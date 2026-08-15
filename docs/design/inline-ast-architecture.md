@@ -2194,6 +2194,77 @@ Each phase is a reviewable unit with a clear exit gate.
   menu registers nothing), so there is none to stage. As with every prep piece before it, nothing
   further is wired in.
 
+  *Step 6 prep landed as (`Macros` → the bibliography anchor, the fourth of that map's
+  divergences):* the builder now recognizes the **bibliography anchor** (`[[[label]]]`,
+  `[[[label,xreftext]]]`) that prefixes a bibliography list item's principal text, as an
+  [`Anchor`](../../parser/src/inlines/anchor.rs) node carrying a new `is_bibliography` flag –
+  the same "one node kind, two forms told apart by a flag rather than by re-reading the source"
+  shape an [`Image`](../../parser/src/inlines/image.rs)'s own `is_icon` already has. It reuses the
+  string pipeline's *exact* recognition – [`INLINE_BIBLIO_ANCHOR`](../../parser/src/content/macros.rs)
+  is now shared `pub(crate)` – and its gate: the pass fires only when the parser flags that it is
+  substituting a bibliography list item's principal text
+  ([`in_bibliography_list_item`](../../parser/src/parser/parser.rs), set in
+  [`list_item`](../../parser/src/blocks/list_item.rs)), which the tree build sees because
+  [`SubstitutionGroup::apply`](../../parser/src/content/substitution_group.rs) clones the parser –
+  flag included – before the authoritative pass runs. This is the divergence the audit's own map
+  reached *through the parse context* rather than through a construct's spelling: with the
+  tree-source swap landed, a real bibliography entry's tree was folding to
+  `[<a id="gof"></a>]` where the string pipeline emits `<a id="gof"></a>[gof]`.
+
+  Two things make it unlike the other macro families. First, it is **not a level pass**: its
+  pattern is `^`-anchored to the whole content (a `[[[…]]]` later in the entry is left to the
+  ordinary inline-anchor pass, which renders it but never catalogs its id – the `is_bibliography_inner`
+  suppression already mirrored in [`anchors`](../../parser/src/content/inline_builder/macros/anchors.rs)),
+  so it runs once, outside `apply_macros`'s own recursion, ahead of every other family exactly as the
+  string step runs it first. Second, the bracketed label the replacer renders (`[label]`, or
+  `[xreftext]`) is **left in the flow** – emitted as the sibling nodes following the anchor, sliced
+  from the match's own outer brackets and its label range – rather than becoming the node's children:
+  that is what lets every family after it see the label exactly as the string pipeline's own later
+  passes see the text the replacer pushed (an auto-link or a `link:` macro written in an xreftext is
+  linked in both), with no new container for any walk – recognition, side effects, or the eventual
+  fold – to descend into. The node's own `reftext` instead carries that bracketed label as the
+  **registered** reference text – what a cross-reference to the entry displays – taken from the level's
+  match string, i.e. in the *already-substituted* form the replacer itself registers (the contract an
+  [`IndexTerm`](../../parser/src/inlines/index_term.rs)'s `terms` already uses), so `[[[gof,A & B]]]`
+  catalogs `[A &amp; B]` byte-for-byte as the string path does. [`fold_anchor`](../../parser/src/content/inline_builder/fold.rs)
+  passes `render_anchor` a `None` reftext for such a node, mirroring the replacer's own
+  `render_anchor(id, None, …)` – the label reaches the output from the flow, not from the node.
+
+  One shape is deferred, documented and pinned by its own divergence test: a label crossing an
+  **opaque piece** – a rendered span, a passthrough or STEM expression (not restored yet), or a
+  character replacement (`(C)`, a smart apostrophe) – which
+  [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) stands in as a single
+  placeholder rather than the markup or entity the string haystack holds there, so the
+  already-substituted label cannot be reconstructed. That is exactly the boundary the index-term
+  family's own visible term documents, and – for the character replacements – the one every macro
+  family already has at this point (the shared match string serves the quotes step too, where the
+  replacements have not yet run). An escaped special is *not* affected (a `CharRef::Special`
+  contributes its canonical entity), and a bibliography anchor reached through a synthesized run (an
+  attribute expansion, or a filtered block's joined seed) is recognized, the run contributing its
+  expanded value to the match string just as it does to the string pipeline's haystack.
+
+  The family's deferred recognition side effect is staged alongside it:
+  [`apply_biblio_side_effects`](../../parser/src/content/inline_builder/macros/anchors.rs) registers
+  the entry under `RefType::Bibliography` with the node's bracketed reftext and raises the same
+  duplicate-id warning, and
+  [`apply_macro_side_effects`](../../parser/src/content/inline_builder/macros/mod.rs) calls it
+  **first**, before the image, link, and anchor/ref functions – the string pipeline's own pass order,
+  which matters because a bibliography anchor's duplicate-id warning and an image's
+  dangerous-link-scheme warning land in the one shared warnings list (the same ordering concern that
+  entry point already records for image-before-anchor, one step earlier). `apply_ref_side_effects`
+  correspondingly skips a bibliography anchor, so composing the two neither double-registers the entry
+  nor warns against itself. A differential corpus pins both spellings, the label character classes and
+  the non-recognized leading-digit label, a `[[[…]]]` that is not at the entry's start, the
+  non-escape of a leading backslash, labels carrying an auto-link / a `link:` macro / an escaped
+  special, and constructs after the anchor; structural tests pin the node and the flow nodes that
+  follow it; registration parity is asserted against an independent golden parser (id, reference text,
+  and `RefType` alike), as is the cross-family warning order; and fixtures are added to the
+  whole-pipeline combined-constructs corpus and to the structural recorder cross-check – where the two
+  constructions reach the same anchor-then-label shape from opposite directions, the recorder
+  recovering it from the rendered output. A whole-document test drives the real parse path end to end,
+  folding a real bibliography list's trees to their own rendered strings. As with every prep piece
+  before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -2362,6 +2433,21 @@ Each phase is a reviewable unit with a clear exit gate.
        still defer, each with its own divergence test. The family's escape check is hoisted ahead of
        the gate (the `footnoteref:` increment's own fix, for the identical reason), so an escaped
        macro the gate rejects still drops its backslash.
+     - ✅ **prep (bibliography anchor).** The fourth of that audit's divergences is closed – and the
+       first it reached through the *parse context* rather than a construct's spelling:
+       `[[[label]]]` prefixing a bibliography list item's principal text is recognized as an `Anchor`
+       node carrying a new `is_bibliography` flag (as an `Image`'s `is_icon` tells its two forms
+       apart), gated on the same `Parser::in_bibliography_list_item` flag the string step reads and
+       the tree build already inherits through `SubstitutionGroup::apply`'s parser clone. It runs
+       once, `^`-anchored, ahead of every other family and outside `apply_macros`'s recursion, and
+       leaves the bracketed label **in the flow** as sibling nodes (so every later family sees it
+       exactly as the string pipeline's later passes do) while the node's `reftext` carries that same
+       label as the entry's *registered* reference text, in already-substituted form.
+       [`apply_biblio_side_effects`](../../parser/src/content/inline_builder/macros/anchors.rs)
+       stages the `register_ref` and is called first by `apply_macro_side_effects`, matching the
+       string pipeline's own pass order for the shared warnings list; see the step's own "landed as"
+       note above. A label crossing an opaque piece (a rendered span, a passthrough, or a character
+       replacement) still defers, with its own divergence test.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

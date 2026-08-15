@@ -7,7 +7,7 @@ pub(super) mod links;
 mod ui;
 mod xref;
 
-use anchors::anchor_macros_level;
+use anchors::{anchor_macros_level, biblio_anchor_level};
 use image::image_macros_level;
 use indexterm::indexterm_macros_level;
 use links::{email_level, inline_link_level, link_macro_level};
@@ -39,6 +39,12 @@ use crate::{Parser, Span, inlines::InlineNode};
 /// families (cross-references, footnotes, index terms, anchors, STEM) are later
 /// increments (see [`link_macro_level`], [`inline_link_level`], and
 /// [`email_level`] for the link forms this increment defers).
+///
+/// It also recognizes the **bibliography anchor** (`[[[label]]]`) that prefixes
+/// a bibliography list item, as an [`Anchor`](InlineNode::Anchor) node whose
+/// `is_bibliography` is set – the one family that is not a level pass, since
+/// its pattern is `^`-anchored to the whole content (see
+/// [`biblio_anchor_level`]).
 ///
 /// Each family is applied at each level in the **same order the string step
 /// applies them** – keyboard/button, then menu, then image/icon, then
@@ -82,18 +88,39 @@ pub(super) fn apply_macros<'src>(
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
+    // The bibliography anchor (`[[[label]]]`) runs before every other family,
+    // exactly as the string step runs its own `INLINE_BIBLIO_ANCHOR` pass
+    // first. It runs *only here*, at the content's own top level – its pattern
+    // is `^`-anchored, so it can only ever match the very start of the whole
+    // content, never the start of a span's children (see
+    // [`biblio_anchor_level`]) – which is why it sits outside
+    // [`apply_macro_families`]'s own recursion.
+    let nodes = biblio_anchor_level(nodes, root, parser);
+
+    apply_macro_families(nodes, root, parser)
+}
+
+/// Applies each macro family at this level – and, first, at every level nested
+/// inside it – in the string step's own family order. See
+/// [`apply_macros`], which wraps this with the once-per-content
+/// bibliography-anchor pass.
+fn apply_macro_families<'src>(
+    nodes: Vec<InlineNode<'src>>,
+    root: Span<'src>,
+    parser: &Parser,
+) -> Vec<InlineNode<'src>> {
     // Recurse into spans/refs first, matching the string pipeline's
     // whole-string pass.
     let nodes: Vec<InlineNode<'src>> = nodes
         .into_iter()
         .map(|node| match node {
             InlineNode::Styled(mut styled) => {
-                styled.children = apply_macros(styled.children, root, parser);
+                styled.children = apply_macro_families(styled.children, root, parser);
                 InlineNode::Styled(styled)
             }
 
             InlineNode::Ref(mut reference) => {
-                reference.children = apply_macros(reference.children, root, parser);
+                reference.children = apply_macro_families(reference.children, root, parser);
                 InlineNode::Ref(reference)
             }
 
@@ -134,11 +161,10 @@ pub(super) fn apply_macros<'src>(
     let nodes = email_level(nodes, root);
 
     // Inline anchors (`[[id]]`, `anchor:id[…]`) run after the link families and
-    // before cross-references, mirroring the string step's order. The
-    // bibliography-anchor pass the string step runs *first* (a `^`-anchored
-    // `[[[id]]]`) fires only inside a bibliography list item – a context the
-    // additive builder is not wired into – so it is a cutover concern, not this
-    // pass's.
+    // before cross-references, mirroring the string step's order. (The
+    // bibliography-anchor pass the string step runs *first* – a `^`-anchored
+    // `[[[id]]]`, recognized only inside a bibliography list item – runs in
+    // [`apply_macros`], outside this recursion.)
     let nodes = anchor_macros_level(nodes, root);
 
     // Cross-references (`xref:id[…]`) run after the anchor pass, mirroring the
@@ -158,16 +184,18 @@ pub(super) fn apply_macros<'src>(
 
 /// The eventual cutover's single entry point (design §5.2, Phase 4 step 6) for
 /// **every** recognition side effect the macro families above defer –
-/// composing [`image::apply_image_side_effects`],
-/// [`links::apply_link_side_effects`], and [`anchors::apply_ref_side_effects`],
-/// each staged and tested as its own standalone building block, into the one
-/// call the cutover makes exactly once per parse.
+/// composing [`anchors::apply_biblio_side_effects`],
+/// [`image::apply_image_side_effects`], [`links::apply_link_side_effects`], and
+/// [`anchors::apply_ref_side_effects`], each staged and tested as its own
+/// standalone building block, into the one call the cutover makes exactly once
+/// per parse.
 ///
 /// # Ordering
 ///
-/// The three are called in the same relative order the string pipeline's own
-/// macro passes run in (image/icon, …, links, …, anchors, …– see
-/// [`apply_macros`]'s own doc comment): image, then link, then anchor/ref.
+/// The four are called in the same relative order the string pipeline's own
+/// macro passes run in (the bibliography anchor, then image/icon, …, links, …,
+/// anchors, …– see [`apply_macros`]'s own doc comment): bibliography anchor,
+/// then image, then link, then anchor/ref.
 /// This is not cosmetic – it is what keeps this function's output identical to
 /// the golden pipeline's whenever more than one family's side effect touches
 /// the *same* shared list. Concretely, [`Parser::record_substitution_warning`]
@@ -176,10 +204,12 @@ pub(super) fn apply_macros<'src>(
 /// [`anchors::apply_ref_side_effects`]'s duplicate-id warning write to it – a
 /// content whose image triggers the first and whose anchor triggers the
 /// second must see the image warning recorded first, exactly as it would from
-/// the string pipeline's own image-then-anchor pass order. (The asset/ref
-/// catalogs the three write to are otherwise disjoint from one another –
-/// images, links, and refs are three separate lists – so this ordering does
-/// not, by itself, need to hold *within* a single catalog; see
+/// the string pipeline's own image-then-anchor pass order. The same holds one
+/// step earlier for [`anchors::apply_biblio_side_effects`]'s own duplicate-id
+/// warning, which the string pipeline's first pass records ahead of both. (The
+/// asset/ref catalogs the three write to are otherwise disjoint from one
+/// another – images, links, and refs are three separate lists – so this
+/// ordering does not, by itself, need to hold *within* a single catalog; see
 /// [`links::apply_link_side_effects`]'s own doc comment for the finer-grained
 /// ordering *within* the link family that the golden pipeline also requires.)
 ///
@@ -202,6 +232,7 @@ pub(crate) fn apply_macro_side_effects(
     source: Span<'_>,
     leading_anchor_registered: bool,
 ) {
+    anchors::apply_biblio_side_effects(nodes, parser, source);
     image::apply_image_side_effects(nodes, parser, source);
     links::apply_link_side_effects(nodes, parser);
     anchors::apply_ref_side_effects(nodes, parser, source, leading_anchor_registered);
@@ -425,6 +456,53 @@ mod tests {
             [
                 WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_string()),
                 WarningType::DuplicateId("dup".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_bibliography_entry_registers_before_every_other_family() {
+        // The string pipeline runs its bibliography-anchor pass *first*, ahead
+        // of every other macro family, so a duplicate bibliography id must be
+        // warned about before an image's dangerous-link-scheme warning in the
+        // one shared warnings list – the same ordering this function's own doc
+        // comment records for image-before-anchor, one step earlier. Each side
+        // uses its own independent parser.
+        let source = "[[[dup]]] image:x.png[alt,link=javascript:alert(1)] entry";
+
+        let builder_parser = Parser::default().with_catalog_assets(true);
+        builder_parser.in_bibliography_list_item.set(true);
+        builder_parser
+            .register_ref("dup", None, crate::document::RefType::Bibliography)
+            .unwrap();
+
+        let nodes = build(Span::new(source), &builder_parser, None);
+        apply_macro_side_effects(&nodes, &builder_parser, Span::new(source), false);
+
+        let golden_parser = Parser::default().with_catalog_assets(true);
+        golden_parser.in_bibliography_list_item.set(true);
+        golden_parser
+            .register_ref("dup", None, crate::document::RefType::Bibliography)
+            .unwrap();
+
+        golden_macros_with(source, &golden_parser);
+
+        let warnings = |parser: &Parser| {
+            parser
+                .drain_substitution_warnings_since(0)
+                .into_iter()
+                .map(|w| w.warning)
+                .collect::<Vec<_>>()
+        };
+
+        let builder_warnings = warnings(&builder_parser);
+
+        assert_eq!(builder_warnings, warnings(&golden_parser));
+        assert_eq!(
+            builder_warnings,
+            [
+                WarningType::DuplicateId("dup".to_string()),
+                WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_string()),
             ]
         );
     }

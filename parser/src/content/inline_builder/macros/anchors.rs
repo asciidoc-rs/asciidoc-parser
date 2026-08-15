@@ -1,4 +1,6 @@
-//! Inline anchor recognition (`[[id]]`, `[[id,reftext]]`, `anchor:id[…]`).
+//! Inline anchor recognition (`[[id]]`, `[[id,reftext]]`, `anchor:id[…]`), and
+//! the bibliography anchor (`[[[label]]]`) that prefixes a bibliography list
+//! item.
 
 use super::{
     MacroMatch, MacroMatchKind, image::range_is_verbatim_or_synthesized, rebuild_macro_level,
@@ -6,9 +8,10 @@ use super::{
 use crate::{
     Parser, Span,
     content::{
-        INLINE_ANCHOR,
+        INLINE_ANCHOR, INLINE_BIBLIO_ANCHOR,
         inline_builder::quotes::{
-            Piece, build_match_string, range_overlaps_synthesized, source_slice, text_slice,
+            Piece, SPAN_PLACEHOLDER, build_match_string, emit_range, range_overlaps_synthesized,
+            source_slice, text_slice,
         },
     },
     document::RefType,
@@ -16,6 +19,166 @@ use crate::{
     strings::CowStr,
     warnings::WarningType,
 };
+
+/// Matches `INLINE_BIBLIO_ANCHOR` at the **content's own top level**, replacing
+/// a bibliography anchor (`[[[label]]]` / `[[[label,xreftext]]]`) with the
+/// [`Anchor`](InlineNode::Anchor) node it produces – `is_bibliography` set –
+/// followed by the bracketed label the string replacer emits into the flow.
+///
+/// # Where this runs, and why only here
+///
+/// The string pipeline runs this pass **first**, ahead of every other macro
+/// family, and only when the parser flags that it is substituting the principal
+/// text of a bibliography list item
+/// ([`in_bibliography_list_item`](Parser::in_bibliography_list_item), set in
+/// `blocks::list_item`); this mirrors both. The pattern is `^`-anchored – a
+/// `[[[…]]]` appearing later in the entry is left to the ordinary inline-anchor
+/// pass, which renders it but never catalogs its id (see
+/// [`is_bibliography_inner`]) – so this level pass runs once, at the top level
+/// [`apply_macros`](super::apply_macros) is called with, and never descends
+/// into a span's children: `^` matches only the very start of the *whole*
+/// content, exactly as it does for the string pipeline's own haystack.
+///
+/// # The bracketed label stays in the flow
+///
+/// The replacer renders the anchor from its id alone (`render_anchor(id,
+/// None)`) and then pushes the bracketed label (`[label]`, or `[xreftext]` when
+/// one was supplied) into the output as ordinary text – text every *later*
+/// string pass then scans. So the label is emitted here as the sibling nodes
+/// that follow the anchor node (sliced from the match's own outer brackets and
+/// its label range with [`emit_range`], so each keeps its exact `'src`
+/// provenance), rather than as the anchor's own children: that is what lets
+/// every family after this one see the label exactly as the string pipeline's
+/// later passes see it (an auto-link written in an xreftext is linked in both),
+/// with no container to descend into.
+///
+/// The node's own `reftext` instead carries the bracketed label as the
+/// **registered** reference text – what a cross-reference to the entry
+/// displays, and what [`apply_biblio_side_effects`] hands
+/// [`register_ref`](Parser::register_ref), mirroring the replacer's own single
+/// `format!("[{label}]")` serving both purposes.
+///
+/// # The registered label is already-substituted text
+///
+/// The string replacer captures its label out of the *escaped,
+/// already-rendered* haystack and registers **that** (`[[[gof,A & B]]]`
+/// catalogs `[A &amp; B]`), so the node's `reftext` holds the label in the same
+/// already-substituted form – the contract an
+/// [`IndexTerm`](InlineNode::IndexTerm)'s own `terms` already uses – taken
+/// straight from this level's match string, which reconstructs exactly that
+/// haystack (a [`CharRef`](InlineNode::CharRef) contributes its
+/// canonical entity, so an escaped special and a character replacement alike
+/// come out byte-identical to the replacer's own capture). Nothing re-escapes
+/// it: the fold hands `render_anchor` `None` for a bibliography anchor (see
+/// `fold_anchor`), exactly as the replacer does.
+///
+/// # Deferred: a label crossing an opaque piece
+///
+/// What the match string cannot reconstruct is an opaque piece – a rendered
+/// [`Styled`](crate::inlines::Styled) span (`[[[gof,*G*]]]`), a passthrough or
+/// STEM expression (not even restored yet), or a character replacement
+/// (`[[[gof,(C) 1995]]]`, `[[[oreilly,O'Reilly]]]`) – which stands in as a
+/// single [`SPAN_PLACEHOLDER`] here rather than as the markup or entity the
+/// string pipeline's haystack holds there. Such an anchor is left unrecognized,
+/// exactly the boundary the index-term family's own visible term documents
+/// (and, for the character replacements, the same one every macro family
+/// already has at this point: `build_match_string` serves the quotes step too,
+/// where the replacements have not run yet, so it can only treat them as
+/// opaque). A label reached through a synthesized run (an attribute expansion,
+/// or a filtered block's joined seed) *is* recognized – the run contributes its
+/// expanded value to the match string, just as it does to the string pipeline's
+/// own haystack.
+///
+/// As in the additive builder generally, this performs *no* recognition side
+/// effect; [`apply_biblio_side_effects`] stages the `register_ref` for the
+/// cutover.
+pub(super) fn biblio_anchor_level<'src>(
+    nodes: Vec<InlineNode<'src>>,
+    root: Span<'src>,
+    parser: &Parser,
+) -> Vec<InlineNode<'src>> {
+    if !parser.in_bibliography_list_item.get() {
+        return nodes;
+    }
+
+    let (s, pieces) = build_match_string(&nodes);
+
+    // Cheap pre-filter, mirroring the string step's own `text.contains("[[[")`
+    // guard: the pattern is `^`-anchored, so only content *starting* with the
+    // triple bracket can match at all.
+    if !s.starts_with("[[[") {
+        return nodes;
+    }
+
+    let Some(caps) = INLINE_BIBLIO_ANCHOR.captures(&s) else {
+        return nodes;
+    };
+
+    // `unwrap` on groups 0 and 1 is safe: a capture always has an overall
+    // match, and the label is not optional in the pattern.
+    #[allow(clippy::unwrap_used)]
+    let full = {
+        let whole = caps.get(0).unwrap();
+        whole.start()..whole.end()
+    };
+
+    #[allow(clippy::unwrap_used)]
+    let id_match = caps.get(1).unwrap();
+
+    // The displayed (and registered) label is the xreftext when one was
+    // supplied, else the id itself – exactly the string replacer's own
+    // `caps.get(2)…unwrap_or(id)`.
+    let label_match = caps.get(2).unwrap_or(id_match);
+
+    let id_range = id_match.start()..id_match.end();
+    let label_range = label_match.start()..label_match.end();
+
+    // The label is registered (and shown) as already-substituted text, which
+    // this level's match string reproduces for every piece except an opaque one
+    // – a rendered span, a passthrough, or a STEM expression – which stands in
+    // as a single placeholder.
+    let label = match s.get(label_range.clone()) {
+        Some(label) if !label.contains(SPAN_PLACEHOLDER) => label,
+        _ => return nodes,
+    };
+
+    let reftext = CowStr::from(format!("[{label}]"));
+
+    // The id, by contrast, rides on the node as logical text, so it is sliced
+    // back to `'src` (borrowing where it can) exactly as an ordinary anchor's
+    // own id is. Its character class admits neither a special nor a placeholder,
+    // so the two readings coincide – and, for the same reason, the `None` arm
+    // (the id crossing an atomic piece) is not actually reachable, kept only
+    // for symmetry with [`build_anchor_node`]'s own gate.
+    let Some(id) = text_slice(&nodes, &pieces, id_range) else {
+        return nodes;
+    };
+
+    let location = source_slice(&pieces, full.clone(), root);
+
+    let mut out = vec![InlineNode::Anchor(Anchor {
+        id,
+        reftext: Some(vec![InlineNode::Text {
+            value: reftext,
+            location,
+        }]),
+        is_bibliography: true,
+        location,
+    })];
+
+    // The bracketed label the replacer pushes into the flow. Its brackets are
+    // the match's own outer `[` and `]` (the very characters the triple bracket
+    // opens and closes with), so each emitted piece keeps an honest `'src`
+    // slice instead of a synthesized value.
+    emit_range(&nodes, &pieces, full.start..full.start + 1, &mut out);
+    emit_range(&nodes, &pieces, label_range, &mut out);
+    emit_range(&nodes, &pieces, full.end - 1..full.end, &mut out);
+
+    // Everything after the anchor is untouched.
+    emit_range(&nodes, &pieces, full.end..s.len(), &mut out);
+
+    out
+}
 
 /// Matches `INLINE_ANCHOR` at this level's escaped text, replacing each
 /// recognized inline anchor – the `[[id]]` / `[[id,reftext]]` shorthand and the
@@ -196,6 +359,7 @@ fn build_anchor_node<'src>(
     Some(InlineNode::Anchor(Anchor {
         id,
         reftext,
+        is_bibliography: false,
         location,
     }))
 }
@@ -218,8 +382,7 @@ fn build_anchor_node<'src>(
 /// coarse `location` regardless of trimming or unescaping (design §4.4) –
 /// sub-slicing a location has no honest meaning for bytes with no `'src`
 /// counterpart of their own, the same policy
-/// [`emit_range`](super::super::quotes::emit_range) already applies to every
-/// fragment of an expanded value.
+/// [`emit_range`] already applies to every fragment of an expanded value.
 fn build_anchor_reftext<'src>(
     range: std::ops::Range<usize>,
     pieces: &[Piece],
@@ -329,7 +492,10 @@ pub(crate) fn apply_ref_side_effects(
     for node in nodes {
         match node {
             InlineNode::Anchor(anchor) => {
-                if !is_bibliography_inner(anchor, source) {
+                // A bibliography anchor registers under its own [`RefType`],
+                // from its own earlier pass (see
+                // [`apply_biblio_side_effects`]), so it is skipped here.
+                if !anchor.is_bibliography && !is_bibliography_inner(anchor, source) {
                     let reftext = anchor_reftext_str(anchor);
 
                     if parser
@@ -377,6 +543,56 @@ pub(crate) fn apply_ref_side_effects(
     }
 }
 
+/// Performs the recognition side effect the string pipeline's
+/// `InlineBiblioAnchorReplacer` attaches to a **bibliography** anchor: it
+/// registers the entry's id under [`RefType::Bibliography`], with the bracketed
+/// label the node carries as its `reftext` (so a cross-reference to the entry
+/// renders identically to the label shown in the flow), and raises the same
+/// duplicate-id warning against the whole content's `source` span when the id
+/// is already taken.
+///
+/// Kept separate from [`apply_ref_side_effects`] – rather than folded into its
+/// walk – because the string pipeline runs the bibliography-anchor pass
+/// **first**, ahead of every other macro family, and
+/// [`apply_macro_side_effects`](super::apply_macro_side_effects) must reproduce
+/// that order: a duplicate-id warning from a bibliography anchor precedes an
+/// image's dangerous-link-scheme warning in the one shared warnings list, the
+/// same ordering concern that function's own doc comment already records for
+/// image-before-anchor.
+///
+/// The pattern is `^`-anchored, so a bibliography anchor is always the
+/// content's *first* node and is never nested inside a container – hence no
+/// recursion here (and none needed for the bracketed label either: it stays in
+/// the flow as ordinary sibling nodes, see [`biblio_anchor_level`]).
+///
+/// As with every staged side effect in this module, **nothing here is wired
+/// into a real parse path yet** – it is exercised only by this module's own
+/// tests, against their own [`Parser`].
+pub(crate) fn apply_biblio_side_effects(
+    nodes: &[InlineNode<'_>],
+    parser: &Parser,
+    source: Span<'_>,
+) {
+    let Some(InlineNode::Anchor(anchor)) = nodes.first() else {
+        return;
+    };
+
+    if !anchor.is_bibliography {
+        return;
+    }
+
+    if parser
+        .register_ref(
+            &anchor.id,
+            anchor_reftext_str(anchor),
+            RefType::Bibliography,
+        )
+        .is_err()
+    {
+        parser.record_substitution_warning(source, WarningType::DuplicateId(anchor.id.to_string()));
+    }
+}
+
 /// The reference text `str` a built [`Anchor`] node's `reftext` carries, when
 /// it is populated (a single verbatim [`Text`](InlineNode::Text) child – see
 /// [`build_anchor_reftext`]), mirroring the `Option<&str>`
@@ -391,10 +607,10 @@ fn anchor_reftext_str<'a>(anchor: &'a Anchor<'_>) -> Option<&'a str> {
 /// Mirrors `InlineAnchorReplacer`'s own `is_bibliography_inner` check: a
 /// shorthand `[[id]]` anchor immediately preceded by a `[` in the source is
 /// the inner anchor of a bibliography-style `[[[id]]]` sequence appearing
-/// *outside* a bibliography list item (a genuine bibliography anchor there is
-/// consumed whole by a separate, list-item-gated pass this builder does not
-/// yet recognize as its own node – `INLINE_BIBLIO_ANCHOR`, see
-/// [`content::macros`](crate::content::macros)). Asciidoctor's own
+/// *outside* a bibliography list item (inside one, a genuine bibliography
+/// anchor at the entry's start is consumed whole by the separate,
+/// list-item-gated [`biblio_anchor_level`] pass, so it never reaches this
+/// function). Asciidoctor's own
 /// inline-anchor *scan* excludes a `[[id]]` preceded by a `[`, so it renders
 /// the anchor (already handled by [`build_anchor_node`], which does not
 /// exclude this case – see its own doc) but never catalogs the id; this
@@ -447,6 +663,7 @@ mod tests {
 
     use super::super::super::test_support::{
         assert_styled, assert_text, build_src, fold_html, golden_macros, golden_macros_with,
+        golden_passthroughs_with,
     };
     use crate::{
         Parser, Span,
@@ -1127,5 +1344,397 @@ mod tests {
                 "registered ids diverged for {fixture:?}"
             );
         }
+    }
+
+    // ---- the bibliography anchor (`[[[label]]]`) ------------------------
+
+    use super::{apply_biblio_side_effects, biblio_anchor_level};
+
+    /// A [`Parser`] flagged as substituting the principal text of a
+    /// bibliography list item – the context `blocks::list_item` puts the parser
+    /// in, and the only one in which either pipeline recognizes a bibliography
+    /// anchor.
+    fn biblio_parser() -> Parser {
+        let parser = Parser::default();
+        parser.in_bibliography_list_item.set(true);
+        parser
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_for_a_bibliography_anchor() {
+        // The differential corpus (design §5.3) pinning the bibliography-anchor
+        // increment: for each fixture, folding the single-pass tree reproduces
+        // the string pipeline's output byte-for-byte, with both sides run
+        // against a parser flagged as being inside a bibliography list item.
+        let fixtures = [
+            // Both spellings, alone and prefixing a real entry.
+            "[[[gof]]]",
+            "[[[gof]]] Gamma, Erich et al. _Design Patterns_.",
+            "[[[gof,GoF]]] Gamma, Erich et al. _Design Patterns_.",
+            "[[[gof, GoF]]] leading space after the comma is dropped",
+            // Label character classes (the pattern admits digits, but never a
+            // leading one).
+            "[[[_gof]]] leading underscore",
+            "[[[:gof]]] leading colon",
+            "[[[gof-2.a:b]]] punctuation in the label",
+            "[[[gof1995]]] digits after the first character",
+            // A label that must *not* be recognized: it starts with a digit,
+            // so the entry keeps its literal brackets (and the inner `[[…]]`
+            // falls through to the ordinary anchor pass, which renders it
+            // without cataloging its id).
+            "[[[1984]]] Orwell, George.",
+            // Not at the start of the entry: the `^`-anchored pass declines it,
+            // exactly as the string step does.
+            "See [[[mid]]] inline.",
+            // A backslash is not an escape here – `\\[[[x]]]` does not begin
+            // with `[[[`, so it is not a bibliography anchor at all.
+            "\\[[[gof]]] Gamma.",
+            // An xreftext carrying flow constructs of its own: the label stays
+            // in the flow, so every later family sees it exactly as the string
+            // pipeline's later passes do.
+            "[[[gof,see https://example.org]]] auto-linked inside the label",
+            "[[[gof,see link:x.html[X]]]] a link macro inside the label",
+            // A label carrying an escaped special: a `CharRef::Special` piece
+            // contributes its canonical entity to this level's match string, so
+            // the label is reconstructed – and registered – exactly as the
+            // string replacer captures it.
+            "[[[gof,A & B]]] an escaped special inside the label",
+            // Constructs after the entry's anchor.
+            "[[[gof]]] *bold* and _em_ and https://example.org",
+            "[[[gof]]] an inline [[mid]] anchor later in the entry",
+        ];
+
+        let parser = biblio_parser();
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = crate::content::inline_builder::fold_html(
+                &build_with(Span::new(fixture), &parser),
+                &renderer,
+                &parser,
+            );
+
+            assert_eq!(
+                folded,
+                golden_macros_with(fixture, &parser),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bibliography_anchor_becomes_a_node_followed_by_its_bracketed_label() {
+        let parser = biblio_parser();
+        let source = "[[[gof,GoF]]] Gamma.";
+        let nodes = build_with(Span::new(source), &parser);
+
+        let anchor = assert_anchor(&nodes[0]);
+        assert!(anchor.is_bibliography);
+
+        // The id borrows from source (no allocation).
+        assert!(matches!(anchor.id, CowStr::Borrowed(_)));
+        assert_eq!(anchor.id.as_ref(), "gof");
+
+        // Its location covers the whole anchor, the triple brackets included.
+        assert_eq!(anchor.location.data(), "[[[gof,GoF]]]");
+        assert_eq!(anchor.location.line(), 1);
+        assert_eq!(anchor.location.col(), 1);
+
+        // The node's own reference text is the *bracketed* label – what the
+        // entry is registered with, and what a cross-reference to it displays.
+        let reftext = anchor.reftext.as_ref().unwrap();
+        assert_eq!(reftext.len(), 1);
+        match &reftext[0] {
+            InlineNode::Text { value, .. } => assert_eq!(value.as_ref(), "[GoF]"),
+            other => panic!("expected Text, got {other:?}"),
+        }
+
+        // The same bracketed label is *also* in the flow, as the sibling nodes
+        // that follow – each sliced from the match's own source characters (the
+        // outer `[` at column 1, the label, and the outer `]` at column 13).
+        assert_text(&nodes[1], "[", 1, 1);
+        assert_text(&nodes[2], "GoF", 1, 8);
+        assert_text(&nodes[3], "]", 1, 13);
+        assert_text(&nodes[4], " Gamma.", 1, 14);
+        assert_eq!(nodes.len(), 5);
+    }
+
+    #[test]
+    fn a_bibliography_anchor_with_no_xreftext_shows_its_label() {
+        let parser = biblio_parser();
+        let source = "[[[gof]]]";
+        let nodes = build_with(Span::new(source), &parser);
+
+        let anchor = assert_anchor(&nodes[0]);
+        assert!(anchor.is_bibliography);
+
+        match &anchor.reftext.as_ref().unwrap()[0] {
+            InlineNode::Text { value, .. } => assert_eq!(value.as_ref(), "[gof]"),
+            other => panic!("expected Text, got {other:?}"),
+        }
+
+        assert_text(&nodes[1], "[", 1, 1);
+        assert_text(&nodes[2], "gof", 1, 4);
+        assert_text(&nodes[3], "]", 1, 9);
+        assert_eq!(nodes.len(), 4);
+    }
+
+    #[test]
+    fn a_bibliography_anchor_is_recognized_only_inside_a_bibliography_list_item() {
+        // The same source, built against a parser that is *not* flagged: the
+        // triple bracket falls through to the ordinary inline-anchor pass, whose
+        // node carries no bibliography flag (and whose id the side-effect pass
+        // deliberately does not catalog – see
+        // `does_not_register_the_inner_anchor_of_a_bibliography_style_triple_bracket`).
+        let nodes = build_src(Span::new("[[[gof]]]"));
+
+        let anchor = nodes
+            .iter()
+            .find_map(|n| match n {
+                InlineNode::Anchor(anchor) => Some(anchor),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected an Anchor node: {nodes:?}"));
+
+        assert!(!anchor.is_bibliography);
+    }
+
+    #[test]
+    fn a_bibliography_anchor_inside_a_synthesized_run_is_recognized() {
+        // A whole bibliography anchor supplied by an attribute reference: its
+        // id and label have no `'src` slice of their own, but – as with the
+        // ordinary anchor family's id – `text_slice` recovers their exact text,
+        // so the anchor is recognized (its `location` taking design §4.4's
+        // coarse fallback), and the fold matches the string pipeline.
+        use crate::parser::ModificationContext;
+
+        let parser = biblio_parser().with_intrinsic_attribute(
+            "entry",
+            "[[[gof,GoF]]]",
+            ModificationContext::Anywhere,
+        );
+
+        let source = "{entry} Gamma.";
+        let nodes = build_with(Span::new(source), &parser);
+
+        let anchor = assert_anchor(&nodes[0]);
+        assert!(anchor.is_bibliography);
+        assert_eq!(anchor.id.as_ref(), "gof");
+        assert!(matches!(anchor.id, CowStr::Boxed(_)), "id is synthesized");
+
+        let folded = crate::content::inline_builder::fold_html(
+            &nodes,
+            &HtmlSubstitutionRenderer {},
+            &parser,
+        );
+
+        assert_eq!(folded, golden_attributes_with(source, &parser));
+    }
+
+    #[test]
+    fn a_bibliography_label_over_an_opaque_piece_is_a_documented_divergence() {
+        // A label crossing an opaque piece – a rendered span, a passthrough, or
+        // a character replacement, each a single placeholder in this level's
+        // match string rather than the markup/entity the string pipeline's
+        // haystack holds there – cannot be reconstructed as the
+        // already-substituted text the string replacer registers and shows, so
+        // the anchor is left unrecognized. The entry then keeps the shape it had
+        // before this increment (the inner `[[…]]` as an ordinary anchor), which
+        // is what diverges. This is exactly the boundary the index-term family's
+        // own visible term documents, and – for the character replacements –
+        // the same one every macro family already has at this point in the
+        // pipeline (a `(C)` or a smart apostrophe is atomic by macro time).
+        let parser = biblio_parser();
+
+        for source in [
+            "[[[gof,*GoF*]]] Gamma.",
+            "[[[gof,+++<b>GoF</b>+++]]] Gamma.",
+            "[[[gof,(C) 1995]]] Gamma.",
+            "[[[oreilly,O'Reilly]]] Hunt.",
+        ] {
+            let nodes = build_with(Span::new(source), &parser);
+
+            assert!(
+                !nodes
+                    .iter()
+                    .any(|n| matches!(n, InlineNode::Anchor(a) if a.is_bibliography)),
+                "expected no bibliography anchor node for {source:?}: {nodes:?}"
+            );
+
+            let folded = crate::content::inline_builder::fold_html(
+                &nodes,
+                &HtmlSubstitutionRenderer {},
+                &parser,
+            );
+
+            assert_ne!(folded, golden_passthroughs_with(source, &parser));
+        }
+    }
+
+    #[test]
+    fn the_bibliography_pass_declines_a_level_it_can_never_match() {
+        // The pass is `^`-anchored to the whole content, so it is a no-op for a
+        // level whose text merely *contains* a triple bracket, and for one that
+        // starts with it but under a parser that is not inside a bibliography
+        // list item. Driven directly, since `apply_macros` only ever calls it at
+        // the content's top level.
+        let root = Span::new("x [[[gof]]]");
+        let nodes = vec![InlineNode::Text {
+            value: CowStr::from(root.data()),
+            location: root,
+        }];
+
+        let out = biblio_anchor_level(nodes, root, &biblio_parser());
+        assert_eq!(out.len(), 1);
+        assert!(matches!(out[0], InlineNode::Text { .. }));
+    }
+
+    #[test]
+    fn registers_a_bibliography_entry() {
+        let source = "[[[gof,GoF]]] Gamma.";
+        let parser = biblio_parser();
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_biblio_side_effects(&nodes, &parser, Span::new(source));
+
+        let catalog = parser.catalog();
+        let entry = catalog.get_ref("gof").unwrap();
+
+        // The bracketed label is the registered reference text, so a
+        // cross-reference to the entry renders exactly as the label does.
+        assert_eq!(entry.reftext.as_deref(), Some("[GoF]"));
+        assert_eq!(entry.ref_type, RefType::Bibliography);
+    }
+
+    #[test]
+    fn matches_the_golden_pipelines_bibliography_registrations() {
+        // Each side registers against its own *independent* parser (design
+        // §5.3's two-independent-parsers discipline), so the staged side effect
+        // is compared with the real pipeline's own registrations – id, reference
+        // text, and `RefType` alike.
+        let fixtures = [
+            "[[[gof]]] Gamma.",
+            "[[[gof,GoF]]] Gamma.",
+            "[[[gof, GoF ]]] Gamma.",
+            "[[[gof,A & B]]] Gamma.",
+            "[[[1984]]] Orwell.",
+            "See [[[mid]]] inline.",
+            "[[[gof]]] and an inline [[extra]] anchor",
+            // An ordinary anchor at the very start of the content: the
+            // bibliography pass leaves it to `apply_ref_side_effects`, which
+            // catalogs it under `RefType::Anchor`.
+            "[[plain]] leads an entry that has no bibliography anchor",
+        ];
+
+        for fixture in fixtures {
+            let builder_parser = biblio_parser();
+            let nodes = build_with(Span::new(fixture), &builder_parser);
+            apply_biblio_side_effects(&nodes, &builder_parser, Span::new(fixture));
+            apply_ref_side_effects(&nodes, &builder_parser, Span::new(fixture), false);
+
+            let golden_parser = biblio_parser();
+            golden_macros_with(fixture, &golden_parser);
+
+            let entries = |parser: &Parser| {
+                let catalog = parser.catalog();
+
+                catalog
+                    .ids()
+                    .map(|id| {
+                        let entry = catalog.get_ref(id).unwrap();
+                        (
+                            id.to_string(),
+                            entry.reftext.clone(),
+                            entry.ref_type.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            };
+
+            assert_eq!(
+                entries(&builder_parser),
+                entries(&golden_parser),
+                "registered references diverged for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn records_a_duplicate_id_warning_for_a_repeated_bibliography_entry() {
+        let source = "[[[gof]]] Gamma.";
+        let parser = biblio_parser();
+        parser
+            .register_ref("gof", None, RefType::Bibliography)
+            .unwrap();
+
+        let nodes = build_with(Span::new(source), &parser);
+
+        let before = parser.substitution_warnings_len();
+        apply_biblio_side_effects(&nodes, &parser, Span::new(source));
+        let warnings = parser.drain_substitution_warnings_since(before);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::DuplicateId("gof".to_string())
+        );
+    }
+
+    #[test]
+    fn a_bibliography_anchor_is_registered_once_not_twice() {
+        // `apply_ref_side_effects` skips a bibliography anchor (its own earlier
+        // pass owns it), so composing the two – as
+        // `apply_macro_side_effects` does – neither double-registers the entry
+        // nor raises a spurious duplicate-id warning against itself.
+        let source = "[[[gof]]] Gamma.";
+        let parser = biblio_parser();
+        let nodes = build_with(Span::new(source), &parser);
+
+        let before = parser.substitution_warnings_len();
+        apply_biblio_side_effects(&nodes, &parser, Span::new(source));
+        apply_ref_side_effects(&nodes, &parser, Span::new(source), false);
+
+        assert_eq!(parser.substitution_warnings_len(), before);
+        assert_eq!(
+            parser.catalog().get_ref("gof").unwrap().ref_type,
+            RefType::Bibliography
+        );
+    }
+
+    #[test]
+    fn a_real_bibliography_list_items_tree_folds_to_its_rendered_string() {
+        // End-to-end, through the real parse path: the flag this pass reads is
+        // set by `blocks::list_item` while the entry's principal text is
+        // substituted, and `SubstitutionGroup::apply` clones the parser (flag
+        // included) to build the tree – so a real bibliography entry's tree
+        // folds to exactly the rendered string the string pipeline produced.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = Parser::default().with_inline_tree(true).parse(
+            "[bibliography]\n* [[[gof,GoF]]] Gamma, Erich et al.\n* [[[pp]]] Hunt, Andrew.\n",
+        );
+
+        let mut folded_blocks = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &Parser::default(),
+                ),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded_blocks += 1;
+        }
+
+        assert_eq!(folded_blocks, 2, "expected both entries to be checked");
     }
 }

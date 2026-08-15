@@ -896,4 +896,26 @@ fn shapes_match_across_combined_constructs() {
                 )
         },
     );
+
+    // A bibliography entry. The two constructions arrive at the same shape from
+    // opposite directions: the builder emits the anchor node and then leaves the
+    // bracketed label in the flow, while the recorder recovers that same
+    // anchor-then-text sequence out of the rendered output (the string
+    // replacer's `render_anchor` call is bracketed by markers, and the label it
+    // pushes after it is not).
+    let in_bibliography_list_item = || {
+        let parser = Parser::default();
+        parser.in_bibliography_list_item.set(true);
+        parser
+    };
+
+    assert_shapes_with(
+        "[[[gof,GoF]]] Gamma, Erich et al. _Design Patterns_.",
+        in_bibliography_list_item,
+    );
+
+    assert_shapes_with(
+        "[[[gof]]] An entry with an https://example.org link.",
+        in_bibliography_list_item,
+    );
 }

@@ -814,6 +814,31 @@ mod tests {
                     )
             },
         );
+
+        // A bibliography entry: the `^`-anchored bibliography-anchor pass runs
+        // ahead of every other macro family, and the bracketed label it leaves
+        // in the flow is then seen by those families exactly as the string
+        // pipeline's later passes see it.
+        let in_bibliography_list_item = || {
+            let parser = Parser::default().with_intrinsic_attribute(
+                "product",
+                "Widget",
+                ModificationContext::Anywhere,
+            );
+
+            parser.in_bibliography_list_item.set(true);
+            parser
+        };
+
+        assert_parity_with(
+            "[[[gof,GoF]]] Gamma, Erich et al. _Design Patterns_. https://example.org",
+            in_bibliography_list_item,
+        );
+
+        assert_parity_with(
+            "[[[widget]]] The {product} handbook, with a footnote:[note] and an [[extra]] anchor.",
+            in_bibliography_list_item,
+        );
     }
 
     /// [`build_from_value`] against the real pipeline, seeded from a

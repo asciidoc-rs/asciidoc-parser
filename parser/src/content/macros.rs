@@ -1569,11 +1569,19 @@ impl Replacer for InlineEmailReplacer<'_> {
 /// Asciidoctor). The documented escape `[\[[id]]]` likewise does not start with
 /// `[[[` and is handled there.
 ///
+/// Shared `pub(crate)` so the single-pass
+/// [`inline_builder`](crate::content::inline_builder) recognizes a
+/// bibliography anchor with the *exact* same pattern this string step matches
+/// with, changing only the recognition *sink* (an
+/// [`Anchor`](crate::inlines::Anchor) node whose `is_bibliography` is set,
+/// instead of rendered markup). Group 1 is the label and group 2 its optional
+/// xreftext.
+///
 /// ## Examples
 ///
 /// * `[[[label]]]`
 /// * `[[[label,xreftext]]]`
-static INLINE_BIBLIO_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static INLINE_BIBLIO_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?x)
