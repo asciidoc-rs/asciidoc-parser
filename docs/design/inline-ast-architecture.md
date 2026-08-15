@@ -2265,6 +2265,86 @@ Each phase is a reviewable unit with a clear exit gate.
   folding a real bibliography list's trees to their own rendered strings. As with every prep piece
   before it, nothing further is wired in.
 
+  *Step 6 prep landed as (`AttributeReferences` → the `attribute-missing` drop modes, the fifth
+  of that map's divergences – and its third real blocker):* the builder now honors the two
+  [`attribute-missing`](https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing)
+  modes that *remove* content – `drop` (drop the reference, and the line if that emptied it) and
+  `drop-line` (drop the whole line the reference sits on) – closing the last of the audit's
+  divergences that golden tests already exercise. Like `hardbreaks` and the unescaped-specials
+  classification before it, this is a **blocker** rather than an unclaimed form: real fixtures in
+  `tests/asciidoctor_rb/attributes_test.rs` set both modes, so an authoritative fold over a tree
+  that left every such reference literal would silently regress them. The other two modes are
+  unchanged and were already parity: `skip` (the default) and `warn` both leave the reference in
+  place, which [`apply_attribute_references`](../../parser/src/content/inline_builder/attribute_refs.rs)
+  reproduces by recording no match at all.
+
+  What the two dropping modes need, and what the node stream did not have, is **line
+  granularity**: `apply_attributes` gets it by splitting `Content::rendered` on `\n` and
+  processing – and sometimes discarding – one line at a time. A new
+  [`MissingHandling`](../../parser/src/content/inline_builder/attribute_refs.rs) carries the
+  resolved mode down the transducer's own recursion, a missing reference becomes a
+  `DropMissing` match (consumed, splicing nothing) rather than being skipped, and
+  [`surviving_lines`](../../parser/src/content/inline_builder/attribute_refs.rs) reproduces that
+  same split over a level's own **match string** – whose `\n` bytes are the very ones the rendered
+  string carries – returning the line ranges the level still emits. It mirrors the string loop's
+  own two decisions exactly: `drop-line` drops a line once it carries a missing reference, `drop`
+  only when removing that reference is all it took to empty the line (Asciidoctor's
+  `reject_if_empty`, reconstructed by
+  [`line_replacement`](../../parser/src/content/inline_builder/attribute_refs.rs) from the level's
+  own matches, `\r` guard included).
+  [`rebuild_attribute_level`](../../parser/src/content/inline_builder/attribute_refs.rs) then emits
+  one survivor at a time, re-emitting between consecutive survivors the `\n` that terminated the
+  *previous* survivor – a real source byte, so a dropped line costs the tree no honest span (#944):
+  every surviving node still borrows from `'src` with its own precise `line`/`col`, pinned by a
+  structural test. When nothing is dropped – every level under `skip`/`warn`, and the overwhelming
+  majority under the other two – the line list is the single whole-level range, so the rebuild is
+  byte- and structure-identical to the flat walk it has always been.
+
+  Two shapes are deferred, each documented and pinned by a divergence test, and both falling back
+  to leaving the reference literal (this step's own pre-increment behavior). The first is a
+  **`Styled` span straddling a line break**: a span is one opaque `SPAN_PLACEHOLDER` piece in the
+  match string, so its interior `\n`s are invisible here while the string pipeline, holding the
+  span's *rendered markup* inline by this point, still splits on them – the line correspondence the
+  drop rests on would be wrong, so the drop is disabled for the whole content when one is present
+  (a masked passthrough or STEM expression is *not* affected: the string pipeline holds a sentinel
+  for it here too, so a multi-line one collapses its lines on both sides alike). The second is a
+  missing reference **nested inside a span, under `drop-line`** *when that span is the one being
+  dropped from within* – the nested level cannot see the enclosing line, so the enclosing level
+  detects it instead, via a recursive `subtree_has_missing_reference` walk that reuses
+  `find_attribute_matches`' own recognition; only the multi-line case above escapes it. Under
+  `drop` the nested case needs no such detection at all, since removing a reference is a purely
+  local edit and a span keeps its enclosing line non-empty either way.
+
+  That detection has an ordering constraint of its own, caught in review:
+  [`styled_drop_indices`](../../parser/src/content/inline_builder/attribute_refs.rs) must run
+  **before** the splicing recursion, not from inside the level that consumes it. The string
+  pipeline replaces every reference on a line in one `replace_all` pass, which never re-scans its
+  own replacements – so an attribute whose value happens to *be* reference-shaped (`:x: {nope}`,
+  then `{x}`) leaves that text in the output literally, and it neither is nor arms a missing
+  reference. Run after the recursion, the walk would have read the already-spliced value as one and
+  dropped a line the string pipeline keeps. Hoisting the whole detection to
+  `apply_attribute_references` – which then hands the resulting node indices down, translated to
+  match-string offsets at the level that uses them (sound because the recursion only rewrites a
+  span's *children*, and a span contributes one placeholder piece whatever they are) – is what keeps
+  the two in step, and it keeps a synthesized *seed* scanned, since its text is pre-expansion
+  content in its own right. The corpus gains fixtures for both halves of this: a reference-shaped
+  value, and a value carrying a newline (where the two pipelines agree by construction, since both
+  split into lines *before* expanding).
+
+  As with every macro family's own catalog/warning side effect, the `drop-line` mode's *diagnostic*
+  (Asciidoctor's "dropping line containing reference to missing attribute", a
+  `SkippingReferenceToMissingAttribute` warning) is **not** raised here: it does not change the
+  fold's output bytes, so it is deferred to the cutover along with `warn` mode's own warning, whose
+  output this step already reproduces. Differential corpora pin both modes over reference-only
+  lines dropped at the start, middle, and end of a content, several dropped lines in a row, two
+  references on one dropped line, a resolvable reference beside a missing one, escapes (never a
+  missing reference, so never a drop), other constructs on both the dropped and the surviving
+  lines, and single-line spans; a test pins that a `counter` directive on a *dropped* line has
+  still advanced (it resolves in `resolve_counters`' own document-order pass, before any line is
+  dropped, exactly as the string loop advances it as it reaches it); fixtures are added to the
+  whole-pipeline combined-constructs corpus; and a whole-document test drives the real parse path
+  end to end. As with every prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -2448,6 +2528,20 @@ Each phase is a reviewable unit with a clear exit gate.
        string pipeline's own pass order for the shared warnings list; see the step's own "landed as"
        note above. A label crossing an opaque piece (a rendered span, a passthrough, or a character
        replacement) still defers, with its own divergence test.
+     - ✅ **prep (`attribute-missing` drop modes).** The fifth of that audit's divergences is
+       closed – and, like `hardbreaks` and the unescaped-specials classification, a **blocker**
+       rather than an unclaimed form, since golden tests set both modes:
+       [`apply_attribute_references`](../../parser/src/content/inline_builder/attribute_refs.rs)
+       now honors `attribute-missing=drop` and `=drop-line`. A new
+       [`MissingHandling`](../../parser/src/content/inline_builder/attribute_refs.rs) carries the
+       mode down the recursion and
+       [`surviving_lines`](../../parser/src/content/inline_builder/attribute_refs.rs) reproduces
+       `apply_attributes`' own line loop over a level's match string, whose `\n` bytes are the
+       rendered string's own; the rebuild re-emits a real source `\n` between survivors, so a
+       dropped line costs no honest span. See the step's own "landed as" note above. A span
+       straddling a line break disables the drop for the whole content (its interior newlines are
+       hidden behind one placeholder), with its own divergence test; the `drop-line` diagnostic is
+       deferred to the cutover like every other family's warning.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

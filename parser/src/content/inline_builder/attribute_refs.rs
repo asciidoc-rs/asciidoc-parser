@@ -7,8 +7,12 @@ use super::{
     quotes::{Piece, build_match_string, emit_range, source_slice},
 };
 use crate::{
-    Parser, Span, content::ATTRIBUTE_REFERENCE, document::InterpretedValue, inlines::InlineNode,
-    parser::attribute_lookup_name, strings::CowStr,
+    Parser, Span,
+    content::{ATTRIBUTE_REFERENCE, AttributeMissing},
+    document::InterpretedValue,
+    inlines::InlineNode,
+    parser::attribute_lookup_name,
+    strings::CowStr,
 };
 
 /// The attribute-references substitution, as a node transducer: descends into
@@ -33,14 +37,24 @@ use crate::{
 /// by [`split_attribute_value`] exactly like a plain reference's value);
 /// `counter2` advances silently and splices nothing.
 ///
-/// One form is still deferred, documented and pinned by a divergence test: a
-/// reference to a **missing** attribute under [`AttributeMissing::Drop`] /
-/// [`AttributeMissing::DropLine`] (whose output *removes* content, unlike
-/// leaving the reference literal – the behavior this step *does* reproduce,
-/// since it is also what [`AttributeMissing::Skip`] (the default) and
-/// [`AttributeMissing::Warn`] do). It is left **unrecognized**: no match is
-/// produced, so the surrounding gap logic reproduces the source text
-/// unchanged, exactly as an unrecognized macro is left for a later increment.
+/// A reference to a **missing** attribute is handled per the document's
+/// [`attribute-missing`] mode, exactly as `AttributeReplacer` handles it.
+/// [`AttributeMissing::Skip`] (the default) and [`AttributeMissing::Warn`]
+/// leave the reference literal, which this step reproduces by recording no
+/// match at all – the surrounding gap logic then emits the source text
+/// unchanged. [`AttributeMissing::Drop`] and [`AttributeMissing::DropLine`]
+/// *remove* content instead, so they need the line granularity the string
+/// pipeline's own `apply_attributes` gets from its line loop: see
+/// [`MissingHandling`] and [`surviving_lines`] for how this transducer
+/// reproduces it, and for the two shapes it defers.
+///
+/// The `DropLine` mode's own diagnostic (Asciidoctor's "dropping line
+/// containing reference to missing attribute", recorded as a
+/// [`SkippingReferenceToMissingAttribute`] warning) is **not** raised here: it
+/// does not change the fold's output bytes, so – like every macro family's own
+/// catalog/warning side effect – it is deferred to the cutover (design §5.2
+/// Phase 4, step 6). The same applies to `Warn` mode's warning, whose output
+/// this step already reproduces.
 ///
 /// A **character replacement** *inside* an expanded value ((C) → © and
 /// friends) is, by contrast, recognized: [`build_match_string`] (shared by
@@ -64,6 +78,8 @@ use crate::{
 /// [`AttributeMissing::DropLine`]: crate::content::AttributeMissing::DropLine
 /// [`AttributeMissing::Skip`]: crate::content::AttributeMissing::Skip
 /// [`AttributeMissing::Warn`]: crate::content::AttributeMissing::Warn
+/// [`attribute-missing`]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing
+/// [`SkippingReferenceToMissingAttribute`]: crate::warnings::WarningType::SkippingReferenceToMissingAttribute
 ///
 /// A `counter`/`counter2` directive's advance must happen in true left-to-right
 /// *document* order even though the splicing recursion below visits a
@@ -85,21 +101,44 @@ pub(super) fn apply_attribute_references<'src>(
     let mut counters = HashMap::new();
     resolve_counters(&nodes, root, parser, &mut counters);
 
-    apply_attribute_references_recursive(nodes, root, parser, &counters)
+    let missing = MissingHandling::for_content(&nodes, parser);
+
+    // Which top-level nodes carry a missing reference *inside a span* – found
+    // here, ahead of the recursion below, precisely because it must read the
+    // content's own **pre-expansion** text (see [`styled_drop_indices`]).
+    let span_drops = if missing == MissingHandling::DropLine {
+        styled_drop_indices(&nodes, parser)
+    } else {
+        Vec::new()
+    };
+
+    apply_attribute_references_recursive(nodes, root, parser, &counters, missing, &span_drops)
 }
 
+/// `span_drops` names this level's own [`Styled`](crate::inlines::Styled)
+/// nodes that force a line drop (see [`styled_drop_indices`]); a nested level
+/// never has any of its own, since a drop is only ever decided at the
+/// content's top level.
 fn apply_attribute_references_recursive<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
     counters: &HashMap<usize, String>,
+    missing: MissingHandling,
+    span_drops: &[usize],
 ) -> Vec<InlineNode<'src>> {
     let nodes: Vec<InlineNode<'src>> = nodes
         .into_iter()
         .map(|node| match node {
             InlineNode::Styled(mut styled) => {
-                styled.children =
-                    apply_attribute_references_recursive(styled.children, root, parser, counters);
+                styled.children = apply_attribute_references_recursive(
+                    styled.children,
+                    root,
+                    parser,
+                    counters,
+                    missing.nested(),
+                    &[],
+                );
                 InlineNode::Styled(styled)
             }
 
@@ -107,7 +146,109 @@ fn apply_attribute_references_recursive<'src>(
         })
         .collect();
 
-    attribute_references_level(nodes, root, parser, counters)
+    attribute_references_level(nodes, root, parser, counters, missing, span_drops)
+}
+
+/// How a level treats a reference to a **missing** attribute — this module's
+/// node-transducer counterpart of the [`AttributeMissing`] mode the string
+/// pipeline's own `AttributeReplacer` reads.
+///
+/// The two modes that *remove* content need line granularity the node stream
+/// does not have on its own: the string pipeline gets it by splitting
+/// `content.rendered` on `\n` and processing (and possibly discarding) one
+/// line at a time. [`surviving_lines`] reproduces that split over a level's
+/// own match string, whose `\n` bytes are the same ones the rendered string
+/// carries — for the two shapes below, and only those.
+///
+/// # The shapes this defers
+///
+/// Both are pinned by their own divergence tests, and both fall back to
+/// [`Literal`](Self::Literal) — the reference stays in place, exactly as it
+/// did before this increment.
+///
+/// - A **`Styled` span straddling a line break** at the content's top level. A
+///   span is one opaque [`SPAN_PLACEHOLDER`](super::quotes::SPAN_PLACEHOLDER)
+///   piece in the match string, so its interior `\n`s are invisible here —
+///   while the string pipeline, which by this point holds the span's rendered
+///   markup inline, still sees them and splits on them. The line correspondence
+///   the drop rests on would therefore be wrong, so
+///   [`for_content`](Self::for_content) disables dropping for the whole content
+///   when it finds one. (A masked passthrough or STEM expression is *not*
+///   affected: the string pipeline holds a sentinel for it at this point, so a
+///   multi-line one collapses its lines there too, exactly as the placeholder
+///   does here.)
+///
+/// - A missing reference nested inside a `Styled` span, under
+///   [`DropLine`](Self::DropLine). Dropping the *enclosing* line is what the
+///   string pipeline does, which this level cannot see from inside the span;
+///   [`nested`](Self::nested) therefore leaves such a reference literal. Under
+///   [`DropReference`](Self::DropReference) the nested case *is* handled,
+///   because removing the reference is a purely local edit and the span keeps
+///   its enclosing line non-empty either way.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MissingHandling {
+    /// Leave the reference in place, recording no match at all
+    /// ([`AttributeMissing::Skip`], [`AttributeMissing::Warn`], and every
+    /// deferred shape above).
+    Literal,
+
+    /// Drop the reference ([`AttributeMissing::Drop`]), and with it the whole
+    /// line when the drop is all the line contained (Asciidoctor's
+    /// `reject_if_empty`).
+    DropReference,
+
+    /// Drop the whole line the reference sits on
+    /// ([`AttributeMissing::DropLine`]).
+    DropLine,
+}
+
+impl MissingHandling {
+    /// The handling the **content's own top level** takes: the document's
+    /// [`AttributeMissing`] mode, unless one of `nodes`'s spans straddles a
+    /// line break (see the type-level docs).
+    fn for_content(nodes: &[InlineNode<'_>], parser: &Parser) -> Self {
+        let mode = match AttributeMissing::from_parser(parser) {
+            AttributeMissing::Skip | AttributeMissing::Warn => Self::Literal,
+            AttributeMissing::Drop => Self::DropReference,
+            AttributeMissing::DropLine => Self::DropLine,
+        };
+
+        if mode.drops_missing() && !line_structure_is_faithful(nodes) {
+            return Self::Literal;
+        }
+
+        mode
+    }
+
+    /// The handling a `Styled` span's own children take (see the type-level
+    /// docs).
+    fn nested(self) -> Self {
+        match self {
+            Self::DropLine => Self::Literal,
+            other => other,
+        }
+    }
+
+    /// Whether a missing reference is removed rather than left literal.
+    fn drops_missing(self) -> bool {
+        self != Self::Literal
+    }
+}
+
+/// Reports whether the match string of a level made of `nodes` preserves the
+/// content's own line structure — i.e. no [`Styled`](crate::inlines::Styled)
+/// span at this level straddles a line break. See [`MissingHandling`]'s own
+/// docs for why a span that does disables the line-dropping modes.
+///
+/// The check is on the span's *source* span rather than on what it renders to,
+/// which is sound in the direction that matters: a span whose source carries
+/// no `\n` cannot render one, and building the tree must not invoke a renderer
+/// to find out.
+fn line_structure_is_faithful(nodes: &[InlineNode<'_>]) -> bool {
+    !nodes.iter().any(|node| match node {
+        InlineNode::Styled(styled) => styled.location.data().contains('\n'),
+        _ => false,
+    })
 }
 
 /// Resolves every `counter`/`counter2` directive in `nodes` (recursively,
@@ -235,43 +376,336 @@ enum AttributeMatchKind {
     /// looked-up value in, classified by [`split_attribute_value`];
     /// `counter2` (`display: false`) advances silently and splices nothing.
     Counter { display: bool },
+
+    /// A reference to a **missing** attribute under a line-dropping mode
+    /// ([`MissingHandling::DropReference`] or
+    /// [`MissingHandling::DropLine`]): the reference itself is replaced with
+    /// nothing, and its presence is what marks its line as a drop candidate
+    /// (see [`surviving_lines`]). Under [`MissingHandling::Literal`] no such
+    /// match is recorded at all, so the reference survives as literal text.
+    DropMissing,
 }
 
 /// Matches [`ATTRIBUTE_REFERENCE`] over this level's escaped text, replacing
 /// each recognized match with the node(s) it produces and leaving everything
 /// else in place. `counters` supplies each `counter`/`counter2` directive's
-/// already-resolved value (see [`resolve_counters`]).
+/// already-resolved value (see [`resolve_counters`]); `missing` decides what a
+/// reference to an unset attribute becomes (see [`MissingHandling`]), and
+/// `span_drops` names the nodes whose spans force a line drop (see
+/// [`styled_drop_indices`]).
+#[allow(clippy::too_many_arguments)]
 fn attribute_references_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
     counters: &HashMap<usize, String>,
+    missing: MissingHandling,
+    span_drops: &[usize],
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
+    // A span that forces a line drop is named by node index; the line decision
+    // works in match-string offsets. Translating here (rather than in
+    // `styled_drop_indices`, which must run before the recursion) is safe
+    // because that recursion only ever rewrites a `Styled` node's *children*,
+    // and a `Styled` node contributes exactly one placeholder piece whatever
+    // they are – so this level's piece layout is the same before and after it.
+    let span_drop_offsets: Vec<usize> = pieces
+        .iter()
+        .filter(|piece| span_drops.contains(&piece.node_index))
+        .map(|piece| piece.s_start)
+        .collect();
+
     // Cheap pre-filter: skip the pattern sweep when no reference can be
-    // present at this level.
-    if !s.contains('{') {
+    // present at this level. A span drop is still work even with no reference
+    // of this level's own.
+    if !s.contains('{') && span_drop_offsets.is_empty() {
         return nodes;
     }
 
-    let matches = find_attribute_matches(&s, parser);
+    let matches = if s.contains('{') {
+        find_attribute_matches(&s, parser, missing)
+    } else {
+        Vec::new()
+    };
 
-    if matches.is_empty() {
+    let lines = surviving_lines(
+        &s,
+        &matches,
+        &span_drop_offsets,
+        missing,
+        &pieces,
+        root,
+        counters,
+    );
+
+    if matches.is_empty() && lines.is_none() {
         return nodes;
     }
 
-    rebuild_attribute_level(&nodes, &pieces, &s, &matches, root, counters)
+    // The whole level as one "line" when nothing was dropped: the rebuild's
+    // flat, line-agnostic walk. (Spelled with `iter::once` rather than a
+    // one-element `vec![…]`, which `clippy::single_range_in_vec_init` reads as
+    // a mistyped `(0..n).collect()`.)
+    let lines = lines.unwrap_or_else(|| std::iter::once(0..s.len()).collect());
+
+    rebuild_attribute_level(&nodes, &pieces, &matches, root, counters, &lines)
+}
+
+/// The indices into `nodes` of every [`Styled`](crate::inlines::Styled) span
+/// whose own subtree carries a live reference to a missing attribute — the
+/// spans that force their enclosing line to be dropped under
+/// [`MissingHandling::DropLine`], since the string pipeline drops the line the
+/// span's rendered markup sits on.
+///
+/// # Why this runs before the splicing recursion
+///
+/// It must read the content's **pre-expansion** text. The string pipeline
+/// replaces every reference on a line in one `replace_all` pass, which never
+/// re-scans its own replacements: a value that happens to expand *to*
+/// `{something}` leaves that text in the output literally, and it neither is
+/// nor arms a missing reference. Run after the recursion, this walk would see
+/// the already-spliced value and read it as one — dropping a line the string
+/// pipeline keeps. Hoisting the whole detection to
+/// [`apply_attribute_references`], before anything is spliced, is what keeps
+/// the two in step; it also means a synthesized *seed* (a filtered multi-line
+/// block, reached through `build_from_value`) is still scanned, since its text
+/// is pre-expansion content in its own right.
+fn styled_drop_indices(nodes: &[InlineNode<'_>], parser: &Parser) -> Vec<usize> {
+    nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| match node {
+            InlineNode::Styled(styled) => subtree_has_missing_reference(&styled.children, parser),
+            _ => false,
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
+/// Reports whether `nodes` — at this level, or inside a
+/// [`Styled`](crate::inlines::Styled) child at any depth — carries a live
+/// (non-escaped, non-directive) reference to an attribute that is not set.
+///
+/// Recognition is [`find_attribute_matches`]'s own, so the two cannot disagree
+/// about what counts as a missing reference.
+fn subtree_has_missing_reference(nodes: &[InlineNode<'_>], parser: &Parser) -> bool {
+    let (s, _) = build_match_string(nodes);
+
+    if s.contains('{')
+        && find_attribute_matches(&s, parser, MissingHandling::DropLine)
+            .iter()
+            .any(|m| matches!(m.kind, AttributeMatchKind::DropMissing))
+    {
+        return true;
+    }
+
+    nodes.iter().any(|node| match node {
+        InlineNode::Styled(styled) => subtree_has_missing_reference(&styled.children, parser),
+        _ => false,
+    })
+}
+
+/// The ranges of `s` this level still emits, one per surviving line — or
+/// `None` when no line is dropped, which is every level under
+/// [`MissingHandling::Literal`] and the overwhelming majority of levels under
+/// the other two.
+///
+/// This mirrors the string pipeline's own line loop (`apply_attributes`
+/// splits `content.rendered` on `\n`, replaces within each line, and skips a
+/// line the mode calls for). A returned range covers a line's *content* only:
+/// [`rebuild_attribute_level`] re-emits one `\n` between consecutive
+/// survivors, which reproduces the string pipeline's "join the kept lines"
+/// shape for a drop anywhere — first line, last line, or a run in the middle.
+#[allow(clippy::too_many_arguments)]
+fn surviving_lines(
+    s: &str,
+    matches: &[AttributeMatch],
+    span_drops: &[usize],
+    missing: MissingHandling,
+    pieces: &[Piece],
+    root: Span<'_>,
+    counters: &HashMap<usize, String>,
+) -> Option<Vec<std::ops::Range<usize>>> {
+    if !missing.drops_missing() {
+        return None;
+    }
+
+    let mut kept = Vec::new();
+    let mut dropped_any = false;
+    let mut start = 0usize;
+
+    for line in s.split('\n') {
+        let range = start..start + line.len();
+
+        // Past the last line this runs off the end, which is harmless: it is
+        // never read again.
+        start = range.end + 1;
+
+        let dropped = line_is_dropped(
+            s,
+            &range,
+            matches,
+            span_drops,
+            missing == MissingHandling::DropLine,
+            pieces,
+            root,
+            counters,
+        );
+
+        if dropped {
+            dropped_any = true;
+        } else {
+            kept.push(range);
+        }
+    }
+
+    dropped_any.then_some(kept)
+}
+
+/// Whether the line covering `range` is dropped whole: unconditionally when
+/// `unconditional` ([`MissingHandling::DropLine`]) once it carries a missing
+/// reference, and otherwise ([`MissingHandling::DropReference`]) only when
+/// removing that reference is all it took to empty the line (Asciidoctor's
+/// `reject_if_empty`, which the string pipeline reproduces in
+/// `drop_emptied_line`).
+///
+/// Only [`surviving_lines`] calls this, and only once it has established that
+/// the level drops missing references at all, so
+/// [`MissingHandling::Literal`] never reaches here — hence the plain flag
+/// rather than the mode itself.
+#[allow(clippy::too_many_arguments)]
+fn line_is_dropped(
+    s: &str,
+    range: &std::ops::Range<usize>,
+    matches: &[AttributeMatch],
+    span_drops: &[usize],
+    unconditional: bool,
+    pieces: &[Piece],
+    root: Span<'_>,
+    counters: &HashMap<usize, String>,
+) -> bool {
+    let has_missing = matches_in(matches, range)
+        .any(|m| matches!(m.kind, AttributeMatchKind::DropMissing))
+        || span_drops
+            .iter()
+            .any(|start| *start >= range.start && *start < range.end);
+
+    if !has_missing {
+        return false;
+    }
+
+    if unconditional {
+        return true;
+    }
+
+    let replaced = line_replacement(s, range, matches, pieces, root, counters);
+
+    // A trailing `\r` left from a CRLF terminator is part of the line ending,
+    // not content — the same guard `drop_emptied_line` applies on the string
+    // side.
+    replaced.strip_suffix('\r').unwrap_or(&replaced).is_empty()
+}
+
+/// The text the line covering `range` would become once every match in it is
+/// replaced — the string pipeline's `replaced` for that line, reconstructed
+/// from this level's own matches so the emptied-line test above sees what
+/// `apply_attributes` sees.
+///
+/// An opaque piece (a rendered span, a masked passthrough) contributes its
+/// single [`SPAN_PLACEHOLDER`](super::quotes::SPAN_PLACEHOLDER) here where the
+/// string pipeline holds its markup or sentinel; the two differ in length but
+/// agree on the only thing this test asks, which is whether anything is left.
+fn line_replacement(
+    s: &str,
+    range: &std::ops::Range<usize>,
+    matches: &[AttributeMatch],
+    pieces: &[Piece],
+    root: Span<'_>,
+    counters: &HashMap<usize, String>,
+) -> String {
+    let mut out = String::new();
+    let mut cursor = range.start;
+
+    for m in matches_in(matches, range) {
+        out.push_str(s.get(cursor..m.full.start).unwrap_or_default());
+
+        match &m.kind {
+            AttributeMatchKind::Unescape { backslashes } => {
+                let mut piece_cursor = m.full.start;
+
+                for &backslash in backslashes {
+                    out.push_str(s.get(piece_cursor..backslash).unwrap_or_default());
+                    piece_cursor = backslash + 1;
+                }
+
+                out.push_str(s.get(piece_cursor..m.full.end).unwrap_or_default());
+            }
+
+            AttributeMatchKind::Expand { value } => out.push_str(value),
+
+            AttributeMatchKind::Counter { display } => {
+                if *display {
+                    out.push_str(counter_value(pieces, &m.full, root, counters));
+                }
+            }
+
+            AttributeMatchKind::DropMissing => {}
+        }
+
+        cursor = m.full.end;
+    }
+
+    out.push_str(s.get(cursor..range.end).unwrap_or_default());
+    out
+}
+
+/// The matches falling wholly inside `range`. A match never straddles a line
+/// break (an [`ATTRIBUTE_REFERENCE`] cannot contain one), so every match is
+/// either wholly inside a line or wholly outside it.
+fn matches_in<'m>(
+    matches: &'m [AttributeMatch],
+    range: &'m std::ops::Range<usize>,
+) -> impl Iterator<Item = &'m AttributeMatch> {
+    matches
+        .iter()
+        .filter(move |m| m.full.start >= range.start && m.full.end <= range.end)
+}
+
+/// The value [`resolve_counters`] recorded for the directive matched at
+/// `full`, keyed by its absolute source byte offset.
+///
+/// `resolve_counters` records a value for every counter match this module's
+/// own regex sweep finds, keyed by this exact offset, so the lookup always
+/// hits; the empty fallback only guards against the two passes somehow
+/// disagreeing, which would itself be a bug.
+fn counter_value<'c>(
+    pieces: &[Piece],
+    full: &std::ops::Range<usize>,
+    root: Span<'_>,
+    counters: &'c HashMap<usize, String>,
+) -> &'c str {
+    let offset = source_slice(pieces, full.clone(), root).byte_offset();
+
+    counters
+        .get(&offset)
+        .map(String::as_str)
+        .unwrap_or_default()
 }
 
 /// Finds every non-overlapping [`ATTRIBUTE_REFERENCE`] match in the escaped
 /// match string `s`, left to right, exactly as the string pipeline's
 /// `replace_all` does. A `counter`/`counter2` directive is recorded as a
 /// match here but not yet resolved (see [`AttributeMatchKind::Counter`]); a
-/// reference to a missing attribute is left out of the returned list
-/// entirely – see the deferred forms documented on
-/// [`apply_attribute_references`].
-fn find_attribute_matches(s: &str, parser: &Parser) -> Vec<AttributeMatch> {
+/// reference to a missing attribute becomes a
+/// [`DropMissing`](AttributeMatchKind::DropMissing) match under a
+/// line-dropping `missing` handling, and is left out of the returned list
+/// entirely under [`MissingHandling::Literal`].
+fn find_attribute_matches(
+    s: &str,
+    parser: &Parser,
+    missing: MissingHandling,
+) -> Vec<AttributeMatch> {
     let mut matches = Vec::new();
 
     for caps in ATTRIBUTE_REFERENCE.captures_iter(s) {
@@ -317,10 +751,17 @@ fn find_attribute_matches(s: &str, parser: &Parser) -> Vec<AttributeMatch> {
         let lookup_name = attribute_lookup_name(attr_name);
 
         if !parser.has_attribute(&lookup_name) {
-            // Left unrecognized – correct parity under the default
-            // (`AttributeMissing::Skip`) and `AttributeMissing::Warn` modes,
-            // a documented divergence under `AttributeMissing::Drop` /
-            // `AttributeMissing::DropLine` (see the doc comment above).
+            if missing.drops_missing() {
+                matches.push(AttributeMatch {
+                    full,
+                    kind: AttributeMatchKind::DropMissing,
+                });
+            }
+
+            // Otherwise left unrecognized, so the surrounding gap logic emits
+            // the reference as literal text – what `AttributeMissing::Skip`
+            // (the default) and `AttributeMissing::Warn` both do, and what the
+            // shapes `MissingHandling` defers fall back to.
             continue;
         }
 
@@ -343,73 +784,93 @@ fn find_attribute_matches(s: &str, parser: &Parser) -> Vec<AttributeMatch> {
 /// [`Unescape`](AttributeMatchKind::Unescape)) or its classified expansion (an
 /// [`Expand`](AttributeMatchKind::Expand)). `counters` supplies each
 /// [`Counter`](AttributeMatchKind::Counter) match's already-resolved value.
+///
+/// `lines` is the level's surviving line ranges (see [`surviving_lines`]).
+/// When no line was dropped it is the single whole-level range `0..s.len()`,
+/// which makes this the flat, line-agnostic walk it has always been; when
+/// lines *were* dropped, each survivor is emitted in turn with one `\n` — the
+/// very byte that terminated the previous *survivor* in the source — re-emitted
+/// between consecutive survivors.
 fn rebuild_attribute_level<'src>(
     nodes: &[InlineNode<'src>],
     pieces: &[Piece],
-    s: &str,
     matches: &[AttributeMatch],
     root: Span<'src>,
     counters: &HashMap<usize, String>,
+    lines: &[std::ops::Range<usize>],
 ) -> Vec<InlineNode<'src>> {
     let mut out = Vec::new();
-    let mut cursor = 0usize;
+    let mut previous_end: Option<usize> = None;
 
-    for m in matches {
-        match &m.kind {
-            AttributeMatchKind::Unescape { backslashes } => {
-                // Keep the match's literal text, dropping each escaping
-                // backslash in turn. `piece_cursor` starts at `cursor`
-                // (before the match), so the first `emit_range` call also
-                // absorbs the untouched gap ahead of it, exactly as
-                // `rebuild_replacements`'s `Unescape` arm does.
-                let mut piece_cursor = cursor;
+    for line in lines {
+        // One separator between consecutive survivors — the string pipeline's
+        // own "join the kept lines with `\n`" shape. The byte emitted is the
+        // `\n` that terminated the *previous survivor*, which is always a real
+        // one: a line range excludes its terminator, and a line followed by
+        // another always has one. Whether lines were dropped in between makes
+        // no difference; exactly one separator belongs here either way.
+        if let Some(end) = previous_end {
+            emit_range(nodes, pieces, end..end + 1, &mut out);
+        }
 
-                for &backslash in backslashes {
-                    emit_range(nodes, pieces, piece_cursor..backslash, &mut out);
-                    piece_cursor = backslash + 1;
+        previous_end = Some(line.end);
+
+        let mut cursor = line.start;
+
+        for m in matches_in(matches, line) {
+            match &m.kind {
+                AttributeMatchKind::Unescape { backslashes } => {
+                    // Keep the match's literal text, dropping each escaping
+                    // backslash in turn. `piece_cursor` starts at `cursor`
+                    // (before the match), so the first `emit_range` call also
+                    // absorbs the untouched gap ahead of it, exactly as
+                    // `rebuild_replacements`'s `Unescape` arm does.
+                    let mut piece_cursor = cursor;
+
+                    for &backslash in backslashes {
+                        emit_range(nodes, pieces, piece_cursor..backslash, &mut out);
+                        piece_cursor = backslash + 1;
+                    }
+
+                    emit_range(nodes, pieces, piece_cursor..m.full.end, &mut out);
                 }
 
-                emit_range(nodes, pieces, piece_cursor..m.full.end, &mut out);
-                cursor = m.full.end;
-            }
+                AttributeMatchKind::Expand { value } => {
+                    emit_range(nodes, pieces, cursor..m.full.start, &mut out);
 
-            AttributeMatchKind::Expand { value } => {
-                emit_range(nodes, pieces, cursor..m.full.start, &mut out);
-
-                let location = source_slice(pieces, m.full.clone(), root);
-                split_attribute_value(value, location, &mut out);
-
-                cursor = m.full.end;
-            }
-
-            AttributeMatchKind::Counter { display } => {
-                emit_range(nodes, pieces, cursor..m.full.start, &mut out);
-
-                // `counter2` advances silently: the match is consumed but
-                // splices no node, mirroring `AttributeReplacer`'s own
-                // directive-name check.
-                if *display {
                     let location = source_slice(pieces, m.full.clone(), root);
-
-                    // `resolve_counters` records a value for every counter
-                    // match this same regex finds, keyed by this exact
-                    // absolute offset, so the lookup always hits; an empty
-                    // fallback only guards against the two passes somehow
-                    // disagreeing, which would itself be a bug.
-                    let value = counters
-                        .get(&location.byte_offset())
-                        .map(String::as_str)
-                        .unwrap_or_default();
                     split_attribute_value(value, location, &mut out);
                 }
 
-                cursor = m.full.end;
-            }
-        }
-    }
+                AttributeMatchKind::Counter { display } => {
+                    emit_range(nodes, pieces, cursor..m.full.start, &mut out);
 
-    if cursor < s.len() {
-        emit_range(nodes, pieces, cursor..s.len(), &mut out);
+                    // `counter2` advances silently: the match is consumed but
+                    // splices no node, mirroring `AttributeReplacer`'s own
+                    // directive-name check.
+                    if *display {
+                        let location = source_slice(pieces, m.full.clone(), root);
+                        let value = counter_value(pieces, &m.full, root, counters);
+                        split_attribute_value(value, location, &mut out);
+                    }
+                }
+
+                // A missing reference under a line-dropping mode: the match is
+                // consumed and splices nothing. Its line survived, so only the
+                // reference itself goes (`AttributeMissing::Drop`'s own
+                // behavior; under `DropLine` a line carrying one is never a
+                // survivor in the first place).
+                AttributeMatchKind::DropMissing => {
+                    emit_range(nodes, pieces, cursor..m.full.start, &mut out);
+                }
+            }
+
+            cursor = m.full.end;
+        }
+
+        if cursor < line.end {
+            emit_range(nodes, pieces, cursor..line.end, &mut out);
+        }
     }
 
     out
@@ -914,49 +1375,298 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_missing_attribute_under_drop_is_a_documented_divergence() {
+    // ---- `attribute-missing` drop / drop-line ------------------------------
+
+    /// A default parser with `attribute-missing` set to `mode`, plus three
+    /// resolvable attributes a fixture can mix with a missing reference:
+    /// an ordinary one, one whose value carries a **newline**, and one whose
+    /// value is itself **reference-shaped**.
+    fn parser_with_missing_mode(mode: &str) -> Parser {
         use crate::parser::ModificationContext;
 
-        let parser = Parser::default().with_intrinsic_attribute(
-            "attribute-missing",
-            "drop",
-            ModificationContext::Anywhere,
+        Parser::default()
+            .with_intrinsic_attribute("attribute-missing", mode, ModificationContext::Anywhere)
+            .with_intrinsic_attribute("greeting", "Hello", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("two-lines", "a\nb", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("looks-like-a-ref", "{nope}", ModificationContext::Anywhere)
+    }
+
+    /// Asserts that folding the single-pass tree for `source` reproduces the
+    /// string pipeline's output byte-for-byte under `attribute-missing=mode`.
+    ///
+    /// Each side gets its own independently-built parser: a fixture carrying a
+    /// `counter` directive advances a real document counter on both, so
+    /// sharing one would number them twice (design §5.3's
+    /// two-independent-parsers discipline).
+    fn assert_missing_mode_parity(source: &str, mode: &str) {
+        let nodes = build(Span::new(source), &parser_with_missing_mode(mode), None);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_attributes_with(source, &parser_with_missing_mode(mode)),
+            "fold diverged under attribute-missing={mode} for {source:?}"
         );
-
-        let source = "before {undefined-thing} after";
-        let nodes = build(Span::new(source), &parser, None);
-
-        // Left unrecognized: the reference stays literal rather than being
-        // dropped.
-        assert_eq!(nodes.len(), 1);
-        assert_text(&nodes[0], source, 1, 1);
-
-        // The string pipeline, by contrast, drops the reference (keeping the
-        // rest of the line).
-        assert_eq!(golden_attributes_with(source, &parser), "before  after");
     }
 
     #[test]
-    fn a_missing_attribute_under_drop_line_is_a_documented_divergence() {
-        use crate::parser::ModificationContext;
+    fn fold_matches_the_string_pipeline_under_attribute_missing_drop() {
+        // `AttributeMissing::Drop` removes the reference and, when that was
+        // all the line contained, the line with it (Asciidoctor's
+        // `reject_if_empty`).
+        let fixtures = [
+            // The reference goes; the rest of the line stays.
+            "before {undefined-thing} after",
+            "{undefined-thing} leads the line",
+            "the line trails with {undefined-thing}",
+            "two {undefined-thing} on {also-undefined} one line",
+            // A resolvable reference beside a missing one.
+            "{greeting}, {undefined-thing}!",
+            // A reference-only line is dropped entirely, wherever it sits.
+            "{undefined-thing}",
+            "{undefined-thing}\nsecond line",
+            "first line\n{undefined-thing}",
+            "first line\n{undefined-thing}\nthird line",
+            "first\n{undefined-thing}\n{also-undefined}\nlast",
+            // A line the drop did *not* empty survives.
+            "first line\nx{undefined-thing}\nthird line",
+            "first line\n{undefined-thing} \nthird line",
+            // A resolvable reference that empties a line does *not* drop it:
+            // only a *missing* one arms the check.
+            "first line\n{empty-value}\nthird line",
+            // An escaped reference is never a missing reference, so it neither
+            // drops nor arms the line check.
+            "\\{undefined-thing}",
+            "first\n\\{undefined-thing}\nlast",
+            // An escaped reference on the *same* line as a missing one: the
+            // literal text it leaves behind is what keeps the line from
+            // counting as emptied.
+            "\\{undefined-thing}{undefined-thing}",
+            "first\n\\{a\\}{undefined-thing}\nlast",
+            // A `counter` directive likewise leaves its digits behind, so the
+            // line survives – while `counter2`, which displays nothing, leaves
+            // the line as empty as the dropped reference did.
+            "{counter:n}{undefined-thing}",
+            "first\n{counter2:n}{undefined-thing}\nlast",
+            // Beside other constructs on the same line.
+            "*bold* and {undefined-thing} here",
+            "a link:index.html[Docs] then {undefined-thing}",
+            // Inside a single-line span: the reference goes, the span (and so
+            // the line) stays.
+            "*{undefined-thing}*",
+            "_text {undefined-thing} more_",
+            "a line with *{undefined-thing}* in it",
+            // An expanded value carrying a newline of its own: both pipelines
+            // split into lines *before* expanding, so the newline the value
+            // introduces is never a line boundary either drop decision sees.
+            "{two-lines} {undefined-thing}",
+            "{two-lines}\n{undefined-thing}",
+            "{undefined-thing}\n{two-lines}",
+            "*{two-lines}* {undefined-thing}",
+            // A value that is itself reference-shaped: neither pipeline
+            // re-scans its own replacement, so the spliced `{nope}` stays
+            // literal and arms nothing.
+            "{looks-like-a-ref}",
+            "_{looks-like-a-ref}_",
+            "keep\n_{looks-like-a-ref}_\nkeep",
+            "_{looks-like-a-ref}_ and {undefined-thing}",
+        ];
 
-        let parser = Parser::default().with_intrinsic_attribute(
-            "attribute-missing",
-            "drop-line",
-            ModificationContext::Anywhere,
+        for fixture in fixtures {
+            assert_missing_mode_parity(fixture, "drop");
+        }
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_under_attribute_missing_drop_line() {
+        // `AttributeMissing::DropLine` removes the whole line a missing
+        // reference sits on, whatever else the line carried.
+        let fixtures = [
+            "a line with {undefined-thing} in it",
+            "{undefined-thing}",
+            "{undefined-thing}\nsecond line",
+            "first line\n{undefined-thing}",
+            "first line\nblah blah {undefined-thing}\nall there is",
+            "first\n{undefined-thing}\n{also-undefined}\nlast",
+            "first\n{undefined-thing}\nmiddle\n{also-undefined}\nlast",
+            // Two missing references on one line drop it once, not twice.
+            "keep\n{undefined-thing} and {also-undefined}\nkeep",
+            // A resolvable reference on a surviving line still expands.
+            "{greeting}\n{undefined-thing}\n{greeting} again",
+            // An escaped reference is not a missing reference: the line stays.
+            "\\{undefined-thing} stays",
+            "keep\n\\{undefined-thing}\nkeep too",
+            // Other constructs on the dropped line go with it.
+            "keep\n*bold* and {undefined-thing}\nkeep too",
+            "keep\nlink:index.html[Docs] {undefined-thing}\nkeep too",
+            // A missing reference nested in a *single-line* span drops the
+            // enclosing line, exactly as the string pipeline drops the line
+            // the span's rendered markup sits on.
+            "*{undefined-thing}*",
+            "keep\na *{undefined-thing}* span\nkeep too",
+            "keep\n_outer *{undefined-thing}* inner_\nkeep too",
+            // An expanded value carrying a newline of its own: both pipelines
+            // split into lines *before* expanding, so the newline the value
+            // introduces is never a line boundary either drop decision sees.
+            "{two-lines} {undefined-thing}",
+            "{two-lines}\n{undefined-thing}",
+            "{undefined-thing}\n{two-lines}",
+            "*{two-lines}* {undefined-thing}",
+            "keep\n{two-lines} {undefined-thing}\nkeep too",
+            // A value that is itself reference-shaped. Neither pipeline
+            // re-scans its own replacement – `replace_all` never does – so the
+            // spliced `{nope}` stays literal and is *not* a missing reference:
+            // it neither drops its own line nor, from inside a span, the
+            // enclosing one. This is why the span-drop detection runs ahead of
+            // the splicing recursion (see `styled_drop_indices`).
+            "{looks-like-a-ref}",
+            "_{looks-like-a-ref}_",
+            "keep\n_{looks-like-a-ref}_\nkeep",
+            "keep\n{looks-like-a-ref}\nkeep",
+            "_{looks-like-a-ref}_ and {undefined-thing}",
+            "keep\n_a {looks-like-a-ref} b_\nkeep too",
+        ];
+
+        for fixture in fixtures {
+            assert_missing_mode_parity(fixture, "drop-line");
+        }
+    }
+
+    #[test]
+    fn a_reference_shaped_expansion_inside_a_span_does_not_drop_its_line() {
+        // The regression the span-drop detection's own ordering guards
+        // against, asserted directly rather than only through the corpus: the
+        // spliced `{nope}` must reach the output literally, with its line
+        // intact, exactly as the string pipeline's single `replace_all` pass
+        // leaves it.
+        let source = "keep\n_{looks-like-a-ref}_\nkeep too";
+
+        let nodes = build(
+            Span::new(source),
+            &parser_with_missing_mode("drop-line"),
+            None,
         );
 
-        let source = "a line with {undefined-thing} in it";
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            "keep\n<em>{nope}</em>\nkeep too",
+            "{nodes:?}"
+        );
+    }
+
+    #[test]
+    fn a_counter_directive_survives_a_dropped_neighbouring_line() {
+        // A `counter` directive advances during `resolve_counters`, which runs
+        // over the whole tree before any line is dropped – exactly as the
+        // string pipeline advances a counter as its own line loop reaches it.
+        // A directive on a *dropped* line has still advanced, so the survivor
+        // after it numbers from there.
+        let parser = parser_with_missing_mode("drop-line");
+        let source = "{counter:n}\n{undefined-thing} {counter:n}\n{counter:n}";
+
+        let nodes = build(Span::new(source), &parser, None);
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+
+        assert_eq!(folded, "1\n3");
+
+        // The string pipeline, driven by its own independent parser (each side
+        // advances the counter for real – design §5.3's two-independent-parsers
+        // discipline), agrees.
+        assert_eq!(
+            golden_attributes_with(source, &parser_with_missing_mode("drop-line")),
+            folded
+        );
+    }
+
+    #[test]
+    fn a_dropped_line_leaves_honest_spans_on_the_survivors() {
+        // Dropping a line is a matter of *which* source ranges are emitted:
+        // every surviving node still borrows from `'src` with its own precise
+        // line/col, including the re-emitted `\n` separator – which is the
+        // byte that terminated the previous survivor (line 1 here), not the
+        // one that terminated the dropped line (design §4.4's precision stage
+        // – the structural assertion the Strategy-A tree cannot make).
+        let parser = parser_with_missing_mode("drop-line");
+        let source = "first\n{undefined-thing}\nthird";
+
         let nodes = build(Span::new(source), &parser, None);
 
-        // Left unrecognized: the whole line is not dropped (this step has no
-        // line-granularity concept; the string pipeline's line-drop mode is
-        // orthogonal to node splicing).
-        assert_eq!(nodes.len(), 1);
-        assert_text(&nodes[0], source, 1, 1);
+        assert_eq!(nodes.len(), 3, "{nodes:?}");
+        assert_text(&nodes[0], "first", 1, 1);
+        assert_text(&nodes[1], "\n", 1, 6);
+        assert_text(&nodes[2], "third", 3, 1);
+    }
 
-        // The string pipeline, by contrast, drops the whole line.
-        assert_eq!(golden_attributes_with(source, &parser), "");
+    #[test]
+    fn a_real_documents_dropped_line_reaches_its_tree() {
+        // End-to-end, through the real parse path: `attribute-missing` is read
+        // off the document's own header, and `SubstitutionGroup::apply` clones
+        // the parser to build each content's tree – so a real paragraph whose
+        // middle line the string pipeline dropped folds to exactly the
+        // rendered string it produced. This is the shape that made this a
+        // *blocker* for the authoritative fold rather than an unclaimed form:
+        // golden tests already exercise it (design §5.3's oracle).
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = Parser::default()
+            .with_inline_tree(true)
+            .parse(":attribute-missing: drop-line\n\nFirst line.\nA {nope} line.\nThird line.\n");
+
+        let blocks: Vec<_> = doc.descendant_blocks().collect();
+        assert_eq!(blocks.len(), 1, "expected one paragraph: {blocks:?}");
+
+        let rendered = blocks[0].rendered_html_content().unwrap();
+        let inlines = blocks[0].inlines().unwrap();
+
+        assert_eq!(rendered, "First line.\nThird line.");
+
+        assert_eq!(
+            super::super::fold_html(inlines, &HtmlSubstitutionRenderer {}, &Parser::default()),
+            rendered,
+            "fold diverged from the rendered string for {inlines:?}"
+        );
+    }
+
+    #[test]
+    fn a_missing_reference_inside_a_multi_line_span_is_a_documented_divergence() {
+        // A `Styled` span is one opaque placeholder in the match string, so a
+        // span straddling a line break hides the `\n`s the string pipeline
+        // still sees in its own rendered markup – and with them the line
+        // correspondence a drop rests on. `MissingHandling::for_content`
+        // therefore disables dropping for the whole content, leaving every
+        // reference literal (this step's pre-increment behavior).
+        let parser = parser_with_missing_mode("drop-line");
+        let source = "_a\nb_ {undefined-thing}";
+
+        let nodes = build(Span::new(source), &parser, None);
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+
+        assert!(
+            folded.contains("{undefined-thing}"),
+            "the reference must be left literal: {folded:?}"
+        );
+
+        // The string pipeline, by contrast, drops the line the reference sits
+        // on – which here is the span's own second half.
+        assert_eq!(golden_attributes_with(source, &parser), "<em>a");
+    }
+
+    #[test]
+    fn a_missing_reference_inside_a_multi_line_span_diverges_under_drop_too() {
+        // The same guard applies under `drop`: it is the line *correspondence*
+        // that is unsound, not the drop rule, so both modes fall back.
+        let parser = parser_with_missing_mode("drop");
+        let source = "_a\n{undefined-thing}\nb_";
+
+        let nodes = build(Span::new(source), &parser, None);
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+
+        assert!(
+            folded.contains("{undefined-thing}"),
+            "the reference must be left literal: {folded:?}"
+        );
+
+        // The string pipeline drops the (now empty) middle line from inside
+        // the span's rendered markup.
+        assert_eq!(golden_attributes_with(source, &parser), "<em>a\nb</em>");
     }
 }

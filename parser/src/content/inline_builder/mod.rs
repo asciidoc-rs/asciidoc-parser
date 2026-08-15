@@ -839,6 +839,33 @@ mod tests {
             "[[[widget]]] The {product} handbook, with a footnote:[note] and an [[extra]] anchor.",
             in_bibliography_list_item,
         );
+
+        // The two `attribute-missing` modes that *remove* content, each with
+        // a resolvable reference and other constructs on both the dropped and
+        // the surviving lines. These run through the real pipeline, so the
+        // builder's own line-drop pass must line up with `apply_attributes`'s
+        // line loop across every other step (see `attribute_refs.rs`).
+        let missing_mode = |mode: &'static str| {
+            move || {
+                Parser::default()
+                    .with_intrinsic_attribute(
+                        "attribute-missing",
+                        mode,
+                        ModificationContext::Anywhere,
+                    )
+                    .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+            }
+        };
+
+        assert_parity_with(
+            "The *{product}* is here.\n{nope} and image:x.png[X]\nA closing (C) line.",
+            missing_mode("drop-line"),
+        );
+
+        assert_parity_with(
+            "A {nope} in *bold {product}* text.\n{nope}\nlink:docs.html[Docs] {nope} tail.",
+            missing_mode("drop"),
+        );
     }
 
     /// [`build_from_value`] against the real pipeline, seeded from a
