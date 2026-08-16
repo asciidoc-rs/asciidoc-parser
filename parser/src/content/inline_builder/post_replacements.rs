@@ -182,6 +182,44 @@ mod tests {
     }
 
     #[test]
+    fn a_trailing_hard_line_break_with_no_newline_after_it_still_breaks() {
+        // The hard-line-break pattern anchors on `$` in multiline mode, which
+        // matches at the end of the haystack as well as before each `\n`, so a
+        // ` +` that *ends* the content is a break too – there is no newline
+        // anywhere in this source (issue #1067).
+        let nodes = build_src(Span::new("only +"));
+
+        assert_eq!(nodes.len(), 2);
+        assert_text(&nodes[0], "only", 1, 1);
+
+        match &nodes[1] {
+            InlineNode::LineBreak { location } => {
+                assert_eq!(location.data(), " +");
+            }
+
+            other => panic!("expected LineBreak, got {other:?}"),
+        }
+
+        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "only<br>");
+    }
+
+    #[test]
+    fn the_last_line_of_a_multi_line_level_breaks_too() {
+        // The same `$` anchor makes the *final* line eligible even when earlier
+        // lines are not: only the trailing ` +` here becomes a break.
+        let nodes = build_src(Span::new("first\nsecond +"));
+
+        assert_eq!(nodes.len(), 2);
+        assert_text(&nodes[0], "first\nsecond", 1, 1);
+        assert!(matches!(nodes[1], InlineNode::LineBreak { .. }));
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            "first\nsecond<br>"
+        );
+    }
+
+    #[test]
     fn post_replacements_recurse_into_ref_children() {
         // A hard line break inside a reference's display text is likewise
         // recognized (driven directly, as above).

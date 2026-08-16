@@ -1033,6 +1033,40 @@ mod tests {
         }
 
         #[test]
+        fn raw_components_fall_back_when_they_disagree_about_a_trailing_email() {
+            // The implicit-author-line counterpart of
+            // `names_only_email_split_stays_aligned_between_raw_and_rendered`.
+            // Escaping the literal brackets makes the rendered expansion
+            // (`Jane Smith &lt;Third&gt;`) match the author pattern as three
+            // *names*, while the raw expansion (`Jane Smith <Third>`) matches it
+            // as two names plus an `<email>`. The two disagree about whether a
+            // trailing email is present, so the raw components fall back to the
+            // rendered ones rather than storing a differently-shaped split.
+            let src = concat!(
+                ":first-name: Jane\n",
+                "= Doc\n",
+                "{first-name} Smith <Third>\n\n",
+                "body\n",
+            );
+
+            let a = only_author(src);
+
+            assert_eq!(a.name(), "Jane Smith &lt;Third&gt;");
+            assert_eq!(a.email(), None);
+            assert_eq!(a.lastname(), Some("&lt;Third&gt;"));
+
+            // The fallback: every raw component equals its rendered counterpart,
+            // brackets escaped and all, rather than the `Jane Smith` +
+            // `<Third>`-as-email split the raw expansion would have yielded on
+            // its own.
+            assert_eq!(a.raw_name(), "Jane Smith &lt;Third&gt;");
+            assert_eq!(a.raw_firstname(), "Jane");
+            assert_eq!(a.raw_middlename(), Some("Smith"));
+            assert_eq!(a.raw_lastname(), Some("&lt;Third&gt;"));
+            assert_eq!(a.raw_email(), None);
+        }
+
+        #[test]
         fn unresolved_attribute_reference_warns_only_once() {
             // The raw pass resolves the same references as the rendered pass, so
             // an author line with an unresolved reference must not record the

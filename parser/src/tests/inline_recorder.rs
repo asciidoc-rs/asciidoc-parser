@@ -264,8 +264,10 @@ const NORMAL_CORPUS: &[&str] = &[
     "A concealed (((primary,secondary))) term.",
     // Macros: anchors.
     "[[the-anchor]]Anchored paragraph.",
-    // Line breaks (post-replacement).
+    // Line breaks (post-replacement), including one that *ends* the content
+    // with no newline after it.
     "first line +\nsecond line",
+    "only +",
     // Combined stress.
     "*bold* _em_ `code` (C) https://x.y[link] <<ref>> image:i.png[i]",
     "A mix of {backend}, *bold < text*, and a footnote:[with `code`].",
@@ -316,8 +318,9 @@ const NORMAL_CORPUS: &[&str] = &[
     "inline pass:[<i>x</i>] macro",
     "math $$a < b$$ here",
     "a +literal *stars*+ b",
-    // Hard breaks across multiple lines.
+    // Hard breaks across multiple lines, and one on the final line only.
     "line one +\nline two +\nline three",
+    "line one\nline two +",
     // STEM inline (asciimath / latexmath).
     "stem:[a < b] expression",
     "asciimath:[a < b] inline",

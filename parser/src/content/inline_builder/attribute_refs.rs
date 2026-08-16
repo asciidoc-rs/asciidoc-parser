@@ -1060,7 +1060,10 @@ mod tests {
             );
         }
 
-        // A `Set`/`Unset` attribute (no textual value) expands to nothing.
+        // A value-less `Set` attribute expands to nothing, while an explicitly
+        // *unset* one counts as missing – so under the default
+        // (`AttributeMissing::Skip`) mode its reference stays literal rather
+        // than vanishing (issue #1117).
         use crate::parser::ModificationContext;
         let bool_parser = Parser::default()
             .with_intrinsic_attribute_bool("flag-on", true, ModificationContext::Anywhere)
@@ -1424,6 +1427,10 @@ mod tests {
     /// resolvable attributes a fixture can mix with a missing reference:
     /// an ordinary one, one whose value carries a **newline**, and one whose
     /// value is itself **reference-shaped**.
+    ///
+    /// It also carries an explicitly **unset** attribute, which counts as
+    /// missing just as a never-assigned one does (issue #1117), and a
+    /// value-less **set** one, which does not.
     fn parser_with_missing_mode(mode: &str) -> Parser {
         use crate::parser::ModificationContext;
 
@@ -1432,6 +1439,8 @@ mod tests {
             .with_intrinsic_attribute("greeting", "Hello", ModificationContext::Anywhere)
             .with_intrinsic_attribute("two-lines", "a\nb", ModificationContext::Anywhere)
             .with_intrinsic_attribute("looks-like-a-ref", "{nope}", ModificationContext::Anywhere)
+            .with_intrinsic_attribute_bool("unset-thing", false, ModificationContext::Anywhere)
+            .with_intrinsic_attribute_bool("set-flag", true, ModificationContext::Anywhere)
     }
 
     /// Asserts that folding the single-pass tree for `source` reproduces the
@@ -1512,6 +1521,17 @@ mod tests {
             "_{looks-like-a-ref}_",
             "keep\n_{looks-like-a-ref}_\nkeep",
             "_{looks-like-a-ref}_ and {undefined-thing}",
+            // An *explicitly unset* attribute is missing too, so it drops – and
+            // empties its line – exactly as a never-assigned one does (issue
+            // #1117). A value-less *set* attribute is not missing: it expands
+            // to nothing without arming the line check.
+            "before {unset-thing} after",
+            "{unset-thing}",
+            "first line\n{unset-thing}\nthird line",
+            "{unset-thing} and {undefined-thing} on one line",
+            "*{unset-thing}*",
+            "first line\n{set-flag}\nthird line",
+            "{set-flag}{unset-thing}",
         ];
 
         for fixture in fixtures {
@@ -1567,6 +1587,16 @@ mod tests {
             "keep\n{looks-like-a-ref}\nkeep",
             "_{looks-like-a-ref}_ and {undefined-thing}",
             "keep\n_a {looks-like-a-ref} b_\nkeep too",
+            // An *explicitly unset* attribute is missing too, so it takes its
+            // whole line with it exactly as a never-assigned one does (issue
+            // #1117). A value-less *set* attribute is not missing: its line
+            // survives, with the reference expanded to nothing.
+            "keep\na line with {unset-thing} in it\nkeep too",
+            "{unset-thing}",
+            "keep\n*{unset-thing}*\nkeep too",
+            "keep\n{unset-thing} and {undefined-thing}\nkeep too",
+            "keep\n{set-flag}\nkeep too",
+            "keep\n{set-flag} and {unset-thing}\nkeep too",
         ];
 
         for fixture in fixtures {
