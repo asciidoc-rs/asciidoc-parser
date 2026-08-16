@@ -121,14 +121,21 @@
 //!   normalized copy, never a source slice), so a cross-reference inside an
 //!   expanded attribute value is recognized with its exact target and text.
 //!   That same gate also admits an **escaped special** for the
-//!   cross-reference family (`xref:sec[a<b]`, `<<sec,Tom & Jerry>>`): the
+//!   cross-reference family (`xref:sec[a<b]`, `<<sec,Tom & Jerry>>`) and for
+//!   the **`link:`/`mailto:` macro** (`link:a&b.html[]`,
+//!   `link:index.html[a < b]`): the
 //!   level's match string carries a
 //!   [`CharRef`](InlineNode::CharRef)`::Special`'s canonical entity, the very
 //!   bytes the string replacer's own escaped haystack holds there, so every
-//!   value this family reads off that string is what the string replacer read.
-//!   Its reference text then becomes **structured children** rather than one
-//!   sliced `Text` — the special stays the `CharRef` it already is, folding
-//!   back to the same entity instead of being escaped twice.
+//!   value these families read off that string is what the string replacer read.
+//!   The display text then becomes **structured children** rather than one
+//!   sliced or baked `Text` — the special stays the `CharRef` it already is,
+//!   folding back to the same entity instead of being escaped twice — which for
+//!   a *bare* link macro covers the target-derived text it shows as well. The
+//!   one capture still holding that boundary in either family is a display text
+//!   carrying an attribute list, parsed as a real
+//!   [`Attrlist`]`<'src>` from the source's own
+//!   bytes rather than the escaped copy the replacer parses.
 //!   A display/reference text crossing a rendered *span*
 //!   (`link:x[*bold*]`, `xref:id[*bold*]`, `<<id,*bold*>>`) remains deferred for
 //!   every reference-bearing family: a span is one opaque placeholder here
@@ -654,6 +661,9 @@ mod tests {
             "see <<target,Tom & Jerry>> now",
             "xref:other.adoc#frag[Other] doc",
             "xref:target[a < b & c] doc",
+            "link:a&b.html[x] macro",
+            "link:index.html[Tom & Jerry] macro",
+            "mailto:a&b@example.org[] address",
             "A claim.footnote:[the evidence]",
             "Named.footnote:disc[a discussion] then footnote:disc[].",
             "A claim.footnote:[the *strong* evidence and a link:https://e.org[source]]",
@@ -794,6 +804,18 @@ mod tests {
         assert_parity(
             "Visit https://example.org or link:docs.html[the docs], \
              or just write to doc@example.org.",
+        );
+
+        // A `link:`/`mailto:` macro carrying an *escaped special* in its
+        // target and in its display text, beside a quoted span and a live
+        // attribute reference: the display text becomes structured children (a
+        // `CharRef` between two `Text` runs) while a bare macro's
+        // target-derived text is unescaped back to logical text, with the
+        // other families running around them.
+        assert_parity_with(
+            "See link:a&b.html[Tom & Jerry] and link:c&d.html[] \
+             or mailto:x&y@example.org[] about *{product}*.",
+            with_product,
         );
 
         // Every spelling of the URL-link family, including both ANGLE-branch

@@ -8,14 +8,14 @@ mod ui;
 mod xref;
 
 use anchors::{anchor_macros_level, biblio_anchor_level};
-use image::image_macros_level;
+use image::{image_macros_level, range_is_verbatim, range_is_verbatim_or_synthesized};
 use indexterm::indexterm_macros_level;
 use links::{email_level, inline_link_level, link_macro_level};
 use ui::{kbd_btn_macros_level, menu_macros_level};
 use xref::xref_macros_level;
 
-use super::quotes::{Piece, emit_range};
-use crate::{Parser, Span, inlines::InlineNode};
+use super::quotes::{Piece, emit_range, source_slice};
+use crate::{Parser, Span, inlines::InlineNode, strings::CowStr};
 
 /// The macros substitution, as a node transducer.
 ///
@@ -80,15 +80,20 @@ use crate::{Parser, Span, inlines::InlineNode};
 /// the escaped piece is a delimiter *it consumes and never slices* — the
 /// angle-bracketed URL's own `&lt;`/`&gt;` (see
 /// `links::build_inline_link_node`) and a menu's `&gt;` submenu caret (see
-/// `ui::menu_match_is_sliceable`) — or, for the **cross-reference** family,
-/// wherever the escaped text need not ride on the node as an `'src` slice at
-/// all: nothing a `Ref{Xref}` holds is `Span`-typed, so it reads its values
-/// out of the match string (whose entity bytes *are* the string pipeline's
-/// own) and rebuilds its reference text as structured children, keeping each
-/// special as its own `CharRef` (see `xref::find_xref_matches` and
-/// [`range_has_no_opaque_piece`](image::range_has_no_opaque_piece)). A rendered
-/// span stays deferred for every family. The differential corpus pins the cases
-/// each increment claims.
+/// `ui::menu_match_is_sliceable`) — or, for the **cross-reference** and
+/// **`link:`/`mailto:` macro** families, wherever the escaped text need not
+/// ride on the node as an `'src` slice at all: neither family's target is
+/// `Span`-typed, so each reads its values out of the match string (whose entity
+/// bytes *are* the string pipeline's own) and rebuilds its display text as
+/// structured children through [`macro_text_children`], keeping each special as
+/// its own `CharRef` (see `xref::find_xref_matches`,
+/// `links::find_link_macro_matches`, and
+/// [`range_has_no_opaque_piece`](image::range_has_no_opaque_piece)). The one
+/// capture that keeps the stricter gate in either family is a display text
+/// carrying an attribute list, which is parsed as a real
+/// [`Attrlist`](crate::attributes::Attrlist)`<'src>` from the source's own
+/// bytes. A rendered span stays deferred for every family. The differential
+/// corpus pins the cases each increment claims.
 pub(super) fn apply_macros<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -324,6 +329,99 @@ pub(super) fn rebuild_macro_level<'src>(
     }
 
     out
+}
+
+/// Builds the display-text children for a macro whose text is taken **straight
+/// from the level's match string** (rather than computed by an attribute-list
+/// parse or derived from the target). Shared by the families that recognize
+/// such a text — the cross-reference spellings
+/// ([`xref::build_xref_node`](xref) and its shorthand) and the
+/// `link:`/`mailto:` macro ([`links::build_link_node`](links)) — so the one
+/// subtle part, the escaped-special rebuild below, cannot drift between them.
+///
+/// `raw_text` is the match string's own bytes for `text_range`, and
+/// `unescape_bracket` selects the one behavior the callers do *not* share: the
+/// `xref:` and `link:`/`mailto:` macro forms unescape an escaped closing
+/// bracket (`\]`) in their bracketed text, mirroring their replacers' own
+/// `replace("\\]", "]")`, while the `<<id,text>>` shorthand — which has no
+/// bracket to escape, and whose own branch of `InlineXrefReplacer` performs no
+/// such replace — keeps the pair literal.
+///
+/// The common case is one [`Text`](InlineNode::Text) child: an unescaped
+/// bracket makes its logical value a computed (owned) one — a *synthesized*
+/// `Text` whose value need not coincide with its source — while without one a
+/// verbatim text borrows the very bytes its location covers (the builder's
+/// `'src`-borrowing goal, §4.5) and a text crossing a
+/// [`synthesized`](Piece::synthesized) run takes the match string's bytes — the
+/// expanded value exactly, and the very text the string replacer matched over —
+/// as an owned value, with only its location falling back to the enclosing
+/// run's coarse span (design §4.4).
+///
+/// A text crossing an **escaped special** (`xref:sec[a<b]`, `link:x[a<b]`)
+/// instead becomes **structured children**, recovered with [`emit_range`]: the
+/// special is its own [`CharRef`](crate::inlines::CharRef) child that folds
+/// back to the same entity the string replacer's text carries, where one `Text`
+/// child holding the match string's `&lt;` would be escaped a second time by
+/// the fold (design §3.4). A text crossing an *opaque* piece never reaches this
+/// function at all — each caller's own gate
+/// ([`range_has_no_opaque_piece`](image::range_has_no_opaque_piece)) rejects
+/// it.
+pub(super) fn macro_text_children<'src>(
+    raw_text: &str,
+    text_range: std::ops::Range<usize>,
+    unescape_bracket: bool,
+    nodes: &[InlineNode<'src>],
+    pieces: &[Piece],
+    root: Span<'src>,
+) -> Vec<InlineNode<'src>> {
+    let text_location = source_slice(pieces, text_range.clone(), root);
+
+    if !range_is_verbatim_or_synthesized(pieces, &text_range) {
+        // The text crosses an escaped special (the only atomic piece the
+        // callers' gate admits). Rebuild it out of the nodes it covers, so each
+        // special stays the `CharRef` it already is.
+        //
+        // The macro forms' `\]` unescape is expressed here as a *gap* in the
+        // emitted ranges — every byte but the backslash is emitted — rather
+        // than as a `replace` over each recovered node. Doing it per node would
+        // miss a pair astride two adjacent runs, which two `Text` nodes can be
+        // without an atomic piece between them: an attribute expansion splices
+        // its value as its own node, so a value ending in a backslash followed
+        // by a literal `]` (`:t: b\`, then `xref:foo[a<{t}]x]`) puts the two
+        // characters in different runs. Skipping the backslash by range is
+        // boundary-agnostic, and leaves every surviving fragment borrowing
+        // `'src` (§4.5) where a rebuilt value would have had to own its bytes.
+        let mut children = Vec::new();
+        let mut cursor = text_range.start;
+
+        if unescape_bracket {
+            // `match_indices` scans non-overlapping and left to right, exactly
+            // as `str::replace` does, so a run of backslashes pairs off
+            // identically.
+            for (offset, _) in raw_text.match_indices("\\]") {
+                let backslash = text_range.start + offset;
+                emit_range(nodes, pieces, cursor..backslash, &mut children);
+                cursor = backslash + 1;
+            }
+        }
+
+        emit_range(nodes, pieces, cursor..text_range.end, &mut children);
+
+        return children;
+    }
+
+    let value = if unescape_bracket && raw_text.contains("\\]") {
+        CowStr::from(raw_text.replace("\\]", "]"))
+    } else if range_is_verbatim(pieces, &text_range) {
+        CowStr::from(text_location.data())
+    } else {
+        CowStr::from(raw_text.to_string())
+    };
+
+    vec![InlineNode::Text {
+        value,
+        location: text_location,
+    }]
 }
 
 #[cfg(test)]

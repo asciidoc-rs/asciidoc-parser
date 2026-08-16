@@ -2654,6 +2654,71 @@ Each phase is a reviewable unit with a clear exit gate.
   forced on for every parse in the suite) confirms no new divergence appeared. As with every prep
   piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (a `link:`/`mailto:` macro crossing an escaped special, the second family
+  to take the third gate):* the increment above named the four reference-bearing link/image families
+  as still holding the escaped-special boundary, "each holds a value that must ride on the node as an
+  `'src` slice or as an already-final computed string". Auditing that claim family by family shows it
+  is true of the *whole* family for none of them, and of exactly one **capture** in the
+  `link:`/`mailto:` macro — which is the same shape the expanded-value lift already took for this
+  family ("the boundary moved from *the family* to *the one capture that still needs an `'src`
+  slice*"). So [`find_link_macro_matches`](../../parser/src/content/inline_builder/macros/links.rs)
+  makes the same one-gate swap to
+  [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs), and a macro
+  whose **target** or **display text** crosses an escaped special (`link:a&b.html[]`,
+  `link:index.html[a < b]`, `mailto:a&b@example.org[]`) is recognized as the same
+  [`Ref`](../../parser/src/inlines/ref_node.rs)`{Link}` node its verbatim spelling builds. Nothing on
+  the node needs the source's own `<`/`>`/`&`: the target is a computed string this pass reads out of
+  the level's match string (`a&amp;b.html` — the very bytes `InlineLinkMacroReplacer` computes from
+  its own escaped haystack), which is also what `has_dangerous_scheme`, the `,`/`=` attribute-list
+  probes, and the `^`/`\]` handling see, and what the eventual
+  [`register_link`](../../parser/src/content/inline_builder/macros/links.rs) records.
+
+  The display text takes the structured-children shape the cross-reference family introduced, and the
+  mechanism is now literally shared: `xref_text_children` moves to
+  [`macro_text_children`](../../parser/src/content/inline_builder/macros/mod.rs) alongside the other
+  cross-family macro helpers, so the one subtle part — recovering the text with `emit_range` (each
+  special staying its own `CharRef`, with its own precise `'src` span, escaped once rather than
+  twice) and expressing the `\]` unescape as a *gap* in the emitted ranges rather than a per-run
+  rewrite — cannot drift between the two families that now perform it. The link macro's own `^`
+  window suffix is one ASCII byte past that text, so it is simply left outside the emitted range.
+  A **bare** macro is the case that made this more than the gate swap: its shown text is not a
+  bracketed slice but the target — the whole target, or (under `hide-uri-scheme`) its scheme-stripped
+  tail. Rather than bake that already-escaped string into one `Text` node (which the fold would escape
+  a second time, and which the structural recorder cross-check immediately caught as a shape
+  regression), the builder recovers it from *the target group's own range*: `URI_SNIFF` is
+  `^`-anchored, so the strip always leaves a suffix, and the children start that many bytes into the
+  range. The one text this family still computes rather than slices — an attribute list's positional
+  value — needs no unescaping counterpart, because its own branch requires a **verbatim** `'src`
+  slice, which carries no entity; that capture is therefore the one that keeps the escaped-special
+  boundary (`Attrlist::parse` reads its source span's bytes as content, and those bytes are the
+  source's `<`, not the `&lt;` the replacer parses from its escaped copy). `unescape_specials` stays
+  in the cross-reference family, where the complementary case — a positional value parsed off the
+  *escaped* copy — actually arises, with its doc note now recording why a caller applies it only where
+  its value's own range crosses such a special (under an effective order that never escapes, a literal
+  `&` survives into a verbatim run and there is no entity to undo).
+
+  As in the cross-reference, `footnoteref:`, and menu increments, the family's escape check is
+  **hoisted ahead of the gate**, mirroring `InlineLinkMacroReplacer`'s own
+  `caps[0].starts_with('\\')`-first order and closing the same latent gap: an escaped
+  `\link:x[*bold*]` whose match the gate rejects now still drops its backslash, where before it was
+  left unrecognized, backslash and all. Differential corpora extend the family's fixtures with an
+  escaped special in a target, in a display text, in both, beside the `\]` unescape and the `^`
+  suffix, and in an escaped macro, alongside structural tests pinning the recovered children's own
+  precise spans (including the `hide-uri-scheme` slice past the scheme) and divergence tests for the
+  two forms that still defer (an attribute-list text crossing a special, in both spellings, and a
+  display text crossing a rendered span). Registration parity is asserted for the escaped-special
+  forms against an independent golden parser, and fixtures are added to the whole-pipeline
+  combined-constructs corpus, the broad general-purpose sweep, and the structural recorder
+  cross-check. Re-running the corpus-wide fold-parity audit (tree building forced on for every parse
+  in the suite) confirms no new divergence appeared and that the surviving set is unchanged — this
+  form was pinned by the family's own divergence test rather than by any whole-corpus fixture, which
+  is why the audit's own itemized map never listed it. The remaining half of that map item — a
+  display or reference text crossing a **rendered span** — is unchanged, as is the escaped-special
+  boundary for the auto-link/formal-URL, bare-e-mail, and image families, each of which holds a value
+  (`INLINE_LINK`'s own trailing-punctuation arithmetic over the target, an address baked as its own
+  display text, an `Attrlist<'src>`) that a later increment must take up on its own terms. As with
+  every prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -2912,6 +2977,20 @@ Each phase is a reviewable unit with a clear exit gate.
        and menu increments' own fix, for the identical reason). See the step's own "landed as"
        note above. A text crossing a *rendered span* still defers, for every reference-bearing
        family, as does an escaped special for the link and image families.
+     - ✅ **prep (a `link:`/`mailto:` macro crossing an escaped special).** The second family to
+       take that third gate, by the same one-gate swap: a macro whose **target** or **display
+       text** crosses an escaped special (`link:a&b.html[]`, `link:index.html[a < b]`,
+       `mailto:a&b@example.org[]`) is recognized, since the target is a computed string read off
+       the match string and the display text becomes structured children — through
+       [`macro_text_children`](../../parser/src/content/inline_builder/macros/mod.rs), the
+       cross-reference family's own helper, now shared so the two cannot drift. A *bare* macro's
+       target-derived text is recovered from the target group's own range (`URI_SNIFF` being
+       `^`-anchored, the `hide-uri-scheme` strip always leaves a suffix) rather than baked, already
+       escaped, into one `Text` the fold would escape twice. The family's escape check is hoisted
+       ahead of the gate, closing the same latent gap its three predecessors did. The one capture
+       that keeps the boundary is a display text carrying an attribute list, parsed as a real
+       `Attrlist<'src>` from the source's own bytes; see the step's own "landed as" note above.
+       The auto-link/formal-URL, bare-e-mail, and image families still keep it.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
