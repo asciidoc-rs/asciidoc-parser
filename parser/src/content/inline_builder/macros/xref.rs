@@ -1,6 +1,10 @@
 //! Cross-reference recognition (`xref:id[…]`, `<<id>>`).
 
-use super::{MacroMatch, MacroMatchKind, image::range_is_verbatim, rebuild_macro_level};
+use super::{
+    MacroMatch, MacroMatchKind,
+    image::{range_is_verbatim, range_is_verbatim_or_synthesized},
+    rebuild_macro_level,
+};
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
@@ -102,9 +106,24 @@ pub(super) fn xref_macros_level<'src>(
 }
 
 /// Finds every recognized cross-reference at this level – the `xref:` macro
-/// form and the `<<id>>` shorthand – skipping any match that is not verbatim
-/// enough to slice from `'src`. That gate is now the family's *only* deferral:
-/// both builders claim every target and text shape a verbatim match can carry.
+/// form and the `<<id>>` shorthand – skipping any match that crosses an
+/// [`atomic`](Piece::atomic) piece. That gate is the family's *only* deferral:
+/// both builders claim every target and text shape an admitted match can
+/// carry.
+///
+/// A [`synthesized`](Piece::synthesized) run (an attribute expansion, or –
+/// reached at a tree's root – a filtered multi-line block's own joined seed)
+/// **is** admitted, which is what lets a cross-reference be recognized inside
+/// an expanded attribute value (`xref:{id}[{text}]`, `<<{id},text>>`). Nothing
+/// on a cross-reference node is `Span`-typed: its target and reference text
+/// come straight out of the level's match string – which carries a synthesized
+/// run's bytes exactly – and its own attribute list is parsed from a normalized
+/// *copy* rather than a source slice (see
+/// [`xref_macro_text`]), so `attrs` is always `None` here. Only the node's
+/// `location` (and its children's) takes design §4.4's coarse fallback. This
+/// is the same lift the anchor, bare-e-mail, UI, and index-term families
+/// already made, and for the same reason; the families that hold a real
+/// [`Attrlist`]`<'src>` (image, link) still cannot make it.
 fn find_xref_matches<'src>(
     s: &str,
     pieces: &[Piece],
@@ -121,16 +140,16 @@ fn find_xref_matches<'src>(
         let full = whole.start()..whole.end();
 
         // The `xref:` macro (group 3) and the `<<…>>` shorthand (group 2) differ
-        // in what must be verbatim to build a node. The macro's whole match is
-        // sliced from `'src`, so all of it must be verbatim. The shorthand's
+        // in how much of the match the gate covers. The macro's whole match is
+        // read as one construct, so all of it must be admitted. The shorthand's
         // `&lt;&lt;` / `&gt;&gt;` delimiters are always `CharRef`s that the node
-        // *consumes* rather than slices, so only its inner text (group 2) – the
-        // id and any reference text – need be verbatim.
+        // *consumes* rather than reads, so only its inner text (group 2) – the
+        // id and any reference text – is gated.
         let shorthand_inner = caps.get(2).map(|inner| inner.start()..inner.end());
 
         let verbatim = match &shorthand_inner {
-            Some(inner) => range_is_verbatim(pieces, inner),
-            None => range_is_verbatim(pieces, &full),
+            Some(inner) => range_is_verbatim_or_synthesized(pieces, inner),
+            None => range_is_verbatim_or_synthesized(pieces, &full),
         };
 
         // An escape (`\xref:` / `\<<`) is honored by dropping the backslash and
@@ -156,11 +175,11 @@ fn find_xref_matches<'src>(
             continue;
         }
 
-        // Both builders claim every shape they are handed, so a verbatim match
+        // Both builders claim every shape they are handed, so an admitted match
         // always yields a node: what a cross-reference *defers* is decided by
-        // the verbatim gate above, not by the builders.
+        // the gate above, not by the builders.
         let node = match &shorthand_inner {
-            Some(inner) => build_xref_shorthand_node(inner.clone(), &full, pieces, root, parser),
+            Some(inner) => build_xref_shorthand_node(inner.clone(), &full, s, pieces, root, parser),
             None => build_xref_node(&caps, &full, pieces, root, parser),
         };
 
@@ -344,17 +363,25 @@ fn plain_xref_text<'src>(
     #[allow(clippy::unwrap_used)]
     let span = text_span.unwrap();
 
-    let text_location = source_slice(pieces, span.start()..span.end(), root);
+    let text_range = span.start()..span.end();
+    let text_location = source_slice(pieces, text_range.clone(), root);
 
     // An escaped bracket (`\]`) makes the logical text a computed (owned)
     // value – a *synthesized* `Text` whose value need not coincide with its
-    // source, mirroring the string replacer's `raw_text.replace`. Without one
-    // the text is verbatim, so it borrows the very bytes its location covers
-    // (the builder's `'src`-borrowing goal).
+    // source, mirroring the string replacer's `raw_text.replace`. Without one,
+    // a verbatim text borrows the very bytes its location covers (the
+    // builder's `'src`-borrowing goal, §4.5), while a text crossing a
+    // [`synthesized`](Piece::synthesized) run has no `'src` slice of its own:
+    // it takes the match string's bytes – the expanded value exactly, and the
+    // very text the string replacer matched over – as an owned value, with only
+    // `text_location` falling back to the enclosing run's coarse span (design
+    // §4.4).
     let value = if raw_text.contains("\\]") {
         CowStr::from(raw_text.replace("\\]", "]"))
-    } else {
+    } else if range_is_verbatim(pieces, &text_range) {
         CowStr::from(text_location.data())
+    } else {
+        CowStr::from(raw_text.to_string())
     };
 
     vec![InlineNode::Text {
@@ -368,13 +395,18 @@ fn plain_xref_text<'src>(
 /// replacer's shorthand branch does so the fold reproduces the same bytes.
 ///
 /// `inner` is the shorthand's inner text (`INLINE_XREF` group 2) in
-/// match-string coordinates; the caller guarantees it is verbatim, so its
-/// match-string bytes coincide with source. It is split on the first `,` into
-/// an id and an optional reference text, each trimmed – mirroring the string
-/// replacer's `inner.split_once(',')` with `id.trim()` / `text.trim()`. The
-/// reference text becomes the node's single [`Text`](InlineNode::Text) child,
-/// and the whole `<<…>>` – its `CharRef` delimiters included – is the node's
-/// `location`.
+/// match-string coordinates; the caller guarantees it crosses no
+/// [`atomic`](Piece::atomic) piece, so the match string carries its bytes
+/// exactly – whether they are source bytes (a verbatim run) or an expanded
+/// attribute value's (a [`synthesized`](Piece::synthesized) run). It is split
+/// on the first `,` into an id and an optional reference text, each trimmed –
+/// mirroring the string replacer's `inner.split_once(',')` with `id.trim()` /
+/// `text.trim()`, which runs over the very same bytes. The reference text
+/// becomes the node's single [`Text`](InlineNode::Text) child – still borrowed
+/// from `'src` when the text is verbatim (§4.5), owned when it crosses a
+/// synthesized run – and the whole `<<…>>` – its `CharRef` delimiters included
+/// – is the node's `location` (a synthesized run's coarse enclosing span, per
+/// design §4.4).
 ///
 /// **A comma is what makes a text *present*, not what it contains.** The
 /// string replacer's own split records `<<id,>>` (and `<<id,   >>`) as a
@@ -406,15 +438,19 @@ fn plain_xref_text<'src>(
 fn build_xref_shorthand_node<'src>(
     inner: std::ops::Range<usize>,
     full: &std::ops::Range<usize>,
+    s: &str,
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
 ) -> InlineNode<'src> {
-    // The inner is verbatim (the caller checked), so its source slice's bytes
-    // coincide with the match string's – a byte offset within `inner_data` maps
-    // to a match-string offset by adding `inner.start`.
-    let inner_span = source_slice(pieces, inner.clone(), root);
-    let inner_data = inner_span.data();
+    // The inner crosses no atomic piece (the caller checked), so the match
+    // string carries its logical bytes exactly – which is what the string
+    // replacer's own `inner.split_once(',')` sees. Reading them here rather
+    // than through the inner's source slice is what lets a shorthand inside an
+    // expanded attribute value be recognized: a synthesized run has no `'src`
+    // slice of its own. A byte offset within `inner_data` maps to a
+    // match-string offset by adding `inner.start`.
+    let inner_data = s.get(inner.start..inner.end).unwrap_or_default();
 
     // Split an optional ", reference text" off the id at the first comma.
     let comma = inner_data.find(',');
@@ -435,17 +471,26 @@ fn build_xref_shorthand_node<'src>(
             let raw_text = &inner_data[index + 1..];
             let trimmed = raw_text.trim();
 
-            // Locate the trimmed reference text at its source. It is verbatim, so
-            // the `Text` child borrows the very bytes its location covers – a
-            // zero-length borrow when the text is empty (or whitespace-only),
-            // which is the present-but-empty text the doc comment describes.
+            // Locate the trimmed reference text at its source. A verbatim text
+            // borrows the very bytes its location covers – a zero-length borrow
+            // when the text is empty (or whitespace-only), which is the
+            // present-but-empty text the doc comment describes – while a
+            // synthesized one keeps its exact expanded bytes against the
+            // enclosing run's coarse location (design §4.4).
             let lead = raw_text.len() - raw_text.trim_start().len();
 
             let text_start = inner.start + index + 1 + lead;
-            let text_location = source_slice(pieces, text_start..text_start + trimmed.len(), root);
+            let text_range = text_start..text_start + trimmed.len();
+            let text_location = source_slice(pieces, text_range.clone(), root);
+
+            let value = if range_is_verbatim(pieces, &text_range) {
+                CowStr::from(text_location.data())
+            } else {
+                CowStr::from(trimmed.to_string())
+            };
 
             vec![InlineNode::Text {
-                value: CowStr::from(text_location.data()),
+                value,
                 location: text_location,
             }]
         }
@@ -1222,5 +1267,213 @@ mod tests {
 
         let folded = super::super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser);
         assert_eq!(folded, golden_xref_with(source, &parser));
+    }
+
+    /// A parser carrying the attributes the expanded-value fixtures below
+    /// reference.
+    fn expanding_parser() -> Parser {
+        use crate::parser::ModificationContext;
+
+        Parser::default()
+            .with_intrinsic_attribute("id", "install", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("label", "Install Now", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("doc", "other.adoc", ModificationContext::Anywhere)
+            .with_intrinsic_attribute(
+                "xref-src",
+                "<<install,Install>>",
+                ModificationContext::Anywhere,
+            )
+    }
+
+    /// The real, public pipeline's output for `source` – the golden for the
+    /// expanded-value fixtures, which need the `AttributeReferences` step
+    /// [`golden_xref_with`] deliberately omits (it also finalizes the deferred
+    /// cross-references, which this does through the group's own pipeline).
+    fn golden_normal(source: &str, parser: &Parser) -> String {
+        use crate::content::SubstitutionGroup;
+
+        let mut content = Content::from(Span::new(source));
+        SubstitutionGroup::Normal.apply(&mut content, parser, None);
+        content.finalize_deferred(&HtmlSubstitutionRenderer {});
+        content.rendered_str().to_string()
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_for_xrefs_inside_expanded_values() {
+        // A cross-reference whose target or reference text crosses a
+        // *synthesized* run (an attribute expansion) is now recognized:
+        // nothing on a `Ref{Xref}` node is `Span`-typed – its target and text
+        // come from the match string, which carries a synthesized run's bytes
+        // exactly – so only the node's `location` takes
+        // design §4.4's coarse fallback. This is the same lift the anchor,
+        // bare-e-mail, UI, and index-term families already made.
+        let parser = expanding_parser();
+
+        let fixtures = [
+            // The macro form: an expanded target, an expanded text, both.
+            "xref:{id}[Install]",
+            "xref:install[{label}]",
+            "xref:{id}[{label}]",
+            "xref:{id}[]",
+            // An expanded inter-document target keeps its derived destination.
+            "xref:{doc}#frag[Elsewhere]",
+            // An expanded value inside a longer text, and beside literal text.
+            "see xref:{id}[the {label} page] now",
+            // The macro form's attribute-list text, expanded.
+            "xref:{id}[{label}, window=_blank]",
+            // The shorthand: an expanded id, an expanded reference text, both.
+            "<<{id}>>",
+            "<<install,{label}>>",
+            "<<{id},{label}>>",
+            // A present-but-empty reference text survives an expanded id.
+            "<<{id},>>",
+            // The whole cross-reference arriving from an expanded value. The
+            // shorthand's `<<` is *literal* in the expanded value (it never
+            // passes through `specialcharacters`), so neither pipeline
+            // recognizes it as a shorthand – the tree and the string agree
+            // that it stays literal.
+            "{xref-src}",
+            "before {xref-src} after",
+            // A cross-reference inside a rendered span, itself carrying an
+            // expansion.
+            "*xref:{id}[{label}]*",
+        ];
+
+        for source in fixtures {
+            let nodes = super::super::super::build(Span::new(source), &parser, None);
+
+            assert_eq!(
+                super::super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
+                golden_normal(source, &parser),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_xref_inside_an_expanded_value_keeps_a_coarse_location() {
+        // The values are exact; only the node's `location` (and its children's)
+        // falls back to the enclosing synthesized run's coarse span (design
+        // §4.4), since an expanded value's bytes have no `'src` counterpart of
+        // their own. A reference text recovered from such a run is necessarily
+        // owned rather than borrowed.
+        use crate::strings::CowStr;
+
+        let parser = expanding_parser();
+
+        let source = "xref:{id}[{label}]";
+        let nodes = super::super::super::build(Span::new(source), &parser, None);
+
+        assert_eq!(nodes.len(), 1, "{nodes:?}");
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "install");
+        assert_eq!(reference.children.len(), 1);
+
+        match &reference.children[0] {
+            InlineNode::Text { value, .. } => {
+                assert_eq!(value.as_ref(), "Install Now");
+                assert!(matches!(value, CowStr::Boxed(_)), "{value:?}");
+            }
+
+            other => panic!("expected a Text child, got {other:?}"),
+        }
+
+        // The whole match is the node's location; its `{id}`/`{label}` bytes
+        // are the source's, not the expanded values'.
+        assert_eq!(reference.location.data(), source);
+        assert_eq!(reference.location.line(), 1);
+        assert_eq!(reference.location.col(), 1);
+    }
+
+    #[test]
+    fn an_xref_shorthand_inside_an_expanded_value_keeps_its_exact_text() {
+        // The shorthand's own version of the split above: the id and the
+        // trimmed reference text are read out of the match string, which
+        // carries the expanded bytes exactly, while the node's location keeps
+        // the coarse fallback.
+        let parser = expanding_parser();
+
+        let source = "<<{id}, {label} >>";
+        let nodes = super::super::super::build(Span::new(source), &parser, None);
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "install");
+
+        assert_eq!(reference.children.len(), 1);
+        match &reference.children[0] {
+            InlineNode::Text { value, .. } => assert_eq!(value.as_ref(), "Install Now"),
+            other => panic!("expected a Text child, got {other:?}"),
+        }
+
+        assert_eq!(
+            super::super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
+            golden_normal(source, &parser)
+        );
+    }
+
+    #[test]
+    fn an_xref_over_a_rendered_span_in_an_expanded_value_is_still_deferred() {
+        // Lifting the boundary admits a *synthesized* run, not an
+        // [`atomic`](Piece::atomic) one: an expanded value whose own `<` became
+        // a `Raw` leaf (design §3.4.1 – the attributes step runs after
+        // `specialcharacters`, so a literal special in a value is emitted
+        // unescaped) is opaque, so the shorthand around it still defers. The
+        // string pipeline leaves it literal too, for its own reason: its
+        // `id.contains('<')` guard.
+        use crate::parser::ModificationContext;
+
+        let parser = Parser::default().with_intrinsic_attribute(
+            "markup",
+            "<b>x</b>",
+            ModificationContext::Anywhere,
+        );
+
+        let source = "<<{markup}>>";
+        let nodes = super::super::super::build(Span::new(source), &parser, None);
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a shorthand crossing an opaque piece must be left unrecognized: {nodes:?}"
+        );
+
+        assert_eq!(
+            super::super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
+            golden_normal(source, &parser)
+        );
+    }
+
+    #[test]
+    fn a_real_documents_expanded_xref_reaches_its_tree() {
+        // End-to-end, through the real parse path: a document attribute whose
+        // value feeds a cross-reference. The rendered string and the fold of
+        // the block's own tree agree, and the tree carries the recognized node
+        // rather than the literal text it used to.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = Parser::default()
+            .with_inline_tree(true)
+            .parse(":id: install\n\n[#install]\n== Install\n\nSee xref:{id}[the install steps].");
+
+        let block = doc
+            .descendant_blocks()
+            .find(|b| {
+                b.rendered_html_content()
+                    .is_some_and(|c| c.contains("install steps"))
+            })
+            .unwrap();
+
+        let rendered = block.rendered_html_content().unwrap();
+        let inlines = block.inlines().unwrap();
+
+        assert!(
+            rendered.contains(r##"href="#install""##),
+            "rendered: {rendered}"
+        );
+
+        assert!(
+            inlines.iter().any(|n| matches!(n, InlineNode::Ref(_))),
+            "expected a Ref node in the block's tree: {inlines:?}"
+        );
     }
 }

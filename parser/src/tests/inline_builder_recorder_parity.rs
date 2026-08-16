@@ -940,4 +940,16 @@ fn shapes_match_across_combined_constructs() {
         "The (({product})) index term beside *bold* text and indexterm:[{product}, docs].",
         with_product,
     );
+
+    // Cross-references spliced in by attribute references, in both spellings –
+    // the same comparison, for the family that just made the same lift.
+    assert_shapes_with(
+        "See xref:{id}[{label}] and <<{id},the {product} steps>> here.",
+        || {
+            Parser::default()
+                .with_intrinsic_attribute("id", "install", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("label", "Install Now", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+        },
+    );
 }
