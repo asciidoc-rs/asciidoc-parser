@@ -452,7 +452,7 @@ The presence of at least one part implicitly makes the document a multi-part boo
     );
 
     // Under `:doctype: book`, an additional level-0 heading is a valid book
-    // *part*, so it does not warn – unlike the default doctype, where a second
+    // *part*, so it does not warn — unlike the default doctype, where a second
     // level-0 heading raises `Level0SectionHeadingNotSupported`. The part is
     // modeled as a level-0 section (Asciidoctor's `sect0`); the fuller part
     // semantics (roman-numeral `partnums` numbering, `partintro`, and the

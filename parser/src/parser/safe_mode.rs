@@ -22,8 +22,8 @@ use crate::document::InterpretedValue;
 /// [`ImageFileHandler`](crate::parser::ImageFileHandler), and
 /// [`SvgFileHandler`](crate::parser::SvgFileHandler). As a consequence, the
 /// path-traversal jail that Ruby Asciidoctor applies through
-/// `PathResolver#system_path` – rejecting or clamping `../`, absolute paths,
-/// `file://` URIs, and symlinks that escape a jail root – is **deliberately not
+/// `PathResolver#system_path` — rejecting or clamping `../`, absolute paths,
+/// `file://` URIs, and symlinks that escape a jail root — is **deliberately not
 /// ported** (see [`PathResolver`](crate::parser::PathResolver)). Below
 /// [`Secure`](Self::Secure), the raw include/image/SVG target is handed to the
 /// client handler verbatim, with no traversal check and without communicating
@@ -68,8 +68,8 @@ pub enum SafeMode {
     /// [`Secure`](Self::Secure)) the include/image/SVG handlers *are* consulted
     /// and file contents *are* embedded: `include::` directives pull in file
     /// contents, `data-uri` images are base64-embedded, and inline/interactive
-    /// SVGs are embedded. Disabling that embedding – and applying any path jail
-    /// – happens only at [`Secure`](Self::Secure) (for embedding) or in the
+    /// SVGs are embedded. Disabling that embedding — and applying any path jail
+    /// — happens only at [`Secure`](Self::Secure) (for embedding) or in the
     /// client handler (for the jail). A server-side integrator that must not
     /// embed arbitrary file contents should use [`Secure`](Self::Secure), not
     /// `Server`.
@@ -142,7 +142,7 @@ impl SafeMode {
 /// Returns `None` for any other name, and for an *unset* `docdir` / `docfile`
 /// (so a reference to one still resolves as missing rather than empty). Because
 /// the computation reads the *raw* stored values, the API-provided attributes
-/// are left untouched – a non-`Server` parser still reads them back verbatim.
+/// are left untouched — a non-`Server` parser still reads them back verbatim.
 ///
 /// Both [`Parser`](crate::Parser) and its
 /// [`ResolvedAttributes`](crate::parser::ResolvedAttributes) snapshot funnel
@@ -168,8 +168,8 @@ pub(crate) fn masked_doc_path(
 
 /// Relativizes `docfile` against `docdir` for `SafeMode::Server` masking.
 ///
-/// When `docfile` sits directly under `docdir` – i.e. it begins with the exact
-/// `docdir` prefix followed by a path separator – the prefix and separator are
+/// When `docfile` sits directly under `docdir` — i.e. it begins with the exact
+/// `docdir` prefix followed by a path separator — the prefix and separator are
 /// stripped, matching Ruby Asciidoctor's `docfile[(docdir.length + 1)..-1]`
 /// (which keeps any intermediate sub-directories, not just the base name). This
 /// is the normal case, since Asciidoctor derives `docdir` from `docfile`.

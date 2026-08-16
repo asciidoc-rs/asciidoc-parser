@@ -1336,7 +1336,7 @@ mod levels {
 
         // A tab (not just a space) may separate the marker run from the title, so
         // a tab-delimited heading shifted to effective level 0 is coerced to the
-        // document title exactly as its space-delimited form is – matching the
+        // document title exactly as its space-delimited form is — matching the
         // section parser's `[ \t]+` whitespace handling. This edge is not covered
         // by a Ruby test, but guards against the header recognizer and the body
         // section parser disagreeing on what counts as a heading.
@@ -1482,7 +1482,7 @@ mod levels {
         // registers the document title in the catalog under its ID (as a
         // [`Section`](crate::document::RefType::Section) whose reference text is
         // the doctitle), so an `<<id>>` to it renders the title rather than the
-        // bracketed `[id]` fallback – matching a cross-reference to an ordinary
+        // bracketed `[id]` fallback — matching a cross-reference to an ordinary
         // section.
         #[test]
         fn should_compute_xreftext_to_document_title() {
@@ -2344,7 +2344,7 @@ mod nesting {
 
         // A `glossary` and a `bibliography` section do not support nested
         // sections, so each subsection found directly within one is reported, in
-        // document order. An `appendix` section – and an ordinary section –
+        // document order. An `appendix` section — and an ordinary section —
         // support subsections and raise no such error.
         let warnings: Vec<_> = doc.warnings().collect();
 
@@ -2361,7 +2361,7 @@ mod nesting {
 
     // The "does not support nested sections" error must point at the offending
     // subsection's heading line, even when block metadata (an anchor, attribute
-    // list, or block title) precedes it – the section span begins at that
+    // list, or block title) precedes it — the section span begins at that
     // metadata, so its first line is not the heading. (No Ruby counterpart.)
     #[test]
     fn nested_section_error_points_at_heading_not_preceding_metadata() {
@@ -3891,7 +3891,7 @@ mod section_numbering {
         // An API-*enabled* `numbered` (`attributes: { 'numbered' => '' }`,
         // modeled here as an `ApiOnly` `with_intrinsic_attribute` on the raw
         // `numbered` alias) seeds `sectnums` *set*, but a flexible attribute set
-        // through the API is unlocked once the header is parsed – so the body's
+        // through the API is unlocked once the header is parsed — so the body's
         // `:numbered!:` / `:numbered:` toggles still take effect. The colophon
         // sections are unnumbered and numbering restarts at `1` after
         // `:numbered:`.
@@ -3964,7 +3964,7 @@ mod section_numbering {
         // An API-*disabled* `numbered!` (`attributes: { 'numbered!' => '' }`,
         // modeled here as an `ApiOnly` `with_intrinsic_attribute_bool` `false`
         // on the raw `numbered` alias) seeds `sectnums` *unset*. An unset
-        // flexible attribute stays locked – so the body's `:numbered:` cannot
+        // flexible attribute stays locked — so the body's `:numbered:` cannot
         // re-enable numbering and every section is unnumbered.
         let doc = Parser::default()
             .with_intrinsic_attribute_bool("numbered", false, ModificationContext::ApiOnly)
@@ -5171,8 +5171,8 @@ mod special_sections {
 // NOTE: The five setext-based tests held here depend on two-line (`Section` /
 // `-------`) section titles, which this crate does not support, so they remain
 // out of scope. The sixth test, `should not match a heading in a block`, does
-// not depend on setext titles – it verifies that a delimited block suppresses
-// an interior `== heading` – and is ported as a real test in the
+// not depend on setext titles — it verifies that a delimited block suppresses
+// an interior `== heading` — and is ported as a real test in the
 // `heading_patterns_in_blocks` module below.
 non_normative!(
     r##"
@@ -6125,9 +6125,9 @@ mod book_doctype {
     use crate::tests::prelude::*;
 
     // NOTE: A body-level `=` heading is now modeled as a level-0 `sect0`
-    // section, but the fuller book-*part* semantics this test exercises –
+    // section, but the fuller book-*part* semantics this test exercises —
     // `partintro` promotion and the standalone `#header` / `#content` page
-    // framing – are not, so this test is out of scope.
+    // framing — are not, so this test is out of scope.
     non_normative!(
         r##"
     test 'document title with level 0 headings' do

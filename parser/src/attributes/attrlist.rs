@@ -70,7 +70,7 @@ impl<'src> Attrlist<'src> {
         let mut index = 0;
 
         // 1-based counter over every comma-delimited entry, incremented per
-        // entry – named attributes and blank (`nil`) slots included – so that
+        // entry — named attributes and blank (`nil`) slots included — so that
         // positional attributes are numbered the way Asciidoctor numbers them
         // (see `nth_attribute`).
         let mut entry_number = 0usize;
@@ -96,7 +96,7 @@ impl<'src> Attrlist<'src> {
 
             // Shorthand items (the `#id`, `.role`, and `%option` entries) are
             // only recognized in the first attribute position. Once the first
-            // attribute has been parsed – whether it was positional or named –
+            // attribute has been parsed — whether it was positional or named —
             // disable shorthand parsing so that, for example, a `%header`
             // entered after a named `cols` attribute is not mistaken for an
             // option (the processor ignores it).
@@ -126,7 +126,7 @@ impl<'src> Attrlist<'src> {
                     attributes.push(attr);
                 }
             } else if !attr.value().is_empty() || attr.value_is_quoted() {
-                // A positional attribute – including an explicit empty quoted
+                // A positional attribute — including an explicit empty quoted
                 // value (`""` / `''`). Record its position so later positionals
                 // stay aligned across named and blank entries.
                 attr.set_positional_index(entry_number);
@@ -191,7 +191,7 @@ impl<'src> Attrlist<'src> {
     /// therefore carries the `source` block style in the first position and
     /// the language in the second, so that downstream consumers resolve the
     /// block to a source (highlighted listing) block and can read the
-    /// language via [`nth_attribute(2)`](Self::nth_attribute) – without
+    /// language via [`nth_attribute(2)`](Self::nth_attribute) — without
     /// this parser performing any syntax highlighting itself.
     ///
     /// The `source` span is set to the language span, since that is the only
@@ -297,8 +297,8 @@ impl<'src> Attrlist<'src> {
             // An attribute carries a positional index exactly when it is a
             // positional (unnamed) attribute; a named attribute has `None`.
             // Dispatching on the index keeps a positional at its Asciidoctor
-            // position – the same 1-based entry count `nth_attribute` uses,
-            // which includes named entries and blank slots – so positions stay
+            // position — the same 1-based entry count `nth_attribute` uses,
+            // which includes named entries and blank slots — so positions stay
             // aligned across lines even when a later line interleaves named
             // attributes before a positional.
             match attr.positional_index() {
@@ -376,7 +376,7 @@ impl<'src> Attrlist<'src> {
     }
 
     /// Return a mutable reference to the positional attribute at (1-based)
-    /// Asciidoctor position `n` – the position recorded on each attribute, not
+    /// Asciidoctor position `n` — the position recorded on each attribute, not
     /// its ordinal among stored positionals (the two differ once named entries
     /// or blank slots consume positions). See
     /// [`nth_attribute`](Self::nth_attribute).
@@ -545,7 +545,7 @@ impl<'src> Attrlist<'src> {
     /// This mirrors the `else` branch of Asciidoctor's
     /// `parse_quoted_text_attributes`: when the first positional attribute is
     /// not shorthand (it does not begin with `.` or `#`), Asciidoctor treats
-    /// the entire first positional – verbatim, quote characters included –
+    /// the entire first positional — verbatim, quote characters included —
     /// as the role. The shorthand parser used for the general attribute
     /// list instead strips the surrounding quotes and records no role or
     /// block style for such a value, so a quoted role would otherwise be
@@ -560,7 +560,7 @@ impl<'src> Attrlist<'src> {
         }
 
         // Asciidoctor's `parse_quoted_text_attributes` considers only the first
-        // positional attribute – the source up to the first comma – and uses it
+        // positional attribute — the source up to the first comma — and uses it
         // verbatim (quote characters included) as the role. The comma split is on
         // the raw source, matching Asciidoctor's `str.slice 0, (str.index ',')`,
         // so a comma *inside* the quotes truncates the role there too (e.g.

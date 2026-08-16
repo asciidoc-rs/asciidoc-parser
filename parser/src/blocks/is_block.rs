@@ -64,7 +64,7 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
             // The `source` style is not itself a context; it specializes the
             // `listing` context (a source block is a listing block with syntax
             // highlighting). A `source` style therefore resolves the context to
-            // `listing` – for example, `[source]` placed over a `....` literal
+            // `listing` — for example, `[source]` placed over a `....` literal
             // block makes it a listing block.
             if declared_style == "source" {
                 return "listing".into();
@@ -155,8 +155,8 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
         &mut []
     }
 
-    /// Returns a mutable reference to this block's own resolvable content – its
-    /// body or description-list term – if any.
+    /// Returns a mutable reference to this block's own resolvable content — its
+    /// body or description-list term — if any.
     ///
     /// The default returns `None`; content-bearing blocks override it. This is
     /// used by in-place passes such as cross-reference resolution. A section

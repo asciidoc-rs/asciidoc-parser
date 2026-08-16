@@ -560,7 +560,7 @@ impl AttributeMissing {
 /// # Why a per-line, positional correlation
 ///
 /// Attribute references are replaced during the *attributes* substitution,
-/// which operates on [`Content::rendered`] – text that earlier steps (special
+/// which operates on [`Content::rendered`] — text that earlier steps (special
 /// characters, quotes) have already transformed, and from which passthroughs
 /// have been masked to placeholder tokens. A byte offset in that rendered text
 /// therefore has no constant delta back to the original source `Span`, so a
@@ -570,13 +570,13 @@ impl AttributeMissing {
 ///
 /// 1. **Thread a source-offset map through every substitution step.** Fully
 ///    general, but adds offset-tracking state to `Content` and every mutating
-///    step – a large surface and regression risk disproportionate to a
+///    step — a large surface and regression risk disproportionate to a
 ///    diagnostic-only refinement.
 /// 2. **Scan the whole original source positionally.** Pair the *k*-th
 ///    reference found in `rendered` with the *k*-th `{name}` in
 ///    `content.original()`. Simple, but the raw source still contains `{name}`
-///    tokens that never reach substitution – inside removed comment lines and
-///    inside passthroughs – so the pairing drifts out of alignment.
+///    tokens that never reach substitution — inside removed comment lines and
+///    inside passthroughs — so the pairing drifts out of alignment.
 /// 3. **Per-line positional correlation (chosen).** Anchor each rendered line
 ///    to the source `Span` of the line it came from (retained at construction,
 ///    see [`Content::from_filtered_lines`]), then pair the *k*-th reference on
@@ -614,7 +614,7 @@ struct AttributeReplacer<'p> {
 
     /// Source span used to locate a recorded warning when a precise
     /// per-reference span cannot be recovered. This is the whole content (or
-    /// line/target) span – the coarse fallback described in the type-level
+    /// line/target) span — the coarse fallback described in the type-level
     /// docs.
     fallback_source: Span<'p>,
 
@@ -658,8 +658,8 @@ impl<'p> AttributeReplacer<'p> {
         source_line: Option<Span<'p>>,
     ) -> Self {
         // The per-reference ranges are only consulted when a warning may be
-        // recorded – `warn` mode, and `drop-line` mode (which records a
-        // diagnostic for each dropped reference) – so skip the extra scan
+        // recorded — `warn` mode, and `drop-line` mode (which records a
+        // diagnostic for each dropped reference) — so skip the extra scan
         // otherwise.
         let source_matches = match (mode, source_line) {
             (AttributeMissing::Warn | AttributeMissing::DropLine, Some(line)) => {
@@ -688,7 +688,7 @@ impl<'p> AttributeReplacer<'p> {
     ///
     /// Falls back to [`fallback_source`](Self::fallback_source) unless a
     /// retained source-line match at `index` exists *and* its text equals
-    /// `matched` – the text check guards against a correlation that has
+    /// `matched` — the text check guards against a correlation that has
     /// drifted (see the type-level docs).
     fn warning_source(&self, index: usize, matched: &str) -> Span<'p> {
         if let Some(line) = self.source_line
@@ -710,7 +710,7 @@ impl Replacer for AttributeReplacer<'_> {
         self.match_index += 1;
 
         // A backslash immediately before the opening brace (`\{name}`) or before
-        // the closing brace (`{name\}`) – or both, as in `\{name\}` – escapes
+        // the closing brace (`{name\}`) — or both, as in `\{name\}` — escapes
         // the reference: it is emitted literally with the escaping backslash(es)
         // removed and left unexpanded, whether or not the attribute is set. An
         // escaped reference is never treated as a missing reference, so it
@@ -769,7 +769,7 @@ impl Replacer for AttributeReplacer<'_> {
         // A reference is "missing" for `attribute-missing` purposes both when
         // the attribute was never assigned at all and when it was explicitly
         // unset (a document `:name!:` entry or an API override that unsets
-        // it) – both resolve to `InterpretedValue::Unset`. Only a value-less
+        // it) — both resolve to `InterpretedValue::Unset`. Only a value-less
         // `Set` attribute or a concrete `Value` counts as present.
         if !self.parser.has_attribute(&lookup_name) || matches!(value, InterpretedValue::Unset) {
             match self.mode {
@@ -912,8 +912,8 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
 /// Block macro targets are always a single line, so (unlike
 /// [`apply_attributes`]) there is no line splitting. Returns `None` when the
 /// target references a missing attribute under
-/// [`AttributeMissing::DropLine`] – signaling that the entire block should be
-/// dropped – and otherwise returns the substituted target.
+/// [`AttributeMissing::DropLine`] — signaling that the entire block should be
+/// dropped — and otherwise returns the substituted target.
 ///
 /// [`attribute-missing`]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing
 pub(crate) fn substitute_attributes_in_macro_target<'src>(
@@ -1275,8 +1275,8 @@ fn apply_post_replacements(
         let rendered = content.rendered.as_ref();
 
         // A hard line break is a ` +` at the end of a line. Because the
-        // `HARD_LINE_BREAK` regex anchors on `$` in multiline mode – which
-        // matches at the end of the haystack as well as before each `\n` – the
+        // `HARD_LINE_BREAK` regex anchors on `$` in multiline mode — which
+        // matches at the end of the haystack as well as before each `\n` — the
         // final line of the content is eligible too, even when it is not
         // followed by a newline (e.g. a one-line paragraph, a block title, or a
         // section title ending in ` +`). So the cheap pre-check requires only a

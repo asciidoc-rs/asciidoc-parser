@@ -222,7 +222,7 @@ impl InterpretedValue {
         // a `pass:subs[…]` macro, its bracketed content is taken greedily (up to
         // the final `]`) and only the named substitutions are applied to it.
         // Because the capture is greedy and anchored to the whole value, content
-        // that itself contains `[…]` – e.g. a link macro – is not truncated at
+        // that itself contains `[…]` — e.g. a link macro — is not truncated at
         // the first inner bracket, unlike the general inline pass macro. Any
         // other value gets the normal header substitutions.
         let value = folded.as_deref().unwrap_or_else(|| raw_value.data());
@@ -272,8 +272,8 @@ static ATTRIBUTE_ENTRY_PASS_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 /// (see [`ATTRIBUTE_ENTRY_PASS_MACRO`]).
 ///
 /// The `:author:` handling uses this to decide whether the stored attribute
-/// value is a *resolved* pass macro. When it is, that substituted value – not
-/// the raw macro syntax – is what should be partitioned into name parts.
+/// value is a *resolved* pass macro. When it is, that substituted value — not
+/// the raw macro syntax — is what should be partitioned into name parts.
 pub(crate) fn is_attribute_entry_pass_macro(value: &str) -> bool {
     ATTRIBUTE_ENTRY_PASS_MACRO.is_match(value)
 }
@@ -397,8 +397,8 @@ mod tests {
     #[test]
     fn whole_value_pass_macro_keeps_nested_brackets() {
         // A value that is entirely a `pass:subs[…]` macro captures its content
-        // greedily to the final `]`, so content that itself contains `[…]` – a
-        // link macro here – is not truncated at the first inner bracket. With
+        // greedily to the final `]`, so content that itself contains `[…]` — a
+        // link macro here — is not truncated at the first inner bracket. With
         // the `n` (normal) substitutions the link and its formatting render.
         let value = |src| {
             crate::document::Attribute::parse(crate::Span::new(src), &Parser::default())

@@ -10,7 +10,7 @@ use crate::{Parser, document::InterpretedValue};
 /// The `toc`/`toc-placement` attributes are header-only, so this value is fixed
 /// once a document's header has been processed. A nested [AsciiDoc table cell]
 /// behaves as its own standalone document and resolves its own [`TocMode`]
-/// independently – it does **not** inherit the parent document's setting.
+/// independently — it does **not** inherit the parent document's setting.
 ///
 /// The `auto`, `left`, `right`, `top`, and `bottom` placements all render the
 /// TOC automatically near the top of the document;
@@ -76,7 +76,7 @@ impl TocMode {
     /// `toc-position` attributes, distinguishing a never-set `toc-placement`
     /// from an explicit unset tombstone. The derived `toc-position` /
     /// `toc-placement` / `toc-class` document attributes are materialized from
-    /// the resolved placement *after* this runs – see
+    /// the resolved placement *after* this runs — see
     /// [`Parser::materialize_toc_attributes`](crate::Parser).
     pub(crate) fn from_parser(parser: &Parser) -> Self {
         // Asciidoctor: `toc_val = (attrs.delete 'toc2') ? 'left' : attrs['toc']`.
@@ -110,8 +110,8 @@ impl TocMode {
         // (`attrs.fetch 'toc-placement', 'macro'`) while its default attribute
         // normally seeds `auto`; this crate seeds no such default, so a never-set
         // `toc-placement` reads as `auto`, an explicit value is taken as-is, and a
-        // soft-unset tombstone – which Asciidoctor *deletes*, so its `fetch` yields
-        // the `macro` fallback – reads as `macro`.
+        // soft-unset tombstone — which Asciidoctor *deletes*, so its `fetch` yields
+        // the `macro` fallback — reads as `macro`.
         let toc_placement_val = match parser.attribute_value("toc-placement") {
             InterpretedValue::Value(v) => v.trim().to_string(),
             InterpretedValue::Set => String::new(),
@@ -674,7 +674,7 @@ mod tests {
 
     /// The derived `toc-position` / `toc-placement` / `toc-class` attributes
     /// for the direction shorthands, the separate `toc-position` attribute,
-    /// and the `toc2` + `toc-position` override – all of which resolve a
+    /// and the `toc2` + `toc-position` override — all of which resolve a
     /// side-column TOC (`toc2` class) in Asciidoctor.
     #[test]
     fn toc_position_normalization_derives_side_column() {
@@ -758,7 +758,7 @@ mod tests {
             InterpretedValue::Value("macro".into())
         );
 
-        // A second document that enables an automatic TOC must resolve `Auto` –
+        // A second document that enables an automatic TOC must resolve `Auto` —
         // if the first document's derived `toc-placement: macro` had leaked onto
         // the parser, `TocMode::from_parser` would read it back and wrongly
         // resolve `Macro` here.
@@ -785,7 +785,7 @@ mod tests {
     }
 
     /// Exercises the derived-attribute mapping directly for every [`TocMode`]
-    /// variant, including [`TocMode::Disabled`] – which the parse path never
+    /// variant, including [`TocMode::Disabled`] — which the parse path never
     /// feeds to these helpers (materialization returns early for it), but whose
     /// arms must still map to "no attribute".
     #[test]

@@ -341,7 +341,7 @@ mod tests {
     #[test]
     fn comma_form_prefix_absorbs_escape_before_reference() {
         // Also mirrors Asciidoctor: the `[^\d{]*` prefix absorbs any leading
-        // characters up to the first `{` – including a backslash – so
+        // characters up to the first `{` — including a backslash — so
         // `v\{draft}1` yields `{draft}1`, an active reference the header
         // substitutions then resolve when `draft` is defined.
         let mut parser = Parser::default().with_intrinsic_attribute(

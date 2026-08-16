@@ -81,7 +81,7 @@ impl<'src> ListBlock<'src> {
         //   restriction is applied below, once the type is known.
         //
         // The section only propagates its style to a list that declares no style
-        // of its own – Asciidoctor applies it with `!style && …`, so a list with
+        // of its own — Asciidoctor applies it with `!style && …`, so a list with
         // an explicit style (e.g. `[square]`) keeps that style and is not treated
         // as a bibliography.
         let declared_style = metadata
@@ -398,12 +398,12 @@ impl<'src> ListBlock<'src> {
     /// Asciidoctor):
     ///
     /// * an explicit `[start=N]` attribute, which takes precedence; or
-    /// * the ordinal of an explicit first-item marker – for example `7.`
+    /// * the ordinal of an explicit first-item marker — for example `7.`
     ///   (arabic), `c.` (loweralpha, ⇒ 3), or `iv)` (lowerroman, ⇒ 4).
     ///
-    /// The result is `None` whenever the start resolves to the default of 1 –
+    /// The result is `None` whenever the start resolves to the default of 1 —
     /// whether from implicit markers (e.g. `.`), an explicit ordinal-1 marker
-    /// (`1.`, `a.`, `i)`), or `[start=1]` – because a converter emits a bare
+    /// (`1.`, `a.`, `i)`), or `[start=1]` — because a converter emits a bare
     /// `<ol>` in that case. It is likewise `None` for a list that is not
     /// ordered. So `start()` is `Some(n)` exactly when a converter must emit a
     /// non-default `start="n"`, mirroring the `ordinal != 1` guard in this
