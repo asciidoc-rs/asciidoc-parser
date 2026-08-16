@@ -215,21 +215,24 @@ fn build_image_node<'src>(
         Some(m) => text_slice(nodes, pieces, m.start()..m.end())?,
     };
 
-    let bracket = match caps.get(2) {
-        Some(m) if range_is_verbatim(pieces, &(m.start()..m.end())) => {
-            source_slice(pieces, m.start()..m.end(), root)
-        }
+    // Group 2 always participates – its own pattern carries an empty
+    // alternative – so the degenerate fallback range here is unreachable, and
+    // stands in for the same empty attribute list an absent group would mean
+    // rather than adding a branch of its own that no input can take.
+    let bracket_range = caps
+        .get(2)
+        .map_or(full.end..full.end, |m| m.start()..m.end());
 
+    let bracket = if range_is_verbatim(pieces, &bracket_range) {
+        source_slice(pieces, bracket_range, root)
+    } else if bracket_range.is_empty() {
         // An empty attribute list carries no bytes to slice, so it parses from
-        // a zero-length span wherever the macro sits (the same span an absent
-        // group takes).
-        Some(m) if m.is_empty() => location.slice(0..0),
-
+        // a zero-length span wherever the macro sits.
+        location.slice(0..0)
+    } else {
         // A non-empty attribute list crossing a synthesized run: deferred (see
         // this function's own "what must be verbatim" note).
-        Some(_) => return None,
-
-        None => location.slice(0..0),
+        return None;
     };
 
     let attrlist = Attrlist::parse(bracket, parser, AttrlistContext::Inline)
@@ -1105,5 +1108,31 @@ mod tests {
 
             assert_eq!(got, want, "registered images diverged for {fixture:?}");
         }
+    }
+
+    #[test]
+    fn a_targetless_macro_yields_an_empty_target() {
+        // `INLINE_IMAGE_MACRO`'s target group is optional, so `image:[…]`
+        // matches with it absent and the node's target is the empty string
+        // (its default alt deriving from that, exactly as `default_alt` does
+        // for any other target).
+        //
+        // This is a structural test rather than a differential one on purpose:
+        // the string pipeline's own `InlineImageMacroReplacer` reads that
+        // group as `&caps[1]`, which **panics** for this shape, so there is no
+        // golden to compare against. That panic is a pre-existing bug in the
+        // shared string pipeline (it reproduces on `main`, through an ordinary
+        // `Parser::parse`), independent of this module – so the builder's own
+        // handling of the shape is pinned here and the fix belongs in its own
+        // change against `main`.
+        let nodes = build_src(Span::new("image:[Alt Text]"));
+
+        assert_eq!(nodes.len(), 1);
+        let image = assert_image(&nodes[0]);
+
+        assert!(!image.is_icon);
+        assert_eq!(image.target.as_ref(), "");
+        assert_eq!(image.alt.as_deref(), Some("Alt Text"));
+        assert_eq!(image.location.data(), "image:[Alt Text]");
     }
 }
