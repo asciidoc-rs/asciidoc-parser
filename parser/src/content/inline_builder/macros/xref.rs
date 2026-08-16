@@ -402,17 +402,24 @@ fn plain_xref_text<'src>(
 
     let text_range = span.start()..span.end();
 
-    xref_text_children(raw_text, text_range, nodes, pieces, root)
+    xref_text_children(raw_text, text_range, true, nodes, pieces, root)
 }
 
 /// Builds the reference-text children both spellings share, for a text taken
 /// straight from the level's match string (rather than computed by an
 /// attribute-list parse).
 ///
-/// The common case is one [`Text`](InlineNode::Text) child: an escaped bracket
-/// (`\]`) makes its logical value a computed (owned) one — a *synthesized*
-/// `Text` whose value need not coincide with its source, mirroring the string
-/// replacer's `raw_text.replace` — while without one a verbatim text borrows
+/// `unescape_bracket` selects the one behavior the two spellings do *not*
+/// share: the `xref:` macro form unescapes an escaped closing bracket (`\]`)
+/// in its bracketed text, mirroring `InlineXrefReplacer`'s own
+/// `raw_text.replace("\\]", "]")`, while the `<<id,text>>` shorthand — which
+/// has no bracket to escape, and whose own branch of that replacer performs no
+/// such replace — keeps the pair literal.
+///
+/// The common case is one [`Text`](InlineNode::Text) child: an unescaped
+/// bracket makes its logical value a computed (owned) one — a *synthesized*
+/// `Text` whose value need not coincide with its source — while without one a
+/// verbatim text borrows
 /// the very bytes its location covers (the builder's `'src`-borrowing goal,
 /// §4.5) and a text crossing a [`synthesized`](Piece::synthesized) run takes
 /// the match string's bytes — the expanded value exactly, and the very text the
@@ -432,6 +439,7 @@ fn plain_xref_text<'src>(
 fn xref_text_children<'src>(
     raw_text: &str,
     text_range: std::ops::Range<usize>,
+    unescape_bracket: bool,
     nodes: &[InlineNode<'src>],
     pieces: &[Piece],
     root: Span<'src>,
@@ -442,25 +450,37 @@ fn xref_text_children<'src>(
         // The text crosses an escaped special (the only atomic piece the gate
         // admits). Rebuild it out of the nodes it covers, so each special
         // stays the `CharRef` it already is.
+        //
+        // The macro form's `\]` unescape is expressed here as a *gap* in the
+        // emitted ranges — every byte but the backslash is emitted — rather
+        // than as a `replace` over each recovered node. Doing it per node would
+        // miss a pair astride two adjacent runs, which two `Text` nodes can be
+        // without an atomic piece between them: an attribute expansion splices
+        // its value as its own node, so a value ending in a backslash followed
+        // by a literal `]` (`:t: b\`, then `xref:foo[a<{t}]x]`) puts the two
+        // characters in different runs. Skipping the backslash by range is
+        // boundary-agnostic, and leaves every surviving fragment borrowing
+        // `'src` (§4.5) where a rebuilt value would have had to own its bytes.
         let mut children = Vec::new();
-        emit_range(nodes, pieces, text_range, &mut children);
+        let mut cursor = text_range.start;
 
-        // The string replacer's own `\]` unescape, applied per recovered
-        // `Text` child. A `\]` pair always sits wholly inside one recovered
-        // run: the two characters are ordinary text, and the escaped special
-        // that split this text into several runs is a `CharRef` between them.
-        for child in &mut children {
-            if let InlineNode::Text { value, .. } = child
-                && value.contains("\\]")
-            {
-                *value = CowStr::from(value.replace("\\]", "]"));
+        if unescape_bracket {
+            // `match_indices` scans non-overlapping and left to right, exactly
+            // as `str::replace` does, so a run of backslashes pairs off
+            // identically.
+            for (offset, _) in raw_text.match_indices("\\]") {
+                let backslash = text_range.start + offset;
+                emit_range(nodes, pieces, cursor..backslash, &mut children);
+                cursor = backslash + 1;
             }
         }
+
+        emit_range(nodes, pieces, cursor..text_range.end, &mut children);
 
         return children;
     }
 
-    let value = if raw_text.contains("\\]") {
+    let value = if unescape_bracket && raw_text.contains("\\]") {
         CowStr::from(raw_text.replace("\\]", "]"))
     } else if range_is_verbatim(pieces, &text_range) {
         CowStr::from(text_location.data())
@@ -599,14 +619,15 @@ fn build_xref_shorthand_node<'src>(
             let text_start = inner.start + index + 1 + lead;
             let text_range = text_start..text_start + trimmed.len();
 
-            // A shorthand's reference text carries no `\]` unescape of its own
-            // (the form has no bracket to escape), so this is the same
-            // one-child-or-structured-children split the macro form makes,
-            // reached through the shared helper. An empty (or whitespace-only)
-            // text crosses nothing, so it takes that helper's single-child
-            // path and keeps the zero-length child the fold keys
+            // The same one-child-or-structured-children split the macro form
+            // makes, reached through the shared helper — but with **no** `\]`
+            // unescape: the shorthand has no bracket to escape, and the string
+            // replacer's own shorthand branch performs no such replace, so a
+            // `\]` written here stays literal in both pipelines. An empty (or
+            // whitespace-only) text crosses nothing, so it takes the helper's
+            // single-child path and keeps the zero-length child the fold keys
             // `provided_text` on.
-            xref_text_children(trimmed, text_range, nodes, pieces, root)
+            xref_text_children(trimmed, text_range, false, nodes, pieces, root)
         }
     };
 
@@ -776,6 +797,10 @@ mod tests {
             "xref:install[a<b\\]c]",
             "<<foo,a<b>>",
             "<<install,Tom & Jerry>>",
+            // A `\]` in a shorthand's text is *not* unescaped (only the macro
+            // form's bracketed text is), with and without a crossed special.
+            "<<foo,a\\]b>>",
+            "<<foo,a<b\\]c>>",
             "<< spaced , Tom & Jerry >>",
             // An attribute-list text whose positional value crosses one: the
             // value is parsed off the already-escaped match string, so the node
@@ -1313,10 +1338,11 @@ mod tests {
 
     #[test]
     fn an_escaped_bracket_survives_a_structured_xref_text() {
-        // The string replacer's own `raw_text.replace("\\]", "]")` unescape,
-        // applied to a text that *also* crosses an escaped special: the `\]`
-        // pair sits wholly inside one recovered `Text` run, so unescaping each
-        // run in turn reproduces it.
+        // The macro form's own `raw_text.replace("\\]", "]")` unescape, applied
+        // to a text that *also* crosses an escaped special: the backslash is a
+        // gap between two emitted ranges, so the `]` after it starts a fresh —
+        // still `'src`-borrowing — run rather than being rebuilt into an owned
+        // value.
         let source = "xref:foo[a<b\\]c]";
         let nodes = build_src(Span::new(source));
 
@@ -1324,13 +1350,38 @@ mod tests {
 
         // `link_text_of` reads only the `Text` children, so the unescaped
         // bracket shows up there while the special rides on its own `CharRef`.
-        assert_eq!(reference.children.len(), 3);
+        assert_eq!(reference.children.len(), 4);
         assert_eq!(link_text_of(reference), "ab]c");
+        assert_text(&reference.children[3], "]c", 1, 14);
 
         assert_eq!(
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),
             golden_xref(source)
         );
+    }
+
+    #[test]
+    fn an_escaped_bracket_stays_literal_in_a_shorthand_text() {
+        // The shorthand has no bracket to escape, and `InlineXrefReplacer`'s
+        // own shorthand branch performs no `\]` replace — so unlike the macro
+        // form, a `\]` written in a shorthand's reference text stays literal in
+        // both pipelines. Pinned in both the plain and the structured
+        // (special-crossing) shapes, since the two take different paths.
+        for source in ["<<foo,a\\]b>>", "<<foo,a<b\\]c>>"] {
+            let nodes = build_src(Span::new(source));
+
+            let reference = assert_xref(&nodes[0]);
+            assert!(
+                link_text_of(reference).contains("\\]"),
+                "the shorthand must keep its backslash: {reference:?}"
+            );
+
+            assert_eq!(
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                golden_xref(source),
+                "fold diverged for {source:?}"
+            );
+        }
     }
 
     #[test]
@@ -1537,6 +1588,10 @@ mod tests {
                 "<<install,Install>>",
                 ModificationContext::Anywhere,
             )
+            // A value *ending* in a backslash, so an expansion followed by a
+            // literal `]` puts an escaped bracket astride two adjacent `Text`
+            // runs (see `xref_text_children`'s own note).
+            .with_intrinsic_attribute("trailing-backslash", "b\\", ModificationContext::Anywhere)
     }
 
     /// The real, public pipeline's output for `source` — the golden for the
@@ -1591,6 +1646,14 @@ mod tests {
             // A cross-reference inside a rendered span, itself carrying an
             // expansion.
             "*xref:{id}[{label}]*",
+            // An escaped bracket *astride two adjacent runs* — the expansion's
+            // trailing backslash and the literal `]` after it — in a text that
+            // also crosses an escaped special, so the structured-children path
+            // runs. The unescape must skip the backslash across the run
+            // boundary, which is why it is applied to the emitted ranges rather
+            // than to each recovered run.
+            "xref:foo[a<{trailing-backslash}]x]",
+            "<<foo,a<{trailing-backslash}]x>>",
         ];
 
         for source in fixtures {

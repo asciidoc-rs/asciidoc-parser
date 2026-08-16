@@ -2615,9 +2615,17 @@ Each phase is a reviewable unit with a clear exit gate.
   attribute list's positional value, parsed off the escaped copy — takes the complementary
   treatment: `unescape_specials` puts the entity back to its character so the node holds logical
   text and the fold performs the single escape, a no-op for every text that carries no escaped
-  special. The string replacer's own `raw_text.replace("\\]", "]")` unescape applies per recovered
-  run, which is exact because a `\]` pair is two ordinary text characters and only a `CharRef`
-  splits a run.
+  special. The `xref:` macro form's own `raw_text.replace("\\]", "]")` unescape becomes a **gap in
+  the emitted ranges** — every byte but the backslash is emitted — rather than a rewrite of each
+  recovered run: a review caught that two adjacent `Text` runs need no atomic piece between them
+  (an attribute expansion splices its value as its own node), so a value ending in a backslash
+  followed by a literal `]` puts the pair astride two runs, which a per-run rewrite would miss.
+  Skipping it by range is boundary-agnostic, and leaves every surviving fragment borrowing `'src`
+  (§4.5) where a rewritten value would have had to own its bytes. The `<<id,text>>` shorthand takes
+  no such unescape at all — it has no bracket to escape, and `InlineXrefReplacer`'s own shorthand
+  branch performs no replace — so the shared helper takes it as a parameter rather than applying it
+  to both spellings (the first draft of this increment applied it to both, which the shorthand
+  fixtures added here now pin against).
 
   Landing this also closed a latent gap of exactly the kind the `footnoteref:` and menu increments
   closed for their own families: the macro form ran its escape branch *after* the gate, so an
