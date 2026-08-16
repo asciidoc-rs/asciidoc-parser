@@ -11,9 +11,7 @@ use crate::{
     content::{
         INLINE_EMAIL, INLINE_LINK, INLINE_LINK_MACRO, NormalizedCaps, URI_SNIFF,
         encode_uri_component, extract_attributes_from_text,
-        inline_builder::quotes::{
-            Piece, SPAN_PLACEHOLDER, build_match_string, source_slice, text_slice,
-        },
+        inline_builder::quotes::{Piece, SPAN_PLACEHOLDER, build_match_string, source_slice},
     },
     inlines::{InlineNode, Ref, RefVariant},
     parser::has_dangerous_scheme,
@@ -1093,13 +1091,9 @@ pub(super) fn build_link_node<'src>(
 /// nodes here (they are already-rendered `<a …>` markup there), so an address
 /// *inside* one is never re-recognized.
 ///
-/// Two forms are left **unrecognized** for a later increment, each documented
-/// and pinned by its own divergence test:
+/// One form is left **unrecognized** for a later increment, documented and
+/// pinned by its own divergence test:
 ///
-/// - An address carrying a literal `&` (`a&b@example.org`), which reaches this
-///   pass as an atomic [`CharRef`](InlineNode::CharRef) (`&amp;`, admitted by
-///   the pattern's own local-part class) that a node cannot carry as text — the
-///   same escaped-special boundary every other macro family documents.
 /// - An address **abutting an already-recognized construct**
 ///   (`**bold**doc@example.org`, `link:x[y]doc@example.org`,
 ///   `image:x.png[]doc@example.org`). The mismatch-prefix group reads the
@@ -1127,6 +1121,36 @@ pub(super) fn build_link_node<'src>(
 /// like an anchor's id, and unlike a URL link's own target, an e-mail node
 /// needs no `Span`-typed field, so [`build_email_node`] recovers the exact
 /// address text there too rather than deferring.
+///
+/// An **escaped special** ([`CharRef`](InlineNode::CharRef)`::Special`) is
+/// admitted too (`a&b@example.org`, whose literal `&` the pattern's own
+/// local-part class matches as `&amp;`) — the fourth family to lift that
+/// boundary, after the cross-reference, `link:`/`mailto:` macro, and
+/// auto-link/formal-URL families, and the last of the link family's own
+/// spellings to lift it. The match string carries such a leaf's canonical
+/// entity — the very bytes the string replacer's own escaped haystack holds
+/// there — so the target this pass computes off that string
+/// (`mailto:a&amp;b@example.org`) *is* the one the replacer computed and
+/// registered, and no value on the node needs the source's own `&`. The
+/// display text, which is the address itself, then becomes **structured
+/// children** rather than one baked `Text` (see [`macro_text_children`]), so
+/// the special folds back to its own entity instead of being escaped twice.
+///
+/// Unlike its three predecessors, this family needs no
+/// [`range_has_no_opaque_piece`] gate to express that lift: an address
+/// **cannot** cross an opaque piece in the first place. Every such piece is
+/// exactly one [`SPAN_PLACEHOLDER`] (U+E0F0, Unicode category `Co`), which
+/// none of the pattern's character classes admit — not the local part's
+/// `[\w_]` / `[\w\-.%+]`, not the domain's `[\p{L}\p{Nd}_\-.]`, not the TLD's
+/// `[a-zA-Z]` — so a match can never contain one. Nor can a match *begin* or
+/// *end* strictly inside an escaped special's entity: an entity's leading `&`
+/// is in no class the domain or TLD accepts, and its trailing `;` is neither
+/// a local-part character nor the `@` a local part must be followed by. So
+/// the only atomic piece an address range can overlap is a **wholly
+/// contained** `&amp;`, which is precisely the one this lift admits — the
+/// same structural argument the sibling auto-link family already makes for
+/// its own required boundary-prefix group ("a placeholder simply fails its
+/// match"). A gate here would be a branch no input can reach.
 pub(super) fn email_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -1149,8 +1173,9 @@ pub(super) fn email_level<'src>(
 }
 
 /// Finds every recognized bare e-mail address at this level, honoring the
-/// pattern's own mismatch-prefix group and skipping any address
-/// [`build_email_node`] defers (see [`email_level`]).
+/// pattern's own mismatch-prefix group and skipping an address that **abuts**
+/// an opaque piece (one it *crosses* being structurally impossible — see
+/// [`email_level`]).
 fn find_email_matches<'src>(
     nodes: &[InlineNode<'src>],
     s: &str,
@@ -1209,20 +1234,15 @@ fn find_email_matches<'src>(
             continue;
         }
 
-        match build_email_node(&caps, pieces, root, nodes) {
-            Some(node) => matches.push(MacroMatch {
-                kind: MacroMatchKind::Node {
-                    consumed: full.clone(),
-                    node: Box::new(node),
-                },
-                full,
-            }),
+        let node = build_email_node(&caps, pieces, root, nodes);
 
-            // An address crossing an atomic piece (an escaped `&`); left as
-            // literal source, exactly as every other macro family defers a
-            // match it cannot recover the text of.
-            None => continue,
-        }
+        matches.push(MacroMatch {
+            kind: MacroMatchKind::Node {
+                consumed: full.clone(),
+                node: Box::new(node),
+            },
+            full,
+        });
     }
 
     matches
@@ -1236,14 +1256,26 @@ fn find_email_matches<'src>(
 /// part — the string replacer passes `extra_roles: vec![]` and the raw address
 /// as its `link_text`.
 ///
-/// The address is recovered with [`text_slice`] rather than
-/// [`source_slice`]`.data()`, so it is exact even when its bytes come from a
-/// [`synthesized`](Piece::synthesized) run — the same treatment an anchor's id
-/// receives, and available for the same reason: an e-mail node carries no
+/// The target is read straight off the level's **match string**, exactly as
+/// `InlineEmailReplacer` reads `caps[2]` off its own escaped haystack — the
+/// same bytes, whether the address is verbatim `'src`, comes from a
+/// [`synthesized`](Piece::synthesized) run (an attribute expansion), or
+/// carries an escaped special (`a&amp;b@example.org`). An e-mail node holds no
 /// `Span`-typed field (no [`Attrlist`] parsed out of `'src`), only plain text,
-/// so only the node's `location` needs design §4.4's coarse fallback. Returns
-/// `None` when the address crosses an [`atomic`](Piece::atomic) piece — an
-/// escaped `&`, the one form [`email_level`] defers.
+/// so only the node's `location` needs design §4.4's coarse fallback.
+///
+/// The display text is that same address, so it is a *slice* of the match's own
+/// range rather than a value this builder computes: [`macro_text_children`]
+/// recovers it, borrowing from `'src` in the common case (§4.5) and rebuilding
+/// it as structured children — each escaped special staying the
+/// [`CharRef`](InlineNode::CharRef) it already is — when it crosses one, rather
+/// than baking the already-escaped address into one `Text` node the fold would
+/// escape a second time (design §3.4). There is no `\]` bracket unescape: this
+/// text comes from the address, which the pattern's own character classes never
+/// let a bracket into.
+///
+/// This is **total**: what the family defers is decided entirely by the gate
+/// [`find_email_matches`] applies before calling it.
 ///
 /// As in the additive builder generally, this performs *no* recognition side
 /// effect: it does **not** `register_link` the target, which
@@ -1254,31 +1286,21 @@ fn build_email_node<'src>(
     pieces: &[Piece],
     root: Span<'src>,
     nodes: &[InlineNode<'src>],
-) -> Option<InlineNode<'src>> {
+) -> InlineNode<'src> {
     // Group 2 is the address itself. The `unwrap` is safe: the group is the
     // pattern's one mandatory capture, so it participates in every match (the
     // same reason the overall-match `unwrap` above is safe).
     #[allow(clippy::unwrap_used)]
     let address_m = caps.get(2).unwrap();
 
+    let address = address_m.as_str();
     let range = address_m.start()..address_m.end();
+    let location = source_slice(pieces, range.clone(), root);
 
-    if !range_is_verbatim_or_synthesized(pieces, &range) {
-        return None;
-    }
-
-    let address = text_slice(nodes, pieces, range.clone())?;
-    let location = source_slice(pieces, range, root);
-
-    Some(InlineNode::Ref(Ref {
+    InlineNode::Ref(Ref {
         variant: RefVariant::Link,
         target: CowStr::from(format!("mailto:{address}")),
-
-        children: vec![InlineNode::Text {
-            value: address,
-            location,
-        }],
-
+        children: macro_text_children(address, range, false, nodes, pieces, root),
         roles: vec![],
         window: None,
         attrs: None,
@@ -1286,7 +1308,7 @@ fn build_email_node<'src>(
         derived: None,
         xrefstyle: None,
         location,
-    }))
+    })
 }
 
 /// Performs the recognition side effect the string pipeline's five link
@@ -2882,9 +2904,37 @@ mod tests {
             "mailto:hello@example.org[]",
             "https://example.org/x@y.com",
             "see https://user@example.org/path here",
+            // An address crossing an escaped special: the pattern's local-part
+            // class admits `&amp;`, so the `&` is part of the address in both
+            // pipelines.
+            "a&b@example.com",
+            "write to a&b@example.com today",
+            "a&b&c@example.com",
+            "a&b@example.com and d&e@example.org",
+            // A literal `&` the pattern's classes do *not* admit — in the
+            // domain, or opening the local part — so neither pipeline matches
+            // the whole address there.
+            "user@ex&ample.com",
+            "&doc@example.com",
+            // An address beside, but not crossing, an escaped special.
+            "a < b then doc@example.com",
+            "doc@example.com & more",
+            // A construct *inside* what would otherwise be an address. Every
+            // opaque piece is one `SPAN_PLACEHOLDER`, which none of the
+            // pattern's character classes admit, so neither pipeline matches
+            // across one — the invariant that lets this family lift the
+            // escaped-special boundary with no gate of its own (see
+            // `email_level`).
+            "a*b*c@example.com",
+            "a`b`c@example.com",
+            "doc@ex*a*ample.com",
+            "doc@ex(C)ample.com",
+            "doc@exa--mple.com",
+            "doc@example.co(C)m",
             // Escapes: the address stays literal, minus the backslash.
             "\\doc.writer@example.com",
             "a \\doc@example.com b",
+            "\\a&b@example.com",
             // An address beside and inside other constructs.
             "*bold* then doc@example.com and _em_",
             "*write to doc@example.com*",
@@ -3099,6 +3149,18 @@ mod tests {
         // them defer — see `email_level`'s own scope note.
         use super::super::super::test_support::golden_passthroughs;
 
+        // A character replacement is the same class, reached without a macro
+        // at all: `(C)` renders to `&#169;`, whose trailing `;` is no mismatch
+        // character, so the string pipeline links the address that follows it.
+        let replacement = "a(C)b@example.com";
+        let nodes = build_src(Span::new(replacement));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an address abutting an opaque construct must stay literal: {nodes:?}"
+        );
+        assert!(golden_macros(replacement).contains(r#"href="mailto:b@example.com""#));
+
         let concealed_term = "indexterm:[a]doc@example.com";
         let nodes = build_src(Span::new(concealed_term));
 
@@ -3151,23 +3213,38 @@ mod tests {
     }
 
     #[test]
-    fn an_email_over_a_special_character_is_a_documented_divergence() {
+    fn an_email_crossing_an_escaped_special_shows_structured_children() {
         // The pattern's local-part class admits `&amp;`, so the string
         // pipeline matches an address carrying a literal `&` over its own
-        // *escaped* text. That `&amp;` is an atomic `CharRef` by the time
-        // macros run, so the builder cannot recover the address as text and
-        // leaves it unrecognized for a later increment — the same boundary the
-        // auto-link and image families document.
+        // *escaped* text. The match string carries the same entity there, so
+        // the target this pass computes off it is the very one the replacer
+        // computed (and registers), and the shown text — which for this form
+        // *is* the address — is recovered from the match's own range as
+        // structured children, so the `&` stays the `CharRef` it already is
+        // rather than being escaped a second time.
         let source = "a&b@example.com";
         let nodes = build_src(Span::new(source));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an address crossing an escaped special must be left unrecognized: {nodes:?}"
-        );
+        assert_eq!(nodes.len(), 1);
+        let reference = assert_link(&nodes[0]);
 
-        // The string pipeline, by contrast, *does* build a link here.
-        assert!(golden_macros(source).contains("<a href"));
+        assert_eq!(reference.target.as_ref(), "mailto:a&amp;b@example.com");
+        assert!(reference.roles.is_empty());
+        assert_eq!(reference.location.data(), source);
+
+        assert_eq!(reference.children.len(), 3);
+        assert_text(&reference.children[0], "a", 1, 1);
+
+        let location = assert_special_char(&reference.children[1], '&');
+        assert_eq!(location.data(), "&");
+        assert_eq!(location.byte_offset(), 1);
+
+        assert_text(&reference.children[2], "b@example.com", 1, 3);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
     }
 
     // ---- `apply_link_side_effects` (staged for the eventual cutover) ------
@@ -3387,6 +3464,11 @@ mod tests {
             "https://example.org/a&b[Example]",
             "<https://example.org/a&b>",
             "https://a.example/?x=1&y=2 then link:b&c.html[B]",
+            // And for the bare-e-mail family, whose registration pass runs
+            // last: the `mailto:` target it records carries the address's own
+            // `&amp;`.
+            "a&b@example.com",
+            "a&b@example.com then link:c.html[C] then https://d.example",
         ];
 
         for fixture in fixtures {

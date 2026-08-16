@@ -2788,6 +2788,66 @@ Each phase is a reviewable unit with a clear exit gate.
   address baked as its own display text, an `Attrlist<'src>`) that a later increment must take up on
   its own terms. As with every prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (the bare e-mail auto-link crossing an escaped special — the fourth
+  family, and the first to need no gate at all):* the increment above named the **bare-e-mail**
+  and **image** families as the two still holding the escaped-special boundary, the first of
+  them because it holds "an address baked as its own display text". Auditing that shows the
+  address is not baked but *sliced*, exactly like a bare `link:` macro's own target-derived
+  text — the shape that family already solved — so the lift needs no new mechanism: the target
+  is a computed string read off the level's **match string**
+  (`mailto:a&amp;b@example.com` — the very bytes `InlineEmailReplacer` computes from its own
+  escaped haystack, and what [`register_link`](../../parser/src/content/inline_builder/macros/links.rs)
+  records), and the display text goes through
+  [`macro_text_children`](../../parser/src/content/inline_builder/macros/mod.rs), the shared
+  helper, so each special stays the [`CharRef`](../../parser/src/inlines/char_ref.rs) it
+  already is — with its own precise `'src` span (#944) — instead of being baked, already
+  escaped, into one [`Text`](../../parser/src/inlines/inline_node.rs) the fold would escape a
+  second time. `a&b@example.com` is therefore recognized as the same
+  [`Ref`](../../parser/src/inlines/ref_node.rs)`{Link}` node its verbatim spelling builds,
+  folding through the identical `render_link`.
+
+  What *is* new in kind is that this family takes the lift with **no gate**. Its three
+  predecessors each swapped [`range_is_verbatim`](../../parser/src/content/inline_builder/macros/image.rs)
+  (or its synthesized-admitting sibling) for
+  [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs); here
+  that swap would add a branch no input can reach. An address **cannot cross an opaque piece**:
+  every such piece is exactly one [`SPAN_PLACEHOLDER`](../../parser/src/content/inline_builder/quotes.rs)
+  (U+E0F0, Unicode category `Co`), which none of [`INLINE_EMAIL`](../../parser/src/content/macros.rs)'s
+  character classes admit — not the local part's `[\w_]` / `[\w\-.%+]`, not the domain's
+  `[\p{L}\p{Nd}_\-.]`, not the TLD's `[a-zA-Z]` — and a match can neither *begin* nor *end*
+  strictly inside an escaped special's entity, since an entity's leading `&` is in no class the
+  domain or TLD accepts and its trailing `;` is neither a local-part character nor the `@` a
+  local part must be followed by. So the only atomic piece an address range can overlap is a
+  **wholly contained** `&amp;` — precisely the one this lift admits. That is the same structural
+  argument the sibling auto-link family already makes for its own *required* boundary-prefix
+  group ("a placeholder simply fails its match"), reached here through the match's interior
+  rather than its boundary. The family's `Option`-returning "this increment defers" machinery is
+  removed rather than left unreachable — as the `<<id,>>` increment removed the cross-reference
+  family's — so [`build_email_node`](../../parser/src/content/inline_builder/macros/links.rs) is
+  now **total**, and the one deferral the family keeps is the *abutting* boundary class it
+  already documented, which the placeholder-**prefix** check expresses (a range gate never
+  could).
+
+  Differential corpora extend the family's fixtures with a crossing address alone, in flow,
+  doubled, and carrying two specials; with a literal `&` the pattern's classes do *not* admit (in
+  the domain, and opening the local part), where neither pipeline matches; with an address beside
+  but not crossing a special; with the escape (`\a&b@example.com`); and with a construct *inside*
+  what would otherwise be an address — a rendered span, a character replacement, a smart em dash —
+  which pins the no-gate invariant above as fixtures rather than only as prose. The family's own
+  divergence test becomes a **parity** test asserting the three recovered children and the `&`'s
+  own precise span, per its "if lifted, fold this into a parity corpus" convention, and the
+  abutting-divergence test gains a character-replacement fixture (`a(C)b@example.com`) — the same
+  class reached with no macro at all, since `&#169;`'s trailing `;` is no mismatch character.
+  Registration parity is asserted for the escaped-special forms against an independent golden
+  parser, and fixtures are added to the whole-pipeline combined-constructs corpus, the broad
+  general-purpose sweep, and the structural recorder cross-check. Re-running the corpus-wide
+  fold-parity audit (tree building forced on for every parse in the suite) confirms the divergence
+  set strictly **shrank**: one previously-surviving source is gone (`bert&ernie@sesamestreet.com`,
+  a real golden fixture) and no new one appeared. The escaped-special boundary now remains only
+  for the **image** family, whose [`Attrlist`](../../parser/src/attributes/attrlist.rs)`<'src>`
+  bracket is the one value in this module a match string genuinely cannot supply. As with every
+  prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -3077,6 +3137,23 @@ Each phase is a reviewable unit with a clear exit gate.
        use the helper. See the step's own "landed as" note above. The bare-e-mail and image families
        still keep the escaped-special boundary, and a display text crossing a rendered span still
        defers everywhere.
+     - ✅ **prep (the bare e-mail auto-link crossing an escaped special).** The fourth family to
+       lift that boundary, and the first to need **no gate** for it: `a&b@example.com` is
+       recognized as the same `Ref{Link}` node its verbatim spelling builds, its target read off
+       the match string (`mailto:a&amp;b@example.com`, the bytes `InlineEmailReplacer` computes
+       and registers) and its shown text — the address itself, a *slice* rather than a baked
+       string — recovered through the shared `macro_text_children`. An address cannot cross an
+       opaque piece at all: `INLINE_EMAIL`'s character classes admit no `SPAN_PLACEHOLDER`
+       (category `Co`), and a match can neither begin nor end inside an entity (its `&` fits no
+       domain/TLD class; its `;` is neither a local-part character nor the `@` a local part needs),
+       so the only atomic overlap possible is a wholly-contained `&amp;` — exactly what the lift
+       admits, making `range_has_no_opaque_piece` here a branch no input reaches.
+       `build_email_node` is correspondingly **total**, its `Option` machinery removed rather than
+       left unreachable, and the family's one remaining deferral is the *abutting* boundary class
+       (a placeholder-**prefix** check, not a range gate), now pinned for a character replacement
+       too. See the step's own "landed as" note above. Only the **image** family still keeps the
+       escaped-special boundary, and a display text crossing a rendered span still defers
+       everywhere.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
