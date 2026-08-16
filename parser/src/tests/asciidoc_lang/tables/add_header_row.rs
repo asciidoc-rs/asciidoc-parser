@@ -109,7 +109,7 @@ TIP: The header row ignores any style operators assigned via column and cell spe
 
     // This sentence is classified `non_normative!` rather than `verifies!`
     // because the crate deliberately diverges from its first clause. It is a
-    // single spec line asserting two rules – (1) the header row ignores
+    // single spec line asserting two rules — (1) the header row ignores
     // alignment operators on column specifiers, and (2) alignment operators on
     // a header *cell* specifier are applied. We honor rule (2) but contradict
     // rule (1): Asciidoctor 2.0.26 (the parity oracle) does *not* ignore column

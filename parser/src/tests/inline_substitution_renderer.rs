@@ -84,7 +84,7 @@ impl InlineSubstitutionRenderer for FigureImages {
     fn render_image(&self, params: &ImageRenderParams, dest: &mut String) {
         // `image_uri` is not overridden, so this inherits the crate's data-uri
         // embedding, which reads the image bytes through the registered
-        // `ImageFileHandler` – behavior a custom renderer previously could not
+        // `ImageFileHandler` — behavior a custom renderer previously could not
         // reproduce.
         let uri = self.image_uri(params.target, params.parser, None);
 
@@ -98,7 +98,7 @@ impl InlineSubstitutionRenderer for FigureImages {
 #[test]
 fn inherited_image_uri_embeds_data_uri_for_a_custom_renderer() {
     // Below `Secure`, with `data-uri` set and a handler registered, the
-    // inherited `image_uri` embeds the image as a `data:` URI – so a custom
+    // inherited `image_uri` embeds the image as a `data:` URI — so a custom
     // renderer that only reshapes the surrounding markup still gets embedding.
     let doc = Parser::default()
         .with_inline_substitution_renderer(FigureImages)
@@ -126,7 +126,7 @@ fn file_handler_accessors_expose_registered_handlers() {
     assert!(bare.image_file_handler().is_none());
     assert!(bare.svg_file_handler().is_none());
 
-    // Once registered, the handlers are reachable – and usable – through the
+    // Once registered, the handlers are reachable — and usable — through the
     // public accessors, so a renderer that resolves asset URIs itself can read
     // the same bytes the built-in renderer would.
     let parser = Parser::default()
@@ -168,8 +168,8 @@ struct InheritEverything;
 
 impl InlineSubstitutionRenderer for InheritEverything {}
 
-/// Applies `step` to `source` twice – once through the default (HTML) renderer
-/// and once through [`InheritEverything`] – with the same parser configuration,
+/// Applies `step` to `source` twice — once through the default (HTML) renderer
+/// and once through [`InheritEverything`] — with the same parser configuration,
 /// and asserts the two rendered outputs are identical. Because every default
 /// method body delegates to the built-in HTML renderer, a mismatch means a
 /// default no longer reproduces the HTML output it promises.

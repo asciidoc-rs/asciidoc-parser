@@ -20,7 +20,7 @@ use walkdir::{DirEntry, WalkDir};
 // NOTE: The Asciidoctor test suite is being ported one file at a time (see
 // `ref/asciidoctor/README.md`); every `.rb` file vendored under
 // `ref/asciidoctor/test` is picked up here automatically. Coverage grows as
-// more files are ported – at present `attribute_list_test.rb` is the first.
+// more files are ported — at present `attribute_list_test.rb` is the first.
 const SPEC_SOURCES: &[(&str, &str, Option<&str>)] = &[
     ("../ref/asciidoc-lang/docs/modules", ".adoc", None),
     ("../ref/asciidoctor/test", ".rb", None),

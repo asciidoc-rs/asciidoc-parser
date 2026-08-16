@@ -145,8 +145,8 @@ impl<'src> Header<'src> {
                 // Asciidoctor runs an attribute-entry value through the
                 // substitution pipeline *before* partitioning it into name parts
                 // (`process_authors`, `names_only`). When that substitution
-                // produced inline HTML – for example a `pass:[…]` macro whose
-                // content resolves to a link and inline formatting – the rendered
+                // produced inline HTML — for example a `pass:[…]` macro whose
+                // content resolves to a link and inline formatting — the rendered
                 // markup is stripped before partitioning so it does not leak into
                 // `firstname`/`middlename`/`lastname`, while the `author` value
                 // keeps the rendered markup. A value that produced no markup
@@ -236,8 +236,8 @@ impl<'src> Header<'src> {
                 warnings.extend(metadata_warnings);
 
                 // A block attribute line directly above the document title assigns
-                // metadata to the *document* – its `id`, `reftext`, `role`, and
-                // options – mirroring Asciidoctor's `parse_document_header`. Each
+                // metadata to the *document* — its `id`, `reftext`, `role`, and
+                // options — mirroring Asciidoctor's `parse_document_header`. Each
                 // recognized value folds into the document's attributes at this
                 // point in the header, so it follows document order alongside any
                 // equivalent header attribute entry (e.g. `:reftext:`).
@@ -249,7 +249,7 @@ impl<'src> Header<'src> {
                 // is not overwritten by this block attribute).
                 //
                 // The line is only intercepted when a document title eventually
-                // follows – possibly after further stacked block attribute lines,
+                // follows — possibly after further stacked block attribute lines,
                 // each folded on its own pass through this loop, mirroring
                 // Asciidoctor's `parse_block_metadata_lines`. Otherwise it is
                 // block metadata for the body (e.g. a table's `separator`) and is
@@ -282,7 +282,7 @@ impl<'src> Header<'src> {
                 && document_title_follows_block_metadata(source, parser.level_offset())
             {
                 // A block title (`.Title`) directly above the document title is
-                // not a title *of* the document – a document has no block title.
+                // not a title *of* the document — a document has no block title.
                 // Its presence demotes the following `= …` line: the document
                 // has no title, and `= …` is a level-0 section heading in the
                 // body rather than the document title (matching Asciidoctor,
@@ -290,7 +290,7 @@ impl<'src> Header<'src> {
                 // book").
                 //
                 // Rather than consume anything here, end the header without a
-                // title and rewind so the block parser sees the whole run –
+                // title and rewind so the block parser sees the whole run —
                 // the block title, the demoted `= …`, and the content below.
                 // The body then recognizes the block title as metadata (not
                 // literal text) and carries it over into the following section,
@@ -302,8 +302,8 @@ impl<'src> Header<'src> {
                 // `source` is left pointing at the block-title line (it is not
                 // advanced), so the header span ends above it and the body
                 // begins there. `document_title_follows_block_metadata` confirms
-                // a `= …` title actually follows – possibly past further stacked
-                // block metadata lines – so an ordinary body block title (with
+                // a `= …` title actually follows — possibly past further stacked
+                // block metadata lines — so an ordinary body block title (with
                 // no document title beneath it) is not caught here.
                 break;
             } else if title.is_none()
@@ -320,8 +320,8 @@ impl<'src> Header<'src> {
 
                 title_source = Some(title_span);
 
-                // A `doctitle` attribute already set above the title – via a
-                // `:doctitle:` entry or the API – overrides the implicit title:
+                // A `doctitle` attribute already set above the title — via a
+                // `:doctitle:` entry or the API — overrides the implicit title:
                 // the implicit text is discarded, the existing doctitle stands
                 // as the document title, and the `doctitle` attribute is left
                 // untouched. Otherwise the implicit title is
@@ -344,9 +344,9 @@ impl<'src> Header<'src> {
                     // though the title is re-resolved against the final
                     // header state below and, in that case, resolves
                     // correctly. Discard the eager warning whenever that
-                    // later re-resolution will run – i.e. the substituted
+                    // later re-resolution will run — i.e. the substituted
                     // text still contains a `{`, mirroring the condition at
-                    // the re-resolution site below – since that pass raises
+                    // the re-resolution site below — since that pass raises
                     // its own warning if the reference is still genuinely
                     // unresolved once the full header is known. Warnings from
                     // a fully-resolved title, or from `drop`/`drop-line` mode
@@ -398,8 +398,8 @@ impl<'src> Header<'src> {
             // The base section title is normally the eager (at-title-line)
             // substitution already held in `title`. It is re-resolved against the
             // final attribute set only when that eager substitution left an
-            // unresolved attribute reference – an attribute defined later in the
-            // header – so that one-shot substitutions such as a `{counter:…}` in
+            // unresolved attribute reference — an attribute defined later in the
+            // header — so that one-shot substitutions such as a `{counter:…}` in
             // the title are not evaluated a second time. When the implicit title
             // was overridden by a `doctitle` set above it, `title` already holds
             // that (resolved) value and is not re-substituted.
@@ -413,15 +413,15 @@ impl<'src> Header<'src> {
             // side effect here is the price of that. Since the eager pass now
             // uses the `Title` group, this extends beyond a `{counter:…}`
             // advancing twice to any stateful macro sharing the title with a
-            // later-defined reference – an anchor
+            // later-defined reference — an anchor
             // (`= {project-name} [[id]]`) can raise a spurious
             // `DuplicateId` warning on its second registration, and a footnote
             // (`= {project-name} footnote:[…]`) is defined twice. This is a
-            // rare combination – a document title is an unusual place for a
-            // footnote or anchor to begin with – and no test exercises it.
+            // rare combination — a document title is an unusual place for a
+            // footnote or anchor to begin with — and no test exercises it.
             // Tracked as a follow-up in #1132: fixing it well wants a way to
             // resolve attribute references once and branch into the
-            // remaining substitution steps without re-invoking macros – a
+            // remaining substitution steps without re-invoking macros — a
             // shape that may fall out more naturally once inline content is
             // a materialized tree instead of a re-run string pipeline.
             let base = if !implicit_overridden_from_above
@@ -508,7 +508,7 @@ impl<'src> Header<'src> {
 
         // Asciidoctor exposes the number of resolved authors via the
         // `authorcount` document attribute. It defaults to `0` (a built-in
-        // default), so only a non-zero count is materialized here – this keeps an
+        // default), so only a non-zero count is materialized here — this keeps an
         // author-less parse from touching the attribute map at all.
         if !authors.is_empty() {
             parser.set_attribute_by_value_from_header("authorcount", authors.len().to_string());
@@ -708,8 +708,8 @@ fn skip_block_comment<'src>(line: Span<'src>, after: Span<'src>) -> Option<(Span
 /// Both the AsciiDoc marker (`=`) and the Markdown-style marker (`#`) are
 /// accepted, mirroring the alternation at the head of Asciidoctor's
 /// section-title regex. A line is the document title when its *effective* level
-/// – the syntactic level (marker run length minus one) shifted by
-/// `level_offset` – is 0, mirroring Asciidoctor's `is_next_line_doctitle?`.
+/// — the syntactic level (marker run length minus one) shifted by
+/// `level_offset` — is 0, mirroring Asciidoctor's `is_next_line_doctitle?`.
 /// With no offset in effect this is exactly a single `=`/`#` marker; a negative
 /// `:leveloffset:` lets a deeper heading (`==` under `-1`) coerce to the
 /// document title, and a positive offset stops a bare `=` from being one.
@@ -734,7 +734,7 @@ fn document_title_marker(line: Span<'_>, level_offset: i32) -> Option<(char, usi
         return None;
     }
 
-    // The marker run must be followed by a blank – a space or a tab – matching
+    // The marker run must be followed by a blank — a space or a tab — matching
     // the section parser's `take_required_whitespace` and Asciidoctor's
     // `[ \t]+` in the section-title regex. Accepting a tab (not just a space)
     // keeps a tab-delimited heading shifted to effective level 0 on the same
@@ -743,8 +743,8 @@ fn document_title_marker(line: Span<'_>, level_offset: i32) -> Option<(char, usi
         return None;
     }
 
-    // The effective level – the syntactic level (run length minus one) shifted
-    // by the running `leveloffset` – must be 0 for the line to be the document
+    // The effective level — the syntactic level (run length minus one) shifted
+    // by the running `leveloffset` — must be 0 for the line to be the document
     // title.
     let syntactic_level = (count as i32) - 1;
     if syntactic_level.saturating_add(level_offset) != 0 {
@@ -774,12 +774,12 @@ fn document_title_marker(line: Span<'_>, level_offset: i32) -> Option<(char, usi
 /// The run's *effective* block style also gates promotion: if it resolves to
 /// `discrete`/`float`, the following level-0 (`=`) heading is a discrete
 /// floating title rather than the document title, so this returns `false` and
-/// neither the metadata nor the heading is folded here – both are left for the
+/// neither the metadata nor the heading is folded here — both are left for the
 /// block parser, which produces a `SectionType::Discrete` heading (see #1014).
 /// The effective style is tracked with last-wins semantics that mirror
-/// `Attrlist::merge_block_attribute_line` / `merge_block_style_shorthand` – a
+/// `Attrlist::merge_block_attribute_line` / `merge_block_style_shorthand` — a
 /// line that specifies a block style overrides the running one, and a line with
-/// none leaves it unchanged – so the header's decision always agrees with the
+/// none leaves it unchanged — so the header's decision always agrees with the
 /// `BlockMetadata::is_discrete` decision the block parser would make on the
 /// same run.
 fn document_title_follows_block_metadata(source: Span<'_>, level_offset: i32) -> bool {
@@ -821,18 +821,18 @@ fn document_title_follows_block_metadata(source: Span<'_>, level_offset: i32) ->
 /// Classifies the block style of a single bracket-delimited document-metadata
 /// `line`, read structurally (the attribute list is *not* parsed):
 ///
-/// * `None` – the line specifies no block style (a `[[id]]` anchor, a shorthand
+/// * `None` — the line specifies no block style (a `[[id]]` anchor, a shorthand
 ///   line whose first positional leads with `.`/`#`/`%`, or a named-first
 ///   attribute list such as `[reftext=…]`), so it leaves a running style
 ///   unchanged.
-/// * `Some(true)` – the block style is `discrete` or `float`.
-/// * `Some(false)` – the block style is some other value (e.g. `[appendix]`).
+/// * `Some(true)` — the block style is `discrete` or `float`.
+/// * `Some(false)` — the block style is some other value (e.g. `[appendix]`).
 ///
-/// Reading the style off the raw text – rather than parsing the attribute list
-/// – keeps an embedded `{counter:…}` in a *value* from being evaluated at
+/// Reading the style off the raw text — rather than parsing the attribute list
+/// — keeps an embedded `{counter:…}` in a *value* from being evaluated at
 /// header time (the invariant the `rejected_metadata_run_does_not_fire_counter`
 /// test guards). This is safe because a block style is always the first
-/// positional attribute's leading shorthand token – a bare name that can never
+/// positional attribute's leading shorthand token — a bare name that can never
 /// itself be a counter.
 fn metadata_line_block_style_is_discrete(line: Span<'_>) -> Option<bool> {
     // Drop the enclosing square brackets (the caller has confirmed they are
@@ -976,7 +976,7 @@ fn parse_document_metadata_anchor<'src>(
     parser: &Parser,
 ) -> Option<(DocumentMetadata, Vec<Warning<'src>>)> {
     // Split an optional reftext off at the first comma (`id,reftext`). A comma
-    // in the final position leaves the whole span – trailing comma included – as
+    // in the final position leaves the whole span — trailing comma included — as
     // the ID, which then fails XML-name validation, matching the block parser.
     let (id, reftext) = match anchor.position(|c| c == ',') {
         Some(comma) if comma < anchor.len() - 1 => (
@@ -1063,7 +1063,7 @@ fn partition_title(title: &str, parser: &Parser) -> (String, Option<String>) {
 ///
 /// `header_has_attributes` reports whether the header carried any attribute
 /// entries. When it did not, none of the `author` / `authors` / `author_N`
-/// attributes can be set, so the attribute lookups are skipped – the common
+/// attributes can be set, so the attribute lookups are skipped — the common
 /// case for a document whose header is just a title (or absent).
 fn resolve_authors(
     author_line: Option<&AuthorLine>,
@@ -1077,7 +1077,7 @@ fn resolve_authors(
         // Reconcile an explicit `:authors:` entry against the implicit author
         // line, mirroring Asciidoctor's `parse_header_metadata`. When the
         // entry's value differs from the computed (comma-joined) value of the
-        // implicit list, the entry *replaces* that list – re-splitting on `;`,
+        // implicit list, the entry *replaces* that list — re-splitting on `;`,
         // updating `authorcount`, and repopulating the derived `author_N` (and
         // per-author name-part) attributes. A value that matches the computed
         // value leaves the implicit list untouched.
@@ -1102,8 +1102,8 @@ fn resolve_authors(
                 // a stale trailing `author_N`; a replacement author lacking a
                 // middle name / email leaves the implicit `middlename` /
                 // `email`). This mirrors Asciidoctor's `doc_attrs.update
-                // author_metadata` – a merge that overwrites present keys and
-                // never deletes absent ones – so `{author_3}` and friends can
+                // author_metadata` — a merge that overwrites present keys and
+                // never deletes absent ones — so `{author_3}` and friends can
                 // outlive an `authorcount` that reflects the shorter list. The
                 // divergence is Asciidoctor's; see the shrinking-replacement
                 // regression test in this module.
@@ -1118,8 +1118,8 @@ fn resolve_authors(
         // equals the implicit author's name leaves that position untouched; any
         // position whose value differs is overridden.
         // When at least one position was overridden, the reconciled list
-        // repopulates the derived attributes – including the combined `authors`
-        // string – so `{authors}` and `Document::authors()` reflect the
+        // repopulates the derived attributes — including the combined `authors`
+        // string — so `{authors}` and `Document::authors()` reflect the
         // override, not just the individual `author_N` attribute.
         //
         // The indexed `author_N` attributes are only assigned once the implicit
@@ -1173,7 +1173,7 @@ fn resolve_authors(
         return vec![];
     }
 
-    // A directly-assigned `author` attribute describes a single author – but
+    // A directly-assigned `author` attribute describes a single author — but
     // only while it remains set. A later `:author!:` unsets the attribute
     // without carrying a raw value to refresh `author_attribute`, so consult
     // the attribute's final state rather than trusting the cached parse. The
@@ -1187,8 +1187,8 @@ fn resolve_authors(
         // Mirror Asciidoctor's `process_authors`, which sets the combined
         // `authors` attribute to the single author's name. The remaining derived
         // keys (`firstname`, `authorinitials`, …) were populated inline as the
-        // `:author:` entry was parsed – deliberately, so an explicit
-        // `:authorinitials:` override survives – but `authors` was still left
+        // `:author:` entry was parsed — deliberately, so an explicit
+        // `:authorinitials:` override survives — but `authors` was still left
         // unset there (see issue #1027).
         parser.set_attribute_by_value_from_header("authors", author.name());
 
@@ -1299,8 +1299,8 @@ fn split_author_entries(value: &str) -> Vec<&str> {
     entries
 }
 
-/// Applies the document title's substitutions – the `Title` group, the same
-/// steps as `Normal` – to `source`, mirroring Asciidoctor's eager
+/// Applies the document title's substitutions — the `Title` group, the same
+/// steps as `Normal` — to `source`, mirroring Asciidoctor's eager
 /// substitution of the `= Title` line into the `doctitle` attribute. Unlike
 /// the restricted `Header` group used for author/revision lines and
 /// attribute-entry values, this renders quotes (formatting), replacements,
@@ -2374,7 +2374,7 @@ mod tests {
         );
 
         // With no authors resolved, the raw `authors` value is left as written
-        // (never rewritten to a comma-joined list) – matching Asciidoctor, whose
+        // (never rewritten to a comma-joined list) — matching Asciidoctor, whose
         // `process_authors` returns only `authorcount` for an all-empty value.
         assert_eq!(doc.attribute_value("authors"), InterpretedValue::Value(";"));
     }
@@ -2414,7 +2414,7 @@ mod tests {
         // beyond the shorter list, and the base `email` / `middlename` when the
         // replacement's first author omits them.
         //
-        // This is not a gap in the port – it is exactly Asciidoctor's behavior.
+        // This is not a gap in the port — it is exactly Asciidoctor's behavior.
         // Its `parse_header_metadata` reconciles with `doc_attrs.update
         // author_metadata`, a merge that overwrites the keys the replacement
         // supplies and never deletes the ones it omits, so `{author_3}` (and the
@@ -2783,8 +2783,8 @@ mod tests {
     fn stacked_block_styles_gate_doctitle_by_effective_style() {
         // Whether a `[float]`/`[discrete]` style above a level-0 (`=`) title
         // suppresses doctitle promotion is decided by the run's *effective*
-        // (merged, last-wins) block style – the same value the block parser
-        // computes via `Attrlist::merge_block_attribute_line` – not by any
+        // (merged, last-wins) block style — the same value the block parser
+        // computes via `Attrlist::merge_block_attribute_line` — not by any
         // single line in isolation.
 
         // A later non-discrete style overrides an earlier `float`, so the
@@ -2813,12 +2813,12 @@ mod tests {
         // `document_title_follows_block_metadata`, which scans structurally and
         // never parses an attribute list). Here no title follows, so the
         // lookahead fails and the `[reftext=…]` line's attribute list is never
-        // parsed during header parsing – its embedded `{counter:item}` must not
+        // parsed during header parsing — its embedded `{counter:item}` must not
         // fire at header time.
         //
         // The `reftext` line advances the counter exactly once when the block
         // parser reaches it (yielding 1), so the following `{counter:item}`
-        // reference renders 2 – not 3, which is what a leaked header-time
+        // reference renders 2 — not 3, which is what a leaked header-time
         // evaluation would produce.
         let doc =
             Parser::default().parse("[reftext=\"See {counter:item}\"]\nBody.\n\n{counter:item}");
@@ -3072,8 +3072,8 @@ mod tests {
 
         #[test]
         fn carries_the_rest_of_the_header() {
-            // Everything that may follow an `=` title – attribute entries, the
-            // author line, the revision line – follows a `#` title too.
+            // Everything that may follow an `=` title — attribute entries, the
+            // author line, the revision line — follows a `#` title too.
             let doc = Parser::default()
                 .parse("# Doc Title\n:foo: bar\nKismet R. Lee <kismet@asciidoctor.org>\nv1.0\n");
             let header = doc.header();

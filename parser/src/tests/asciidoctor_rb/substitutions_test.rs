@@ -5894,7 +5894,7 @@ mod macros {
         assert_eq!(images[0].imagesdir, None);
 
         // `data-uri` is set but no image file handler is registered, so the
-        // image degrades silently to a web path – no warning is emitted
+        // image degrades silently to a web path — no warning is emitted
         // (mirroring `assert logger.empty?`).
         assert_eq!(doc.warnings().count(), 0);
     }
@@ -8947,7 +8947,7 @@ mod passthroughs {
 
         // The quote-delimited role (`['role']`) is preserved as a verbatim role
         // on the passthrough span, so the rendered output includes
-        // `<span class="'role'">` – exactly matching Asciidoctor here.
+        // `<span class="'role'">` — exactly matching Asciidoctor here.
         let mut p = Parser::default();
         let maw =
             crate::blocks::Block::parse(crate::Span::new("['role']\\++This++++++++++++"), &mut p);

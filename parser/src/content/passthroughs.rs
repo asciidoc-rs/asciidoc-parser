@@ -29,7 +29,7 @@ pub struct Passthrough {
 }
 
 impl Passthrough {
-    /// Returns the stored, unescaped source text of this passthrough – the text
+    /// Returns the stored, unescaped source text of this passthrough — the text
     /// that is substituted back in (after applying [`subs`](Self::subs)) when
     /// the passthrough is restored.
     ///
@@ -131,7 +131,7 @@ impl Passthroughs {
 
         // A deferred cross-reference's explicit text is pulled out of the main
         // rendered string before this point, so any passthrough placeholder it
-        // carries (e.g. `<<id, `+[literal]+`>>`) must be restored here too –
+        // carries (e.g. `<<id, `+[literal]+`>>`) must be restored here too —
         // otherwise the placeholder sentinels leak into the link text.
         content.restore_deferred_xref_passthroughs(|text| {
             if let Cow::Owned(restored) =
@@ -663,8 +663,8 @@ impl Replacer for PassthroughRestoreReplacer<'_> {
         if let Some(type_) = pass.type_ {
             // Resolve attribute references in the stored attrlist before parsing
             // it. Inline passthroughs are extracted before the substitution
-            // pipeline runs, so – unlike the inline quoted-text path, whose
-            // attrlist is a slice of the already-substituted buffer – a reference
+            // pipeline runs, so — unlike the inline quoted-text path, whose
+            // attrlist is a slice of the already-substituted buffer — a reference
             // embedded in a passthrough role (e.g. `['{myrole}']++x++`) would
             // otherwise render verbatim. This mirrors Asciidoctor's
             // `parse_quoted_text_attributes`, which runs `sub_attributes` on the
@@ -819,8 +819,8 @@ mod tests {
 
     #[test]
     fn content_without_passthroughs_exposes_an_empty_collection() {
-        // Plain content – and content whose substitution group never extracts
-        // passthroughs – exposes an empty collection rather than any sentinel.
+        // Plain content — and content whose substitution group never extracts
+        // passthroughs — exposes an empty collection rather than any sentinel.
         let mut p = Parser::default();
 
         let maw = crate::blocks::Block::parse(crate::Span::new("just plain prose"), &mut p);

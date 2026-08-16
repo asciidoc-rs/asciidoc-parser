@@ -215,7 +215,7 @@ mod sealed {
 /// | [`role`](Self::role) | membership in [`IsBlock::roles`] |
 ///
 /// [`style`](Self::style) matches [`resolved_style`](IsBlock::resolved_style),
-/// which tracks Asciidoctor's `style` – including a style declared in shorthand
+/// which tracks Asciidoctor's `style` — including a style declared in shorthand
 /// form (e.g. an admonition written `NOTE:` matches `style("NOTE")`) and a
 /// style acquired implicitly during parsing (e.g. a list that inherited
 /// `bibliography` from its section matches `style("bibliography")`). The one
@@ -428,7 +428,7 @@ where
 ///
 /// This is the return type of [`FindBlocks::child_blocks`] and of each block
 /// type's inherent `child_blocks()` accessor. It yields `&Block` for the
-/// receiver's immediate children only (it does not recurse – use
+/// receiver's immediate children only (it does not recurse — use
 /// [`FindBlocks::descendant_blocks`] for the full subtree). Unlike a raw
 /// structural walk, it reaches the children of a Markdown-style blockquote
 /// (which borrow the block's own owned source); AsciiDoc table cells are

@@ -604,7 +604,7 @@ mod structure {
 
     // Out of scope here: standalone `max-width` framing and the Ruby
     // `Document::Title` partition/`sanitize` API. asciidoc-parser also does not
-    // enable compat-mode for a legacy (setext) doctitle – an intentional
+    // enable compat-mode for a legacy (setext) doctitle — an intentional
     // divergence that will not be addressed.
     non_normative!(
         r##"
@@ -830,7 +830,7 @@ mod structure {
 
         // A `:title:` attribute entry overrides the value of `doctitle` (and
         // `title`) without disturbing the section title or the `doctitle`
-        // attribute – so `{doctitle}` in the body still renders the implicit
+        // attribute — so `{doctitle}` in the body still renders the implicit
         // title. (The `#preamble` wrapper Ruby asserts on is standalone-HTML
         // structure asciidoc-parser does not emit.)
         assert_eq!(doc.doctitle(), Some("Override"));

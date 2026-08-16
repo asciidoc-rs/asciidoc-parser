@@ -1635,7 +1635,7 @@ fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
 /// Renders a compound delimited block, matching Asciidoctor's HTML output.
 ///
 /// In practice this only ever renders an open block (`div.openblock`): the
-/// other compound containers are intercepted earlier – a sidebar by
+/// other compound containers are intercepted earlier — a sidebar by
 /// [`is_sidebar`], an example by [`is_example`], a quote/verse masquerade by
 /// [`QuoteBlock`], an admonition masquerade by [`AdmonitionBlock`], and a
 /// verbatim masquerade (`source`/`listing`/`literal`) by [`RawDelimitedBlock`].
@@ -1681,7 +1681,7 @@ fn compound_delimited_to_node<'a>(compound: &'a CompoundDelimitedBlock<'a>) -> V
 /// The paragraph form of an open block (`[open]` over a single paragraph)
 /// produces the same `div.openblock > div.content` structure as the delimited
 /// `--` form in [`compound_delimited_to_node`], but its inline content is
-/// rendered directly inside the content wrapper without a wrapping `<p>` –
+/// rendered directly inside the content wrapper without a wrapping `<p>` —
 /// mirroring the `[example]` and `[sidebar]` paragraph styles. The outer
 /// `div.openblock` carries the block's id and roles, and a title, when present,
 /// is rendered as a `div.title` *before* the content wrapper.
@@ -1855,8 +1855,8 @@ fn is_sidebar<'a>(block: &'a Block<'a>) -> bool {
 /// The delimited form is a [`Block::CompoundDelimited`] rendered by
 /// [`compound_delimited_to_node`]; the paragraph form is a [`Block::Simple`]
 /// rendered by [`open_paragraph_to_node`]. Every masquerade style on a `--`
-/// block is intercepted earlier – by [`is_sidebar`], [`is_example`],
-/// [`is_abstract`], `QuoteBlock`, `AdmonitionBlock`, or `RawDelimitedBlock` –
+/// block is intercepted earlier — by [`is_sidebar`], [`is_example`],
+/// [`is_abstract`], `QuoteBlock`, `AdmonitionBlock`, or `RawDelimitedBlock` —
 /// so a `CompoundDelimited` block that reaches here always resolves to `open`
 /// with no abstract styling. Like
 /// a sidebar, an open block renders its own title (as a `div.title` before its
@@ -1941,7 +1941,7 @@ fn is_example<'a>(block: &'a Block<'a>) -> bool {
 /// directly inside the content wrapper without a `<p>` wrapper.
 ///
 /// A titled example block is rendered with a `div.title` caption placed
-/// *before* the content wrapper – unlike a sidebar, whose title sits inside the
+/// *before* the content wrapper — unlike a sidebar, whose title sits inside the
 /// content. The caption prefix and number are computed during parsing and
 /// stored on the block (see [`IsBlock::caption`]); when present the prefix is
 /// prepended to the title (e.g. "Example 1. Onomatopoeia"), otherwise the bare
@@ -3145,7 +3145,7 @@ mod tests {
 
         #[test]
         fn toc_macro_renders_nothing_when_toc_not_enabled() {
-            // A stray `toc::[]` with no `toc` attribute renders nothing – neither
+            // A stray `toc::[]` with no `toc` attribute renders nothing — neither
             // a TOC nor the literal paragraph text.
             let doc = Parser::default().parse("= Title\n\ntoc::[]\n\n== Section\n\nhi");
 

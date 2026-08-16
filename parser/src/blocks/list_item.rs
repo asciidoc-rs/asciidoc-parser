@@ -515,7 +515,7 @@ impl<'src> ListItem<'src> {
             warnings.extend(indented_block_maw.warnings);
 
             // A block dropped at parse time (`attribute-missing=drop-line` on a
-            // block-macro target) attaches nothing, but – like a real block –
+            // block-macro target) attaches nothing, but — like a real block —
             // it consumes any active continuation and requires the next block
             // to be indented or reintroduced with a `+`. (A dropped block is
             // always a block macro, never `+`-prefixed content, so it can't set
@@ -610,9 +610,9 @@ impl<'src> ListItem<'src> {
     ///
     /// Such an empty principal text node is not emitted as a child block (see
     /// [`child_blocks`](Self::child_blocks)); this flag preserves the fact that
-    /// it was there. It distinguishes an item whose principal text is empty –
+    /// it was there. It distinguishes an item whose principal text is empty —
     /// so a renderer emits an empty principal paragraph ahead of any
-    /// continuation-attached blocks (as Asciidoctor does) – from an item that
+    /// continuation-attached blocks (as Asciidoctor does) — from an item that
     /// simply has no principal text. When it is `true`, the item's first child
     /// block is an attached block rather than the principal text.
     pub fn has_empty_principal_text(&self) -> bool {
