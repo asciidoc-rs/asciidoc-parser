@@ -174,7 +174,7 @@ mod default_post_replacements_substitution {
         assert_eq!(revremark, "remark +");
 
         // The document *title* line itself is not part of this "Headers" row
-        // – like a block or section title (see the `titles` test below), it
+        // — like a block or section title (see the `titles` test below), it
         // uses `SubstitutionGroup::Title`, so the same trailing ` +` there
         // does convert to a line break (verified against Asciidoctor 2.0.26).
         let doc = Parser::default().parse("= abc +\ndef");
@@ -297,8 +297,8 @@ mod default_post_replacements_substitution {
 
         assert_eq!(block1.content().rendered_html(), "abc<br>\ndef");
 
-        // A trailing ` +` on the *final* line of a paragraph – with no newline
-        // following it – is also converted to a line break, matching
+        // A trailing ` +` on the *final* line of a paragraph — with no newline
+        // following it — is also converted to a line break, matching
         // Asciidoctor 2.0.26. Here the paragraph is a single line, so the ` +`
         // ends the block's content.
         let doc = Parser::default().parse("only +");

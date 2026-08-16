@@ -31,10 +31,10 @@ impl<'src> AuthorLine<'src> {
             .collect();
 
         // Populate the derived author document attributes from the implicit
-        // author line – the unsuffixed first-author keys (`author`,
+        // author line — the unsuffixed first-author keys (`author`,
         // `firstname`, ...), the `author_N` companions, the `_1` companions
         // (mirrored once a second author appears), and the combined,
-        // comma-joined `authors` attribute – exactly as Asciidoctor's
+        // comma-joined `authors` attribute — exactly as Asciidoctor's
         // `process_authors` does. Setting them here, during header parsing,
         // keeps `{author}`, `{authors}`, etc. available to later header lines.
         if !authors.is_empty() {
@@ -50,14 +50,14 @@ impl<'src> AuthorLine<'src> {
     }
 }
 
-/// Matches a numeric HTML character reference – decimal (`&#174;`) or
+/// Matches a numeric HTML character reference — decimal (`&#174;`) or
 /// hexadecimal (`&#xAE;`). The terminating semicolon of such a reference must
 /// never be treated as an author separator.
 ///
 /// Only numeric references are recognized here. A named reference such as
 /// `&reg;` cannot be distinguished structurally from arbitrary `&word;` text
 /// (the crate does not carry a table of valid entity names), so treating every
-/// `&word;` as a reference would suppress genuine separators – e.g. the
+/// `&word;` as a reference would suppress genuine separators — e.g. the
 /// semicolon in `Alice &Development; Bob`. Numeric references are unambiguous,
 /// and they are what the implicit author line needs to guard (see issue #757).
 static NUMERIC_CHARACTER_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
@@ -70,8 +70,8 @@ static NUMERIC_CHARACTER_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
 /// Following Asciidoctor, a semicolon separates authors only when it is
 /// immediately followed by a space or the end of the line. A semicolon that is
 /// followed by any other character (as in `Joe Doe;Smith Johnson`) is part of a
-/// single author's name. Blank entries – produced by a trailing separator or an
-/// empty middle entry – are left in place; [`Author::parse`] trims each entry
+/// single author's name. Blank entries — produced by a trailing separator or an
+/// empty middle entry — are left in place; [`Author::parse`] trims each entry
 /// and discards the empty ones.
 ///
 /// Semicolons that terminate a numeric HTML character reference (such as
@@ -329,7 +329,7 @@ mod tests {
             AuthorLine {
                 authors: &[Author {
                     // A line with four or more names doesn't match the author
-                    // pattern, so the whole line becomes the name – with the
+                    // pattern, so the whole line becomes the name — with the
                     // header substitution group applied, escaping the literal
                     // angle brackets.
                     name: "Four Names Not Supported &lt;doc@example.com&gt;",
@@ -1178,7 +1178,7 @@ mod tests {
                 authors: &[
                     Author {
                         // The bare `&` is not a numeric character reference, so
-                        // the header substitution group escapes it – unlike a
+                        // the header substitution group escapes it — unlike a
                         // `&#nnn;` reference, which is preserved.
                         name: "Alice &amp;Development",
                         firstname: "Alice",

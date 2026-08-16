@@ -3597,7 +3597,7 @@ mod custom {
         // warning, observable via `Document::warnings()`. The paragraph keeps
         // its default context; the style `foo` is retained but otherwise
         // ignored. The warning anchors at the paragraph's first content line
-        // (`bar`, line 2) – not the `[foo]` style line above it – matching the
+        // (`bar`, line 2) — not the `[foo]` style line above it — matching the
         // `line 2` Asciidoctor reports.
         let doc = Parser::default().parse("[foo]\nbar");
 

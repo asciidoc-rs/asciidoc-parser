@@ -27,8 +27,8 @@ use crate::{
 /// (or, for multi-document workflows, in another document entirely). The
 /// macros substitution therefore records each cross-reference in a deferred
 /// form and leaves an opaque placeholder in the rendered text. The
-/// references are resolved in a later pass – see
-/// [`Document::resolve_references`] – at which point [`rendered_html()`]
+/// references are resolved in a later pass — see
+/// [`Document::resolve_references`] — at which point [`rendered_html()`]
 /// reflects the resolved links. Until then, [`rendered_html()`] shows an
 /// unresolved fallback, so it always returns clean text.
 ///
@@ -167,16 +167,16 @@ const XREF_PLACEHOLDER_END: char = '\u{E001}';
 /// A footnote in a section title is a real, document-order footnote, but its
 /// marker must be kept out of the section's reference text and auto-generated
 /// ID. Marking the marker in a single render (rather than re-rendering the
-/// title with footnotes suppressed) means stateful substitutions – counters,
-/// attribute references that expand into footnotes – run exactly once. See
+/// title with footnotes suppressed) means stateful substitutions — counters,
+/// attribute references that expand into footnotes — run exactly once. See
 /// [`strip_footnote_marker_spans`] and
 /// [`Content::remove_footnote_marker_sentinels`].
 pub(crate) const FOOTNOTE_MARKER_START: char = '\u{E002}';
 pub(crate) const FOOTNOTE_MARKER_END: char = '\u{E003}';
 
-/// Removes each footnote marker span – a [`FOOTNOTE_MARKER_START`] …
+/// Removes each footnote marker span — a [`FOOTNOTE_MARKER_START`] …
 /// [`FOOTNOTE_MARKER_END`] region and everything between, i.e. the sentinels
-/// *and* the marker they bracket – leaving footnote-free text suitable for a
+/// *and* the marker they bracket — leaving footnote-free text suitable for a
 /// section's reference text and auto-generated ID.
 pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -187,7 +187,7 @@ pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
         rest = &rest[start + FOOTNOTE_MARKER_START.len_utf8()..];
 
         // Drop through the matching end sentinel (the marker text). A start
-        // without an end cannot occur – the substitution always emits both – but
+        // without an end cannot occur — the substitution always emits both — but
         // if it somehow did, drop the remainder rather than reintroduce the
         // stray sentinel.
         rest = match rest.find(FOOTNOTE_MARKER_END) {
@@ -202,8 +202,8 @@ pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
 
 /// Strips markup down to plain text, mirroring Asciidoctor's
 /// `Document::Title` sanitize option (`XmlSanitizeRx = /<[^>]+>/`): every tag
-/// – opening, closing, or self-contained (e.g. an `<img>` rendered from an
-/// inline `image:` macro) – is removed, any run of interior spaces left
+/// — opening, closing, or self-contained (e.g. an `<img>` rendered from an
+/// inline `image:` macro) — is removed, any run of interior spaces left
 /// behind by a removed tag is squeezed to one, and the result is trimmed.
 ///
 /// A value with no `<` is returned unchanged, matching Asciidoctor, which
@@ -257,8 +257,8 @@ pub(crate) fn sanitize_title(source: &str) -> String {
 /// cross-references it carries.
 ///
 /// A block title stashed across a section heading (see
-/// `Parser::pending_block_title`) cannot keep its borrowed [`Content`] – the
-/// parser it rides on has no `'src` lifetime – so the title travels in this
+/// `Parser::pending_block_title`) cannot keep its borrowed [`Content`] — the
+/// parser it rides on has no `'src` lifetime — so the title travels in this
 /// owned form and is rebuilt into a [`Content`] (via
 /// [`Content::from_owned_title`]) when the next block claims it. Carrying the
 /// deferred template and cross-references along means an embedded `<<id>>`
@@ -280,8 +280,8 @@ impl<'src> Content<'src> {
     pub(crate) fn from_filtered<T: AsRef<str>>(span: Span<'src>, filtered: T) -> Self {
         let filtered = filtered.as_ref();
 
-        // When filtering was a no-op – the filtered text is byte-identical to
-        // the source span – borrow the span rather than allocating an owned
+        // When filtering was a no-op — the filtered text is byte-identical to
+        // the source span — borrow the span rather than allocating an owned
         // copy of text we already hold.
         let rendered = if filtered == span.data() {
             CowStr::Borrowed(span.data())
@@ -430,8 +430,8 @@ impl<'src> Content<'src> {
     /// An inline passthrough (`+++…+++`, `++…++`, `$$…$$`, `pass:[…]`, or an
     /// inline STEM macro) is pulled out of the text before the other
     /// substitutions run and spliced back in afterward. This exposes that
-    /// collection – each entry's stored [`text`](Passthrough::text) and
-    /// resolved [`subs`](Passthrough::subs) – for inspection, analogous to
+    /// collection — each entry's stored [`text`](Passthrough::text) and
+    /// resolved [`subs`](Passthrough::subs) — for inspection, analogous to
     /// Asciidoctor's internal `@passthroughs` array.
     ///
     /// The slice is empty when the content has no passthroughs, and when the
@@ -1087,8 +1087,8 @@ fn render_template(
 /// macros substitution step, so any cross-reference (`<<id>>`, `xref:id[…]`)
 /// inside it cannot be resolved by the document-level pass that resolves
 /// references in block content. Instead, the footnote captures its
-/// cross-references here – as a placeholder template plus the references in
-/// placeholder order – and they are resolved alongside the block references
+/// cross-references here — as a placeholder template plus the references in
+/// placeholder order — and they are resolved alongside the block references
 /// (see [`Footnote::resolve_references`]).
 ///
 /// [`Footnote::resolve_references`]: crate::document::Footnote::resolve_references

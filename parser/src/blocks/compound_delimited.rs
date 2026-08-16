@@ -2207,8 +2207,8 @@ mod tests {
     }
 
     mod section_heading_suppressed {
-        //! A `== …` line inside a delimited block is literal content – a
-        //! paragraph – not a section heading (matching Asciidoctor, which only
+        //! A `== …` line inside a delimited block is literal content — a
+        //! paragraph — not a section heading (matching Asciidoctor, which only
         //! creates sections at the document level or within a section body). A
         //! discrete heading, by contrast, is an ordinary block and remains
         //! valid inside a delimited block.

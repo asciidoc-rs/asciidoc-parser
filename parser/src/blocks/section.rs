@@ -63,8 +63,8 @@ impl<'src> SectionBlock<'src> {
 
         // A section heading is only recognized at the document top level or
         // within another section's body. Inside a delimited block (example,
-        // sidebar, open, or quote), a `== …` line is literal content – a
-        // paragraph – not a section, so decline here and let the line fall
+        // sidebar, open, or quote), a `== …` line is literal content — a
+        // paragraph — not a section, so decline here and let the line fall
         // through to `SimpleBlock`. A discrete heading is an ordinary block, not
         // a section, and remains valid in these contexts, so it is not
         // suppressed.
@@ -76,8 +76,8 @@ impl<'src> SectionBlock<'src> {
 
         // The heading's effective level folds in the running `leveloffset`
         // document attribute. A positive offset (the usual case, from
-        // `include::[leveloffset=+1]`) pushes headings down – notably promoting
-        // an included file's level-0 document title (`=`) into a real section –
+        // `include::[leveloffset=+1]`) pushes headings down — notably promoting
+        // an included file's level-0 document title (`=`) into a real section —
         // while a negative offset pulls them up. A heading whose effective level
         // is below 1 is rejected as an unsupported level-0 heading (the warning
         // is raised inside `parse_title_line`).
@@ -150,7 +150,7 @@ impl<'src> SectionBlock<'src> {
         // Appendix sections are lettered (A, B, ...) independently of `sectnums`
         // because their title prefix is governed by the `appendix-caption`
         // attribute (see the "Appendix label" section of the spec). An appendix
-        // root – the section that directly carries the `appendix` style –
+        // root — the section that directly carries the `appendix` style —
         // therefore always advances the appendix counter so it (and the numbering
         // of any subsection) can derive its letter, even when `sectnums` is unset.
         // A level-0 section (a book part) is not numbered through `sectnums`
@@ -181,8 +181,8 @@ impl<'src> SectionBlock<'src> {
         // on {platform-name}]]`), whether the anchor sits above the heading
         // (`metadata.anchor_reftext`) or is embedded in the title
         // (`embedded_reftext`). Resolve them against the attributes in effect at
-        // the anchor's location – captured here, before the section body is
-        // parsed and can itself redefine those attributes – mirroring how the
+        // the anchor's location — captured here, before the section body is
+        // parsed and can itself redefine those attributes — mirroring how the
         // anchor ID and a `reftext=` attribute are already substituted when the
         // attribute list is parsed.
         let anchor_reftext = metadata
@@ -252,7 +252,7 @@ impl<'src> SectionBlock<'src> {
         // A footnote in the title is a real, document-order footnote, but its
         // marker must not leak into the section's reference text (an xref's link
         // text) or auto-generated ID. Marking the title's footnote markers with
-        // sentinels lets those be excised below from a single render – no second
+        // sentinels lets those be excised below from a single render — no second
         // substitution pass, so counters and attribute-expanded footnotes are
         // processed exactly once.
         let mut section_title = Content::from(title_span);
@@ -303,7 +303,7 @@ impl<'src> SectionBlock<'src> {
         // A block title above a section heading does not become the section's
         // title; it is carried over to the first block inside the section
         // (matching Asciidoctor). Stash it on the parser: the next block parsed
-        // claims it – usually the section's first child, or (when the section
+        // claims it — usually the section's first child, or (when the section
         // body is empty) the sibling section that follows, which re-stashes it
         // for its own first block. A discrete heading is an ordinary block, not
         // a section, so it keeps its title. See `Block::parse_internal` for the
@@ -455,7 +455,7 @@ impl<'src> SectionBlock<'src> {
     ///
     /// This function will return an integer between 1 and 5 for an ordinary
     /// section. It returns 0 for a level-0 (`=`) heading modeled as a `sect0`
-    /// section – a body document title / book part – and for a level-0 (`=`)
+    /// section — a body document title / book part — and for a level-0 (`=`)
     /// `discrete` (floating) heading rendered as an `<h1>` floating title.
     pub fn level(&self) -> usize {
         self.level
@@ -579,7 +579,7 @@ fn appendix_caption(parser: &Parser, number: &SectionNumber) -> String {
 /// Combines a reference signifier with a reference number for the
 /// `full`/`short` xrefstyle label. When the signifier is set the label is
 /// `"<signifier> <number>"` (e.g. `"Section 2.3"`); when it is unset (or empty)
-/// – as after `:!section-refsig:` – the signifier is dropped and only the
+/// — as after `:!section-refsig:` — the signifier is dropped and only the
 /// number remains.
 fn join_signifier(signifier: Option<&str>, number: &str) -> String {
     match signifier {
@@ -604,7 +604,7 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
 
     // `content_mut` keeps the default `None`: the section's own resolvable
     // content is its heading, which is resolved by the document-order title
-    // pass (see `document::title_refs`) rather than the per-content pass –
+    // pass (see `document::title_refs`) rather than the per-content pass —
     // that pass coordinates cross-references *between* titles (forward and
     // circular), which per-content resolution cannot see.
 
@@ -612,7 +612,7 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
         // A discrete (floating) heading is modeled by Asciidoctor as a block
         // with the `floating_title` context rather than a section, so a
         // consumer that switches on block context can tell it apart from an
-        // ordinary section – for instance, to exclude it from the table of
+        // ordinary section — for instance, to exclude it from the table of
         // contents or to pick a converter method.
         if self.section_type == SectionType::Discrete {
             "floating_title".into()
@@ -651,7 +651,7 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
 
     fn id(&'src self) -> Option<&'src str> {
         // An explicit ID above the heading wins, and an attribute-list ID
-        // (`[id=…]`/`[#id]`) takes precedence over a `[[id]]` block anchor –
+        // (`[id=…]`/`[#id]`) takes precedence over a `[[id]]` block anchor —
         // matching the precedence used when the section registers itself in the
         // catalog (see `attr_or_anchor_id` in `SectionBlock::parse`), so this
         // accessor reports the same ID the section is cross-referenced under.
@@ -703,7 +703,7 @@ const MAX_SECTION_LEVEL: i32 = 5;
 /// `(?: +\1)?` group of Asciidoctor's section-title regex.
 pub(crate) fn strip_symmetric_title_close(title: Span<'_>, marker: char, count: usize) -> Span<'_> {
     // The close must be separated from the title by an ASCII blank (space or
-    // tab), matching Asciidoctor's `CG_BLANK` (`[ \t]`) – not arbitrary Unicode
+    // tab), matching Asciidoctor's `CG_BLANK` (`[ \t]`) — not arbitrary Unicode
     // whitespace, so e.g. `== Title<NBSP>==` keeps its `==` as title text.
     const BLANK: [char; 2] = [' ', '\t'];
     let close = marker.to_string().repeat(count);
@@ -748,9 +748,9 @@ static EMBEDDED_SECTION_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
 /// absent).
 ///
 /// The `title` span must already have had any symmetric ATX close stripped. An
-/// *escaped* anchor (`Title \[[id]]`) is intentionally left intact – the ID is
+/// *escaped* anchor (`Title \[[id]]`) is intentionally left intact — the ID is
 /// not adopted and the title is returned unchanged so the inline-anchor
-/// substitution can unescape it – mirroring Ruby Asciidoctor.
+/// substitution can unescape it — mirroring Ruby Asciidoctor.
 fn match_embedded_section_anchor<'src>(
     title: Span<'src>,
 ) -> (Span<'src>, Option<&'src str>, Option<Span<'src>>) {
@@ -840,7 +840,7 @@ fn parse_title_line<'src>(
 
     // Fold in the running `leveloffset`. `saturating_add` keeps a hostile
     // offset (e.g. an absolute `:leveloffset:` near `i32::MAX`) from
-    // overflowing – a panic in debug builds and a wrap in release builds – the
+    // overflowing — a panic in debug builds and a wrap in release builds — the
     // syntactic level itself is at most 5.
     let syntactic_level = (count - 1) as i32;
     let effective_level = syntactic_level.saturating_add(offset);
@@ -856,7 +856,7 @@ fn parse_title_line<'src>(
     // A bare `=` (syntactic level 0) that no positive offset lifts to level 1 or
     // beyond is a document title appearing in the body. Rather than the document
     // title (the single-document-title rule forbids a second one), it models a
-    // level-0 section – Asciidoctor's `sect0`, rendered as `<h1 class="sect0">`,
+    // level-0 section — Asciidoctor's `sect0`, rendered as `<h1 class="sect0">`,
     // a book part under `:doctype: book`. It is carried through with level 0 so
     // the block model can represent it; `SectionBlock::parse` raises
     // [`WarningType::Level0SectionHeadingNotSupported`] for it under any doctype
@@ -878,7 +878,7 @@ fn parse_title_line<'src>(
     };
 
     // A bare `=` (syntactic level 0) whose effective level a negative offset
-    // pushes below 0 still floors at level 0 – the level-0 case – rather than
+    // pushes below 0 still floors at level 0 — the level-0 case — rather than
     // being reported as an out-of-range clamp. Its diagnostic is the
     // doctype-gated [`WarningType::Level0SectionHeadingNotSupported`] that
     // `SectionBlock::parse` raises, so no clamp warning is added for it here.
@@ -926,7 +926,7 @@ fn peer_or_ancestor_section<'src>(
     // (see `skip_comments_before_section`): a bare `=` counts as a section only
     // when a positive offset promotes it. Mirror the live parser's offset onto
     // the temporary parser so the boundary look-ahead makes the same decision
-    // the real parse will – otherwise a peer/ancestor section reached across
+    // the real parse will — otherwise a peer/ancestor section reached across
     // such a comment would be missed and wrongly nested. The stored offset is
     // already an absolute integer, so it needs no further resolution.
     let level_offset = parser.level_offset();
@@ -955,13 +955,13 @@ fn peer_or_ancestor_section<'src>(
     // `:leveloffset:` attribute entry, has already been applied), while `level`
     // is the current section's own effective level. A heading whose effective
     // level is below 1 has no section representation, so `parse_title_line`
-    // returns `None` and it is treated as ordinary content – exactly as an
+    // returns `None` and it is treated as ordinary content — exactly as an
     // un-offset level-0 heading would be.
     //
     // Any warnings the heading would raise (a clamped level, an unsupported
     // level-0 heading, ...) are discarded here: this is only a look-ahead to
-    // find the section boundary, and the heading is parsed again – recording
-    // those warnings once – either as a child block of this section or in the
+    // find the section boundary, and the heading is parsed again — recording
+    // those warnings once — either as a child block of this section or in the
     // enclosing scope once this section ends.
     let mut ignored_warnings = vec![];
 
@@ -997,8 +997,8 @@ fn peer_or_ancestor_section<'src>(
 /// Asciidoctor treats every section style other than the numbered `sect0`–
 /// `sect5` styles as a special section, and permits subsections only within the
 /// `appendix`, `preface`, and `abstract` special sections. The remaining
-/// well-known special sections – `glossary`, `bibliography`, `colophon`,
-/// `dedication`, and `index` – forbid them.
+/// well-known special sections — `glossary`, `bibliography`, `colophon`,
+/// `dedication`, and `index` — forbid them.
 fn special_section_forbids_subsections(style: &str) -> bool {
     matches!(
         style,
@@ -1007,7 +1007,7 @@ fn special_section_forbids_subsections(style: &str) -> bool {
 }
 
 /// Records a "section title out of sequence" warning for a *top-level* section
-/// whose level skips ahead of level 1 – the document root's expected first
+/// whose level skips ahead of level 1 — the document root's expected first
 /// child level. The nested case (a section skipping a level under its *parent
 /// section*) is handled during parsing by [`peer_or_ancestor_section`]; this
 /// covers the document-root case (e.g. `= Doc` followed directly by `=== X`),
@@ -2073,7 +2073,7 @@ mod tests {
         #[test]
         fn comment_transfer_boundary_respects_leveloffset() {
             // Under `:leveloffset: +2`, `== Parent` is level 3 and a bare
-            // `= Child` is level 2 – an ancestor that must end Parent. The
+            // `= Child` is level 2 — an ancestor that must end Parent. The
             // `[[x]]` anchor and the `// comment` before `= Child` transfer to
             // it, and the section-boundary look-ahead must apply the active
             // `leveloffset` (rather than a default offset of zero) so `= Child`

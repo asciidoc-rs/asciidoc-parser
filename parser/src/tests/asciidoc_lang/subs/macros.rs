@@ -128,7 +128,7 @@ mod default_macros_substitution {
         assert_eq!(revremark, "icon:heart[]-less");
 
         // The document *title* line itself is not part of this "Headers" row
-        // – it uses `SubstitutionGroup::Title` (the same steps as `Normal`),
+        // — it uses `SubstitutionGroup::Title` (the same steps as `Normal`),
         // so the same `icon:` macro there is rendered (verified against
         // Asciidoctor 2.0.26).
         let doc = Parser::default().parse("= Title icon:heart[]-less");

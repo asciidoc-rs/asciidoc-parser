@@ -126,8 +126,8 @@ We'll cover that modifier shortly.
     }
 
     // Block extensions are out of scope for the 1.0 release, so the block name →
-    // context mapping described here – an arbitrary block name mapped to one or
-    // more contexts by an extension's process method – has no corresponding
+    // context mapping described here — an arbitrary block name mapped to one or
+    // more contexts by an extension's process method — has no corresponding
     // parser behavior to verify. Treated as non-normative for now.
     non_normative!(
         r#"

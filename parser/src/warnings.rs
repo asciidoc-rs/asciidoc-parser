@@ -15,7 +15,7 @@ use crate::{Span, parser::SourceLine};
 /// [`Document::warnings`](crate::Document::warnings) regardless of severity; a
 /// host filters on this value to decide which diagnostics to act on. The
 /// variants are ordered from least to most severe, so a host can select "at or
-/// above" a threshold with an ordinary comparison – for example, keeping only
+/// above" a threshold with an ordinary comparison — for example, keeping only
 /// entries where `warning.severity >= WarningSeverity::Warning` suppresses the
 /// low-severity [`Debug`](Self::Debug) diagnostics.
 ///
@@ -65,8 +65,8 @@ pub struct Warning<'src> {
 
     /// Severity of this warning.
     ///
-    /// This is derived from [`warning`](Self::warning) – each [`WarningType`]
-    /// has a fixed severity – so a host can filter the
+    /// This is derived from [`warning`](Self::warning) — each [`WarningType`]
+    /// has a fixed severity — so a host can filter the
     /// [`Document::warnings`](crate::Document::warnings) stream by
     /// importance without matching on every individual type. Most diagnostics
     /// are [`WarningSeverity::Warning`]; a handful (such as an unknown block
@@ -83,7 +83,7 @@ pub struct Warning<'src> {
     /// `source.line()` through [`Document::source_map`].
     ///
     /// It is `Some` only when the warning arises from content that was expanded
-    /// *privately* and never appears in the document source – an `include::`
+    /// *privately* and never appears in the document source — an `include::`
     /// directive buried inside an owned (include-expanded) AsciiDoc table cell.
     /// No document span maps to such a directive, so its true `(file, line)` is
     /// resolved when the warning is raised (against the owning cell's own
@@ -359,8 +359,8 @@ pub enum WarningType {
     /// An include directive was not expanded because the file containing it
     /// already sits at the maximum include depth (the `max-include-depth`
     /// attribute, possibly lowered by an enclosing include directive's `depth`
-    /// attribute). The field is the relative maximum in effect – the number of
-    /// levels that were permitted below the file that established the limit –
+    /// attribute). The field is the relative maximum in effect — the number of
+    /// levels that were permitted below the file that established the limit —
     /// matching the number Asciidoctor reports.
     #[error("maximum include depth of {0} exceeded")]
     MaxIncludeDepthExceeded(usize),
@@ -368,8 +368,8 @@ pub enum WarningType {
     /// Block parsing reached the maximum nesting depth (the `max-block-nesting`
     /// attribute, default 32, API-only) before the innermost content was
     /// parsed, so the over-nested content was truncated rather than descended
-    /// into. This bounds native recursion – a delimited block's body, a section
-    /// body, a table cell, or a nested list each parse on a fresh call stack –
+    /// into. This bounds native recursion — a delimited block's body, a section
+    /// body, a table cell, or a nested list each parse on a fresh call stack —
     /// so a crafted document cannot overflow the stack and abort the process.
     /// The field is the limit in effect.
     #[error("maximum block nesting depth of {0} exceeded")]
@@ -408,7 +408,7 @@ pub enum WarningType {
 
     /// One or more tags named by an include directive's `tag` / `tags`
     /// attribute were never found in the include file. The field is the
-    /// pre-formatted, pluralized subject – `tag '<name>'` for a single missing
+    /// pre-formatted, pluralized subject — `tag '<name>'` for a single missing
     /// tag, or `tags '<name>, <name>'` (comma-joined, in the order specified)
     /// for several.
     #[error("{0} not found in include file")]
@@ -465,9 +465,9 @@ pub enum WarningType {
     ///
     /// The first field is the block's context (for example `open` or
     /// `paragraph`); the second is the unrecognized style as the author wrote
-    /// it. This is a [`WarningSeverity::Debug`] diagnostic – Asciidoctor logs
+    /// it. This is a [`WarningSeverity::Debug`] diagnostic — Asciidoctor logs
     /// the equivalent message (`unknown style for <context> block: <style>`)
-    /// only below its default `WARN` threshold – so a host suppresses it by
+    /// only below its default `WARN` threshold — so a host suppresses it by
     /// default.
     #[error("unknown style for {0} block: {1}")]
     UnknownBlockStyle(String, String),

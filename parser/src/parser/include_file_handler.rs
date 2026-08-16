@@ -88,7 +88,7 @@ pub trait IncludeFileHandler: Debug {
 /// The outcome of an [`IncludeFileHandler::resolve_target`] call: either the
 /// resolved content, or the reason resolution failed.
 ///
-/// The failure reasons map to distinct warnings – mirroring Asciidoctor, which
+/// The failure reasons map to distinct warnings — mirroring Asciidoctor, which
 /// distinguishes a missing include file (`include file not found`) from one
 /// that is present but unreadable (`include file not readable`) or present but
 /// not valid UTF-8 (`invalid byte sequence in UTF-8`).

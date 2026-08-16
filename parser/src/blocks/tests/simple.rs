@@ -891,7 +891,7 @@ fn terminal_empty_block_anchor_does_not_spin() {
     // decorates no block, so it is consumed (dropped) and yields no block.
     // Regression: an empty anchor consumed into empty metadata with no block
     // following once returned `NoMatch` on a non-blank source, which the
-    // block-collection loop leaves unadvanced – spinning forever.
+    // block-collection loop leaves unadvanced — spinning forever.
     let doc = Parser::default().parse("--\nBlock content\n[[]]\n--\n");
 
     let block = doc.child_blocks().next().unwrap();
@@ -1390,8 +1390,8 @@ fn comment_then_hashes_without_space_does_not_terminate_paragraph() {
     );
 }
 
-/// A single-line comment (`//`) placed directly above a block-metadata line –
-/// an attribute list, an anchor, etc., with no blank line between them – must
+/// A single-line comment (`//`) placed directly above a block-metadata line —
+/// an attribute list, an anchor, etc., with no blank line between them — must
 /// not detach that metadata from the block it decorates. Regression tests for
 /// the case where the first metadata line after the comment was surfaced as
 /// paragraph text.
@@ -1487,7 +1487,7 @@ mod comment_directly_above_metadata {
         // rejected by attribute-line parsing) is still treated as a block
         // boundary, exactly as it is when it directly follows ordinary
         // paragraph text. The comment is retained as its own block and the
-        // bracketed line renders as its own paragraph – the same rendered
+        // bracketed line renders as its own paragraph — the same rendered
         // output the pre-existing merged form produced, just as a distinct
         // block.
         let doc = Parser::default().parse("= T\n\nfirst\n\n// note\n[ foo]\n");

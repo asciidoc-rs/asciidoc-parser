@@ -3441,7 +3441,7 @@ mod psv {
         // Neither attribute set: the cell hides its title.
         assert_css(&default_doc, ".tableblock h1", 0);
 
-        // With `showtitle` enabled in the cell, the same title renders – proving
+        // With `showtitle` enabled in the cell, the same title renders — proving
         // only the "neither set" default changed.
         let shown_doc = Parser::default().parse(
             "= Document Title\n\n|===\na|\n= Nested Document Title\n:showtitle:\n\ncontent\n|===",

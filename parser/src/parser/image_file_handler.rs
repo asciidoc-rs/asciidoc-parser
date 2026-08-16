@@ -12,8 +12,8 @@ use crate::Parser;
 /// must provide an `ImageFileHandler` (analogous to [`SvgFileHandler`],
 /// [`IncludeFileHandler`], and [`DocinfoFileHandler`]) that maps a resolved
 /// image path to its bytes. If no handler is provided (or the handler cannot
-/// find the file), the image degrades to an ordinary web path – the same output
-/// as when `data-uri` is not set – matching this crate's convention that a
+/// find the file), the image degrades to an ordinary web path — the same output
+/// as when `data-uri` is not set — matching this crate's convention that a
 /// missing I/O handler is a silent, graceful degradation.
 ///
 /// [`Parser`]: crate::Parser

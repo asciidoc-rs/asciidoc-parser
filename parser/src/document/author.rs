@@ -20,14 +20,14 @@ use crate::{Parser, Span, content::Content};
 /// The [`name`], [`firstname`], [`middlename`], [`lastname`], and [`email`]
 /// accessors return the value that populates the corresponding document
 /// attribute (`author`, `firstname`, …). As in Asciidoctor, that value has the
-/// header substitution group applied – so a literal `<`, `>`, or `&` written on
+/// header substitution group applied — so a literal `<`, `>`, or `&` written on
 /// the author line is escaped (`&lt;`, `&gt;`, `&amp;`), matching what
 /// `{author}` and the rendered byline emit and what Asciidoctor's own
 /// `doc.author` / `authors[0].name` return.
 ///
 /// Each accessor has a `raw_` counterpart ([`raw_name`], [`raw_firstname`],
 /// [`raw_middlename`], [`raw_lastname`], [`raw_email`]) that returns the same
-/// value *before* that escaping – attribute references still resolved, but the
+/// value *before* that escaping — attribute references still resolved, but the
 /// literal special characters left as they were written. This mirrors
 /// Asciidoctor's internal, pre-substitution `metadata` hash and lets a consumer
 /// that escapes for HTML itself do so exactly once, rather than double-escaping
@@ -200,7 +200,7 @@ impl Author {
             }
         } else if names_only {
             // Input comes from an attribute entry (e.g. `:author:`) and does not
-            // match the author pattern – typically a name with four or more parts
+            // match the author pattern — typically a name with four or more parts
             // or one containing punctuation such as a comma. Asciidoctor still
             // partitions it by splitting on whitespace into at most three parts,
             // assigning any trailing parts to `lastname`. This path applies no
@@ -215,7 +215,7 @@ impl Author {
             // partitioning a *matching* line, not in this fallback.
             //
             // The rendered value has the header substitution group applied, so any
-            // literal `<`, `>`, or `&` is escaped – matching Asciidoctor's
+            // literal `<`, `>`, or `&` is escaped — matching Asciidoctor's
             // `apply_header_subs`. The raw value keeps those characters as written.
             let raw_name = condense_whitespace(source);
             let name = apply_author_special_characters(&raw_name, parser);
@@ -228,8 +228,8 @@ impl Author {
     /// `raw` is the entry's raw (pre-substitution) value and `substituted` is
     /// its substituted value (the stored attribute value). When the entry is a
     /// whole-value `pass:[…]` macro its substituted value is the resolved
-    /// content, so that value is partitioned – with any generated markup
-    /// stripped – rather than the raw macro syntax (see
+    /// content, so that value is partitioned — with any generated markup
+    /// stripped — rather than the raw macro syntax (see
     /// [`parse_substituted_names_only`]). Every other value is partitioned from
     /// the raw value as before, so plain names, attribute references, and
     /// inline emails are unaffected.
@@ -248,16 +248,16 @@ impl Author {
     }
 
     /// Parse a single author from a value that has *already* been through
-    /// attribute-value substitution and now carries generated inline HTML –
+    /// attribute-value substitution and now carries generated inline HTML —
     /// typically the rendered output of a `pass:[…]` macro in an `:author:`
     /// entry.
     ///
     /// This mirrors the `<`-branch of Asciidoctor's `process_authors` under
-    /// `names_only`: the full rendered value – with name-joiner underscores
-    /// turned to spaces – becomes the author's `name`, while the name parts are
+    /// `names_only`: the full rendered value — with name-joiner underscores
+    /// turned to spaces — becomes the author's `name`, while the name parts are
     /// partitioned from the value with its HTML tags removed, so the formatting
     /// does not leak into `firstname`/`middlename`/`lastname`. As in
-    /// Asciidoctor, no email is split off here – an email supplied through a
+    /// Asciidoctor, no email is split off here — an email supplied through a
     /// companion `:email:` entry is attached later.
     pub(crate) fn parse_substituted_names_only(substituted: &str) -> Option<Self> {
         let substituted = substituted.trim();
@@ -440,7 +440,7 @@ impl Author {
 /// derived `authorinitials` always overwrites an explicit `:authorinitials:`
 /// entry for the `authors` and `author_N` forms. Only a single `:author:` entry
 /// (handled inline in [`Header::parse`](crate::document::Header)) preserves an
-/// explicit override, exactly as Asciidoctor does – its `authorinitials`
+/// explicit override, exactly as Asciidoctor does — its `authorinitials`
 /// deletion guard lives only in the `author` branch of `process_authors`, not
 /// the `authors`/indexed branches.
 pub(crate) fn set_author_metadata(parser: &mut Parser, authors: &[Author]) {
@@ -537,11 +537,11 @@ fn join_name_parts(firstname: &str, middlename: Option<&str>, lastname: Option<&
 /// value such as `:author:`).
 ///
 /// A trailing `<email>` (or URL) is first split off so it is not absorbed into
-/// the name – mirroring the email group of the author pattern and Asciidoctor's
+/// the name — mirroring the email group of the author pattern and Asciidoctor's
 /// XML sanitization of a names-only value. The remaining name is then split on
 /// whitespace into at most three segments (Ruby's `String#split(nil, 3)`, which
 /// also drops leading whitespace). The trailing segment retains its interior
-/// text – so a four-plus-part name keeps its later parts in `lastname` – but
+/// text — so a four-plus-part name keeps its later parts in `lastname` — but
 /// has repeating spaces condensed to a single space. Each segment then has
 /// underscore joiners replaced with spaces.
 ///
@@ -696,8 +696,8 @@ where
     (name, firstname, middlename, lastname, email)
 }
 
-/// Build a single-name [`Author`] – one whose whole value is the `name` with no
-/// separate first/middle/last/email parts – from its rendered and raw forms.
+/// Build a single-name [`Author`] — one whose whole value is the `name` with no
+/// separate first/middle/last/email parts — from its rendered and raw forms.
 fn single_name_author(name: String, raw_name: String) -> Author {
     Author {
         firstname: name.clone(),
@@ -811,7 +811,7 @@ static NAMES_ONLY_EMAIL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(.*\S)\s+<([^>]+)>$").unwrap()
 });
 
-/// Returns whether `source` matches the author pattern – at most three
+/// Returns whether `source` matches the author pattern — at most three
 /// space-separated names with an optional trailing `<email>`.
 ///
 /// The `:author:` attribute-entry path uses this to tell whether a plain-name
@@ -824,14 +824,14 @@ pub(crate) fn matches_author_pattern(source: &str) -> bool {
 }
 
 /// Apply the header substitution group to an author-line fragment: special
-/// characters first, then attribute references – matching Asciidoctor's
+/// characters first, then attribute references — matching Asciidoctor's
 /// `apply_header_subs` (`HEADER_SUBS = [:specialcharacters, :attributes]`).
 ///
 /// Running special characters *before* attribute references escapes any literal
 /// `<`, `>`, or `&` in the fragment while leaving the expanded value of an
 /// attribute reference untouched, so an attribute whose value already contains
 /// markup (or a character reference) is inserted verbatim rather than escaped a
-/// second time – exactly as Asciidoctor's header subs behave. Numeric character
+/// second time — exactly as Asciidoctor's header subs behave. Numeric character
 /// references in the literal text are preserved (see
 /// [`apply_author_special_characters`]).
 fn apply_author_subs(source: &str, parser: &Parser) -> String {
@@ -850,8 +850,8 @@ fn apply_author_subs(source: &str, parser: &Parser) -> String {
 /// Resolve attribute references in `source` *without* applying the special-
 /// characters substitution.
 ///
-/// This yields the raw form of an author fragment – attribute references
-/// expanded, but any literal `<`, `>`, or `&` left as written – which populates
+/// This yields the raw form of an author fragment — attribute references
+/// expanded, but any literal `<`, `>`, or `&` left as written — which populates
 /// the [`Author`] `raw_*` fields. It is the attribute-references half of
 /// [`apply_author_subs`], mirroring the value Asciidoctor keeps in its
 /// internal, pre-substitution `metadata` hash.
@@ -876,7 +876,7 @@ fn resolve_attribute_references(source: &str, parser: &Parser) -> String {
 }
 
 /// Apply the special-characters substitution to `source`, escaping every
-/// literal `<`, `>`, and `&` – except the leading `&` of a numeric HTML
+/// literal `<`, `>`, and `&` — except the leading `&` of a numeric HTML
 /// character reference, which is left intact so a name such as `AsciiDoc&#174;`
 /// keeps its ® entity rather than degrading to `AsciiDoc&amp;#174;` (issue
 /// #757).
@@ -911,7 +911,7 @@ fn escape_special_characters(source: &str, parser: &Parser) -> String {
     content.rendered_html().to_string()
 }
 
-/// Matches a numeric HTML character reference – decimal (`&#174;`) or
+/// Matches a numeric HTML character reference — decimal (`&#174;`) or
 /// hexadecimal (`&#xAE;`). Mirrors the guard the author line uses when deciding
 /// whether a semicolon separates two authors (see
 /// [`AuthorLine`](crate::document::AuthorLine)); the leading `&` of such a
@@ -929,7 +929,7 @@ mod tests {
 
     // The `raw_*` accessors return the author value with attribute references
     // resolved but the header substitution group's special-characters escaping
-    // *not* applied – the value Asciidoctor keeps in its internal `metadata`
+    // *not* applied — the value Asciidoctor keeps in its internal `metadata`
     // hash. The rendered accessors are unaffected and keep escaping literal `<`,
     // `>`, and `&` to match `doc.author`/`{author}`.
     mod raw_accessors {
@@ -962,7 +962,7 @@ mod tests {
         fn implicit_line_with_literal_angle_brackets_keeps_them_raw() {
             // A line that does not match the author pattern (here because of the
             // comma) becomes a single name. The rendered value escapes the literal
-            // angle brackets – matching Asciidoctor's `doc.author` – while the raw
+            // angle brackets — matching Asciidoctor's `doc.author` — while the raw
             // value keeps them as written.
             let a = only_author(
                 "= Doc\nStuart Rackham, founder of AsciiDoc <founder@asciidoc.org>\n\nbody\n",
@@ -1010,7 +1010,7 @@ mod tests {
             // The literal `<`/`>` around the referenced email keep the expanded
             // value from matching the author pattern, so it is stored as a single
             // name. The rendered value escapes the brackets; the raw value resolves
-            // the references but leaves the brackets literal, and – importantly –
+            // the references but leaves the brackets literal, and — importantly —
             // keeps the same single-name structure as the rendered value rather
             // than re-splitting into name parts.
             let src = concat!(
@@ -1100,7 +1100,7 @@ mod tests {
             // When the trailing `<email>` survives into the rendered expansion
             // unescaped (here from an intrinsic attribute value, so the bracket is
             // literal in *both* the rendered and raw expansions), the email is
-            // split off in both – the alignment fix only suppresses a raw split
+            // split off in both — the alignment fix only suppresses a raw split
             // the rendered value did not also make.
             let mut parser = Parser::default().with_intrinsic_attribute(
                 "tail",
@@ -1118,7 +1118,7 @@ mod tests {
 
     // The `<`-branch of Asciidoctor's `process_authors` (`names_only`), reached
     // when an `:author:` attribute value's substitution produced inline HTML.
-    // The rendered markup – with name-joiner underscores turned to spaces –
+    // The rendered markup — with name-joiner underscores turned to spaces —
     // becomes `name`, while the name parts are partitioned from the tag-stripped
     // text so the formatting does not leak into them. No email is split off.
     mod parse_substituted_names_only {

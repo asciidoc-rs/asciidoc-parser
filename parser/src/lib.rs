@@ -11,8 +11,8 @@
 ///
 /// This is the value of the predefined `asciidoctor-version` attribute, and it
 /// is also the release that the reference test suite vendored in
-/// `ref/asciidoctor` is taken from. Update it here – and re-vendor
-/// `ref/asciidoctor` – when the crate starts tracking a newer Asciidoctor
+/// `ref/asciidoctor` is taken from. Update it here — and re-vendor
+/// `ref/asciidoctor` — when the crate starts tracking a newer Asciidoctor
 /// release.
 pub(crate) const ASCIIDOCTOR_VERSION: &str = "2.0.26";
 

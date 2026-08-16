@@ -644,7 +644,7 @@ fn header_cell_operator_overrides_column_alignment() {
 #[test]
 fn csv_header_cell_inherits_column_alignment() {
     // A data-format (CSV) header cell carries no per-cell specifier, so its
-    // alignment comes entirely from the column – including in the header row.
+    // alignment comes entirely from the column — including in the header row.
     let table = parse_table(
         "[format=\"csv\",cols=\"^.>2,1\",options=\"header\"]\n|===\nHeader A,Header B\nbody a,body b\n|===",
     );
@@ -754,8 +754,8 @@ fn asciidoc_cell_exposes_inherited_attributes_for_introspection() {
     // The cell's attribute state is scoped to the cell and restored on the parser
     // once the cell is parsed, so it can no longer be read from the parser. The
     // cell nonetheless retains a snapshot of it, letting a caller introspect the
-    // nested document's attributes – both those inherited from the parent and any
-    // the cell set for itself – after parsing has finished.
+    // nested document's attributes — both those inherited from the parent and any
+    // the cell set for itself — after parsing has finished.
     let doc = Parser::default().parse(
         ":parent-attr: inherited\n\n[cols=\"a\"]\n|===\n|\n:cell-attr: local\ncontent\n|===",
     );
@@ -1337,7 +1337,7 @@ fn bare_duplication_operator_clones_once() {
 
 #[test]
 fn huge_duplication_factor_does_not_overallocate() {
-    // A duplication factor is an amplifier – `1000000000*` would otherwise
+    // A duplication factor is an amplifier — `1000000000*` would otherwise
     // materialize a billion cells (a multi-gigabyte allocation). The factor is
     // clamped to `MAX_DUPLICATION_FACTOR` (1,000), so the expansion stays
     // bounded. This is the one place the implementation diverges from Asciidoctor,

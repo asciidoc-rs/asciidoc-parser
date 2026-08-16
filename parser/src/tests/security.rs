@@ -376,8 +376,8 @@ fn image_link_self_with_inline_raster_data_image_target_stays_a_live_link() {
 #[test]
 fn image_link_self_with_author_supplied_svg_data_uri_drops_the_wrapping_link() {
     // An SVG opened as a top-level document runs its embedded script, so an
-    // author-supplied `data:image/svg+xml` target – which `link=self` would
-    // promote into a followable `href` – is rejected, unlike a raster data URI
+    // author-supplied `data:image/svg+xml` target — which `link=self` would
+    // promote into a followable `href` — is rejected, unlike a raster data URI
     // (above) or a trusted embedded SVG (which is resolved from a file target,
     // not passed through as a URI). Only the anchor is dropped. (The `<` `>`
     // reaching the `src` are escaped by the special-characters step.)

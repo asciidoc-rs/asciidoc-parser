@@ -4688,7 +4688,7 @@ mod custom_blocks {
         // Asciidoctor asserts no messages at its *default* (WARN) severity. This
         // crate surfaces the unknown style as a `WarningSeverity::Debug`
         // diagnostic (see the debug-level test below), which a host suppresses
-        // by default. The default-severity view – warnings at WARN or above – is
+        // by default. The default-severity view — warnings at WARN or above — is
         // therefore empty, mirroring Asciidoctor.
         assert_eq!(
             doc.warnings()
@@ -4723,7 +4723,7 @@ mod custom_blocks {
         // warning, observable via `Document::warnings()`. The block keeps its
         // default `open` context; the style `foo` is retained but otherwise
         // ignored. The warning anchors at the block's delimiter line (the `--`,
-        // line 2) – not the `[foo]` style line above it – matching the `line 2`
+        // line 2) — not the `[foo]` style line above it — matching the `line 2`
         // Asciidoctor reports, and naming the offending style directly.
         let doc = Parser::default().parse("[foo]\n--\nbar\n--\n");
 
@@ -4797,16 +4797,16 @@ mod metadata {
     // the header is empty and `= …` is a level-0 section heading in the body.
     // This crate now honors the demotion *and* models the `= …` line as a
     // level-0 section (Asciidoctor's `sect0`) that a renderer emits as an `<h1>`
-    // heading, with the block title forwarded into that section's first block –
+    // heading, with the block title forwarded into that section's first block —
     // matching Asciidoctor's structure. What the crate does not reproduce is the
     // converter's page framing (`#header` / `#content` / `#preamble` wrappers)
     // nor the exact `h1.sect0` class placement (the test virtual DOM carries the
     // `sect0` class on the section's container, not the `<h1>`), so the Ruby
     // tests stay `non_normative!` for those framing assertions.
     //
-    // The crate's actual behavior on each input – the empty header, the level-0
+    // The crate's actual behavior on each input — the empty header, the level-0
     // section, the forwarded block title, and (under a non-`book` doctype) the
-    // `Level0SectionHeadingNotSupported` warning – is asserted by
+    // `Level0SectionHeadingNotSupported` warning — is asserted by
     // `block_title_above_document_title_demotes_it` and
     // `block_title_above_document_title_demotes_it_in_book_doctype` below; see
     // also `block_title_above_section_gets_carried_over_to_first_block_in_section`.
@@ -4855,8 +4855,8 @@ mod metadata {
     // `<h1 class="sect0">`; this crate models it as a level-0 section (rendered
     // as an `<h1>` inside a `sect0` container), raising
     // `Level0SectionHeadingNotSupported` under the default (non-`book`) doctype.
-    // The block title is forwarded into that section's first block – the
-    // `section paragraph` – exactly as Asciidoctor forwards it.
+    // The block title is forwarded into that section's first block — the
+    // `section paragraph` — exactly as Asciidoctor forwards it.
     #[test]
     fn block_title_above_document_title_demotes_it() {
         let doc = Parser::default().parse(".Block title\n= Section Title\n\nsection paragraph\n");
@@ -4875,7 +4875,7 @@ mod metadata {
         assert_eq!(warnings[0].source.line(), 2);
 
         // `= Section Title` is modeled as a level-0 section, rendered as an
-        // `<h1>` heading inside a `sect0` container – not as a literal paragraph.
+        // `<h1>` heading inside a `sect0` container — not as a literal paragraph.
         assert_xpath(&doc, "//*[@class=\"sect0\"]", 1);
         assert_xpath(
             &doc,
@@ -4901,7 +4901,7 @@ mod metadata {
     // (`:doctype: book`). The demotion is the same: the block title above
     // `= Document Title` empties the header and demotes the line to a level-0
     // section. Under `:doctype: book` that level-0 section is a legitimate book
-    // *part*, so – unlike the default-doctype case – no
+    // *part*, so — unlike the default-doctype case — no
     // `Level0SectionHeadingNotSupported` warning is raised. The part has no
     // direct content before `== First Section`, so the forwarded block title
     // travels through the empty part onto the first block of that first section,
@@ -4934,7 +4934,7 @@ mod metadata {
         assert_xpath(&doc, "//*[@class=\"sect0\"]//*[@class=\"sect1\"]", 1);
 
         // The block title is forwarded through the empty part onto the first
-        // block of the first section – the `paragraph`.
+        // block of the first section — the `paragraph`.
         assert_xpath(
             &doc,
             "//*[@class=\"sect1\"]//*[@class=\"paragraph\"]/*[@class=\"title\"][text()=\"Block title\"]",
