@@ -2577,6 +2577,75 @@ Each phase is a reviewable unit with a clear exit gate.
   parse in the suite) confirms the divergence set strictly **shrank**: one more whole-corpus source
   is gone and no new one appeared. As with every prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (a cross-reference text crossing an escaped special, via structured
+  display-text children):* every macro family in this module draws a boundary at an **atomic**
+  piece — "an escaped special or a rendered span" — and the two have been treated as one boundary
+  throughout, relaxed only where a family *consumes* the escaped delimiter and never slices it
+  (the angle-bracketed URL's `&lt;`/`&gt;`, a menu's `&gt;` submenu caret, the `<<id>>` shorthand's
+  own `&lt;&lt;`/`&gt;&gt;`). Auditing that pairing for the cross-reference family — the one whose
+  node holds nothing `Span`-typed at all, which is what already let it lift the *synthesized*-run
+  half of the same gate — found the two halves are not alike. A rendered span is opaque because
+  [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) stands it in as one
+  `SPAN_PLACEHOLDER` where the string pipeline's own haystack holds its **markup** inline; an
+  escaped [`CharRef`](../../parser/src/inlines/char_ref.rs)`::Special`, by contrast, contributes its
+  canonical entity — the *very bytes* that haystack carries at that position. So a family that
+  reads its values out of the match string sees exactly what the string replacer sees, and the
+  gate need not reject it.
+
+  A third gate, [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs),
+  expresses that distinction alongside its two siblings, and
+  [`find_xref_matches`](../../parser/src/content/inline_builder/macros/xref.rs) adopts it — the same
+  one-gate-per-family swap the synthesized-run lifts made. Every value the family computes then
+  follows unchanged, because each already came from the match string: the target (`xref:foo&bar[…]`
+  reads the id `foo&amp;bar`, exactly as the string replacer does), the `raw_text.contains('=')`
+  attribute-list probe, the attrlist parse itself (already over a newline-normalized *copy*, never a
+  source slice), and the shorthand's own `inner.split_once(',')`. The shorthand's
+  `id.contains('<')` guard needs no counterpart either: a literal `<` can only come from rendered
+  markup, which is still opaque, so the two pipelines agree by construction.
+
+  The one thing that did have to change is the **shape of the reference text**. Baking an
+  already-escaped `&lt;` into a single [`Text`](../../parser/src/inlines/inline_node.rs) child would
+  have the fold escape it a second time (a `Text` node is *logical* text — design §3.4), so a text
+  crossing an escaped special is instead rebuilt as **structured children** with
+  [`emit_range`](../../parser/src/content/inline_builder/quotes.rs): the special stays the `CharRef`
+  it already is, keeping its own precise `'src` span (#944), and folds back to the same entity the
+  string replacer's text carries. This is the shape a footnote's own content already has, reached
+  here for the first time by a reference-bearing family — and it is the mechanism the *remaining*
+  half of this boundary needs (see below). The one text a family computes rather than slices — an
+  attribute list's positional value, parsed off the escaped copy — takes the complementary
+  treatment: `unescape_specials` puts the entity back to its character so the node holds logical
+  text and the fold performs the single escape, a no-op for every text that carries no escaped
+  special. The string replacer's own `raw_text.replace("\\]", "]")` unescape applies per recovered
+  run, which is exact because a `\]` pair is two ordinary text characters and only a `CharRef`
+  splits a run.
+
+  Landing this also closed a latent gap of exactly the kind the `footnoteref:` and menu increments
+  closed for their own families: the macro form ran its escape branch *after* the gate, so an
+  escaped macro the gate rejected (`\xref:sec[with *bold* reftext]`) was left fully unrecognized —
+  backslash and all — where the string replacer drops the backslash and keeps the rest. The check is
+  hoisted ahead of the gate, mirroring `InlineXrefReplacer`'s own `caps.get(1)`-first order, and
+  needs no gate of its own: dropping the backslash keeps the rest of the match as its own original
+  nodes, which fold to exactly the bytes `caps[0][1..]` emits. (The shorthand already ran its escape
+  first, for the same reason.)
+
+  What remains deferred is the boundary's other half, unchanged and still the audit map's own
+  outstanding item: a display or reference text crossing a **rendered span**
+  (`xref:id[*bold*]`, `<<id,*bold*>>`, `link:x[*bold*]`). Its markup exists only at fold time, and
+  that markup is what the string replacer's `=` probe and the pattern's `]` boundary read — so
+  admitting it would mean invoking a renderer while building the tree, which this module does not
+  do (the same reasoning the bare-e-mail increment's boundary-class deferral records). The four
+  reference-bearing link/image families likewise keep the escaped-special boundary for now: each
+  holds a value that must ride on the node as an `'src` slice or as an already-final computed
+  string, so the lift is not the single gate swap it is here. Differential corpora extend the
+  existing cross-reference fixtures with an escaped special in a reference text (both spellings), in
+  an attribute-list text, in a *target*, escaped, inside a rendered span, and beside other
+  constructs, alongside structural tests pinning the recovered children's own precise spans and the
+  logical-text round trip; fixtures are added to the whole-pipeline combined-constructs corpus, the
+  broad general-purpose sweep, and the structural recorder cross-check, and a whole-document test
+  drives the real parse path end to end. Re-running the corpus-wide fold-parity audit (tree building
+  forced on for every parse in the suite) confirms no new divergence appeared. As with every prep
+  piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -2820,6 +2889,21 @@ Each phase is a reviewable unit with a clear exit gate.
        because that marker is how `link_form` tells its nodes from the other link passes' when
        replaying the string pipeline's registration order; see the step's own "landed as" note
        above.
+     - ✅ **prep (a cross-reference text crossing an escaped special).** The first half of the
+       audit's last remaining *normal*-order divergence — "a display or reference text crossing a
+       rendered span" — split apart: an escaped special is **not** like a rendered span, because
+       `build_match_string` gives a `CharRef::Special` its canonical entity (the string pipeline's
+       own haystack bytes) while a span is one opaque placeholder standing in for markup that
+       exists only at fold time. A third gate,
+       [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs),
+       names that distinction, and the cross-reference family — which holds nothing `Span`-typed —
+       adopts it with the same one-gate swap the synthesized-run lifts made, its reference text
+       becoming **structured children** via `emit_range` (so the special stays its own `CharRef`
+       and is escaped once, not twice) and an attribute-list positional value being unescaped back
+       to logical text. The family's escape check is hoisted ahead of the gate (the `footnoteref:`
+       and menu increments' own fix, for the identical reason). See the step's own "landed as"
+       note above. A text crossing a *rendered span* still defers, for every reference-bearing
+       family, as does an escaped special for the link and image families.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

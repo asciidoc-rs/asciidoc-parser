@@ -120,11 +120,21 @@
 //!   `Ref{Xref}` node is `Span`-typed (its own attribute list is parsed from a
 //!   normalized copy, never a source slice), so a cross-reference inside an
 //!   expanded attribute value is recognized with its exact target and text.
-//!   A display/reference text crossing a rendered span
+//!   That same gate also admits an **escaped special** for the
+//!   cross-reference family (`xref:sec[a<b]`, `<<sec,Tom & Jerry>>`): the
+//!   level's match string carries a
+//!   [`CharRef`](InlineNode::CharRef)`::Special`'s canonical entity, the very
+//!   bytes the string replacer's own escaped haystack holds there, so every
+//!   value this family reads off that string is what the string replacer read.
+//!   Its reference text then becomes **structured children** rather than one
+//!   sliced `Text` — the special stays the `CharRef` it already is, folding
+//!   back to the same entity instead of being escaped twice.
+//!   A display/reference text crossing a rendered *span*
 //!   (`link:x[*bold*]`, `xref:id[*bold*]`, `<<id,*bold*>>`) remains deferred for
-//!   every reference-bearing family, since a rendered span is an opaque piece
-//!   the node's single `Text` child cannot absorb without becoming structured
-//!   children (the shape a footnote's own content already needs). An anchor
+//!   every reference-bearing family: a span is one opaque placeholder here
+//!   where the string pipeline's haystack holds its markup inline, and that
+//!   markup — which only exists at fold time — is what the replacer's own
+//!   attribute-list `=` probe and the pattern's `]` boundary read. An anchor
 //!   renders from its id alone, so it is recognized whenever that id does not
 //!   cross a rendered span — its character class rules out an escaped special
 //!   entirely. Unlike every other reference-bearing family, an anchor is now
@@ -641,7 +651,9 @@ mod tests {
             "image:pic.png[Scaled,200,100]",
             "see <<target>> for more",
             "see <<target,the target>> now",
+            "see <<target,Tom & Jerry>> now",
             "xref:other.adoc#frag[Other] doc",
+            "xref:target[a < b & c] doc",
             "A claim.footnote:[the evidence]",
             "Named.footnote:disc[a discussion] then footnote:disc[].",
             "A claim.footnote:[the *strong* evidence and a link:https://e.org[source]]",
@@ -757,6 +769,15 @@ mod tests {
         assert_parity(
             "Visit https://example.org[the site] or mailto:a@example.org[email us], \
              then see <<conclusion,the conclusion>>.",
+        );
+
+        // Both cross-reference spellings carrying an *escaped special* in
+        // their reference text, beside a quoted span and a live attribute
+        // reference: the text becomes structured children (a `CharRef` between
+        // two `Text` runs) with the other families running around it.
+        assert_parity_with(
+            "See xref:intro[Tom & Jerry] and <<intro,1 < 2>> about *{product}*.",
+            with_product,
         );
 
         // Both shorthand cross-reference bodies in one sentence — a
