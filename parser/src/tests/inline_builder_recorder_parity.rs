@@ -791,6 +791,8 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "a +literal *stars*+ b",
         "line one +\nline two +\nline three",
         "line one\nline two +",
+        "*bold +*",
+        "*bold +\nmore +*",
         "stem:[a < b] expression",
         "asciimath:[a < b] inline",
         "latexmath:[x < y] inline",

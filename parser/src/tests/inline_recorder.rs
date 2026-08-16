@@ -321,6 +321,12 @@ const NORMAL_CORPUS: &[&str] = &[
     // Hard breaks across multiple lines, and one on the final line only.
     "line one +\nline two +\nline three",
     "line one\nline two +",
+    // A ` +` that ends a *span* is not at a line end in the rendered string
+    // (its closing tag follows), so it stays literal — unlike one that ends the
+    // content itself.
+    "*bold +*",
+    "*bold +\nmore +*",
+    "a link:https://example.org[text +] here",
     // STEM inline (asciimath / latexmath).
     "stem:[a < b] expression",
     "asciimath:[a < b] inline",
