@@ -2719,6 +2719,75 @@ Each phase is a reviewable unit with a clear exit gate.
   display text, an `Attrlist<'src>`) that a later increment must take up on its own terms. As with
   every prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (the auto-link / formal-URL family crossing an escaped special, the third
+  family to take the third gate):* the increment above named `INLINE_LINK`'s own
+  trailing-punctuation arithmetic as the value that keeps this family from the same one-gate swap.
+  Auditing it shows the arithmetic is not the obstacle the note assumed — it runs over the *match
+  string*, exactly as `InlineLinkReplacer`'s runs over its own escaped haystack, so the two agree by
+  construction — but it does have one *boundary* consequence, and that is the whole of what still
+  defers. So [`build_inline_link_node`](../../parser/src/content/inline_builder/macros/links.rs)
+  makes the swap to
+  [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs), for
+  **both** of the pattern's branches: a bare auto-link, a formal URL link, and an angle-bracketed
+  URL whose target or display text crosses an escaped special (`https://example.org/?a=1&b=2`,
+  `https://example.org[a < b]`, `<https://example.org/a&b>`) is recognized as the same
+  [`Ref`](../../parser/src/inlines/ref_node.rs)`{Link}` node its verbatim spelling builds, folding
+  through the identical `render_link`. Nothing on the node needs the source's own `<`/`>`/`&`: the
+  target is a computed string read off the match string, and the display text becomes **structured
+  children** through [`macro_text_children`](../../parser/src/content/inline_builder/macros/mod.rs),
+  the shared helper the cross-reference family introduced and the `link:` macro generalized — for a
+  *bare* link (an auto-link's URL, an angle link's interior) too, whose shown text is recovered from
+  the URL group's own range, offset past the `hide-uri-scheme` strip exactly as a bare `link:`
+  macro's is, rather than baked already-escaped into one `Text` the fold would escape twice. The
+  ANGLE branch keeps its own narrower gate — the `&lt;`/`&gt;` delimiters are escaped specials the
+  node consumes and never slices, so only the *interior* is gated — now expressed inside
+  [`build_angle_link_node`](../../parser/src/content/inline_builder/macros/links.rs) beside the
+  branch's two escapes. As in the four increments before it, the family's escape check is **hoisted
+  ahead of the gate**, mirroring `InlineLinkReplacer`'s own scheme-backslash-first order and closing
+  the same latent gap: an escaped `\https://example.org/*bold*` whose match the gate rejects now
+  still drops its backslash.
+
+  What the trailing-punctuation strip does cost is one narrow deferral, of a kind no earlier family
+  has had: the strip keys off the *target's final character* (a `;` or `:`, plus an adjacent `)`),
+  and a bare URL ending in a literal `&` reaches this pass as `…&amp;` — whose own final `;`
+  satisfies it. The string replacer happily splits that entity (target `…&amp`, a literal `;` after
+  the link); a node list cannot, because the boundary would fall *inside* a
+  [`CharRef`](../../parser/src/inlines/char_ref.rs) leaf that
+  [`emit_range`](../../parser/src/content/inline_builder/quotes.rs) can only emit whole. That one
+  form is left literal, pinned by its own divergence test, alongside the two boundaries the family
+  shares with its siblings: an attribute-list-bearing display text (parsed as a real
+  `Attrlist<'src>` from the source's own bytes) and a text or URL crossing a **rendered span**.
+
+  Landing this also closed a latent gap that had been live since the cross-reference increment first
+  introduced `macro_text_children`, and that this increment's own corpus-wide audit surfaced: the
+  helper recovered a non-crossing text by re-reading its `source_slice(…).data()`, on the reasoning
+  that a *verbatim* range maps one-to-one onto source. It does not always — a verbatim range need
+  not be **contiguous** in the source. An earlier step can drop a byte from the flow without
+  splicing a node in its place, and
+  [`apply_attribute_references`](../../parser/src/content/inline_builder/attribute_refs.rs) does
+  exactly that for an escaped reference (`link:x[\{name}]`), dropping the backslash as a *gap* in
+  the ranges it emits and leaving two adjacent verbatim runs whose match-string bytes run on while
+  their source spans skip one. Re-reading the enclosing span put the backslash back — a character
+  the string pipeline no longer carries — so all three families that build a display text through
+  the helper rendered it. The value now comes from
+  [`text_slice`](../../parser/src/content/inline_builder/quotes.rs), which slices the pieces
+  themselves (still borrowing `'src` for a single run, §4.5) and so cannot reintroduce a byte the
+  flow dropped; a range it declines falls through to the structured rebuild rather than to a
+  defensive fallback. Differential corpora extend the family's three fixture sets (non-angle,
+  `hide-uri-scheme`, and angle) with an escaped special in a target, in a display text, in both,
+  beside the `\]` unescape, the `^` suffix, the scheme strip and the punctuation strip, and in an
+  escaped link, alongside structural tests pinning the recovered children's own precise spans and
+  divergence tests for each form that still defers (an attribute-list text crossing a special, a
+  bare URL whose strip would split one, a restored entity, and a rendered span in either branch).
+  Registration parity is asserted for the escaped-special forms against an independent golden
+  parser, and fixtures are added to the whole-pipeline combined-constructs corpus, the broad
+  general-purpose sweep, and the structural recorder cross-check. Re-running the corpus-wide
+  fold-parity audit (tree building forced on for every parse in the suite) confirms no new
+  divergence appeared and that four previously-surviving ones are gone. The escaped-special boundary
+  now remains only for the **bare-e-mail** and **image** families, each of which holds a value (an
+  address baked as its own display text, an `Attrlist<'src>`) that a later increment must take up on
+  its own terms. As with every prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -2991,6 +3060,23 @@ Each phase is a reviewable unit with a clear exit gate.
        that keeps the boundary is a display text carrying an attribute list, parsed as a real
        `Attrlist<'src>` from the source's own bytes; see the step's own "landed as" note above.
        The auto-link/formal-URL, bare-e-mail, and image families still keep it.
+     - ✅ **prep (the auto-link / formal-URL family crossing an escaped special).** The third family
+       to take that third gate, in both of `INLINE_LINK`'s branches: a bare auto-link, a formal URL
+       link, and an angle-bracketed URL whose target or display text crosses one
+       (`https://example.org/?a=1&b=2`, `https://example.org[a < b]`, `<https://example.org/a&b>`)
+       is recognized, by the same swap and the same structured-children recovery — the ANGLE branch
+       keeping its own interior-only gate, now expressed inside `build_angle_link_node`, and the
+       family's escape check hoisted ahead of the gate as its four predecessors' were.
+       `INLINE_LINK`'s trailing-punctuation arithmetic, named earlier as this family's blocker,
+       turns out to agree with the replacer's by construction (both run over the escaped text) and
+       to cost only one narrow deferral: a bare URL ending in a literal `&`, whose strip would cut
+       inside the `&amp;` leaf. Landing this also fixed a latent gap in `macro_text_children` — a
+       *verbatim* range need not be contiguous in the source, so the value now comes from
+       `text_slice` rather than from re-reading the enclosing span, which had been reinstating the
+       backslash of an escaped attribute reference (`link:x[\{name}]`) for all three families that
+       use the helper. See the step's own "landed as" note above. The bare-e-mail and image families
+       still keep the escaped-special boundary, and a display text crossing a rendered span still
+       defers everywhere.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
