@@ -4,7 +4,7 @@
 //! This module defines the public node vocabulary described in the [inline AST
 //! architecture] design document. It is aligned with the Eclipse AsciiDoc
 //! Language project's [Abstract Semantic Graph (ASG)]: the ASG's small inline
-//! core – `span` / `ref` / `text` / `charref` / `raw` – forms the spine, and
+//! core — `span` / `ref` / `text` / `charref` / `raw` — forms the spine, and
 //! the constructs this crate supports beyond that core (images, footnotes, UI
 //! macros, index terms, callouts, anchors, line breaks, and STEM) are modeled
 //! as additional variants that project down to ASG-legal nodes when emitting
@@ -15,8 +15,8 @@
 //! These are **types only, with no wiring.** Nothing in the parser or the
 //! rendering pipeline produces or consumes them yet; [`Content`] still exposes
 //! inline content as a rendered string. The types are landed first so the
-//! public shape can be reviewed and the later phases – building the tree,
-//! making it canonical, and folding it back to HTML – can proceed against a
+//! public shape can be reviewed and the later phases — building the tree,
+//! making it canonical, and folding it back to HTML — can proceed against a
 //! stable vocabulary. Field sets on the crate-extension nodes are provisional
 //! and will be refined against the first real consumer.
 //!

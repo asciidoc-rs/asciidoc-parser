@@ -20,15 +20,15 @@ use crate::{
 /// span is recognized just as the string pipeline recognizes one inside
 /// rendered markup), then matches and splices at this level.
 ///
-/// It reuses the string pipeline's *exact* recognition –
-/// [`ATTRIBUTE_REFERENCE`] is now shared `pub(crate)` – so only the
+/// It reuses the string pipeline's *exact* recognition —
+/// [`ATTRIBUTE_REFERENCE`] is now shared `pub(crate)` — so only the
 /// recognition *sink* differs (§4.1): a resolved reference's value is spliced
 /// into the node stream, classified by [`split_attribute_value`] (design
 /// §3.4.1) rather than written into a `&mut String`.
 ///
 /// A `counter`/`counter2` directive (`{counter:name}`, `{counter2:name:seed}`)
 /// is recognized like any other reference: it resolves *and advances* the
-/// named document counter via [`Parser::counter`] – the same required side
+/// named document counter via [`Parser::counter`] — the same required side
 /// effect [`apply_footnotes`](super::footnotes::apply_footnotes) performs for
 /// footnote numbering, and for the same reason it cannot be deferred to the
 /// cutover the way every other macro family's catalog/warning side effect is
@@ -41,7 +41,7 @@ use crate::{
 /// [`attribute-missing`] mode, exactly as `AttributeReplacer` handles it.
 /// [`AttributeMissing::Skip`] (the default) and [`AttributeMissing::Warn`]
 /// leave the reference literal, which this step reproduces by recording no
-/// match at all – the surrounding gap logic then emits the source text
+/// match at all — the surrounding gap logic then emits the source text
 /// unchanged. [`AttributeMissing::Drop`] and [`AttributeMissing::DropLine`]
 /// *remove* content instead, so they need the line granularity the string
 /// pipeline's own `apply_attributes` gets from its line loop: see
@@ -51,8 +51,8 @@ use crate::{
 /// The `DropLine` mode's own diagnostic (Asciidoctor's "dropping line
 /// containing reference to missing attribute", recorded as a
 /// [`SkippingReferenceToMissingAttribute`] warning) is **not** raised here: it
-/// does not change the fold's output bytes, so – like every macro family's own
-/// catalog/warning side effect – it is deferred to the cutover (design §5.2
+/// does not change the fold's output bytes, so — like every macro family's own
+/// catalog/warning side effect — it is deferred to the cutover (design §5.2
 /// Phase 4, step 6). The same applies to `Warn` mode's warning, whose output
 /// this step already reproduces.
 ///
@@ -61,8 +61,8 @@ use crate::{
 /// [`apply_character_replacements`](super::char_replacements::apply_character_replacements),
 /// [`apply_macros`](super::macros::apply_macros), and
 /// [`apply_quotes`](super::quotes::apply_quotes)) now contributes a
-/// synthesized run's own `value` to the match string too – flagged
-/// [`synthesized`](super::quotes::Piece::synthesized) rather than opaque –
+/// synthesized run's own `value` to the match string too — flagged
+/// [`synthesized`](super::quotes::Piece::synthesized) rather than opaque —
 /// so `apply_character_replacements`'s pattern sweep, still ahead in the
 /// effective order, can match inside it exactly as it would over any other
 /// run (a follow-up to this step, closing the gap this doc comment used to
@@ -79,7 +79,7 @@ use crate::{
 /// image macro's non-empty attribute list (`image:sunset.jpg[{caption}]`) and
 /// a link's attribute-list-bearing display text (`link:x[{text},role=hl]`).
 /// A *wholly* expanded `link:`/`mailto:` macro defers for a second reason of
-/// its own – see `link_macro_level`'s own scope note in
+/// its own — see `link_macro_level`'s own scope note in
 /// [`macros::links`](super::macros).
 ///
 /// [`AttributeMissing::Drop`]: crate::content::AttributeMissing::Drop
@@ -92,7 +92,7 @@ use crate::{
 /// A `counter`/`counter2` directive's advance must happen in true left-to-right
 /// *document* order even though the splicing recursion below visits a
 /// [`Styled`](crate::inlines::Styled) child's content *before* its own level
-/// (so a later sub can match *inside* an earlier span – design note on
+/// (so a later sub can match *inside* an earlier span — design note on
 /// [`apply_quotes`](super::quotes::apply_quotes)). Left uncorrected, that
 /// would advance a directive nested in an earlier-positioned span *after* one
 /// that sits later in the same source but outside any span.
@@ -111,7 +111,7 @@ pub(super) fn apply_attribute_references<'src>(
 
     let missing = MissingHandling::for_content(&nodes, parser);
 
-    // Which top-level nodes carry a missing reference *inside a span* – found
+    // Which top-level nodes carry a missing reference *inside a span* — found
     // here, ahead of the recursion below, precisely because it must read the
     // content's own **pre-expansion** text (see [`styled_drop_indices`]).
     let span_drops = if missing == MissingHandling::DropLine {
@@ -265,9 +265,9 @@ fn line_structure_is_faithful(nodes: &[InlineNode<'_>]) -> bool {
 /// records each one's advanced value in `out`, keyed by the directive's
 /// absolute source byte offset.
 ///
-/// At each level this merges two kinds of event by source position – a
+/// At each level this merges two kinds of event by source position — a
 /// counter match found directly at this level, and a `Styled` sibling's own
-/// placeholder position (a recursion point) – so a directive nested inside an
+/// placeholder position (a recursion point) — so a directive nested inside an
 /// *earlier* sibling span is resolved before a *later* plain-text directive
 /// at this same level, and vice versa. See [`apply_attribute_references`]'s
 /// doc comment for why this must be a separate pass from the splicing
@@ -365,7 +365,7 @@ struct AttributeMatch {
 enum AttributeMatchKind {
     /// An escaped reference (`\{name}`, `{name\}`, `\{name\}`): drop the
     /// escaping backslash(es) and keep the rest of the match as literal
-    /// text, replacing nothing – mirroring the string replacer's
+    /// text, replacing nothing — mirroring the string replacer's
     /// `caps[1]`/`caps[5]` branch. One or two absolute offsets, ascending.
     Unescape { backslashes: Vec<usize> },
 
@@ -379,7 +379,7 @@ enum AttributeMatchKind {
 
     /// A `counter`/`counter2` directive: the named counter's advanced value is
     /// looked up from [`resolve_counters`]'s output (keyed by this match's
-    /// absolute source offset), *not* resolved here – see
+    /// absolute source offset), *not* resolved here — see
     /// [`apply_attribute_references`]'s doc comment for why resolution must
     /// happen as a separate, document-order pass. `counter` splices the
     /// looked-up value in, classified by [`split_attribute_value`];
@@ -418,7 +418,7 @@ fn attribute_references_level<'src>(
     // `styled_drop_indices`, which must run before the recursion) is safe
     // because that recursion only ever rewrites a `Styled` node's *children*,
     // and a `Styled` node contributes exactly one placeholder piece whatever
-    // they are – so this level's piece layout is the same before and after it.
+    // they are — so this level's piece layout is the same before and after it.
     let span_drop_offsets: Vec<usize> = pieces
         .iter()
         .filter(|piece| span_drops.contains(&piece.node_index))
@@ -739,7 +739,7 @@ fn find_attribute_matches(
         }
 
         // A `counter`/`counter2` directive resolves *and advances* the named
-        // counter rather than looking up an existing attribute – mirroring
+        // counter rather than looking up an existing attribute — mirroring
         // `AttributeReplacer`'s own counter branch exactly, including which
         // directive spelling displays the new value. The value itself was
         // already resolved by `resolve_counters`.
@@ -764,7 +764,7 @@ fn find_attribute_matches(
         // A reference is "missing" for `attribute-missing` purposes both when
         // the attribute was never assigned at all and when it was explicitly
         // unset (a document `:name!:` entry or an API override that unsets
-        // it) – both resolve to `InterpretedValue::Unset`. Only a value-less
+        // it) — both resolve to `InterpretedValue::Unset`. Only a value-less
         // `Set` attribute or a concrete `Value` counts as present, mirroring
         // `AttributeReplacer::replace_append`.
         if !parser.has_attribute(&lookup_name)
@@ -778,7 +778,7 @@ fn find_attribute_matches(
             }
 
             // Otherwise left unrecognized, so the surrounding gap logic emits
-            // the reference as literal text – what `AttributeMissing::Skip`
+            // the reference as literal text — what `AttributeMissing::Skip`
             // (the default) and `AttributeMissing::Warn` both do, and what the
             // shapes `MissingHandling` defers fall back to.
             continue;
@@ -904,11 +904,11 @@ fn rebuild_attribute_level<'src>(
 /// [`apply_special_characters`](super::special_chars::apply_special_characters)
 /// has already run and will not run again over spliced-in content, so a literal
 /// `<`, `>`, or `&` in `value` must **not** be re-escaped by the fold: it
-/// becomes a `Raw` leaf (verbatim). Everything else stays `Text` – logical
+/// becomes a `Raw` leaf (verbatim). Everything else stays `Text` — logical
 /// content that design §3.4.1 says
 /// [`apply_character_replacements`](super::char_replacements::apply_character_replacements) and [`apply_macros`](super::macros::apply_macros) (still ahead in the
 /// effective order) should recognize normally (a `(C)` in the value becomes
-/// a `CharRef`, a `link:` in it becomes a `Ref`) – true today for the former
+/// a `CharRef`, a `link:` in it becomes a `Ref`) — true today for the former
 /// (a follow-up to this step extended [`build_match_string`] to look inside a
 /// synthesized run, so no change was needed here), still deferred for the
 /// latter (see [`apply_attribute_references`]'s doc comment for why).
@@ -999,7 +999,7 @@ mod tests {
             // A reference to a missing attribute, under the default
             // (`AttributeMissing::Skip`) mode, stays literal.
             "a reference to {undefined-thing} here",
-            // Escapes: the reference stays literal, minus the backslash(es) –
+            // Escapes: the reference stays literal, minus the backslash(es) —
             // whether or not the attribute is set.
             "\\{set-name} stays literal",
             "{set-name\\} stays literal",
@@ -1061,7 +1061,7 @@ mod tests {
         }
 
         // A value-less `Set` attribute expands to nothing, while an explicitly
-        // *unset* one counts as missing – so under the default
+        // *unset* one counts as missing — so under the default
         // (`AttributeMissing::Skip`) mode its reference stays literal rather
         // than vanishing (issue #1117).
         use crate::parser::ModificationContext;
@@ -1118,7 +1118,7 @@ mod tests {
     fn an_escaped_reference_drops_the_backslash() {
         // The kept text is emitted as whatever nodes cover its (possibly
         // split, around the dropped backslash) source range, so this asserts
-        // on the *fold*, not node count/shape – the same choice
+        // on the *fold*, not node count/shape — the same choice
         // `an_escaped_quote_wraps_nothing` makes for the quotes step.
         for (source, expected) in [
             ("\\{name}", "{name}"),
@@ -1145,7 +1145,7 @@ mod tests {
         let parser = parser_with_attribute("tag", "<b>");
         let nodes = build(Span::new("{tag}"), &parser, None);
 
-        // The expansion splits into `Raw("<")`, `Text("b")`, `Raw(">")` –
+        // The expansion splits into `Raw("<")`, `Text("b")`, `Raw(">")` —
         // design §3.4.1's mix of node kinds, since `specialcharacters` has
         // already run and will not re-escape this spliced-in content.
         assert_eq!(nodes.len(), 3);
@@ -1156,7 +1156,7 @@ mod tests {
                 assert_eq!(value.as_ref(), "b");
                 // A synthesized value has no source of its own, so every
                 // sub-node falls back to the whole reference's span (design
-                // §4.4) – the same coarse fallback as `raw_location`.
+                // §4.4) — the same coarse fallback as `raw_location`.
                 assert_eq!(*location, raw_location);
             }
 
@@ -1172,7 +1172,7 @@ mod tests {
     #[test]
     fn a_replacement_inside_an_expanded_value_is_recognized() {
         // Design §3.4.1 says `replacements` still runs over an expanded
-        // value, so a `(C)` inside it becomes a `CharRef` – closing the gap
+        // value, so a `(C)` inside it becomes a `CharRef` — closing the gap
         // `build_match_string` documented as a follow-up: a synthesized
         // `Text` piece now contributes its own `value` to the match string
         // (flagged [`synthesized`](super::super::quotes::Piece::synthesized)
@@ -1197,7 +1197,7 @@ mod tests {
     #[test]
     fn a_replacement_straddling_a_synthesized_and_a_real_piece_is_recognized() {
         // The em-dash-without-space rule (`(\w)--`) needs its leading word
-        // character from one piece and its `--` from the next – exercised
+        // character from one piece and its `--` from the next — exercised
         // here across the boundary between a synthesized (attribute-expanded)
         // piece and the real, verbatim text that follows it, the case that
         // first exposed `s_to_src`'s own edge-vs-interior bug (see
@@ -1261,8 +1261,8 @@ mod tests {
     #[test]
     fn a_macro_inside_an_expanded_value_is_recognized() {
         // The counterpart of the divergence above: a family that computes
-        // every value it holds from the level's match string – here the
-        // `link:` macro, whose own marker is written in the source – is
+        // every value it holds from the level's match string — here the
+        // `link:` macro, whose own marker is written in the source — is
         // recognized inside a spliced value, with only the node's `location`
         // taking design §4.4's coarse fallback.
         let parser = parser_with_attribute("target", "https://example.org");
@@ -1295,7 +1295,7 @@ mod tests {
         // string pipeline's output byte-for-byte. Each fixture uses its own
         // pair of *independent* default parsers (one for `build`, one for
         // `golden_attributes_with`), so the counter each one advances never
-        // crosses over – the same test-independence footnote numbering needs
+        // crosses over — the same test-independence footnote numbering needs
         // (see `fold_matches_the_string_pipeline_through_footnotes` in
         // `footnotes.rs`). As long as both recognize the same occurrences in
         // the same left-to-right order, their numbering stays in lockstep.
@@ -1317,7 +1317,7 @@ mod tests {
             "page {counter:page} of many",
             "*{counter:n}*",
             // A directive outside a span and one nested inside it, in both
-            // relative orders – regression coverage for `resolve_counters`'s
+            // relative orders — regression coverage for `resolve_counters`'s
             // document-order pass (see
             // `a_counter_directive_advances_in_true_document_order_across_a_span_boundary`).
             "{counter:n} *{counter:n}*",
@@ -1391,7 +1391,7 @@ mod tests {
         // child's own content *before* its own level, so a naive
         // find-then-advance at match time would advance the directive nested
         // in the *later* span before the plain directive that precedes it in
-        // the source – reversing the numbering. `resolve_counters` fixes this
+        // the source — reversing the numbering. `resolve_counters` fixes this
         // by resolving every directive, across the whole tree, in one
         // document-order pass first.
         let nodes = build(
@@ -1495,7 +1495,7 @@ mod tests {
             "\\{undefined-thing}{undefined-thing}",
             "first\n\\{a\\}{undefined-thing}\nlast",
             // A `counter` directive likewise leaves its digits behind, so the
-            // line survives – while `counter2`, which displays nothing, leaves
+            // line survives — while `counter2`, which displays nothing, leaves
             // the line as empty as the dropped reference did.
             "{counter:n}{undefined-thing}",
             "first\n{counter2:n}{undefined-thing}\nlast",
@@ -1521,8 +1521,8 @@ mod tests {
             "_{looks-like-a-ref}_",
             "keep\n_{looks-like-a-ref}_\nkeep",
             "_{looks-like-a-ref}_ and {undefined-thing}",
-            // An *explicitly unset* attribute is missing too, so it drops – and
-            // empties its line – exactly as a never-assigned one does (issue
+            // An *explicitly unset* attribute is missing too, so it drops — and
+            // empties its line — exactly as a never-assigned one does (issue
             // #1117). A value-less *set* attribute is not missing: it expands
             // to nothing without arming the line check.
             "before {unset-thing} after",
@@ -1576,7 +1576,7 @@ mod tests {
             "*{two-lines}* {undefined-thing}",
             "keep\n{two-lines} {undefined-thing}\nkeep too",
             // A value that is itself reference-shaped. Neither pipeline
-            // re-scans its own replacement – `replace_all` never does – so the
+            // re-scans its own replacement — `replace_all` never does — so the
             // spliced `{nope}` stays literal and is *not* a missing reference:
             // it neither drops its own line nor, from inside a span, the
             // enclosing one. This is why the span-drop detection runs ahead of
@@ -1629,7 +1629,7 @@ mod tests {
     #[test]
     fn a_counter_directive_survives_a_dropped_neighbouring_line() {
         // A `counter` directive advances during `resolve_counters`, which runs
-        // over the whole tree before any line is dropped – exactly as the
+        // over the whole tree before any line is dropped — exactly as the
         // string pipeline advances a counter as its own line loop reaches it.
         // A directive on a *dropped* line has still advanced, so the survivor
         // after it numbers from there.
@@ -1642,7 +1642,7 @@ mod tests {
         assert_eq!(folded, "1\n3");
 
         // The string pipeline, driven by its own independent parser (each side
-        // advances the counter for real – design §5.3's two-independent-parsers
+        // advances the counter for real — design §5.3's two-independent-parsers
         // discipline), agrees.
         assert_eq!(
             golden_attributes_with(source, &parser_with_missing_mode("drop-line")),
@@ -1654,10 +1654,10 @@ mod tests {
     fn a_dropped_line_leaves_honest_spans_on_the_survivors() {
         // Dropping a line is a matter of *which* source ranges are emitted:
         // every surviving node still borrows from `'src` with its own precise
-        // line/col, including the re-emitted `\n` separator – which is the
+        // line/col, including the re-emitted `\n` separator — which is the
         // byte that terminated the previous survivor (line 1 here), not the
         // one that terminated the dropped line (design §4.4's precision stage
-        // – the structural assertion the Strategy-A tree cannot make).
+        // — the structural assertion the Strategy-A tree cannot make).
         let parser = parser_with_missing_mode("drop-line");
         let source = "first\n{undefined-thing}\nthird";
 
@@ -1673,7 +1673,7 @@ mod tests {
     fn a_real_documents_dropped_line_reaches_its_tree() {
         // End-to-end, through the real parse path: `attribute-missing` is read
         // off the document's own header, and `SubstitutionGroup::apply` clones
-        // the parser to build each content's tree – so a real paragraph whose
+        // the parser to build each content's tree — so a real paragraph whose
         // middle line the string pipeline dropped folds to exactly the
         // rendered string it produced. This is the shape that made this a
         // *blocker* for the authoritative fold rather than an unclaimed form:
@@ -1703,7 +1703,7 @@ mod tests {
     fn a_missing_reference_inside_a_multi_line_span_is_a_documented_divergence() {
         // A `Styled` span is one opaque placeholder in the match string, so a
         // span straddling a line break hides the `\n`s the string pipeline
-        // still sees in its own rendered markup – and with them the line
+        // still sees in its own rendered markup — and with them the line
         // correspondence a drop rests on. `MissingHandling::for_content`
         // therefore disables dropping for the whole content, leaving every
         // reference literal (this step's pre-increment behavior).
@@ -1719,7 +1719,7 @@ mod tests {
         );
 
         // The string pipeline, by contrast, drops the line the reference sits
-        // on – which here is the span's own second half.
+        // on — which here is the span's own second half.
         assert_eq!(golden_attributes_with(source, &parser), "<em>a");
     }
 

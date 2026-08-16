@@ -9,8 +9,8 @@ use crate::{
 /// ` +` has that ` +` replaced by a [`LineBreak`](InlineNode::LineBreak) leaf,
 /// the line content before it staying in place.
 ///
-/// Under the block-wide `hardbreaks` option – set on `attrlist` (the block's
-/// own attribute list) or via the document's `hardbreaks-option` attribute –
+/// Under the block-wide `hardbreaks` option — set on `attrlist` (the block's
+/// own attribute list) or via the document's `hardbreaks-option` attribute —
 /// [`apply_hardbreaks`] runs instead: *every* line ending becomes a break, not
 /// only one already marked with ` +`.
 pub(super) fn apply_post_replacements<'src>(
@@ -81,7 +81,7 @@ pub(super) fn apply_post_replacements<'src>(
 /// The `hardbreaks` form of the post-replacement substitution: every line
 /// ending (`\n`) in the level's match string becomes a break, mirroring the
 /// string pipeline's own `line.ends_with(" +")`-stripping, line-by-line
-/// rejoin exactly – a trailing ` +` is stripped rather than kept *and*
+/// rejoin exactly — a trailing ` +` is stripped rather than kept *and*
 /// doubled, and the level's *last* line (nothing follows its own `\n`, since
 /// there is none) never gets one, matching the string pipeline leaving the
 /// popped last line unbroken.
@@ -185,7 +185,7 @@ mod tests {
     fn a_trailing_hard_line_break_with_no_newline_after_it_still_breaks() {
         // The hard-line-break pattern anchors on `$` in multiline mode, which
         // matches at the end of the haystack as well as before each `\n`, so a
-        // ` +` that *ends* the content is a break too – there is no newline
+        // ` +` that *ends* the content is a break too — there is no newline
         // anywhere in this source (issue #1067).
         let nodes = build_src(Span::new("only +"));
 

@@ -144,7 +144,7 @@ static QUOTED_TEXT_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
 ///
 /// The rules are `pub(crate)` (via [`quote_subs`]) so the single-pass
 /// [`inline_builder`](crate::content::inline_builder) reuses the *exact* same
-/// patterns the string pipeline matches with – the design's core principle of
+/// patterns the string pipeline matches with — the design's core principle of
 /// changing the recognition *sink*, not the recognition itself (§4.1).
 pub(crate) struct QuoteSub {
     pub(crate) type_: QuoteType,
@@ -1103,7 +1103,7 @@ fn apply_character_replacements(
 ///
 /// The rules are `pub(crate)` (via [`character_replacements`]) so the
 /// single-pass [`inline_builder`](crate::content::inline_builder) reuses the
-/// *exact* same patterns the string pipeline matches with – the design's core
+/// *exact* same patterns the string pipeline matches with — the design's core
 /// principle of changing the recognition *sink*, not the recognition itself
 /// (§4.1). This mirrors how [`quote_subs`] is shared.
 pub(crate) struct CharacterReplacement {

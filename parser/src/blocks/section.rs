@@ -508,8 +508,8 @@ impl<'src> SectionBlock<'src> {
         self.section_title.set_rendered(rendered);
     }
 
-    /// Mirrors the section title's resolved cross-reference destinations –
-    /// computed by the document-order title resolution pass – into the title's
+    /// Mirrors the section title's resolved cross-reference destinations —
+    /// computed by the document-order title resolution pass — into the title's
     /// inline tree, so a caller that walks the title's
     /// [`inlines`](Content::inlines) sees the same destinations
     /// [`set_section_title_rendered`](Self::set_section_title_rendered)

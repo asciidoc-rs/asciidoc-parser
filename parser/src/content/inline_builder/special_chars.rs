@@ -15,11 +15,11 @@ use crate::{
 /// it under the group's effective order.
 #[derive(Clone, Copy)]
 enum SpecialLeaf {
-    /// A [`CharRef::Special`] the fold escapes – what the `SpecialCharacters`
+    /// A [`CharRef::Special`] the fold escapes — what the `SpecialCharacters`
     /// step itself produces when it acts on a run.
     CharRef,
 
-    /// A [`Raw`](InlineNode::Raw) leaf the fold emits verbatim – what a
+    /// A [`Raw`](InlineNode::Raw) leaf the fold emits verbatim — what a
     /// literal special is under an effective order that never runs
     /// `SpecialCharacters`, since the string pipeline leaves it untouched.
     Raw,
@@ -31,8 +31,8 @@ enum SpecialLeaf {
 /// every other node passes through (recursing into parent nodes' children).
 ///
 /// The split is driven by the node's **logical `value`**, not by its source
-/// span, so a *synthesized* value – an attribute expansion or a joined
-/// multi-line run that a later step may feed in under a custom `subs` order –
+/// span, so a *synthesized* value — an attribute expansion or a joined
+/// multi-line run that a later step may feed in under a custom `subs` order —
 /// is preserved rather than replaced by its source spelling. Precise spans are
 /// kept for the common verbatim run, where the value coincides with the source
 /// its `location` covers; see [`split_text`].
@@ -65,7 +65,7 @@ pub(super) fn apply_special_characters<'src>(
 }
 
 /// Classifies every literal `<`/`>`/`&` left in the finished tree as a
-/// [`Raw`](InlineNode::Raw) leaf – the §3.4.1 policy for an effective
+/// [`Raw`](InlineNode::Raw) leaf — the §3.4.1 policy for an effective
 /// substitution order whose steps **never include**
 /// [`SpecialCharacters`](crate::content::SubstitutionStep::SpecialCharacters).
 ///
@@ -82,15 +82,15 @@ pub(super) fn apply_special_characters<'src>(
 /// of `apply_special_characters`, and that ordering is what keeps it faithful:
 /// under such an order the string pipeline's own steps also match over text in
 /// which the specials are still literal, so every transducer must see them as
-/// ordinary [`Text`](InlineNode::Text) characters – not as the opaque leaf a
+/// ordinary [`Text`](InlineNode::Text) characters — not as the opaque leaf a
 /// `Raw` node is to [`build_match_string`](super::quotes::build_match_string).
 /// Only the finished tree's *classification* differs, so nothing about
 /// recognition changes.
 ///
-/// It recurses into every container a text run can be nested inside – a
+/// It recurses into every container a text run can be nested inside — a
 /// [`Styled`](crate::inlines::Styled) span, a [`Ref`](crate::inlines::Ref)'s
 /// own display children, an [`Anchor`](crate::inlines::Anchor)'s reference
-/// text, and a [`Footnote`](crate::inlines::Footnote)'s own children –
+/// text, and a [`Footnote`](crate::inlines::Footnote)'s own children —
 /// mirroring the containers [`fold_html`](super::fold_html) itself descends
 /// into.
 pub(super) fn classify_unescaped_specials<'src>(
@@ -134,16 +134,16 @@ pub(super) fn classify_unescaped_specials<'src>(
 /// Splits a [`Text`](InlineNode::Text) node's logical `value` into alternating
 /// text runs and `<`/`>`/`&` leaves of the kind `leaf` names.
 ///
-/// When `value` is exactly the source its `location` covers – the common
-/// verbatim run – each sub-node is sliced from `location`, so its
+/// When `value` is exactly the source its `location` covers — the common
+/// verbatim run — each sub-node is sliced from `location`, so its
 /// `line`/`col`/`offset` stay honest (issue #944) and its run text borrows from
-/// `'src`. When `value` is *synthesized* – it has no source of its own – the
+/// `'src`. When `value` is *synthesized* — it has no source of its own — the
 /// runs are owned slices of the value and every sub-node falls back to the
 /// whole `location` span, the documented coarse fallback (design §4.4).
 ///
 /// An **empty** value is kept as the node it already is rather than split.
 /// Neither splitter ever emits an empty run (there is nothing in one to
-/// escape), so splitting an empty node would silently delete it – and an empty
+/// escape), so splitting an empty node would silently delete it — and an empty
 /// `Text` can be load-bearing: a `<<id,>>` cross-reference's present-but-empty
 /// reference text is exactly one, and the fold tells it from an absent text by
 /// the child's *presence* (see `build_xref_shorthand_node` in
@@ -163,8 +163,8 @@ fn split_text<'src>(
     }
 }
 
-/// Splits a verbatim run – text that coincides with the source `location`
-/// covers – slicing each sub-span from `location` with the crate's span
+/// Splits a verbatim run — text that coincides with the source `location`
+/// covers — slicing each sub-span from `location` with the crate's span
 /// primitives so `line`/`col`/`offset` stay honest; a run is never emitted
 /// empty.
 fn split_verbatim<'src>(location: Span<'src>, leaf: SpecialLeaf, out: &mut Vec<InlineNode<'src>>) {
@@ -212,7 +212,7 @@ fn split_verbatim<'src>(location: Span<'src>, leaf: SpecialLeaf, out: &mut Vec<I
     }
 }
 
-/// Splits a synthesized `value` – text with no source span of its own – into
+/// Splits a synthesized `value` — text with no source span of its own — into
 /// owned [`Text`](InlineNode::Text) runs and specials of the kind `leaf` names,
 /// each carrying the whole `location` as its coarse fallback span; a run is
 /// never emitted empty.
@@ -458,7 +458,7 @@ mod tests {
     fn special_characters_preserves_a_synthesized_text_value() {
         // A synthesized `value` (standing in for an attribute expansion) does
         // not coincide with the source its `location` covers. The step must
-        // split the *logical value* – not re-derive text from the span – so the
+        // split the *logical value* — not re-derive text from the span — so the
         // expansion survives, with the whole `location` kept as each sub-node's
         // coarse fallback span.
         let location = Span::new("{x}");

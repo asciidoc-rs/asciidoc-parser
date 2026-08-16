@@ -91,7 +91,7 @@ pub struct Content<'src> {
     /// pre-substitution source, in parallel with the substitution pass that
     /// produced [`rendered`](Self::rendered).
     ///
-    /// This is a **derived artifact** – built alongside the rendered content,
+    /// This is a **derived artifact** — built alongside the rendered content,
     /// which remains the source of truth (making the tree canonical, with
     /// `rendered_html()` a fold of it, is the remaining half of the [inline
     /// AST architecture] design's step 6). It is populated only when
@@ -476,7 +476,7 @@ impl<'src> Content<'src> {
     /// [`Ref`](crate::inlines::Ref) node, so a caller that walks
     /// [`inlines`](Self::inlines) after the parse sees the same destinations
     /// the rendered string reflects (§4.3 of the design). Before resolution
-    /// – or for a standalone parse with no document catalog – a `Ref`
+    /// — or for a standalone parse with no document catalog — a `Ref`
     /// node's destination is `None`.
     ///
     /// [inline AST architecture design]: https://github.com/scouten/asciidoc-parser/blob/main/docs/design/inline-ast-architecture.md
@@ -712,9 +712,9 @@ impl<'src> Content<'src> {
         self.mirror_tree_xref_resolution(&block_ordered, &footnote_ordered);
     }
 
-    /// Installs a pre-computed list of resolved cross-reference destinations –
+    /// Installs a pre-computed list of resolved cross-reference destinations —
     /// in placeholder (document) order, as produced by
-    /// [`block_tree_xrefs`] – into this content's inline tree.
+    /// [`block_tree_xrefs`] — into this content's inline tree.
     ///
     /// This is the tree-facing half of
     /// [`resolve_references`](Self::resolve_references): where that method
@@ -727,8 +727,8 @@ impl<'src> Content<'src> {
     /// sees the resolved destinations the rendered string reflects.
     ///
     /// `footnote_ordered` carries the same thing for the cross-references
-    /// embedded in this content's **footnotes** – the complementary list, as
-    /// produced by [`footnote_tree_xrefs`] – which are installed into the
+    /// embedded in this content's **footnotes** — the complementary list, as
+    /// produced by [`footnote_tree_xrefs`] — which are installed into the
     /// tree's footnote subtrees. The two lists partition the deferred segments,
     /// so each is correlated against exactly the nodes it belongs to.
     ///
@@ -748,11 +748,11 @@ impl<'src> Content<'src> {
         // The correlation is positional, so it requires the tree to hold
         // exactly one node per segment. The single-pass builder leaves a
         // documented set of divergent forms unrecognized (e.g. a display text
-        // crossing a rendered span – see the `inline_builder` module), so the
+        // crossing a rendered span — see the `inline_builder` module), so the
         // tree can legitimately hold *fewer* cross-reference nodes than the
         // string pipeline deferred. When the counts differ the positional
-        // pairing is unknowable; the mirror is skipped for that list – leaving
-        // its nodes in their honest unresolved state – rather than assigning
+        // pairing is unknowable; the mirror is skipped for that list — leaving
+        // its nodes in their honest unresolved state — rather than assigning
         // destinations to the wrong nodes.
         if count_tree_xrefs(&self.inlines) == block_ordered.len() {
             let mut next = 0;
@@ -808,7 +808,7 @@ pub(crate) fn block_tree_xrefs(
 /// per deferred segment whose placeholder **no longer appears in `template`**,
 /// in segment order. A placeholder leaves the template only by being re-homed
 /// onto a footnote (see [`rehome_xref_placeholders`]), which happens when the
-/// footnote's text is extracted out of the block – and the footnotes are
+/// footnote's text is extracted out of the block — and the footnotes are
 /// extracted left to right, each scanning its own text left to right, so this
 /// order is the document order in which the tree's footnote subtrees hold their
 /// cross-reference nodes.
@@ -831,7 +831,7 @@ pub(crate) fn footnote_tree_xrefs(
 }
 
 /// Counts the [`Xref`](RefVariant::Xref) nodes an [`assign_tree_xrefs`] walk
-/// over `nodes` would visit – i.e. the block-level cross-reference slots of the
+/// over `nodes` would visit — i.e. the block-level cross-reference slots of the
 /// tree, excluding footnote subtrees (which [`count_footnote_tree_xrefs`]
 /// covers). Used to verify the positional correlation before assigning.
 fn count_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
@@ -851,7 +851,7 @@ fn count_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
 }
 
 /// Counts the [`Xref`](RefVariant::Xref) nodes an
-/// [`assign_footnote_tree_xrefs`] walk over `nodes` would visit – i.e. the
+/// [`assign_footnote_tree_xrefs`] walk over `nodes` would visit — i.e. the
 /// cross-reference slots inside the tree's footnote subtrees.
 fn count_footnote_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
     nodes
@@ -869,15 +869,15 @@ fn count_footnote_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
 }
 
 /// Walks an inline node slice in document order and installs each
-/// cross-reference's resolved destination from `ordered` – the resolved state
-/// of the block-level deferred segments, in placeholder order – advancing
+/// cross-reference's resolved destination from `ordered` — the resolved state
+/// of the block-level deferred segments, in placeholder order — advancing
 /// `next` past each [`Xref`](RefVariant::Xref) node it visits.
 ///
 /// Only [`Ref`](InlineNode::Ref) nodes of variant [`Xref`](RefVariant::Xref)
 /// consume a slot; a [`Link`](RefVariant::Link) has no catalog destination. The
 /// pre-order traversal visits cross-references in the same left-to-right order
 /// the substitution assigned their placeholders, so node *i* receives segment
-/// *i*'s destination – overwritten unconditionally (to `Some` or `None`) so a
+/// *i*'s destination — overwritten unconditionally (to `Some` or `None`) so a
 /// repeated resolution reflects the latest result. A node with no matching slot
 /// (a count mismatch, guarded against by the caller) is left untouched.
 ///
@@ -916,8 +916,8 @@ fn assign_tree_xrefs(
 
 /// Walks an inline node slice in document order and installs each
 /// **footnote-embedded** cross-reference's resolved destination from `ordered`
-/// – the resolved state of the re-homed deferred segments, in segment order (as
-/// produced by [`footnote_tree_xrefs`]) – advancing `next` past each one.
+/// — the resolved state of the re-homed deferred segments, in segment order (as
+/// produced by [`footnote_tree_xrefs`]) — advancing `next` past each one.
 ///
 /// The block walk skips footnote subtrees, so this is the pass that reaches
 /// them: for each [`Footnote`](InlineNode::Footnote) node it hands the

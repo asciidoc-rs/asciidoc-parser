@@ -2330,7 +2330,7 @@ impl Parser {
     /// counter-safe recognition pass per block over the same source, so the
     /// default parse path is unchanged in both output and performance. The
     /// switch is expected to retire once the inline AST becomes the canonical
-    /// representation (with `rendered_html()` a fold of it – the remaining
+    /// representation (with `rendered_html()` a fold of it — the remaining
     /// half of the design's step 6 cutover).
     ///
     /// A custom [`InlineSubstitutionRenderer`] is consulted while the tree is

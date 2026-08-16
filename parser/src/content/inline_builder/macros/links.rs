@@ -26,11 +26,11 @@ use crate::{
 ///
 /// # Scope
 ///
-/// This increment covers [`INLINE_LINK`]'s **non-angle branch** – a bare
+/// This increment covers [`INLINE_LINK`]'s **non-angle branch** — a bare
 /// auto-linked URL (`https://example.org`) and a formal URL link
-/// (`https://example.org[text]`, `https://example.org[]`) – and its **ANGLE
-/// branch** – an angle-bracketed URL (`<https://example.org>`) and the
-/// bracketed form that keeps its `&lt;` (`<https://example.org[text]`) – in
+/// (`https://example.org[text]`, `https://example.org[]`) — and its **ANGLE
+/// branch** — an angle-bracketed URL (`<https://example.org>`) and the
+/// bracketed form that keeps its `&lt;` (`<https://example.org[text]`) — in
 /// their verbatim,
 /// attribute-list-free forms, reproducing the string replacer's boundary-prefix
 /// preservation, bare-URL trailing-punctuation stripping, `^` new-window
@@ -48,19 +48,19 @@ use crate::{
 ///   `'src`, exactly as [`link_macro_level`] defers it: the attribute list is
 ///   parsed from a newline-normalized *copy* of the text, and only a text with
 ///   no embedded newline *and* no [`synthesized`](Piece::synthesized) run in it
-///   has an `'src` slice that copy coincides with – the one thing an
+///   has an `'src` slice that copy coincides with — the one thing an
 ///   [`Attrlist`]`<'src>` cannot do without.
-/// - A match crossing an [`atomic`](Piece::atomic) piece – a URL crossing an
+/// - A match crossing an [`atomic`](Piece::atomic) piece — a URL crossing an
 ///   escaped special ([`CharRef`](InlineNode::CharRef)) or a rendered
-///   [`Styled`](crate::inlines::Styled) span – is deferred exactly as the image
+///   [`Styled`](crate::inlines::Styled) span — is deferred exactly as the image
 ///   increment defers `image:a&b.png[]`. For the ANGLE branch this means the
 ///   URL *between* the delimiters: the delimiters themselves are escaped
 ///   specials by construction (see [`build_inline_link_node`]).
 ///
-/// A [`synthesized`](Piece::synthesized) run (an attribute expansion, or –
-/// reached at a tree's root – a filtered multi-line block's own joined seed)
-/// **is** admitted: every value this pass's nodes hold – the scheme, the URL,
-/// and the bracketed display text – is computed out of the level's match
+/// A [`synthesized`](Piece::synthesized) run (an attribute expansion, or —
+/// reached at a tree's root — a filtered multi-line block's own joined seed)
+/// **is** admitted: every value this pass's nodes hold — the scheme, the URL,
+/// and the bracketed display text — is computed out of the level's match
 /// string, which carries a synthesized run's bytes exactly, so
 /// `https://{host}/path` and `{url}[Docs]` are recognized with only the node's
 /// `location` taking design §4.4's coarse fallback. The one exception is the
@@ -97,7 +97,7 @@ pub(super) fn inline_link_level<'src>(
 
 /// Finds every recognized auto-link / formal-URL / angle-bracketed link at this
 /// level, skipping a `link:` macro match and any form
-/// [`build_inline_link_node`] defers – including a non-verbatim one, whose gate
+/// [`build_inline_link_node`] defers — including a non-verbatim one, whose gate
 /// now lives inside that function (it needs the branch's own capture groups to
 /// know which sub-range of the match must be verbatim; see
 /// [`inline_link_level`]).
@@ -145,9 +145,9 @@ fn find_inline_link_matches<'src>(
 /// for a form this increment defers or that the string step leaves literal (see
 /// [`inline_link_level`]).
 ///
-/// The value computation mirrors [`InlineLinkReplacer`] exactly – target, bare
+/// The value computation mirrors [`InlineLinkReplacer`] exactly — target, bare
 /// vs. labeled display text, `hide-uri-scheme`, the `^` window suffix, and the
-/// trailing-punctuation strip – so the fold reproduces the same bytes through
+/// trailing-punctuation strip — so the fold reproduces the same bytes through
 /// the same `render_link` [`link_macro_level`]'s nodes fold through. The
 /// replacer's own angle-bracketed special case (`<url>`: no boundary prefix
 /// kept, no trailing-punctuation strip, the whole match consumed) is mirrored
@@ -156,12 +156,12 @@ fn find_inline_link_matches<'src>(
 ///
 /// # The gate lives here
 ///
-/// A match crossing an [`atomic`](Piece::atomic) piece – an escaped special
+/// A match crossing an [`atomic`](Piece::atomic) piece — an escaped special
 /// ([`CharRef`](InlineNode::CharRef)) or a rendered
-/// [`Styled`](crate::inlines::Styled) span – is deferred. *Which* sub-range the
+/// [`Styled`](crate::inlines::Styled) span — is deferred. *Which* sub-range the
 /// gate covers depends on the branch, which is why the check sits here rather
 /// than in [`find_inline_link_matches`]: the ANGLE branch's `&lt;` prefix and
-/// `&gt;` terminator are themselves escaped specials – atomic pieces – under
+/// `&gt;` terminator are themselves escaped specials — atomic pieces — under
 /// every effective order that escapes them, so gating the whole match would
 /// defer that branch outright. Those two delimiters carry no value a node
 /// slices (the replacer emits neither), so for the ANGLE branch the gate covers
@@ -176,7 +176,7 @@ fn find_inline_link_matches<'src>(
 /// Like every macro family in this additive builder, it deliberately performs
 /// *no* recognition side effect: it does **not** `register_link` the target in
 /// the document's asset catalog, because the builder is not yet the
-/// authoritative recognition sink – the string pipeline still registers it, and
+/// authoritative recognition sink — the string pipeline still registers it, and
 /// registering it here too would double-count it. The cutover (design §5.2
 /// Phase 4, step 6) re-attaches this registration, so
 /// `Document::catalog().links()` stays populated by the string pipeline until
@@ -216,7 +216,7 @@ fn build_inline_link_node<'src>(
     }
 
     // An escaped scheme (`\https://…`) keeps the boundary prefix and drops the
-    // single backslash, leaving the rest of the match literal – no link node.
+    // single backslash, leaving the rest of the match literal — no link node.
     if scheme.starts_with('\\') {
         return Some(MacroMatch {
             kind: MacroMatchKind::Unescape {
@@ -256,7 +256,7 @@ fn build_inline_link_node<'src>(
         }
 
         // Strip a trailing ';' or ':' (and an adjacent ')') off a bare URL,
-        // keeping it as literal text after the link – mirroring the string
+        // keeping it as literal text after the link — mirroring the string
         // replacer, which keys off the target's final character.
         let mut stripped = 0usize;
 
@@ -302,7 +302,7 @@ fn build_inline_link_node<'src>(
         // (`Ref::attrs`'s own field docs explain why `roles`/`window` alone
         // are not enough). A text that *does* embed a newline still needs a
         // synthesized (owned) copy the node cannot hold yet, so that one form
-        // remains deferred – as does one crossing a
+        // remains deferred — as does one crossing a
         // [`synthesized`](Piece::synthesized) run, whose match-string bytes
         // have no `'src` slice at all (the one sub-range this family's
         // expanded-value lift cannot cover).
@@ -388,13 +388,13 @@ fn build_inline_link_node<'src>(
 }
 
 /// Builds one [`MacroMatch`] for an angle-bracketed URL (`<https://example.org>`
-/// – [`INLINE_LINK`]'s ANGLE branch with no `[…]`), mirroring
+/// — [`INLINE_LINK`]'s ANGLE branch with no `[…]`), mirroring
 /// [`InlineLinkReplacer`]'s own angle path exactly. That path differs from the
 /// general one in three ways, each reproduced here:
 ///
 /// - **The delimiters are consumed, not kept.** The replacer emits *only* the
 ///   rendered link for the whole match, so the node's `consumed` range is the
-///   whole match – the `&lt;` prefix and `&gt;` terminator included – rather
+///   whole match — the `&lt;` prefix and `&gt;` terminator included — rather
 ///   than starting at the scheme the way a boundary-prefixed non-angle link
 ///   does.
 /// - **No trailing-punctuation strip and no "bare scheme with no body"
@@ -404,18 +404,18 @@ fn build_inline_link_node<'src>(
 ///   carries a `window`, and folds through an empty attribute list.
 /// - **Both escapes are honored.** A `\` before the `&lt;` and a `\` before the
 ///   scheme each drop that one backslash and leave the rest of the match
-///   literal – two [`Unescape`](MacroMatchKind::Unescape)s where the general
+///   literal — two [`Unescape`](MacroMatchKind::Unescape)s where the general
 ///   path has only the scheme one.
 ///
-/// Returns `None` for the ANGLE branch's remaining alternative – a URL with no
-/// closing `&gt;` (`<https://example.org`) – which the replacer emits unchanged.
+/// Returns `None` for the ANGLE branch's remaining alternative — a URL with no
+/// closing `&gt;` (`<https://example.org`) — which the replacer emits unchanged.
 /// (Its third alternative, a `[…]` attribute list, never reaches here: the
 /// caller delegates only when `attrlist` did not participate, exactly as the
 /// replacer branches.)
 ///
 /// Like the rest of this additive builder it performs no `register_link` side
 /// effect; [`apply_link_side_effects`] stages that for the cutover, and needs
-/// no angle-specific case – an angle node is `InlineLinkReplacer`'s own pass,
+/// no angle-specific case — an angle node is `InlineLinkReplacer`'s own pass,
 /// so [`link_form`] already classifies it as
 /// [`AutoOrFormal`](LinkForm::AutoOrFormal) from its `location` and `target`.
 ///
@@ -496,7 +496,7 @@ fn build_angle_link_node<'src>(
 /// Neither of the two callers can be left with nothing by the strip:
 /// [`INLINE_LINK`]'s bare branch rejects a bare scheme with no body upstream,
 /// and its ANGLE branch's `<url>` alternative requires at least one character
-/// between the delimiters – so, unlike a bare `link:`/`mailto:` macro, this
+/// between the delimiters — so, unlike a bare `link:`/`mailto:` macro, this
 /// does *not* fall back to the whole target.
 fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
     if parser.is_attribute_set("hide-uri-scheme") {
@@ -522,20 +522,20 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 /// - **Auto-links and formal-URL links** (`https://example.org`, `https://example.org[text]`)
 ///   are matched by a *different* pattern (`INLINE_LINK`, with its bare-URL
 ///   trailing-punctuation handling) and are a separate later increment.
-/// - **A link text that carries an attribute list** – a `,` in a `mailto:` text
+/// - **A link text that carries an attribute list** — a `,` in a `mailto:` text
 ///   (its `subject`/`body`) or an `=` in a `link:` text (roles / id / title /
-///   window) – is deferred unless the bracketed text is verbatim `'src`,
+///   window) — is deferred unless the bracketed text is verbatim `'src`,
 ///   because that attribute list is parsed from a newline-normalized *copy* of
 ///   the text and only a text with no embedded newline and no
 ///   [`synthesized`](Piece::synthesized) run in it has a source slice that copy
-///   coincides with – the one thing an [`Attrlist`]`<'src>` cannot do without.
-/// - **A match crossing an [`atomic`](Piece::atomic) piece** – a macro whose
+///   coincides with — the one thing an [`Attrlist`]`<'src>` cannot do without.
+/// - **A match crossing an [`atomic`](Piece::atomic) piece** — a macro whose
 ///   target or text crosses an escaped special
 ///   ([`CharRef`](InlineNode::CharRef)) or a rendered
-///   [`Styled`](crate::inlines::Styled) span (`link:a&b[]`, `link:x[*bold*]`) –
+///   [`Styled`](crate::inlines::Styled) span (`link:a&b[]`, `link:x[*bold*]`) —
 ///   is deferred exactly as the image increment defers `image:a&b.png[]`.
-/// - **A macro whose own `link:`/`mailto:` marker is not verbatim** – a
-///   *wholly* expanded macro (`:m: link:index.html[Docs]`, then `{m}`) – is
+/// - **A macro whose own `link:`/`mailto:` marker is not verbatim** — a
+///   *wholly* expanded macro (`:m: link:index.html[Docs]`, then `{m}`) — is
 ///   deferred. Its target and bracketed text could be read from the match
 ///   string like every other value here, but the node's `location` would then
 ///   fall back to the expansion's coarse span (design §4.4), and that location
@@ -550,7 +550,7 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 /// string, which carries an expanded value's bytes exactly.
 ///
 /// A `link:` (not `mailto:`) target whose scheme could execute script
-/// (`javascript:`, `data:`, `vbscript:`) is likewise left literal – matching
+/// (`javascript:`, `data:`, `vbscript:`) is likewise left literal — matching
 /// the string step, which neutralizes it, so it renders identically; the
 /// additive builder simply skips the `record_substitution_warning` side effect
 /// the string step performs there.
@@ -602,7 +602,7 @@ fn find_link_macro_matches<'src>(
         }
 
         // The macro's own `link:`/`mailto:` marker must be verbatim source, so
-        // the node's `location` still starts with it – the signal
+        // the node's `location` still starts with it — the signal
         // [`link_form`] reads (see [`link_macro_level`]'s own scope note). The
         // marker runs from the match's start to wherever the target group
         // begins; one of groups 2 (empty target) and 3 always participates.
@@ -661,7 +661,7 @@ fn find_link_macro_matches<'src>(
 /// node's `roles`.
 ///
 /// As in the additive builder generally, this performs *no* recognition side
-/// effect – notably it does **not** `register_link` the target in the asset
+/// effect — notably it does **not** `register_link` the target in the asset
 /// catalog, which the string replacer does; the cutover (design §5.2 Phase 4,
 /// step 6) re-attaches that (see [`build_inline_link_node`]).
 pub(super) fn build_link_node<'src>(
@@ -685,7 +685,7 @@ pub(super) fn build_link_node<'src>(
     };
 
     // A `link:` target whose scheme could execute script is neutralized by the
-    // string step (left literal); mirror that by deferring – the node would
+    // string step (left literal); mirror that by deferring — the node would
     // otherwise render a live, dangerous link. `mailto:` carries its own safe
     // scheme and is exempt.
     if !is_mailto && has_dangerous_scheme(&target) {
@@ -709,7 +709,7 @@ pub(super) fn build_link_node<'src>(
         // slice, so the node can carry the real `Attrlist<'src>` `render_link`
         // needs (`Ref::attrs`'s own field docs). A text that *does* embed a
         // newline still needs a synthesized copy the node cannot hold yet, so
-        // that one form remains deferred – as does one crossing a
+        // that one form remains deferred — as does one crossing a
         // [`synthesized`](Piece::synthesized) run, whose match-string bytes
         // have no `'src` slice at all.
         if is_mailto {
@@ -832,7 +832,7 @@ pub(super) fn build_link_node<'src>(
 
 /// The bare e-mail auto-link pass at a level: matches [`INLINE_EMAIL`] over the
 /// level's escaped text and replaces each recognized address with the
-/// [`Ref`](InlineNode::Ref)`{Link}` node it produces – the same node kind the
+/// [`Ref`](InlineNode::Ref)`{Link}` node it produces — the same node kind the
 /// two URL-link passes above build, so it folds through the identical
 /// `render_link`.
 ///
@@ -841,7 +841,7 @@ pub(super) fn build_link_node<'src>(
 /// This is the **last** of the link family's spellings: a bare address written
 /// in the flow (`doc.writer@example.com`), which the string pipeline turns into
 /// a `mailto:` link whose display text is the address itself (no `bare` role,
-/// unlike an auto-linked URL – see [`build_email_node`]). It reuses the string
+/// unlike an auto-linked URL — see [`build_email_node`]). It reuses the string
 /// pipeline's *exact* recognition, so only the recognition *sink* differs
 /// (design §4.1), including the pattern's own "prefix that causes a mismatch"
 /// group: a `\` escape drops its backslash and leaves the address literal,
@@ -850,7 +850,7 @@ pub(super) fn build_link_node<'src>(
 /// whole match is left untouched.
 ///
 /// It runs **after** both URL-link passes and before the anchor pass, exactly
-/// where the string step runs `InlineEmailReplacer` – which matters, because by
+/// where the string step runs `InlineEmailReplacer` — which matters, because by
 /// then a `mailto:`/`link:` macro and an auto-linked URL are already opaque
 /// nodes here (they are already-rendered `<a …>` markup there), so an address
 /// *inside* one is never re-recognized.
@@ -860,7 +860,7 @@ pub(super) fn build_link_node<'src>(
 ///
 /// - An address carrying a literal `&` (`a&b@example.org`), which reaches this
 ///   pass as an atomic [`CharRef`](InlineNode::CharRef) (`&amp;`, admitted by
-///   the pattern's own local-part class) that a node cannot carry as text – the
+///   the pattern's own local-part class) that a node cannot carry as text — the
 ///   same escaped-special boundary every other macro family documents.
 /// - An address **abutting an already-recognized construct**
 ///   (`**bold**doc@example.org`, `link:x[y]doc@example.org`,
@@ -873,19 +873,19 @@ pub(super) fn build_link_node<'src>(
 ///   whose markup exists only at fold time cannot reproduce that decision, so
 ///   the address is left literal rather than recognized into a link the string
 ///   pipeline does not build. The sibling auto-link family reaches the same
-///   outcome structurally – [`INLINE_LINK`]'s own boundary-prefix group is
+///   outcome structurally — [`INLINE_LINK`]'s own boundary-prefix group is
 ///   *required*, so a placeholder simply fails its match
 ///   (`**bold**https://example.org` is already deferred for exactly this
 ///   reason, independently of this pass). The deferral is deliberately
 ///   unconditional rather than keyed on what the preceding node *would* render
 ///   to: a construct that renders to nothing (a concealed index term) or to
 ///   text not ending in a mismatch character (a STEM expression, a
-///   passthrough) is one the string pipeline *does* link, so those defer too –
+///   passthrough) is one the string pipeline *does* link, so those defer too —
 ///   reading that would mean invoking a renderer while building the tree.
 ///
 /// An address's bytes *may*, by contrast, come from a
-/// [`synthesized`](Piece::synthesized) run (an attribute expansion, or –
-/// reached at a tree's root – a filtered multi-line block's own joined seed):
+/// [`synthesized`](Piece::synthesized) run (an attribute expansion, or —
+/// reached at a tree's root — a filtered multi-line block's own joined seed):
 /// like an anchor's id, and unlike a URL link's own target, an e-mail node
 /// needs no `Span`-typed field, so [`build_email_node`] recovers the exact
 /// address text there too rather than deferring.
@@ -945,22 +945,22 @@ fn find_email_matches<'src>(
             }
 
             // Any other prefix (`>`, `:`, `/`) makes the string replacer emit
-            // the whole match unchanged – which is exactly what recording no
+            // the whole match unchanged — which is exactly what recording no
             // match at all does here.
             continue;
         }
 
-        // The mismatch-prefix group above read an *empty* prefix – but that
+        // The mismatch-prefix group above read an *empty* prefix — but that
         // decision is only faithful when the tree can actually see the
         // character the string pipeline reads there. When the address abuts an
         // already-recognized construct (`**bold**doc@example.org`,
         // `link:x[y]doc@example.org`), the string pipeline reads that
-        // construct's *rendered* last character – `</strong>`, `</a>`, and
-        // `<img …>` all end in `>`, one of the three mismatch characters – and
+        // construct's *rendered* last character — `</strong>`, `</a>`, and
+        // `<img …>` all end in `>`, one of the three mismatch characters — and
         // suppresses the address, while [`build_match_string`] stands the
         // construct in as one opaque [`SPAN_PLACEHOLDER`], which no mismatch
         // class contains. Recognizing here would build a link the string
-        // pipeline does not, so this defers instead – leaving the address as
+        // pipeline does not, so this defers instead — leaving the address as
         // literal text, never a wrong node, exactly as the sibling auto-link
         // family already behaves for the same input ([`INLINE_LINK`]'s own
         // boundary-prefix group is *required*, so a placeholder simply fails
@@ -995,16 +995,16 @@ fn find_email_matches<'src>(
 /// so the fold reproduces the same bytes: the target is the address prefixed
 /// with `mailto:`, and the display text is the address as written. Unlike a
 /// bare *URL* auto-link, no `bare` role is added and `hide-uri-scheme` plays no
-/// part – the string replacer passes `extra_roles: vec![]` and the raw address
+/// part — the string replacer passes `extra_roles: vec![]` and the raw address
 /// as its `link_text`.
 ///
 /// The address is recovered with [`text_slice`] rather than
 /// [`source_slice`]`.data()`, so it is exact even when its bytes come from a
-/// [`synthesized`](Piece::synthesized) run – the same treatment an anchor's id
+/// [`synthesized`](Piece::synthesized) run — the same treatment an anchor's id
 /// receives, and available for the same reason: an e-mail node carries no
 /// `Span`-typed field (no [`Attrlist`] parsed out of `'src`), only plain text,
 /// so only the node's `location` needs design §4.4's coarse fallback. Returns
-/// `None` when the address crosses an [`atomic`](Piece::atomic) piece – an
+/// `None` when the address crosses an [`atomic`](Piece::atomic) piece — an
 /// escaped `&`, the one form [`email_level`] defers.
 ///
 /// As in the additive builder generally, this performs *no* recognition side
@@ -1054,7 +1054,7 @@ fn build_email_node<'src>(
 /// Performs the recognition side effect the string pipeline's five link
 /// replacers (`InlineLinkReplacer`'s angle/formal/bare branches,
 /// `InlineLinkMacroReplacer`, and `InlineEmailReplacer`) attach to a matched
-/// link – registering the target in the document's asset catalog – by walking
+/// link — registering the target in the document's asset catalog — by walking
 /// an already-built tree and reading each [`Ref`](InlineNode::Ref)`{Link}`
 /// node's own stored `target` instead of a regex capture. `target` already
 /// holds exactly the string the string pipeline registers (see
@@ -1065,24 +1065,24 @@ fn build_email_node<'src>(
 /// effect (see
 /// [`image::apply_image_side_effects`](super::image::apply_image_side_effects)'
 /// s own note): while the additive builder runs *alongside* the authoritative
-/// string pipeline – each against its own, independent [`Parser`] – performing
+/// string pipeline — each against its own, independent [`Parser`] — performing
 /// it from every additive pass would risk double-counting a registration once
 /// the two paths ever share one `Parser`. This function is that deferred piece
 /// for the link family, staged as its own building block for the eventual
 /// cutover (design §5.2, Phase 4 step 6): re-attaching it for real means
 /// calling it exactly once per parse, after the single-pass builder replaces
 /// the recorder as `Content`'s tree source, so nothing here is wired into a
-/// real parse yet – it is exercised only by this module's own tests, against
+/// real parse yet — it is exercised only by this module's own tests, against
 /// their own `Parser`.
 ///
 /// # Registration order across the three link forms
 ///
 /// The string pipeline registers a link's target *when its own replacer's
-/// regex pass matches it* – `InlineLinkReplacer` (auto-links and formal-URL
+/// regex pass matches it* — `InlineLinkReplacer` (auto-links and formal-URL
 /// links, `INLINE_LINK`'s non-angle branch) runs as one whole-string pass, then
 /// `InlineLinkMacroReplacer` (`link:`/`mailto:`, `INLINE_LINK_MACRO`) runs as a
 /// *second*, later pass, then `InlineEmailReplacer` (a bare address,
-/// `INLINE_EMAIL`) as a *third* – exactly the order [`inline_link_level`],
+/// `INLINE_EMAIL`) as a *third* — exactly the order [`inline_link_level`],
 /// [`link_macro_level`], and [`email_level`] apply the three families in. So
 /// the catalog ends up in **family-pass order, not true source order**: every
 /// auto-link/formal-URL link in the content registers before every
@@ -1095,23 +1095,23 @@ fn build_email_node<'src>(
 /// example `link:b.html[B] then https://a.example`, which the golden pipeline
 /// registers as `["https://a.example", "b.html"]`, not `["b.html",
 /// "https://a.example"]`), so this function makes **three** passes over the
-/// tree – all auto-link/formal-URL matches first, then all `link:`/`mailto:`
-/// macro matches, then all bare addresses – rather than one. [`link_form`]
+/// tree — all auto-link/formal-URL matches first, then all `link:`/`mailto:`
+/// macro matches, then all bare addresses — rather than one. [`link_form`]
 /// tells them apart from the node's own `location` and `target` (a
 /// `link:`/`mailto:` macro's location always starts with its literal prefix,
 /// and only a bare address yields a `mailto:` target without one;
 /// [`inline_link_level`] never builds a node for `INLINE_LINK`'s own
-/// link-macro branch, deferring that whole form to [`link_macro_level`] – see
-/// [`inline_link_level`]'s own doc comment – so this is a reliable,
+/// link-macro branch, deferring that whole form to [`link_macro_level`] — see
+/// [`inline_link_level`]'s own doc comment — so this is a reliable,
 /// no-recomputation signal, not a heuristic).
 ///
-/// Recurses into every container a `Ref` node can be nested inside –
+/// Recurses into every container a `Ref` node can be nested inside —
 /// [`Styled`](InlineNode::Styled), another [`Ref`](InlineNode::Ref) (a link's
 /// own display children, or a cross-reference's), and
-/// [`Footnote`](InlineNode::Footnote) children – mirroring exactly where
+/// [`Footnote`](InlineNode::Footnote) children — mirroring exactly where
 /// [`apply_macros`](super::apply_macros) and the footnote increment's own
 /// `emit_range` can place one. A cross-reference node itself is not
-/// registered – only a [`Link`](RefVariant::Link) has an asset-catalog entry –
+/// registered — only a [`Link`](RefVariant::Link) has an asset-catalog entry —
 /// but its children are still walked, since a formatted cross-reference text
 /// could itself carry a nested link.
 pub(crate) fn apply_link_side_effects(nodes: &[InlineNode<'_>], parser: &Parser) {
@@ -1121,7 +1121,7 @@ pub(crate) fn apply_link_side_effects(nodes: &[InlineNode<'_>], parser: &Parser)
 }
 
 /// Which of the three link-recognizing passes built a
-/// [`Ref`](InlineNode::Ref) node – see [`apply_link_side_effects`]'s own
+/// [`Ref`](InlineNode::Ref) node — see [`apply_link_side_effects`]'s own
 /// "Registration order" note.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum LinkForm {
@@ -1163,8 +1163,8 @@ fn register_links_of_form(nodes: &[InlineNode<'_>], parser: &Parser, form: LinkF
 
 /// Tells which pass built a link [`Ref`](InlineNode::Ref) node from its own
 /// `location` and `target`: only [`link_macro_level`] ever builds a node whose
-/// matched source starts with a literal `link:`/`mailto:` prefix, and – of the
-/// two passes left – only [`email_level`] builds one whose target carries the
+/// matched source starts with a literal `link:`/`mailto:` prefix, and — of the
+/// two passes left — only [`email_level`] builds one whose target carries the
 /// `mailto:` scheme ([`inline_link_level`]'s own targets always carry one of
 /// [`INLINE_LINK`]'s `https?`/`file`/`ftp`/`irc` schemes instead). See
 /// [`apply_link_side_effects`]'s own doc comment.
@@ -1204,7 +1204,7 @@ mod tests {
         // reproduces the string pipeline's output byte-for-byte. This is the
         // differential corpus (design §5.3) that pins the `link:`/`mailto:`
         // macro increment. Every fixture is a *verbatim* `link:`/`mailto:`
-        // macro – the boundary this increment claims (a URL target, a
+        // macro — the boundary this increment claims (a URL target, a
         // multi-line attribute-list text, a display text crossing a rendered
         // span, or a special character inside the macro is deferred and lives
         // in a divergence test below).
@@ -1375,7 +1375,7 @@ mod tests {
 
     #[test]
     fn an_escaped_link_macro_stays_literal() {
-        // `\link:…` drops the backslash and keeps the macro as literal text – no
+        // `\link:…` drops the backslash and keeps the macro as literal text — no
         // link node.
         let nodes = build_src(Span::new("\\link:index.html[Docs]"));
 
@@ -1480,7 +1480,7 @@ mod tests {
         // A comma inside a quoted positional value (`"Full, Name"`) is not a
         // subject/body separator: `extract_attributes_from_text` still parses
         // only *one* positional attribute, so `nth_attribute(2)` is `None` and
-        // no `?subject=` is appended – the target stays the bare address,
+        // no `?subject=` is appended — the target stays the bare address,
         // exactly as the golden pipeline leaves it.
         let source = "mailto:team@example.org[\"Full, Name\"]";
         let nodes = build_src(Span::new(source));
@@ -1572,7 +1572,7 @@ mod tests {
         // For each fixture, folding the single-pass tree (all five steps)
         // reproduces the string pipeline's output byte-for-byte. This is the
         // differential corpus (design §5.3) that pins the auto-link / formal-URL
-        // link increment. Every fixture is a *verbatim* link – the boundary
+        // link increment. Every fixture is a *verbatim* link — the boundary
         // this increment claims (a URL crossing a special, a multi-line
         // attribute-list text, or a display text crossing a rendered span is
         // deferred and lives in a divergence test below). The pattern's ANGLE
@@ -1717,7 +1717,7 @@ mod tests {
     #[test]
     fn a_bare_auto_link_keeps_its_boundary_prefix() {
         // The boundary character before the URL (here a space) is not part of
-        // the link – it stays as literal text before the node.
+        // the link — it stays as literal text before the node.
         let nodes = build_src(Span::new("Visit https://example.org now"));
 
         // Text "Visit ", the link, then Text " now".
@@ -1804,8 +1804,8 @@ mod tests {
 
     #[test]
     fn an_escaped_auto_link_stays_literal() {
-        // `\https://…` drops the backslash and keeps the URL as literal text – no
-        // link node – with the boundary prefix preserved.
+        // `\https://…` drops the backslash and keeps the URL as literal text — no
+        // link node — with the boundary prefix preserved.
         let nodes = build_src(Span::new("see \\https://example.org here"));
 
         assert!(
@@ -1856,7 +1856,7 @@ mod tests {
     fn fold_matches_the_string_pipeline_through_angle_bracketed_links() {
         // The differential corpus for `INLINE_LINK`'s ANGLE branch, whose
         // `&lt;`/`&gt;` delimiters are escaped `CharRef`s by the time macros
-        // run – so these fixtures are exactly the ones the whole-match verbatim
+        // run — so these fixtures are exactly the ones the whole-match verbatim
         // gate used to defer (see `build_inline_link_node`'s own note). Each is
         // driven through the same fold-vs-string-pipeline comparison the
         // non-angle corpus above uses.
@@ -1888,7 +1888,7 @@ mod tests {
             "<https://example.org[]",
             "<https://example.org[Docs,role=hl]",
             "\\<https://example.org[text]",
-            // The branch's third alternative – no closing `>`, no `[…]` – is
+            // The branch's third alternative — no closing `>`, no `[…]` — is
             // left wholly literal by both, and still honors both escapes
             // (which the replacer's angle path checks before it reaches that
             // alternative, so the builder must too).
@@ -1945,7 +1945,7 @@ mod tests {
         // A bare auto-link strips a trailing ';'/':' off its target; the angle
         // form does not, because the replacer's angle path takes the bracketed
         // body verbatim. `<http://;>` is therefore a link whose target *is*
-        // `http://;` – the very target the bare branch rejects as a bare
+        // `http://;` — the very target the bare branch rejects as a bare
         // scheme with no body.
         let nodes = build_src(Span::new("<http://;>"));
 
@@ -1959,7 +1959,7 @@ mod tests {
     #[test]
     fn an_angle_bracketed_url_with_a_bracketed_text_keeps_its_opening_delimiter() {
         // The ANGLE branch's `[…]` alternative goes through the *general* path,
-        // which keeps the match's boundary prefix – here the `&lt;` `CharRef` –
+        // which keeps the match's boundary prefix — here the `&lt;` `CharRef` —
         // as literal text before the link node.
         let nodes = build_src(Span::new("<https://example.org[text]"));
 
@@ -1981,8 +1981,8 @@ mod tests {
 
     #[test]
     fn an_unterminated_angle_bracketed_url_is_left_literal() {
-        // The ANGLE branch's third alternative – no closing `&gt;` and no
-        // `[…]` – is emitted unchanged by the string replacer, so the builder
+        // The ANGLE branch's third alternative — no closing `&gt;` and no
+        // `[…]` — is emitted unchanged by the string replacer, so the builder
         // builds no node for it either (and, because the branch's own match
         // consumed the URL, no *non-angle* auto-link is found inside it).
         let nodes = build_src(Span::new("<https://example.org"));
@@ -1995,8 +1995,8 @@ mod tests {
 
     #[test]
     fn an_angle_bracketed_url_over_a_special_character_is_a_documented_divergence() {
-        // The delimiters of an angle link may be escaped specials – that is the
-        // whole point of the relaxed gate – but the URL *between* them may not:
+        // The delimiters of an angle link may be escaped specials — that is the
+        // whole point of the relaxed gate — but the URL *between* them may not:
         // a `&` in it is an atomic `CharRef` the node cannot slice from `'src`,
         // exactly the boundary `an_auto_link_over_a_special_character_is_a_
         // documented_divergence` pins for the non-angle branch.
@@ -2095,7 +2095,7 @@ mod tests {
     fn an_incidental_equals_in_link_text_is_not_an_attribute_list() {
         // `=text` contains an `=`, but no valid attribute name precedes it, so
         // the attrlist parse yields one positional value spanning the *whole*
-        // text rather than a named attribute – the `=` was incidental,
+        // text rather than a named attribute — the `=` was incidental,
         // mirroring `InlineLinkReplacer`'s own `extract_attributes_from_text`
         // fallback (the same case `xref`'s own part 3c increment pins).
         let source = "https://example.org[=text]";
@@ -2115,7 +2115,7 @@ mod tests {
     fn a_link_display_text_over_a_rendered_span_is_a_documented_divergence() {
         // The macros step matches over *escaped, already-rendered* text, so a
         // display text containing a quoted span (`*bold*`) has already become
-        // a `Styled` node by the time macros run – an opaque piece the node's
+        // a `Styled` node by the time macros run — an opaque piece the node's
         // single `Text` child cannot absorb without becoming structured
         // children (the same shape a footnote's own content needs). Left
         // unrecognized for a later increment.
@@ -2238,7 +2238,7 @@ mod tests {
     #[test]
     fn an_escaped_email_stays_literal() {
         // `\doc@example.com` drops the single backslash and leaves the address
-        // as literal text – no link node – mirroring the string replacer's
+        // as literal text — no link node — mirroring the string replacer's
         // `caps[0][1..]`.
         let source = "\\doc@example.com";
         let nodes = build_src(Span::new(source));
@@ -2301,7 +2301,7 @@ mod tests {
     #[test]
     fn an_email_inside_an_expanded_attribute_value_is_recognized() {
         // An address whose bytes come from a *synthesized* run (an attribute
-        // reference's resolved value) – recovered exactly by `text_slice`,
+        // reference's resolved value) — recovered exactly by `text_slice`,
         // since an e-mail node carries only plain text (design §3.4.1's "a
         // macro inside an expanded value" boundary). The two URL-link passes
         // now make the same lift for their own targets and display texts; the
@@ -2343,8 +2343,8 @@ mod tests {
     fn an_email_abutting_a_rendered_construct_stays_literal() {
         // The mismatch-prefix group reads the character immediately before the
         // address. The string pipeline reads it out of already-rendered markup
-        // – `</strong>`, `</a>`, and `<img …>` all end in `>`, a mismatch
-        // character – and so leaves the address literal. The tree stands the
+        // — `</strong>`, `</a>`, and `<img …>` all end in `>`, a mismatch
+        // character — and so leaves the address literal. The tree stands the
         // construct in as one opaque placeholder, which belongs to no mismatch
         // class, so `find_email_matches` defers explicitly instead of building
         // a link the string pipeline does not: parity, not a divergence, for
@@ -2378,13 +2378,13 @@ mod tests {
     fn an_email_abutting_a_construct_that_hides_its_boundary_is_a_documented_divergence() {
         // What the unconditional deferral above costs, pinned exactly. In each
         // of these the string pipeline's mismatch-prefix group does *not* see a
-        // mismatch character before the address, so it links it – a concealed
+        // mismatch character before the address, so it links it — a concealed
         // index term renders to nothing, and a passthrough or STEM expression
         // is still masked by its own sentinel when the macros step runs (it is
         // restored afterwards), so neither presents rendered markup there. The
         // tree cannot tell those apart from a construct that *did* render
         // markup without folding the preceding node while building, so all of
-        // them defer – see `email_level`'s own scope note.
+        // them defer — see `email_level`'s own scope note.
         use super::super::super::test_support::golden_passthroughs;
 
         let concealed_term = "indexterm:[a]doc@example.com";
@@ -2444,7 +2444,7 @@ mod tests {
         // pipeline matches an address carrying a literal `&` over its own
         // *escaped* text. That `&amp;` is an atomic `CharRef` by the time
         // macros run, so the builder cannot recover the address as text and
-        // leaves it unrecognized for a later increment – the same boundary the
+        // leaves it unrecognized for a later increment — the same boundary the
         // auto-link and image families document.
         let source = "a&b@example.com";
         let nodes = build_src(Span::new(source));
@@ -2508,8 +2508,8 @@ mod tests {
 
     #[test]
     fn registers_an_angle_bracketed_target_in_the_auto_link_pass() {
-        // The angle form is `InlineLinkReplacer`'s own branch – the *first* of
-        // the three link passes – so it registers alongside (and in source
+        // The angle form is `InlineLinkReplacer`'s own branch — the *first* of
+        // the three link passes — so it registers alongside (and in source
         // order with) the auto-links and formal-URL links, before any
         // `link:`/`mailto:` macro. `link_form` reaches that classification with
         // no angle-specific case: the node's location does not start with a
@@ -2536,7 +2536,7 @@ mod tests {
         // `link:b.html[B]` appears first in the source, but the golden
         // pipeline's `link:`/`mailto:` pass runs *after* its auto-link/
         // formal-URL pass (see `apply_link_side_effects`'s own "Registration
-        // order" doc note), so `https://a.example` – which appears second –
+        // order" doc note), so `https://a.example` — which appears second —
         // registers first. A single document-order tree walk would get this
         // backwards; the two-pass split must reproduce it.
         let source = "link:b.html[B] then https://a.example then link:c.html[C]";
@@ -2571,7 +2571,7 @@ mod tests {
     fn registers_a_bare_email_after_both_url_link_forms() {
         // The e-mail pass is the *third* of the three link-recognizing passes,
         // so a bare address registers after every auto-link/formal-URL link
-        // and every `link:`/`mailto:` macro in the content – regardless of
+        // and every `link:`/`mailto:` macro in the content — regardless of
         // where it appears in the source (see `apply_link_side_effects`'s own
         // "Registration order" doc note).
         let source = "first@example.org then link:b.html[B] then https://a.example";
@@ -2639,7 +2639,7 @@ mod tests {
         // The separators are plain spaces, not `{sp}` attribute references:
         // `golden_macros_with` deliberately skips the `AttributeReferences`
         // step (see its own doc comment), so a reference in a fixture makes the
-        // two sides read *different* text – latent while every link family
+        // two sides read *different* text — latent while every link family
         // deferred inside a synthesized run, but live now that they no longer
         // do (a `{sp}` before a bare URL leaves the golden a `}` boundary
         // character, which `INLINE_LINK` rejects, while the builder sees the
@@ -2659,7 +2659,7 @@ mod tests {
             // "Registration order" doc note).
             "link:b.html[B] then https://a.example",
             // The bare e-mail form, alone and interleaved with both URL-link
-            // forms – it registers last of the three, wherever it appears.
+            // forms — it registers last of the three, wherever it appears.
             "doc@example.com",
             "\\doc@example.com",
             "doc@example.com then link:b.html[B]",
@@ -2700,7 +2700,7 @@ mod tests {
             )
     }
 
-    /// The real, public pipeline's output for `source` – the golden for the
+    /// The real, public pipeline's output for `source` — the golden for the
     /// expanded-value fixtures, which need the `AttributeReferences` step
     /// [`golden_macros_with`] deliberately omits.
     fn golden_normal(source: &str, parser: &Parser) -> String {
@@ -2717,9 +2717,9 @@ mod tests {
         // attribute expansion) is now recognized: every value these nodes hold
         // is computed out of the level's match string, which carries an
         // expanded value's bytes exactly, so only the node's `location` takes
-        // design §4.4's coarse fallback. The two shapes that still defer – an
+        // design §4.4's coarse fallback. The two shapes that still defer — an
         // attribute-list-bearing display text, and a wholly expanded
-        // `link:`/`mailto:` macro – have their own divergence tests below.
+        // `link:`/`mailto:` macro — have their own divergence tests below.
         let parser = expanding_parser();
 
         let fixtures = [
@@ -2774,7 +2774,7 @@ mod tests {
     fn a_link_inside_an_expanded_value_keeps_a_coarse_location() {
         // The target and display text are recovered *exactly* from the match
         // string, while the node's `location` falls back to the enclosing
-        // synthesized run's own span – design §4.4's documented split.
+        // synthesized run's own span — design §4.4's documented split.
         let parser = expanding_parser();
         let source = "link:{url}[{label}]";
         let nodes = build(Span::new(source), &parser, None);
@@ -2821,7 +2821,7 @@ mod tests {
     fn a_link_attribute_list_text_inside_an_expanded_value_is_a_documented_divergence() {
         // A display text carrying an attribute list is parsed as a real
         // `Attrlist<'src>`, which reads its own source span's bytes *as
-        // content* – so, unlike every other value these nodes hold, it cannot
+        // content* — so, unlike every other value these nodes hold, it cannot
         // be taken from the match string. Both link-recognizing passes defer
         // it, as does a `mailto:` text carrying a `,` subject.
         //
@@ -2852,7 +2852,7 @@ mod tests {
     #[test]
     fn matches_the_golden_pipelines_registration_for_links_inside_expanded_values() {
         // The staged `register_link` side effect classifies each node by the
-        // pass that built it, from the node's own `location` – which is exactly
+        // pass that built it, from the node's own `location` — which is exactly
         // why `link_macro_level` still requires its `link:`/`mailto:` marker to
         // be verbatim. These fixtures interleave the two URL-link passes' forms
         // over expanded values, in both relative orders, so a misclassification

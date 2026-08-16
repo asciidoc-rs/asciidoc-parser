@@ -74,11 +74,11 @@ pub enum StyleVariant {
 /// ASG: `form`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SpanForm {
-    /// Constrained form – the single-delimiter syntax (`*bold*`), which
+    /// Constrained form — the single-delimiter syntax (`*bold*`), which
     /// requires word boundaries around the span.
     Constrained,
 
-    /// Unconstrained form – the doubled-delimiter syntax (`**bold**`), which
+    /// Unconstrained form — the doubled-delimiter syntax (`**bold**`), which
     /// may appear mid-word.
     Unconstrained,
 }

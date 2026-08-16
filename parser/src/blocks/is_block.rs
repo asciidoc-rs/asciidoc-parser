@@ -41,8 +41,8 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
     /// read-only representation of its inline nodes.
     ///
     /// This is the structured counterpart of
-    /// [`rendered_html_content`](Self::rendered_html_content) – the same blocks
-    /// carry each – so a block with no directly-contained content returns
+    /// [`rendered_html_content`](Self::rendered_html_content) — the same blocks
+    /// carry each — so a block with no directly-contained content returns
     /// `None` here too.
     ///
     /// The tree is populated only when inline-tree building is enabled on the

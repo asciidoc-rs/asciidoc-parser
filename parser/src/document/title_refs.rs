@@ -181,7 +181,7 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
 /// Installs each collected title's computed resolution, walking `blocks` in the
 /// same document order as [`collect`] so `index` stays aligned. For every title
 /// this installs both views the resolution carries: the coordinated rendered
-/// string, and – mirrored into the title's inline tree – the resolved
+/// string, and — mirrored into the title's inline tree — the resolved
 /// destinations of its cross-references.
 fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<Resolution>], index: &mut usize) {
     for block in blocks.iter_mut() {

@@ -9,16 +9,16 @@
 //! step 6 tree-source swap) and the recorder returned to test-only status.
 //! This module remains the **harness** for both:
 //!
-//! 1. The recorder-driven corpus keeps proving Strategy A's own invariants –
+//! 1. The recorder-driven corpus keeps proving Strategy A's own invariants —
 //!    stripping/folding the marked string reproduces the built-in renderer's
 //!    `rendered_html()` output **byte-for-byte** (the *no-perturbation*
 //!    invariant), and the recovered [`InlineNode`] tree is structurally
 //!    faithful (node kinds, nesting, and the `constructs <= markers <= events`
-//!    cross-check) – so the recorder stays honest as the independent
+//!    cross-check) — so the recorder stays honest as the independent
 //!    construction the structural cross-check
 //!    (`tests::inline_builder_recorder_parity`) compares the builder against.
-//! 2. The `with_inline_tree` wiring tests drive the **production** tree path –
-//!    now the single-pass builder – asserting what
+//! 2. The `with_inline_tree` wiring tests drive the **production** tree path —
+//!    now the single-pass builder — asserting what
 //!    [`Content::inlines`](crate::content::Content) stores for real parsed
 //!    documents, and that enabling the flag never changes rendered output.
 //!
@@ -54,7 +54,7 @@ fn assert_no_reserved_sentinels(source: &str) {
     );
 }
 
-/// The number of recorded constructs (non-text nodes) in the tree – i.e. the
+/// The number of recorded constructs (non-text nodes) in the tree — i.e. the
 /// number of recorder [`Event`](crate::content::inline_tree)s the tree
 /// consumed. Used to cross-check the tree against the recorder.
 fn construct_count(nodes: &[InlineNode<'_>]) -> usize {
@@ -163,10 +163,10 @@ fn check<'src>(source: &'src str, group: &SubstitutionGroup) -> Vec<InlineNode<'
     // Cross-check the tree against the recorder along the honest chain
     // `constructs <= markers <= events`:
     //
-    // * `markers <= events` – some recorded events (formatting inside a footnote's
+    // * `markers <= events` — some recorded events (formatting inside a footnote's
     //   text) are extracted out of the block, so their marker never reaches the
     //   block string.
-    // * `constructs <= markers` – some markers (formatting inside a construct
+    // * `constructs <= markers` — some markers (formatting inside a construct
     //   rendered as a single leaf, e.g. a formatted xref reftext) are absorbed into
     //   that leaf's HTML rather than surfacing as their own node.
     assert!(
@@ -353,8 +353,8 @@ fn normal_corpus_folds_byte_for_byte() {
 //
 // The block-level harness above drives `SubstitutionGroup::apply` on a bare
 // `Content`, which cannot resolve cross-references (that needs a document
-// catalog). This harness parses whole documents – once normally, once with the
-// recorder installed – and asserts that folding each simple block's recorded
+// catalog). This harness parses whole documents — once normally, once with the
+// recorder installed — and asserts that folding each simple block's recorded
 // tree reproduces its `rendered_html()` string. It reaches resolved xrefs, list
 // items, section bodies, and the interactions between blocks.
 
@@ -420,8 +420,8 @@ fn collect_rendered(doc: &crate::Document<'_>) -> Vec<String> {
 ///
 /// A footnote's text is extracted out of the block it was written in, so it
 /// never appears in any `rendered_html()` string [`collect_rendered`] reaches.
-/// It is nonetheless substituted inline content – and the source of a footnote
-/// node's subtree – so the differential harness folds it under the same
+/// It is nonetheless substituted inline content — and the source of a footnote
+/// node's subtree — so the differential harness folds it under the same
 /// invariant.
 fn collect_footnote_texts(doc: &crate::Document<'_>) -> Vec<String> {
     doc.catalog()
@@ -431,7 +431,7 @@ fn collect_footnote_texts(doc: &crate::Document<'_>) -> Vec<String> {
         .collect()
 }
 
-/// Parses `source` twice – normally and with the recorder – and asserts that
+/// Parses `source` twice — normally and with the recorder — and asserts that
 /// folding every content location's recorded tree reproduces its
 /// `rendered_html()` output byte-for-byte, including any resolved
 /// cross-references, section headings, block titles, table cells, and footnote
@@ -540,7 +540,7 @@ fn document_corpus_folds_byte_for_byte() {
     }
 }
 
-/// Parses `source` twice – with inline-tree building off (the default) and on –
+/// Parses `source` twice — with inline-tree building off (the default) and on —
 /// and asserts the rendered output is identical, so enabling the flag cannot
 /// perturb what the golden `.rendered_html()` assertions pin.
 ///
@@ -850,7 +850,7 @@ fn first_simple_inlines<'a>(doc: &'a crate::Document<'a>) -> &'a [InlineNode<'a>
     panic!("no simple block found");
 }
 
-/// The rendered (string-pipeline) content of the first simple block in `doc` –
+/// The rendered (string-pipeline) content of the first simple block in `doc` —
 /// the counterpart of [`first_simple_inlines`], for a test that pins both
 /// views of the same content.
 fn first_simple_rendered<'a>(doc: &'a crate::Document<'a>) -> &'a str {
@@ -928,7 +928,7 @@ fn is_block_inlines_is_some_but_empty_when_flag_off() {
     use crate::blocks::IsBlock;
 
     // A content-bearing block parsed without tree building returns an *empty*
-    // tree, not `None` – the block still has content, the tree is just not built.
+    // tree, not `None` — the block still has content, the tree is just not built.
     let mut parser = Parser::default();
     let doc = parser.parse("One *word* is strong.");
 
@@ -1051,7 +1051,7 @@ fn is_block_inlines_carries_a_real_tree_for_each_content_bearing_kind() {
     use crate::blocks::{Block, FindBlocks, IsBlock};
 
     // Beyond `Some` vs `None`, the override bodies for the content-bearing block
-    // kinds must return the *actual* parsed tree – so a formatting construct in
+    // kinds must return the *actual* parsed tree — so a formatting construct in
     // each shows up as a `Styled` node, not an empty slice.
     let mut parser = Parser::default().with_inline_tree(true);
     let doc = parser.parse(concat!(
@@ -1090,7 +1090,7 @@ fn is_block_inlines_carries_a_real_tree_for_each_content_bearing_kind() {
         "the verse tree lost its `verse` code span"
     );
 
-    // A listing applies verbatim subs, so its tree is a single text run – but a
+    // A listing applies verbatim subs, so its tree is a single text run — but a
     // populated one, proving the `RawDelimited` override returns the parse.
     assert_eq!(
         listing_tree_len,
@@ -1112,7 +1112,7 @@ fn inline_tree_honors_a_blocks_custom_subs_list() {
     // A `subs="quotes"` paragraph runs only the quotes step, so the
     // group-aware tree builder must mirror the string pipeline's own step
     // selection: the tree carries a `Styled` node for `*bold*`, while `<`
-    // stays inside a plain `Text` run (no `CharRef` – the special-characters
+    // stays inside a plain `Text` run (no `CharRef` — the special-characters
     // step never ran) exactly as the rendered string leaves it unescaped.
     let mut parser = Parser::default().with_inline_tree(true);
     let doc = parser.parse("[subs=quotes]\nkeep *bold* and a < b\n");
@@ -1175,7 +1175,7 @@ fn inline_tree_for_a_listing_block_carries_callout_nodes() {
 
     // A listing block applies the verbatim group (special characters, then
     // callouts), so its tree must carry a `Callout` node for the trailing
-    // `<1>` – driving the group-aware builder's `Callouts` dispatch through a
+    // `<1>` — driving the group-aware builder's `Callouts` dispatch through a
     // real parse.
     let mut parser = Parser::default().with_inline_tree(true);
     let doc = parser.parse("----\ncode line <1>\n----\n");
@@ -1200,7 +1200,7 @@ fn xref_mirror_is_skipped_when_the_tree_defers_a_reference_form() {
     // display text crossing a rendered span is left unrecognized), so the
     // tree holds *fewer* cross-reference nodes than the string pipeline
     // deferred. The positional resolution mirror must detect the count
-    // mismatch and skip – leaving the tree in its honest unresolved state –
+    // mismatch and skip — leaving the tree in its honest unresolved state —
     // rather than assign destinations to the wrong nodes (or panic).
     let mut parser = Parser::default().with_inline_tree(true);
     let doc = parser.parse("[[sec]]The target.\n\nSee xref:sec[with *bold* reftext].");
@@ -1301,7 +1301,7 @@ fn collect_footnote_refs<'a>(doc: &'a crate::Document<'a>) -> Vec<crate::inlines
 fn inline_tree_numbers_footnotes_in_document_order() {
     // The recording pass clones the parser *before* the authoritative pass
     // advances the footnote counter, so a footnote in the second paragraph is
-    // numbered "2" in its tree – matching `rendered_html()` – rather than
+    // numbered "2" in its tree — matching `rendered_html()` — rather than
     // restarting at "1" (which a fresh-parser recording pass would produce).
     let mut parser = Parser::default().with_inline_tree(true);
     let doc =
@@ -1331,7 +1331,7 @@ fn inline_tree_numbers_footnotes_in_document_order() {
 //
 // After a full parse (which resolves references against the document's own
 // catalog), a cross-reference in the inline tree carries the same resolved
-// destination the rendered string reflects – so a consumer that walks
+// destination the rendered string reflects — so a consumer that walks
 // `inlines()` sees resolved xrefs, not just the parse-time `resolved: None`
 // state the tree is first built with (design §4.3).
 
@@ -1574,8 +1574,8 @@ fn inline_tree_build_tolerates_a_stateful_renderer() {
     /// recorder, tree building re-ran the whole pipeline through the shared
     /// renderer instance, so such a renderer poisoned the recorded tree (and a
     /// debug assertion rejected it). The single-pass builder derives the tree
-    /// from source instead – a `CharRef` node carries the *logical* character,
-    /// not renderer output – so a stateful renderer is now safe: the
+    /// from source instead — a `CharRef` node carries the *logical* character,
+    /// not renderer output — so a stateful renderer is now safe: the
     /// authoritative rendered string sees the renderer's stateful bytes, and
     /// the tree stays logical.
     #[derive(Debug, Default)]
@@ -1635,10 +1635,10 @@ fn inline_tree_build_tolerates_a_stateful_renderer() {
 //
 // A cross-reference embedded in a section heading or a block `.Title` is owned
 // by the separate document-order title pass (`title_refs`), which coordinates
-// cross-title references – including forward and circular ones – that the
+// cross-title references — including forward and circular ones — that the
 // per-content pass cannot. That pass now mirrors each resolved destination into
 // the title's own inline tree, so a consumer that walks a title's `inlines()`
-// sees the same destinations the rendered title reflects – closing the
+// sees the same destinations the rendered title reflects — closing the
 // section-/block-title follow-up of Phase 2 step 2 (design §4.3).
 
 /// Collects every cross-reference/link node from the inline tree of every
@@ -1708,7 +1708,7 @@ fn section_title_forward_xref_is_resolved_in_the_tree() {
 fn circular_section_title_xrefs_are_both_resolved_in_the_tree() {
     // Two headings reference each other. The title pass breaks the cycle for the
     // rendered link *text*, but each reference still resolves to its target's
-    // destination – and both destinations are now mirrored into the two
+    // destination — and both destinations are now mirrored into the two
     // headings' trees.
     let mut parser = Parser::default().with_inline_tree(true);
     let doc = parser.parse("[#a]\n== See <<b>>\n\n[#b]\n== See <<a>>\n");
@@ -1750,7 +1750,7 @@ fn unresolved_section_title_xref_stays_none_in_the_tree() {
 #[test]
 fn block_title_xref_is_resolved_in_the_tree() {
     // A block `.Title` carrying a cross-reference is resolved by the same title
-    // pass, which mirrors the destination into the block title's tree – a site
+    // pass, which mirrors the destination into the block title's tree — a site
     // the per-content pass never resolved at all.
     let mut parser = Parser::default().with_inline_tree(true);
     let doc =
@@ -1795,7 +1795,7 @@ fn block_title_xref_is_resolved_in_the_tree() {
 fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
     // Resolving a document twice, the second time with a resolver that no longer
     // recognizes the title's target, must leave the title tree's `Ref` node
-    // *unresolved* – not stale at the first pass's destination. The title pass
+    // *unresolved* — not stale at the first pass's destination. The title pass
     // rebuilds the ordered destinations each run (the template, and so the list
     // length, is stable), and the mirror overwrites each slot unconditionally
     // (to `Some` or `None`), so the tree tracks the rendered title rather than
@@ -1846,7 +1846,7 @@ fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
 // ─── Wiring: the footnote subtree and its cross-references ──────────────────
 //
 // A footnote's text is extracted out of the flow of the block during the macros
-// substitution step – only its marker is left behind – so it never reaches the
+// substitution step — only its marker is left behind — so it never reaches the
 // block's rendered string and the tree could not recover it from that string
 // alone. The recording pass now also picks up the footnote texts it registered
 // (which carry the recorder's markers, against the same event log) and parses
@@ -1855,7 +1855,7 @@ fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
 // That closes the second of the two follow-ups tracked from Phase 2 step 2: a
 // cross-reference *inside* a footnote is re-homed out of the block template
 // when the footnote text is extracted, so it lives in that subtree, and the
-// shared mirror now installs its resolved destination there – the same
+// shared mirror now installs its resolved destination there — the same
 // destination the rendered footnote text reflects (design §4.3).
 
 /// The first [`Footnote`](InlineNode::Footnote) node found anywhere in the
@@ -1972,7 +1972,7 @@ fn footnote_subtree_carries_a_nested_macro() {
 
 #[test]
 fn footnote_reference_keeps_an_empty_subtree() {
-    // `footnote:id[]` defines nothing – it re-uses an earlier footnote's number –
+    // `footnote:id[]` defines nothing — it re-uses an earlier footnote's number —
     // so it consumes no footnote text and keeps the empty subtree its node type
     // documents, while the defining occurrence carries the text.
     let mut parser = Parser::default().with_inline_tree(true);
@@ -2049,7 +2049,7 @@ fn footnote_subtrees_track_document_order_across_blocks() {
 fn footnote_embedded_xref_is_resolved_in_the_tree() {
     // The cross-reference lives in the footnote's subtree, and its destination
     // is mirrored there from the same resolution sweep that resolved the block's
-    // own references – so the tree agrees with the rendered footnote text.
+    // own references — so the tree agrees with the rendered footnote text.
     let mut parser = Parser::default().with_inline_tree(true);
     let doc = parser.parse("[[tgt]]The target.\n\nA claim.footnote:[see <<tgt>> for details]");
 

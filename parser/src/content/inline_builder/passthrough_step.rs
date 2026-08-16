@@ -17,9 +17,9 @@ use crate::{
 /// for [`apply_special_characters`](super::special_chars::apply_special_characters)
 /// and the later steps to refine.
 ///
-/// This is the **first** step [`build`](super::build) runs – mirroring
+/// This is the **first** step [`build`](super::build) runs — mirroring
 /// [`Passthroughs::extract_from`](crate::content::Passthroughs::extract_from),
-/// which the string pipeline runs *before* its own step loop – so a
+/// which the string pipeline runs *before* its own step loop — so a
 /// passthrough's content is never touched by specialcharacters, quotes,
 /// replacements, or macros: it is a leaf, and every later step's
 /// [`build_match_string`] already treats a node it does not specifically
@@ -27,8 +27,8 @@ use crate::{
 /// [`Raw`](InlineNode::Raw) leaf) as a
 /// single opaque placeholder.
 ///
-/// It reuses the string pipeline's *exact* recognition –
-/// [`INLINE_PASS_MACRO`] is now shared `pub(crate)` – so only the recognition
+/// It reuses the string pipeline's *exact* recognition —
+/// [`INLINE_PASS_MACRO`] is now shared `pub(crate)` — so only the recognition
 /// *sink* differs (§4.1). Two forms fold through a [`Raw`](InlineNode::Raw)
 /// node whose `value`
 /// is the *content itself*, since their substitution list applies nothing:
@@ -43,7 +43,7 @@ use crate::{
 /// ([`passthrough_text`]) so a custom
 /// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)'s
 /// escaping is honored, exactly as it would be for the string pipeline's own
-/// restore step – the cost is an owned [`Raw`](InlineNode::Raw) value rather
+/// restore step — the cost is an owned [`Raw`](InlineNode::Raw) value rather
 /// than a `'src` borrow, since the pipeline's output is not guaranteed to
 /// coincide with the source.
 ///
@@ -51,10 +51,10 @@ use crate::{
 /// `` [x-]`text` ``, `[attrs]+text+`) folds through a [`Styled`] node instead:
 /// [`build_attrlisted_passthrough_node`] and
 /// [`build_bare_attrlisted_passthrough_node`] parse the attrlist the same way
-/// an attributed quote does ([`attributes_of`]) and wrap the body – itself a
+/// an attributed quote does ([`attributes_of`]) and wrap the body — itself a
 /// `Raw` leaf under `SubstitutionGroup::None`/`Verbatim`, unless the legacy
 /// `x-` compatibility marker switches it to a full `Normal`-order subtree
-/// ([`apply_normal_subs`]) – in `Code` (monospace) or `Unquoted`, mirroring
+/// ([`apply_normal_subs`]) — in `Code` (monospace) or `Unquoted`, mirroring
 /// `PassthroughRestoreReplacer`'s own `render_quoted_substitution` call for a
 /// stored passthrough whose `type_` is `Some`. This runs as a **second pass**
 /// ([`apply_bare_attrlisted_pass_level`]) after the delimited forms above,
@@ -63,31 +63,31 @@ use crate::{
 ///
 /// Running as a genuine second pass has one consequence worth calling out: a
 /// bare-attrlisted body whose content the *first* pass already recognizes on
-/// its own – an embedded `pass:[…]`, or a `+++…+++`/`++…++`/`$$…$$` delimited
-/// passthrough – is left **unrecognized** rather than wrapped, because the
+/// its own — an embedded `pass:[…]`, or a `+++…+++`/`++…++`/`$$…$$` delimited
+/// passthrough — is left **unrecognized** rather than wrapped, because the
 /// candidate match's body then spans the already-built (opaque) node the
 /// first pass left behind (the same `range_is_verbatim` boundary every macro
 /// family in this module documents). The *delimited* attrlisted forms do not
 /// share this gap: `INLINE_PASS_MACRO`'s own attrlist-prefixed alternative
 /// matches the *whole* construct (attrlist, delimiters, and body) as one
 /// leftmost match, so an embedded `pass:[…]` inside, say, `[x-]++pass:[<b>]++`
-/// is captured as part of that one match's body – never independently matched
-/// first – and (per the `x-` marker below) extracted correctly by the
+/// is captured as part of that one match's body — never independently matched
+/// first — and (per the `x-` marker below) extracted correctly by the
 /// recursive `Normal`-order substitution its body then runs through.
 ///
 /// The **bare unconstrained form** (`+text+`, no attribute list) folds
-/// through a plain [`Raw`](InlineNode::Raw) leaf – like the double-plus/
+/// through a plain [`Raw`](InlineNode::Raw) leaf — like the double-plus/
 /// double-dollar forms, an absent attrlist means no stored `type_`, so
 /// `PassthroughRestoreReplacer` never wraps the restored text in a rendered
 /// span. Unlike the two attribute-list-prefixed bare forms above (matched via
 /// `\b{start-half}`, which does not by itself exclude a `\`/`:`/`;` prefix),
-/// this form's own pattern already excludes that "prohibited prefix" – and the
+/// this form's own pattern already excludes that "prohibited prefix" — and the
 /// word-boundary rule the doc comment on [`find_bare_attrlisted_matches`]
-/// explains – directly in its *consuming* boundary group (`[^\w;:\\]`), so no
+/// explains — directly in its *consuming* boundary group (`[^\w;:\\]`), so no
 /// runtime retry is needed: a match simply cannot start where the pattern's
 /// own character class would reject it. The boundary character it does
 /// consume (present unless the match sits at the very start of the level) is
-/// not part of the construct – it is kept as literal text before the node,
+/// not part of the construct — it is kept as literal text before the node,
 /// reusing the same kept-prefix [`MacroMatch`] sub-range the auto-link
 /// increment introduced.
 ///
@@ -100,8 +100,8 @@ use crate::{
 /// `PassthroughRestoreReplacer`'s own `pass.subs.apply(…)` call), producing
 /// an already-final HTML string that becomes the leaf's `value` verbatim.
 /// See [`build_pass_macro_subs_value`]'s own doc comment for why a `Raw`
-/// leaf – not a richer node subtree built from this module's own
-/// transducers – is the shape this increment needs: the resolved list can
+/// leaf — not a richer node subtree built from this module's own
+/// transducers — is the shape this increment needs: the resolved list can
 /// name any of the six steps in any order, and only an opaque leaf is immune
 /// to [`build`](super::build)'s own later steps reprocessing (or, for a step
 /// the list omits, wrongly applying to) that same content a second time.
@@ -117,14 +117,14 @@ use crate::{
 /// One more attribute-list-prefixed corner case is deferred: an **escaped
 /// bracket** (`\[attrs]++text++`) unescapes to a literal `[attrs]` prefix
 /// *and* still recognizes the delimited text as an ordinary (non-attrlisted)
-/// passthrough – a kept-literal-prefix-with-one-dropped-char, plus a node for
+/// passthrough — a kept-literal-prefix-with-one-dropped-char, plus a node for
 /// the remainder, a shape neither [`MacroMatchKind`] variant expresses. Left
 /// unrecognized (a documented divergence); see
 /// `an_escaped_attrlist_bracket_is_a_documented_divergence`.
 ///
 /// An **escaped triple- or double-plus** (`\+++text+++`, `\++text++`) drops
 /// its backslash and keeps the delimited text literal at the pass-macro
-/// level, but – now that the bare unconstrained form is recognized too – the
+/// level, but — now that the bare unconstrained form is recognized too — the
 /// *second* pass ([`INLINE_PASS`]) legitimately re-scans that same de-escaped
 /// text and consumes its leading `+++`/`++` as a bare passthrough wrapping a
 /// shorter run (`+text` / `text`, one `+` left over as trailing literal
@@ -183,7 +183,7 @@ fn apply_pass_macro_level<'src>(
 
 /// The `INLINE_PASS` pass: the attribute-list-prefixed bare forms
 /// (`` [x-]`text` ``, `[attrs]+text+`). The bare unconstrained form with no
-/// attribute list (`+text+`) is deferred – see
+/// attribute list (`+text+`) is deferred — see
 /// [`find_bare_attrlisted_matches`].
 fn apply_bare_attrlisted_pass_level<'src>(
     nodes: Vec<InlineNode<'src>>,
@@ -229,8 +229,8 @@ fn find_passthrough_matches<'src>(
         let full = whole.start()..whole.end();
 
         // Only a wholly-verbatim match can slice its content from `'src`; a
-        // match crossing an already-recognized construct cannot occur here –
-        // this is the very first step – but the check is kept for the same
+        // match crossing an already-recognized construct cannot occur here —
+        // this is the very first step — but the check is kept for the same
         // reason every other family keeps it: a future caller of this
         // function over a non-seed level must not silently mis-slice.
         if !range_is_verbatim(pieces, &full) {
@@ -243,13 +243,13 @@ fn find_passthrough_matches<'src>(
 
             if escape_count > 0 {
                 // `[attrs]\++text++`: the delimiter escape drops one
-                // backslash and the whole match – attrlist brackets included
-                // – stays literal here, mirroring `handle_quoted_text`'s
+                // backslash and the whole match — attrlist brackets included
+                // — stays literal here, mirroring `handle_quoted_text`'s
                 // `escape_count > 0` branch, which never builds a passthrough
                 // either. The bare-form second pass
                 // (`apply_bare_attrlisted_pass_level`) then legitimately
                 // re-scans this now-literal, unopaqued text and may recognize
-                // its own (different) match in it – exactly what the string
+                // its own (different) match in it — exactly what the string
                 // pipeline's own second regex pass does, so this is parity,
                 // not a divergence.
                 #[allow(clippy::unwrap_used)]
@@ -268,7 +268,7 @@ fn find_passthrough_matches<'src>(
             if &caps[1] == "\\" {
                 // `\[attrs]++text++`: the bracket unescapes to a literal
                 // `[attrs]`, but the delimited text is still recognized as
-                // an *ordinary* (non-attrlisted) passthrough – a
+                // an *ordinary* (non-attrlisted) passthrough — a
                 // kept-literal-prefix-plus-node shape neither
                 // `MacroMatchKind` variant expresses. Deferred; see
                 // `an_escaped_attrlist_bracket_is_a_documented_divergence`.
@@ -314,7 +314,7 @@ fn find_passthrough_matches<'src>(
     matches
 }
 
-/// Finds every bare passthrough at this level – the two attribute-list-
+/// Finds every bare passthrough at this level — the two attribute-list-
 /// prefixed [`INLINE_PASS`] options (`` [x-]`text` `` and `[attrs]+text+`)
 /// and the bare unconstrained form with no attribute list (`+text+`, built by
 /// [`build_bare_unconstrained_match`]).
@@ -325,7 +325,7 @@ fn find_passthrough_matches<'src>(
 /// `;` is not really a passthrough. This increment does not reproduce that
 /// retry for *them*; instead it simply leaves such a match unrecognized, a
 /// documented divergence pinned by a test. The bare unconstrained form needs
-/// no such handling – see [`build_bare_unconstrained_match`].
+/// no such handling — see [`build_bare_unconstrained_match`].
 fn find_bare_attrlisted_matches<'src>(
     s: &str,
     pieces: &[Piece],
@@ -370,7 +370,7 @@ fn find_bare_attrlisted_matches<'src>(
             let escape_count = caps.get(4).map_or(0, |m| m.len());
 
             if escape_count > 0 {
-                // `[attrs]\+text+`: honor the escape of the formatting mark –
+                // `[attrs]\+text+`: honor the escape of the formatting mark —
                 // one backslash drops, the rest (attrlist brackets included)
                 // stays literal, mirroring `InlinePassReplacer`'s own
                 // `escape_count > 0` branch, which never builds a
@@ -405,25 +405,25 @@ fn find_bare_attrlisted_matches<'src>(
 }
 
 /// Builds one [`MacroMatch`] for a bare unconstrained [`INLINE_PASS`] match
-/// (`+text+`, option 3 – no attribute list): a plain [`Raw`](InlineNode::Raw)
+/// (`+text+`, option 3 — no attribute list): a plain [`Raw`](InlineNode::Raw)
 /// leaf, computed through the real substitution pipeline under
 /// [`SubstitutionGroup::Verbatim`] exactly like the double-plus/double-dollar
 /// forms (an absent attrlist means no stored `type_`, so
 /// `PassthroughRestoreReplacer` never wraps the restored text in a rendered
-/// span – unlike [`build_bare_attrlisted_passthrough_node`]'s `Styled` result).
+/// span — unlike [`build_bare_attrlisted_passthrough_node`]'s `Styled` result).
 ///
 /// Group 8 (the body) always participates whenever this alternative matches at
 /// all, and the pattern's own leading/trailing `+` delimiters sit exactly one
 /// byte to either side of it, so their offsets are derived rather than
 /// captured separately. The optional boundary character the pattern consumes
-/// ahead of the leading `+` (Group 6 – absent only when the match sits at the
+/// ahead of the leading `+` (Group 6 — absent only when the match sits at the
 /// very start of the level, via the pattern's `^` alternative) is not part of
 /// the construct itself; it is kept as literal text before the node via the
 /// same kept-prefix [`MacroMatchKind::Node`] sub-range the auto-link increment
 /// introduced for a bare URL's own boundary prefix.
 ///
 /// An escaped mark (`\+text+`, Group 7) drops the single backslash and keeps
-/// the rest of the match – the boundary character included – as literal text,
+/// the rest of the match — the boundary character included — as literal text,
 /// with nothing left to re-scan it afterward (this is already the last pass),
 /// so it is plain parity rather than a divergence.
 ///
@@ -474,7 +474,7 @@ fn build_bare_unconstrained_match<'src>(
 }
 
 /// Builds one [`Raw`](InlineNode::Raw) node from a verbatim, unescaped
-/// passthrough match – see [`apply_passthroughs`] for how each delimiter form
+/// passthrough match — see [`apply_passthroughs`] for how each delimiter form
 /// maps to its `value`.
 fn build_passthrough_node<'src>(
     caps: &regex::Captures<'_>,
@@ -513,12 +513,12 @@ fn build_passthrough_node<'src>(
     // The `pass:` macro (no delimiters). With an **explicit substitution
     // list** (`pass:c,q[…]`, group 14), the body is rendered through the
     // real substitution pipeline under the resolved `SubstitutionGroup::
-    // Custom` list – see [`build_pass_macro_subs_value`] for why this (and
+    // Custom` list — see [`build_pass_macro_subs_value`] for why this (and
     // not a richer node subtree) is the safe shape for this increment.
     // Without one (the bare `pass:[…]` form), `SubstitutionGroup::None`
     // applies nothing. Either way, an escaped closing bracket (`\]`)
     // unescapes first, mirroring the string replacer's
-    // `text.replace("\\]", "]")` – the same treatment every other macro
+    // `text.replace("\\]", "]")` — the same treatment every other macro
     // family's bracket content gets.
     #[allow(clippy::unwrap_used)]
     let m = caps.get(15).unwrap();
@@ -543,7 +543,7 @@ fn build_passthrough_node<'src>(
 }
 
 /// Computes the rendered `value` for a `pass:` macro carrying an **explicit
-/// substitution list** (`pass:c,q[…]`) – the one deferred form 5a documented
+/// substitution list** (`pass:c,q[…]`) — the one deferred form 5a documented
 /// that a bare `SubstitutionGroup::None`/`::Verbatim` treatment cannot cover,
 /// since the list can name *any* of the six named steps, in any order and
 /// combination the author writes.
@@ -555,7 +555,7 @@ fn build_passthrough_node<'src>(
 /// order over the level this passthrough is embedded in, so any structural
 /// node (`Styled`, `Ref`, …) this construct's own resolved subset produced
 /// would be visited *again* by whichever of `build`'s six steps come after
-/// this one – and unlike `Quotes` (whose delimiters are consumed, so a
+/// this one — and unlike `Quotes` (whose delimiters are consumed, so a
 /// second pass finds nothing left to match) or `SpecialCharacters` (whose
 /// `CharRef` leaves are atomic), a macro's own display text is not
 /// idempotent under a second pass: a `Ref{Link}`'s display children are
@@ -567,20 +567,20 @@ fn build_passthrough_node<'src>(
 /// unconditional `SpecialCharacters` step would escape content the author's
 /// list deliberately left raw.
 ///
-/// [`passthrough_text`] – already used for `++…++`/`$$…$$`/the bare
-/// unconstrained form – sidesteps both failure modes: it renders `text`
+/// [`passthrough_text`] — already used for `++…++`/`$$…$$`/the bare
+/// unconstrained form — sidesteps both failure modes: it renders `text`
 /// through the **real, string-based** substitution pipeline
 /// ([`SubstitutionGroup::apply`], the same call
 /// `PassthroughRestoreReplacer` makes for a stored `Passthrough`), producing
 /// an already-final HTML string, then this function's caller wraps it in a
 /// single [`Raw`](InlineNode::Raw) leaf. A `Raw` leaf is *opaque* to every
-/// later step in this module (never descended into, never re-matched –
+/// later step in this module (never descended into, never re-matched —
 /// design §4.2's passthrough-as-leaf convention), so it is immune to both
 /// failure modes above: nothing in `build`'s own remaining steps can touch
 /// it, whether or not the author's list included that step.
 ///
 /// An unrecognized substitution name in the list (e.g. `pass:bogus[…]`) is
-/// silently skipped – any recognized names are still honored – mirroring
+/// silently skipped — any recognized names are still honored — mirroring
 /// [`SubstitutionGroup::from_custom_string`]/`InlinePassMacroReplacer`'s own
 /// resolution. Unlike the string pipeline, this additive pass does not yet
 /// raise the `InvalidSubstitutionTypeForPassthroughMacro` warning for it,
@@ -594,7 +594,7 @@ fn build_pass_macro_subs_value(text: &str, subs_list: &str, parser: &Parser) -> 
 
 /// Builds one [`Styled`] node from a verbatim, unescaped, attribute-listed
 /// `INLINE_PASS_MACRO` match (`[attrs]+++text+++`, `[attrs]++text++`,
-/// `[attrs]$$text$$`) – the delimited half of the attribute-list-prefixed
+/// `[attrs]$$text$$`) — the delimited half of the attribute-list-prefixed
 /// forms this increment recognizes (see
 /// [`build_bare_attrlisted_passthrough_node`] for the bare half). Folds through
 /// the same `render_quoted_substitution` `PassthroughRestoreReplacer` calls
@@ -624,7 +624,7 @@ fn build_attrlisted_passthrough_node<'src>(
 
     // Each delimited alternative's body group is mandatory (its `(.*?)`
     // participates, possibly empty, whenever that alternative matches at
-    // all) – exactly one of groups 5/8/11 is therefore always `Some` here,
+    // all) — exactly one of groups 5/8/11 is therefore always `Some` here,
     // never a genuinely absent capture.
     #[allow(clippy::unwrap_used)]
     let body_m = caps
@@ -677,12 +677,12 @@ fn build_attrlisted_passthrough_node<'src>(
 }
 
 /// Builds one [`Styled`] node from a verbatim, unescaped, attribute-listed
-/// bare [`INLINE_PASS`] match – either the backtick form (`` [x-]`text` ``,
+/// bare [`INLINE_PASS`] match — either the backtick form (`` [x-]`text` ``,
 /// `is_backtick`) or the plus form (`[attrs]+text+`).
 ///
-/// The backtick form's attrlist is *always* `x-`-eligible – the regex itself
+/// The backtick form's attrlist is *always* `x-`-eligible — the regex itself
 /// requires it (`` INLINE_PASS ``'s option 1 only matches `[x-]` or
-/// `[… x-]`) – but its format mark (`` ` ``) keeps `subs` at `Verbatim`
+/// `[… x-]`) — but its format mark (`` ` ``) keeps `subs` at `Verbatim`
 /// regardless, mirroring `InlinePassReplacer`'s `format_mark != '`'` guard:
 /// only the plus form's `old_behavior` switches to the `Normal` group.
 fn build_bare_attrlisted_passthrough_node<'src>(
@@ -707,7 +707,7 @@ fn build_bare_attrlisted_passthrough_node<'src>(
 
     // Both the backtick body (group 2, requiring at least one non-space
     // character) and the plus body (group 5) are mandatory captures of
-    // whichever alternative matched – never a genuinely absent one.
+    // whichever alternative matched — never a genuinely absent one.
     #[allow(clippy::unwrap_used)]
     let body_m = body.unwrap();
     let body_span = source_slice(pieces, body_m.start()..body_m.end(), root);
@@ -745,7 +745,7 @@ fn build_bare_attrlisted_passthrough_node<'src>(
 }
 
 /// Splits an old-behavior-eligible attrlist span into its final attrlist body
-/// and whether the legacy `x-` compatibility marker was present – mirroring
+/// and whether the legacy `x-` compatibility marker was present — mirroring
 /// the string replacer's own check (`handle_quoted_text` and
 /// `InlinePassReplacer` both apply it identically): an attrlist of exactly
 /// `x-` clears entirely; one *ending* in ` x-` drops that suffix; anything
@@ -773,15 +773,15 @@ fn split_old_behavior_attrlist(attrlist: Span<'_>) -> (Span<'_>, bool) {
 /// `CharacterReplacements`, `Macros`, `PostReplacement`): `SubstitutionGroup`'s
 /// `run_pipeline` extracts passthroughs (and, as part of that same extraction,
 /// inline STEM) *before* running a group's steps whenever the group's step
-/// list includes `Macros` – which `Normal`'s does – so a passthrough or STEM
+/// list includes `Macros` — which `Normal`'s does — so a passthrough or STEM
 /// macro nested in an `x-` body (`[x-]++pass:[<b>]++`) is itself extracted
 /// and restored, not left for `Macros` to walk over as plain text.
 /// [`build`](super::build)
-/// already threads a span through exactly that full sequence – passthroughs,
+/// already threads a span through exactly that full sequence — passthroughs,
 /// STEM, then the six steps, footnotes included (the string pipeline's
 /// `Macros` step recognizes footnote macros too, so `Normal`'s semantics
 /// cover them; `build` only splits that recognition into its own step for
-/// numbering-order reasons, design §5.2 step 4b(ii) part 4c) – so this
+/// numbering-order reasons, design §5.2 step 4b(ii) part 4c) — so this
 /// delegates to it directly rather than re-deriving a subset.
 fn apply_normal_subs<'src>(text: Span<'src>, parser: &Parser) -> Vec<InlineNode<'src>> {
     super::build(text, parser, None)
@@ -789,9 +789,9 @@ fn apply_normal_subs<'src>(text: Span<'src>, parser: &Parser) -> Vec<InlineNode<
 
 /// Runs `text` through the real substitution pipeline under `subs`, returning
 /// the resulting owned string. Used to compute a [`Raw`](InlineNode::Raw)
-/// passthrough's `value` under [`SubstitutionGroup::Verbatim`] – mirroring
+/// passthrough's `value` under [`SubstitutionGroup::Verbatim`] — mirroring
 /// `PassthroughRestoreReplacer`'s own `pass.subs.apply(…)` call in the string
-/// pipeline's restore step – so the result honors whatever
+/// pipeline's restore step — so the result honors whatever
 /// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)
 /// `parser` carries rather than a hand-rolled, always-default escaping.
 pub(super) fn passthrough_text(text: &str, subs: &SubstitutionGroup, parser: &Parser) -> String {
@@ -842,7 +842,7 @@ mod tests {
         // In practice `apply_pass_macro_level` only ever runs on the pristine
         // whole-source seed (it is `build`'s first step, ahead of every node
         // that could make a range non-verbatim), so `range_is_verbatim`'s
-        // false branch is defensive – kept for the same reason every other
+        // false branch is defensive — kept for the same reason every other
         // macro family keeps the check. Exercise it directly, feeding a
         // hand-built level whose triple-plus content spans an already-built
         // `Styled` node, to document the intended fallback: the whole match
@@ -851,7 +851,7 @@ mod tests {
         // This calls `apply_pass_macro_level` (not the top-level
         // `apply_passthroughs`) to isolate this guard from the bare
         // unconstrained pass that runs after it: each leftover `+++` run is,
-        // on its own, itself a valid (non-crossing) bare passthrough – see
+        // on its own, itself a valid (non-crossing) bare passthrough — see
         // `a_bare_unconstrained_match_whose_content_crosses_an_already_built_node_is_deferred`
         // for that guard exercised directly on the second pass instead.
         let location = Span::new("+++");
@@ -888,7 +888,7 @@ mod tests {
     #[test]
     fn triple_plus_borrows_its_content_unescaped() {
         // `SubstitutionGroup::None` applies nothing, so the content is genuinely
-        // raw – not even special characters are escaped – and borrows `'src`.
+        // raw — not even special characters are escaped — and borrows `'src`.
         let nodes = build_src(Span::new("+++<b>*not quotes*</b>+++"));
 
         assert_eq!(nodes.len(), 1);
@@ -967,7 +967,7 @@ mod tests {
         // that same de-escaped text and consumes its leading `+++` as a bare
         // passthrough wrapping a single `+` (the outer `+` is the delimiter,
         // the middle `+` is the body), leaving the third `+` as literal text
-        // in front of `text+++` – exactly what the string pipeline's own
+        // in front of `text+++` — exactly what the string pipeline's own
         // second regex pass does over its own once-substituted text, so this
         // is parity, not a divergence.
         let source = r"\+++text+++";
@@ -1102,7 +1102,7 @@ mod tests {
             "a [x-]`code` b",
             "multi\nline [x-]++text\nmore++ end",
             // A delimiter escape after an attribute list drops one backslash
-            // and leaves the rest literal – which the bare-form second pass
+            // and leaves the rest literal — which the bare-form second pass
             // then legitimately re-recognizes as its own (different) match,
             // exactly as the string pipeline's own second regex pass does.
             r"[.role]\++text++",
@@ -1158,7 +1158,7 @@ mod tests {
         // `[.role]++text++` splices an attribute list ahead of the
         // delimiters, so it folds through a `Styled` node (`Unquoted`,
         // `Unconstrained`) whose single `Raw` child carries the passthrough
-        // body – not a plain `Raw` leaf.
+        // body — not a plain `Raw` leaf.
         let nodes = build_src(Span::new("[.role]++text++"));
 
         assert_eq!(nodes.len(), 1);
@@ -1196,7 +1196,7 @@ mod tests {
     #[test]
     fn the_plus_plus_boundary_switches_special_characters_only() {
         // `[.role]++<b>++`: `SubstitutionGroup::Verbatim` applies only special
-        // characters – the same treatment the unattrlisted `++…++` form gets.
+        // characters — the same treatment the unattrlisted `++…++` form gets.
         let nodes = build_src(Span::new("[.role]++<b>++"));
 
         let children = assert_styled(&nodes[0], StyleVariant::Unquoted, SpanForm::Unconstrained);
@@ -1217,7 +1217,7 @@ mod tests {
     fn the_legacy_x_dash_marker_switches_to_monospace_and_normal_subs() {
         // `[x-]++*bold*++`: the `++` boundary's legacy compatibility marker
         // switches the variant to `Code` (monospace) and the body to the full
-        // `Normal` substitution order – quotes included – unlike the
+        // `Normal` substitution order — quotes included — unlike the
         // ordinary attrlist case above, whose body is always a single `Raw`
         // leaf.
         let nodes = build_src(Span::new("[x-]++*bold*++"));
@@ -1239,7 +1239,7 @@ mod tests {
     fn the_x_dash_marker_normal_subs_extracts_a_nested_passthrough() {
         // `[x-]++pass:[<b>]++`: `SubstitutionGroup::Normal`'s own
         // `run_pipeline` extracts passthroughs (and STEM) *before* running its
-        // step list whenever `Macros` is in scope – which it is for `Normal` –
+        // step list whenever `Macros` is in scope — which it is for `Normal` —
         // so a `pass:[…]` nested in the `x-` body is itself extracted and
         // restored by `apply_normal_subs`'s delegation to `build`, rather than
         // being left for `apply_macros` (which does not recognize `pass:` at
@@ -1304,10 +1304,10 @@ mod tests {
         // `[method x-]+save()+`: the trailing ` x-` is stripped, leaving
         // `method` as the surviving attrlist body. `styled.roles` (from
         // `Attrlist::roles`) does not itself capture a bare first positional
-        // attribute like `method` – the renderer's own
+        // attribute like `method` — the renderer's own
         // `render_quoted_substitution` treats it as a role via
         // `nth_attribute(1).block_style()`, using `styled.attrs` (kept in
-        // full) rather than `styled.roles` – so this is asserted through the
+        // full) rather than `styled.roles` — so this is asserted through the
         // fold, which is what the differential corpus also pins.
         let nodes = build_src(Span::new("[method x-]+save()+"));
 
@@ -1355,7 +1355,7 @@ mod tests {
     fn the_backtick_bare_form_is_always_monospace_under_verbatim_subs() {
         // `` [x-]`just *mono*` ``: the backtick form's attrlist is always
         // `x-`-eligible (the regex itself requires it), but its format mark
-        // keeps `subs` at `Verbatim` regardless – `*mono*` stays literal,
+        // keeps `subs` at `Verbatim` regardless — `*mono*` stays literal,
         // unlike the plus form's `Normal`-subs old-behavior case.
         let nodes = build_src(Span::new("[x-]`just *mono*`"));
 
@@ -1367,7 +1367,7 @@ mod tests {
     #[test]
     fn the_plus_bare_form_without_x_dash_is_an_unquoted_span() {
         // `[.role]+text+`: an ordinary (non-`x-`) attrlist on the plus bare
-        // form behaves like the delimited `++`/`$$` boundaries – `Unquoted`
+        // form behaves like the delimited `++`/`$$` boundaries — `Unquoted`
         // under `Verbatim` subs.
         let nodes = build_src(Span::new("[.role]+text+"));
 
@@ -1379,7 +1379,7 @@ mod tests {
     fn an_escaped_attrlist_bracket_is_a_documented_divergence() {
         // `\[attrs]++text++` unescapes to a literal `[attrs]` prefix *and*
         // still recognizes the delimited text as an ordinary (non-attrlisted)
-        // passthrough – a kept-literal-prefix-with-one-dropped-char, plus a
+        // passthrough — a kept-literal-prefix-with-one-dropped-char, plus a
         // node for the remainder, a shape neither `MacroMatchKind` variant
         // expresses. Left fully unrecognized here.
         let source = r"\[attrs]++text++";
@@ -1403,7 +1403,7 @@ mod tests {
     fn a_prohibited_prefix_before_a_bare_attrlisted_form_is_a_documented_divergence() {
         // The string pipeline's own `InlinePassReplacer` retries around a
         // match immediately preceded by `\`, `:`, or `;` (no lookbehind in
-        // Rust's regex engine) – this increment does not reproduce the
+        // Rust's regex engine) — this increment does not reproduce the
         // retry, so such a match is simply left unrecognized.
         let source = "index:[attrs]+text+";
         let nodes = build_src(Span::new(source));
@@ -1423,12 +1423,12 @@ mod tests {
     #[test]
     fn a_bare_attrlisted_match_whose_content_crosses_an_already_built_node_is_deferred() {
         // Exercises `find_bare_attrlisted_matches`'s own `range_is_verbatim`
-        // guard directly – the second pass's counterpart to
+        // guard directly — the second pass's counterpart to
         // `a_match_whose_content_crosses_an_already_built_node_is_deferred`.
         // Reconstructed as flat text this level would read `[attrs]+x+`, but
         // the single-character body sits on an already-built (opaque)
-        // `Styled` node rather than verbatim text, so the candidate match –
-        // whose `full` range still spans it – is left unrecognized.
+        // `Styled` node rather than verbatim text, so the candidate match —
+        // whose `full` range still spans it — is left unrecognized.
         let source = Span::new("[attrs]+x+");
 
         let nodes = vec![
@@ -1462,13 +1462,13 @@ mod tests {
     #[test]
     fn a_bare_attrlisted_form_wrapping_an_embedded_macro_pass_is_a_documented_divergence() {
         // `[method x-]+pass:[<b>]+`: the *macro* pass (`apply_pass_macro_level`,
-        // which runs first) recognizes the embedded `pass:[<b>]` on its own –
+        // which runs first) recognizes the embedded `pass:[<b>]` on its own —
         // `INLINE_PASS_MACRO`'s `pass:` alternative matches that substring
-        // regardless of surrounding context – *before* the bare-form second
+        // regardless of surrounding context — *before* the bare-form second
         // pass gets a chance to see `[method x-]+…+` as one attrlisted
         // construct. The candidate bare-form match's body then spans the
         // already-built (opaque) node the macro pass left behind, so
-        // `range_is_verbatim` defers it – the real-world trigger for
+        // `range_is_verbatim` defers it — the real-world trigger for
         // `a_bare_attrlisted_match_whose_content_crosses_an_already_built_node_is_deferred`'s
         // guard, rather than a hand-built level.
         //
@@ -1494,12 +1494,12 @@ mod tests {
 
     #[test]
     fn a_bare_plus_attrlisted_delimiter_escape_stays_literal() {
-        // `[attrs]\+text+`: honors the escape of the formatting mark – one
+        // `[attrs]\+text+`: honors the escape of the formatting mark — one
         // backslash drops, the rest (attrlist brackets included) stays
         // literal, mirroring `InlinePassReplacer`'s own `escape_count > 0`
         // branch. Unlike the delimited form's own escape
         // (`[.role]\++text++`), there is no further pass to re-scan the
-        // residue here – this second pass already is the last one – so the
+        // residue here — this second pass already is the last one — so the
         // result is simple parity with the golden string pipeline.
         let source = r"[attrs]\+text+";
         let nodes = build_src(Span::new(source));
@@ -1519,7 +1519,7 @@ mod tests {
         // `pass:c[…]` resolves to `Custom([SpecialCharacters])`: the body is
         // rendered through the real pipeline under just that one step (see
         // `build_pass_macro_subs_value`), so `<`/`>` are already escaped in
-        // the leaf's `value` – a single opaque `Raw` node, not `CharRef`
+        // the leaf's `value` — a single opaque `Raw` node, not `CharRef`
         // leaves this builder's own `SpecialCharacters` transducer would
         // produce.
         let source = "pass:c[<b>]";
@@ -1538,7 +1538,7 @@ mod tests {
     fn a_pass_macro_with_a_quotes_subs_list_renders_the_markup() {
         // `pass:q[…]` resolves to `Custom([Quotes])`: rendered through the
         // real pipeline, so the leaf's `value` already carries the
-        // `<strong>` markup `Quotes` produced – unescaped, since `Raw`'s
+        // `<strong>` markup `Quotes` produced — unescaped, since `Raw`'s
         // fold emits `value` verbatim.
         let source = "pass:q[*bold*]";
         let nodes = build_src(Span::new(source));
@@ -1575,12 +1575,12 @@ mod tests {
 
     #[test]
     fn a_pass_macro_with_multiple_subs_applies_them_in_the_order_given() {
-        // `pass:q,c[…]` resolves to `Custom([Quotes, SpecialCharacters])` –
+        // `pass:q,c[…]` resolves to `Custom([Quotes, SpecialCharacters])` —
         // the order the author wrote, not the *normal* effective order
         // (which always runs `SpecialCharacters` first). `Quotes` runs
         // first here, wrapping `*bold*` in a literal `<strong>…</strong>`;
         // `SpecialCharacters` then runs *second* and escapes every `<`/`>`
-        // it finds – tags included, since it has no way to tell them apart
+        // it finds — tags included, since it has no way to tell them apart
         // from `<b>`'s own literal angle brackets. This is the documented
         // gotcha of naming `specialcharacters` after a step that emits
         // markup, reproduced byte-for-byte from the real pipeline.
@@ -1597,8 +1597,8 @@ mod tests {
 
     #[test]
     fn a_pass_macro_with_an_unrecognized_subs_name_skips_it() {
-        // An unrecognized name resolves to zero steps – rather than
-        // invalidating the whole list – mirroring
+        // An unrecognized name resolves to zero steps — rather than
+        // invalidating the whole list — mirroring
         // `SubstitutionGroup::from_custom_string`/`InlinePassMacroReplacer`'s
         // own "skip and keep going" resolution. With no steps at all the
         // rendered `value` is the content completely untouched (not even
@@ -1618,7 +1618,7 @@ mod tests {
     #[test]
     fn a_recognized_name_beside_an_unrecognized_one_is_still_honored() {
         // `pass:c,bogus[…]` resolves to the same `Custom([SpecialCharacters])`
-        // as `pass:c[…]` alone – the unrecognized name is skipped, not fatal
+        // as `pass:c[…]` alone — the unrecognized name is skipped, not fatal
         // to the rest of the list.
         let nodes = build_src(Span::new("pass:c,bogus[<b>]"));
 
@@ -1659,7 +1659,7 @@ mod tests {
 
     #[test]
     fn a_bare_unconstrained_passthrough_is_a_raw_node() {
-        // `+text+` with no attribute list folds through a plain `Raw` leaf –
+        // `+text+` with no attribute list folds through a plain `Raw` leaf —
         // like the double-plus/double-dollar forms, an absent attrlist means
         // no stored `type_`, so the restore never wraps the text in a
         // rendered span.
@@ -1707,8 +1707,8 @@ mod tests {
 
     #[test]
     fn an_escaped_bare_unconstrained_passthrough_stays_literal() {
-        // `\+text+` drops the single backslash and keeps `+text+` literal –
-        // no `Raw` node – with the boundary prefix (here "see ") preserved.
+        // `\+text+` drops the single backslash and keeps `+text+` literal —
+        // no `Raw` node — with the boundary prefix (here "see ") preserved.
         // Unlike the pass-macro level's own `+++`/`++` escapes, there is no
         // further pass to re-scan the residue here (this is already the last
         // pass), so this is plain parity, not a divergence.
@@ -1729,7 +1729,7 @@ mod tests {
     #[test]
     fn a_prohibited_prefix_before_a_bare_unconstrained_form_needs_no_retry() {
         // Unlike the two attribute-list-prefixed bare forms (which need a
-        // documented divergence for this – see
+        // documented divergence for this — see
         // `a_prohibited_prefix_before_a_bare_attrlisted_form_is_a_documented_divergence`),
         // the bare unconstrained form's own pattern already excludes a `\`,
         // `:`, or `;` prefix in its consuming boundary group, so this is
@@ -1754,9 +1754,9 @@ mod tests {
     #[test]
     fn a_bare_unconstrained_match_whose_content_crosses_an_already_built_node_is_deferred() {
         // A candidate bare-unconstrained match whose body spans an
-        // already-built (opaque) node – here a `Styled` span from a hand-built
+        // already-built (opaque) node — here a `Styled` span from a hand-built
         // level, standing in for what an earlier pass-macro-level match would
-        // leave behind – is left unrecognized rather than mis-sliced, the same
+        // leave behind — is left unrecognized rather than mis-sliced, the same
         // guard every other macro family in this module keeps.
         let source = Span::new("+x+");
 

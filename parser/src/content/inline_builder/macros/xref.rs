@@ -28,8 +28,8 @@ use crate::{
 /// - a same-document reference to a specific id resolves through the catalog
 ///   later, so it carries no *derived* destination (`derived: None`);
 /// - the empty target (`xref:#[]`, `<<>>`) names the current document as a
-///   whole, and a target naming another document – or a file that was included
-///   into this one in full, which is a reference within it after all – carries
+///   whole, and a target naming another document — or a file that was included
+///   into this one in full, which is a reference within it after all — carries
 ///   a destination *derived* from the target itself, computed here from the
 ///   path attributes in effect at the reference (no catalog consulted).
 ///
@@ -105,19 +105,19 @@ pub(super) fn xref_macros_level<'src>(
     rebuild_macro_level(&nodes, &pieces, &s, matches)
 }
 
-/// Finds every recognized cross-reference at this level – the `xref:` macro
-/// form and the `<<id>>` shorthand – skipping any match that crosses an
+/// Finds every recognized cross-reference at this level — the `xref:` macro
+/// form and the `<<id>>` shorthand — skipping any match that crosses an
 /// [`atomic`](Piece::atomic) piece. That gate is the family's *only* deferral:
 /// both builders claim every target and text shape an admitted match can
 /// carry.
 ///
-/// A [`synthesized`](Piece::synthesized) run (an attribute expansion, or –
-/// reached at a tree's root – a filtered multi-line block's own joined seed)
+/// A [`synthesized`](Piece::synthesized) run (an attribute expansion, or —
+/// reached at a tree's root — a filtered multi-line block's own joined seed)
 /// **is** admitted, which is what lets a cross-reference be recognized inside
 /// an expanded attribute value (`xref:{id}[{text}]`, `<<{id},text>>`). Nothing
 /// on a cross-reference node is `Span`-typed: its target and reference text
-/// come straight out of the level's match string – which carries a synthesized
-/// run's bytes exactly – and its own attribute list is parsed from a normalized
+/// come straight out of the level's match string — which carries a synthesized
+/// run's bytes exactly — and its own attribute list is parsed from a normalized
 /// *copy* rather than a source slice (see
 /// [`xref_macro_text`]), so `attrs` is always `None` here. Only the node's
 /// `location` (and its children's) takes design §4.4's coarse fallback. This
@@ -143,8 +143,8 @@ fn find_xref_matches<'src>(
         // in how much of the match the gate covers. The macro's whole match is
         // read as one construct, so all of it must be admitted. The shorthand's
         // `&lt;&lt;` / `&gt;&gt;` delimiters are always `CharRef`s that the node
-        // *consumes* rather than reads, so only its inner text (group 2) – the
-        // id and any reference text – is gated.
+        // *consumes* rather than reads, so only its inner text (group 2) — the
+        // id and any reference text — is gated.
         let shorthand_inner = caps.get(2).map(|inner| inner.start()..inner.end());
 
         let verbatim = match &shorthand_inner {
@@ -218,7 +218,7 @@ fn find_xref_matches<'src>(
 /// list (an `=`) is interpreted.
 ///
 /// As in the additive builder generally, this performs *no* recognition side
-/// effect – notably it does **not** register the reference for resolution,
+/// effect — notably it does **not** register the reference for resolution,
 /// which the string replacer does by recording a deferred `XrefSegment`; the
 /// cutover (design §5.2 Phase 4, step 6) wires resolution to the tree.
 fn build_xref_node<'src>(
@@ -260,20 +260,20 @@ fn build_xref_node<'src>(
 /// Interprets the bracketed display text of an `xref:` macro, mirroring
 /// [`InlineXrefReplacer::replace_append`](crate::content::macros)'s own text
 /// interpretation exactly so the fold reproduces the same bytes: a text
-/// carrying an `=` is parsed – from a newline-normalized copy, since the parse
+/// carrying an `=` is parsed — from a newline-normalized copy, since the parse
 /// is not necessarily verbatim (mirroring the string replacer, which parses
-/// the same normalized copy rather than a source slice) – as an
+/// the same normalized copy rather than a source slice) — as an
 /// [`Attrlist`], whose first positional attribute becomes the display text
 /// and whose `window`/`role`/`xrefstyle` named attributes are honored. If the
-/// attrlist parse finds no named attribute – the sole positional value is the
-/// whole normalized text – the `=` was incidental (e.g. an already-rendered
+/// attrlist parse finds no named attribute — the sole positional value is the
+/// whole normalized text — the `=` was incidental (e.g. an already-rendered
 /// inner macro such as `xref:sec[image:...[]]`, whose HTML contains `=` and
 /// `"`), not a real attribute list; the text is then used as plain text with
 /// no named attributes, matching Asciidoctor's `extract_attributes_from_text`.
 ///
 /// Returns the display-text children, the window, the roles, and the
 /// `xrefstyle` override (`None` unless the macro carries its own `xrefstyle=`
-/// attribute; the document-wide default is applied later, at fold time – see
+/// attribute; the document-wide default is applied later, at fold time — see
 /// [`Ref::xrefstyle`]'s field docs).
 fn xref_macro_text<'src>(
     raw_text: &str,
@@ -367,13 +367,13 @@ fn plain_xref_text<'src>(
     let text_location = source_slice(pieces, text_range.clone(), root);
 
     // An escaped bracket (`\]`) makes the logical text a computed (owned)
-    // value – a *synthesized* `Text` whose value need not coincide with its
+    // value — a *synthesized* `Text` whose value need not coincide with its
     // source, mirroring the string replacer's `raw_text.replace`. Without one,
     // a verbatim text borrows the very bytes its location covers (the
     // builder's `'src`-borrowing goal, §4.5), while a text crossing a
     // [`synthesized`](Piece::synthesized) run has no `'src` slice of its own:
-    // it takes the match string's bytes – the expanded value exactly, and the
-    // very text the string replacer matched over – as an owned value, with only
+    // it takes the match string's bytes — the expanded value exactly, and the
+    // very text the string replacer matched over — as an owned value, with only
     // `text_location` falling back to the enclosing run's coarse span (design
     // §4.4).
     let value = if raw_text.contains("\\]") {
@@ -397,21 +397,21 @@ fn plain_xref_text<'src>(
 /// `inner` is the shorthand's inner text (`INLINE_XREF` group 2) in
 /// match-string coordinates; the caller guarantees it crosses no
 /// [`atomic`](Piece::atomic) piece, so the match string carries its bytes
-/// exactly – whether they are source bytes (a verbatim run) or an expanded
+/// exactly — whether they are source bytes (a verbatim run) or an expanded
 /// attribute value's (a [`synthesized`](Piece::synthesized) run). It is split
-/// on the first `,` into an id and an optional reference text, each trimmed –
+/// on the first `,` into an id and an optional reference text, each trimmed —
 /// mirroring the string replacer's `inner.split_once(',')` with `id.trim()` /
 /// `text.trim()`, which runs over the very same bytes. The reference text
-/// becomes the node's single [`Text`](InlineNode::Text) child – still borrowed
+/// becomes the node's single [`Text`](InlineNode::Text) child — still borrowed
 /// from `'src` when the text is verbatim (§4.5), owned when it crosses a
-/// synthesized run – and the whole `<<…>>` – its `CharRef` delimiters included
-/// – is the node's `location` (a synthesized run's coarse enclosing span, per
+/// synthesized run — and the whole `<<…>>` — its `CharRef` delimiters included
+/// — is the node's `location` (a synthesized run's coarse enclosing span, per
 /// design §4.4).
 ///
 /// **A comma is what makes a text *present*, not what it contains.** The
 /// string replacer's own split records `<<id,>>` (and `<<id,   >>`) as a
-/// *present-but-empty* text – `Some("")`, which renders an empty `<a>…</a>`
-/// rather than the bracketed `[id]` fallback `None` renders – so a shorthand
+/// *present-but-empty* text — `Some("")`, which renders an empty `<a>…</a>`
+/// rather than the bracketed `[id]` fallback `None` renders — so a shorthand
 /// carrying a comma always builds exactly one `Text` child, empty value and
 /// all (a zero-length `'src` borrow at the position the trim left). The fold
 /// keys "was a text provided?" on the *presence* of a child rather than on
@@ -427,13 +427,13 @@ fn plain_xref_text<'src>(
 /// [`xref_target_and_derived`] exactly as the macro form's.
 ///
 /// A shorthand whose id already carries a rendered `<` (an earlier-substituted
-/// macro, e.g. `<<link:https://example.com[], Example>>`) – which the string
-/// replacer leaves untouched – cannot reach here at all: the `<` is a
+/// macro, e.g. `<<link:https://example.com[], Example>>`) — which the string
+/// replacer leaves untouched — cannot reach here at all: the `<` is a
 /// `CharRef`, so the inner is not verbatim and the caller never calls this
 /// builder.
 ///
 /// As in the additive builder generally, this performs *no* recognition side
-/// effect – notably it does **not** register the reference for resolution; the
+/// effect — notably it does **not** register the reference for resolution; the
 /// cutover (design §5.2 Phase 4, step 6) wires resolution to the tree.
 fn build_xref_shorthand_node<'src>(
     inner: std::ops::Range<usize>,
@@ -444,7 +444,7 @@ fn build_xref_shorthand_node<'src>(
     parser: &Parser,
 ) -> InlineNode<'src> {
     // The inner crosses no atomic piece (the caller checked), so the match
-    // string carries its logical bytes exactly – which is what the string
+    // string carries its logical bytes exactly — which is what the string
     // replacer's own `inner.split_once(',')` sees. Reading them here rather
     // than through the inner's source slice is what lets a shorthand inside an
     // expanded attribute value be recognized: a synthesized run has no `'src`
@@ -472,9 +472,9 @@ fn build_xref_shorthand_node<'src>(
             let trimmed = raw_text.trim();
 
             // Locate the trimmed reference text at its source. A verbatim text
-            // borrows the very bytes its location covers – a zero-length borrow
+            // borrows the very bytes its location covers — a zero-length borrow
             // when the text is empty (or whitespace-only), which is the
-            // present-but-empty text the doc comment describes – while a
+            // present-but-empty text the doc comment describes — while a
             // synthesized one keeps its exact expanded bytes against the
             // enclosing run's coarse location (design §4.4).
             let lead = raw_text.len() - raw_text.trim_start().len();
@@ -530,7 +530,7 @@ mod tests {
     /// with any deferred cross-references finalized to their unresolved
     /// fallback. Unlike [`golden_macros`], the macros step defers a
     /// cross-reference to a placeholder rather than rendering it, so the
-    /// placeholder must be finalized – no catalog resolution runs, so the
+    /// placeholder must be finalized — no catalog resolution runs, so the
     /// result is the unresolved-fallback rendering the additive builder's
     /// fold (always unresolved) must reproduce.
     fn golden_xref_with(source: &str, parser: &Parser) -> String {
@@ -570,7 +570,7 @@ mod tests {
         // increment. Every fixture is a *verbatim* cross-reference in either
         // spelling, whether it resolves through the catalog (same-document) or
         // through a target-derived destination (inter-document, or the
-        // document-as-a-whole form) – the boundary this increment claims (an
+        // document-as-a-whole form) — the boundary this increment claims (an
         // attribute-list text, and a shorthand crossing a special/span, are
         // deferred and live in divergence tests below).
         let fixtures = [
@@ -584,8 +584,8 @@ mod tests {
             "xref:sect-one[Section One]",
             // An explicit same-document reference (`#id`).
             "xref:#install[Install]",
-            // An inter-document target – with and without a fragment, and a
-            // non-AsciiDoc extension kept as-is – and the document-as-a-whole
+            // An inter-document target — with and without a fragment, and a
+            // non-AsciiDoc extension kept as-is — and the document-as-a-whole
             // form (an empty target).
             "xref:other.adoc#frag[Elsewhere]",
             "xref:other.adoc[]",
@@ -604,7 +604,7 @@ mod tests {
             "xref:install[role=hl]",
             // An `=` that is not a real attribute list: no valid attribute
             // name precedes it, so the attrlist parse yields one positional
-            // value spanning the whole text – the incidental case.
+            // value spanning the whole text — the incidental case.
             "xref:install[=text]",
             // A macro embedded in surrounding flow, and next to other constructs.
             "See xref:install[the guide] for details.",
@@ -635,7 +635,7 @@ mod tests {
             // (the branch of `render_xref` an empty text reaches differently
             // from the unresolved one).
             "<<other#frag,>>",
-            // An inter-document shorthand – with and without a fragment – and
+            // An inter-document shorthand — with and without a fragment — and
             // the document-as-a-whole shorthand (an empty id).
             "<<other#frag,Elsewhere>>",
             "<<other#>>",
@@ -749,8 +749,8 @@ mod tests {
 
     #[test]
     fn an_escaped_xref_stays_literal() {
-        // `\xref:…` drops the backslash and keeps the macro as literal text – no
-        // reference node – exactly as the string replacer's escape branch does.
+        // `\xref:…` drops the backslash and keeps the macro as literal text — no
+        // reference node — exactly as the string replacer's escape branch does.
         let source = "\\xref:install[Installation]";
         let nodes = build_src(Span::new(source));
 
@@ -836,8 +836,8 @@ mod tests {
 
     #[test]
     fn an_escaped_xref_shorthand_stays_literal() {
-        // `\<<id>>` drops the backslash and keeps the shorthand as literal text –
-        // no reference node – exactly as the string replacer's escape branch
+        // `\<<id>>` drops the backslash and keeps the shorthand as literal text —
+        // no reference node — exactly as the string replacer's escape branch
         // does. Its delimiters are non-verbatim `CharRef`s, so this also exercises
         // the escape path that does not require a verbatim inner.
         let source = "\\<<install,Install Now>>";
@@ -912,8 +912,8 @@ mod tests {
         // `<<id,>>` records a *present-but-empty* reference text: the string
         // replacer renders an empty `<a href="#install"></a>`, not the
         // bracketed `[install]` fallback a comma-less shorthand renders. The
-        // node keeps the distinction structurally – the text is present as one
-        // empty `Text` child – so the fold reproduces the same bytes.
+        // node keeps the distinction structurally — the text is present as one
+        // empty `Text` child — so the fold reproduces the same bytes.
         let source = "<<install,>>";
         let nodes = build_src(Span::new(source));
 
@@ -952,7 +952,7 @@ mod tests {
     fn a_real_documents_empty_shorthand_text_reaches_its_tree() {
         // End-to-end, through the real parse path, and with the reference
         // *resolved*: this is the shape that makes the form a blocker for the
-        // authoritative fold rather than an unclaimed one – a golden test
+        // authoritative fold rather than an unclaimed one — a golden test
         // already exercises it (`xref_should_use_title_of_target_as_link_text_
         // when_explicit_link_text_is_empty` in `tests/asciidoctor_rb/
         // links_test.rs`, design §5.3's oracle). Resolution reaches the node
@@ -992,7 +992,7 @@ mod tests {
     #[test]
     fn a_whitespace_only_xref_shorthand_text_trims_to_an_empty_present_text() {
         // The reference text is trimmed exactly as the string replacer trims
-        // it, so a whitespace-only text is the same present-but-empty text –
+        // it, so a whitespace-only text is the same present-but-empty text —
         // its zero-length span sitting where the trim left it, after the
         // leading whitespace.
         let source = "<<install,   >>";
@@ -1011,7 +1011,7 @@ mod tests {
     #[test]
     fn an_xref_shorthand_over_a_rendered_span_is_a_documented_divergence() {
         // A shorthand whose reference text is a rendered span (`<<x,*bold*>>`) has
-        // a non-verbatim inner – the span is opaque – so the builder cannot slice
+        // a non-verbatim inner — the span is opaque — so the builder cannot slice
         // its text from `'src` and leaves the shorthand unrecognized, exactly as
         // it defers a macro crossing a rendered span.
         let source = "<<x,*bold*>>";
@@ -1029,8 +1029,8 @@ mod tests {
     #[test]
     fn an_inter_document_xref_becomes_a_ref_node() {
         // An inter-document target (`other.adoc#frag`) carries a *derived*
-        // destination computed from the target itself – the AsciiDoc extension
-        // stripped, the output suffix substituted in – mirroring the string
+        // destination computed from the target itself — the AsciiDoc extension
+        // stripped, the output suffix substituted in — mirroring the string
         // replacer's own target interpretation exactly.
         let source = "xref:other.adoc#frag[Elsewhere]";
         let nodes = build_src(Span::new(source));
@@ -1133,8 +1133,8 @@ mod tests {
     #[test]
     fn an_xref_attribute_list_with_no_positional_text_has_no_children() {
         // An attribute list with no positional value at all (only named
-        // attributes) yields no display text – the same "no text provided"
-        // fallback an empty `xref:id[]` uses – but still honors the named
+        // attributes) yields no display text — the same "no text provided"
+        // fallback an empty `xref:id[]` uses — but still honors the named
         // attributes.
         let source = "xref:install[role=hl]";
         let nodes = build_src(Span::new(source));
@@ -1174,7 +1174,7 @@ mod tests {
         // `=text` contains an `=`, but no valid attribute name precedes it (an
         // attribute name cannot start with `=`), so the attrlist parse finds
         // one positional value spanning the *whole* text rather than a named
-        // attribute – the `=` was incidental, mirroring
+        // attribute — the `=` was incidental, mirroring
         // `InlineXrefReplacer`'s own `extract_attributes_from_text` fallback.
         // The text is then used as plain display text with no named
         // attributes, exactly as if it carried no `=` at all.
@@ -1227,7 +1227,7 @@ mod tests {
         // included into it in full) is a reference within it after all: the
         // element it names is in the catalog being built right now, so the node
         // carries the same-document target (the fragment) with no derived
-        // destination – exactly as an explicit `#id` shorthand does.
+        // destination — exactly as an explicit `#id` shorthand does.
         let parser = Parser::default().with_primary_file_name("mydoc.adoc");
 
         let source = "xref:mydoc.adoc#install[Install]";
@@ -1285,7 +1285,7 @@ mod tests {
             )
     }
 
-    /// The real, public pipeline's output for `source` – the golden for the
+    /// The real, public pipeline's output for `source` — the golden for the
     /// expanded-value fixtures, which need the `AttributeReferences` step
     /// [`golden_xref_with`] deliberately omits (it also finalizes the deferred
     /// cross-references, which this does through the group's own pipeline).
@@ -1302,9 +1302,9 @@ mod tests {
     fn fold_matches_the_string_pipeline_for_xrefs_inside_expanded_values() {
         // A cross-reference whose target or reference text crosses a
         // *synthesized* run (an attribute expansion) is now recognized:
-        // nothing on a `Ref{Xref}` node is `Span`-typed – its target and text
+        // nothing on a `Ref{Xref}` node is `Span`-typed — its target and text
         // come from the match string, which carries a synthesized run's bytes
-        // exactly – so only the node's `location` takes
+        // exactly — so only the node's `location` takes
         // design §4.4's coarse fallback. This is the same lift the anchor,
         // bare-e-mail, UI, and index-term families already made.
         let parser = expanding_parser();
@@ -1330,7 +1330,7 @@ mod tests {
             // The whole cross-reference arriving from an expanded value. The
             // shorthand's `<<` is *literal* in the expanded value (it never
             // passes through `specialcharacters`), so neither pipeline
-            // recognizes it as a shorthand – the tree and the string agree
+            // recognizes it as a shorthand — the tree and the string agree
             // that it stays literal.
             "{xref-src}",
             "before {xref-src} after",
@@ -1416,7 +1416,7 @@ mod tests {
     fn an_xref_over_a_rendered_span_in_an_expanded_value_is_still_deferred() {
         // Lifting the boundary admits a *synthesized* run, not an
         // [`atomic`](Piece::atomic) one: an expanded value whose own `<` became
-        // a `Raw` leaf (design §3.4.1 – the attributes step runs after
+        // a `Raw` leaf (design §3.4.1 — the attributes step runs after
         // `specialcharacters`, so a literal special in a value is emitted
         // unescaped) is opaque, so the shorthand around it still defers. The
         // string pipeline leaves it literal too, for its own reason: its
