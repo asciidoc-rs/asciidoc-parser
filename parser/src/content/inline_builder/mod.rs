@@ -121,9 +121,11 @@
 //!   normalized copy, never a source slice), so a cross-reference inside an
 //!   expanded attribute value is recognized with its exact target and text.
 //!   That same gate also admits an **escaped special** for the
-//!   cross-reference family (`xref:sec[a<b]`, `<<sec,Tom & Jerry>>`) and for
+//!   cross-reference family (`xref:sec[a<b]`, `<<sec,Tom & Jerry>>`), for
 //!   the **`link:`/`mailto:` macro** (`link:a&b.html[]`,
-//!   `link:index.html[a < b]`): the
+//!   `link:index.html[a < b]`), and for the **auto-link / formal-URL** family
+//!   in both of `INLINE_LINK`'s branches (`https://example.org/?a=1&b=2`,
+//!   `https://example.org[a < b]`, `<https://example.org/a&b>`): the
 //!   level's match string carries a
 //!   [`CharRef`](InlineNode::CharRef)`::Special`'s canonical entity, the very
 //!   bytes the string replacer's own escaped haystack holds there, so every
@@ -131,11 +133,16 @@
 //!   The display text then becomes **structured children** rather than one
 //!   sliced or baked `Text` — the special stays the `CharRef` it already is,
 //!   folding back to the same entity instead of being escaped twice — which for
-//!   a *bare* link macro covers the target-derived text it shows as well. The
-//!   one capture still holding that boundary in either family is a display text
+//!   a *bare* link (a macro's target-derived text, an auto-link's or an angle
+//!   link's URL) covers the text it shows as well. The
+//!   one capture still holding that boundary in these families is a display text
 //!   carrying an attribute list, parsed as a real
 //!   [`Attrlist`]`<'src>` from the source's own
-//!   bytes rather than the escaped copy the replacer parses.
+//!   bytes rather than the escaped copy the replacer parses; the auto-link
+//!   family keeps one narrower deferral of its own, a **bare URL whose
+//!   trailing-punctuation strip** would cut inside an escaped special
+//!   (`https://example.org/a&`, whose match-string tail `&amp;` ends in the
+//!   very `;` the strip keys off) — a boundary no node list can be split at.
 //!   A display/reference text crossing a rendered *span*
 //!   (`link:x[*bold*]`, `xref:id[*bold*]`, `<<id,*bold*>>`) remains deferred for
 //!   every reference-bearing family: a span is one opaque placeholder here
@@ -664,6 +671,13 @@ mod tests {
             "link:a&b.html[x] macro",
             "link:index.html[Tom & Jerry] macro",
             "mailto:a&b@example.org[] address",
+            "https://example.org/?a=1&b=2 auto-link",
+            "https://example.org/a&b[Text] formal",
+            "https://example.org[Tom & Jerry] formal",
+            "<https://example.org/x&y> angle",
+            r"http://google.com[\{google_homepage}]",
+            r"link:index.html[\{name}]",
+            r"xref:target[\{name}]",
             "A claim.footnote:[the evidence]",
             "Named.footnote:disc[a discussion] then footnote:disc[].",
             "A claim.footnote:[the *strong* evidence and a link:https://e.org[source]]",
@@ -825,6 +839,17 @@ mod tests {
         assert_parity(
             "See <https://example.org> and <https://example.org/docs[the docs] \
              beside *bold* text and (C) 2024, plus https://plain.example.",
+        );
+
+        // The same escaped-special lift, for the auto-link / formal-URL family:
+        // a bare URL and an angle-bracketed one whose *targets* cross a
+        // special (their shown text recovered from the URL's own range as
+        // structured children) beside a formal link whose *display text* does,
+        // with a quoted span and a live attribute reference around them.
+        assert_parity_with(
+            "See https://example.org/?a=1&b=2 and <https://other.example/x&y>, \
+             or https://docs.example[Tom & Jerry] about *{product}*.",
+            with_product,
         );
 
         // A bare e-mail address spliced in by an attribute reference — a
