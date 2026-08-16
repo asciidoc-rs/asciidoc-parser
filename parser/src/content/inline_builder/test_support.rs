@@ -9,9 +9,9 @@
 
 use super::{build, quotes::apply_quotes, special_chars::apply_special_characters};
 use crate::{
-    Parser, Span,
+    HasSpan, Parser, Span,
     content::{Content, Passthroughs, SubstitutionStep},
-    inlines::{InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
+    inlines::{CharRef, InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
     parser::HtmlSubstitutionRenderer,
     strings::CowStr,
 };
@@ -72,6 +72,31 @@ pub(super) fn assert_text(node: &InlineNode<'_>, data: &str, line: usize, col: u
 
         other => panic!("expected Text({data:?}), got {other:?}"),
     }
+}
+
+/// Asserts that `node` is a [`CharRef`](InlineNode::CharRef)`::Special` for
+/// `ch` — an escaped special the macro families recover as its own child
+/// rather than baking into a `Text` — and returns its `location` for further
+/// inspection.
+///
+/// Deliberately written as an `assert!` over a [`matches!`] rather than as a
+/// destructuring `let … else { panic!(…) }`: the latter puts its
+/// never-executed failure arm on a line of its own, which the coverage report
+/// then counts as a miss at every call site (five of them in `links.rs`
+/// alone). Here the whole assertion is one executed expression.
+pub(super) fn assert_special_char<'src>(node: &InlineNode<'src>, ch: char) -> Span<'src> {
+    assert!(
+        matches!(
+            node,
+            InlineNode::CharRef {
+                value: CharRef::Special(got),
+                ..
+            } if *got == ch
+        ),
+        "expected the special character {ch:?}, got {node:?}"
+    );
+
+    node.span()
 }
 
 /// Asserts that `node` is a [`Raw`](InlineNode::Raw) with the given

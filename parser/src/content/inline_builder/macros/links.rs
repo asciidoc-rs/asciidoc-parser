@@ -1425,8 +1425,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::super::super::test_support::{
-        assert_link, assert_styled, assert_text, build_src, fold_html, golden_macros,
-        golden_macros_with, link_text_of,
+        assert_link, assert_special_char, assert_styled, assert_text, build_src, fold_html,
+        golden_macros, golden_macros_with, link_text_of,
     };
     use crate::{
         Parser, Span,
@@ -1711,15 +1711,7 @@ mod tests {
 
         assert_text(&reference.children[0], "a", 1, 6);
 
-        let InlineNode::CharRef {
-            value: CharRef::Special(ch),
-            location,
-        } = &reference.children[1]
-        else {
-            panic!("expected a special character: {:?}", reference.children[1]);
-        };
-
-        assert_eq!(*ch, '&');
+        let location = assert_special_char(&reference.children[1], '&');
         assert_eq!(location.data(), "&");
 
         assert_text(&reference.children[2], "b.html", 1, 8);
@@ -1803,15 +1795,7 @@ mod tests {
 
         assert_text(&reference.children[0], "a ", 1, 17);
 
-        let InlineNode::CharRef {
-            value: CharRef::Special(ch),
-            location,
-        } = &reference.children[1]
-        else {
-            panic!("expected a special character: {:?}", reference.children[1]);
-        };
-
-        assert_eq!(*ch, '<');
+        let location = assert_special_char(&reference.children[1], '<');
         assert_eq!(location.data(), "<");
         assert_eq!(location.byte_offset(), 18);
 
@@ -2545,15 +2529,7 @@ mod tests {
         assert_eq!(reference.children.len(), 3);
         assert_text(&reference.children[0], "https://example.org/?a=1", 1, 2);
 
-        let InlineNode::CharRef {
-            value: CharRef::Special(ch),
-            location,
-        } = &reference.children[1]
-        else {
-            panic!("expected a special character: {:?}", reference.children[1]);
-        };
-
-        assert_eq!(*ch, '&');
+        let location = assert_special_char(&reference.children[1], '&');
         assert_eq!(location.data(), "&");
         assert_eq!(location.byte_offset(), 25);
 
@@ -2629,15 +2605,7 @@ mod tests {
         assert_eq!(reference.children.len(), 3);
         assert_text(&reference.children[0], "https://example.org/?a=1", 1, 1);
 
-        let InlineNode::CharRef {
-            value: CharRef::Special(ch),
-            location,
-        } = &reference.children[1]
-        else {
-            panic!("expected a special character: {:?}", reference.children[1]);
-        };
-
-        assert_eq!(*ch, '&');
+        let location = assert_special_char(&reference.children[1], '&');
         assert_eq!(location.data(), "&");
         assert_eq!(location.byte_offset(), 24);
 
@@ -2666,15 +2634,7 @@ mod tests {
         assert_eq!(reference.children.len(), 3);
         assert_text(&reference.children[0], "a ", 1, 21);
 
-        let InlineNode::CharRef {
-            value: CharRef::Special(ch),
-            location,
-        } = &reference.children[1]
-        else {
-            panic!("expected a special character: {:?}", reference.children[1]);
-        };
-
-        assert_eq!(*ch, '<');
+        let location = assert_special_char(&reference.children[1], '<');
         assert_eq!(location.data(), "<");
 
         assert_text(&reference.children[2], " b", 1, 24);
