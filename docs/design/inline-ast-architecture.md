@@ -2503,6 +2503,80 @@ Each phase is a reviewable unit with a clear exit gate.
   set strictly **shrank**: four whole-corpus sources are gone and no new one appeared. As with every
   prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (the image and link families inside an expanded attribute value,
+  closing the last of that divergence):* the two increments above closed "a macro inside an
+  expanded attribute value" for every family whose node carries no `Span`-typed field; the two
+  that are left – [`Image`](../../parser/src/inlines/image.rs) and the
+  [`Ref`](../../parser/src/inlines/ref_node.rs)`{Link}` family, the two that hold a real
+  [`Attrlist`](../../parser/src/attributes/attrlist.rs)`<'src>` – now make the same lift for
+  everything *except* that attribute list, which is the one value in this whole module that a
+  match string genuinely cannot supply:
+  [`Attrlist::parse`](../../parser/src/attributes/attrlist.rs) reads its `source: Span<'src>`'s
+  bytes **as content**, not merely as a location tag, so an expanded value – which has no `'src`
+  slice of its own – leaves it nothing to parse. The boundary therefore moves from *the family*
+  to *the one capture that needs a slice*, which is what makes the common real-world spellings
+  (`image:{logo}[Logo]`, `link:{url}[Docs]`, `https://{host}/path`) work while the genuinely
+  blocked ones stay documented divergences.
+
+  Concretely, the same one-gate-per-family swap
+  ([`range_is_verbatim`](../../parser/src/content/inline_builder/macros/image.rs) →
+  [`range_is_verbatim_or_synthesized`](../../parser/src/content/inline_builder/macros/image.rs))
+  the four prior families made, plus a narrower check where a slice is still required:
+
+  - **Image / icon.** [`build_image_node`](../../parser/src/content/inline_builder/macros/image.rs)
+    reads the macro *name* from the level's match string rather than from `location.data()` (which
+    is the coarse enclosing span for a wholly-expanded macro, so the `image:`-vs-`icon:`
+    discriminant would otherwise be read off the attribute *reference*), and its *target* through
+    [`text_slice`](../../parser/src/content/inline_builder/quotes.rs) – still borrowing from `'src`
+    when the target is verbatim (§4.5), exact when it is not. The **bracket** keeps the verbatim
+    check: a non-empty attribute list crossing a synthesized run leaves the macro literal, while an
+    **empty** one (`image:{logo}[]`) needs no bytes at all and parses from the same zero-length span
+    an absent group already used – so even a wholly-expanded `image:x.png[]` is recognized.
+  - **Links.** Every value the three URL-link passes hold – the scheme, the URL, the bracketed
+    display text – is already computed out of the match string, so
+    [`build_inline_link_node`](../../parser/src/content/inline_builder/macros/links.rs) and
+    [`find_link_macro_matches`](../../parser/src/content/inline_builder/macros/links.rs) needed only
+    the gate swap. The **attribute-list-bearing display text** (a `link:`/formal-URL `=`, a
+    `mailto:` `,` subject) keeps the verbatim check, for the same `Attrlist<'src>` reason and
+    alongside the multi-line form the family already defers there.
+  - **One extra rule, for the `link:`/`mailto:` macro pass only.** That pass additionally requires
+    its own `link:`/`mailto:` **marker** to be verbatim, so a *wholly* expanded macro (`{m}`, where
+    `:m: link:index.html[Docs]`) stays literal. The reason is not the node but the staged side
+    effect: [`link_form`](../../parser/src/content/inline_builder/macros/links.rs) tells this pass's
+    nodes from the other two link passes' by whether the node's `location` starts with that literal
+    marker – the "no new node field" signal the combined-entry-point increment introduced to replay
+    the string pipeline's family-pass registration order – and a coarse §4.4 location cannot carry
+    it. A marker written in the source (`link:{url}[Docs]`) keeps an honest location end to end and
+    is recognized. The URL-link and bare-e-mail passes need no such rule: their own targets never
+    carry the `link:`/`mailto:` scheme `link_form` keys on, so a wholly expanded `{site}`
+    auto-link *is* recognized.
+
+  Building the differential corpora surfaced a latent test-harness hazard worth recording, of
+  exactly the kind these lifts keep exposing: the family-scoped golden helper
+  ([`golden_macros_with`](../../parser/src/content/inline_builder/test_support.rs)) deliberately
+  omits the `AttributeReferences` step, so a fixture carrying a reference makes the two sides read
+  *different* text. The link family's own registration corpus used `{sp}` as an interleaving
+  separator, which was inert only while every link family deferred inside a synthesized run: with
+  the lift, the builder sees the expanded space and links a following bare URL where the golden –
+  still holding a literal `}` boundary character `INLINE_LINK` rejects – does not. Those separators
+  are now plain spaces, which is what the fixture always meant (and which makes its interleaved
+  registration-order assertion non-vacuous for the first time). Every expanded-value fixture in this
+  increment is driven through the real, public `SubstitutionGroup::Normal::apply` instead.
+
+  Differential corpora drive each family's expanded-value forms – an expanded image/icon target,
+  whole or partial, with a verbatim, an empty, and a positional/named attribute list; an expanded
+  `link:`/`mailto:` target and display text; expanded auto-link, formal-URL and angle-bracketed
+  hosts; a wholly expanded auto-link – through that real entry point as the golden, alongside
+  structural tests pinning the exact-value/coarse-location split and the match-string-read macro
+  name. Registration parity is asserted for both staged side effects against an independent golden
+  parser (the same two-independent-parsers discipline), including the interleaved link forms that
+  pin the marker rule above. Fixtures are added to the whole-pipeline combined-constructs corpus,
+  the synthesized-seed sweep (whose own deferral test keeps its `link:` macro fixture – now
+  deferred by the marker rule rather than by a whole-family gate), and the structural recorder
+  cross-check. Re-running the corpus-wide fold-parity audit (tree building forced on for every
+  parse in the suite) confirms the divergence set strictly **shrank**: one more whole-corpus source
+  is gone and no new one appeared. As with every prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -2735,8 +2809,17 @@ Each phase is a reviewable unit with a clear exit gate.
        [`find_xref_matches`](../../parser/src/content/inline_builder/macros/xref.rs) makes the same
        one-gate swap to `range_is_verbatim_or_synthesized`, reading its target and reference text
        out of the match string and through `text_slice`; see the step's own "landed as" note above.
-       The `Attrlist<'src>`-bearing families (image, link) still defer, so that last part of the map
-       item remains open.
+     - ✅ **prep (images and links inside an expanded value).** The map item closed in full, for the
+       two families that hold a real `Attrlist<'src>`: the same one-gate swap, with the boundary
+       moved from *the family* to *the one capture that still needs an `'src` slice* – an image's
+       non-empty attribute list and a link's attribute-list-bearing display text, since
+       `Attrlist::parse` reads its own source span's bytes as content. An image's macro name and
+       target now come from the match string / `text_slice`, and an empty bracket parses from a
+       zero-length span, so even a wholly-expanded `image:x.png[]` is recognized. The
+       `link:`/`mailto:` macro pass additionally requires its own literal marker to be verbatim,
+       because that marker is how `link_form` tells its nodes from the other link passes' when
+       replaying the string pipeline's registration order; see the step's own "landed as" note
+       above.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

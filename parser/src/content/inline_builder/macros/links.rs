@@ -44,15 +44,28 @@ use crate::{
 ///   the identical node; running that pass second mirrors the string step's
 ///   order.
 /// - A **formal text carrying an attribute list** (an `=` selecting roles / id
-///   / title / window) is deferred, exactly as [`link_macro_level`] defers it:
-///   the attribute list is parsed from a newline-normalized *copy* of the text,
-///   so it cannot ride on the node as an [`Attrlist`]`<'src>` yet.
-/// - A **non-verbatim match** – a URL crossing an escaped special
-///   ([`CharRef`](InlineNode::CharRef)) or a rendered
+///   / title / window) is deferred when the bracketed text is not verbatim
+///   `'src`, exactly as [`link_macro_level`] defers it: the attribute list is
+///   parsed from a newline-normalized *copy* of the text, and only a text with
+///   no embedded newline *and* no [`synthesized`](Piece::synthesized) run in it
+///   has an `'src` slice that copy coincides with – the one thing an
+///   [`Attrlist`]`<'src>` cannot do without.
+/// - A match crossing an [`atomic`](Piece::atomic) piece – a URL crossing an
+///   escaped special ([`CharRef`](InlineNode::CharRef)) or a rendered
 ///   [`Styled`](crate::inlines::Styled) span – is deferred exactly as the image
 ///   increment defers `image:a&b.png[]`. For the ANGLE branch this means the
 ///   URL *between* the delimiters: the delimiters themselves are escaped
 ///   specials by construction (see [`build_inline_link_node`]).
+///
+/// A [`synthesized`](Piece::synthesized) run (an attribute expansion, or –
+/// reached at a tree's root – a filtered multi-line block's own joined seed)
+/// **is** admitted: every value this pass's nodes hold – the scheme, the URL,
+/// and the bracketed display text – is computed out of the level's match
+/// string, which carries a synthesized run's bytes exactly, so
+/// `https://{host}/path` and `{url}[Docs]` are recognized with only the node's
+/// `location` taking design §4.4's coarse fallback. The one exception is the
+/// attribute-list text above, which is what `Attrlist<'src>` needs a real
+/// slice for.
 ///
 /// An invalid quoted bare URL (`"https://example.org`) and a bare scheme with no
 /// body (`http://;`) are left literal by the string step *and* the builder, so
@@ -141,20 +154,24 @@ fn find_inline_link_matches<'src>(
 /// by [`build_angle_link_node`], to which this delegates on the same condition
 /// the replacer branches on.
 ///
-/// # The verbatim gate lives here
+/// # The gate lives here
 ///
-/// Only a wholly-verbatim match can slice its target / attribute list from
-/// `'src`, so a match crossing an escaped special
+/// A match crossing an [`atomic`](Piece::atomic) piece – an escaped special
 /// ([`CharRef`](InlineNode::CharRef)) or a rendered
-/// [`Styled`](crate::inlines::Styled) span is deferred. *Which* sub-range must
-/// be verbatim depends on the branch, which is why the check sits here rather
+/// [`Styled`](crate::inlines::Styled) span – is deferred. *Which* sub-range the
+/// gate covers depends on the branch, which is why the check sits here rather
 /// than in [`find_inline_link_matches`]: the ANGLE branch's `&lt;` prefix and
 /// `&gt;` terminator are themselves escaped specials – atomic pieces – under
-/// every effective order that escapes them, so requiring the whole match to be
-/// verbatim would defer that branch outright. Those two delimiters carry no
-/// value a node slices (the replacer emits neither), so for the ANGLE branch
-/// the gate covers only the interior between them: the scheme, the URL, and any
-/// `[…]` attribute list.
+/// every effective order that escapes them, so gating the whole match would
+/// defer that branch outright. Those two delimiters carry no value a node
+/// slices (the replacer emits neither), so for the ANGLE branch the gate covers
+/// only the interior between them: the scheme, the URL, and any `[…]`
+/// attribute list.
+///
+/// A [`synthesized`](Piece::synthesized) run is admitted (see
+/// [`inline_link_level`]); only the attribute-list branch below, which parses a
+/// real [`Attrlist`]`<'src>` out of the bracketed text's own source slice,
+/// still requires that one sub-range to be verbatim.
 ///
 /// Like every macro family in this additive builder, it deliberately performs
 /// *no* recognition side effect: it does **not** `register_link` the target in
@@ -179,16 +196,16 @@ fn build_inline_link_node<'src>(
     let scheme_m = n.scheme_match()?;
     let scheme = scheme_m.as_str();
 
-    // The sub-range that must be verbatim source (see this function's own
-    // "verbatim gate" note): the whole match, except for the ANGLE branch,
-    // whose escaped-special delimiters sit outside the interior.
-    let verbatim_range = if n.is_angle() {
+    // The sub-range the gate covers (see this function's own "the gate lives
+    // here" note): the whole match, except for the ANGLE branch, whose
+    // escaped-special delimiters sit outside the interior.
+    let gated_range = if n.is_angle() {
         scheme_m.start()..n.angle_url().map_or(full.end, |m| m.end())
     } else {
         full.clone()
     };
 
-    if !range_is_verbatim(pieces, &verbatim_range) {
+    if !range_is_verbatim_or_synthesized(pieces, &gated_range) {
         return None;
     }
 
@@ -285,10 +302,18 @@ fn build_inline_link_node<'src>(
         // (`Ref::attrs`'s own field docs explain why `roles`/`window` alone
         // are not enough). A text that *does* embed a newline still needs a
         // synthesized (owned) copy the node cannot hold yet, so that one form
-        // remains deferred.
+        // remains deferred – as does one crossing a
+        // [`synthesized`](Piece::synthesized) run, whose match-string bytes
+        // have no `'src` slice at all (the one sub-range this family's
+        // expanded-value lift cannot cover).
         if link_text.contains('=') {
             #[allow(clippy::unwrap_used)]
             let range = text_location_range.clone().unwrap();
+
+            if !range_is_verbatim(pieces, &range) {
+                return None;
+            }
+
             let text_span = source_slice(pieces, range, root);
 
             if text_span.data().contains('\n') {
@@ -499,13 +524,30 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 ///   trailing-punctuation handling) and are a separate later increment.
 /// - **A link text that carries an attribute list** – a `,` in a `mailto:` text
 ///   (its `subject`/`body`) or an `=` in a `link:` text (roles / id / title /
-///   window) – is deferred, because that attribute list is parsed from a
-///   newline-normalized *copy* of the text (not from `'src`) and so cannot be
-///   carried as an [`Attrlist`]`<'src>` on the node yet.
-/// - **A non-verbatim match** – a macro whose target or text crosses an escaped
-///   special ([`CharRef`](InlineNode::CharRef)) or a rendered
+///   window) – is deferred unless the bracketed text is verbatim `'src`,
+///   because that attribute list is parsed from a newline-normalized *copy* of
+///   the text and only a text with no embedded newline and no
+///   [`synthesized`](Piece::synthesized) run in it has a source slice that copy
+///   coincides with – the one thing an [`Attrlist`]`<'src>` cannot do without.
+/// - **A match crossing an [`atomic`](Piece::atomic) piece** – a macro whose
+///   target or text crosses an escaped special
+///   ([`CharRef`](InlineNode::CharRef)) or a rendered
 ///   [`Styled`](crate::inlines::Styled) span (`link:a&b[]`, `link:x[*bold*]`) –
 ///   is deferred exactly as the image increment defers `image:a&b.png[]`.
+/// - **A macro whose own `link:`/`mailto:` marker is not verbatim** – a
+///   *wholly* expanded macro (`:m: link:index.html[Docs]`, then `{m}`) – is
+///   deferred. Its target and bracketed text could be read from the match
+///   string like every other value here, but the node's `location` would then
+///   fall back to the expansion's coarse span (design §4.4), and that location
+///   is the very signal [`link_form`] reads to tell this pass's nodes apart
+///   from the other two link passes' when [`apply_link_side_effects`] replays
+///   the string pipeline's own family-pass registration order. A macro whose
+///   marker *is* written in the source (`link:{url}[Docs]`,
+///   `mailto:{addr}[Team]`) keeps an honest location and is recognized.
+///
+/// Apart from that marker, a [`synthesized`](Piece::synthesized) run is
+/// admitted: the target and display text are read out of the level's match
+/// string, which carries an expanded value's bytes exactly.
 ///
 /// A `link:` (not `mailto:`) target whose scheme could execute script
 /// (`javascript:`, `data:`, `vbscript:`) is likewise left literal – matching
@@ -552,10 +594,25 @@ fn find_link_macro_matches<'src>(
 
         let full = whole.start()..whole.end();
 
-        // Only a wholly-verbatim match can slice its target/text from `'src`; a
-        // match crossing an escaped special or a rendered span is left for a
-        // later increment.
-        if !range_is_verbatim(pieces, &full) {
+        // A match crossing an escaped special or a rendered span is left for a
+        // later increment; one crossing an expanded attribute value is
+        // admitted, since the target and text are read from the match string.
+        if !range_is_verbatim_or_synthesized(pieces, &full) {
+            continue;
+        }
+
+        // The macro's own `link:`/`mailto:` marker must be verbatim source, so
+        // the node's `location` still starts with it – the signal
+        // [`link_form`] reads (see [`link_macro_level`]'s own scope note). The
+        // marker runs from the match's start to wherever the target group
+        // begins; one of groups 2 (empty target) and 3 always participates.
+        let marker = full.start
+            ..caps
+                .get(2)
+                .or_else(|| caps.get(3))
+                .map_or(full.end, |m| m.start());
+
+        if !range_is_verbatim(pieces, &marker) {
             continue;
         }
 
@@ -652,12 +709,20 @@ pub(super) fn build_link_node<'src>(
         // slice, so the node can carry the real `Attrlist<'src>` `render_link`
         // needs (`Ref::attrs`'s own field docs). A text that *does* embed a
         // newline still needs a synthesized copy the node cannot hold yet, so
-        // that one form remains deferred.
+        // that one form remains deferred – as does one crossing a
+        // [`synthesized`](Piece::synthesized) run, whose match-string bytes
+        // have no `'src` slice at all.
         if is_mailto {
             if link_text.contains(',') {
                 #[allow(clippy::unwrap_used)]
                 let m = raw_text_m.unwrap();
-                let text_span = source_slice(pieces, m.start()..m.end(), root);
+                let range = m.start()..m.end();
+
+                if !range_is_verbatim(pieces, &range) {
+                    return None;
+                }
+
+                let text_span = source_slice(pieces, range, root);
 
                 if text_span.data().contains('\n') {
                     return None;
@@ -685,7 +750,13 @@ pub(super) fn build_link_node<'src>(
         } else if link_text.contains('=') {
             #[allow(clippy::unwrap_used)]
             let m = raw_text_m.unwrap();
-            let text_span = source_slice(pieces, m.start()..m.end(), root);
+            let range = m.start()..m.end();
+
+            if !range_is_verbatim(pieces, &range) {
+                return None;
+            }
+
+            let text_span = source_slice(pieces, range, root);
 
             if text_span.data().contains('\n') {
                 return None;
@@ -2230,13 +2301,16 @@ mod tests {
     #[test]
     fn an_email_inside_an_expanded_attribute_value_is_recognized() {
         // An address whose bytes come from a *synthesized* run (an attribute
-        // reference's resolved value). Unlike a URL link – whose node bakes an
-        // `Attrlist`/target straight out of `'src` – an e-mail node carries
-        // only plain text, so `text_slice` recovers the address exactly here,
-        // the same lift the anchor family already has (design §3.4.1's "a
-        // macro inside an expanded value" boundary). Byte-parity for this
-        // shape is pinned by the whole-pipeline corpus in this module's
-        // `mod.rs`, which runs the real `AttributeReferences` step.
+        // reference's resolved value) – recovered exactly by `text_slice`,
+        // since an e-mail node carries only plain text (design §3.4.1's "a
+        // macro inside an expanded value" boundary). The two URL-link passes
+        // now make the same lift for their own targets and display texts; the
+        // one part of this family that still needs an honest `'src` slice is
+        // an attribute-list-bearing display text (see
+        // `a_link_attribute_list_text_inside_an_expanded_value_is_a_documented_divergence`).
+        // Byte-parity for this shape is pinned by the whole-pipeline corpus in
+        // this module's `mod.rs`, which runs the real `AttributeReferences`
+        // step.
         use crate::parser::ModificationContext;
 
         let parser = Parser::default().with_intrinsic_attribute(
@@ -2561,6 +2635,15 @@ mod tests {
         // that the real string pipeline (`golden_macros_with`) runs against
         // directly. Because neither path is wired into the other, comparing
         // their two catalogs after the fact is the whole test.
+        //
+        // The separators are plain spaces, not `{sp}` attribute references:
+        // `golden_macros_with` deliberately skips the `AttributeReferences`
+        // step (see its own doc comment), so a reference in a fixture makes the
+        // two sides read *different* text – latent while every link family
+        // deferred inside a synthesized run, but live now that they no longer
+        // do (a `{sp}` before a bare URL leaves the golden a `}` boundary
+        // character, which `INLINE_LINK` rejects, while the builder sees the
+        // expanded space and links it).
         let fixtures = [
             "link:index.html[Docs]",
             "link:[]",
@@ -2570,17 +2653,17 @@ mod tests {
             "https://example.org[Example]",
             "link:https://example.org[Example]",
             "\\link:index.html[Docs]",
-            "link:a.html[A]{sp}link:b.html[B]",
+            "link:a.html[A] link:b.html[B]",
             // Interleaved forms, out of source order relative to the family
             // passes that register them (see `apply_link_side_effects`'s own
             // "Registration order" doc note).
-            "link:b.html[B]{sp}then{sp}https://a.example",
+            "link:b.html[B] then https://a.example",
             // The bare e-mail form, alone and interleaved with both URL-link
             // forms – it registers last of the three, wherever it appears.
             "doc@example.com",
             "\\doc@example.com",
-            "doc@example.com{sp}then{sp}link:b.html[B]",
-            "a@example.org{sp}link:b.html[B]{sp}https://c.example{sp}d@example.org",
+            "doc@example.com then link:b.html[B]",
+            "a@example.org link:b.html[B] https://c.example d@example.org",
         ];
 
         for fixture in fixtures {
@@ -2590,6 +2673,206 @@ mod tests {
 
             let golden_parser = Parser::default().with_catalog_assets(true);
             golden_macros_with(fixture, &golden_parser);
+
+            assert_eq!(
+                builder_parser.catalog().links(),
+                golden_parser.catalog().links(),
+                "registered links diverged for {fixture:?}"
+            );
+        }
+    }
+
+    /// A parser carrying the attributes the expanded-value fixtures below
+    /// reference.
+    fn expanding_parser() -> Parser {
+        use crate::parser::ModificationContext;
+
+        Parser::default()
+            .with_intrinsic_attribute("url", "index.html", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("host", "example.org", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("addr", "hello@example.org", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("label", "Docs", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("site", "https://example.org", ModificationContext::Anywhere)
+            .with_intrinsic_attribute(
+                "link-src",
+                "link:index.html[Docs]",
+                ModificationContext::Anywhere,
+            )
+    }
+
+    /// The real, public pipeline's output for `source` – the golden for the
+    /// expanded-value fixtures, which need the `AttributeReferences` step
+    /// [`golden_macros_with`] deliberately omits.
+    fn golden_normal(source: &str, parser: &Parser) -> String {
+        use crate::content::{Content, SubstitutionGroup};
+
+        let mut content = Content::from(Span::new(source));
+        SubstitutionGroup::Normal.apply(&mut content, parser, None);
+        content.rendered_str().to_string()
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_for_links_inside_expanded_values() {
+        // A link whose target or display text crosses a synthesized run (an
+        // attribute expansion) is now recognized: every value these nodes hold
+        // is computed out of the level's match string, which carries an
+        // expanded value's bytes exactly, so only the node's `location` takes
+        // design §4.4's coarse fallback. The two shapes that still defer – an
+        // attribute-list-bearing display text, and a wholly expanded
+        // `link:`/`mailto:` macro – have their own divergence tests below.
+        let parser = expanding_parser();
+
+        let fixtures = [
+            // The `link:`/`mailto:` macro with an expanded target: labeled,
+            // bare, and with the `^` new-window suffix.
+            "link:{url}[Docs]",
+            "link:{url}[]",
+            "link:{url}[Open^]",
+            "mailto:{addr}[Team]",
+            "mailto:{addr}[]",
+            // An expanded *display text* beside a verbatim target.
+            "link:index.html[{label}]",
+            "link:{url}[{label}]",
+            // Auto-links and formal-URL links over an expanded host.
+            "https://{host}",
+            "https://{host}/path",
+            "https://{host}[Example]",
+            "https://{host}[{label}]",
+            // A wholly expanded auto-link (the URL-link passes need no
+            // literal marker of their own, unlike the `link:` macro).
+            "see {site} now",
+            "see {site}[Home] now",
+            // The angle-bracketed spellings.
+            "<https://{host}>",
+            "<https://{host}[Example]",
+            // Embedded in surrounding flow, beside another link, and inside a
+            // rendered span.
+            "See link:{url}[Docs] here.",
+            "link:{url}[A] and link:other.html[B]",
+            "*link:{url}[Docs]*",
+            // The escapes still keep the macro literal.
+            "\\link:{url}[Docs]",
+            "\\https://{host}",
+        ];
+
+        for fixture in fixtures {
+            let folded = crate::content::inline_builder::fold_html(
+                &build(Span::new(fixture), &parser, None),
+                &HtmlSubstitutionRenderer {},
+                &parser,
+            );
+
+            assert_eq!(
+                folded,
+                golden_normal(fixture, &parser),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_link_inside_an_expanded_value_keeps_a_coarse_location() {
+        // The target and display text are recovered *exactly* from the match
+        // string, while the node's `location` falls back to the enclosing
+        // synthesized run's own span – design §4.4's documented split.
+        let parser = expanding_parser();
+        let source = "link:{url}[{label}]";
+        let nodes = build(Span::new(source), &parser, None);
+
+        assert_eq!(nodes.len(), 1);
+        let reference = assert_link(&nodes[0]);
+
+        assert_eq!(reference.target.as_ref(), "index.html");
+        assert_eq!(link_text_of(reference), "Docs");
+
+        // The macro's own source bytes: its `link:` marker is verbatim (which
+        // is what this pass requires), so the location is honest end to end
+        // here even though both captures came from expansions.
+        assert_eq!(reference.location.data(), source);
+    }
+
+    #[test]
+    fn a_wholly_expanded_link_macro_is_a_documented_divergence() {
+        // A `link:`/`mailto:` macro whose own marker comes from the expansion
+        // has no location starting with that marker, and that location is the
+        // signal `link_form` reads to replay the string pipeline's family-pass
+        // registration order. Rather than build a node the side-effect walk
+        // would then mis-attribute, the macro is left literal.
+        //
+        // If this boundary is ever lifted (with a signal that does not depend
+        // on the location), fold this fixture into the parity corpus above.
+        let parser = expanding_parser();
+        let source = "see {link-src} now";
+
+        let nodes = build(Span::new(source), &parser, None);
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a wholly expanded link macro must stay literal: {nodes:?}"
+        );
+
+        assert!(
+            golden_normal(source, &parser).contains("<a href"),
+            "the golden fixture stopped recognizing the link"
+        );
+    }
+
+    #[test]
+    fn a_link_attribute_list_text_inside_an_expanded_value_is_a_documented_divergence() {
+        // A display text carrying an attribute list is parsed as a real
+        // `Attrlist<'src>`, which reads its own source span's bytes *as
+        // content* – so, unlike every other value these nodes hold, it cannot
+        // be taken from the match string. Both link-recognizing passes defer
+        // it, as does a `mailto:` text carrying a `,` subject.
+        //
+        // If this boundary is ever lifted, fold these fixtures into the parity
+        // corpus above.
+        let parser = expanding_parser();
+
+        for source in [
+            "link:index.html[{label},role=hl]",
+            "https://example.org[{label},role=hl]",
+            "mailto:hello@example.org[{label},Hi there]",
+        ] {
+            let nodes = build(Span::new(source), &parser, None);
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+                "a link whose attribute-list text crosses an expansion must stay literal: \
+                 {nodes:?}"
+            );
+
+            assert!(
+                golden_normal(source, &parser).contains("<a href"),
+                "the golden fixture stopped recognizing the link for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn matches_the_golden_pipelines_registration_for_links_inside_expanded_values() {
+        // The staged `register_link` side effect classifies each node by the
+        // pass that built it, from the node's own `location` – which is exactly
+        // why `link_macro_level` still requires its `link:`/`mailto:` marker to
+        // be verbatim. These fixtures interleave the two URL-link passes' forms
+        // over expanded values, in both relative orders, so a misclassification
+        // would show up as the wrong catalog order.
+        let fixtures = [
+            "link:{url}[Docs]",
+            "https://{host}",
+            "link:{url}[Docs] and https://{host}",
+            "https://{host} then link:{url}[Docs]",
+            "see {site} now",
+            "mailto:{addr}[Team] and https://{host}",
+        ];
+
+        for fixture in fixtures {
+            let builder_parser = expanding_parser().with_catalog_assets(true);
+            let nodes = build(Span::new(fixture), &builder_parser, None);
+            apply_link_side_effects(&nodes, &builder_parser);
+
+            let golden_parser = expanding_parser().with_catalog_assets(true);
+            golden_normal(fixture, &golden_parser);
 
             assert_eq!(
                 builder_parser.catalog().links(),

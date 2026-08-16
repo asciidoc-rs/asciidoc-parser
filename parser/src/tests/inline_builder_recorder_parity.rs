@@ -952,4 +952,29 @@ fn shapes_match_across_combined_constructs() {
                 .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
         },
     );
+
+    // Links and images spliced in by attribute references – the last two
+    // families to make that lift. What each still defers (an image's non-empty
+    // attribute list, a link's attribute-list-bearing display text, and a
+    // wholly expanded `link:` macro) is deliberately absent here: the recorder
+    // recognizes those, so a fixture carrying one would compare a node against
+    // literal text rather than two constructions of the same node.
+    let with_link_attributes = || {
+        Parser::default()
+            .with_intrinsic_attribute("url", "index.html", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("host", "example.org", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("label", "Docs", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("logo", "sunset.jpg", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+    };
+
+    assert_shapes_with(
+        "Read link:{url}[{label}] or visit https://{host}/docs about {product}.",
+        with_link_attributes,
+    );
+
+    assert_shapes_with(
+        "See image:{logo}[Logo] and image:{logo}[] beside a *bold* run.",
+        with_link_attributes,
+    );
 }

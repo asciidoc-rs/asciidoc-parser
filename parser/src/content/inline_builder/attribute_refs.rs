@@ -66,13 +66,21 @@ use crate::{
 /// so `apply_character_replacements`'s pattern sweep, still ahead in the
 /// effective order, can match inside it exactly as it would over any other
 /// run (a follow-up to this step, closing the gap this doc comment used to
-/// describe). A **macro** *inside* an expanded value remains deferred,
-/// though: a macro node bakes its target/attribute list straight from an
-/// honest `'src` slice, which a synthesized run – its bytes have no source
-/// counterpart of their own – cannot supply; see
-/// [`range_is_verbatim`](super::macros::image::range_is_verbatim), which
-/// every macro family gates recognition on, and which rejects a synthesized
-/// piece for exactly this reason.
+/// describe). Most **macro** families are recognized inside an expanded value
+/// too, for the same reason and by the same mechanism: a family that computes
+/// every value it holds from the match string gates recognition on
+/// [`range_is_verbatim_or_synthesized`](super::macros::image::range_is_verbatim_or_synthesized)
+/// rather than
+/// [`range_is_verbatim`](super::macros::image::range_is_verbatim), rejecting
+/// only an [`atomic`](super::quotes::Piece::atomic) piece. What still needs an
+/// honest `'src` slice, and so still defers, is an
+/// [`Attrlist`](crate::attributes::Attrlist)`<'src>`, which reads its own
+/// source span's bytes *as content* rather than merely as a location tag: an
+/// image macro's non-empty attribute list (`image:sunset.jpg[{caption}]`) and
+/// a link's attribute-list-bearing display text (`link:x[{text},role=hl]`).
+/// A *wholly* expanded `link:`/`mailto:` macro defers for a second reason of
+/// its own – see `link_macro_level`'s own scope note in
+/// [`macros::links`](super::macros).
 ///
 /// [`AttributeMissing::Drop`]: crate::content::AttributeMissing::Drop
 /// [`AttributeMissing::DropLine`]: crate::content::AttributeMissing::DropLine
@@ -1213,19 +1221,39 @@ mod tests {
     }
 
     #[test]
-    fn a_macro_inside_an_expanded_value_is_a_documented_divergence() {
-        // The same boundary as
-        // `a_replacement_inside_an_expanded_value_is_a_documented_divergence`,
-        // for the macros step.
-        let parser = parser_with_attribute("linktext", "link:https://example.org[Example]");
-        let nodes = build(Span::new("see {linktext} now"), &parser, None);
+    fn an_attrlist_bearing_macro_inside_an_expanded_value_is_a_documented_divergence() {
+        // Most macro families are now recognized inside a spliced value (see
+        // this module's own doc comment, and each family's own parity corpus).
+        // What still defers is a construct needing an `Attrlist<'src>`, which
+        // reads its own source span's bytes *as content*: an image macro's
+        // non-empty attribute list here, alongside a link's own
+        // attribute-list-bearing display text (pinned in `macros/links.rs`).
+        let parser = parser_with_attribute("imgtext", "image:sunset.jpg[Sunset]");
+        let nodes = build(Span::new("see {imgtext} now"), &parser, None);
 
         assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "a macro inside a spliced value must not yet be recognized: {nodes:?}"
+            nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
+            "an attrlist-bearing macro inside a spliced value must not yet be recognized: \
+             {nodes:?}"
         );
 
-        assert!(golden_attributes_with("see {linktext} now", &parser).contains("<a href"));
+        assert!(golden_attributes_with("see {imgtext} now", &parser).contains("<img"));
+    }
+
+    #[test]
+    fn a_macro_inside_an_expanded_value_is_recognized() {
+        // The counterpart of the divergence above: a family that computes
+        // every value it holds from the level's match string – here the
+        // `link:` macro, whose own marker is written in the source – is
+        // recognized inside a spliced value, with only the node's `location`
+        // taking design §4.4's coarse fallback.
+        let parser = parser_with_attribute("target", "https://example.org");
+        let nodes = build(Span::new("see link:{target}[Example] now"), &parser, None);
+
+        assert!(
+            nodes.iter().any(|n| matches!(n, InlineNode::Ref(_))),
+            "a link macro over a spliced target should be recognized: {nodes:?}"
+        );
     }
 
     #[test]
