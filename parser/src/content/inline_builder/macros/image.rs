@@ -9,7 +9,7 @@ use crate::{
         inline_builder::quotes::{Piece, build_match_string, source_slice, text_slice},
         normalize_text_lf_escaped_bracket,
     },
-    inlines::{Image, InlineNode},
+    inlines::{CharRef, Image, InlineNode},
     parser::{has_dangerous_scheme, has_dangerous_self_href, is_uri_ish},
     strings::CowStr,
     warnings::WarningType,
@@ -160,6 +160,67 @@ pub(in crate::content::inline_builder) fn range_is_verbatim_or_synthesized(
         }
 
         if piece.atomic {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// The most relaxed of the three gates: accepts a range whose overlapping
+/// pieces are all ones the tree can reproduce **exactly** — a
+/// [`Text`](InlineNode::Text) run (verbatim or
+/// [`synthesized`](Piece::synthesized)) or an *escaped special*, a
+/// [`CharRef`](InlineNode::CharRef)`::Special` leaf — rejecting only an
+/// **opaque** piece: a rendered [`Styled`](crate::inlines::Styled) span, an
+/// earlier-recognized macro node, a masked passthrough or STEM expression, or a
+/// character replacement, each of which
+/// [`build_match_string`] stands in as one
+/// `SPAN_PLACEHOLDER` rather than the markup or entity the string pipeline's
+/// own haystack holds there.
+///
+/// An escaped special is admissible because its match-string bytes are its
+/// canonical entity (`&lt;`, `&gt;`, `&amp;`) — the very byte sequence the
+/// string pipeline's own escaped haystack carries at that position — so a
+/// family that reads its values out of the match string sees exactly what the
+/// string replacer sees. What such a family cannot do is *slice* those bytes
+/// from `'src` (the source holds one character where the match string holds an
+/// entity), so a value that must ride on the node as an `'src` slice — an
+/// [`Attrlist`]`<'src>`, an [`Image`](InlineNode::Image)'s bracket — keeps
+/// [`range_is_verbatim`], and a *display text* recovered under this gate is
+/// rebuilt as structured children with
+/// [`emit_range`](super::super::quotes::emit_range) (the escaped special
+/// becoming its own `CharRef` child, which folds back to the same entity)
+/// rather than as one sliced `Text`.
+pub(in crate::content::inline_builder) fn range_has_no_opaque_piece(
+    nodes: &[InlineNode<'_>],
+    pieces: &[Piece],
+    range: &std::ops::Range<usize>,
+) -> bool {
+    for piece in pieces {
+        let p_start = piece.s_start;
+        let p_end = piece.s_start + piece.s_len;
+
+        // Skip pieces that do not overlap the range.
+        if p_end <= range.start || p_start >= range.end {
+            continue;
+        }
+
+        if !piece.atomic {
+            continue;
+        }
+
+        // The only atomic piece `build_match_string` gives real bytes to is an
+        // escaped special; everything else it stands in as one placeholder.
+        let recoverable = matches!(
+            nodes.get(piece.node_index),
+            Some(InlineNode::CharRef {
+                value: CharRef::Special(_),
+                ..
+            })
+        );
+
+        if !recoverable {
             return false;
         }
     }

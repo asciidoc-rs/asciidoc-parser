@@ -76,13 +76,19 @@ use crate::{Parser, Span, inlines::InlineNode};
 /// cannot carry that escaped text as an `'src` slice. Such a macro is therefore
 /// **left unrecognized** here for a later increment (the attribute-references
 /// step and the cutover), mirroring how the quotes step documents its own
-/// cross-span boundary (crossed delimiters). A family relaxes that gate only
-/// where the escaped piece is a delimiter *it consumes and never slices* — the
+/// cross-span boundary (crossed delimiters). A family relaxes that gate where
+/// the escaped piece is a delimiter *it consumes and never slices* — the
 /// angle-bracketed URL's own `&lt;`/`&gt;` (see
 /// `links::build_inline_link_node`) and a menu's `&gt;` submenu caret (see
-/// `ui::menu_match_is_sliceable`) — not where the escaped text would have to
-/// ride on the node. The differential corpus pins the cases each increment
-/// claims.
+/// `ui::menu_match_is_sliceable`) — or, for the **cross-reference** family,
+/// wherever the escaped text need not ride on the node as an `'src` slice at
+/// all: nothing a `Ref{Xref}` holds is `Span`-typed, so it reads its values
+/// out of the match string (whose entity bytes *are* the string pipeline's
+/// own) and rebuilds its reference text as structured children, keeping each
+/// special as its own `CharRef` (see `xref::find_xref_matches` and
+/// [`range_has_no_opaque_piece`](image::range_has_no_opaque_piece)). A rendered
+/// span stays deferred for every family. The differential corpus pins the cases
+/// each increment claims.
 pub(super) fn apply_macros<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
