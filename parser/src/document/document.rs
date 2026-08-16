@@ -332,6 +332,21 @@ impl<'src> Document<'src> {
         self.header().doctitle()
     }
 
+    /// Return the document title (see [`doctitle`]) with any rendered markup
+    /// stripped down to plain text, mirroring Ruby Asciidoctor's
+    /// `Document#doctitle(sanitize: true)`.
+    ///
+    /// Use this in contexts where markup is not allowed, such as the text of
+    /// a standalone HTML `<title>` element: a title rendered with formatting
+    /// (`*bold*`) or an inline macro (`image:...[]`) has that markup removed
+    /// rather than passed through verbatim. Returns `None` when there is no
+    /// title, matching [`doctitle`].
+    ///
+    /// [`doctitle`]: Self::doctitle
+    pub fn doctitle_sanitized(&self) -> Option<String> {
+        self.header().doctitle_sanitized()
+    }
+
     /// Return the document subtitle, if the document title contained one.
     ///
     /// A subtitle is the text following the final subtitle separator (a colon
@@ -390,6 +405,36 @@ impl<'src> Document<'src> {
             .borrow_dependent()
             .attributes
             .is_attribute_set(name)
+    }
+
+    /// Resolves whether this document's title should be displayed, from the
+    /// `showtitle`/`notitle` [document attribute] pair (which are
+    /// complements), as of the end of parsing.
+    ///
+    /// This mirrors [`Parser::resolve_show_title`] and is the accessor to use
+    /// on the *embed* path -- rendering a [`Document`] you already hold,
+    /// without a [`Parser`] in hand. Use it instead of reading `notitle` or
+    /// `showtitle` directly: `notitle` and `showtitle` are two spellings of
+    /// one toggle (assigning either updates the other, per
+    /// [Asciidoctor#3804]), and precedence between the two default-then-decide
+    /// how a raw read of just one name resolves. Re-deriving that precedence
+    /// from a direct attribute read is easy to get subtly wrong -- see [issue
+    /// #1148], where a downstream re-implementation of this exact logic
+    /// repeatedly drifted out of sync with the parser's.
+    ///
+    /// `default_shown` decides the outcome when neither attribute is present:
+    /// a standalone document shows its title by default, while embedded
+    /// output does not.
+    ///
+    /// [document attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes/
+    /// [Asciidoctor#3804]: https://github.com/asciidoctor/asciidoctor/issues/3804
+    /// [issue #1148]: https://github.com/asciidoc-rs/asciidoc-parser/issues/1148
+    /// [`Parser::resolve_show_title`]: crate::Parser::resolve_show_title
+    pub fn show_title(&self, default_shown: bool) -> bool {
+        self.internal
+            .borrow_dependent()
+            .attributes
+            .resolve_show_title(default_shown)
     }
 
     /// Return where (and whether) this document's table of contents is
@@ -1898,6 +1943,65 @@ mod tests {
                 doc.attribute_value("my-counter"),
                 InterpretedValue::Value("2".to_string())
             );
+        }
+    }
+
+    mod show_title {
+        use crate::{parser::ModificationContext, tests::prelude::*};
+
+        #[test]
+        fn default_shown_decides_when_neither_attribute_is_present() {
+            let doc = Parser::default().parse("= Title\n\nBody.");
+
+            assert!(doc.show_title(true));
+            assert!(!doc.show_title(false));
+        }
+
+        #[test]
+        fn header_notitle_hides_the_title() {
+            let doc = Parser::default().parse("= Title\n:notitle:\n\nBody.");
+
+            assert!(!doc.show_title(true));
+        }
+
+        #[test]
+        fn header_notitle_entry_shows_title_when_showtitle_is_api_hard_unset() {
+            // Issue #1148 (reopened): a hard-unset `showtitle` lock
+            // (`Options::unset("showtitle")`) combined with an unrelated
+            // document `:!notitle:` entry must still resolve to showing the
+            // title end-to-end through the `Document` accessor (parity
+            // oracle: `test/document_test.rb`, "should be able to enable
+            // doctitle for embedded document", case
+            // `[{ 'showtitle' => false }, [':!notitle:']]`).
+            let doc = Parser::default()
+                .with_intrinsic_attribute_bool("showtitle", false, ModificationContext::ApiOnly)
+                .parse("= Document Title\n:!notitle:\n\nBody.");
+
+            assert!(doc.show_title(false));
+        }
+
+        #[test]
+        fn header_showtitle_entry_shows_title_when_notitle_is_api_hard_unset() {
+            // Mirror of the above, in the other direction (same Ruby test,
+            // case `[{ 'notitle' => nil }, [':!showtitle:']]`).
+            let doc = Parser::default()
+                .with_intrinsic_attribute_bool("notitle", false, ModificationContext::ApiOnly)
+                .parse("= Document Title\n:!showtitle:\n\nBody.");
+
+            assert!(doc.show_title(false));
+        }
+
+        #[test]
+        fn matches_parser_state() {
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+            let doc = parser.parse("= Title\n:!notitle:\n\nBody.");
+
+            assert_eq!(doc.show_title(false), parser.resolve_show_title(false));
+            assert_eq!(doc.show_title(true), parser.resolve_show_title(true));
         }
     }
 }

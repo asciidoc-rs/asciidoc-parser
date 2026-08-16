@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use crate::{
-    blocks::{ContentModel, IsBlock, MediaType},
+    blocks::{ContentModel, IsBlock, ListType, MediaType},
     tests::prelude::*,
 };
 
@@ -608,6 +608,156 @@ fn has_title() {
             line: 3,
             col: 1,
             offset: 26
+        }
+    );
+}
+
+// Asciidoctor's block-macro regex requires the target to begin and end with a
+// non-space character, so a block-image macro whose target has leading or
+// trailing whitespace is not recognized as a media block. A leading space turns
+// the line into a description list (`image` becomes the term); a trailing space
+// before the `[` turns it into a paragraph.
+
+#[test]
+fn rejects_image_with_leading_space_in_target() {
+    let mut parser = Parser::default();
+
+    let mi = crate::blocks::Block::parse(crate::Span::new("image:: tiger.png[Tiger]"), &mut parser)
+        .unwrap_if_no_warnings()
+        .unwrap();
+
+    assert_eq!(
+        mi.item,
+        Block::List(ListBlock {
+            type_: ListType::Description,
+            items: &[Block::ListItem(ListItem {
+                marker: ListItemMarker::DefinedTerm {
+                    term: Content {
+                        original: Span {
+                            data: "image",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        rendered: "image",
+                    },
+                    marker: Span {
+                        data: "::",
+                        line: 1,
+                        col: 6,
+                        offset: 5,
+                    },
+                    source: Span {
+                        data: "image::",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                },
+                blocks: &[Block::Simple(SimpleBlock {
+                    content: Content {
+                        original: Span {
+                            data: "tiger.png[Tiger]",
+                            line: 1,
+                            col: 9,
+                            offset: 8,
+                        },
+                        rendered: "tiger.png[Tiger]",
+                    },
+                    source: Span {
+                        data: "tiger.png[Tiger]",
+                        line: 1,
+                        col: 9,
+                        offset: 8,
+                    },
+                    style: SimpleBlockStyle::Paragraph,
+                    title_source: None,
+                    title: None,
+                    caption: None,
+                    number: None,
+                    anchor: None,
+                    anchor_reftext: None,
+                    attrlist: None,
+                })],
+                source: Span {
+                    data: "image:: tiger.png[Tiger]",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                anchor: None,
+                anchor_reftext: None,
+                attrlist: None,
+            })],
+            source: Span {
+                data: "image:: tiger.png[Tiger]",
+                line: 1,
+                col: 1,
+                offset: 0,
+            },
+            title_source: None,
+            title: None,
+            anchor: None,
+            anchor_reftext: None,
+            attrlist: None,
+        }),
+    );
+}
+
+#[test]
+fn rejects_image_with_trailing_space_in_target() {
+    let mut parser = Parser::default();
+
+    let mi = crate::blocks::Block::parse(crate::Span::new("image::tiger.png [Tiger]"), &mut parser)
+        .unwrap_if_no_warnings()
+        .unwrap();
+
+    assert_eq!(
+        mi.item,
+        Block::Simple(SimpleBlock {
+            content: Content {
+                original: Span {
+                    data: "image::tiger.png [Tiger]",
+                    line: 1,
+                    col: 1,
+                    offset: 0,
+                },
+                rendered: "image::tiger.png [Tiger]",
+            },
+            source: Span {
+                data: "image::tiger.png [Tiger]",
+                line: 1,
+                col: 1,
+                offset: 0,
+            },
+            style: SimpleBlockStyle::Paragraph,
+            title_source: None,
+            title: None,
+            caption: None,
+            number: None,
+            anchor: None,
+            anchor_reftext: None,
+            attrlist: None,
+        }),
+    );
+
+    assert_eq!(
+        mi.item.span(),
+        Span {
+            data: "image::tiger.png [Tiger]",
+            line: 1,
+            col: 1,
+            offset: 0,
+        }
+    );
+
+    assert_eq!(
+        mi.after,
+        Span {
+            data: "",
+            line: 1,
+            col: 25,
+            offset: 24
         }
     );
 }

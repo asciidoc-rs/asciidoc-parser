@@ -8,7 +8,7 @@ pub use content::Content;
 pub(crate) use content::{
     FOOTNOTE_MARKER_END, FOOTNOTE_MARKER_START, FootnoteDeferred, OwnedTitle, XrefSegment,
     block_tree_xrefs, footnote_tree_xrefs, rehome_xref_placeholders, render_xref_template,
-    strip_footnote_marker_spans,
+    sanitize_title, strip_footnote_marker_spans,
 };
 
 pub(crate) mod inline_builder;
@@ -49,5 +49,4 @@ pub(crate) use substitution_step::{
     ATTRIBUTE_REFERENCE, AttributeMissing, CharacterReplacement, QuoteSub, build_callout_regexes,
     character_replacements, hard_line_break_pattern, maybe_has_quotes, maybe_has_replacements,
     quote_subs, substitute_attributes_in_macro_target, substitute_attributes_in_reftext,
-    substitute_attributes_in_text,
 };

@@ -370,10 +370,11 @@ enum AttributeMatchKind {
     Unescape { backslashes: Vec<usize> },
 
     /// A reference to a set attribute: its `value` (already resolved from
-    /// `parser`) is spliced in, classified by [`split_attribute_value`]. An
-    /// `InterpretedValue::Set`/`::Unset` attribute resolves to an empty
-    /// `value`, mirroring the string replacer (whose behavior for those two
-    /// kinds the language leaves unclear – see `AttributeReplacer`).
+    /// `parser`) is spliced in, classified by [`split_attribute_value`]. A
+    /// value-less `InterpretedValue::Set` attribute resolves to an empty
+    /// `value`, mirroring the string replacer (see `AttributeReplacer`); an
+    /// `InterpretedValue::Unset` one never becomes an `Expand` at all,
+    /// counting as missing instead.
     Expand { value: String },
 
     /// A `counter`/`counter2` directive: the named counter's advanced value is
@@ -758,7 +759,17 @@ fn find_attribute_matches(
         let attr_name = caps.get(4).unwrap().as_str();
         let lookup_name = attribute_lookup_name(attr_name);
 
-        if !parser.has_attribute(&lookup_name) {
+        let interpreted_value = parser.attribute_value(&lookup_name);
+
+        // A reference is "missing" for `attribute-missing` purposes both when
+        // the attribute was never assigned at all and when it was explicitly
+        // unset (a document `:name!:` entry or an API override that unsets
+        // it) – both resolve to `InterpretedValue::Unset`. Only a value-less
+        // `Set` attribute or a concrete `Value` counts as present, mirroring
+        // `AttributeReplacer::replace_append`.
+        if !parser.has_attribute(&lookup_name)
+            || matches!(interpreted_value, InterpretedValue::Unset)
+        {
             if missing.drops_missing() {
                 matches.push(AttributeMatch {
                     full,
@@ -773,8 +784,12 @@ fn find_attribute_matches(
             continue;
         }
 
-        let value = match parser.attribute_value(&lookup_name) {
+        let value = match interpreted_value {
             InterpretedValue::Value(value) => value,
+
+            // A value-less `Set` attribute substitutes to an empty string; an
+            // `Unset` one never reaches here, having been treated as missing
+            // above.
             InterpretedValue::Set | InterpretedValue::Unset => String::new(),
         };
 
@@ -900,8 +915,8 @@ fn rebuild_attribute_level<'src>(
 ///
 /// Both node kinds carry the reference's own `location` as their coarse
 /// fallback span (design §4.4: a synthesized value has no source of its own).
-/// A run is never emitted empty, and an empty `value` (an
-/// `InterpretedValue::Set`/`::Unset` attribute) emits no node at all.
+/// A run is never emitted empty, and an empty `value` (a value-less
+/// `InterpretedValue::Set` attribute) emits no node at all.
 fn split_attribute_value<'src>(value: &str, location: Span<'src>, out: &mut Vec<InlineNode<'src>>) {
     let mut rest = value;
 

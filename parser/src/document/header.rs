@@ -2,7 +2,7 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     blocks::metadata::block_title_text,
-    content::{Content, SubstitutionGroup, substitute_attributes_in_reftext},
+    content::{Content, SubstitutionGroup, sanitize_title, substitute_attributes_in_reftext},
     document::{
         Attribute, Author, AuthorLine, InterpretedValue, RefType, RevisionLine,
         is_attribute_entry_pass_macro, matches_author_pattern, set_author_metadata,
@@ -244,7 +244,9 @@ impl<'src> Header<'src> {
                 //
                 // A `separator` sets the subtitle separator; it behaves exactly
                 // like assigning the `title-separator` document attribute here, so
-                // both mechanisms share the same partitioning logic.
+                // both mechanisms share the same partitioning logic and the same
+                // modification-context lock check (an API-locked `title-separator`
+                // is not overwritten by this block attribute).
                 //
                 // The line is only intercepted when a document title eventually
                 // follows – possibly after further stacked block attribute lines,
@@ -256,7 +258,7 @@ impl<'src> Header<'src> {
                     id = Some(doc_id);
                 }
                 if let Some(separator) = metadata.separator {
-                    parser.set_attribute_by_value_from_header("title-separator", separator);
+                    parser.set_attribute_by_value_from_header_checked("title-separator", separator);
                 }
                 if let Some(reftext) = metadata.reftext {
                     parser.set_attribute_by_value_from_header("reftext", reftext);
@@ -332,7 +334,27 @@ impl<'src> Header<'src> {
                     implicit_doctitle_str = Some(existing.clone());
                     title = Some(existing);
                 } else {
-                    let title_str = apply_header_subs(title_span.data(), parser);
+                    let warnings_before_implicit_title = parser.substitution_warnings_len();
+                    let title_str = apply_title_subs(title_span.data(), parser);
+
+                    // Under `attribute-missing: warn`, a reference to an
+                    // attribute defined later in the header is still
+                    // unresolved at this point in the scan and trips a
+                    // `SkippingReferenceToMissingAttribute` warning here, even
+                    // though the title is re-resolved against the final
+                    // header state below and, in that case, resolves
+                    // correctly. Discard the eager warning whenever that
+                    // later re-resolution will run – i.e. the substituted
+                    // text still contains a `{`, mirroring the condition at
+                    // the re-resolution site below – since that pass raises
+                    // its own warning if the reference is still genuinely
+                    // unresolved once the full header is known. Warnings from
+                    // a fully-resolved title, or from `drop`/`drop-line` mode
+                    // (which does not leave a `{` behind), are left as they
+                    // are not superseded by a later pass.
+                    if title_str.contains('{') {
+                        parser.truncate_substitution_warnings(warnings_before_implicit_title);
+                    }
 
                     parser.set_attribute_by_value_from_header("doctitle", &title_str);
 
@@ -382,20 +404,33 @@ impl<'src> Header<'src> {
             // was overridden by a `doctitle` set above it, `title` already holds
             // that (resolved) value and is not re-substituted.
             //
-            // Residual edge: a title that *mixes* a counter with a later-defined
-            // reference (e.g. `= {counter:n} {project-name}`) still contains a
-            // `{` after the eager pass, so the re-resolution runs and advances the
-            // counter a second time. Re-resolving is done from the raw title (not
-            // the eager result) so that escaped `\{…}` and specialchars stay
-            // correct; the counter here is the price of that. This is a rare
-            // combination and no test exercises it.
+            // Residual edge: a title that *mixes* a stateful, one-shot
+            // substitution with a later-defined reference (e.g. `= {counter:n}
+            // {project-name}`) still contains a `{` after the eager pass, so the
+            // re-resolution runs that one-shot substitution a second time.
+            // Re-resolving is done from the raw title (not the eager result) so
+            // that escaped `\{…}` and specialchars stay correct; the duplicated
+            // side effect here is the price of that. Since the eager pass now
+            // uses the `Title` group, this extends beyond a `{counter:…}`
+            // advancing twice to any stateful macro sharing the title with a
+            // later-defined reference – an anchor
+            // (`= {project-name} [[id]]`) can raise a spurious
+            // `DuplicateId` warning on its second registration, and a footnote
+            // (`= {project-name} footnote:[…]`) is defined twice. This is a
+            // rare combination – a document title is an unusual place for a
+            // footnote or anchor to begin with – and no test exercises it.
+            // Tracked as a follow-up in #1132: fixing it well wants a way to
+            // resolve attribute references once and branch into the
+            // remaining substitution steps without re-invoking macros – a
+            // shape that may fall out more naturally once inline content is
+            // a materialized tree instead of a re-run string pipeline.
             let base = if !implicit_overridden_from_above
                 && let Some(raw) = title_source
                 && implicit_doctitle_str
                     .as_deref()
                     .is_some_and(|s| s.contains('{'))
             {
-                Some(apply_header_subs(raw.data(), parser))
+                Some(apply_title_subs(raw.data(), parser))
             } else {
                 title
             };
@@ -533,6 +568,20 @@ impl<'src> Header<'src> {
     /// [`Document::doctitle`]: crate::Document::doctitle
     pub(crate) fn doctitle(&self) -> Option<&str> {
         self.doctitle.as_deref()
+    }
+
+    /// Return the effective document title (see [`doctitle`]) with any
+    /// rendered markup stripped down to plain text, mirroring Ruby
+    /// Asciidoctor's `Document#doctitle(sanitize: true)`.
+    ///
+    /// This is intended for contexts where markup is not allowed, such as
+    /// the text of the standalone HTML `<title>` element: a title rendered
+    /// with formatting (`*bold*`) or an inline macro (`image:...[]`) has that
+    /// markup removed rather than passed through verbatim.
+    ///
+    /// [`doctitle`]: Self::doctitle
+    pub(crate) fn doctitle_sanitized(&self) -> Option<String> {
+        self.doctitle.as_deref().map(sanitize_title)
     }
 
     /// Return the main portion of the document title, if there was a title.
@@ -1250,11 +1299,17 @@ fn split_author_entries(value: &str) -> Vec<&str> {
     entries
 }
 
-fn apply_header_subs(source: &str, parser: &Parser) -> String {
+/// Applies the document title's substitutions – the `Title` group, the same
+/// steps as `Normal` – to `source`, mirroring Asciidoctor's eager
+/// substitution of the `= Title` line into the `doctitle` attribute. Unlike
+/// the restricted `Header` group used for author/revision lines and
+/// attribute-entry values, this renders quotes (formatting), replacements,
+/// and inline macros (e.g. `image:`) in the title itself.
+fn apply_title_subs(source: &str, parser: &Parser) -> String {
     let span = Span::new(source);
 
     let mut content = Content::from(span);
-    SubstitutionGroup::Header.apply(&mut content, parser, None);
+    SubstitutionGroup::Title.apply(&mut content, parser, None);
 
     content.rendered_html().to_string()
 }
@@ -1325,6 +1380,85 @@ mod tests {
         let doc = Parser::default().parse(":leveloffset: -6\n======= Not A Title");
 
         assert_eq!(doc.doctitle(), None);
+    }
+
+    #[test]
+    fn title_applies_full_normal_substitutions() {
+        // The document title line goes through the `Title` substitution group
+        // (the same steps as `Normal`), not the restricted `Header` group
+        // used for author/revision lines — so formatting (quotes) and inline
+        // macros (`image:`) render, matching Asciidoctor.
+        let doc = Parser::default()
+            .parse("= *Document* image:logo.png[] _Title_ image:another-logo.png[another logo]");
+
+        let expected = concat!(
+            "<strong>Document</strong> ",
+            r#"<span class="image"><img src="logo.png" alt="logo"></span> "#,
+            "<em>Title</em> ",
+            r#"<span class="image"><img src="another-logo.png" alt="another logo"></span>"#,
+        );
+
+        assert_eq!(doc.doctitle(), Some(expected));
+        assert_eq!(doc.header().main_title(), Some(expected));
+        assert_eq!(doc.header().subtitle(), None);
+    }
+
+    #[test]
+    fn title_substitutions_apply_before_subtitle_partition() {
+        // A subtitle carved out of the (now fully substituted) title retains
+        // its own rendered formatting, rather than the literal, unprocessed
+        // source it used to keep.
+        let doc = Parser::default().parse("= Main Title: *Subtitle*");
+
+        assert_eq!(doc.header().main_title(), Some("Main Title"));
+        assert_eq!(doc.header().subtitle(), Some("<strong>Subtitle</strong>"));
+    }
+
+    #[test]
+    fn author_and_revision_lines_keep_restricted_header_substitutions() {
+        // The fuller title substitution is scoped to the title line only:
+        // author and revision lines must still see just the restricted
+        // `Header` group (special characters, attribute references, and the
+        // inline pass macro) — formatting is left as literal, unprocessed
+        // text.
+        let doc = Parser::default().parse("= Title\n*Jane Smith*\nv1, *2025-09-28*");
+
+        let author_line = doc.header().author_line().unwrap();
+        assert_eq!(
+            author_line.authors().next().map(|a| a.name().to_string()),
+            Some("*Jane Smith*".to_string())
+        );
+
+        let revision_line = doc.header().revision_line().unwrap();
+        assert_eq!(revision_line.revdate(), "*2025-09-28*");
+    }
+
+    #[test]
+    fn doctitle_sanitized_strips_rendered_markup_to_plain_text() {
+        // Mirrors Ruby Asciidoctor's `Document#doctitle(sanitize: true)`,
+        // used for contexts (like the standalone HTML `<title>` element)
+        // where markup is not allowed. Relies on the fuller title
+        // substitution above: without it there would be no rendered markup
+        // (bold, italic, an `<img>` from `image:`) to strip in the first
+        // place.
+        let doc = Parser::default()
+            .parse("= *Document* image:logo.png[] _Title_ image:another-logo.png[another logo]");
+
+        assert_eq!(doc.doctitle_sanitized(), Some("Document Title".to_string()));
+    }
+
+    #[test]
+    fn doctitle_sanitized_passes_through_plain_title_unchanged() {
+        let doc = Parser::default().parse("= Just the Title");
+
+        assert_eq!(doc.doctitle_sanitized(), Some("Just the Title".to_string()));
+    }
+
+    #[test]
+    fn doctitle_sanitized_is_none_without_a_title() {
+        let doc = Parser::default().parse("No title here.");
+
+        assert_eq!(doc.doctitle_sanitized(), None);
     }
 
     #[test]
@@ -2452,6 +2586,47 @@ mod tests {
 
         assert_eq!(header.main_title(), Some("Main Title"));
         assert_eq!(header.subtitle(), Some("Subtitle"));
+    }
+
+    #[test]
+    fn separator_block_attribute_does_not_override_api_locked_title_separator() {
+        // An API-locked `title-separator` must not be overwritten by a
+        // `[separator=…]` block attribute above the title, exactly as an
+        // ordinary `:title-separator:` header entry is already blocked.
+        let doc = Parser::default()
+            .with_intrinsic_attribute("title-separator", " -", ModificationContext::ApiOnly)
+            .parse("[separator=::]\n= Main Title - *Subtitle*\nAuthor Name\n\ncontent\n");
+
+        assert_eq!(
+            doc.attribute_value("title-separator"),
+            InterpretedValue::Value(" -")
+        );
+
+        let header = doc.header();
+        assert_eq!(header.main_title(), Some("Main Title"));
+    }
+
+    #[test]
+    fn separator_block_attribute_does_not_override_api_or_document_body_locked_title_separator() {
+        // `ApiOrDocumentBody` also locks `title-separator` against a *header*
+        // assignment (it may only be changed from the document body) -- the
+        // `[separator=…]` block attribute above the title is itself part of
+        // the header, so it must be rejected the same as `ApiOnly`.
+        let doc = Parser::default()
+            .with_intrinsic_attribute(
+                "title-separator",
+                " -",
+                ModificationContext::ApiOrDocumentBody,
+            )
+            .parse("[separator=::]\n= Main Title - *Subtitle*\n\ncontent\n");
+
+        assert_eq!(
+            doc.attribute_value("title-separator"),
+            InterpretedValue::Value(" -")
+        );
+
+        let header = doc.header();
+        assert_eq!(header.main_title(), Some("Main Title"));
     }
 
     #[test]

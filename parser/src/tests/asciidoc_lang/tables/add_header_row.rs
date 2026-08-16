@@ -107,7 +107,21 @@ TIP: The header row ignores any style operators assigned via column and cell spe
         crate::blocks::TableCellContent::AsciiDoc(_)
     ));
 
-    verifies!(
+    // This sentence is classified `non_normative!` rather than `verifies!`
+    // because the crate deliberately diverges from its first clause. It is a
+    // single spec line asserting two rules – (1) the header row ignores
+    // alignment operators on column specifiers, and (2) alignment operators on
+    // a header *cell* specifier are applied. We honor rule (2) but contradict
+    // rule (1): Asciidoctor 2.0.26 (the parity oracle) does *not* ignore column
+    // alignment for the header row. In `lib/asciidoctor/table.rb`,
+    // `Table::Cell#initialize` runs `update_attributes column.attributes` for
+    // every cell (header or body), copying the column's `halign`/`valign` onto
+    // the cell; the header-specific handling only skips
+    // `cell_style = column.style`, so the header ignores the column *style*,
+    // not its alignment. Because the SDD coverage tool matches whole spec lines,
+    // the honored and contradicted rules cannot be split, so the line is marked
+    // non-normative rather than falsely reporting rule (1) as verified.
+    non_normative!(
         r#"
 It also ignores alignment operators assigned to the table's column specifiers; however, any alignment operators assigned to a cell specifier in the header row are applied.
 
@@ -115,22 +129,21 @@ It also ignores alignment operators assigned to the table's column specifiers; h
     );
 
     // The columns carry alignment operators (`^` centers, `.>` bottom-aligns),
-    // and the first row is promoted to the header. The header row ignores the
-    // column alignment operators, so its cells fall back to the default
-    // alignment (left, top) ...
+    // and the first row is promoted to the header. The header cells inherit the
+    // column alignment (center, bottom), just as the body cells do.
     let table = parse_table(
         "[cols=\"^.>,^.>\",options=\"header\"]\n|===\n|Column 1 |Column 2\n\n|Cell 1 |Cell 2\n|===",
     );
     assert_eq!(
         header_alignments(&table),
         vec![
-            (HorizontalAlignment::Left, VerticalAlignment::Top),
-            (HorizontalAlignment::Left, VerticalAlignment::Top),
+            (HorizontalAlignment::Center, VerticalAlignment::Bottom),
+            (HorizontalAlignment::Center, VerticalAlignment::Bottom),
         ]
     );
 
-    // ... while the body cells in the same columns *do* honor the column
-    // alignment operators.
+    // The body cells in the same columns resolve to the same alignment,
+    // confirming the header now matches the body.
     assert_eq!(
         table.body_rows()[0]
             .cells()
@@ -143,12 +156,13 @@ It also ignores alignment operators assigned to the table's column specifiers; h
         ]
     );
 
-    // Alignment operators on a cell specifier *in the header row* are applied.
-    // Here the columns are centered (`^`), but the header cells carry their own
-    // operators (`>` right, `.>` bottom), which override the ignored column
-    // alignment; the horizontal alignment of the second header cell has no cell
-    // operator, so it falls back to the default (left) rather than the column's
-    // center.
+    // Alignment operators on a cell specifier *in the header row* are applied,
+    // overriding the column alignment for whichever axis the cell operator
+    // sets. Here the columns are centered (`^`); the first header cell's `>`
+    // sets its horizontal alignment to right while its vertical alignment falls
+    // back to the column (top, since `^` sets no vertical operator). The second
+    // header cell's `.>` sets its vertical alignment to bottom while its
+    // horizontal alignment falls back to the column's center.
     let table = parse_table(
         "[cols=\"2*^\",options=\"header\"]\n|===\n>|Column 1 .>|Column 2\n\n|Cell 1 |Cell 2\n|===",
     );
@@ -156,12 +170,12 @@ It also ignores alignment operators assigned to the table's column specifiers; h
         header_alignments(&table),
         vec![
             (HorizontalAlignment::Right, VerticalAlignment::Top),
-            (HorizontalAlignment::Left, VerticalAlignment::Bottom),
+            (HorizontalAlignment::Center, VerticalAlignment::Bottom),
         ]
     );
 
-    // The body cells, which have no cell specifier, still honor the column's
-    // center alignment.
+    // The body cells, which have no cell specifier, honor the column's center
+    // alignment on both axes.
     assert_eq!(
         table.body_rows()[0]
             .cells()

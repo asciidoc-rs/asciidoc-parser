@@ -932,18 +932,12 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
         list_element = list_element.with_attribute(option, "");
     }
 
-    // Add style class to the list element if present.
-    // Skip for horizontal dlists since they use a different rendering.
-    if !is_horizontal && let Some(style) = list.declared_style() {
+    // Add the resolved style class to the list element if present. Using the
+    // resolved style covers both an explicit `[bibliography]` and the style a
+    // list inherits implicitly from a `bibliography` section. Skip for
+    // horizontal dlists since they use a different rendering.
+    if !is_horizontal && let Some(style) = list.resolved_style() {
         list_element = list_element.with_class(style);
-    }
-
-    // A bibliography list whose style is inherited from its enclosing section
-    // (rather than declared with `[bibliography]`) still renders with the
-    // `bibliography` class. The `declared_style` guard avoids adding it twice
-    // when the style was declared explicitly.
-    if list.is_bibliography() && list.declared_style() != Some("bibliography") {
-        list_element = list_element.with_class("bibliography");
     }
 
     for item in list.child_blocks() {
@@ -1079,16 +1073,11 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
         wrapper = wrapper.with_class(style);
     }
 
-    // Add style class to the wrapper if present (explicit style overrides marker
-    // style). Skip for horizontal dlists since wrapper already has hdlist class.
-    if !is_horizontal && let Some(style) = list.declared_style() {
+    // Add the resolved style class to the wrapper if present (an explicit or
+    // inherited style overrides the marker style). Skip for horizontal dlists
+    // since the wrapper already has the hdlist class.
+    if !is_horizontal && let Some(style) = list.resolved_style() {
         wrapper = wrapper.with_class(style);
-    }
-
-    // As above, a bibliography list that inherited its style from its section
-    // renders the wrapper with the `bibliography` class.
-    if list.is_bibliography() && list.declared_style() != Some("bibliography") {
-        wrapper = wrapper.with_class("bibliography");
     }
 
     for role in list.roles() {

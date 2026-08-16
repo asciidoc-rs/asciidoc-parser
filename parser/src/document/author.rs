@@ -15,7 +15,35 @@ use crate::{Parser, Span, content::Content};
 /// the full name is assigned to the `firstname` attribute. You can adjoin names
 /// using an underscore (`_`) character.
 ///
+/// # Rendered versus raw values
+///
+/// The [`name`], [`firstname`], [`middlename`], [`lastname`], and [`email`]
+/// accessors return the value that populates the corresponding document
+/// attribute (`author`, `firstname`, …). As in Asciidoctor, that value has the
+/// header substitution group applied – so a literal `<`, `>`, or `&` written on
+/// the author line is escaped (`&lt;`, `&gt;`, `&amp;`), matching what
+/// `{author}` and the rendered byline emit and what Asciidoctor's own
+/// `doc.author` / `authors[0].name` return.
+///
+/// Each accessor has a `raw_` counterpart ([`raw_name`], [`raw_firstname`],
+/// [`raw_middlename`], [`raw_lastname`], [`raw_email`]) that returns the same
+/// value *before* that escaping – attribute references still resolved, but the
+/// literal special characters left as they were written. This mirrors
+/// Asciidoctor's internal, pre-substitution `metadata` hash and lets a consumer
+/// that escapes for HTML itself do so exactly once, rather than double-escaping
+/// an already-escaped value.
+///
 /// [author line]: https://docs.asciidoctor.org/asciidoc/latest/document/author-line/
+/// [`name`]: Self::name
+/// [`firstname`]: Self::firstname
+/// [`middlename`]: Self::middlename
+/// [`lastname`]: Self::lastname
+/// [`email`]: Self::email
+/// [`raw_name`]: Self::raw_name
+/// [`raw_firstname`]: Self::raw_firstname
+/// [`raw_middlename`]: Self::raw_middlename
+/// [`raw_lastname`]: Self::raw_lastname
+/// [`raw_email`]: Self::raw_email
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Author {
     name: String,
@@ -23,6 +51,16 @@ pub struct Author {
     middlename: Option<String>,
     lastname: Option<String>,
     email: Option<String>,
+
+    // The `raw_*` fields hold the same values as their rendered counterparts
+    // above, but before the header substitution group escapes any literal `<`,
+    // `>`, or `&` written on the author line. Attribute references are still
+    // resolved. See the type-level "Rendered versus raw values" documentation.
+    raw_name: String,
+    raw_firstname: String,
+    raw_middlename: Option<String>,
+    raw_lastname: Option<String>,
+    raw_email: Option<String>,
 }
 
 impl Author {
@@ -55,48 +93,34 @@ impl Author {
             // name.
             let expanded_source = apply_author_subs(source, parser);
 
+            // The raw value expands the reference without applying special
+            // characters. A single reference carries no literal special
+            // characters of its own, so the raw and rendered expansions differ
+            // only if the referenced attribute's own value was already escaped.
+            let raw_expanded = resolve_attribute_references(source, parser);
+
             if names_only {
                 // An attribute-entry value is partitioned *after* its references
                 // are expanded, so a reference that resolves to a multi-part name
                 // (or one with a trailing email) yields the same metadata as the
                 // equivalent literal value.
-                Some(partition_names_only(&expanded_source))
+                Some(partition_names_only(&expanded_source, &raw_expanded))
             } else {
-                let name_with_spaces = replace_underscores_with_spaces(expanded_source);
-                Some(Self {
-                    name: name_with_spaces.clone(),
-                    firstname: name_with_spaces,
-                    middlename: None,
-                    lastname: None,
-                    email: None,
-                })
+                Some(single_name_author(
+                    replace_underscores_with_spaces(expanded_source),
+                    replace_underscores_with_spaces(raw_expanded),
+                ))
             }
         } else if let Some(captures) = AUTHOR.captures(source) {
-            // Raw input matches author pattern: Extract components then apply
-            // substitutions.
+            // Raw input matches author pattern: Extract each component and apply
+            // substitutions to it. The rendered components escape literal special
+            // characters (`apply_author_subs`); the raw components resolve
+            // attribute references only, leaving those characters as written.
+            let (name, firstname, middlename, lastname, email) =
+                matched_parts(&captures, |s| apply_author_subs(s, parser));
 
-            // Extract raw components first.
-            let firstname =
-                replace_underscores_with_spaces(apply_author_subs(&captures[1], parser));
-            let mut middlename = captures
-                .get(2)
-                .map(|m| replace_underscores_with_spaces(apply_author_subs(m.as_str(), parser)));
-            let mut lastname = captures
-                .get(3)
-                .map(|m| replace_underscores_with_spaces(apply_author_subs(m.as_str(), parser)));
-            let email = captures
-                .get(4)
-                .map(|m| apply_author_subs(m.as_str(), parser));
-
-            if middlename.is_some() && lastname.is_none() {
-                lastname = middlename;
-                middlename = None;
-            }
-
-            // Reconstruct the full name from its parsed parts so that any interior
-            // whitespace that appeared between the names in the source is condensed
-            // to a single space (matching Asciidoctor).
-            let name = join_name_parts(&firstname, middlename.as_deref(), lastname.as_deref());
+            let (raw_name, raw_firstname, raw_middlename, raw_lastname, raw_email) =
+                matched_parts(&captures, |s| resolve_attribute_references(s, parser));
 
             Some(Self {
                 name,
@@ -104,31 +128,45 @@ impl Author {
                 middlename,
                 lastname,
                 email,
+                raw_name,
+                raw_firstname,
+                raw_middlename,
+                raw_lastname,
+                raw_email,
             })
         } else if source.contains('{') {
             // Input contains attributes that prevent regex match: Expand first, then try
             // parsing.
             let expanded_source = apply_author_subs(source, parser);
+            let raw_expanded = resolve_attribute_references(source, parser);
 
             if let Some(captures) = AUTHOR.captures(&expanded_source) {
-                // After expansion, it matches the pattern: Parse normally.
-                let firstname = replace_underscores_with_spaces(captures[1].to_string());
-                let mut middlename = captures
-                    .get(2)
-                    .map(|m| replace_underscores_with_spaces(m.as_str().to_string()));
-                let mut lastname = captures
-                    .get(3)
-                    .map(|m| replace_underscores_with_spaces(m.as_str().to_string()));
-                let email = captures.get(4).map(|m| m.as_str().to_string());
+                // After expansion, it matches the pattern: Parse normally. The
+                // components are already substituted, so the transform is the
+                // identity here.
+                let (name, firstname, middlename, lastname, email) =
+                    matched_parts(&captures, str::to_string);
 
-                if middlename.is_some() && lastname.is_none() {
-                    lastname = middlename;
-                    middlename = None;
-                }
+                // Derive the raw components from the raw expansion, but only when
+                // it matches the same pattern *and* agrees on whether a trailing
+                // `<email>` is present, so the two representations keep the same
+                // structure and differ only in escaping. They can disagree only
+                // if a literal author-line bracket was escaped in the rendered
+                // value; in that case fall back to the rendered components.
+                let (raw_name, raw_firstname, raw_middlename, raw_lastname, raw_email) =
+                    match AUTHOR.captures(&raw_expanded) {
+                        Some(raw_captures) if raw_captures.get(4).is_some() == email.is_some() => {
+                            matched_parts(&raw_captures, str::to_string)
+                        }
 
-                // Reconstruct the full name from its parsed parts so interior
-                // whitespace between the names is condensed (matching Asciidoctor).
-                let name = join_name_parts(&firstname, middlename.as_deref(), lastname.as_deref());
+                        _ => (
+                            name.clone(),
+                            firstname.clone(),
+                            middlename.clone(),
+                            lastname.clone(),
+                            email.clone(),
+                        ),
+                    };
 
                 Some(Self {
                     name,
@@ -136,6 +174,11 @@ impl Author {
                     middlename,
                     lastname,
                     email,
+                    raw_name,
+                    raw_firstname,
+                    raw_middlename,
+                    raw_lastname,
+                    raw_email,
                 })
             } else if names_only {
                 // An attribute-entry value that still fails the pattern after
@@ -143,52 +186,40 @@ impl Author {
                 // reference resolving to a four-plus-part name behaves like its
                 // literal equivalent. The expanded value is used before any HTML
                 // encoding so a trailing `<email>` can still be split off.
-                Some(partition_names_only(&expanded_source))
+                Some(partition_names_only(&expanded_source, &raw_expanded))
             } else {
-                // Even after expansion, doesn't match: Treat as single name with HTML encoding.
-                let mut expanded_name = expanded_source;
-
-                if expanded_name.contains('<') && expanded_name.contains('>') {
-                    let span = crate::Span::new(&expanded_name);
-                    let mut content = crate::content::Content::from(span);
-                    crate::content::SubstitutionStep::SpecialCharacters.apply(
-                        &mut content,
-                        parser,
-                        None,
-                    );
-                    expanded_name = content.rendered_html().to_string();
-                }
-
-                let name_with_spaces = replace_underscores_with_spaces(expanded_name);
-                Some(Self {
-                    name: name_with_spaces.clone(),
-                    firstname: name_with_spaces,
-                    middlename: None,
-                    lastname: None,
-                    email: None,
-                })
+                // Even after expansion the value does not match the author
+                // pattern, so it becomes a single name. The rendered value has the
+                // header substitution group applied (escaping any literal `<`,
+                // `>`, or `&`), mirroring Asciidoctor's `apply_header_subs`; the
+                // raw value expands the references without that escaping.
+                Some(single_name_author(
+                    replace_underscores_with_spaces(expanded_source),
+                    replace_underscores_with_spaces(raw_expanded),
+                ))
             }
         } else if names_only {
             // Input comes from an attribute entry (e.g. `:author:`) and does not
             // match the author pattern – typically a name with four or more parts
             // or one containing punctuation such as a comma. Asciidoctor still
             // partitions it by splitting on whitespace into at most three parts,
-            // assigning any trailing parts to `lastname`.
-            Some(partition_names_only(source))
+            // assigning any trailing parts to `lastname`. This path applies no
+            // special-characters substitution, so the raw and rendered values are
+            // identical.
+            Some(partition_names_only(source, source))
         } else {
-            // Input doesn't contain attributes and doesn't match the author pattern.
-            // Asciidoctor stores the whole line as the author, condensing interior
-            // whitespace and keeping any angle brackets literal. Underscores are left
-            // literal here: Asciidoctor only converts underscore-joined names while
+            // Input doesn't contain attributes and doesn't match the author
+            // pattern. Asciidoctor stores the whole line as the author,
+            // condensing interior whitespace. Underscores are left literal here:
+            // Asciidoctor only converts underscore-joined names while
             // partitioning a *matching* line, not in this fallback.
-            let name = condense_whitespace(source);
-            Some(Self {
-                name: name.clone(),
-                firstname: name,
-                middlename: None,
-                lastname: None,
-                email: None,
-            })
+            //
+            // The rendered value has the header substitution group applied, so any
+            // literal `<`, `>`, or `&` is escaped – matching Asciidoctor's
+            // `apply_header_subs`. The raw value keeps those characters as written.
+            let raw_name = condense_whitespace(source);
+            let name = apply_author_special_characters(&raw_name, parser);
+            Some(single_name_author(name, raw_name))
         }
     }
 
@@ -242,13 +273,7 @@ impl Author {
         if segments.is_empty() {
             // The value was nothing but markup: keep the rendered value as the
             // single name.
-            return Some(Self {
-                firstname: name.clone(),
-                name,
-                middlename: None,
-                lastname: None,
-                email: None,
-            });
+            return Some(single_name_author(name.clone(), name));
         }
 
         let firstname = replace_underscores_with_spaces(segments.remove(0));
@@ -266,7 +291,15 @@ impl Author {
             ),
         };
 
+        // This path partitions an already-substituted value, so it applies no
+        // further special-characters substitution: the raw values equal the
+        // rendered ones.
         Some(Self {
+            raw_name: name.clone(),
+            raw_firstname: firstname.clone(),
+            raw_middlename: middlename.clone(),
+            raw_lastname: lastname.clone(),
+            raw_email: None,
             name,
             firstname,
             middlename,
@@ -282,6 +315,10 @@ impl Author {
     /// separately.
     pub(crate) fn with_email(mut self, email: Option<String>) -> Self {
         if let Some(email) = email {
+            // The email arrives from a companion `email_N` attribute value, which
+            // carries no author-line special-characters escaping of its own, so
+            // the raw and rendered emails are the same.
+            self.raw_email = Some(email.clone());
             self.email = Some(email);
         }
 
@@ -325,6 +362,53 @@ impl Author {
     /// brackets (`< >`). A URL can be used in place of the email address.
     pub fn email(&self) -> Option<&str> {
         self.email.as_deref()
+    }
+
+    /// Returns the full name of the author *before* the header substitution
+    /// group escapes any literal special characters.
+    ///
+    /// This is [`name`](Self::name) with attribute references resolved but any
+    /// literal `<`, `>`, or `&` written on the author line left unescaped,
+    /// mirroring Asciidoctor's internal `metadata` hash. Use it when the value
+    /// will be HTML-escaped downstream, so the escaping happens exactly once.
+    pub fn raw_name(&self) -> &str {
+        &self.raw_name
+    }
+
+    /// Returns the first name of the author *before* the header substitution
+    /// group escapes any literal special characters.
+    ///
+    /// See [`raw_name`](Self::raw_name) for how the raw value differs from
+    /// [`firstname`](Self::firstname).
+    pub fn raw_firstname(&self) -> &str {
+        &self.raw_firstname
+    }
+
+    /// Returns the middle name of the author *before* the header substitution
+    /// group escapes any literal special characters.
+    ///
+    /// See [`raw_name`](Self::raw_name) for how the raw value differs from
+    /// [`middlename`](Self::middlename).
+    pub fn raw_middlename(&self) -> Option<&str> {
+        self.raw_middlename.as_deref()
+    }
+
+    /// Returns the last name of the author *before* the header substitution
+    /// group escapes any literal special characters.
+    ///
+    /// See [`raw_name`](Self::raw_name) for how the raw value differs from
+    /// [`lastname`](Self::lastname).
+    pub fn raw_lastname(&self) -> Option<&str> {
+        self.raw_lastname.as_deref()
+    }
+
+    /// Returns the email address of the author *before* the header substitution
+    /// group escapes any literal special characters.
+    ///
+    /// See [`raw_name`](Self::raw_name) for how the raw value differs from
+    /// [`email`](Self::email).
+    pub fn raw_email(&self) -> Option<&str> {
+        self.raw_email.as_deref()
     }
 
     /// Returns the initials of the author.
@@ -461,18 +545,83 @@ fn join_name_parts(firstname: &str, middlename: Option<&str>, lastname: Option<&
 /// has repeating spaces condensed to a single space. Each segment then has
 /// underscore joiners replaced with spaces.
 ///
-/// `source` may already have attribute references substituted (the expanded
-/// value of a reference such as `{full-name}`); in that case any email it
-/// carries is likewise already substituted.
-fn partition_names_only(source: &str) -> Author {
+/// `escaped_source` may already have attribute references substituted (the
+/// expanded value of a reference such as `{full-name}`); in that case any email
+/// it carries is likewise already substituted.
+///
+/// `raw_source` is the same value expanded *without* the special-characters
+/// substitution and is partitioned independently to populate the author's
+/// `raw_*` fields (see the [`Author`] documentation). For an
+/// attribute entry that carries no literal special characters the two arguments
+/// are identical.
+fn partition_names_only(escaped_source: &str, raw_source: &str) -> Author {
+    // Partition the rendered value first, then partition the raw value using the
+    // *rendered* value's trailing-email decision so the two representations keep
+    // the same structure and differ only in escaping. A literal author-line
+    // bracket is escaped in the rendered value and so is not recognized as an
+    // email delimiter; the raw value, whose bracket is still literal, must follow
+    // that same decision rather than splitting an email off on its own.
+    let escaped = partition_parts(escaped_source, EmailSplit::Detect);
+
+    let raw = partition_parts(
+        raw_source,
+        if escaped.email.is_some() {
+            EmailSplit::Detect
+        } else {
+            EmailSplit::Suppress
+        },
+    );
+
+    Author {
+        name: escaped.name,
+        firstname: escaped.firstname,
+        middlename: escaped.middlename,
+        lastname: escaped.lastname,
+        email: escaped.email,
+        raw_name: raw.name,
+        raw_firstname: raw.firstname,
+        raw_middlename: raw.middlename,
+        raw_lastname: raw.lastname,
+        raw_email: raw.email,
+    }
+}
+
+/// The five partitioned strings produced from a single names-only author value.
+struct NameParts {
+    name: String,
+    firstname: String,
+    middlename: Option<String>,
+    lastname: Option<String>,
+    email: Option<String>,
+}
+
+/// Whether [`partition_parts`] may split a trailing `<email>` off its input.
+enum EmailSplit {
+    /// Split a trailing `<email>` off when one is present (the rendered value's
+    /// own decision).
+    Detect,
+
+    /// Never split an email off; the whole value is treated as the name. Used
+    /// for the raw value when the rendered value kept its bracket escaped, so
+    /// the two stay structurally aligned.
+    Suppress,
+}
+
+/// Partition a single names-only author value into its parts, following the
+/// rules described on [`partition_names_only`].
+fn partition_parts(source: &str, email_split: EmailSplit) -> NameParts {
     let source = source.trim();
 
-    let (name_source, email) = match NAMES_ONLY_EMAIL.captures(source) {
-        Some(captures) => (
-            captures.get(1).map_or(source, |m| m.as_str()),
-            Some(captures[2].to_string()),
-        ),
-        None => (source, None),
+    let (name_source, email) = match email_split {
+        EmailSplit::Detect => match NAMES_ONLY_EMAIL.captures(source) {
+            Some(captures) => (
+                captures.get(1).map_or(source, |m| m.as_str()),
+                Some(captures[2].to_string()),
+            ),
+            None => (source, None),
+        },
+
+        EmailSplit::Suppress => (source, None),
     };
 
     let mut segments = split_whitespace_max3(name_source);
@@ -492,12 +641,75 @@ fn partition_names_only(source: &str) -> Author {
 
     let name = join_name_parts(&firstname, middlename.as_deref(), lastname.as_deref());
 
-    Author {
+    NameParts {
         name,
         firstname,
         middlename,
         lastname,
         email,
+    }
+}
+
+/// Extract the author components from a successful [`AUTHOR`] match, applying
+/// `transform` to each captured fragment.
+///
+/// The rendered components pass `apply_author_subs` (special characters, then
+/// attribute references); the raw components pass
+/// [`resolve_attribute_references`] (attribute references only), so the two
+/// share the match's structure but differ in whether literal special characters
+/// are escaped. Returns `(name, firstname, middlename, lastname, email)`,
+/// promoting a lone middle name to the last name and reconstructing `name` from
+/// the parts so interior whitespace is condensed to a single space (matching
+/// Asciidoctor).
+fn matched_parts<F>(
+    captures: &regex::Captures,
+    transform: F,
+) -> (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+)
+where
+    F: Fn(&str) -> String,
+{
+    let firstname = replace_underscores_with_spaces(transform(&captures[1]));
+
+    let mut middlename = captures
+        .get(2)
+        .map(|m| replace_underscores_with_spaces(transform(m.as_str())));
+
+    let mut lastname = captures
+        .get(3)
+        .map(|m| replace_underscores_with_spaces(transform(m.as_str())));
+
+    let email = captures.get(4).map(|m| transform(m.as_str()));
+
+    if middlename.is_some() && lastname.is_none() {
+        lastname = middlename;
+        middlename = None;
+    }
+
+    let name = join_name_parts(&firstname, middlename.as_deref(), lastname.as_deref());
+
+    (name, firstname, middlename, lastname, email)
+}
+
+/// Build a single-name [`Author`] – one whose whole value is the `name` with no
+/// separate first/middle/last/email parts – from its rendered and raw forms.
+fn single_name_author(name: String, raw_name: String) -> Author {
+    Author {
+        firstname: name.clone(),
+        name,
+        middlename: None,
+        lastname: None,
+        email: None,
+        raw_firstname: raw_name.clone(),
+        raw_name,
+        raw_middlename: None,
+        raw_lastname: None,
+        raw_email: None,
     }
 }
 
@@ -611,46 +823,264 @@ pub(crate) fn matches_author_pattern(source: &str) -> bool {
     AUTHOR.is_match(source.trim())
 }
 
+/// Apply the header substitution group to an author-line fragment: special
+/// characters first, then attribute references – matching Asciidoctor's
+/// `apply_header_subs` (`HEADER_SUBS = [:specialcharacters, :attributes]`).
+///
+/// Running special characters *before* attribute references escapes any literal
+/// `<`, `>`, or `&` in the fragment while leaving the expanded value of an
+/// attribute reference untouched, so an attribute whose value already contains
+/// markup (or a character reference) is inserted verbatim rather than escaped a
+/// second time – exactly as Asciidoctor's header subs behave. Numeric character
+/// references in the literal text are preserved (see
+/// [`apply_author_special_characters`]).
 fn apply_author_subs(source: &str, parser: &Parser) -> String {
-    let span = Span::new(source);
-    let mut content = Content::from(span);
-
     use crate::content::SubstitutionStep;
 
-    // Apply attribute references first.
+    let with_special_characters = apply_author_special_characters(source, parser);
+
+    let span = Span::new(&with_special_characters);
+    let mut content = Content::from(span);
+
     SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
-
-    // Apply HTML encoding:
-    // - Single attribute reference (like {full-author}): No HTML encoding.
-    // - Single attribute in email position (like <{email}>): No HTML encoding.
-    // - Multiple attributes or complex patterns: HTML encoding.
-    // - Don't HTML encode if the content only has pre-existing HTML entities.
-    let is_simple_single_attribute = source.trim().starts_with('{')
-        && source.trim().ends_with('}')
-        && source.matches('{').count() == 1;
-
-    let has_multiple_attributes = source.matches('{').count() > 1;
-
-    // Check if we should apply HTML encoding.
-    let rendered = content.rendered_html();
-    let has_angle_brackets = rendered.contains('<') && rendered.contains('>');
-    let has_unencoded_ampersand = rendered.contains('&') && !rendered.contains("&amp;");
-
-    if !is_simple_single_attribute
-        && has_multiple_attributes
-        && (has_angle_brackets || has_unencoded_ampersand)
-    {
-        SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
-    }
 
     content.rendered_html().to_string()
 }
+
+/// Resolve attribute references in `source` *without* applying the special-
+/// characters substitution.
+///
+/// This yields the raw form of an author fragment – attribute references
+/// expanded, but any literal `<`, `>`, or `&` left as written – which populates
+/// the [`Author`] `raw_*` fields. It is the attribute-references half of
+/// [`apply_author_subs`], mirroring the value Asciidoctor keeps in its
+/// internal, pre-substitution `metadata` hash.
+///
+/// The rendered value is always resolved from the same source first (via
+/// [`apply_author_subs`]), which records any `attribute-missing` warning, so
+/// this second, raw-value pass discards the warnings it would otherwise
+/// duplicate.
+fn resolve_attribute_references(source: &str, parser: &Parser) -> String {
+    use crate::content::SubstitutionStep;
+
+    let warnings_before = parser.substitution_warnings_len();
+
+    let span = Span::new(source);
+    let mut content = Content::from(span);
+
+    SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+
+    parser.truncate_substitution_warnings(warnings_before);
+
+    content.rendered_html().to_string()
+}
+
+/// Apply the special-characters substitution to `source`, escaping every
+/// literal `<`, `>`, and `&` – except the leading `&` of a numeric HTML
+/// character reference, which is left intact so a name such as `AsciiDoc&#174;`
+/// keeps its ® entity rather than degrading to `AsciiDoc&amp;#174;` (issue
+/// #757).
+fn apply_author_special_characters(source: &str, parser: &Parser) -> String {
+    let mut result = String::with_capacity(source.len());
+    let mut last = 0;
+
+    // Escape the text between the character references, emitting each reference
+    // verbatim so its `&` is never doubled.
+    for m in NUMERIC_CHARACTER_REFERENCE.find_iter(source) {
+        result.push_str(&escape_special_characters(&source[last..m.start()], parser));
+        result.push_str(m.as_str());
+        last = m.end();
+    }
+
+    result.push_str(&escape_special_characters(&source[last..], parser));
+    result
+}
+
+/// Run the special-characters substitution step over `source`, escaping `<`,
+/// `>`, and `&`.
+fn escape_special_characters(source: &str, parser: &Parser) -> String {
+    if source.is_empty() {
+        return String::new();
+    }
+
+    let span = Span::new(source);
+    let mut content = Content::from(span);
+
+    crate::content::SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
+
+    content.rendered_html().to_string()
+}
+
+/// Matches a numeric HTML character reference – decimal (`&#174;`) or
+/// hexadecimal (`&#xAE;`). Mirrors the guard the author line uses when deciding
+/// whether a semicolon separates two authors (see
+/// [`AuthorLine`](crate::document::AuthorLine)); the leading `&` of such a
+/// reference is preserved rather than escaped when header subs are applied.
+static NUMERIC_CHARACTER_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r"&#(?:[0-9]+|[xX][0-9a-fA-F]+);").unwrap()
+});
 
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::Author;
+
+    // The `raw_*` accessors return the author value with attribute references
+    // resolved but the header substitution group's special-characters escaping
+    // *not* applied – the value Asciidoctor keeps in its internal `metadata`
+    // hash. The rendered accessors are unaffected and keep escaping literal `<`,
+    // `>`, and `&` to match `doc.author`/`{author}`.
+    mod raw_accessors {
+        use crate::{Parser, document::Author};
+
+        // Parse `src` and return its single, first author.
+        fn only_author(src: &str) -> Author {
+            let mut parser = Parser::default();
+            let doc = parser.parse(src);
+            doc.authors().first().cloned().unwrap()
+        }
+
+        #[test]
+        fn plain_name_has_no_special_characters_so_raw_equals_rendered() {
+            let a = only_author("= Doc\nKismet R. Lee <kismet@asciidoctor.org>\n\nbody\n");
+
+            assert_eq!(a.name(), "Kismet R. Lee");
+            assert_eq!(a.raw_name(), "Kismet R. Lee");
+            assert_eq!(a.firstname(), "Kismet");
+            assert_eq!(a.raw_firstname(), "Kismet");
+            assert_eq!(a.middlename(), Some("R."));
+            assert_eq!(a.raw_middlename(), Some("R."));
+            assert_eq!(a.lastname(), Some("Lee"));
+            assert_eq!(a.raw_lastname(), Some("Lee"));
+            assert_eq!(a.email(), Some("kismet@asciidoctor.org"));
+            assert_eq!(a.raw_email(), Some("kismet@asciidoctor.org"));
+        }
+
+        #[test]
+        fn implicit_line_with_literal_angle_brackets_keeps_them_raw() {
+            // A line that does not match the author pattern (here because of the
+            // comma) becomes a single name. The rendered value escapes the literal
+            // angle brackets – matching Asciidoctor's `doc.author` – while the raw
+            // value keeps them as written.
+            let a = only_author(
+                "= Doc\nStuart Rackham, founder of AsciiDoc <founder@asciidoc.org>\n\nbody\n",
+            );
+
+            assert_eq!(
+                a.name(),
+                "Stuart Rackham, founder of AsciiDoc &lt;founder@asciidoc.org&gt;"
+            );
+
+            assert_eq!(
+                a.raw_name(),
+                "Stuart Rackham, founder of AsciiDoc <founder@asciidoc.org>"
+            );
+
+            assert_eq!(
+                a.raw_firstname(),
+                "Stuart Rackham, founder of AsciiDoc <founder@asciidoc.org>"
+            );
+        }
+
+        #[test]
+        fn literal_ampersand_is_escaped_only_in_the_rendered_value() {
+            // A downstream converter that HTML-escapes the raw name gets a single
+            // level of escaping rather than the double-escaped `&amp;amp;` it would
+            // get from re-escaping the already-escaped rendered value.
+            let a = only_author("= Doc\nBen & Jerry\n\nbody\n");
+
+            assert_eq!(a.name(), "Ben &amp; Jerry");
+            assert_eq!(a.raw_name(), "Ben & Jerry");
+            assert_eq!(a.middlename(), Some("&amp;"));
+            assert_eq!(a.raw_middlename(), Some("&"));
+        }
+
+        #[test]
+        fn four_part_name_with_email_keeps_brackets_raw() {
+            let a = only_author("= Doc\nFour Names Not Supported <doc@example.com>\n\nbody\n");
+
+            assert_eq!(a.name(), "Four Names Not Supported &lt;doc@example.com&gt;");
+            assert_eq!(a.raw_name(), "Four Names Not Supported <doc@example.com>");
+        }
+
+        #[test]
+        fn attribute_reference_resolves_then_stays_a_single_raw_name() {
+            // The literal `<`/`>` around the referenced email keep the expanded
+            // value from matching the author pattern, so it is stored as a single
+            // name. The rendered value escapes the brackets; the raw value resolves
+            // the references but leaves the brackets literal, and – importantly –
+            // keeps the same single-name structure as the rendered value rather
+            // than re-splitting into name parts.
+            let src = concat!(
+                ":first-name: Jane\n",
+                ":last-name: Smith\n",
+                ":author-email: jane@example.com\n",
+                "= Doc\n",
+                "{first-name} {last-name} <{author-email}>\n\n",
+                "body\n",
+            );
+
+            let a = only_author(src);
+
+            assert_eq!(a.name(), "Jane Smith &lt;jane@example.com&gt;");
+            assert_eq!(a.raw_name(), "Jane Smith <jane@example.com>");
+            assert_eq!(a.middlename(), None);
+            assert_eq!(a.raw_middlename(), None);
+            assert_eq!(a.lastname(), None);
+            assert_eq!(a.raw_lastname(), None);
+        }
+
+        #[test]
+        fn unresolved_attribute_reference_warns_only_once() {
+            // The raw pass resolves the same references as the rendered pass, so
+            // an author line with an unresolved reference must not record the
+            // `attribute-missing` warning twice.
+            let mut parser = Parser::default();
+            let doc =
+                parser.parse(":attribute-missing: warn\n= Doc\nJane {undefined} Smith\n\nbody\n");
+
+            assert_eq!(doc.warnings().count(), 1);
+        }
+
+        #[test]
+        fn names_only_email_split_stays_aligned_between_raw_and_rendered() {
+            // A four-part `:author:` entry that wraps an attribute reference in
+            // literal brackets fails the author pattern, so it is partitioned. The
+            // rendered value escapes the brackets and keeps no email; the raw
+            // value must follow that decision rather than splitting the still-
+            // literal `<…>` off as an email, so the two stay structurally aligned.
+            let a = only_author(":mail: someone@example.com\n:author: A B C D <{mail}>\n\nbody\n");
+
+            assert_eq!(a.name(), "A B C D &lt;someone@example.com&gt;");
+            assert_eq!(a.raw_name(), "A B C D <someone@example.com>");
+            assert_eq!(a.email(), None);
+            assert_eq!(a.raw_email(), None);
+            assert_eq!(a.lastname(), Some("C D &lt;someone@example.com&gt;"));
+            assert_eq!(a.raw_lastname(), Some("C D <someone@example.com>"));
+        }
+
+        #[test]
+        fn names_only_email_from_an_attribute_still_splits_in_both() {
+            // When the trailing `<email>` survives into the rendered expansion
+            // unescaped (here from an intrinsic attribute value, so the bracket is
+            // literal in *both* the rendered and raw expansions), the email is
+            // split off in both – the alignment fix only suppresses a raw split
+            // the rendered value did not also make.
+            let mut parser = Parser::default().with_intrinsic_attribute(
+                "tail",
+                "Jr. <boss@example.com>",
+                crate::parser::ModificationContext::Anywhere,
+            );
+
+            let doc = parser.parse("= Doc\n:author: A B C {tail}\n\nbody\n");
+            let a = doc.authors().first().cloned().unwrap();
+
+            assert_eq!(a.email(), Some("boss@example.com"));
+            assert_eq!(a.raw_email(), Some("boss@example.com"));
+        }
+    }
 
     // The `<`-branch of Asciidoctor's `process_authors` (`names_only`), reached
     // when an `:author:` attribute value's substitution produced inline HTML.

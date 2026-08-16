@@ -424,6 +424,34 @@ fn reference_to_this_document_by_name_resolves_within_it() {
 }
 
 #[test]
+fn reference_to_this_document_by_explicit_docname_attribute_resolves_within_it() {
+    // Same as above, but the current document is identified by an explicitly-set
+    // `docname` attribute rather than a primary file name. Asciidoctor treats
+    // `doc.attributes['docname']` as the single source of truth for the
+    // self-reference match, so an API-provided `docname` must be honored too.
+    let mut doc = Parser::default()
+        .with_intrinsic_attribute(
+            "docname",
+            "guide",
+            crate::parser::ModificationContext::ApiOnly,
+        )
+        .parse_deferred("See <<guide.adoc#install>>.\n\n[#install]\n== Installation\n");
+
+    assert!(first_simple(&doc).content().has_unresolved_refs());
+
+    let catalog = doc.catalog().clone();
+    let resolver = CatalogResolver::new(&catalog);
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+
+    assert!(warnings.is_empty());
+
+    assert_eq!(
+        first_paragraph(&doc),
+        "See <a href=\"#install\">Installation</a>."
+    );
+}
+
+#[test]
 fn reference_to_document_title_resolves_to_its_title() {
     // A document title carrying an explicit ID is registered in the catalog
     // under that ID (mirroring Asciidoctor, which registers the document itself

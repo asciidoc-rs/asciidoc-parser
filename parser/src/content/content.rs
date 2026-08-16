@@ -200,6 +200,59 @@ pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
     out
 }
 
+/// Strips markup down to plain text, mirroring Asciidoctor's
+/// `Document::Title` sanitize option (`XmlSanitizeRx = /<[^>]+>/`): every tag
+/// – opening, closing, or self-contained (e.g. an `<img>` rendered from an
+/// inline `image:` macro) – is removed, any run of interior spaces left
+/// behind by a removed tag is squeezed to one, and the result is trimmed.
+///
+/// A value with no `<` is returned unchanged, matching Asciidoctor, which
+/// skips the squeeze-and-trim pass entirely when there is nothing to
+/// sanitize. Used both by the sanitized doctitle accessor
+/// (`Document::doctitle_sanitized`) and by this document's own
+/// cross-reference fallback text (`this_document_reference`), which embeds
+/// the doctitle inside its own `<a>` and so cannot carry nested markup.
+pub(crate) fn sanitize_title(source: &str) -> String {
+    if !source.contains('<') {
+        return source.to_string();
+    }
+
+    let mut stripped = String::with_capacity(source.len());
+    let mut rest = source;
+
+    while let Some(lt) = rest.find('<') {
+        stripped.push_str(&rest[..lt]);
+
+        let after_lt = &rest[lt + 1..];
+        match after_lt.find('>') {
+            // `[^>]+` requires at least one character between `<` and `>`;
+            // an empty `<>` does not match and is copied through verbatim.
+            Some(gt) if gt > 0 => rest = &after_lt[gt + 1..],
+            _ => {
+                stripped.push('<');
+                rest = after_lt;
+            }
+        }
+    }
+    stripped.push_str(rest);
+
+    let mut squeezed = String::with_capacity(stripped.len());
+    let mut prev_was_space = false;
+    for c in stripped.chars() {
+        if c == ' ' {
+            if prev_was_space {
+                continue;
+            }
+            prev_was_space = true;
+        } else {
+            prev_was_space = false;
+        }
+        squeezed.push(c);
+    }
+
+    squeezed.trim().to_string()
+}
+
 /// A fully-owned snapshot of a rendered title, including any deferred
 /// cross-references it carries.
 ///
@@ -1227,6 +1280,63 @@ mod tests {
             // lone start must not leak the sentinel into the output.
             let input = format!("Title{FOOTNOTE_MARKER_START}dangling");
             assert_eq!(strip_footnote_marker_spans(&input), "Title");
+        }
+    }
+
+    mod sanitize_title {
+        use super::super::sanitize_title;
+
+        #[test]
+        fn leaves_plain_text_unchanged() {
+            assert_eq!(sanitize_title("Plain title"), "Plain title");
+        }
+
+        #[test]
+        fn strips_a_tag_pair_keeping_its_inner_text() {
+            assert_eq!(sanitize_title("<strong>bold</strong>"), "bold");
+        }
+
+        #[test]
+        fn strips_a_self_contained_tag() {
+            assert_eq!(
+                sanitize_title(r#"Before <img src="a.png" alt="a"> after"#),
+                "Before after",
+            );
+        }
+
+        #[test]
+        fn squeezes_spaces_left_behind_by_a_removed_tag() {
+            // A run of spaces left behind after tags are stripped (e.g. two
+            // images rendered back-to-back, or a tag flanked by spaces on
+            // both sides) collapses to one, and the ends are trimmed,
+            // mirroring Ruby's `tr_s(' ', ' ').strip`.
+            assert_eq!(
+                sanitize_title(r#"<img src="a.png">  <img src="b.png">"#),
+                "",
+            );
+            assert_eq!(
+                sanitize_title("Before <b>bold</b>   after"),
+                "Before bold after",
+            );
+        }
+
+        #[test]
+        fn an_empty_tag_does_not_match_and_is_kept_verbatim() {
+            // `[^>]+` in Ruby's `XmlSanitizeRx` requires at least one
+            // character between `<` and `>`; an empty `<>` does not match
+            // and is copied through as literal text.
+            assert_eq!(sanitize_title("a<>b"), "a<>b");
+        }
+
+        #[test]
+        fn an_unclosed_angle_bracket_is_kept_verbatim() {
+            // A `<` with no `>` anywhere after it in the rest of the string
+            // is not a tag and is left as literal text, along with
+            // everything after it.
+            assert_eq!(
+                sanitize_title("Title <dangling and more"),
+                "Title <dangling and more",
+            );
         }
     }
 

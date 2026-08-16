@@ -47,8 +47,11 @@ pub(super) fn apply_post_replacements<'src>(
 
     let (s, pieces) = build_match_string(&nodes);
 
-    // The string pipeline guards on both a `+` and a newline being present.
-    if !(s.contains('+') && s.contains('\n')) {
+    // The string pipeline guards only on a `+` being present: the hard-line-
+    // break pattern anchors on `$` in multiline mode, which matches at the end
+    // of the haystack as well as before each `\n`, so a level whose *last* line
+    // ends in ` +` is eligible even with no newline anywhere in it.
+    if !s.contains('+') {
         return nodes;
     }
 

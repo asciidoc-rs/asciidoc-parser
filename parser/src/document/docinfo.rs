@@ -4,7 +4,12 @@
 //!
 //! [docinfo]: https://docs.asciidoctor.org/asciidoc/latest/docinfo/
 
-use crate::{Parser, SafeMode, content::substitute_attributes_in_text, document::InterpretedValue};
+use crate::{
+    Parser, SafeMode, Span,
+    content::{Content, SubstitutionGroup, SubstitutionStep},
+    document::InterpretedValue,
+    parser::{CatalogResolver, ReferenceWarnings},
+};
 
 /// Where a [docinfo] file's content is injected into the converted output.
 ///
@@ -98,14 +103,57 @@ impl Docinfo {
         // The `docinfo` attribute selects which scopes/locations apply. An unset
         // attribute means no docinfo; an empty value (a bare `:docinfo:`) is
         // equivalent to `private`.
+        //
+        // When `docinfo` itself is unset, the legacy `docinfo1`/`docinfo2`
+        // standalone boolean attributes are consulted as a fallback: `docinfo1`
+        // is equivalent to `docinfo=shared`, and `docinfo2` is equivalent to
+        // `docinfo=private,shared`.
+        // A `docinfo` value that resolves to exactly "private" -- whether
+        // from a bare `:docinfo:` entry or an explicit `:docinfo: private`
+        // (both read back as the literal `Value("private")` here, since
+        // `Parser::attribute_value` already resolves a bare boolean to its
+        // registered default) -- does not preclude the legacy
+        // `docinfo1`/`docinfo2` booleans from also contributing their
+        // shared-file component. Asciidoctor unions them rather than letting
+        // the literal `docinfo` value suppress the derived "shared"
+        // component: `docinfo docinfo2` resolves the same as `docinfo2`
+        // alone, regardless of which was set first. A `docinfo` value with
+        // any other content (e.g. `shared-head`) is left as the caller's
+        // explicit, complete scope.
+        let union_legacy_shared = |mut tokens: Vec<String>| -> Vec<String> {
+            if tokens == ["private"]
+                && (parser.is_attribute_set("docinfo1") || parser.is_attribute_set("docinfo2"))
+            {
+                tokens.push("shared".to_string());
+            }
+            tokens
+        };
+
         let tokens: Vec<String> = match parser.attribute_value("docinfo") {
-            InterpretedValue::Unset => return Self::default(),
-            InterpretedValue::Set => vec!["private".to_string()],
-            InterpretedValue::Value(v) => v
-                .split(',')
-                .map(|t| t.trim().to_ascii_lowercase())
-                .filter(|t| !t.is_empty())
-                .collect(),
+            InterpretedValue::Unset => {
+                if parser.is_attribute_set("docinfo2") {
+                    vec!["private".to_string(), "shared".to_string()]
+                } else if parser.is_attribute_set("docinfo1") {
+                    vec!["shared".to_string()]
+                } else {
+                    return Self::default();
+                }
+            }
+            // `docinfo` has a registered default (`"private"`, set in
+            // `built_in_default_values`), so `Parser::attribute_value`
+            // always resolves a bare boolean to that default -- see the
+            // `Value` arm below -- and never returns a bare `Set` for it.
+            // This arm exists only to satisfy match exhaustiveness.
+            InterpretedValue::Set => unreachable!(
+                "docinfo has a registered default, so Parser::attribute_value never returns \
+                 InterpretedValue::Set for it"
+            ),
+            InterpretedValue::Value(v) => union_legacy_shared(
+                v.split(',')
+                    .map(|t| t.trim().to_ascii_lowercase())
+                    .filter(|t| !t.is_empty())
+                    .collect(),
+            ),
         };
 
         if tokens.is_empty() {
@@ -130,7 +178,7 @@ impl Docinfo {
         // private scope is only available when a primary file name is known.
         let docname = parser.docname();
 
-        let apply_attribute_subs = docinfosubs_includes_attributes(parser);
+        let docinfo_subs = docinfosubs_steps(parser);
 
         let resolve_location = |location: DocinfoLocation| -> String {
             let token = location.token();
@@ -170,15 +218,36 @@ impl Docinfo {
 
             let joined = parts.join("\n");
 
-            if !apply_attribute_subs {
+            if docinfo_subs.steps().is_empty() {
                 return joined;
             }
 
-            // Attribute substitution may record `warn`-mode warnings whose
-            // offsets refer to the docinfo text, not the document source.
-            // Discard them so they are not reported against the document.
+            // Substitution may record `warn`-mode warnings whose offsets refer
+            // to the docinfo text, not the document source. Discard them so
+            // they are not reported against the document.
             let saved = parser.substitution_warnings_len();
-            let substituted = substitute_attributes_in_text(&joined, parser);
+            let mut content = Content::from(Span::new(&joined));
+            docinfo_subs.apply(&mut content, parser, None);
+
+            // A `docinfosubs` list that includes `macros` may have discovered
+            // cross-references (`<<id>>`, `xref:id[…]`), left deferred with an
+            // unresolved-fallback rendering. Docinfo content isn't part of the
+            // document's own block tree, so the later document-wide
+            // `resolve_against_own_catalog` pass never visits it; resolve it
+            // here instead, directly against the parser's catalog. This is
+            // safe because `Docinfo::resolve` runs only after the entire
+            // document body has been parsed, so the catalog is already
+            // complete. Any unresolved-reference warning is discarded for the
+            // same reason the substitution warnings above are: its span
+            // refers to the docinfo text, not the document source.
+            if content.has_unresolved_refs() {
+                let catalog = parser.catalog();
+                let resolver = CatalogResolver::new(&catalog);
+                let mut ref_warnings = ReferenceWarnings::default();
+                content.resolve_references(&resolver, &*parser.renderer, &mut ref_warnings);
+            }
+
+            let substituted = content.rendered_owned();
             parser.truncate_substitution_warnings(saved);
             substituted
         };
@@ -191,17 +260,23 @@ impl Docinfo {
     }
 }
 
-/// Returns whether the `attributes` substitution should be applied to docinfo
+/// Resolves the ordered list of substitution steps applied to docinfo
 /// content, per the `docinfosubs` attribute.
 ///
 /// When `docinfosubs` is unset it has an implied default of `attributes`, so
-/// substitution is applied. When set, substitution is applied only if the
-/// comma-separated list names `attributes`.
-fn docinfosubs_includes_attributes(parser: &Parser) -> bool {
+/// only the attribute-references substitution is applied. When set with no
+/// value (a bare `:docinfosubs:`), no substitutions are applied. When set
+/// with a value, the comma-separated list is parsed with the same vocabulary
+/// and ordering rules as a block's `subs` attribute (see
+/// [`SubstitutionGroup::from_custom_string`]); unrecognized names are
+/// silently ignored.
+fn docinfosubs_steps(parser: &Parser) -> SubstitutionGroup {
     match parser.attribute_value("docinfosubs") {
-        InterpretedValue::Unset => true,
-        InterpretedValue::Set => false,
-        InterpretedValue::Value(v) => v.split(',').any(|s| s.trim() == "attributes"),
+        InterpretedValue::Unset => {
+            SubstitutionGroup::Custom(vec![SubstitutionStep::AttributeReferences])
+        }
+        InterpretedValue::Set => SubstitutionGroup::Custom(vec![]),
+        InterpretedValue::Value(v) => SubstitutionGroup::from_custom_string(None, &v).0,
     }
 }
 
@@ -209,7 +284,11 @@ fn docinfosubs_includes_attributes(parser: &Parser) -> bool {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::{Parser, SafeMode, document::DocinfoLocation, parser::DocinfoFileHandler};
+    use crate::{
+        Parser, SafeMode,
+        document::DocinfoLocation,
+        parser::{DocinfoFileHandler, ModificationContext},
+    };
 
     /// A minimal handler that resolves docinfo from a fixed file-name map.
     #[derive(Debug)]
@@ -300,6 +379,18 @@ mod tests {
     }
 
     #[test]
+    fn drop_line_removes_docinfo_lines_with_an_unset_attribute() {
+        // A reference to an attribute explicitly unset via a document
+        // `:name!:` entry is dropped just like one that was never assigned at
+        // all (issue #1117).
+        let head = head_for(
+            "= Doc\n:attribute-missing: drop-line\n:license-url!:\n:docinfo: shared-head\n\nBody.",
+            &[("docinfo.html", "keep one\n{license-url}\nkeep two")],
+        );
+        assert_eq!(head, "keep one\nkeep two");
+    }
+
+    #[test]
     fn outfilesuffix_falls_back_to_html() {
         // A bare `:outfilesuffix:` (set, no value) is not a usable suffix, so
         // docinfo file names fall back to the `.html` default.
@@ -308,5 +399,152 @@ mod tests {
             &[("docinfo.html", "HEAD")],
         );
         assert_eq!(head, "HEAD");
+    }
+
+    #[test]
+    fn docinfo1_is_equivalent_to_shared_docinfo() {
+        // `docinfo1` is a legacy standalone boolean attribute equivalent to
+        // `docinfo=shared` (issue #1115): only the shared docinfo file is
+        // included, not a document-private one.
+        let head = head_for(
+            "= Doc\n:docinfo1:\n\nBody.",
+            &[
+                ("docinfo.html", "SHARED"),
+                ("mydoc-docinfo.html", "PRIVATE"),
+            ],
+        );
+        assert_eq!(head, "SHARED");
+    }
+
+    #[test]
+    fn docinfo2_is_equivalent_to_private_and_shared_docinfo() {
+        // `docinfo2` is a legacy standalone boolean attribute equivalent to
+        // `docinfo=private,shared` (issue #1115): both the shared and
+        // document-private docinfo files are included, shared first.
+        let head = head_for(
+            "= Doc\n:docinfo2:\n\nBody.",
+            &[
+                ("docinfo.html", "SHARED"),
+                ("mydoc-docinfo.html", "PRIVATE"),
+            ],
+        );
+        assert_eq!(head, "SHARED\nPRIVATE");
+    }
+
+    #[test]
+    fn bare_docinfo_and_docinfo2_union_to_private_and_shared() {
+        // A bare `:docinfo:` ("private" only) and `:docinfo2:` ("private" +
+        // "shared") set together union their effects rather than one
+        // suppressing the other's shared-file component: matches
+        // Asciidoctor's `docinfo docinfo2` test case, which is identical to
+        // `docinfo2` alone.
+        let head = head_for(
+            "= Doc\n:docinfo:\n:docinfo2:\n\nBody.",
+            &[
+                ("docinfo.html", "SHARED"),
+                ("mydoc-docinfo.html", "PRIVATE"),
+            ],
+        );
+        assert_eq!(head, "SHARED\nPRIVATE");
+
+        // Order does not matter.
+        let head = head_for(
+            "= Doc\n:docinfo2:\n:docinfo:\n\nBody.",
+            &[
+                ("docinfo.html", "SHARED"),
+                ("mydoc-docinfo.html", "PRIVATE"),
+            ],
+        );
+        assert_eq!(head, "SHARED\nPRIVATE");
+    }
+
+    #[test]
+    fn api_set_bare_docinfo_unions_with_docinfo2() {
+        // A bare `docinfo` boolean set via the intrinsic-attribute API
+        // (rather than a document `:docinfo:` header entry) still reads back
+        // as `Value("private")` -- `Parser::attribute_value` resolves a bare
+        // `Set` to its registered default regardless of how it was set --
+        // so it unions with a document `:docinfo2:` entry's shared scope the
+        // same way.
+        let head = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("mydoc.adoc")
+            .with_docinfo_file_handler(MapHandler::new(&[
+                ("docinfo.html", "SHARED"),
+                ("mydoc-docinfo.html", "PRIVATE"),
+            ]))
+            .with_intrinsic_attribute_bool("docinfo", true, ModificationContext::Anywhere)
+            .parse("= Doc\n:docinfo2:\n\nBody.")
+            .docinfo(DocinfoLocation::Head)
+            .to_string();
+        assert_eq!(head, "SHARED\nPRIVATE");
+    }
+
+    #[test]
+    fn bare_docinfo_and_docinfo1_union_to_private_and_shared() {
+        // Same union behavior applies against the `docinfo1` legacy toggle
+        // ("shared" only): the bare `docinfo` attribute's "private" scope is
+        // combined with it rather than suppressing it.
+        let head = head_for(
+            "= Doc\n:docinfo:\n:docinfo1:\n\nBody.",
+            &[
+                ("docinfo.html", "SHARED"),
+                ("mydoc-docinfo.html", "PRIVATE"),
+            ],
+        );
+        assert_eq!(head, "SHARED\nPRIVATE");
+    }
+
+    #[test]
+    fn explicit_docinfo_attribute_takes_precedence_over_legacy_toggles() {
+        // When `docinfo` is explicitly set, the legacy `docinfo1`/`docinfo2`
+        // toggles are not consulted at all.
+        let head = head_for(
+            "= Doc\n:docinfo: shared-head\n:docinfo2:\n\nBody.",
+            &[
+                ("docinfo.html", "SHARED"),
+                ("mydoc-docinfo.html", "PRIVATE"),
+            ],
+        );
+        assert_eq!(head, "SHARED");
+    }
+
+    #[test]
+    fn docinfosubs_multiple_tokens_apply_additional_steps() {
+        // `docinfosubs=attributes,replacements` (issue #1116) applies both the
+        // attribute-references substitution and the character-replacements
+        // substitution, not just attribute references: `(C)` becomes the
+        // copyright character reference.
+        let head = head_for(
+            "= Doc\n:license-url: https://example.org\n:docinfo: shared-head\n:docinfosubs: attributes,replacements\n\nBody.",
+            &[("docinfo.html", "{license-url} (C)")],
+        );
+        assert_eq!(head, "https://example.org &#169;");
+    }
+
+    #[test]
+    fn docinfosubs_macros_resolves_cross_references_against_the_document_catalog() {
+        // `docinfosubs=macros` runs the macros substitution on docinfo
+        // content, which can discover a cross-reference. Docinfo content
+        // isn't part of the document's own block tree, so the reference must
+        // still resolve against the document's catalog rather than being left
+        // as unresolved-fallback text.
+        let head = head_for(
+            "= Doc\n:docinfo: shared-head\n:docinfosubs: macros\n\n[#section-a]\n== Section A\n\ncontent",
+            &[("docinfo.html", "xref:section-a[]")],
+        );
+        assert_eq!(head, r##"<a href="#section-a">Section A</a>"##);
+    }
+
+    #[test]
+    fn docinfosubs_replacements_only_skips_attribute_substitution() {
+        // `docinfosubs=replacements` names only the replacements step, so
+        // attribute references are left untouched while `(C)` is still
+        // replaced.
+        let head = head_for(
+            "= Doc\n:license-url: https://example.org\n:docinfo: shared-head\n:docinfosubs: replacements\n\nBody.",
+            &[("docinfo.html", "{license-url} (C)")],
+        );
+        assert_eq!(head, "{license-url} &#169;");
     }
 }

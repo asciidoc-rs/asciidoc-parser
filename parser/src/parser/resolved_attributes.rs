@@ -433,6 +433,33 @@ impl ResolvedAttributes {
             .map(|a| a.value != InterpretedValue::Unset)
             .unwrap_or_else(|| self.resolve_datetime_attribute(name).is_some())
     }
+
+    /// Resolves whether a document title should be displayed, from the
+    /// `showtitle`/`notitle` attribute pair (which are complements).
+    ///
+    /// Mirrors [`Parser::resolve_show_title`](crate::Parser::resolve_show_title)
+    /// exactly, so a lookup here returns the same value the parser would report
+    /// after `parse`. See that method's doc comment for the full precedence
+    /// rules. This is the accessor a renderer holding only a [`Document`]
+    /// (e.g. an *embed* consumer with no [`Parser`] in hand) should use to
+    /// decide whether to emit the title, rather than re-deriving the toggle
+    /// from a direct read of `notitle` / `showtitle` -- see issue
+    /// asciidoc-rs/asciidoc-parser#1148, where a downstream re-implementation
+    /// of this logic repeatedly drifted out of sync with the parser's.
+    ///
+    /// [`Document`]: crate::Document
+    /// [`Parser`]: crate::Parser
+    pub(crate) fn resolve_show_title(&self, default_shown: bool) -> bool {
+        if self.is_attribute_set("showtitle") {
+            true
+        } else if self.has_attribute("notitle") {
+            !self.is_attribute_set("notitle")
+        } else if self.has_attribute("showtitle") {
+            false
+        } else {
+            default_shown
+        }
+    }
 }
 
 #[cfg(test)]
@@ -654,5 +681,76 @@ mod tests {
             attrs.attribute_value("docdir"),
             InterpretedValue::Value("/some/dir".to_string())
         );
+    }
+
+    mod resolve_show_title {
+        use std::{collections::HashMap, sync::Arc};
+
+        use crate::{
+            SafeMode,
+            document::InterpretedValue,
+            parser::{AllowableValue, AttributeValue, ModificationContext, ResolvedAttributes},
+        };
+
+        fn attrs(entries: &[(&str, InterpretedValue)]) -> ResolvedAttributes {
+            let mut attribute_values: HashMap<String, AttributeValue> = HashMap::new();
+            for (name, value) in entries {
+                attribute_values.insert(
+                    name.to_string(),
+                    AttributeValue {
+                        allowable_value: AllowableValue::Any,
+                        modification_context: ModificationContext::Anywhere,
+                        silent_when_locked: false,
+                        value: value.clone(),
+                    },
+                );
+            }
+
+            ResolvedAttributes::new(
+                Arc::new(attribute_values),
+                Arc::new(HashMap::new()),
+                HashMap::new(),
+                SafeMode::Secure,
+                None,
+                None,
+            )
+        }
+
+        #[test]
+        fn neither_present_uses_default() {
+            let empty = attrs(&[]);
+
+            assert!(empty.resolve_show_title(true));
+            assert!(!empty.resolve_show_title(false));
+        }
+
+        #[test]
+        fn set_showtitle_always_wins() {
+            let showtitle_set = attrs(&[("showtitle", InterpretedValue::Set)]);
+
+            assert!(showtitle_set.resolve_show_title(false));
+        }
+
+        #[test]
+        fn present_notitle_decides_when_showtitle_absent() {
+            let notitle_set = attrs(&[("notitle", InterpretedValue::Set)]);
+            let notitle_unset = attrs(&[("notitle", InterpretedValue::Unset)]);
+
+            assert!(!notitle_set.resolve_show_title(true));
+            assert!(notitle_unset.resolve_show_title(false));
+        }
+
+        #[test]
+        fn present_but_unset_showtitle_hides_when_notitle_absent() {
+            // This shape -- `showtitle` present and unset, with no `notitle`
+            // entry at all -- cannot arise from a normal document/API write
+            // (assigning `showtitle` always plants a `notitle` mirror; see
+            // `apply_title_visibility_linkage`), but a snapshot can still be
+            // constructed directly (as this test does), so the fallback must
+            // resolve it correctly too.
+            let showtitle_unset = attrs(&[("showtitle", InterpretedValue::Unset)]);
+
+            assert!(!showtitle_unset.resolve_show_title(true));
+        }
     }
 }

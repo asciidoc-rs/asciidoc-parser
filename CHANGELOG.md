@@ -7,6 +7,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.29.19](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.18...v0.29.19)
+_09 August 2026_
+
+### Fixed
+
+* Don't join a first-level include's recorded name against the primary document's own directory ([#1158](https://github.com/asciidoc-rs/asciidoc-parser/pull/1158))
+
+## [0.29.18](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.17...v0.29.18)
+_09 August 2026_
+
+### Fixed
+
+* Expose the canonical notitle/showtitle resolution as a public API ([#1155](https://github.com/asciidoc-rs/asciidoc-parser/pull/1155))
+
+## [0.29.17](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.16...v0.29.17)
+_09 August 2026_
+
+### Fixed
+
+* Preserve an absolute container's root when joining a nested include path ([#1149](https://github.com/asciidoc-rs/asciidoc-parser/pull/1149))
+* Mirror the notitle/showtitle toggle for a hard API unset, unlocked ([#1151](https://github.com/asciidoc-rs/asciidoc-parser/pull/1151))
+
+## [0.29.16](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.15...v0.29.16)
+_08 August 2026_
+
+### Fixed
+
+* Resolve nested includes relative to their own containing file ([#1146](https://github.com/asciidoc-rs/asciidoc-parser/pull/1146))
+* Do not let a hard API unset of showtitle veto a document notitle entry ([#1145](https://github.com/asciidoc-rs/asciidoc-parser/pull/1145))
+
+## [0.29.15](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.14...v0.29.15)
+_08 August 2026_
+
+### Fixed
+
+* Union docinfo/docinfo2 scopes and veto conflicting notitle writes ([#1141](https://github.com/asciidoc-rs/asciidoc-parser/pull/1141))
+* Do not warn for a doctitle attribute reference resolved later in the header ([#1134](https://github.com/asciidoc-rs/asciidoc-parser/pull/1134))
+
+### Other
+
+* Leave revdate unset when the revision line's date field is empty ([#1133](https://github.com/asciidoc-rs/asciidoc-parser/pull/1133))
+
+## [0.29.14](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.13...v0.29.14)
+_08 August 2026_
+
+### Fixed
+
+* Apply full title substitution to document title; add sanitized doctitle accessor ([#1126](https://github.com/asciidoc-rs/asciidoc-parser/pull/1126))
+* Recognize docinfo1/docinfo2 and honor full docinfosubs step list ([#1128](https://github.com/asciidoc-rs/asciidoc-parser/pull/1128))
+* Respect API attribute locks for title-separator and notitle/showtitle ([#1127](https://github.com/asciidoc-rs/asciidoc-parser/pull/1127))
+* Trim whitespace around block anchor reftext after the comma ([#1112](https://github.com/asciidoc-rs/asciidoc-parser/pull/1112))
+
+### Other
+
+* Register block image:: macro targets in the document catalog ([#1131](https://github.com/asciidoc-rs/asciidoc-parser/pull/1131))
+* Treat explicitly-unset attributes as missing for attribute-missing ([#1129](https://github.com/asciidoc-rs/asciidoc-parser/pull/1129))
+
+## [0.29.13](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.12...v0.29.13)
+_07 August 2026_
+
+### Fixed
+
+* Honor an explicitly-set docname attribute in Parser::docname() ([#1107](https://github.com/asciidoc-rs/asciidoc-parser/pull/1107))
+
+## [0.29.12](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.11...v0.29.12)
+_07 August 2026_
+
+### Fixed
+
+* Honor a cell-body sectnumlevels assignment in an AsciiDoc table cell ([#1102](https://github.com/asciidoc-rs/asciidoc-parser/pull/1102))
+* Hide AsciiDoc table cell doctitle by default (embedded semantics) ([#1101](https://github.com/asciidoc-rs/asciidoc-parser/pull/1101))
+* Process an include:: directive in a single-line conditional's brackets ([#1098](https://github.com/asciidoc-rs/asciidoc-parser/pull/1098))
+
+## [0.29.11](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.10...v0.29.11)
+_05 August 2026_
+
+### Fixed
+
+* Reject block-image macro when target has leading or trailing whitespace ([#1094](https://github.com/asciidoc-rs/asciidoc-parser/pull/1094))
+
+## [0.29.10](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.9...v0.29.10)
+_03 August 2026_
+
+### Added
+
+* Add raw (pre-substitution) author name/email accessors ([#1081](https://github.com/asciidoc-rs/asciidoc-parser/pull/1081))
+* Expose Parser::apply_substitutions to run a substitution group on a string ([#1079](https://github.com/asciidoc-rs/asciidoc-parser/pull/1079))
+
+## [0.29.9](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.8...v0.29.9)
+_03 August 2026_
+
+### Fixed
+
+* Surface the bibliography style propagated to child unordered lists ([#1071](https://github.com/asciidoc-rs/asciidoc-parser/pull/1071))
+* Apply the header substitution group to implicit author-line names consistently ([#1072](https://github.com/asciidoc-rs/asciidoc-parser/pull/1072))
+* Apply post-replacement line break to a trailing ` +` at end of content ([#1069](https://github.com/asciidoc-rs/asciidoc-parser/pull/1069))
+
+## [0.29.8](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.7...v0.29.8)
+_02 August 2026_
+
+### Fixed
+
+* Propagate column alignment to header cells ([#1062](https://github.com/asciidoc-rs/asciidoc-parser/pull/1062))
+
 ## [0.29.7](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.6...v0.29.7)
 _02 August 2026_
 

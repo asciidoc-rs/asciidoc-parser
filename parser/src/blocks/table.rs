@@ -53,15 +53,29 @@ fn absolute_cell_directive_origin(
     }
 }
 
-/// Attributes that an AsciiDoc table cell may modify even when they are set in
-/// the parent document.
+/// Attributes that an AsciiDoc table cell may modify even when they hold a
+/// value inherited from the parent document.
 ///
 /// An AsciiDoc cell inherits the parent's attributes and cannot modify them,
 /// but the AsciiDoc specification carves out a handful of exceptions:
 /// `doctype`, `toc`, `notitle` (and its complement, `showtitle`), and
 /// `compat-mode`.
-const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
-    &["doctype", "toc", "notitle", "showtitle", "compat-mode"];
+///
+/// `sectnumlevels` is also listed here. It is header-settable (its built-in
+/// default carries a value of `3`) and an AsciiDoc cell is a nested, standalone
+/// document whose leading attribute lines form its own header, so the cell may
+/// set its own `sectnumlevels` – matching Asciidoctor, where a cell that
+/// assigns `:sectnumlevels:` is honored rather than pinned to the inherited
+/// default. Without this exception the built-in default value would lock the
+/// attribute for the cell, silently ignoring the cell-body assignment.
+const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] = &[
+    "doctype",
+    "toc",
+    "notitle",
+    "showtitle",
+    "compat-mode",
+    "sectnumlevels",
+];
 
 /// A table is a delimited block that arranges content into a grid of rows and
 /// columns.
@@ -1688,6 +1702,13 @@ fn process_content<'src>(
         // which a static lock could not do anyway once the cell changes its own
         // doctype.
         let saved_locks = parser.locked_attribute_names.clone();
+
+        // The cached section-numbering depth is frozen at the end of the
+        // enclosing document's header, so it holds the parent's value throughout
+        // the cell. A cell that assigns its own `sectnumlevels` refreshes it (see
+        // `Parser::set_attribute_from_body`); snapshot and restore it here so that
+        // refresh cannot leak back into the parent's numbering.
+        let saved_sectnumlevels = parser.sectnumlevels;
         {
             // Whether `name` (holding `value` in the inherited set) must be
             // locked for the cell. Kept separate from the insert so each source
@@ -1929,6 +1950,7 @@ fn process_content<'src>(
 
         parser.locked_attribute_names = saved_locks;
         parser.attribute_values = saved_attributes;
+        parser.sectnumlevels = saved_sectnumlevels;
         TableCellContent::AsciiDoc(cell)
     } else {
         let mut content = match replacement {
@@ -2043,7 +2065,12 @@ fn parse_asciidoc_cell_body<'src>(
         InterpretedValue::Value(ref v) if v == "inline"
     );
 
-    let title = if parser.resolve_show_title(true) {
+    // An AsciiDoc table cell's inner document is embedded output (like
+    // `convert_string_to_embedded`), so its doctitle defaults to hidden when
+    // neither `showtitle` nor `notitle` is set – matching Asciidoctor, which
+    // renders a nested cell document without an `<h1>` unless `showtitle` is
+    // enabled.
+    let title = if parser.resolve_show_title(false) {
         title_source.map(|span| {
             let mut content = Content::from(span);
             SubstitutionGroup::Header.apply(&mut content, parser, None);
@@ -2119,10 +2146,11 @@ impl<'src> TableCell<'src> {
     /// specifier overrides the column's [style](ColumnStyle); with no cell
     /// style operator, the cell is processed with the column's style. A
     /// header cell (`is_header`) is always processed as plain header
-    /// content, regardless of any style operator on the column or the cell, and
-    /// it ignores the column's alignment operators: with no operator on its own
-    /// specifier, a header cell falls back to the default alignment rather than
-    /// inheriting the column's.
+    /// content, regardless of any style operator on the column or the cell.
+    /// Alignment, however, is inherited from the column just as for a body
+    /// cell: with no operator on its own specifier, a header cell falls back to
+    /// the column's alignment. Only the column *style* is ignored for a header
+    /// row, not its alignment.
     ///
     /// Leading and trailing whitespace is always stripped. For every style but
     /// [`AsciiDoc`](ColumnStyle::AsciiDoc) the cell holds inline
@@ -2141,21 +2169,13 @@ impl<'src> TableCell<'src> {
         warnings: &mut Vec<Warning<'src>>,
     ) -> Self {
         // A cell's own alignment operator overrides the column's alignment; with
-        // no operator, the cell inherits the column's alignment. The header row
-        // ignores alignment operators on the column specifier, so a header cell
-        // with no operator of its own falls back to the default alignment rather
-        // than the column's; a cell specifier's own operator is still applied.
-        let (h_align, v_align) = if is_header {
-            (
-                raw.spec.h_align.unwrap_or(HorizontalAlignment::Left),
-                raw.spec.v_align.unwrap_or(VerticalAlignment::Top),
-            )
-        } else {
-            (
-                raw.spec.h_align.unwrap_or(column.h_align),
-                raw.spec.v_align.unwrap_or(column.v_align),
-            )
-        };
+        // no operator, the cell inherits the column's alignment. This applies to
+        // header and body cells alike: only the column *style* is ignored for a
+        // header row (see below), not the column alignment.
+        let (h_align, v_align) = (
+            raw.spec.h_align.unwrap_or(column.h_align),
+            raw.spec.v_align.unwrap_or(column.v_align),
+        );
 
         // A cell's own style operator overrides the column's style; with no
         // operator, the cell is processed with the column's style. The header
@@ -2223,13 +2243,9 @@ impl<'src> TableCell<'src> {
         };
 
         // A data field carries no cell specifier, so its alignment comes from the
-        // column – except in the header row, which ignores the column's alignment
-        // operators and falls back to the default alignment.
-        let (h_align, v_align) = if is_header {
-            (HorizontalAlignment::Left, VerticalAlignment::Top)
-        } else {
-            (column.h_align, column.v_align)
-        };
+        // column. This applies to header and body cells alike: only the column
+        // style is ignored for a header row, not the column alignment.
+        let (h_align, v_align) = (column.h_align, column.v_align);
 
         let source = field.content;
         let content = process_content(field.content, field.replacement, style, parser, warnings);
@@ -3388,7 +3404,8 @@ mod tests {
         #![allow(clippy::indexing_slicing)]
 
         use crate::{
-            parser::SourceLine,
+            attributes::Attrlist,
+            parser::{IncludeContent, IncludeFileHandler, IncludeResolution, SourceLine},
             tests::prelude::{inline_file_handler::InlineFileHandler, *},
         };
 
@@ -3480,6 +3497,62 @@ mod tests {
                     .original_file_and_line(warnings[0].source.line()),
                 Some(SourceLine(Some("outer.adoc".to_string()), 4))
             );
+        }
+
+        // Regression test for
+        // https://github.com/asciidoc-rs/asciidoc-parser/issues/1157 (see also
+        // the Greptile review on the PR that fixed it): an AsciiDoc cell that
+        // itself came from an included file (`partials/outer.adoc`, reached via
+        // a top-level `include::partials/outer.adoc[]`) is re-preprocessed from
+        // its own owned source, starting a fresh depth-1 pass. A further
+        // `include::` directive written directly in that cell must still
+        // resolve relative to `partials/` — the *cell's own* origin directory —
+        // not relative to nothing, which is only correct for a directive
+        // written directly in the primary document. A directory-aware handler
+        // (unlike `InlineFileHandler`, which ignores the containing file)
+        // proves this: only the correctly joined path resolves at each level.
+        #[test]
+        fn include_in_asciidoc_cell_resolves_relative_to_the_cells_own_include_origin() {
+            #[derive(Debug)]
+            struct DirRelativeHandler {
+                files: HashMap<&'static str, &'static str>,
+            }
+
+            impl IncludeFileHandler for DirRelativeHandler {
+                fn resolve_target<'src>(
+                    &self,
+                    source: Option<&str>,
+                    target: &str,
+                    _attrlist: &Attrlist<'src>,
+                    _parser: &Parser,
+                ) -> IncludeResolution {
+                    let dir = source.and_then(|s| s.rfind('/').map(|i| &s[..i]));
+                    let path = match dir {
+                        Some(dir) => format!("{dir}/{target}"),
+                        None => target.to_owned(),
+                    };
+                    self.files
+                        .get(path.as_str())
+                        .map_or(IncludeResolution::NotFound, |v| {
+                            IncludeResolution::Found(IncludeContent::new(*v))
+                        })
+                }
+            }
+
+            let handler = DirRelativeHandler {
+                files: HashMap::from([
+                    ("partials/outer.adoc", "|===\na|include::inner.adoc[]\n|==="),
+                    ("partials/inner.adoc", "include::deeper.adoc[]"),
+                    ("partials/deeper.adoc", "Deepest content."),
+                ]),
+            };
+
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_include_file_handler(handler)
+                .parse("include::partials/outer.adoc[]");
+
+            assert_rendered_contains(&doc, "Deepest content.");
         }
 
         // A table nested inside an *owned* (include-expanded) cell is parsed from

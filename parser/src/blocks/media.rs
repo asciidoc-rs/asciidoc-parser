@@ -135,6 +135,22 @@ impl<'src> MediaBlock<'src> {
             };
         }
 
+        // Asciidoctor's block-macro regex requires the target to begin and end
+        // with a non-space character. A target with leading or trailing
+        // whitespace is not recognized as a block macro at all; the line falls
+        // through to be parsed as a description list or paragraph instead. Reject
+        // it here (with no warning) so it is not mistaken for a media block.
+        let target_data = target.item.data();
+
+        if target_data.starts_with(char::is_whitespace)
+            || target_data.ends_with(char::is_whitespace)
+        {
+            return MatchAndWarnings {
+                item: None,
+                warnings: vec![],
+            };
+        }
+
         let Some(open_brace) = target.after.take_prefix("[") else {
             return MatchAndWarnings {
                 item: None,
@@ -224,11 +240,27 @@ impl<'src> MediaBlock<'src> {
     /// [`TargetResolution::Drop`] is returned and the caller drops the
     /// entire block.
     ///
+    /// When this block is an image that survives resolution, it is also
+    /// recorded in the document catalog (a no-op unless
+    /// [`catalog_assets`](Parser::with_catalog_assets) is enabled), mirroring
+    /// the registration done for the inline `image:` macro.
+    ///
     /// [`attribute-missing`]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing
     pub(crate) fn resolve_target(&mut self, parser: &Parser) -> TargetResolution {
         match substitute_attributes_in_macro_target(self.target, parser) {
             Some(resolved) => {
                 self.resolved_target = resolved;
+
+                if self.type_ == MediaType::Image {
+                    parser.register_image(
+                        self.resolved_target.to_string(),
+                        parser
+                            .attribute_value("imagesdir")
+                            .as_maybe_str()
+                            .map(str::to_owned),
+                    );
+                }
+
                 TargetResolution::Keep
             }
             None => TargetResolution::Drop,

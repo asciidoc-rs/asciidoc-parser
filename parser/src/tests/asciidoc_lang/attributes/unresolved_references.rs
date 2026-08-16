@@ -163,6 +163,39 @@ fn warn_only_warns_about_truly_missing_attributes() {
 }
 
 #[test]
+fn warn_does_not_fire_for_a_doctitle_reference_to_an_attribute_defined_later_in_the_header() {
+    // Issue #1124: the implicit doctitle (`= {attr} …`) is scanned before the
+    // rest of the header, but `doctitle`/`{doctitle}` resolve lazily against
+    // the *final* header state (issue #716). The eager, at-title-line scan
+    // must not raise `SkippingReferenceToMissingAttribute` for a reference
+    // that resolves once the full header (including a later `:attr:` entry)
+    // is known.
+    let doc = Parser::default().parse(
+        "= {project-name} Docs\n:project-name: ACME\n:attribute-missing: warn\n\n{doctitle}",
+    );
+
+    assert!(doc.warnings().next().is_none());
+    assert_eq!(doc.doctitle(), Some("ACME Docs"));
+}
+
+#[test]
+fn warn_still_fires_for_a_doctitle_reference_that_is_never_defined() {
+    // A genuinely missing reference in the doctitle is not swallowed by the
+    // issue #1124 fix: it still raises exactly one warning, from the
+    // re-resolution pass against the final header state rather than the
+    // eager, at-title-line pass.
+    let doc =
+        Parser::default().parse(":attribute-missing: warn\n= {never-defined} Docs\n\n{doctitle}");
+
+    let warnings: Vec<_> = doc.warnings().collect();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0].warning,
+        WarningType::SkippingReferenceToMissingAttribute("never-defined".to_string())
+    );
+}
+
+#[test]
 fn drop_line_only_drops_the_offending_line() {
     // Only the line carrying the missing reference is dropped; the surrounding
     // lines (including one with a resolvable reference) are preserved.
@@ -171,6 +204,19 @@ fn drop_line_only_drops_the_offending_line() {
             ":attribute-missing: drop-line\n:name: Bob\n\nfirst {name} line\nsecond {missing} line\nthird line"
         ),
         "first Bob line\nthird line"
+    );
+}
+
+#[test]
+fn drop_line_treats_an_explicitly_unset_attribute_as_missing() {
+    // `attribute-missing` fires for a reference to an attribute that was
+    // explicitly unset via a document `:name!:` entry, not only for one that
+    // was never assigned at all (issue #1117).
+    assert_eq!(
+        render_first_block(
+            ":attribute-missing: drop-line\n:version!:\n\nbootstrap.{version}.min.js"
+        ),
+        ""
     );
 }
 

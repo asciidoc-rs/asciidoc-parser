@@ -58,7 +58,9 @@ impl<'src> RevisionLine<'src> {
 
         let revdate = {
             let resolved = apply_header_subs(&revdate, parser);
-            parser.set_attribute_by_value_from_header("revdate", &resolved);
+            if !resolved.is_empty() {
+                parser.set_attribute_by_value_from_header("revdate", &resolved);
+            }
             resolved
         };
 
@@ -389,7 +391,10 @@ mod tests {
             Some("1.2.3")
         );
 
-        assert_eq!(parser.attribute_value("revdate").as_maybe_str(), Some(""));
+        // No date component was given, so `revdate` stays unset (matching
+        // Asciidoctor's `nil`), unlike `RevisionLine::revdate()` which always
+        // returns a `&str` and is `""` here.
+        assert_eq!(parser.attribute_value("revdate").as_maybe_str(), None);
         assert_eq!(parser.attribute_value("revremark").as_maybe_str(), None);
     }
 
@@ -459,7 +464,7 @@ mod tests {
             Some("1.2.3")
         );
 
-        assert_eq!(parser.attribute_value("revdate").as_maybe_str(), Some(""));
+        assert_eq!(parser.attribute_value("revdate").as_maybe_str(), None);
 
         assert_eq!(
             parser.attribute_value("revremark").as_maybe_str(),
@@ -520,7 +525,30 @@ mod tests {
             Some("1.2.3-beta.1")
         );
 
-        assert_eq!(parser.attribute_value("revdate").as_maybe_str(), Some(""));
+        assert_eq!(parser.attribute_value("revdate").as_maybe_str(), None);
         assert_eq!(parser.attribute_value("revremark").as_maybe_str(), None);
+    }
+
+    #[test]
+    fn sets_document_attributes_empty_date_between_comma_and_colon() {
+        // Regression test for https://github.com/asciidoc-rs/asciidoc-parser/issues/1125:
+        // a revision line with a revision number and remark, but an empty date
+        // field between the two commas, must leave `revdate` unset rather than
+        // setting it to an empty string.
+        let mut parser = Parser::default();
+        let _result =
+            crate::document::RevisionLine::parse(Span::new("v1.0.0,:remark"), &mut parser);
+
+        assert_eq!(
+            parser.attribute_value("revnumber").as_maybe_str(),
+            Some("1.0.0")
+        );
+
+        assert_eq!(parser.attribute_value("revdate").as_maybe_str(), None);
+
+        assert_eq!(
+            parser.attribute_value("revremark").as_maybe_str(),
+            Some("remark")
+        );
     }
 }
