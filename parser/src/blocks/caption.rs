@@ -65,7 +65,7 @@ pub(crate) struct Caption {
 ///
 /// This is the entry point used while parsing a block. It resolves the
 /// captioning context (a block style naming a built-in context, such as
-/// `[example]` over an open block, takes precedence over the raw context –
+/// `[example]` over an open block, takes precedence over the raw context —
 /// mirroring [`resolved_context`]) and the explicit caption override, then
 /// delegates to [`assign_caption`]:
 ///
@@ -107,7 +107,7 @@ pub(crate) fn assign_block_caption(
 /// Computes the caption for a block, following Asciidoctor's `assign_caption`.
 ///
 /// Returns `None` (no caption, no number) when:
-/// * the block has no title (`has_title` is `false`) – untitled blocks are
+/// * the block has no title (`has_title` is `false`) — untitled blocks are
 ///   never captioned or counted;
 /// * an explicit caption override is present but empty (e.g. `[caption=]`, or a
 ///   collapsible example whose caption is suppressed);
@@ -116,8 +116,8 @@ pub(crate) fn assign_block_caption(
 /// * the context is not captionable, or its caption attribute is unset.
 ///
 /// When a non-empty explicit `caption` override is supplied (from a
-/// `[caption=]` attribute) – or a non-empty document-wide `caption` attribute
-/// is present – that value is used verbatim as the prefix, with **no** number
+/// `[caption=]` attribute) — or a non-empty document-wide `caption` attribute
+/// is present — that value is used verbatim as the prefix, with **no** number
 /// assigned. Otherwise the label comes from the context's caption attribute and
 /// the document-wide counter for that context is incremented, producing a
 /// `"<label> <n>. "` prefix.
@@ -156,7 +156,7 @@ pub(crate) fn assign_caption(
     // the attribute as present-or-not (an empty string is truthy in Ruby). A
     // non-empty value is used verbatim as the prefix; an empty one (bare
     // `:caption:`, resolving to `Set`, or `:caption:` with an empty value,
-    // resolving to `Value("")`) suppresses the caption entirely – exactly like
+    // resolving to `Value("")`) suppresses the caption entirely — exactly like
     // an empty `[caption=]` override. Only a truly unset (`:caption!:`) or
     // absent attribute falls through to auto-numbering.
     match parser.attribute_value("caption") {

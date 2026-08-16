@@ -64,8 +64,8 @@
 //!   parsed [`Author`](crate::document::Author) list (name / firstname /
 //!   middlename / lastname / email / initials). This crate derives the combined
 //!   `authors` (comma-joined) attribute, the `authorcount` count (including `0`
-//!   for an author-less document, via the built-in default), and – when more
-//!   than one author is present – the first author's `_1`-suffixed names
+//!   for an author-less document, via the built-in default), and — when more
+//!   than one author is present — the first author's `_1`-suffixed names
 //!   (`author_1`, ...) as well as the unsuffixed forms. The Ruby
 //!   `metadata.size` (hash cardinality) has no crate analog and is not
 //!   asserted.
@@ -1040,7 +1040,7 @@ fn parse_invalid_author_line_becomes_author() {
     // The Ruby assertions above check `metadata['author']`, the *raw* value that
     // `parse_header_metadata` returns before substitution. This crate's
     // `Author::name()` instead represents the value that populates the `author`
-    // document attribute – the one `{author}` and the converter consume – to which
+    // document attribute — the one `{author}` and the converter consume — to which
     // Asciidoctor applies the header substitution group via `apply_header_subs`
     // (`doc.attributes['author'] = apply_header_subs val`). Applying the header
     // subs escapes the literal angle brackets, so they appear as `&lt;`/`&gt;`
@@ -1616,7 +1616,7 @@ fn removes_formatting_before_partitioning_author_defined_using_author_attribute(
 fn author_pass_macro_resolving_to_plain_text_is_partitioned_from_the_substituted_value() {
     // A whole-value `pass:[…]` macro whose result carries no markup must still
     // be partitioned from its resolved (substituted) value, not the raw macro
-    // syntax – otherwise `pass:n[Doc Writer]` would leak `pass:n[Doc` into
+    // syntax — otherwise `pass:n[Doc Writer]` would leak `pass:n[Doc` into
     // `firstname`.
     let doc = Parser::default().parse(":author: pass:n[Doc Writer]");
 
@@ -1646,7 +1646,7 @@ fn author_pass_macro_with_trailing_email_strips_it_matching_asciidoctor() {
     // Asciidoctor's names-only `process_authors`: the `<…>` is removed by its
     // `XmlSanitizeRx` and no `email` is derived from the author value (the
     // `unless names_only` guard). The `author` attribute keeps the literal
-    // `<email>`. This crate matches that behavior – an email for an attribute
+    // `<email>`. This crate matches that behavior — an email for an attribute
     // author comes from a companion `:email:` entry, not the name value.
     let doc = Parser::default().parse(":author: pass:[Doc Writer <doc@example.com>]");
 

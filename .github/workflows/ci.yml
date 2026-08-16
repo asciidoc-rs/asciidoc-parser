@@ -14,7 +14,7 @@ on:
 # Every job below is gated on the same condition: run automatically for
 # pushes, for pull requests whose head branch lives in this repository
 # (pushing a branch here already requires write access, so those are
-# trusted – this covers maintainers, dependabot, and Claude Code and
+# trusted — this covers maintainers, dependabot, and Claude Code and
 # other agent-authored PRs alike). Pull requests from forks await a human
 # adding the "safe to test" label.
 jobs:
@@ -331,7 +331,7 @@ jobs:
         run: cargo codspeed build
 
       - name: Run the benchmarks
-        uses: CodSpeedHQ/action@0ca9cbbf4623b599a6c3ed4fc8a922942705d9f1 # v5.0.2
+        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
         with:
           mode: instrumentation
           run: cargo codspeed run

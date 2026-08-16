@@ -22,7 +22,7 @@ where
 
     // Bound native recursion (issue #885). This scope is one level of block
     // nesting; if the running depth already exceeds `max-block-nesting`, refuse
-    // to descend – parse no blocks and leave `source` unconsumed – so a crafted
+    // to descend — parse no blocks and leave `source` unconsumed — so a crafted
     // document (strictly-increasing delimiters, deeply-nested sections, …)
     // cannot overflow the stack and abort the host. Non-empty over-nested
     // content is truncated with a warning; genuinely empty content is dropped
@@ -45,7 +45,7 @@ where
 
     while !source.data().is_empty() {
         // The predicate is given the parser (as a shared borrow) so a stop
-        // condition can consult the running document-attribute state – notably
+        // condition can consult the running document-attribute state — notably
         // `leveloffset`, which shifts the effective level a section boundary is
         // compared against. Every block preceding `source` (including any
         // `:leveloffset:` attribute entry) has already been applied to the

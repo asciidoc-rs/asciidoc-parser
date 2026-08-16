@@ -413,9 +413,9 @@ fn parse_lines<'src>(
         }
 
         // A leading line comment sitting directly above a line that begins a new
-        // block – block metadata (a `.Title`, or a `[...]` attribute list or
+        // block — block metadata (a `.Title`, or a `[...]` attribute list or
         // `[[...]]` anchor) or a block delimiter (a delimited block or a table)
-        // – must not absorb that line as paragraph content. Terminate the
+        // — must not absorb that line as paragraph content. Terminate the
         // comment-only block here so the following line gets a fresh dispatch
         // and can attach as metadata to (or open) the block it decorates.
         // Without this, the first such line after the comment is swallowed as
@@ -639,7 +639,7 @@ impl<'src> HasSpan<'src> for SimpleBlock<'src> {
 /// more markers (`== `/`## `, effective level 1+, or clamped up to 1 under a
 /// negative offset) is always a section. A single-marker heading (`= `/`# `) is
 /// a document title rather than a section *unless* a positive offset lifts it
-/// to level 1 or beyond – mirroring the level-0 rule in
+/// to level 1 or beyond — mirroring the level-0 rule in
 /// [`parse_title_line`](crate::blocks::section).
 pub(crate) fn is_section_header(line: &str, level_offset: i32) -> bool {
     // AsciiDoc `=` style or Markdown `#` style.

@@ -7,8 +7,8 @@ impl<'src> Span<'src> {
     /// A macro name begins with a word character (a letter, numeral, or
     /// underscore) and continues with any number of word or `-` characters
     /// (e.g., `image`, `toc`, or `foo-bar`). This mirrors the name capture of
-    /// Asciidoctor's `BlockMacroRx` (`#{CG_WORD}[#{CC_WORD}-]*`), except that –
-    /// as elsewhere in this crate – a "word character" is restricted to ASCII
+    /// Asciidoctor's `BlockMacroRx` (`#{CG_WORD}[#{CC_WORD}-]*`), except that —
+    /// as elsewhere in this crate — a "word character" is restricted to ASCII
     /// (`[A-Za-z0-9_]`); accepting the full Unicode word class is tracked
     /// separately. (The same name grammar governs inline macros, but the sole
     /// caller today parses block macros.)
@@ -37,7 +37,7 @@ impl<'src> Span<'src> {
     /// underscore) and continues with any number of word, `-`, or `.`
     /// characters (e.g., `see-also`, `_foo`, or `foo.foo`). This mirrors
     /// Asciidoctor's `AttributeList::NameRx` (`#{CG_WORD}[#{CC_WORD}\-.]*`),
-    /// except that – as elsewhere in this crate – a "word character" is
+    /// except that — as elsewhere in this crate — a "word character" is
     /// restricted to ASCII (`[A-Za-z0-9_]`); accepting the full Unicode word
     /// class is tracked separately.
     ///
@@ -63,7 +63,7 @@ impl<'src> Span<'src> {
     ///
     /// The name of an attribute entry begins with a [word character] (any
     /// Unicode letter, digit, or `_`, matching Asciidoctor's `\p{Word}`) and
-    /// runs up to – but not including – the closing colon (`:`) that terminates
+    /// runs up to — but not including — the closing colon (`:`) that terminates
     /// it. Mirroring Asciidoctor's
     /// `AttributeEntryRx` (whose capture is `!?#{CG_WORD}[^:]*`), the
     /// characters after the first are otherwise unconstrained: the raw name may
@@ -75,8 +75,8 @@ impl<'src> Span<'src> {
     /// as the name (the caller then fails to find the terminating colon).
     ///
     /// IMPORTANT: This function performs no normalization. The captured name is
-    /// sanitized – lower-cased, with every character that is not a word
-    /// character or `-` stripped – before it is used as an attribute key, so
+    /// sanitized — lower-cased, with every character that is not a word
+    /// character or `-` stripped — before it is used as an attribute key, so
     /// `URL-Repo` becomes `url-repo` and `Author Initials` becomes
     /// `authorinitials`. See `remap_attr_name` in the parser.
     ///

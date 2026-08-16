@@ -912,7 +912,7 @@ fn should_clean_crlf_from_end_of_lines() {
 }
 
 // Front matter support: a `---`-fenced YAML-style block at the very top of the
-// document is dropped – and captured verbatim in the `front-matter` attribute –
+// document is dropped — and captured verbatim in the `front-matter` attribute —
 // but only when the `skip-front-matter` attribute is set. This crate has no
 // public reader, so where Asciidoctor inspects `reader.peek_line` /
 // `reader.lineno`, these ports observe the parsed document instead: the
@@ -948,7 +948,7 @@ fn should_not_skip_front_matter_by_default() {
 
     // With `skip-front-matter` unset, the leading `---` keeps its ordinary
     // meaning: nothing is stripped, no `front-matter` attribute is recorded, and
-    // the `= Document Title` line – no longer the first line – is not read as the
+    // the `= Document Title` line — no longer the first line — is not read as the
     // document title.
     let doc = Parser::default().parse(
         "---\nlayout: post\ntitle: Document Title\nauthor: username\ntags: [ first, second ]\n---\n= Document Title\nAuthor Name\n\npreamble\n",
@@ -1030,7 +1030,7 @@ fn should_skip_front_matter_if_specified_by_skip_front_matter_attribute() {
     // `skip-front-matter` is set and the block is well-formed: its content
     // (delimiters excluded, lines joined by LF) is captured in the
     // `front-matter` attribute, and parsing resumes at `= Document Title`, which
-    // – thanks to the blank lines left in place of the removed block – is still
+    // — thanks to the blank lines left in place of the removed block — is still
     // reported at its original line 7.
     let doc = Parser::default()
         .with_intrinsic_attribute_bool("skip-front-matter", true, ModificationContext::ApiOnly)
@@ -1866,8 +1866,8 @@ fn should_replace_include_directive_that_references_missing_file_with_message() 
 // This crate delegates file access to the handler, which distinguishes a
 // missing file ([`IncludeResolution::NotFound`]) from one that exists but can't
 // be read ([`IncludeResolution::NotReadable`]). An unreadable target is
-// therefore reported with an `IncludeFileNotReadable` warning – matching
-// Asciidoctor's separate "include file not readable" message – while the
+// therefore reported with an `IncludeFileNotReadable` warning — matching
+// Asciidoctor's separate "include file not readable" message — while the
 // rendered "Unresolved directive" replacement is identical to the missing case.
 #[test]
 fn should_replace_include_directive_that_references_unreadable_file_with_message() {
@@ -5676,7 +5676,7 @@ fn should_log_warning_if_endif_is_mismatched() {
     assert_eq!(rendered_paragraphs(&doc), vec!["Our quest is complete!"]);
 
     // `warnings()` yields diagnostics in source order, so the unterminated
-    // conditional (line 1) precedes the mismatch (line 3) here – Asciidoctor
+    // conditional (line 1) precedes the mismatch (line 3) here — Asciidoctor
     // logs them the other way around (in detection order), since the
     // unterminated conditional is only recognized at end-of-input.
     let warnings: Vec<_> = doc.warnings().collect();
@@ -5911,7 +5911,7 @@ fn ifeval_running_invalid_operation_drops_content() {
 "#
     );
 
-    // `asciidoctor-version` is predefined by this crate, so – as in Ruby – the
+    // `asciidoctor-version` is predefined by this crate, so — as in Ruby — the
     // invalid operation is a number compared against a boolean.
     assert_eq!(
         reader_read(
