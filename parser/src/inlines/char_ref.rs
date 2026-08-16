@@ -11,7 +11,7 @@ pub enum CharRef<'src> {
     /// `&gt;`, `&` → `&amp;`).
     Special(char),
 
-    /// A replacement whose logical value is one or more characters – for
+    /// A replacement whose logical value is one or more characters — for
     /// example `(C)` → `©`, `--` → an em dash, or `...` → an ellipsis. The
     /// stored string is the logical character(s); the fold decides how to
     /// encode them.

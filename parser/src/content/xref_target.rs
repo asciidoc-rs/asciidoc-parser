@@ -4,17 +4,17 @@
 //! document (an ID or a reference text) or an [inter-document cross reference]:
 //! a reference that names another document, optionally with a fragment
 //! identifying an element inside it. Which of the two a target is depends on
-//! whether it carries a `#`, whether it has a file extension, and – for the
-//! `xref:` macro form only – whether that extension is an AsciiDoc one.
+//! whether it carries a `#`, whether it has a file extension, and — for the
+//! `xref:` macro form only — whether that extension is an AsciiDoc one.
 //!
 //! A target that names a document brings its own destination with it, built
 //! here from the path attributes in effect at the reference. That document may
 //! turn out to be the one being parsed, in which case the reference points at
-//! this document after all – see [`this_document_reference`].
+//! this document after all — see [`this_document_reference`].
 //!
 //! [inter-document cross reference]: https://docs.asciidoctor.org/asciidoc/latest/macros/inter-document-xref/
 
-use crate::{Parser, parser::DerivedReference};
+use crate::{Parser, content::sanitize_title, parser::DerivedReference};
 
 /// The file extensions an AsciiDoc processor recognizes as AsciiDoc source.
 ///
@@ -159,8 +159,8 @@ const SELF_REFERENCE_FALLBACK_TEXT: &str = "[^top]";
 /// document.
 ///
 /// The path is assembled from the document attributes in effect at the
-/// reference: `relfileprefix` is prepended, and – for a path that names an
-/// AsciiDoc source document – `relfilesuffix` (which falls back to
+/// reference: `relfileprefix` is prepended, and — for a path that names an
+/// AsciiDoc source document — `relfilesuffix` (which falls back to
 /// `outfilesuffix`) is appended in place of the extension that was stripped.
 pub(crate) fn other_document_reference(
     parser: &Parser,
@@ -202,13 +202,16 @@ pub(crate) fn this_document_reference(parser: &Parser) -> DerivedReference {
     let doctitle = parser.attribute_value("doctitle");
 
     // An empty `reftext` names nothing, so it falls through to the title just
-    // as an unset one does.
+    // as an unset one does. The doctitle carries real rendered markup —
+    // formatting, or even a live link from an autolinked bare URL — which
+    // cannot be embedded as-is inside this reference's own wrapping `<a>`,
+    // so it is sanitized down to plain text first, mirroring Asciidoctor.
     let text = reftext
         .as_maybe_str()
         .filter(|reftext| !reftext.is_empty())
         .or_else(|| doctitle.as_maybe_str().filter(|title| !title.is_empty()))
-        .unwrap_or(SELF_REFERENCE_FALLBACK_TEXT)
-        .to_string();
+        .map(sanitize_title)
+        .unwrap_or_else(|| SELF_REFERENCE_FALLBACK_TEXT.to_string());
 
     DerivedReference {
         href: "#".to_string(),

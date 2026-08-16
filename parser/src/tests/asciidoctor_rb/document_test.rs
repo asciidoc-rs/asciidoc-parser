@@ -604,7 +604,7 @@ mod structure {
 
     // Out of scope here: standalone `max-width` framing and the Ruby
     // `Document::Title` partition/`sanitize` API. asciidoc-parser also does not
-    // enable compat-mode for a legacy (setext) doctitle – an intentional
+    // enable compat-mode for a legacy (setext) doctitle — an intentional
     // divergence that will not be addressed.
     non_normative!(
         r##"
@@ -830,7 +830,7 @@ mod structure {
 
         // A `:title:` attribute entry overrides the value of `doctitle` (and
         // `title`) without disturbing the section title or the `doctitle`
-        // attribute – so `{doctitle}` in the body still renders the implicit
+        // attribute — so `{doctitle}` in the body still renders the implicit
         // title. (The `#preamble` wrapper Ruby asserts on is standalone-HTML
         // structure asciidoc-parser does not emit.)
         assert_eq!(doc.doctitle(), Some("Override"));
@@ -1129,16 +1129,18 @@ mod structure {
 "##
         );
 
-        let doc =
-            Parser::default().parse("= {project-name} Docs\n:project-name: ACME\n\n{doctitle}");
+        let doc = Parser::default()
+            .with_intrinsic_attribute("attribute-missing", "warn", ModificationContext::Anywhere)
+            .parse("= {project-name} Docs\n:project-name: ACME\n\n{doctitle}");
 
         // The implicit title references an attribute defined *later* in the
         // header. The `doctitle` attribute keeps the eager (at-title-line)
-        // value, where the reference was still unresolved (and, in `skip` mode,
-        // left literal without warning); `doctitle` itself resolves lazily
-        // against the final attribute state (issue #716). As in the sibling
-        // (defined-earlier) test, the port parses under the default
-        // `attribute-missing=skip` rather than `warn`.
+        // value, where the reference was still unresolved; `doctitle` itself
+        // resolves lazily against the final attribute state (issue #716).
+        // Under `attribute-missing: warn`, that eager scan must not raise a
+        // `SkippingReferenceToMissingAttribute` warning either, since the
+        // reference does resolve once the full header is known (issue
+        // #1124).
         assert_eq!(doc.warnings().count(), 0);
         assert_eq!(
             doc.attribute_value("doctitle"),

@@ -160,7 +160,7 @@ impl<'src> QuoteBlock<'src> {
 
             // A `[quote]`/`[verse]` style also masquerades over an open block
             // (`--`): the open delimiter adopts the quote/verse context. This is
-            // unique to the open block – every other structural container (below)
+            // unique to the open block — every other structural container (below)
             // keeps its own context and ignores the style.
             if first_line.data() == "--" {
                 return Some(Self::parse_delimited(metadata, parser, type_));
@@ -1112,8 +1112,8 @@ mod tests {
 
     #[test]
     fn markdown_blockquote_propagates_nested_warning() {
-        // A warning produced while parsing the (owned, `>`-stripped) body – here
-        // an unterminated nested delimited block – is re-anchored at the
+        // A warning produced while parsing the (owned, `>`-stripped) body — here
+        // an unterminated nested delimited block — is re-anchored at the
         // blockquote's own span and surfaced to the caller, rather than being
         // dropped (or panicking a debug build).
         let mut parser = Parser::default();
@@ -1307,7 +1307,7 @@ mod tests {
 
     mod section_heading_suppressed {
         //! A `== …` line inside a quote block or a Markdown-style blockquote is
-        //! literal content – a paragraph – not a section heading (matching
+        //! literal content — a paragraph — not a section heading (matching
         //! Asciidoctor, which only creates sections at the document level or
         //! within a section body).
 

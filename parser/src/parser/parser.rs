@@ -159,7 +159,7 @@ pub struct Parser {
     ///
     /// A section heading is only recognized at the document top level or within
     /// another section's body. Inside a delimited block a `== …` line is
-    /// literal content – a paragraph – not a section (matching Asciidoctor,
+    /// literal content — a paragraph — not a section (matching Asciidoctor,
     /// which only creates sections when the parent context is the document
     /// or a section). A discrete heading, by contrast, is an ordinary block
     /// and remains valid in these contexts, so it is not suppressed by this
@@ -203,7 +203,7 @@ pub struct Parser {
     /// carried over to the first block inside the section (matching
     /// Asciidoctor, where the block-attribute hash holding the title is passed
     /// through to the section body's first block). `SectionBlock::parse`
-    /// stashes the rendered title here and the next block parsed claims it –
+    /// stashes the rendered title here and the next block parsed claims it —
     /// which may be a nested section, re-stashing it for *its* first block, or
     /// (when the section body is empty) a sibling section reached after the
     /// stashing section ends. A block with a title of its own wins over the
@@ -211,7 +211,7 @@ pub struct Parser {
     ///
     /// The title is carried as an owned snapshot (this struct is lifetime-free
     /// and cannot hold the `.Title` line's source span), so a block claiming a
-    /// carried title has no `title_source` – the same shape as a title
+    /// carried title has no `title_source` — the same shape as a title
     /// supplied via a `title=` attribute. The snapshot keeps any deferred
     /// cross-references, so an embedded `<<id>>` in a carried title still
     /// resolves once the catalog is complete.
@@ -241,7 +241,7 @@ pub struct Parser {
     /// target attribute is *locked* (API-set or a locked built-in).
     ///
     /// Such a counter must keep advancing across repeated references, but it
-    /// must not overwrite the locked attribute's readable value – so its
+    /// must not overwrite the locked attribute's readable value — so its
     /// sequence is tracked here rather than in the readable
     /// [`counter_values`](Self::counter_values) overlay. This mirrors
     /// Asciidoctor's `Document#counter`, which advances `@counters` while
@@ -254,10 +254,10 @@ pub struct Parser {
     /// [`counter_values`](Self::counter_values), so the two sequences diverge
     /// when the *same* locked attribute is advanced both ways in one document
     /// (e.g. an API-locked `example-number` driven by both example blocks and
-    /// inline `{counter:example-number}` references) – Asciidoctor keeps a
+    /// inline `{counter:example-number}` references) — Asciidoctor keeps a
     /// single `@counters` sequence shared across both. This is left unmatched
-    /// deliberately. The scenario – API-locking a `<context>-number` attribute
-    /// *and* mixing caption and inline use – is pathological, and exact parity
+    /// deliberately. The scenario — API-locking a `<context>-number` attribute
+    /// *and* mixing caption and inline use — is pathological, and exact parity
     /// is unreachable regardless: this crate resolves inline counters during
     /// parsing, whereas Asciidoctor advances captions during parsing but inline
     /// references during conversion, so the two sequences interleave
@@ -284,8 +284,8 @@ pub struct Parser {
     /// names are already `&'static str`, so entries are stored as
     /// [`Cow<'static, str>`]: a built-in is locked with a borrowed static name
     /// (no allocation), and only a genuinely dynamic (parent-defined) name is
-    /// owned. This keeps the per-cell rebuild – which runs once for every
-    /// AsciiDoc cell – from allocating a `String` per built-in attribute.
+    /// owned. This keeps the per-cell rebuild — which runs once for every
+    /// AsciiDoc cell — from allocating a `String` per built-in attribute.
     pub(crate) locked_attribute_names: HashSet<Cow<'static, str>>,
 
     /// Number of AsciiDoc table cells currently being parsed in the call stack.
@@ -320,13 +320,13 @@ pub struct Parser {
 
     /// Number of nested block-parsing scopes currently open on the call stack.
     ///
-    /// Every level of block nesting – a delimited block's body, a section body,
-    /// an AsciiDoc table cell, a nested list – is parsed by a fresh recursive
+    /// Every level of block nesting — a delimited block's body, a section body,
+    /// an AsciiDoc table cell, a nested list — is parsed by a fresh recursive
     /// descent (through [`parse_blocks_until`] or
     /// [`ListBlock::parse_inside_list`]) that consumes native stack. Without a
     /// bound, a small crafted document (strictly-increasing delimiters, or
     /// deeply-nested list markers) drives arbitrarily deep recursion and
-    /// overflows the stack – an *uncatchable* abort that takes down the whole
+    /// overflows the stack — an *uncatchable* abort that takes down the whole
     /// host process, not just the parse. This counter is incremented on entry
     /// to each such scope and decremented on exit; when it would exceed
     /// [`max_block_nesting`](Self::max_block_nesting) the over-nested content
@@ -382,7 +382,7 @@ pub struct Parser {
     /// Each owned cell's own source map (produced by re-running the
     /// preprocessor over its content) is pushed here for the duration of
     /// its parse, so a directive buried inside the owned content can still
-    /// be mapped back to the file and line it *originally* came from –
+    /// be mapped back to the file and line it *originally* came from —
     /// needed to name that file in the "Unresolved directive" message and
     /// to report the warning's true cursor via
     /// [`Warning::origin`](crate::warnings::Warning::origin).
@@ -516,8 +516,8 @@ pub(crate) struct DeferredWarning {
     /// This is `None` for warnings that point at real (emitted) output: their
     /// [`offset`](Self::offset)/[`len`](Self::len) span resolves the location
     /// through the document source map. It is `Some` for a preprocessor
-    /// directive that produces no output of its own – a malformed or
-    /// unterminated conditional directive – where there is no output span to
+    /// directive that produces no output of its own — a malformed or
+    /// unterminated conditional directive — where there is no output span to
     /// resolve against, so the directive's own file and line are recorded here
     /// directly (the `offset`/`len` span is then only a best-effort anchor).
     ///
@@ -608,6 +608,24 @@ impl Default for Parser {
     }
 }
 
+/// The document scope a `notitle`/`showtitle` assignment originated from, for
+/// [`Parser::apply_title_visibility_linkage`]'s partner-lock check.
+///
+/// This mirrors the two document-side write-permission checks
+/// ([`Parser::set_attribute_from_header`] and
+/// [`Parser::set_attribute_from_body`]): which
+/// [`ModificationContext`] values block a write depends on whether the write
+/// is happening in the header or the body, since [`ApiOrHeader`] and
+/// [`ApiOrDocumentBody`] each permit one scope and forbid the other.
+///
+/// [`ApiOrHeader`]: ModificationContext::ApiOrHeader
+/// [`ApiOrDocumentBody`]: ModificationContext::ApiOrDocumentBody
+#[derive(Clone, Copy)]
+enum DocumentWriteScope {
+    Header,
+    Body,
+}
+
 impl Parser {
     /// The default value of [`max_block_nesting`](Self::max_block_nesting),
     /// mirroring the `max-block-nesting` built-in default (see
@@ -648,9 +666,9 @@ impl Parser {
     /// # Reusing a `Parser` across documents
     ///
     /// A single `Parser` may be reused to parse many documents (in a loop, for
-    /// example). Each parse begins from the `Parser`'s configured baseline –
+    /// example). Each parse begins from the `Parser`'s configured baseline —
     /// the attributes established through the builder API (e.g.
-    /// [`with_intrinsic_attribute()`]) – with the document attributes
+    /// [`with_intrinsic_attribute()`]) — with the document attributes
     /// discovered while parsing the *previous* document cleared.
     /// Header/body assignments (`:foo: bar`) therefore do not leak from one
     /// document into the next, so output does not depend on parse order.
@@ -788,20 +806,73 @@ impl Parser {
         )
     }
 
+    /// Applies a substitution group to a bare string, returning the substituted
+    /// result.
+    ///
+    /// This runs the same inline substitution pipeline the parser uses for
+    /// block and inline content, but over a caller-supplied fragment rather
+    /// than a parsed block. It lets a downstream converter mirror
+    /// Asciidoctor's per-string substitution helpers — `sub_replacements`,
+    /// `sub_macros`, `apply_header_subs`, and friends — without
+    /// reimplementing (or taking a dependency on) this crate's
+    /// `regex`-based substitution logic.
+    ///
+    /// Pass any [`SubstitutionGroup`](crate::content::SubstitutionGroup),
+    /// including a [`Custom`](crate::content::SubstitutionGroup::Custom) group
+    /// built from an explicit list of
+    /// [`SubstitutionStep`](crate::content::SubstitutionStep)s, to select
+    /// exactly which substitutions run. A single-step group is the way to apply
+    /// one step (e.g. just character replacements) on its own.
+    ///
+    /// The parser's document attributes are visible to the attribute-references
+    /// step, so `{name}` references in `text` resolve against this parser's
+    /// current attribute state.
+    ///
+    /// # Example
+    ///
+    /// Mirror Asciidoctor's `sub_replacements` on a byline author name so
+    /// `O'Brien` renders with a typographic apostrophe and `(C)` becomes the
+    /// copyright sign:
+    ///
+    /// ```
+    /// use asciidoc_parser::{
+    ///     Parser,
+    ///     content::{SubstitutionGroup, SubstitutionStep},
+    /// };
+    ///
+    /// let parser = Parser::default();
+    /// let replacements = SubstitutionGroup::Custom(vec![SubstitutionStep::CharacterReplacements]);
+    ///
+    /// assert_eq!(
+    ///     parser.apply_substitutions("O'Brien (C)", &replacements),
+    ///     "O&#8217;Brien &#169;"
+    /// );
+    /// ```
+    #[must_use]
+    pub fn apply_substitutions(
+        &self,
+        text: &str,
+        group: &crate::content::SubstitutionGroup,
+    ) -> String {
+        let mut content = crate::content::Content::from(crate::Span::new(text));
+        group.apply(&mut content, self, None);
+        content.rendered_owned()
+    }
+
     /// Drops leading YAML-style front matter from `source`, mirroring
     /// Asciidoctor's `Reader#skip_front_matter!`.
     ///
     /// Front matter is a block opened by a line of exactly `---` at the very
     /// start of the document and closed by a matching `---` line. Only this
-    /// `---` fence (the YAML convention) is recognized – a `+++` TOML fence is
-    /// not – and the captured content is stored verbatim, never parsed. It is
+    /// `---` fence (the YAML convention) is recognized — a `+++` TOML fence is
+    /// not — and the captured content is stored verbatim, never parsed. It is
     /// only removed when the `skip-front-matter` attribute is set
     /// (typically via the API); otherwise `---` retains its ordinary
     /// meaning and this is a no-op. When a well-formed block is found, its
     /// content (the lines between the delimiters, joined by LF and with the
     /// delimiters excluded) is stored in the `front-matter` document
     /// attribute, and a rewritten copy of the source is returned in which
-    /// every removed line – both delimiters and the content – is replaced
+    /// every removed line — both delimiters and the content — is replaced
     /// by a blank line. Preserving the line *count* keeps every following
     /// line at its original line number, matching Asciidoctor (whose reader
     /// advances `lineno` past the skipped block); the leading blank lines
@@ -911,7 +982,7 @@ impl Parser {
         }
 
         // An unset `relfilesuffix` reads as the *effective* value of
-        // `outfilesuffix` – routed through this same reader so an
+        // `outfilesuffix` — routed through this same reader so an
         // `outfilesuffix` counter overlay is honored too (see
         // [`tracks_outfilesuffix`](Self::tracks_outfilesuffix)).
         if self.tracks_outfilesuffix(name) {
@@ -1019,11 +1090,11 @@ impl Parser {
 
     /// Reports whether `name` is `relfilesuffix` in its unset state, in which
     /// case a *read* resolves it to the current value of `outfilesuffix` (the
-    /// two diverge for non-HTML backends, e.g. `.xml` for DocBook – see
+    /// two diverge for non-HTML backends, e.g. `.xml` for DocBook — see
     /// [issue #657](https://github.com/asciidoc-rs/asciidoc-parser/issues/657)).
     ///
     /// Returns `false` once `relfilesuffix` is explicitly set or unset (an
-    /// entry – a value or an [unset] tombstone – then lives in the
+    /// entry — a value or an [unset] tombstone — then lives in the
     /// per-parser map), and for every other name. The redirect is
     /// deliberately confined to the value *readers*: the attribute
     /// *writers* consult [`effective_attribute`](Self::effective_attribute)
@@ -1116,8 +1187,8 @@ impl Parser {
     ///
     /// The attribute is API-only, so a hostile document cannot raise its own
     /// limit. The value is coerced as Ruby's `String#to_i` would (matching how
-    /// `max-include-depth` is read): a non-positive result yields `0` – which
-    /// permits only the outermost, document-level block scope – while a
+    /// `max-include-depth` is read): a non-positive result yields `0` — which
+    /// permits only the outermost, document-level block scope — while a
     /// positive value too large for `usize` saturates rather than wrapping to
     /// the "disabled" sentinel.
     ///
@@ -1175,8 +1246,8 @@ impl Parser {
     /// force.
     ///
     /// The value is coerced as Ruby's `String#to_i` would (matching
-    /// Asciidoctor); a non-positive result – including an explicit unset or `0`
-    /// – disables the limit. The `4096` default only exists under
+    /// Asciidoctor); a non-positive result — including an explicit unset or `0`
+    /// — disables the limit. The `4096` default only exists under
     /// `SafeMode::Secure` (see
     /// [`apply_safe_mode_attributes`](Self::apply_safe_mode_attributes)), so in
     /// a relaxed safe mode this resolves to `None` unless the caller sets an
@@ -1252,8 +1323,8 @@ impl Parser {
             // makes the accumulation itself infallible; `saturating_add` then
             // guards the (already absurd) case of a delta near `i64::MIN/MAX`,
             // and the result is clamped back into the `i32` the attribute
-            // stores. This keeps a pathological offset from overflowing –
-            // which would panic in debug builds and wrap in release builds –
+            // stores. This keeps a pathological offset from overflowing —
+            // which would panic in debug builds and wrap in release builds —
             // rather than imposing a real bound the syntax does not otherwise
             // impose.
             Ok(delta) => InterpretedValue::Value(
@@ -1297,7 +1368,7 @@ impl Parser {
     }
 
     /// Captures the parser's fully-resolved document-attribute state so it can
-    /// outlive the parser – for example, retained on a [`Document`] to answer
+    /// outlive the parser — for example, retained on a [`Document`] to answer
     /// [`attribute_value`]/[`has_attribute`]/[`is_attribute_set`] without a
     /// parser in hand (the embed path a renderer uses for `convert_document`).
     ///
@@ -1325,16 +1396,33 @@ impl Parser {
     /// Resolves whether a document title should be displayed, from the
     /// `showtitle`/`notitle` attribute pair (which are complements).
     ///
-    /// `showtitle` takes precedence: if present, the title shows precisely when
-    /// it is set. Otherwise `notitle`, if present, hides the title when set.
-    /// When neither attribute is present, `default_shown` decides – a
-    /// standalone document (such as a nested AsciiDoc table cell) shows its
-    /// title, while an embedded document does not.
-    pub(crate) fn resolve_show_title(&self, default_shown: bool) -> bool {
-        if self.has_attribute("showtitle") {
-            self.is_attribute_set("showtitle")
+    /// A *set* `showtitle` always takes precedence and shows the title. A
+    /// merely-*present-but-unset* `showtitle` (e.g. a hard API unset, an
+    /// `ApiOnly` lock to [`Unset`](InterpretedValue::Unset)) only decides the
+    /// outcome — hiding the title — when `notitle` is absent; it does not by
+    /// itself mean "hide the title" the way an explicit `notitle` entry does,
+    /// so a present `notitle` still gets to decide in that case. Otherwise
+    /// `notitle`, if present, hides the title when set. When neither
+    /// attribute is present, `default_shown` decides — a standalone document
+    /// shows its title, while embedded output does not. A nested AsciiDoc
+    /// table cell is embedded output, so it passes `default_shown = false`.
+    ///
+    /// Use this rather than reading `notitle` or `showtitle` directly:
+    /// re-deriving this precedence from a raw attribute read is easy to get
+    /// subtly wrong, as the pair's mirroring can leave one spelling's stored
+    /// value looking inconsistent with the toggle's true, resolved state
+    /// (see issue asciidoc-rs/asciidoc-parser#1148, where a downstream
+    /// re-implementation of this exact logic repeatedly drifted out of sync
+    /// with this one). After parsing, prefer
+    /// [`Document::show_title`](crate::Document::show_title), which mirrors
+    /// this method and needs no [`Parser`] in hand.
+    pub fn resolve_show_title(&self, default_shown: bool) -> bool {
+        if self.is_attribute_set("showtitle") {
+            true
         } else if self.has_attribute("notitle") {
             !self.is_attribute_set("notitle")
+        } else if self.has_attribute("showtitle") {
+            false
         } else {
             default_shown
         }
@@ -1351,19 +1439,56 @@ impl Parser {
     ///
     /// `attr_name` is the attribute just assigned and `value` its stored value;
     /// the call is a no-op for any other name. Turning the toggle *off* (an
-    /// explicit [unset], e.g. `:!notitle:`) turns the partner *on* – it is
+    /// explicit [unset], e.g. `:!notitle:`) turns the partner *on* — it is
     /// stored [set] with the same `modification_context` and
-    /// `silent_when_locked` flag as the triggering assignment. Turning the
-    /// toggle *on* (an empty `Set` or an explicit value, e.g. `:notitle:`)
+    /// `silent_when_locked` flag as the triggering assignment, *except* that a
+    /// hard API unset (`ApiOnly`) always plants an unlocked
+    /// ([`Anywhere`](ModificationContext::Anywhere)) partner instead (see the
+    /// note on the `Unset` branch below; issue #1148). Turning the toggle
+    /// *on* (an empty `Set` or an explicit value, e.g. `:notitle:`)
     /// *removes* the partner entirely.
     ///
-    /// The partner is removed – rather than left as an explicit unset
-    /// tombstone – to mirror Asciidoctor's attribute-hash semantics, where an
+    /// The partner is removed — rather than left as an explicit unset
+    /// tombstone — to mirror Asciidoctor's attribute-hash semantics, where an
     /// "off" attribute is simply absent. That keeps every observer consistent:
     /// `has_attribute`, `ifdef`/`ifndef`, and `{partner}` reference
     /// substitution all see the same absence Asciidoctor does (so, e.g., a
     /// `{showtitle}` reference stays literal after `:notitle:` rather than
     /// silently resolving to an empty string).
+    ///
+    /// `write_scope` distinguishes a document-originated assignment (a header
+    /// or body attribute entry) from an API-originated one: when `Some`, the
+    /// partner is left untouched if its current [`ModificationContext`]
+    /// forbids a write from that scope (the same rule
+    /// [`set_attribute_from_header`](Self::set_attribute_from_header) and
+    /// [`set_attribute_from_body`](Self::set_attribute_from_body) apply to
+    /// the attribute being assigned directly), so a document entry cannot use
+    /// the linkage as a back door around an API- or header/body-scoped lock
+    /// on the *other* spelling. An API call always passes `None`, since a
+    /// later API call is always permitted to override an earlier one
+    /// (matching the "last call wins" contract of
+    /// [`with_intrinsic_attribute()`](Self::with_intrinsic_attribute) and
+    /// its siblings), including the partner it set.
+    ///
+    /// Returns whether the caller should proceed with storing `attr_name`'s
+    /// own direct assignment. This is `false` only for a document-originated
+    /// `notitle` entry whose partner `showtitle` is locked against the write
+    /// *and currently resolves to [`Set`](InterpretedValue::Set): a `Set`
+    /// `showtitle` takes precedence when resolving title visibility (see
+    /// [`resolve_show_title`](Self::resolve_show_title)), so it must veto the
+    /// conflicting `notitle` entry outright, not merely skip the
+    /// partner-sync side effect — otherwise a direct probe of `notitle`
+    /// (e.g. `ifdef::notitle[]`) would see the raw, rejected document value
+    /// instead of staying consistent with the lock. A locked `showtitle`
+    /// that is merely [`Unset`](InterpretedValue::Unset) (a hard API unset)
+    /// does *not* veto the `notitle` entry: hard-unsetting `showtitle` only
+    /// prevents the document from turning it on, it does not by itself mean
+    /// "hide the title", so `notitle`'s own (unlocked) entry still applies
+    /// normally (see [`resolve_show_title`](Self::resolve_show_title)'s
+    /// matching precedence rule). The reverse does not hold: a locked
+    /// `notitle` never vetoes a `showtitle` entry, since `showtitle`'s own
+    /// precedence already decides the resolved visibility regardless of
+    /// `notitle`'s raw value.
     ///
     /// [set]: https://docs.asciidoctor.org/asciidoc/latest/attributes/set-attributes/
     /// [unset]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unset-attributes/
@@ -1373,34 +1498,77 @@ impl Parser {
         value: &InterpretedValue,
         modification_context: ModificationContext,
         silent_when_locked: bool,
-    ) {
+        write_scope: Option<DocumentWriteScope>,
+    ) -> bool {
         let partner = match attr_name {
             "notitle" => "showtitle",
             "showtitle" => "notitle",
-            _ => return,
+            _ => return true,
         };
+
+        if let Some(scope) = write_scope
+            && self.partner_write_is_locked(partner, scope)
+        {
+            // Only a partner locked to `Set` takes precedence over (and so
+            // vetoes) a conflicting `notitle` entry; a partner that is merely
+            // locked `Unset` (a hard API unset) is not decisive on its own,
+            // so the direct write proceeds normally instead.
+            let partner_forces_show = attr_name == "notitle"
+                && matches!(
+                    self.effective_attribute(partner).map(|a| &a.value),
+                    Some(InterpretedValue::Set)
+                );
+            return !partner_forces_show;
+        }
 
         // Either way the partner supersedes (and resets) any counter of the
         // same name, mirroring a direct assignment.
         self.counter_values.borrow_mut().remove(partner);
 
         if let InterpretedValue::Unset = value {
-            // The toggle is off, so the partner turns on.
+            // The toggle is off, so the partner turns on. This mirroring
+            // must run even for a hard API unset (`ApiOnly`): a consumer may
+            // read either half of the pair directly instead of resolving the
+            // toggle itself (as `resolve_show_title` does), and with no
+            // competing document entry at all, that raw read is the only
+            // signal it has (issue #1148) — skipping the plant left it
+            // seeing neither attribute change.
+            //
+            // But the planted value must not itself become a *lock*:
+            // hard-unsetting `showtitle` (or `notitle`) only prevents the
+            // document from turning that one attribute on, it is not itself
+            // a request to force-hide (or force-show) that a later,
+            // unlocked document entry for the partner cannot override (issue
+            // #1143). So when the triggering write is `ApiOnly`, the plant
+            // always uses an unlocked ([`Anywhere`](ModificationContext::Anywhere))
+            // context instead of mirroring the trigger's own `ApiOnly`
+            // context — letting a later document entry for the partner
+            // resolve normally, exactly as if the API call had never
+            // touched it.
+            let partner_modification_context =
+                if modification_context == ModificationContext::ApiOnly {
+                    ModificationContext::Anywhere
+                } else {
+                    modification_context
+                };
+
             Arc::make_mut(&mut self.attribute_values).insert(
                 partner.to_string(),
                 AttributeValue {
                     allowable_value: AllowableValue::Any,
-                    modification_context,
+                    modification_context: partner_modification_context,
                     silent_when_locked,
                     value: InterpretedValue::Set,
                 },
             );
         } else if self.attribute_values.contains_key(partner) {
-            // The toggle is on, so the partner turns off – and, matching
+            // The toggle is on, so the partner turns off — and, matching
             // Asciidoctor, "off" means absent. (Guarded so the common case of
             // no prior partner entry does not clone the shared map.)
             Arc::make_mut(&mut self.attribute_values).remove(partner);
         }
+
+        true
     }
 
     /// Forces the `doctype` attribute to `value`.
@@ -1488,7 +1656,7 @@ impl Parser {
 
         Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
 
-        self.apply_title_visibility_linkage(&name, &value, modification_context, false);
+        self.apply_title_visibility_linkage(&name, &value, modification_context, false, None);
 
         self.capture_attribute_baseline();
 
@@ -1542,7 +1710,7 @@ impl Parser {
 
         Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
 
-        self.apply_title_visibility_linkage(&name, &value, modification_context, true);
+        self.apply_title_visibility_linkage(&name, &value, modification_context, true, None);
 
         self.capture_attribute_baseline();
 
@@ -1607,17 +1775,6 @@ impl Parser {
         }
     }
 
-    /// Returns the parser's own live catalog, for tests that inspect a
-    /// registration recorded via [`register_image`](Self::register_image) or
-    /// [`register_link`](Self::register_link) directly against this `Parser`,
-    /// without going through a full [`Document`](crate::document::Document)
-    /// parse (whose own [`catalog`](crate::document::Document::catalog) is a
-    /// separate, later snapshot).
-    #[cfg(test)]
-    pub(crate) fn catalog(&self) -> std::cell::Ref<'_, crate::document::Catalog> {
-        self.catalog.borrow()
-    }
-
     /// Registers a callout number defined by a verbatim block.
     ///
     /// Takes `&self` so it can be called from the callouts substitution step,
@@ -1659,7 +1816,7 @@ impl Parser {
     /// cross-reference warning can be anchored at the footnote rather than at
     /// the whole document. When the footnote is defined while substituting a
     /// privately-owned sub-source (a Markdown-style blockquote or an AsciiDoc
-    /// table cell – see
+    /// table cell — see
     /// [`owned_subsource_depth`](Self::owned_subsource_depth)), that offset
     /// does not map to the document, so no location is recorded and
     /// resolution falls back to the whole-document span.
@@ -1822,7 +1979,7 @@ impl Parser {
     /// [`take_owned_cell_warnings`]).
     ///
     /// A no-op when not inside an owned cell source (the line does not resolve
-    /// to an owned origin) – the caller only reaches this from an owned-cell
+    /// to an owned origin) — the caller only reaches this from an owned-cell
     /// parse, but the guard keeps a stray call from recording an unanchorable
     /// warning.
     ///
@@ -1865,7 +2022,7 @@ impl Parser {
     ) -> String {
         // A synthetic ID that collides with an existing one is enumerated using
         // the `idseparator` (e.g. `_section_one`, `_section_one_2`), matching
-        // Ruby Asciidoctor – not a hardcoded hyphen. Mirrors the separator
+        // Ruby Asciidoctor — not a hardcoded hyphen. Mirrors the separator
         // resolution in `generate_section_id`.
         let separator = self
             .attribute_value("idseparator")
@@ -1888,6 +2045,25 @@ impl Parser {
     /// parser to the document at the end of parsing.
     pub(crate) fn take_catalog(&mut self) -> Catalog {
         std::mem::take(&mut *self.catalog.borrow_mut())
+    }
+
+    /// Returns a read-only borrow of the parser's current reference catalog,
+    /// without taking it.
+    ///
+    /// Used to resolve cross-references discovered outside the document's own
+    /// block tree (e.g. docinfo content) against the catalog while it is still
+    /// held by the parser — after the document body has been parsed (so the
+    /// catalog is complete) but before [`take_catalog`](Self::take_catalog)
+    /// transfers it to the `Document`.
+    ///
+    /// Tests also use it to inspect a registration recorded via
+    /// [`register_image`](Self::register_image) or
+    /// [`register_link`](Self::register_link) directly against this `Parser`,
+    /// without going through a full [`Document`] parse (whose own
+    /// [`catalog`](crate::document::Document::catalog) is a separate, later
+    /// snapshot).
+    pub(crate) fn catalog(&self) -> std::cell::Ref<'_, Catalog> {
+        self.catalog.borrow()
     }
 
     /* Comment out until we're prepared to use and test this.
@@ -1960,7 +2136,7 @@ impl Parser {
 
         Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
 
-        self.apply_title_visibility_linkage(&name, &value, modification_context, false);
+        self.apply_title_visibility_linkage(&name, &value, modification_context, false, None);
 
         self.capture_attribute_baseline();
 
@@ -2010,7 +2186,7 @@ impl Parser {
 
         Arc::make_mut(&mut self.attribute_values).insert(name.clone(), attribute_value);
 
-        self.apply_title_visibility_linkage(&name, &value, modification_context, true);
+        self.apply_title_visibility_linkage(&name, &value, modification_context, true, None);
 
         self.capture_attribute_baseline();
 
@@ -2104,12 +2280,12 @@ impl Parser {
     /// attribute map, as an owned string (a value-less "set" reads as an empty
     /// string), or `None` when it has no such entry.
     ///
-    /// This reads only the stored overrides – never the on-the-fly datetime
-    /// resolution – so it can supply the explicit sibling values
+    /// This reads only the stored overrides — never the on-the-fly datetime
+    /// resolution — so it can supply the explicit sibling values
     /// [`resolve_datetime_attribute`](Self::resolve_datetime_attribute) needs
     /// without recursing. It mirrors the Ruby truthiness the datetime
-    /// computation relies on (`attrs['docdate']`), where any present value –
-    /// including an empty string – counts as explicitly supplied.
+    /// computation relies on (`attrs['docdate']`), where any present value —
+    /// including an empty string — counts as explicitly supplied.
     fn stored_datetime_override(&self, name: &str) -> Option<String> {
         self.attribute_values
             .get(name)
@@ -2154,7 +2330,7 @@ impl Parser {
     /// counter-safe recognition pass per block over the same source, so the
     /// default parse path is unchanged in both output and performance. The
     /// switch is expected to retire once the inline AST becomes the canonical
-    /// representation (with `rendered_html()` a fold of it – the remaining
+    /// representation (with `rendered_html()` a fold of it — the remaining
     /// half of the design's step 6 cutover).
     ///
     /// A custom [`InlineSubstitutionRenderer`] is consulted while the tree is
@@ -2237,7 +2413,7 @@ impl Parser {
     /// Sets the [`ImageFileHandler`] for this parser.
     ///
     /// The image file handler is responsible for providing the raw bytes of an
-    /// image that must be embedded as a `data:` URI – i.e. when the `data-uri`
+    /// image that must be embedded as a `data:` URI — i.e. when the `data-uri`
     /// document attribute is set and the safe mode is below
     /// [`SafeMode::Secure`]. If no handler is provided (or it cannot find the
     /// file), such images fall back to an ordinary web path, exactly as if
@@ -2258,8 +2434,8 @@ impl Parser {
     /// The path resolver turns an asset target (an image `src`, a stylesheet
     /// href, and so on) into the clean, resolved path that appears in the
     /// rendered output. The default is [`DefaultPathResolver`], which mirrors
-    /// Ruby Asciidoctor. A host that needs custom path or URL rewriting – a
-    /// virtual filesystem, a content root, URL slugs – can supply its own
+    /// Ruby Asciidoctor. A host that needs custom path or URL rewriting — a
+    /// virtual filesystem, a content root, URL slugs — can supply its own
     /// implementation here.
     ///
     /// [`PathResolver`]: crate::parser::PathResolver
@@ -2306,10 +2482,10 @@ impl Parser {
     /// These attributes let a document (or a downstream converter) inspect the
     /// security mode under which it is being processed:
     ///
-    /// * `safe-mode-level` – the numeric level (`0`, `1`, `10`, or `20`).
-    /// * `safe-mode-name` – the lowercase mode name (`unsafe`, `safe`,
+    /// * `safe-mode-level` — the numeric level (`0`, `1`, `10`, or `20`).
+    /// * `safe-mode-name` — the lowercase mode name (`unsafe`, `safe`,
     ///   `server`, or `secure`).
-    /// * `safe-mode-<name>` – a single flag attribute (set to an empty value)
+    /// * `safe-mode-<name>` — a single flag attribute (set to an empty value)
     ///   naming the active mode; the flags for the other modes are absent so
     ///   that a reference to them resolves literally.
     ///
@@ -2393,11 +2569,28 @@ impl Parser {
     /// Returns the document name (`docname`): the base name of the primary
     /// file, stripped of its directory and final extension.
     ///
+    /// An explicitly-set `docname` attribute (e.g. via
+    /// [`with_intrinsic_attribute`]) takes precedence and is returned verbatim,
+    /// mirroring Asciidoctor's model where `doc.attributes['docname']` is the
+    /// single source of truth (seeded from the primary file name at load time,
+    /// but overridable through the API). Only when no `docname` attribute is
+    /// set does this fall back to deriving the stem from the primary file
+    /// name.
+    ///
     /// This is the `<docname>` used to build private docinfo file names (e.g.
-    /// `mydoc-docinfo.html` for `mydoc.adoc`). Returns `None` when no primary
-    /// file name has been set, in which case private docinfo files cannot be
-    /// resolved.
+    /// `mydoc-docinfo.html` for `mydoc.adoc`). Returns `None` when neither a
+    /// `docname` attribute nor a primary file name has been set, in which case
+    /// private docinfo files cannot be resolved.
+    ///
+    /// [`with_intrinsic_attribute`]: Self::with_intrinsic_attribute
     pub(crate) fn docname(&self) -> Option<String> {
+        // An explicitly-set `docname` attribute is the source of truth.
+        if let Some(docname) = self.attribute_value("docname").as_maybe_str()
+            && !docname.is_empty()
+        {
+            return Some(docname.to_string());
+        }
+
         let primary = self.primary_file_name.as_deref()?;
 
         // Strip the directory portion (handling both separators, since the
@@ -2420,7 +2613,7 @@ impl Parser {
     }
 
     /// Returns `true` if the AsciiDoc file named by `key` (an inter-document
-    /// xref path – relative to this document, AsciiDoc extension removed) was
+    /// xref path — relative to this document, AsciiDoc extension removed) was
     /// included into this document *in full* by the preprocessor.
     ///
     /// A cross reference to such a file collapses to a same-document reference,
@@ -2438,8 +2631,8 @@ impl Parser {
     ///
     /// `Parser::parse_deferred` seeds the registry with the outermost
     /// document's own includes before parsing begins; this entry point is for
-    /// an include performed while a nested scope with a shared catalog – an
-    /// AsciiDoc table cell – is parsed. Takes `&self` for the same reason as
+    /// an include performed while a nested scope with a shared catalog — an
+    /// AsciiDoc table cell — is parsed. Takes `&self` for the same reason as
     /// [`catalog_include_is_full`](Self::catalog_include_is_full). See
     /// [`Catalog::register_include`](crate::document::Catalog::register_include).
     pub(crate) fn register_include(&self, key: &str, full: bool) {
@@ -2498,18 +2691,26 @@ impl Parser {
         }
 
         // Cap the resolved value at `max-attribute-value-size` bytes (a no-op
-        // unless that limit is in force – by default, only under Secure).
+        // unless that limit is in force — by default, only under Secure).
         value = self.limit_attribute_value_size(value);
 
         // `notitle` and `showtitle` are inverse spellings of one title-
         // visibility toggle; keep the partner in sync (see
         // [`apply_title_visibility_linkage`](Self::apply_title_visibility_linkage)).
-        self.apply_title_visibility_linkage(
+        // A document header entry must not use the linkage to route around a
+        // lock on the partner spelling, so the lock is enforced here. A
+        // locked `showtitle` also vetoes a conflicting `notitle` entry
+        // outright (see the method doc), so the write is dropped entirely in
+        // that case.
+        if !self.apply_title_visibility_linkage(
             &attr_name,
             &value,
             ModificationContext::Anywhere,
             false,
-        );
+            Some(DocumentWriteScope::Header),
+        ) {
+            return;
+        }
 
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
@@ -2549,6 +2750,41 @@ impl Parser {
         Arc::make_mut(&mut self.attribute_values).insert(attr_name, attribute_value);
     }
 
+    /// Called from [`Header::parse()`] for a value that is derived from a
+    /// block attribute above the document title (e.g. `[separator=::]` sets
+    /// `title-separator`) and that has a direct document-attribute-entry
+    /// equivalent.
+    ///
+    /// Unlike [`set_attribute_by_value_from_header()`](Self::set_attribute_by_value_from_header),
+    /// this applies the same modification-context lock check that an
+    /// ordinary `:title-separator:` header entry goes through (see
+    /// [`set_attribute_from_header()`](Self::set_attribute_from_header)), so
+    /// an attribute locked via the API
+    /// ([`ApiOnly`](ModificationContext::ApiOnly) or
+    /// [`ApiOrDocumentBody`](ModificationContext::ApiOrDocumentBody)) is not
+    /// silently overwritten just because the equivalent value arrived via
+    /// block-attribute syntax rather than an attribute entry. The write is
+    /// dropped silently on a lock: this path has no attribute span to attach
+    /// an `AttributeValueIsLocked` warning to.
+    ///
+    /// [`Header::parse()`]: crate::document::Header::parse
+    pub(crate) fn set_attribute_by_value_from_header_checked<N: AsRef<str>, V: AsRef<str>>(
+        &mut self,
+        name: N,
+        value: V,
+    ) {
+        let attr_name = remap_attr_name(name);
+
+        if let Some(existing_attr) = self.effective_attribute(&attr_name)
+            && (existing_attr.modification_context == ModificationContext::ApiOnly
+                || existing_attr.modification_context == ModificationContext::ApiOrDocumentBody)
+        {
+            return;
+        }
+
+        self.set_attribute_by_value_from_header(attr_name, value);
+    }
+
     /// Applies the `imagesdir`-relative default for the `iconsdir` attribute.
     ///
     /// The `iconsdir` attribute defaults to `{imagesdir}/icons`; when
@@ -2557,7 +2793,7 @@ impl Parser {
     /// non-empty value and `iconsdir` was left at its built-in default, the
     /// icons directory is derived as `{imagesdir}/icons`.
     ///
-    /// The derivation is skipped – so an explicit `iconsdir` wins – when either
+    /// The derivation is skipped — so an explicit `iconsdir` wins — when either
     /// the attribute was set in the header (`iconsdir_set_in_header`) or its
     /// resolved value differs from [`DEFAULT_ICONSDIR`] (which is how an
     /// override applied any other way, e.g. via the API, is detected). The one
@@ -2652,18 +2888,26 @@ impl Parser {
         }
 
         // Cap the resolved value at `max-attribute-value-size` bytes (a no-op
-        // unless that limit is in force – by default, only under Secure).
+        // unless that limit is in force — by default, only under Secure).
         value = self.limit_attribute_value_size(value);
 
         // `notitle` and `showtitle` are inverse spellings of one title-
         // visibility toggle; keep the partner in sync (see
         // [`apply_title_visibility_linkage`](Self::apply_title_visibility_linkage)).
-        self.apply_title_visibility_linkage(
+        // A document body entry must not use the linkage to route around a
+        // lock on the partner spelling, so the lock is enforced here. A
+        // locked `showtitle` also vetoes a conflicting `notitle` entry
+        // outright (see the method doc), so the write is dropped entirely in
+        // that case.
+        if !self.apply_title_visibility_linkage(
             &attr_name,
             &value,
             ModificationContext::Anywhere,
             false,
-        );
+            Some(DocumentWriteScope::Body),
+        ) {
+            return;
+        }
 
         let attribute_value = AttributeValue {
             allowable_value: AllowableValue::Any,
@@ -2672,6 +2916,18 @@ impl Parser {
             value,
         };
 
+        // Inside an AsciiDoc table cell (a nested document) the leading attribute
+        // lines act as the cell's own header, so a `sectnumlevels` assignment
+        // there must refresh the cached depth that section numbering reads. The
+        // top-level document freezes that value at the end of its header (see
+        // [`Document::parse`](crate::Document)) and a cell has no separate header
+        // pass, so without this a cell that lowered `sectnumlevels` would still
+        // number its deeper sections at the inherited depth. The enclosing cell
+        // parse saves and restores the field, keeping the change scoped to the
+        // cell.
+        let refresh_cell_sectnumlevels =
+            attr_name == "sectnumlevels" && self.nested_document_depth > 0;
+
         // An explicit assignment supersedes (and resets) any counter of the same
         // name. This is what lets `:!name:` reset a counter.
         self.counter_values.borrow_mut().remove(&attr_name);
@@ -2679,6 +2935,14 @@ impl Parser {
         // The derived `backend-html5-doctype-*` attribute tracks `doctype`
         // automatically (it is synthesized on lookup), so no refresh is needed.
         Arc::make_mut(&mut self.attribute_values).insert(attr_name, attribute_value);
+
+        if refresh_cell_sectnumlevels {
+            self.sectnumlevels = self
+                .attribute_value("sectnumlevels")
+                .as_maybe_str()
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(3);
+        }
     }
 
     /// Unlocks each *flexible* document attribute ([`FLEXIBLE_ATTRIBUTES`],
@@ -2694,7 +2958,7 @@ impl Parser {
     /// a body `:numbered!:`, while an API-*disabled* `numbered!` stays
     /// permanently unnumbered even across a later `:numbered:`.
     ///
-    /// Called once, for the top-level document only – Asciidoctor guards the
+    /// Called once, for the top-level document only — Asciidoctor guards the
     /// unfreeze with `unless @parent_document`, and an AsciiDoc table cell
     /// never reaches this path. This must *not* recapture the attribute
     /// baseline: the unlock is a per-parse effect, so a `Parser` reused across
@@ -2785,8 +3049,8 @@ impl Parser {
     /// A counter reads the current value to produce (and display) the next one.
     /// For an unlocked attribute the advanced value is stored in the readable
     /// [`counter_values`](Self::counter_values) overlay, so a later reference
-    /// reads it. For a *locked* attribute – one set via the API, or a locked
-    /// built-in such as `max-include-depth` – the write path depends on the
+    /// reads it. For a *locked* attribute — one set via the API, or a locked
+    /// built-in such as `max-include-depth` — the write path depends on the
     /// caller:
     ///
     /// * `commit_when_locked` (the captioning counter): the value is stored in
@@ -2842,7 +3106,7 @@ impl Parser {
     /// Reports whether `name` currently resolves to an attribute that is
     /// *locked* against modification by a counter: it has an effective value
     /// whose [`ModificationContext`] is
-    /// [`ApiOnly`](ModificationContext::ApiOnly) – an API-set override or a
+    /// [`ApiOnly`](ModificationContext::ApiOnly) — an API-set override or a
     /// locked built-in such as `max-include-depth`.
     ///
     /// This mirrors Asciidoctor's `Document#attribute_locked?`, which is `true`
@@ -2857,6 +3121,36 @@ impl Parser {
     fn attribute_is_locked(&self, name: &str) -> bool {
         self.effective_attribute(name)
             .is_some_and(|a| a.modification_context == ModificationContext::ApiOnly)
+    }
+
+    /// Reports whether `name` currently resolves to an attribute that a write
+    /// from `scope` is not permitted to change, for
+    /// [`apply_title_visibility_linkage`](Self::apply_title_visibility_linkage)'s
+    /// partner-lock check.
+    ///
+    /// Applies the exact blocking condition
+    /// [`set_attribute_from_header`](Self::set_attribute_from_header) and
+    /// [`set_attribute_from_body`](Self::set_attribute_from_body) apply to
+    /// the attribute being assigned directly: a header write is blocked by
+    /// [`ApiOnly`](ModificationContext::ApiOnly) or
+    /// [`ApiOrDocumentBody`](ModificationContext::ApiOrDocumentBody) (the
+    /// latter permits only the body), and a body write is blocked by
+    /// [`ApiOnly`](ModificationContext::ApiOnly) or
+    /// [`ApiOrHeader`](ModificationContext::ApiOrHeader) (the latter permits
+    /// only the API or the header). Unlike
+    /// [`attribute_is_locked`](Self::attribute_is_locked), this also treats a
+    /// scope-mismatched `ApiOrHeader`/`ApiOrDocumentBody` value as locked, so
+    /// a header entry cannot use the linkage to reach a body-only partner (or
+    /// a body entry a header-only one).
+    fn partner_write_is_locked(&self, name: &str, scope: DocumentWriteScope) -> bool {
+        self.effective_attribute(name).is_some_and(|a| {
+            let mc = a.modification_context;
+            mc == ModificationContext::ApiOnly
+                || match scope {
+                    DocumentWriteScope::Header => mc == ModificationContext::ApiOrDocumentBody,
+                    DocumentWriteScope::Body => mc == ModificationContext::ApiOrHeader,
+                }
+        })
     }
 }
 
@@ -3048,10 +3342,10 @@ fn apply_soft_set_modifier(
 /// would name can become active later in the same parse and the stored override
 /// would then shadow the read-only intrinsic:
 ///
-/// * The bare derived values `basebackend` / `filetype` – always resolved on
+/// * The bare derived values `basebackend` / `filetype` — always resolved on
 ///   the fly from `backend` (see [`derived_backend_value`]), never stored.
 /// * The doctype-keyed flags `backend-<b>-doctype-<d>` /
-///   `basebackend-<bb>-doctype-<d>` – the `doctype` component shifts mid-parse
+///   `basebackend-<bb>-doctype-<d>` — the `doctype` component shifts mid-parse
 ///   (e.g. an AsciiDoc table cell that resets, then changes, its doctype), so
 ///   an assignment to an inactive one (`backend-html5-doctype-article` while
 ///   the doctype is `book`) must not be stored where it could shadow the
@@ -3096,6 +3390,97 @@ mod tests {
         let p = Parser::new();
         assert_eq!(p.attribute_value("foo"), InterpretedValue::Unset);
         assert_eq!(p.safe_mode(), Parser::default().safe_mode());
+    }
+
+    mod apply_substitutions {
+        use crate::{
+            content::{SubstitutionGroup, SubstitutionStep},
+            parser::ModificationContext,
+            tests::prelude::*,
+        };
+
+        #[test]
+        fn character_replacements_only() {
+            // The byline use case: a converter runs just the
+            // character-replacements step over an author name, so `O'Brien`
+            // gets a typographic apostrophe and `(C)` becomes the copyright
+            // sign, without any other substitution altering the string.
+            let parser = Parser::default();
+            let group = SubstitutionGroup::Custom(vec![SubstitutionStep::CharacterReplacements]);
+
+            assert_eq!(
+                parser.apply_substitutions("O'Brien (C)", &group),
+                "O&#8217;Brien &#169;"
+            );
+        }
+
+        #[test]
+        fn character_replacements_leave_markup_untouched() {
+            // Only the replacements step runs, so `*bold*` and `<` are passed
+            // through verbatim — neither the quotes nor the special-characters
+            // step fires.
+            let parser = Parser::default();
+            let group = SubstitutionGroup::Custom(vec![SubstitutionStep::CharacterReplacements]);
+
+            assert_eq!(
+                parser.apply_substitutions("*bold* < (TM)", &group),
+                "*bold* < &#8482;"
+            );
+        }
+
+        #[test]
+        fn header_group_matches_byline_subs() {
+            // The `Header` group applies special characters and attribute
+            // references but not quotes, matching Asciidoctor's header subs.
+            let parser = Parser::default();
+
+            assert_eq!(
+                parser.apply_substitutions("*Ed* <a & b>", &SubstitutionGroup::Header),
+                "*Ed* &lt;a &amp; b&gt;"
+            );
+        }
+
+        #[test]
+        fn attribute_references_resolve_against_parser_state() {
+            // A `{name}` reference resolves against the parser's current
+            // attribute state, so the caller can seed values via the builder.
+            let parser = Parser::default().with_intrinsic_attribute(
+                "author",
+                "Kismet",
+                ModificationContext::Anywhere,
+            );
+
+            let group = SubstitutionGroup::Custom(vec![SubstitutionStep::AttributeReferences]);
+
+            assert_eq!(
+                parser.apply_substitutions("by {author}", &group),
+                "by Kismet"
+            );
+        }
+
+        #[test]
+        fn normal_group_runs_full_pipeline() {
+            // A named group runs its whole step sequence: `Normal` turns
+            // `*word*` into a `<strong>` span and escapes `<`.
+            let parser = Parser::default();
+
+            assert_eq!(
+                parser.apply_substitutions("*word* <x>", &SubstitutionGroup::Normal),
+                "<strong>word</strong> &lt;x&gt;"
+            );
+        }
+
+        #[test]
+        fn none_group_is_a_no_op() {
+            // The `None` group applies no substitutions, returning the input
+            // unchanged.
+            let parser = Parser::default();
+
+            assert_eq!(
+                parser.apply_substitutions("*word* <x> (C)", &SubstitutionGroup::None),
+                "*word* <x> (C)"
+            );
+        }
     }
 
     mod attribute_state_between_parses {
@@ -4231,6 +4616,26 @@ mod tests {
         }
 
         #[test]
+        fn unset_showtitle_alone_still_hides_via_the_mirrored_notitle() {
+            // A merely-present-but-unset `showtitle` decides the outcome
+            // (hidden) even with no document entry for either spelling at
+            // all. An `ApiOnly` hard unset mirrors an unlocked `notitle: Set`
+            // as a side effect (issue #1148; see
+            // `notitle_showtitle_linkage::api_hard_unset_of_showtitle_plants_
+            // an_unlocked_notitle_mirror`), so this resolves via the
+            // `notitle`-present branch rather than `showtitle`'s own
+            // present-but-unset fallback -- either way, the resolved
+            // visibility is the same.
+            let parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+            assert!(parser.has_attribute("notitle"));
+            assert!(!parser.resolve_show_title(true));
+        }
+
+        #[test]
         fn notitle_is_the_complement_when_showtitle_absent() {
             // notitle set -> hidden; notitle unset -> shown.
             assert!(!with("notitle", true).resolve_show_title(true));
@@ -4248,13 +4653,49 @@ mod tests {
         // Asciidoctor asciidoctor/asciidoctor#3804: `notitle` and `showtitle`
         // are two spellings of one title-visibility toggle, wired as inverses.
         // Assigning either updates the partner so the resolved document carries
-        // one consistent signal – following Asciidoctor's hash semantics, where
+        // one consistent signal — following Asciidoctor's hash semantics, where
         // turning the toggle *on* sets one spelling and *removes* the other.
 
         fn parse_header(entries: &str) -> Parser {
             let mut parser = Parser::default();
             let _ = parser.parse(&format!("= Title\n{entries}\n\nbody"));
             parser
+        }
+
+        #[test]
+        fn header_notitle_entry_shows_title_when_showtitle_is_api_hard_unset() {
+            // Issue #1148 (reopened): a hard-unset `showtitle` lock
+            // (`Options::unset("showtitle")`) combined with an unrelated
+            // document `:!notitle:` entry must still resolve to showing the
+            // title end-to-end (parity oracle: `test/document_test.rb`,
+            // "should be able to enable doctitle for embedded document",
+            // case `[{ 'showtitle' => false }, [':!notitle:']]`).
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+            let _ = parser.parse("= Document Title\n:!notitle:\n\nbody\n");
+
+            assert!(parser.resolve_show_title(false));
+        }
+
+        #[test]
+        fn header_showtitle_entry_shows_title_when_notitle_is_api_hard_unset() {
+            // Issue #1148 (reopened): a hard-unset `notitle` lock
+            // (`Options::unset("notitle")`) combined with an unrelated
+            // document `:!showtitle:` entry must still resolve to showing the
+            // title -- this was a regression from 0.29.15 introduced while
+            // fixing the case above (parity oracle: same Ruby test, case
+            // `[{ 'notitle' => nil }, [':!showtitle:']]`).
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "notitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+            let _ = parser.parse("= Document Title\n:!showtitle:\n\nbody\n");
+
+            assert!(parser.resolve_show_title(false));
         }
 
         #[test]
@@ -4356,10 +4797,212 @@ mod tests {
 
         #[test]
         fn unrelated_attributes_are_untouched() {
-            // A document that never assigns either spelling leaves both absent –
+            // A document that never assigns either spelling leaves both absent —
             // the linkage is a no-op for every other attribute.
             let parser = parse_header(":sectnums:");
             assert!(!parser.has_attribute("notitle"));
+            assert!(!parser.has_attribute("showtitle"));
+        }
+
+        #[test]
+        fn header_notitle_does_not_override_api_locked_showtitle() {
+            // An API-locked `showtitle` must win over a header `:notitle:`
+            // entry -- the linkage must not use the partner update as a back
+            // door around the lock.
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                true,
+                ModificationContext::ApiOnly,
+            );
+            let _ = parser.parse("= Doc\n:notitle:\n\nBody.");
+
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
+            assert!(parser.is_attribute_set("showtitle"));
+            assert!(parser.resolve_show_title(false));
+
+            // The conflicting `:notitle:` entry must be rejected outright,
+            // not just have its partner-sync side effect skipped --
+            // otherwise a direct probe of `notitle` (e.g. `ifdef::notitle[]`)
+            // would see the raw document value instead of staying consistent
+            // with the `showtitle` lock, as Asciidoctor does.
+            assert!(!parser.has_attribute("notitle"));
+        }
+
+        #[test]
+        fn header_unset_notitle_entry_also_rejected_when_showtitle_is_api_locked() {
+            // The rejection applies to any conflicting `notitle` write, not
+            // just a `Set` one: an explicit `:!notitle:` unset entry must not
+            // create a `notitle` tombstone either, since that would still make
+            // a direct `ifdef::notitle[]` probe diverge from the lock.
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                true,
+                ModificationContext::ApiOnly,
+            );
+            let _ = parser.parse("= Doc\n:!notitle:\n\nBody.");
+
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
+            assert!(!parser.has_attribute("notitle"));
+        }
+
+        #[test]
+        fn header_unset_notitle_entry_applies_when_showtitle_is_api_hard_unset() {
+            // Issue #1143: hard-unsetting `showtitle` via the API (`ApiOnly`
+            // lock to `Unset`, e.g. `Options::unset("showtitle")`) only
+            // prevents the document from turning `showtitle` on -- it does
+            // not by itself mean "hide the title" the way a locked `Set`
+            // does (see `header_unset_notitle_entry_also_rejected_when_
+            // showtitle_is_api_locked` above, which covers that `Set` case).
+            // Since `notitle` itself carries no lock here, the document's
+            // own `:!notitle:` entry should apply normally and the title
+            // should show, matching Asciidoctor (parity oracle:
+            // `test/document_test.rb`, "should be able to enable doctitle
+            // for embedded document", case `[{ 'showtitle' => false },
+            // [':!notitle:']]`).
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+            let _ = parser.parse("= Doc\n:!notitle:\n\nBody.");
+
+            assert!(!parser.is_attribute_set("showtitle"));
+            assert!(parser.has_attribute("notitle"));
+            assert!(!parser.is_attribute_set("notitle"));
+            assert!(parser.resolve_show_title(false));
+        }
+
+        #[test]
+        fn api_hard_unset_of_showtitle_plants_an_unlocked_notitle_mirror() {
+            // Issue #1148: a single-sided hard API unset -- no document
+            // entry for either spelling at all -- must still keep the pair
+            // mirrored, restoring the 0.29.15 behavior that #1145's blanket
+            // `ApiOnly` skip regressed. A downstream consumer that reads
+            // `notitle` directly (e.g. `ifdef::notitle[]`, or a renderer
+            // checking the raw attribute instead of resolving the toggle via
+            // `resolve_show_title`) needs to see it too.
+            let parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+
+            assert!(parser.has_attribute("notitle"));
+            assert!(parser.is_attribute_set("notitle"));
+
+            // Unlike the pre-#1143 behavior, the mirrored value is not
+            // itself locked: a later document entry for `notitle` can still
+            // override it (see
+            // `header_unset_notitle_entry_applies_when_showtitle_is_api_hard_unset`
+            // above, which exercises exactly that).
+        }
+
+        #[test]
+        fn api_hard_unset_of_notitle_plants_an_unlocked_showtitle_mirror() {
+            // Mirror of the above, in the other direction -- the exact repro
+            // from issue #1148 (`Options::unset("notitle")`, no document
+            // entries): the title should show, and a consumer reading
+            // `showtitle` directly should see it `Set`.
+            let parser = Parser::default().with_intrinsic_attribute_bool(
+                "notitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+
+            assert!(!parser.is_attribute_set("notitle"));
+            assert!(parser.has_attribute("showtitle"));
+            assert!(parser.is_attribute_set("showtitle"));
+            assert!(parser.resolve_show_title(false));
+        }
+
+        #[test]
+        fn header_showtitle_does_not_override_api_locked_notitle() {
+            // Same as above, in the opposite direction: a header `:showtitle:`
+            // entry is itself unlocked (only `notitle` was API-locked), so the
+            // direct write is permitted -- but its partner-update side effect
+            // must not clobber the API-locked `notitle` value.
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "notitle",
+                true,
+                ModificationContext::ApiOnly,
+            );
+            let _ = parser.parse("= Doc\n:showtitle:\n\nBody.");
+
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
+            assert!(parser.is_attribute_set("notitle"));
+
+            // `showtitle` itself was never locked, so the direct write stands,
+            // and per its documented precedence over `notitle` it decides the
+            // resolved visibility here -- that precedence rule is unrelated to
+            // the API lock on `notitle`'s raw value, which this test guards.
+            assert!(parser.resolve_show_title(false));
+        }
+
+        #[test]
+        fn body_notitle_does_not_override_api_locked_showtitle() {
+            // The lock is enforced from the document body too, not just the
+            // header.
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                true,
+                ModificationContext::ApiOnly,
+            );
+            let _ = parser.parse("= Doc\n\nintro\n\n:notitle:\n\nmore");
+
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
+            assert!(parser.is_attribute_set("showtitle"));
+
+            // Rejected outright, same as the header case.
+            assert!(!parser.has_attribute("notitle"));
+        }
+
+        #[test]
+        fn header_notitle_does_not_override_document_body_locked_showtitle() {
+            // `ApiOrDocumentBody` permits only a *body* write, so a header
+            // `:notitle:` entry must not be able to use the linkage to reach
+            // an `ApiOrDocumentBody`-locked `showtitle` either -- not just an
+            // `ApiOnly` one.
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                true,
+                ModificationContext::ApiOrDocumentBody,
+            );
+            let _ = parser.parse("= Doc\n:notitle:\n\nBody.");
+
+            assert_eq!(parser.attribute_value("showtitle"), InterpretedValue::Set);
+            assert!(parser.is_attribute_set("showtitle"));
+
+            // Rejected outright, same as the `ApiOnly` case.
+            assert!(!parser.has_attribute("notitle"));
+        }
+
+        #[test]
+        fn body_showtitle_does_not_override_header_locked_notitle() {
+            // `ApiOrHeader` permits only the API or a *header* write, so a
+            // body `:showtitle:` entry must not be able to use the linkage to
+            // reach an `ApiOrHeader`-locked `notitle`.
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "notitle",
+                true,
+                ModificationContext::ApiOrHeader,
+            );
+            let _ = parser.parse("= Doc\n\nintro\n\n:showtitle:\n\nmore");
+
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
+            assert!(parser.is_attribute_set("notitle"));
+        }
+
+        #[test]
+        fn api_reassignment_still_updates_locked_partner() {
+            // The partner lock is enforced only against a *document*
+            // assignment; a later API call is always permitted to override an
+            // earlier one (including the partner it previously set), matching
+            // the "last call wins" contract of `with_intrinsic_attribute*`.
+            let parser = Parser::default()
+                .with_intrinsic_attribute_bool("showtitle", true, ModificationContext::ApiOnly)
+                .with_intrinsic_attribute_bool("notitle", true, ModificationContext::ApiOnly);
+
+            assert_eq!(parser.attribute_value("notitle"), InterpretedValue::Set);
             assert!(!parser.has_attribute("showtitle"));
         }
     }
@@ -4537,7 +5180,7 @@ mod tests {
             // Author-defined attributes that share a derived-family prefix but
             // name no active flag (and are not the doctype-keyed namespace) are
             // kept, not swallowed by the read-only reservation, so they stay
-            // visible to `ifdef` / attribute references – matching Asciidoctor.
+            // visible to `ifdef` / attribute references — matching Asciidoctor.
             let doc = Parser::default().parse(
                 ":backend-custom: enabled\n:basebackend-custom: on\n:filetype-custom: yes\n:doctype-draft: 1\n\nbody",
             );
@@ -4589,11 +5232,39 @@ mod tests {
     }
 
     mod docname {
-        use crate::Parser;
+        use crate::{Parser, parser::ModificationContext};
 
         #[test]
         fn none_without_primary_file_name() {
             assert_eq!(Parser::default().docname(), None);
+        }
+
+        #[test]
+        fn explicit_attribute_takes_precedence() {
+            // An explicitly-set `docname` attribute is the source of truth, even
+            // when no primary file name has been supplied.
+            assert_eq!(
+                Parser::default()
+                    .with_intrinsic_attribute("docname", "test", ModificationContext::ApiOnly)
+                    .docname()
+                    .as_deref(),
+                Some("test")
+            );
+        }
+
+        #[test]
+        fn explicit_attribute_overrides_primary_file_name() {
+            // When both are present, the attribute wins and is returned verbatim
+            // (no directory/extension stripping), mirroring Asciidoctor's
+            // `doc.attributes['docname']` being the single source of truth.
+            assert_eq!(
+                Parser::default()
+                    .with_primary_file_name("mydoc.adoc")
+                    .with_intrinsic_attribute("docname", "other", ModificationContext::ApiOnly)
+                    .docname()
+                    .as_deref(),
+                Some("other")
+            );
         }
 
         #[test]

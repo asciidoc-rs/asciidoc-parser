@@ -62,13 +62,13 @@
 //! leaf's structure from already-*rendered* output, while the builder's
 //! leaves are drawn from *source*, so the two can legitimately draw leaf
 //! boundaries differently even when the underlying content is identical.
-//! [`consume_rendered_prefix`] is the one mechanism behind every case below –
+//! [`consume_rendered_prefix`] is the one mechanism behind every case below —
 //! see its own doc comment for how it works:
 //!
 //! - A handful of character-replacement types combine more than one output
-//!   character into a single logical value (an em dash surrounded by spaces –
+//!   character into a single logical value (an em dash surrounded by spaces —
 //!   [`CharacterReplacementType::EmDashSurroundedBySpaces`](crate::parser::CharacterReplacementType)
-//!   – renders as *thin space, em dash, thin space*, three characters from one
+//!   — renders as *thin space, em dash, thin space*, three characters from one
 //!   source match). The builder recognizes the whole match as **one**
 //!   [`CharRef::Replacement`](crate::inlines::CharRef::Replacement) leaf
 //!   carrying the combined value; the recorder sees three separate numeric-
@@ -77,22 +77,22 @@
 //! - Adjacent `Text` node boundaries can legitimately differ: the builder gives
 //!   an attribute-expanded run its own node even when it is plain text with no
 //!   escaping of its own (design §3.4.1), so it sits as a distinct sibling
-//!   beside the literal text around it, while the recorder – with no marker
-//!   around plain text – recovers the whole run as one `Text` node.
+//!   beside the literal text around it, while the recorder — with no marker
+//!   around plain text — recovers the whole run as one `Text` node.
 //! - A source `&amp;`/`&lt;`/`&gt;`/`&#8217;`/… that the author wrote out
 //!   literally passes through Asciidoctor's `specialcharacters` step unchanged
 //!   (it is already a valid entity), rendering byte-identical to whatever
-//!   *live* substitution – a special-character escape, or a typographic
-//!   replacement that happens to render as the same entity – produces the same
+//!   *live* substitution — a special-character escape, or a typographic
+//!   replacement that happens to render as the same entity — produces the same
 //!   output. From already-rendered output alone the recorder cannot tell "the
 //!   author wrote this entity" ([`CharRef::Entity`], the builder's
 //!   classification) apart from the live classification that coincides with it
-//!   – exactly the same set of entities [`classify_entity`] (the recorder's own
+//!   — exactly the same set of entities [`classify_entity`] (the recorder's own
 //!   recovery table) hard-codes, reproduced in [`RECORDER_ENTITY_TABLE`] and
 //!   kept in lockstep with it by
 //!   [`recorder_entity_table_matches_production_classify_entity`].
 //! - A passthrough's content becomes its own [`Raw`](InlineNode::Raw) leaf in
-//!   the builder's tree – but a passthrough's *restore* is a direct string
+//!   the builder's tree — but a passthrough's *restore* is a direct string
 //!   splice with no renderer call for the recorder to intercept (design §4.2's
 //!   "re-splicing is just keeping the node in place" describes the target
 //!   architecture, not what today's post-hoc string recorder can observe), so
@@ -108,7 +108,7 @@
 //!   the node: "an empty text yields no children ... the fold reads as 'no text
 //!   provided'"). The recorder can only recover what actually got *rendered*,
 //!   and Asciidoctor's own unresolved-xref fallback renders the bracketed
-//!   `[target]` form – never the author's display text – so the recorder's
+//!   `[target]` form — never the author's display text — so the recorder's
 //!   `children` for such a node is legitimately empty even when the builder's
 //!   is not. This corpus builds both trees with no resolution pass, so every
 //!   cross-reference is in exactly this state; a resolved reference (out of
@@ -116,13 +116,13 @@
 //!   *destination*, not the text, onto a `children` list the builder already
 //!   populated correctly.
 //! - A footnote **reference** occurrence's own `id` (`footnote:disc[]`) never
-//!   reaches the renderer's params at all once it *resolves* to a number – the
-//!   fold renders just the number, dropping `id` – so the recorder cannot
+//!   reaches the renderer's params at all once it *resolves* to a number — the
+//!   fold renders just the number, dropping `id` — so the recorder cannot
 //!   recover it, while the builder still carries it as a structural fact (see
 //!   [`assert_node_equivalent`]'s own `Footnote` arm).
 //! - A [`Link`](RefVariant::Link)'s `roles`/`window` fields are not populated
 //!   from its own attribute-list display text (`Ref::attrs`'s own doc comment)
-//!   – the fold reads those straight off `attrs` instead – so they are skipped
+//!   — the fold reads those straight off `attrs` instead — so they are skipped
 //!   whenever `attrs` is present (see [`assert_node_equivalent`]'s own `Ref`
 //!   arm).
 //!
@@ -167,10 +167,10 @@ use crate::{
 /// them), then asserts they are the same shape.
 ///
 /// The recorder side reproduces the *retired* Strategy-A production path
-/// directly – a [`RecordingRenderer`] wrapped around the built-in HTML
+/// directly — a [`RecordingRenderer`] wrapped around the built-in HTML
 /// renderer, the real pipeline run over it, the recorded markers parsed into
 /// a tree, and each defining footnote's subtree attached from the footnote
-/// texts that pass registered – exactly what `SubstitutionGroup::apply` did
+/// texts that pass registered — exactly what `SubstitutionGroup::apply` did
 /// before the single-pass builder replaced the recorder as `Content`'s tree
 /// source (the swap this module's cross-check cleared the way for). The
 /// builder side is the production path's own [`build`].
@@ -246,7 +246,7 @@ fn assert_trees_equivalent(recorder: &[InlineNode<'_>], builder: &[InlineNode<'_
         let b = builder.front().expect("checked non-empty above");
 
         // A `Text`/`Raw`/`CharRef` builder leaf is first tried against the
-        // recorder's *rendered* bytes at this position – see
+        // recorder's *rendered* bytes at this position — see
         // `consume_rendered_prefix`'s own doc comment for why this one
         // mechanism covers every leaf-boundary difference the module doc
         // comment documents. Only when that fails (or `b` is not a leaf at
@@ -259,7 +259,7 @@ fn assert_trees_equivalent(recorder: &[InlineNode<'_>], builder: &[InlineNode<'_
         // special character, so it has no business matching a `CharRef`'s
         // rendered entity), and a `CharRef` target only ever matches
         // recorder `CharRef`. `Raw` (a passthrough) is the one documented
-        // exception that legitimately spans both kinds – its content still
+        // exception that legitimately spans both kinds — its content still
         // passes through `specialcharacters`, so the recorder can recover
         // it as a mix of plain text and entities (design §3.4.1).
         let target: Option<(Cow<'_, str>, LeafKinds)> = match b {
@@ -299,8 +299,8 @@ fn assert_trees_equivalent(recorder: &[InlineNode<'_>], builder: &[InlineNode<'_
 /// ambiguity the module doc comment describes).
 ///
 /// This is a hand-reproduced copy of `classify_entity`'s own match arms, not
-/// a shared definition (the two functions map in opposite directions – entity
-/// to kind there, kind to entity here – over different types, the recorder's
+/// a shared definition (the two functions map in opposite directions — entity
+/// to kind there, kind to entity here — over different types, the recorder's
 /// own internal `CharRefKind` there and the public `CharRef` here), so it can
 /// drift from its source silently.
 /// [`recorder_entity_table_matches_production_classify_entity`] below guards
@@ -357,7 +357,7 @@ fn recorder_entity_table_matches_production_classify_entity() {
 /// [`CharRef::Entity`] the table does not name (an author-written entity
 /// `classify_entity` has no special case for is carried through unchanged,
 /// on both sides, the same way). A multi-character
-/// [`CharRef::Replacement`] (an em dash surrounded by spaces, an ellipsis –
+/// [`CharRef::Replacement`] (an em dash surrounded by spaces, an ellipsis —
 /// see the module doc comment) has no single table entry of its own, since
 /// the recorder recovers it as several adjacent leaves, one per character;
 /// it is rendered by looking up each character individually and
@@ -393,7 +393,7 @@ fn entity_for_char(c: char) -> Option<&'static str> {
 }
 
 /// Which recorder leaf kinds [`consume_rendered_prefix`] may draw on for a
-/// given builder target – see that function's own doc comment, and
+/// given builder target — see that function's own doc comment, and
 /// [`assert_trees_equivalent`]'s own note on why this restriction exists
 /// (so a byte-coincidental match can never paper over a genuine leaf-kind
 /// regression).
@@ -419,10 +419,10 @@ impl LeafKinds {
 }
 
 /// The single mechanism behind every leaf-boundary difference this module's
-/// own doc comment documents: if a prefix of `recorder`'s front nodes –
+/// own doc comment documents: if a prefix of `recorder`'s front nodes —
 /// each [`Text`](InlineNode::Text) leaf contributing its value verbatim,
 /// each [`CharRef`](InlineNode::CharRef) leaf contributing its own
-/// *rendered* bytes ([`char_ref_rendered`]) – concatenates to exactly
+/// *rendered* bytes ([`char_ref_rendered`]) — concatenates to exactly
 /// `target`, consumes that prefix and returns `true`. A `CharRef` leaf is
 /// atomic (only ever consumed whole); a trailing `Text` leaf is split when
 /// `target` ends part-way through it, so the unconsumed remainder is kept in
@@ -585,7 +585,7 @@ fn assert_node_equivalent(r: &InlineNode<'_>, b: &InlineNode<'_>, source: &str) 
             // renders the bracketed target, not the text), while the
             // builder always bakes it in. This exemption is scoped as
             // narrowly as the asymmetry itself: it fires only when the
-            // recorder's `children` is empty *and* the builder's is not –
+            // recorder's `children` is empty *and* the builder's is not —
             // exactly the shape the documented gap produces. Both sides
             // empty (a shorthand `<<id>>` with no display text at all,
             // where there is nothing to lose) still goes through the
@@ -624,10 +624,10 @@ fn assert_node_equivalent(r: &InlineNode<'_>, b: &InlineNode<'_>, source: &str) 
             );
 
             // A *resolved* reference occurrence's `id` never reaches the
-            // renderer's own params at all – both `fold_footnote` and the
+            // renderer's own params at all — both `fold_footnote` and the
             // string pipeline's own replacer render just the resolved
             // number, dropping `id` (see `fold_footnote` in
-            // `inline_builder/fold.rs`) – so the recorder has nothing to
+            // `inline_builder/fold.rs`) — so the recorder has nothing to
             // recover it from; the builder still carries it as a structural
             // fact about the node regardless. The defining occurrence and an
             // *unresolved* reference (whose fallback rendering does use
@@ -754,6 +754,7 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "A concealed (((primary,secondary))) term.",
         "[[the-anchor]]Anchored paragraph.",
         "first line +\nsecond line",
+        "only +",
         "*bold* _em_ `code` (C) https://x.y[link] <<ref>> image:i.png[i]",
         "A mix of {backend}, *bold < text*, and a footnote:[with `code`].",
         r"a \*not bold* b",
@@ -789,6 +790,9 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "math $$a < b$$ here",
         "a +literal *stars*+ b",
         "line one +\nline two +\nline three",
+        "line one\nline two +",
+        "*bold +*",
+        "*bold +\nmore +*",
         "stem:[a < b] expression",
         "asciimath:[a < b] inline",
         "latexmath:[x < y] inline",
@@ -923,7 +927,7 @@ fn shapes_match_across_combined_constructs() {
     // recorder has always recovered these (it reads the string pipeline's own
     // render params, and the pipeline expands the reference before matching);
     // the builder now recognizes them too, so the two constructions'
-    // *structures* – not just the HTML they fold to – can finally be compared
+    // *structures* — not just the HTML they fold to — can finally be compared
     // for this shape.
     assert_shapes_with(
         "Press kbd:[{key}] then choose menu:{view}[Zoom > Reset] in *{product}*.",
@@ -941,7 +945,7 @@ fn shapes_match_across_combined_constructs() {
         with_product,
     );
 
-    // Cross-references spliced in by attribute references, in both spellings –
+    // Cross-references spliced in by attribute references, in both spellings —
     // the same comparison, for the family that just made the same lift.
     assert_shapes_with(
         "See xref:{id}[{label}] and <<{id},the {product} steps>> here.",
@@ -953,7 +957,7 @@ fn shapes_match_across_combined_constructs() {
         },
     );
 
-    // Links and images spliced in by attribute references – the last two
+    // Links and images spliced in by attribute references — the last two
     // families to make that lift. What each still defers (an image's non-empty
     // attribute list, a link's attribute-list-bearing display text, and a
     // wholly expanded `link:` macro) is deliberately absent here: the recorder

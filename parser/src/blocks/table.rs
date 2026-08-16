@@ -26,7 +26,7 @@ use crate::{
 /// tag-filter diagnostic) raised while expanding a table cell.
 ///
 /// The warning's deferred `origin` carries a line relative to the cell's inner
-/// preprocessing pass – `1` is the cell's first content line. `cell_origin` is
+/// preprocessing pass — `1` is the cell's first content line. `cell_origin` is
 /// that first line's already-resolved location.
 ///
 /// * A `None` deferred origin (e.g. an unresolved include target, located by
@@ -53,23 +53,37 @@ fn absolute_cell_directive_origin(
     }
 }
 
-/// Attributes that an AsciiDoc table cell may modify even when they are set in
-/// the parent document.
+/// Attributes that an AsciiDoc table cell may modify even when they hold a
+/// value inherited from the parent document.
 ///
 /// An AsciiDoc cell inherits the parent's attributes and cannot modify them,
 /// but the AsciiDoc specification carves out a handful of exceptions:
 /// `doctype`, `toc`, `notitle` (and its complement, `showtitle`), and
 /// `compat-mode`.
-const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] =
-    &["doctype", "toc", "notitle", "showtitle", "compat-mode"];
+///
+/// `sectnumlevels` is also listed here. It is header-settable (its built-in
+/// default carries a value of `3`) and an AsciiDoc cell is a nested, standalone
+/// document whose leading attribute lines form its own header, so the cell may
+/// set its own `sectnumlevels` — matching Asciidoctor, where a cell that
+/// assigns `:sectnumlevels:` is honored rather than pinned to the inherited
+/// default. Without this exception the built-in default value would lock the
+/// attribute for the cell, silently ignoring the cell-body assignment.
+const ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES: &[&str] = &[
+    "doctype",
+    "toc",
+    "notitle",
+    "showtitle",
+    "compat-mode",
+    "sectnumlevels",
+];
 
 /// A table is a delimited block that arranges content into a grid of rows and
 /// columns.
 ///
 /// A table is introduced by a table delimiter (`|===`, or `!===` for a nested
 /// table) and closed by a matching delimiter. By default cells are separated
-/// using prefix-separated value (PSV) syntax: the table's cell separator – a
-/// vertical bar (`|`) by default – at the start of a line or preceded by
+/// using prefix-separated value (PSV) syntax: the table's cell separator — a
+/// vertical bar (`|`) by default — at the start of a line or preceded by
 /// whitespace begins a new cell. Cells flow, in document order, into rows whose
 /// length is fixed by the number of columns. (The separator defaults to `!`
 /// inside a nested table and can be overridden with the `separator` attribute;
@@ -226,8 +240,8 @@ impl<'src> TableBlock<'src> {
         let data_format = resolve_data_format(metadata, delimiter_text);
 
         // The cell separator partitions each row into cells. In PSV it defaults
-        // to the vertical bar (`|`), except inside an AsciiDoc table cell – a
-        // nested, standalone document – where it defaults to the exclamation
+        // to the vertical bar (`|`), except inside an AsciiDoc table cell — a
+        // nested, standalone document — where it defaults to the exclamation
         // mark (`!`) so a nested table is distinguished from the `|`-separated
         // table that encloses it. Each data format has its own default (CSV =
         // comma, TSV = tab, DSV = colon). The `separator` attribute overrides
@@ -284,10 +298,10 @@ impl<'src> TableBlock<'src> {
             !line1.after.is_empty() && line1.after.take_line().item.data().trim().is_empty();
 
         // An implicit header additionally requires that the first row be complete
-        // on the first line. If the first cell spans multiple lines – for PSV,
+        // on the first line. If the first cell spans multiple lines — for PSV,
         // the first non-blank line after the blank gap continues the cell instead
         // of starting a new one; for CSV/TSV, the first line opens a quoted value
-        // that is not closed on that line – there is no implicit header (matching
+        // that is not closed on that line — there is no implicit header (matching
         // Asciidoctor, which cancels the implicit header in these cases).
         let first_row_complete = match data_format {
             DataFormat::Psv => first_nonblank_line(line1.after)
@@ -567,7 +581,7 @@ impl<'src> IsBlock<'src> for TableBlock<'src> {
 
     // These forward to the inherent `caption()`/`number()` (the documented
     // public accessors) so that the captioned table is reported correctly
-    // through the trait interface too – `dyn IsBlock` / generic `T: IsBlock`
+    // through the trait interface too — `dyn IsBlock` / generic `T: IsBlock`
     // consumers resolve to these rather than the inherent methods.
     fn caption(&self) -> Option<&str> {
         self.caption.as_deref()
@@ -985,7 +999,7 @@ fn resolve_table_attribute<B: TableAttributeValue>(
 ///
 /// An explicit, recognized `format` attribute (`psv`, `csv`, `tsv`, or `dsv`)
 /// always wins. Otherwise the lead character of the delimiter selects the
-/// format via its shorthand – `,===` is CSV and `:===` is DSV – and any other
+/// format via its shorthand — `,===` is CSV and `:===` is DSV — and any other
 /// delimiter (`|===`, `!===`) is PSV.
 fn resolve_data_format(metadata: &BlockMetadata<'_>, delimiter_text: &str) -> DataFormat {
     if let Some(attr) = metadata
@@ -1015,8 +1029,8 @@ fn resolve_data_format(metadata: &BlockMetadata<'_>, delimiter_text: &str) -> Da
 /// Resolve the cell separator for a table.
 ///
 /// Each [`DataFormat`] supplies a default separator: PSV uses the vertical bar
-/// (`|`), except inside an AsciiDoc table cell – a nested, standalone document
-/// – where it defaults to the exclamation mark (`!`) so a nested table is
+/// (`|`), except inside an AsciiDoc table cell — a nested, standalone document
+/// — where it defaults to the exclamation mark (`!`) so a nested table is
 /// distinguished from the `|`-separated table that encloses it; CSV defaults to
 /// a comma (`,`), TSV to a tab, and DSV to a colon (`:`). An explicit
 /// `separator` attribute on the table overrides the default; an empty
@@ -1115,8 +1129,8 @@ struct TableBody<'src> {
 /// Asciidoctor. A row whose columns are entirely pre-filled by carried slots
 /// has no cells of its own to close it, so the next cell overruns and is
 /// dropped together with that pre-filled row. A duplicated cell (`<n>*`) is
-/// expanded into `<n>` independent cells – each carrying the original's
-/// content, alignment, and style – before the grid walk, so each clone occupies
+/// expanded into `<n>` independent cells — each carrying the original's
+/// content, alignment, and style — before the grid walk, so each clone occupies
 /// its own column slot exactly like an ordinary cell. A duplication factor of
 /// zero drops the cell entirely.
 fn build_psv_table<'src>(
@@ -1480,7 +1494,7 @@ fn make_csv_field<'src>(
 /// Note: the `continue` intentionally leaves `prev_quote` set, so a run of
 /// *N ≥ 2* consecutive `"` collapses to a single `"` (e.g. `""""` -> `"`), not
 /// to pairs. This deliberately matches Asciidoctor rather than strict RFC 4180,
-/// under which only `""` is a double-quote escape – don't "fix" it to a
+/// under which only `""` is a double-quote escape — don't "fix" it to a
 /// two-character collapse without also changing Asciidoctor.
 fn squeeze_quotes(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -1675,7 +1689,7 @@ fn process_content<'src>(
         // restored so it applies only within the cell and nests correctly.
         // An attribute set in the parent is locked, as is one hard set or unset
         // through the API (its modification context is `ApiOnly`) even though it
-        // is unset – matching Asciidoctor, where an API-controlled attribute can
+        // is unset — matching Asciidoctor, where an API-controlled attribute can
         // never be overridden in a cell. An attribute merely unset in the parent
         // document is not locked, so the cell may assign it.
         //
@@ -1688,6 +1702,13 @@ fn process_content<'src>(
         // which a static lock could not do anyway once the cell changes its own
         // doctype.
         let saved_locks = parser.locked_attribute_names.clone();
+
+        // The cached section-numbering depth is frozen at the end of the
+        // enclosing document's header, so it holds the parent's value throughout
+        // the cell. A cell that assigns its own `sectnumlevels` refreshes it (see
+        // `Parser::set_attribute_from_body`); snapshot and restore it here so that
+        // refresh cannot leak back into the parent's numbering.
+        let saved_sectnumlevels = parser.sectnumlevels;
         {
             // Whether `name` (holding `value` in the inherited set) must be
             // locked for the cell. Kept separate from the insert so each source
@@ -1758,9 +1779,9 @@ fn process_content<'src>(
             // (the document source at document level, or an enclosing owned
             // cell's expanded source otherwise), so it may itself have
             // originated from an `include::`d file. Look up the file and line
-            // the cell's first line came from – through the document source map
+            // the cell's first line came from — through the document source map
             // at document level, or through the enclosing owned cell's source
-            // map otherwise – so a directive that fails to resolve reports the
+            // map otherwise — so a directive that fails to resolve reports the
             // correct originating file (rather than "(root file)") and so its
             // warning carries the right cursor.
             let cell_origin = if at_document_level {
@@ -1787,7 +1808,7 @@ fn process_content<'src>(
 
             // An AsciiDoc table cell shares the enclosing document's catalog
             // (only its footnote list is cell-local), so a file included by the
-            // cell registers on the document's include registry – as it does in
+            // cell registers on the document's include registry — as it does in
             // Asciidoctor, where the cell's nested document shares the parent's
             // `catalog[:includes]`. Registration is skipped when the cell was
             // itself brought in from an included file: the cell's include
@@ -1808,8 +1829,8 @@ fn process_content<'src>(
 
             // The cell's first line as it appears in the source it was sliced
             // from. Only a directive on that first line reaches this inner
-            // preprocessor – a directive at the start of any later line sits at
-            // column 0 and was already expanded by the enclosing preprocessor –
+            // preprocessor — a directive at the start of any later line sits at
+            // column 0 and was already expanded by the enclosing preprocessor —
             // so every warning the preprocessor just produced belongs to it.
             let directive_line = trimmed.take_line().item;
 
@@ -1929,6 +1950,7 @@ fn process_content<'src>(
 
         parser.locked_attribute_names = saved_locks;
         parser.attribute_values = saved_attributes;
+        parser.sectnumlevels = saved_sectnumlevels;
         TableCellContent::AsciiDoc(cell)
     } else {
         let mut content = match replacement {
@@ -1947,8 +1969,8 @@ fn process_content<'src>(
     }
 }
 
-/// Parses the body of an AsciiDoc table cell – a nested, standalone AsciiDoc
-/// document – returning its (shown) title, whether its doctype is `inline`, its
+/// Parses the body of an AsciiDoc table cell — a nested, standalone AsciiDoc
+/// document — returning its (shown) title, whether its doctype is `inline`, its
 /// table-of-contents configuration, its blocks, a snapshot of the cell's
 /// resolved attribute state, and the footnotes defined within the cell.
 ///
@@ -1998,8 +2020,8 @@ fn parse_asciidoc_cell_body<'src>(
 
     // A block title carried over from a section heading (see
     // `SectionBlock::parse`) must not cross this nested-document boundary in
-    // either direction: a title left pending by the cell – e.g. a trailing
-    // titled empty section – must not leak out and be claimed by the enclosing
+    // either direction: a title left pending by the cell — e.g. a trailing
+    // titled empty section — must not leak out and be claimed by the enclosing
     // document's next block, and (defensively) any parent-pending title must
     // not be claimed by the cell's first block. Reset it to `None` for the cell
     // and restore the parent's value afterward, like the footnote registry.
@@ -2017,7 +2039,7 @@ fn parse_asciidoc_cell_body<'src>(
     parser.owned_subsource_depth += 1;
 
     // An AsciiDoc cell is a nested document, where a section heading is again
-    // valid – it is not a delimited-block body. Clear `in_delimited_block` for
+    // valid — it is not a delimited-block body. Clear `in_delimited_block` for
     // the cell parse (saved and restored) so a `== …` line inside the cell is
     // recognized as a section even when the table itself sits inside a delimited
     // block, whose flag the parser would otherwise still be carrying.
@@ -2043,7 +2065,12 @@ fn parse_asciidoc_cell_body<'src>(
         InterpretedValue::Value(ref v) if v == "inline"
     );
 
-    let title = if parser.resolve_show_title(true) {
+    // An AsciiDoc table cell's inner document is embedded output (like
+    // `convert_string_to_embedded`), so its doctitle defaults to hidden when
+    // neither `showtitle` nor `notitle` is set — matching Asciidoctor, which
+    // renders a nested cell document without an `<h1>` unless `showtitle` is
+    // enabled.
+    let title = if parser.resolve_show_title(false) {
         title_source.map(|span| {
             let mut content = Content::from(span);
             SubstitutionGroup::Header.apply(&mut content, parser, None);
@@ -2062,14 +2089,14 @@ fn parse_asciidoc_cell_body<'src>(
     // Snapshot the cell's resolved attribute state while the parser still holds
     // it (the caller restores the parent's snapshot immediately after this
     // returns). The snapshot shares the parser's attribute tables by `Arc`, so
-    // it is cheap. It lets a caller introspect the nested cell document –
-    // including the attributes it inherited from the parent – the same way the
+    // it is cheap. It lets a caller introspect the nested cell document —
+    // including the attributes it inherited from the parent — the same way the
     // top-level `Document` exposes its own.
     let mut attributes = parser.snapshot_attributes();
 
     // Materialize the cell's derived `toc-position` / `toc-placement` /
     // `toc-class` attributes into its snapshot, so it exposes them the same way
-    // the top-level `Document` does – without mutating the parser (whose
+    // the top-level `Document` does — without mutating the parser (whose
     // attribute state the caller restores to the parent's on return anyway).
     attributes.materialize_toc_attributes(toc.mode);
 
@@ -2119,16 +2146,17 @@ impl<'src> TableCell<'src> {
     /// specifier overrides the column's [style](ColumnStyle); with no cell
     /// style operator, the cell is processed with the column's style. A
     /// header cell (`is_header`) is always processed as plain header
-    /// content, regardless of any style operator on the column or the cell, and
-    /// it ignores the column's alignment operators: with no operator on its own
-    /// specifier, a header cell falls back to the default alignment rather than
-    /// inheriting the column's.
+    /// content, regardless of any style operator on the column or the cell.
+    /// Alignment, however, is inherited from the column just as for a body
+    /// cell: with no operator on its own specifier, a header cell falls back to
+    /// the column's alignment. Only the column *style* is ignored for a header
+    /// row, not its alignment.
     ///
     /// Leading and trailing whitespace is always stripped. For every style but
     /// [`AsciiDoc`](ColumnStyle::AsciiDoc) the cell holds inline
     /// [`Content`](TableCellContent::Simple): escaped cell separators (the
     /// table's `separator` character preceded by a backslash, e.g. `\|`) are
-    /// unescaped and substitutions are applied – the verbatim group for
+    /// unescaped and substitutions are applied — the verbatim group for
     /// [`Literal`](ColumnStyle::Literal), the normal group otherwise. An
     /// [`AsciiDoc`](ColumnStyle::AsciiDoc) cell instead parses its content as a
     /// nested sequence of [blocks](TableCellContent::AsciiDoc).
@@ -2141,21 +2169,13 @@ impl<'src> TableCell<'src> {
         warnings: &mut Vec<Warning<'src>>,
     ) -> Self {
         // A cell's own alignment operator overrides the column's alignment; with
-        // no operator, the cell inherits the column's alignment. The header row
-        // ignores alignment operators on the column specifier, so a header cell
-        // with no operator of its own falls back to the default alignment rather
-        // than the column's; a cell specifier's own operator is still applied.
-        let (h_align, v_align) = if is_header {
-            (
-                raw.spec.h_align.unwrap_or(HorizontalAlignment::Left),
-                raw.spec.v_align.unwrap_or(VerticalAlignment::Top),
-            )
-        } else {
-            (
-                raw.spec.h_align.unwrap_or(column.h_align),
-                raw.spec.v_align.unwrap_or(column.v_align),
-            )
-        };
+        // no operator, the cell inherits the column's alignment. This applies to
+        // header and body cells alike: only the column *style* is ignored for a
+        // header row (see below), not the column alignment.
+        let (h_align, v_align) = (
+            raw.spec.h_align.unwrap_or(column.h_align),
+            raw.spec.v_align.unwrap_or(column.v_align),
+        );
 
         // A cell's own style operator overrides the column's style; with no
         // operator, the cell is processed with the column's style. The header
@@ -2223,13 +2243,9 @@ impl<'src> TableCell<'src> {
         };
 
         // A data field carries no cell specifier, so its alignment comes from the
-        // column – except in the header row, which ignores the column's alignment
-        // operators and falls back to the default alignment.
-        let (h_align, v_align) = if is_header {
-            (HorizontalAlignment::Left, VerticalAlignment::Top)
-        } else {
-            (column.h_align, column.v_align)
-        };
+        // column. This applies to header and body cells alike: only the column
+        // style is ignored for a header row, not the column alignment.
+        let (h_align, v_align) = (column.h_align, column.v_align);
 
         let source = field.content;
         let content = process_content(field.content, field.replacement, style, parser, warnings);
@@ -2748,7 +2764,7 @@ fn parse_col_spec(spec: &str) -> TableColumn {
     // The style operator, if present, occupies the last position on the
     // specifier, so it is the entire remainder after the width. Matching the
     // whole remainder (rather than just its first byte) means a malformed spec
-    // with trailing junk – e.g. `1em` – falls back to the default style instead
+    // with trailing junk — e.g. `1em` — falls back to the default style instead
     // of silently honoring the first letter and discarding the rest.
     let style = match rest.trim() {
         "a" => ColumnStyle::AsciiDoc,
@@ -2777,8 +2793,8 @@ fn parse_col_spec(spec: &str) -> TableColumn {
 /// absent from the specifier, in which case the cell inherits that alignment
 /// (or style) from its column. `colspan` and `rowspan` are the number of
 /// columns and rows the cell spans; they default to `1` (no span). `repeat` is
-/// the duplication factor – the number of consecutive cells the content is
-/// cloned into – and defaults to `1` (no duplication).
+/// the duplication factor — the number of consecutive cells the content is
+/// cloned into — and defaults to `1` (no duplication).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct CellSpec {
     h_align: Option<HorizontalAlignment>,
@@ -2817,8 +2833,8 @@ struct RawCell<'src> {
 /// is an amplification: a dozen source bytes such as `1000000000*` would
 /// otherwise request a billion `RawCell`s (a multi-gigabyte allocation).
 /// Capping the per-specifier factor bounds that amplification while leaving any
-/// realistic table – which never duplicates a cell more than a handful of times
-/// – untouched. (This is the one point where the implementation diverges from
+/// realistic table — which never duplicates a cell more than a handful of times
+/// — untouched. (This is the one point where the implementation diverges from
 /// Asciidoctor, which expands the literal factor however large.)
 const MAX_DUPLICATION_FACTOR: usize = 1_000;
 
@@ -2826,8 +2842,8 @@ const MAX_DUPLICATION_FACTOR: usize = 1_000;
 ///
 /// A cell specifier with a duplication factor (`<n>*`) clones the cell's
 /// content and properties into `<n>` consecutive cells. Each clone is an
-/// ordinary single-slot cell (colspan and rowspan of 1), so expanding here –
-/// before the grid is walked – lets the clones flow into rows exactly like
+/// ordinary single-slot cell (colspan and rowspan of 1), so expanding here —
+/// before the grid is walked — lets the clones flow into rows exactly like
 /// cells the author typed out by hand. A duplication factor of zero produces no
 /// cells, dropping the original (matching Asciidoctor). A cell with no
 /// duplication factor has a `repeat` of 1 and so passes through unchanged. The
@@ -2868,7 +2884,7 @@ fn expand_duplicates(cells: Vec<RawCell<'_>>) -> Vec<RawCell<'_>> {
 /// A separator immediately preceded by a backslash (e.g. `\|`) is escaped: it
 /// is literal content rather than a boundary, and the backslash is stripped
 /// later in [`TableCell::parse`]. Only the single byte before the separator is
-/// inspected, so `\\|` is also read as an escaped separator – matching
+/// inspected, so `\\|` is also read as an escaped separator — matching
 /// Asciidoctor, whose check is likewise the single-character
 /// `pre_match.end_with? '\'`.
 fn scan_cells<'src>(
@@ -3001,8 +3017,8 @@ fn scan_cells<'src>(
 ///   `2.3`, `.3`) that, when present, must be followed by `+` (span) or `*`
 ///   (duplication). For a span the factor is interpreted as the cell's colspan
 ///   and rowspan (a missing column or row count defaults to 1). For a
-///   duplication the column part of the factor is the duplication count – the
-///   number of consecutive cells the content is cloned into – and any row part
+///   duplication the column part of the factor is the duplication count — the
+///   number of consecutive cells the content is cloned into — and any row part
 ///   is ignored; a duplicated cell keeps a colspan and rowspan of 1.
 /// * The horizontal alignment operator is `<`, `>`, or `^`.
 /// * The vertical alignment operator is a dot followed by `<`, `>`, or `^`.
@@ -3275,7 +3291,7 @@ mod tests {
             None
         );
 
-        // A different file (included content): kept as-is – its line is already
+        // A different file (included content): kept as-is — its line is already
         // absolute within that file.
         assert_eq!(
             absolute_cell_directive_origin(
@@ -3296,7 +3312,7 @@ mod tests {
         );
 
         // The cell's own file, a later line (pass-relative line 3): translated to
-        // two lines past the cell's first line – not collapsed onto line 5.
+        // two lines past the cell's first line — not collapsed onto line 5.
         assert_eq!(
             absolute_cell_directive_origin(
                 Some(SourceLine(Some("outer.adoc".to_owned()), 3)),
@@ -3331,7 +3347,7 @@ mod tests {
     ///
     /// The cell's footnotes are resolved in the *same* guarded branch as its
     /// blocks, so they share this behavior exactly: a shared owned cell leaves
-    /// both its blocks and its footnotes untouched – they never diverge (one
+    /// both its blocks and its footnotes untouched — they never diverge (one
     /// re-resolved while the other stays stale).
     #[test]
     fn resolve_references_skips_shared_owned_cell() {
@@ -3345,8 +3361,8 @@ mod tests {
 
                 // A footnote that still carries deferred cross-reference state:
                 // resolving it would rebuild `text` from the template
-                // (`RESOLVED`), so the sentinel `text` below changes if – and
-                // only if – the shared cell is mistakenly resolved.
+                // (`RESOLVED`), so the sentinel `text` below changes if — and
+                // only if — the shared cell is mistakenly resolved.
                 footnotes: vec![Footnote {
                     index: "1".to_string(),
                     id: None,
@@ -3388,7 +3404,8 @@ mod tests {
         #![allow(clippy::indexing_slicing)]
 
         use crate::{
-            parser::SourceLine,
+            attributes::Attrlist,
+            parser::{IncludeContent, IncludeFileHandler, IncludeResolution, SourceLine},
             tests::prelude::{inline_file_handler::InlineFileHandler, *},
         };
 
@@ -3482,6 +3499,62 @@ mod tests {
             );
         }
 
+        // Regression test for
+        // https://github.com/asciidoc-rs/asciidoc-parser/issues/1157 (see also
+        // the Greptile review on the PR that fixed it): an AsciiDoc cell that
+        // itself came from an included file (`partials/outer.adoc`, reached via
+        // a top-level `include::partials/outer.adoc[]`) is re-preprocessed from
+        // its own owned source, starting a fresh depth-1 pass. A further
+        // `include::` directive written directly in that cell must still
+        // resolve relative to `partials/` — the *cell's own* origin directory —
+        // not relative to nothing, which is only correct for a directive
+        // written directly in the primary document. A directory-aware handler
+        // (unlike `InlineFileHandler`, which ignores the containing file)
+        // proves this: only the correctly joined path resolves at each level.
+        #[test]
+        fn include_in_asciidoc_cell_resolves_relative_to_the_cells_own_include_origin() {
+            #[derive(Debug)]
+            struct DirRelativeHandler {
+                files: HashMap<&'static str, &'static str>,
+            }
+
+            impl IncludeFileHandler for DirRelativeHandler {
+                fn resolve_target<'src>(
+                    &self,
+                    source: Option<&str>,
+                    target: &str,
+                    _attrlist: &Attrlist<'src>,
+                    _parser: &Parser,
+                ) -> IncludeResolution {
+                    let dir = source.and_then(|s| s.rfind('/').map(|i| &s[..i]));
+                    let path = match dir {
+                        Some(dir) => format!("{dir}/{target}"),
+                        None => target.to_owned(),
+                    };
+                    self.files
+                        .get(path.as_str())
+                        .map_or(IncludeResolution::NotFound, |v| {
+                            IncludeResolution::Found(IncludeContent::new(*v))
+                        })
+                }
+            }
+
+            let handler = DirRelativeHandler {
+                files: HashMap::from([
+                    ("partials/outer.adoc", "|===\na|include::inner.adoc[]\n|==="),
+                    ("partials/inner.adoc", "include::deeper.adoc[]"),
+                    ("partials/deeper.adoc", "Deepest content."),
+                ]),
+            };
+
+            let doc = Parser::default()
+                .with_safe_mode(SafeMode::Server)
+                .with_include_file_handler(handler)
+                .parse("include::partials/outer.adoc[]");
+
+            assert_rendered_contains(&doc, "Deepest content.");
+        }
+
         // A table nested inside an *owned* (include-expanded) cell is parsed from
         // that cell's private source, whose spans index the cell's own source map
         // rather than the document's. An unresolved directive in the inner cell
@@ -3528,9 +3601,9 @@ mod tests {
                 Some(SourceLine(Some("cell.adoc".to_string()), 2))
             );
 
-            // Its `source` span is a best-effort anchor into the document – the
+            // Its `source` span is a best-effort anchor into the document — the
             // enclosing cell's `include::cell.adoc[]` directive line (line 2 of
-            // the root document) – so it still resolves to a real cursor.
+            // the root document) — so it still resolves to a real cursor.
             assert_eq!(
                 doc.source_map()
                     .original_file_and_line(warnings[0].source.line()),
@@ -3602,7 +3675,7 @@ mod tests {
     // for header and default-style cells by the ported tests in
     // `tests::asciidoctor_rb::tables_test`. Those styled-column fixtures place
     // the anchor in the first (header) row, and a header cell is always parsed
-    // with the default column style – so `cols=1a` never actually parses the
+    // with the default column style — so `cols=1a` never actually parses the
     // anchored value as an AsciiDoc-style cell there. This exercises that
     // missing case directly: a leading anchor in an AsciiDoc-style *body* cell
     // must still be cataloged in the main document.
@@ -3619,7 +3692,7 @@ mod tests {
 
             // Guard the premise: the anchored cell is a genuine AsciiDoc-style
             // body cell (each `a` cell renders its content as a nested document in
-            // `div.content`), not a header cell – no `th` is produced, and the
+            // `div.content`), not a header cell — no `th` is produced, and the
             // anchor renders as a target inside the cell.
             assert_css(&doc, "th", 0);
             assert_css(&doc, "table.tableblock td.tableblock > div.content", 2);
@@ -3632,7 +3705,7 @@ mod tests {
 
     mod section_in_asciidoc_cell {
         //! An AsciiDoc (`a|`) cell is a nested document, so a `== …` line
-        //! inside it is a real section heading – even when the table
+        //! inside it is a real section heading — even when the table
         //! itself sits inside a delimited block, whose
         //! section-suppression context must not leak into the cell's
         //! nested document.

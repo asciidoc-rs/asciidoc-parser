@@ -22,10 +22,10 @@ use crate::{
 /// the substitutions whose output it wants to change and inherits the built-in
 /// HTML output for the rest. In particular, [`image_uri`](Self::image_uri) and
 /// [`render_image`](Self::render_image) inherit the crate's `data-uri`
-/// embedding and `opts=inline` SVG handling – which read bytes through the
+/// embedding and `opts=inline` SVG handling — which read bytes through the
 /// [`ImageFileHandler`](crate::parser::ImageFileHandler) and
 /// [`SvgFileHandler`](crate::parser::SvgFileHandler) registered on the
-/// [`Parser`] – so a downstream renderer gets that behavior without needing to
+/// [`Parser`] — so a downstream renderer gets that behavior without needing to
 /// reproduce it.
 ///
 /// Note that these defaults delegate to the HTML renderer's *own* methods
@@ -33,7 +33,7 @@ use crate::{
 /// change what a still-defaulted sibling emits. For example, overriding
 /// [`image_uri`](Self::image_uri) alone does not change the URI that the
 /// inherited [`render_image`](Self::render_image) or
-/// [`render_icon`](Self::render_icon) produces – override that method too
+/// [`render_icon`](Self::render_icon) produces — override that method too
 /// (calling `self.image_uri(…)`) if the two must agree. The sole exception is
 /// [`icon_uri`](Self::icon_uri): its default derives an icon path and then
 /// calls `self.image_uri(…)`, so it alone *does* reflect an `image_uri`
@@ -658,8 +658,8 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         // A quote-delimited first positional attribute (e.g. `['role']`) carries
         // no shorthand role or block style, so the derivation above leaves it
-        // out. Asciidoctor treats such a value as a verbatim role – quotes
-        // included – so recover it here rather than dropping the role.
+        // out. Asciidoctor treats such a value as a verbatim role — quotes
+        // included — so recover it here rather than dropping the role.
         if roles.is_empty()
             && id.is_none()
             && let Some(role) = attrlist
@@ -906,8 +906,8 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         // Asciidoctor embeds the image as a data URI when the `data-uri`
         // attribute is set and the safe mode is below `SafeMode::Secure`. A
-        // target that is itself a URI is never embedded – there is no local
-        // file to read – so it passes through as an ordinary web path
+        // target that is itself a URI is never embedded — there is no local
+        // file to read — so it passes through as an ordinary web path
         // (Asciidoctor only fetches a remote target under `allow-uri-read`,
         // which this crate does not implement). Otherwise the image's bytes are
         // read through the `ImageFileHandler` and base64-encoded into a
@@ -1065,7 +1065,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             // by the substitution pipeline, but that step leaves `"` intact. A
             // stray `"` in the target would otherwise close the `href` attribute
             // and let an author inject further attributes (e.g. an event
-            // handler), so escape the quote delimiter here – mirroring the
+            // handler), so escape the quote delimiter here — mirroring the
             // image `alt`/`title` handling.
             target = encode_attribute_value(params.target.clone()),
             id = if let Some(id) = id {
@@ -1312,7 +1312,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 /// delimiter as `&quot;`.
 ///
 /// A `"` left raw inside a `"…"`-delimited attribute value would terminate the
-/// value early and let following text be parsed as additional attributes –
+/// value early and let following text be parsed as additional attributes —
 /// attribute injection. Role and id values can carry a literal `"` (for
 /// example a single-quoted positional role such as `['a"b']`, or a
 /// single-quoted `role='a"b'` named attribute), so escape it here. The `<`,
@@ -1390,13 +1390,13 @@ fn render_icon_or_image(
         // An explicit `link=` destination whose scheme could execute script is
         // not turned into a live link; the image is rendered without the
         // wrapping anchor. Escaping the `"` delimiter alone would still leave a
-        // live `javascript:` URI, so the destination is rejected outright – the
+        // live `javascript:` URI, so the destination is rejected outright — the
         // same policy the explicit `link:` macro applies, and the macro layer
         // records the accompanying warning. `link=self` resolves to the image's
         // own `src`, which may legitimately be a `data:image/*` URI, so it is
         // checked with the more permissive [`has_dangerous_self_href`] (a
-        // `javascript:` or non-image `data:` src – or an author-supplied SVG
-        // data URI target – still resolves to a live script URI here and is
+        // `javascript:` or non-image `data:` src — or an author-supplied SVG
+        // data URI target — still resolves to a live script URI here and is
         // rejected).
         let rejected = if is_self {
             has_dangerous_self_href(href, self_href_from_uri_target)
@@ -1407,9 +1407,9 @@ fn render_icon_or_image(
         if !rejected {
             img = format!(
                 r#"<a class="image" href="{href}"{link_constraint_attrs}>{img}</a>"#,
-                // Both sources of `href` – the image's own `src` (a resolved web
+                // Both sources of `href` — the image's own `src` (a resolved web
                 // path that can carry a stray `"`) and an author-supplied
-                // `link=` value – are escaped for the `"` delimiter so neither
+                // `link=` value — are escaped for the `"` delimiter so neither
                 // can break out of the attribute.
                 href = encode_attribute_value(href.to_owned()),
                 link_constraint_attrs = link_constraint_attrs(attrlist, None)
@@ -1437,7 +1437,7 @@ fn encode_attribute_value(value: String) -> String {
 }
 
 /// Reports whether `target` begins with a URI scheme that can execute script
-/// when placed in an `href` – `javascript:`, `data:`, or `vbscript:`.
+/// when placed in an `href` — `javascript:`, `data:`, or `vbscript:`.
 ///
 /// Leading control and space characters are ignored first, because a browser
 /// strips them before it parses the scheme (so `"\u{1}javascript:…"` is still
@@ -1461,15 +1461,15 @@ pub(crate) fn has_dangerous_scheme(target: &str) -> bool {
     })
 }
 
-/// Reports whether `href` – the `src` a `link=self` image/icon resolves to –
+/// Reports whether `href` — the `src` a `link=self` image/icon resolves to —
 /// would place a script-capable URI in the wrapping anchor's `href`.
 ///
 /// `link=self` names the image's own `src`, so it cannot simply be run through
 /// [`has_dangerous_scheme`]: an embedded image (`data-uri`) legitimately
 /// resolves to a `data:image/*` URI, and there is an Asciidoctor-parity test
 /// for exactly that. A `data:image/*` source is therefore exempt. Every other
-/// dangerous scheme – `javascript:`, `vbscript:`, or a non-image `data:` such
-/// as `data:text/html,…` – is never a valid image source, so promoting it into
+/// dangerous scheme — `javascript:`, `vbscript:`, or a non-image `data:` such
+/// as `data:text/html,…` — is never a valid image source, so promoting it into
 /// an `href` is rejected: only the anchor is dropped (the harmless `<img src>`
 /// is left intact), mirroring the `link=` policy above.
 ///
@@ -1477,7 +1477,7 @@ pub(crate) fn has_dangerous_scheme(target: &str) -> bool {
 /// passed through verbatim from an author-supplied URI target, rather than
 /// resolved from a local file path (a plain web path, or a crate-embedded
 /// `data-uri`). A `data:image/svg+xml` document *executes* its embedded script
-/// when it is navigated to – which following the `href` on click does – unlike
+/// when it is navigated to — which following the `href` on click does — unlike
 /// a raster image data URI, which merely displays. An embedded SVG comes from a
 /// trusted local file (the parity case) and stays exempt; an author-supplied
 /// `data:image/svg…` target is script-navigable and is rejected.
@@ -1529,8 +1529,8 @@ fn is_svg_data_uri(href: &str) -> bool {
 /// Unlike [`encode_attribute_value`] (which only guards the quote delimiter to
 /// mirror Asciidoctor's image-alt handling), this escapes the full set of
 /// characters that could break out of, or corrupt, an attribute value. It is
-/// used for author-supplied `xref` `window`/`role` values, which – unlike the
-/// hard-coded `window` strings the link macro passes – can contain arbitrary
+/// used for author-supplied `xref` `window`/`role` values, which — unlike the
+/// hard-coded `window` strings the link macro passes — can contain arbitrary
 /// text.
 fn encode_html_attribute(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
@@ -1712,12 +1712,12 @@ static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
 /// between them.
 ///
 /// Used when a cross-reference's link text is drawn from its target's reference
-/// text and that reftext itself contains an anchor – an inline link, or a
+/// text and that reftext itself contains an anchor — an inline link, or a
 /// cross-reference embedded in the target's title. HTML forbids nesting an
 /// `<a>` inside another, so the inner anchor tags are stripped, leaving their
 /// text in place. Mirrors Asciidoctor's `DropAnchorRx = /<(?:a\b[^>]*|\/a)>/`.
 fn drop_anchor_tags(text: &str) -> String {
-    // The common case – a reftext with no anchor at all – allocates a plain
+    // The common case — a reftext with no anchor at all — allocates a plain
     // copy and does no scanning.
     if !text.contains("<a") {
         return text.to_string();

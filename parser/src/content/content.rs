@@ -27,8 +27,8 @@ use crate::{
 /// (or, for multi-document workflows, in another document entirely). The
 /// macros substitution therefore records each cross-reference in a deferred
 /// form and leaves an opaque placeholder in the rendered text. The
-/// references are resolved in a later pass – see
-/// [`Document::resolve_references`] – at which point [`rendered_html()`]
+/// references are resolved in a later pass — see
+/// [`Document::resolve_references`] — at which point [`rendered_html()`]
 /// reflects the resolved links. Until then, [`rendered_html()`] shows an
 /// unresolved fallback, so it always returns clean text.
 ///
@@ -91,7 +91,7 @@ pub struct Content<'src> {
     /// pre-substitution source, in parallel with the substitution pass that
     /// produced [`rendered`](Self::rendered).
     ///
-    /// This is a **derived artifact** – built alongside the rendered content,
+    /// This is a **derived artifact** — built alongside the rendered content,
     /// which remains the source of truth (making the tree canonical, with
     /// `rendered_html()` a fold of it, is the remaining half of the [inline
     /// AST architecture] design's step 6). It is populated only when
@@ -167,16 +167,16 @@ const XREF_PLACEHOLDER_END: char = '\u{E001}';
 /// A footnote in a section title is a real, document-order footnote, but its
 /// marker must be kept out of the section's reference text and auto-generated
 /// ID. Marking the marker in a single render (rather than re-rendering the
-/// title with footnotes suppressed) means stateful substitutions – counters,
-/// attribute references that expand into footnotes – run exactly once. See
+/// title with footnotes suppressed) means stateful substitutions — counters,
+/// attribute references that expand into footnotes — run exactly once. See
 /// [`strip_footnote_marker_spans`] and
 /// [`Content::remove_footnote_marker_sentinels`].
 pub(crate) const FOOTNOTE_MARKER_START: char = '\u{E002}';
 pub(crate) const FOOTNOTE_MARKER_END: char = '\u{E003}';
 
-/// Removes each footnote marker span – a [`FOOTNOTE_MARKER_START`] …
+/// Removes each footnote marker span — a [`FOOTNOTE_MARKER_START`] …
 /// [`FOOTNOTE_MARKER_END`] region and everything between, i.e. the sentinels
-/// *and* the marker they bracket – leaving footnote-free text suitable for a
+/// *and* the marker they bracket — leaving footnote-free text suitable for a
 /// section's reference text and auto-generated ID.
 pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -187,7 +187,7 @@ pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
         rest = &rest[start + FOOTNOTE_MARKER_START.len_utf8()..];
 
         // Drop through the matching end sentinel (the marker text). A start
-        // without an end cannot occur – the substitution always emits both – but
+        // without an end cannot occur — the substitution always emits both — but
         // if it somehow did, drop the remainder rather than reintroduce the
         // stray sentinel.
         rest = match rest.find(FOOTNOTE_MARKER_END) {
@@ -200,12 +200,65 @@ pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
     out
 }
 
+/// Strips markup down to plain text, mirroring Asciidoctor's
+/// `Document::Title` sanitize option (`XmlSanitizeRx = /<[^>]+>/`): every tag
+/// — opening, closing, or self-contained (e.g. an `<img>` rendered from an
+/// inline `image:` macro) — is removed, any run of interior spaces left
+/// behind by a removed tag is squeezed to one, and the result is trimmed.
+///
+/// A value with no `<` is returned unchanged, matching Asciidoctor, which
+/// skips the squeeze-and-trim pass entirely when there is nothing to
+/// sanitize. Used both by the sanitized doctitle accessor
+/// (`Document::doctitle_sanitized`) and by this document's own
+/// cross-reference fallback text (`this_document_reference`), which embeds
+/// the doctitle inside its own `<a>` and so cannot carry nested markup.
+pub(crate) fn sanitize_title(source: &str) -> String {
+    if !source.contains('<') {
+        return source.to_string();
+    }
+
+    let mut stripped = String::with_capacity(source.len());
+    let mut rest = source;
+
+    while let Some(lt) = rest.find('<') {
+        stripped.push_str(&rest[..lt]);
+
+        let after_lt = &rest[lt + 1..];
+        match after_lt.find('>') {
+            // `[^>]+` requires at least one character between `<` and `>`;
+            // an empty `<>` does not match and is copied through verbatim.
+            Some(gt) if gt > 0 => rest = &after_lt[gt + 1..],
+            _ => {
+                stripped.push('<');
+                rest = after_lt;
+            }
+        }
+    }
+    stripped.push_str(rest);
+
+    let mut squeezed = String::with_capacity(stripped.len());
+    let mut prev_was_space = false;
+    for c in stripped.chars() {
+        if c == ' ' {
+            if prev_was_space {
+                continue;
+            }
+            prev_was_space = true;
+        } else {
+            prev_was_space = false;
+        }
+        squeezed.push(c);
+    }
+
+    squeezed.trim().to_string()
+}
+
 /// A fully-owned snapshot of a rendered title, including any deferred
 /// cross-references it carries.
 ///
 /// A block title stashed across a section heading (see
-/// `Parser::pending_block_title`) cannot keep its borrowed [`Content`] – the
-/// parser it rides on has no `'src` lifetime – so the title travels in this
+/// `Parser::pending_block_title`) cannot keep its borrowed [`Content`] — the
+/// parser it rides on has no `'src` lifetime — so the title travels in this
 /// owned form and is rebuilt into a [`Content`] (via
 /// [`Content::from_owned_title`]) when the next block claims it. Carrying the
 /// deferred template and cross-references along means an embedded `<<id>>`
@@ -227,8 +280,8 @@ impl<'src> Content<'src> {
     pub(crate) fn from_filtered<T: AsRef<str>>(span: Span<'src>, filtered: T) -> Self {
         let filtered = filtered.as_ref();
 
-        // When filtering was a no-op – the filtered text is byte-identical to
-        // the source span – borrow the span rather than allocating an owned
+        // When filtering was a no-op — the filtered text is byte-identical to
+        // the source span — borrow the span rather than allocating an owned
         // copy of text we already hold.
         let rendered = if filtered == span.data() {
             CowStr::Borrowed(span.data())
@@ -377,8 +430,8 @@ impl<'src> Content<'src> {
     /// An inline passthrough (`+++…+++`, `++…++`, `$$…$$`, `pass:[…]`, or an
     /// inline STEM macro) is pulled out of the text before the other
     /// substitutions run and spliced back in afterward. This exposes that
-    /// collection – each entry's stored [`text`](Passthrough::text) and
-    /// resolved [`subs`](Passthrough::subs) – for inspection, analogous to
+    /// collection — each entry's stored [`text`](Passthrough::text) and
+    /// resolved [`subs`](Passthrough::subs) — for inspection, analogous to
     /// Asciidoctor's internal `@passthroughs` array.
     ///
     /// The slice is empty when the content has no passthroughs, and when the
@@ -423,7 +476,7 @@ impl<'src> Content<'src> {
     /// [`Ref`](crate::inlines::Ref) node, so a caller that walks
     /// [`inlines`](Self::inlines) after the parse sees the same destinations
     /// the rendered string reflects (§4.3 of the design). Before resolution
-    /// – or for a standalone parse with no document catalog – a `Ref`
+    /// — or for a standalone parse with no document catalog — a `Ref`
     /// node's destination is `None`.
     ///
     /// [inline AST architecture design]: https://github.com/scouten/asciidoc-parser/blob/main/docs/design/inline-ast-architecture.md
@@ -659,9 +712,9 @@ impl<'src> Content<'src> {
         self.mirror_tree_xref_resolution(&block_ordered, &footnote_ordered);
     }
 
-    /// Installs a pre-computed list of resolved cross-reference destinations –
+    /// Installs a pre-computed list of resolved cross-reference destinations —
     /// in placeholder (document) order, as produced by
-    /// [`block_tree_xrefs`] – into this content's inline tree.
+    /// [`block_tree_xrefs`] — into this content's inline tree.
     ///
     /// This is the tree-facing half of
     /// [`resolve_references`](Self::resolve_references): where that method
@@ -674,8 +727,8 @@ impl<'src> Content<'src> {
     /// sees the resolved destinations the rendered string reflects.
     ///
     /// `footnote_ordered` carries the same thing for the cross-references
-    /// embedded in this content's **footnotes** – the complementary list, as
-    /// produced by [`footnote_tree_xrefs`] – which are installed into the
+    /// embedded in this content's **footnotes** — the complementary list, as
+    /// produced by [`footnote_tree_xrefs`] — which are installed into the
     /// tree's footnote subtrees. The two lists partition the deferred segments,
     /// so each is correlated against exactly the nodes it belongs to.
     ///
@@ -695,11 +748,11 @@ impl<'src> Content<'src> {
         // The correlation is positional, so it requires the tree to hold
         // exactly one node per segment. The single-pass builder leaves a
         // documented set of divergent forms unrecognized (e.g. a display text
-        // crossing a rendered span – see the `inline_builder` module), so the
+        // crossing a rendered span — see the `inline_builder` module), so the
         // tree can legitimately hold *fewer* cross-reference nodes than the
         // string pipeline deferred. When the counts differ the positional
-        // pairing is unknowable; the mirror is skipped for that list – leaving
-        // its nodes in their honest unresolved state – rather than assigning
+        // pairing is unknowable; the mirror is skipped for that list — leaving
+        // its nodes in their honest unresolved state — rather than assigning
         // destinations to the wrong nodes.
         if count_tree_xrefs(&self.inlines) == block_ordered.len() {
             let mut next = 0;
@@ -755,7 +808,7 @@ pub(crate) fn block_tree_xrefs(
 /// per deferred segment whose placeholder **no longer appears in `template`**,
 /// in segment order. A placeholder leaves the template only by being re-homed
 /// onto a footnote (see [`rehome_xref_placeholders`]), which happens when the
-/// footnote's text is extracted out of the block – and the footnotes are
+/// footnote's text is extracted out of the block — and the footnotes are
 /// extracted left to right, each scanning its own text left to right, so this
 /// order is the document order in which the tree's footnote subtrees hold their
 /// cross-reference nodes.
@@ -778,7 +831,7 @@ pub(crate) fn footnote_tree_xrefs(
 }
 
 /// Counts the [`Xref`](RefVariant::Xref) nodes an [`assign_tree_xrefs`] walk
-/// over `nodes` would visit – i.e. the block-level cross-reference slots of the
+/// over `nodes` would visit — i.e. the block-level cross-reference slots of the
 /// tree, excluding footnote subtrees (which [`count_footnote_tree_xrefs`]
 /// covers). Used to verify the positional correlation before assigning.
 fn count_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
@@ -798,7 +851,7 @@ fn count_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
 }
 
 /// Counts the [`Xref`](RefVariant::Xref) nodes an
-/// [`assign_footnote_tree_xrefs`] walk over `nodes` would visit – i.e. the
+/// [`assign_footnote_tree_xrefs`] walk over `nodes` would visit — i.e. the
 /// cross-reference slots inside the tree's footnote subtrees.
 fn count_footnote_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
     nodes
@@ -816,15 +869,15 @@ fn count_footnote_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
 }
 
 /// Walks an inline node slice in document order and installs each
-/// cross-reference's resolved destination from `ordered` – the resolved state
-/// of the block-level deferred segments, in placeholder order – advancing
+/// cross-reference's resolved destination from `ordered` — the resolved state
+/// of the block-level deferred segments, in placeholder order — advancing
 /// `next` past each [`Xref`](RefVariant::Xref) node it visits.
 ///
 /// Only [`Ref`](InlineNode::Ref) nodes of variant [`Xref`](RefVariant::Xref)
 /// consume a slot; a [`Link`](RefVariant::Link) has no catalog destination. The
 /// pre-order traversal visits cross-references in the same left-to-right order
 /// the substitution assigned their placeholders, so node *i* receives segment
-/// *i*'s destination – overwritten unconditionally (to `Some` or `None`) so a
+/// *i*'s destination — overwritten unconditionally (to `Some` or `None`) so a
 /// repeated resolution reflects the latest result. A node with no matching slot
 /// (a count mismatch, guarded against by the caller) is left untouched.
 ///
@@ -863,8 +916,8 @@ fn assign_tree_xrefs(
 
 /// Walks an inline node slice in document order and installs each
 /// **footnote-embedded** cross-reference's resolved destination from `ordered`
-/// – the resolved state of the re-homed deferred segments, in segment order (as
-/// produced by [`footnote_tree_xrefs`]) – advancing `next` past each one.
+/// — the resolved state of the re-homed deferred segments, in segment order (as
+/// produced by [`footnote_tree_xrefs`]) — advancing `next` past each one.
 ///
 /// The block walk skips footnote subtrees, so this is the pass that reaches
 /// them: for each [`Footnote`](InlineNode::Footnote) node it hands the
@@ -1034,8 +1087,8 @@ fn render_template(
 /// macros substitution step, so any cross-reference (`<<id>>`, `xref:id[…]`)
 /// inside it cannot be resolved by the document-level pass that resolves
 /// references in block content. Instead, the footnote captures its
-/// cross-references here – as a placeholder template plus the references in
-/// placeholder order – and they are resolved alongside the block references
+/// cross-references here — as a placeholder template plus the references in
+/// placeholder order — and they are resolved alongside the block references
 /// (see [`Footnote::resolve_references`]).
 ///
 /// [`Footnote::resolve_references`]: crate::document::Footnote::resolve_references
@@ -1227,6 +1280,63 @@ mod tests {
             // lone start must not leak the sentinel into the output.
             let input = format!("Title{FOOTNOTE_MARKER_START}dangling");
             assert_eq!(strip_footnote_marker_spans(&input), "Title");
+        }
+    }
+
+    mod sanitize_title {
+        use super::super::sanitize_title;
+
+        #[test]
+        fn leaves_plain_text_unchanged() {
+            assert_eq!(sanitize_title("Plain title"), "Plain title");
+        }
+
+        #[test]
+        fn strips_a_tag_pair_keeping_its_inner_text() {
+            assert_eq!(sanitize_title("<strong>bold</strong>"), "bold");
+        }
+
+        #[test]
+        fn strips_a_self_contained_tag() {
+            assert_eq!(
+                sanitize_title(r#"Before <img src="a.png" alt="a"> after"#),
+                "Before after",
+            );
+        }
+
+        #[test]
+        fn squeezes_spaces_left_behind_by_a_removed_tag() {
+            // A run of spaces left behind after tags are stripped (e.g. two
+            // images rendered back-to-back, or a tag flanked by spaces on
+            // both sides) collapses to one, and the ends are trimmed,
+            // mirroring Ruby's `tr_s(' ', ' ').strip`.
+            assert_eq!(
+                sanitize_title(r#"<img src="a.png">  <img src="b.png">"#),
+                "",
+            );
+            assert_eq!(
+                sanitize_title("Before <b>bold</b>   after"),
+                "Before bold after",
+            );
+        }
+
+        #[test]
+        fn an_empty_tag_does_not_match_and_is_kept_verbatim() {
+            // `[^>]+` in Ruby's `XmlSanitizeRx` requires at least one
+            // character between `<` and `>`; an empty `<>` does not match
+            // and is copied through as literal text.
+            assert_eq!(sanitize_title("a<>b"), "a<>b");
+        }
+
+        #[test]
+        fn an_unclosed_angle_bracket_is_kept_verbatim() {
+            // A `<` with no `>` anywhere after it in the rest of the string
+            // is not a tag and is left as literal text, along with
+            // everything after it.
+            assert_eq!(
+                sanitize_title("Title <dangling and more"),
+                "Title <dangling and more",
+            );
         }
     }
 

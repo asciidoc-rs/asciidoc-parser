@@ -22,7 +22,7 @@ use crate::{
 
 /// Matches `INLINE_BIBLIO_ANCHOR` at the **content's own top level**, replacing
 /// a bibliography anchor (`[[[label]]]` / `[[[label,xreftext]]]`) with the
-/// [`Anchor`](InlineNode::Anchor) node it produces – `is_bibliography` set –
+/// [`Anchor`](InlineNode::Anchor) node it produces — `is_bibliography` set —
 /// followed by the bracketed label the string replacer emits into the flow.
 ///
 /// # Where this runs, and why only here
@@ -31,10 +31,10 @@ use crate::{
 /// family, and only when the parser flags that it is substituting the principal
 /// text of a bibliography list item
 /// ([`in_bibliography_list_item`](Parser::in_bibliography_list_item), set in
-/// `blocks::list_item`); this mirrors both. The pattern is `^`-anchored – a
+/// `blocks::list_item`); this mirrors both. The pattern is `^`-anchored — a
 /// `[[[…]]]` appearing later in the entry is left to the ordinary inline-anchor
 /// pass, which renders it but never catalogs its id (see
-/// [`is_bibliography_inner`]) – so this level pass runs once, at the top level
+/// [`is_bibliography_inner`]) — so this level pass runs once, at the top level
 /// [`apply_macros`](super::apply_macros) is called with, and never descends
 /// into a span's children: `^` matches only the very start of the *whole*
 /// content, exactly as it does for the string pipeline's own haystack.
@@ -43,7 +43,7 @@ use crate::{
 ///
 /// The replacer renders the anchor from its id alone (`render_anchor(id,
 /// None)`) and then pushes the bracketed label (`[label]`, or `[xreftext]` when
-/// one was supplied) into the output as ordinary text – text every *later*
+/// one was supplied) into the output as ordinary text — text every *later*
 /// string pass then scans. So the label is emitted here as the sibling nodes
 /// that follow the anchor node (sliced from the match's own outer brackets and
 /// its label range with [`emit_range`], so each keeps its exact `'src`
@@ -53,7 +53,7 @@ use crate::{
 /// with no container to descend into.
 ///
 /// The node's own `reftext` instead carries the bracketed label as the
-/// **registered** reference text – what a cross-reference to the entry
+/// **registered** reference text — what a cross-reference to the entry
 /// displays, and what [`apply_biblio_side_effects`] hands
 /// [`register_ref`](Parser::register_ref), mirroring the replacer's own single
 /// `format!("[{label}]")` serving both purposes.
@@ -63,8 +63,8 @@ use crate::{
 /// The string replacer captures its label out of the *escaped,
 /// already-rendered* haystack and registers **that** (`[[[gof,A & B]]]`
 /// catalogs `[A &amp; B]`), so the node's `reftext` holds the label in the same
-/// already-substituted form – the contract an
-/// [`IndexTerm`](InlineNode::IndexTerm)'s own `terms` already uses – taken
+/// already-substituted form — the contract an
+/// [`IndexTerm`](InlineNode::IndexTerm)'s own `terms` already uses — taken
 /// straight from this level's match string, which reconstructs exactly that
 /// haystack (a [`CharRef`](InlineNode::CharRef) contributes its
 /// canonical entity, so an escaped special and a character replacement alike
@@ -74,10 +74,10 @@ use crate::{
 ///
 /// # Deferred: a label crossing an opaque piece
 ///
-/// What the match string cannot reconstruct is an opaque piece – a rendered
+/// What the match string cannot reconstruct is an opaque piece — a rendered
 /// [`Styled`](crate::inlines::Styled) span (`[[[gof,*G*]]]`), a passthrough or
 /// STEM expression (not even restored yet), or a character replacement
-/// (`[[[gof,(C) 1995]]]`, `[[[oreilly,O'Reilly]]]`) – which stands in as a
+/// (`[[[gof,(C) 1995]]]`, `[[[oreilly,O'Reilly]]]`) — which stands in as a
 /// single [`SPAN_PLACEHOLDER`] here rather than as the markup or entity the
 /// string pipeline's haystack holds there. Such an anchor is left unrecognized,
 /// exactly the boundary the index-term family's own visible term documents
@@ -85,7 +85,7 @@ use crate::{
 /// already has at this point: `build_match_string` serves the quotes step too,
 /// where the replacements have not run yet, so it can only treat them as
 /// opaque). A label reached through a synthesized run (an attribute expansion,
-/// or a filtered block's joined seed) *is* recognized – the run contributes its
+/// or a filtered block's joined seed) *is* recognized — the run contributes its
 /// expanded value to the match string, just as it does to the string pipeline's
 /// own haystack.
 ///
@@ -126,7 +126,7 @@ pub(super) fn biblio_anchor_level<'src>(
     let id_match = caps.get(1).unwrap();
 
     // The displayed (and registered) label is the xreftext when one was
-    // supplied, else the id itself – exactly the string replacer's own
+    // supplied, else the id itself — exactly the string replacer's own
     // `caps.get(2)…unwrap_or(id)`.
     let label_match = caps.get(2).unwrap_or(id_match);
 
@@ -135,7 +135,7 @@ pub(super) fn biblio_anchor_level<'src>(
 
     // The label is registered (and shown) as already-substituted text, which
     // this level's match string reproduces for every piece except an opaque one
-    // – a rendered span, a passthrough, or a STEM expression – which stands in
+    // — a rendered span, a passthrough, or a STEM expression — which stands in
     // as a single placeholder.
     let label = match s.get(label_range.clone()) {
         Some(label) if !label.contains(SPAN_PLACEHOLDER) => label,
@@ -147,7 +147,7 @@ pub(super) fn biblio_anchor_level<'src>(
     // The id, by contrast, rides on the node as logical text, so it is sliced
     // back to `'src` (borrowing where it can) exactly as an ordinary anchor's
     // own id is. Its character class admits neither a special nor a placeholder,
-    // so the two readings coincide – and, for the same reason, the `None` arm
+    // so the two readings coincide — and, for the same reason, the `None` arm
     // (the id crossing an atomic piece) is not actually reachable, kept only
     // for symmetry with [`build_anchor_node`]'s own gate.
     let Some(id) = text_slice(&nodes, &pieces, id_range) else {
@@ -181,8 +181,8 @@ pub(super) fn biblio_anchor_level<'src>(
 }
 
 /// Matches `INLINE_ANCHOR` at this level's escaped text, replacing each
-/// recognized inline anchor – the `[[id]]` / `[[id,reftext]]` shorthand and the
-/// `anchor:id[reftext]` macro – with the [`Anchor`](InlineNode::Anchor) node it
+/// recognized inline anchor — the `[[id]]` / `[[id,reftext]]` shorthand and the
+/// `anchor:id[reftext]` macro — with the [`Anchor`](InlineNode::Anchor) node it
 /// produces and leaving everything else in place.
 pub(super) fn anchor_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
@@ -206,21 +206,21 @@ pub(super) fn anchor_macros_level<'src>(
     rebuild_macro_level(&nodes, &pieces, &s, matches)
 }
 
-/// Finds every recognized inline anchor at this level – both spellings – as a
+/// Finds every recognized inline anchor at this level — both spellings — as a
 /// [`MacroMatch`].
 ///
 /// An anchor's HTML rendering (`<a id="…"></a>`) is a function of its **id
 /// alone**, and an id admits no special character (the pattern's id class is
 /// letters/digits/`_`/`-`/`:`/`.`), so an id crossing an *escaped special* or a
-/// *rendered span* can never occur – unlike the link/xref families, an anchor
+/// *rendered span* can never occur — unlike the link/xref families, an anchor
 /// is never deferred on *that* boundary. An id's characters can, though, come
 /// from a [`synthesized`](Piece::synthesized) run (an attribute reference whose
-/// expanded value happens to contain `[[id]]`, or – reached at a tree's root –
+/// expanded value happens to contain `[[id]]`, or — reached at a tree's root —
 /// a filtered multi-line block's own joined seed): [`build_anchor_node`] no
 /// longer defers on that alone, recovering the id's exact text via
 /// [`text_slice`] even though it has no honest `'src` slice of its own (design
 /// §3.4.1/§4.1's "a macro inside an expanded value" boundary, reached here
-/// through the id rather than a target/attribute list) – the node's
+/// through the id rather than a target/attribute list) — the node's
 /// `location` still falls back to the coarse enclosing span design §4.4
 /// documents, since only the *text* needed the precision. A non-verbatim
 /// *reference text* (one carrying a rendered span or an escaped special) is a
@@ -247,7 +247,7 @@ pub(super) fn find_anchor_matches<'src>(
         // `caps.get(1)` check. [`rebuild_macro_level`] emits the kept range with
         // [`emit_range`], which clones an atomic piece (a rendered-span reference
         // text) whole, so the unescape works even across a non-verbatim reference
-        // text – just as the id itself is always verbatim, the whole anchor
+        // text — just as the id itself is always verbatim, the whole anchor
         // unescapes regardless.
         if caps.get(1).is_some() {
             matches.push(MacroMatch {
@@ -264,7 +264,7 @@ pub(super) fn find_anchor_matches<'src>(
             Some(node) => node,
 
             // The id itself crosses an atomic piece (an escaped special or a
-            // rendered span – never actually reachable given the id's own
+            // rendered span — never actually reachable given the id's own
             // character class, kept for symmetry with every other macro
             // family's own gate); left as literal source, exactly as every
             // other macro family defers a match it cannot slice at all.
@@ -286,7 +286,7 @@ pub(super) fn find_anchor_matches<'src>(
 /// Builds one [`Anchor`](InlineNode::Anchor) node from an inline-anchor match,
 /// recovering the id's exact text via [`text_slice`] so the fold reproduces
 /// the string replacer's `<a id="…"></a>` exactly. Returns `None` only when
-/// the id crosses an [`atomic`](Piece::atomic) piece (see below) – a form this
+/// the id crosses an [`atomic`](Piece::atomic) piece (see below) — a form this
 /// increment still defers.
 ///
 /// Two spellings share this builder: the `[[id,reftext]]` shorthand (groups
@@ -295,19 +295,19 @@ pub(super) fn find_anchor_matches<'src>(
 ///
 /// An id's character class (letters/digits/`_`/`-`/`:`/`.`) admits no escaped
 /// special or rendered span, so [`range_is_verbatim_or_synthesized`]'s atomic
-/// check can in practice never fail for an id – it is kept for symmetry with
+/// check can in practice never fail for an id — it is kept for symmetry with
 /// every other macro family's own gate. Its bytes *can* come from a
-/// [`synthesized`](Piece::synthesized) run – an attribute reference whose
-/// expanded value happens to contain `[[id]]`, or – reached at a tree's root –
+/// [`synthesized`](Piece::synthesized) run — an attribute reference whose
+/// expanded value happens to contain `[[id]]`, or — reached at a tree's root —
 /// a filtered multi-line block's own joined seed (design §3.4.1's "a macro
-/// inside an expanded value" boundary) – and [`text_slice`] recovers the exact
+/// inside an expanded value" boundary) — and [`text_slice`] recovers the exact
 /// id text for that case too, unlike [`source_slice`], which would silently
 /// fall back to the enclosing synthesized run's *coarse* span (design §4.4)
 /// for both the id and the node's `location`. Only `location` keeps that
 /// coarse fallback here; the id text itself is always precise.
 ///
-/// The optional reference text is captured as the node's `reftext` – a single
-/// [`Text`](InlineNode::Text) child – whenever it does not cross an atomic
+/// The optional reference text is captured as the node's `reftext` — a single
+/// [`Text`](InlineNode::Text) child — whenever it does not cross an atomic
 /// piece (the common verbatim case borrows `'src`; a synthesized one is
 /// recovered via [`text_slice`] into an owned value, `location` falling back
 /// to the coarse span exactly as the id's own does). A shorthand's trailing
@@ -315,12 +315,12 @@ pub(super) fn find_anchor_matches<'src>(
 /// the string replacer. A reference text that carries a rendered span or an
 /// escaped special is left non-verbatim; because it never reaches the flow
 /// (the anchor renders from its id alone), the anchor is still recognized but
-/// its `reftext` is left `None` rather than sliced wrongly – a narrower
+/// its `reftext` is left `None` rather than sliced wrongly — a narrower
 /// boundary than the id's own, and a shape a re-flow consumer can refine later
 /// (the field is provisional, per the node's Phase-0 note).
 ///
 /// As in the additive builder generally, this performs *no* recognition side
-/// effect – notably it does **not** `register_ref` the id in the catalog (so a
+/// effect — notably it does **not** `register_ref` the id in the catalog (so a
 /// cross-reference can resolve against it), nor emit the duplicate-id warning
 /// the string replacer raises; the cutover (design §5.2 Phase 4, step 6) wires
 /// those in.
@@ -364,8 +364,8 @@ fn build_anchor_node<'src>(
     }))
 }
 
-/// Builds an inline anchor's `reftext` – a single [`Text`](InlineNode::Text)
-/// child – from the reference-text capture's match-string `range`, or `None`
+/// Builds an inline anchor's `reftext` — a single [`Text`](InlineNode::Text)
+/// child — from the reference-text capture's match-string `range`, or `None`
 /// when the reference text crosses an atomic piece or trims to empty (see
 /// [`build_anchor_node`] for why crossing an atomic piece is not an error for
 /// the anchor as a whole).
@@ -379,7 +379,7 @@ fn build_anchor_node<'src>(
 /// borrows `'src`, and a shorthand's `location` is sliced down to the trimmed
 /// text precisely. A [`synthesized`](Piece::synthesized) range instead
 /// recovers its exact text via [`text_slice`] but keeps the whole range's
-/// coarse `location` regardless of trimming or unescaping (design §4.4) –
+/// coarse `location` regardless of trimming or unescaping (design §4.4) —
 /// sub-slicing a location has no honest meaning for bytes with no `'src`
 /// counterpart of their own, the same policy
 /// [`emit_range`] already applies to every fragment of an expanded value.
@@ -437,35 +437,35 @@ fn build_anchor_reftext<'src>(
 }
 
 /// Performs the recognition side effects the string pipeline attaches to an
-/// assigned id at two distinct points – `InlineAnchorReplacer` (an inline
+/// assigned id at two distinct points — `InlineAnchorReplacer` (an inline
 /// anchor, `[[id]]` / `anchor:id[…]`) and the attributed-quote handling in
 /// [`SubstitutionStep::Quotes`](crate::content::SubstitutionStep::Quotes)
-/// (`[#id]#…#`) – by walking an already-built tree and reading each
+/// (`[#id]#…#`) — by walking an already-built tree and reading each
 /// [`Anchor`](InlineNode::Anchor) node's own stored `id`/`reftext` and each
 /// [`Styled`](crate::inlines::Styled) span's own optional `id`, instead of a
 /// regex capture. Both register the id in the document's reference catalog
 /// under [`RefType::Anchor`] so a later cross-reference can resolve against
 /// it; only the inline-anchor form also raises a duplicate-id warning (the
-/// attributed-span form is silently non-fatal in the string pipeline too –
+/// attributed-span form is silently non-fatal in the string pipeline too —
 /// see [`attributes_of`](super::super::quotes::attributes_of)'s own note).
 ///
 /// Every macro family this module recognizes defers exactly this kind of side
 /// effect (see
 /// [`image::apply_image_side_effects`](super::image::apply_image_side_effects)'
 /// s own note): while the additive builder runs *alongside* the authoritative
-/// string pipeline – each against its own, independent [`Parser`] – performing
+/// string pipeline — each against its own, independent [`Parser`] — performing
 /// it from every additive pass would risk double-counting a registration once
 /// the two paths ever share one `Parser`. This function is the last of the
 /// deferred registrations, staged as its own building block for the eventual
 /// cutover (design §5.2, Phase 4 step 6): re-attaching it for real means
 /// calling it exactly once per parse, after the single-pass builder replaces
 /// the recorder as `Content`'s tree source, so nothing here is wired into a
-/// real parse yet – it is exercised only by this module's own tests, against
+/// real parse yet — it is exercised only by this module's own tests, against
 /// their own `Parser`.
 ///
-/// `source` is the whole original content span being processed, used – like
+/// `source` is the whole original content span being processed, used — like
 /// [`image::apply_image_side_effects`](super::image::apply_image_side_effects)'
-/// s own `source` parameter – to locate the duplicate-id warning exactly as
+/// s own `source` parameter — to locate the duplicate-id warning exactly as
 /// [`InlineAnchorReplacer`](crate::content::macros) does (against the
 /// content's own span, not the individual anchor's).
 ///
@@ -473,15 +473,15 @@ fn build_anchor_reftext<'src>(
 /// [`apply_macros_with_leading_anchor_registered`](super::apply_macros)'s own
 /// parameter: a description-list term pre-registers its own leading
 /// `[[id]]`/`[[id,reftext]]` before running the macros pass (see
-/// `DefinedTerm::substitute` in `blocks::list_item_marker`), so – once this
-/// function is wired in for real at the same call site – passing `true` there
+/// `DefinedTerm::substitute` in `blocks::list_item_marker`), so — once this
+/// function is wired in for real at the same call site — passing `true` there
 /// suppresses the duplicate-id warning this function would otherwise raise
 /// for that very same anchor, which sits at byte offset `0` of `source`.
 /// Every other caller passes `false`.
 ///
-/// Recurses into every container an id-bearing node can be nested inside –
+/// Recurses into every container an id-bearing node can be nested inside —
 /// [`Styled`](InlineNode::Styled), [`Ref`](InlineNode::Ref), and
-/// [`Footnote`](InlineNode::Footnote) children – mirroring exactly where the
+/// [`Footnote`](InlineNode::Footnote) children — mirroring exactly where the
 /// image and link increments' own side-effect functions recurse.
 pub(crate) fn apply_ref_side_effects(
     nodes: &[InlineNode<'_>],
@@ -551,8 +551,8 @@ pub(crate) fn apply_ref_side_effects(
 /// duplicate-id warning against the whole content's `source` span when the id
 /// is already taken.
 ///
-/// Kept separate from [`apply_ref_side_effects`] – rather than folded into its
-/// walk – because the string pipeline runs the bibliography-anchor pass
+/// Kept separate from [`apply_ref_side_effects`] — rather than folded into its
+/// walk — because the string pipeline runs the bibliography-anchor pass
 /// **first**, ahead of every other macro family, and
 /// [`apply_macro_side_effects`](super::apply_macro_side_effects) must reproduce
 /// that order: a duplicate-id warning from a bibliography anchor precedes an
@@ -561,12 +561,12 @@ pub(crate) fn apply_ref_side_effects(
 /// image-before-anchor.
 ///
 /// The pattern is `^`-anchored, so a bibliography anchor is always the
-/// content's *first* node and is never nested inside a container – hence no
+/// content's *first* node and is never nested inside a container — hence no
 /// recursion here (and none needed for the bracketed label either: it stays in
 /// the flow as ordinary sibling nodes, see [`biblio_anchor_level`]).
 ///
 /// As with every staged side effect in this module, **nothing here is wired
-/// into a real parse path yet** – it is exercised only by this module's own
+/// into a real parse path yet** — it is exercised only by this module's own
 /// tests, against their own [`Parser`].
 pub(crate) fn apply_biblio_side_effects(
     nodes: &[InlineNode<'_>],
@@ -594,7 +594,7 @@ pub(crate) fn apply_biblio_side_effects(
 }
 
 /// The reference text `str` a built [`Anchor`] node's `reftext` carries, when
-/// it is populated (a single verbatim [`Text`](InlineNode::Text) child – see
+/// it is populated (a single verbatim [`Text`](InlineNode::Text) child — see
 /// [`build_anchor_reftext`]), mirroring the `Option<&str>`
 /// [`register_ref`](Parser::register_ref) itself expects.
 fn anchor_reftext_str<'a>(anchor: &'a Anchor<'_>) -> Option<&'a str> {
@@ -613,7 +613,7 @@ fn anchor_reftext_str<'a>(anchor: &'a Anchor<'_>) -> Option<&'a str> {
 /// function). Asciidoctor's own
 /// inline-anchor *scan* excludes a `[[id]]` preceded by a `[`, so it renders
 /// the anchor (already handled by [`build_anchor_node`], which does not
-/// exclude this case – see its own doc) but never catalogs the id; this
+/// exclude this case — see its own doc) but never catalogs the id; this
 /// mirrors that by skipping only the registration, not the recognition. See
 /// #769.
 ///
@@ -623,14 +623,14 @@ fn anchor_reftext_str<'a>(anchor: &'a Anchor<'_>) -> Option<&'a str> {
 /// meaningful. A **synthesized** anchor's `id` (design §4.4's coarse-fallback
 /// case, lifted for this family by [`text_slice`]) instead carries a
 /// `location` that is only the enclosing run's *whole* coarse span, not the
-/// exact `[[id]]` text – peeking at a byte relative to that span would answer
+/// exact `[[id]]` text — peeking at a byte relative to that span would answer
 /// a question about the wrong bytes (the source immediately before the
 /// *attribute reference*, not before the *id* inside its expanded value), so
 /// this bails out to `false` (not bibliography-inner) for any non-verbatim id
 /// rather than risk a wrong answer in either direction from bytes that were
 /// never the id's own. A genuinely bibliography-style `[[[id]]]` sequence
 /// reached through an attribute expansion is therefore registered as an
-/// ordinary reference rather than suppressed – a narrower, documented gap the
+/// ordinary reference rather than suppressed — a narrower, documented gap the
 /// eventual `apply_ref_side_effects` wiring (design §5.2 Phase 4, step 6) can
 /// close if it proves to matter, the same "a coarse fallback trades precision
 /// for correctness of the common case" policy design §4.4 already establishes
@@ -730,8 +730,8 @@ mod tests {
             "*see [[x]]*",
             "_anchor:y[] in em_",
             // A reference text that is a rendered span or a special: the anchor is
-            // still recognized (its id alone renders), and the reference text –
-            // which never reaches the flow – is consumed with the match.
+            // still recognized (its id alone renders), and the reference text —
+            // which never reaches the flow — is consumed with the match.
             "[[id,*bold*]]",
             "anchor:id[*bold*]",
             "[[id,A & B]]",
@@ -822,7 +822,7 @@ mod tests {
     fn an_anchor_shorthand_reftext_that_is_whitespace_only_has_no_reftext() {
         // A shorthand reference text that trims to empty (the pattern's `(.+?)`
         // matched only the whitespace the string replacer's `trim_end` strips)
-        // leaves `reftext` `None`, the same shape as the bare `[[id]]` form – and
+        // leaves `reftext` `None`, the same shape as the bare `[[id]]` form — and
         // it still folds to the same `<a id="…"></a>` the string pipeline emits.
         let source = "[[install, ]]";
         let nodes = build_src(Span::new(source));
@@ -882,7 +882,7 @@ mod tests {
     #[test]
     fn an_escaped_anchor_stays_literal() {
         // `\[[…]]` and `\anchor:…[…]` drop the backslash and keep the anchor as
-        // literal text – no anchor node – exactly as the string replacer's escape
+        // literal text — no anchor node — exactly as the string replacer's escape
         // branch does.
         for source in ["\\[[install]]", "\\anchor:install[Installation]"] {
             let nodes = build_src(Span::new(source));
@@ -927,11 +927,11 @@ mod tests {
     }
 
     /// The string pipeline's output through the **attribute-references** step
-    /// for `source`, run against `parser` – the six steps [`build`] runs, in
+    /// for `source`, run against `parser` — the six steps [`build`] runs, in
     /// order (special characters, quotes, attribute references, character
     /// replacements, macros, post replacement). Unlike [`golden_macros_with`],
     /// this exercises `AttributeReferences` too, so an attribute whose
-    /// expanded value contains `[[id]]` is spliced in before `Macros` runs –
+    /// expanded value contains `[[id]]` is spliced in before `Macros` runs —
     /// the scenario the divergence test below needs.
     fn golden_attributes_with(source: &str, parser: &Parser) -> String {
         use crate::content::{Content, SubstitutionStep};
@@ -1006,7 +1006,7 @@ mod tests {
         // produces for a genuinely multi-line, filtered block) now also
         // recognizes an anchor, mirroring `mod.rs`'s own
         // `a_macro_construct_is_deferred_when_the_whole_seed_is_synthesized`
-        // – which still pins this boundary for the *other* macro families
+        // — which still pins this boundary for the *other* macro families
         // (link/image/xref) this increment does not touch.
         use crate::content::inline_builder::build_from_value;
 
@@ -1048,7 +1048,7 @@ mod tests {
     #[test]
     fn an_anchors_reftext_inside_an_expanded_attribute_value_is_now_recognized() {
         // `build_anchor_reftext`'s own synthesized branch: the reference text
-        // – not just the id – can come from a synthesized run too. Its
+        // — not just the id — can come from a synthesized run too. Its
         // `location` falls back to the coarse enclosing span (design §4.4)
         // rather than a sub-slice of it, since there is no honest source
         // position to slice for owned bytes; only the recovered `value` is
@@ -1184,8 +1184,8 @@ mod tests {
     #[test]
     fn does_not_register_the_inner_anchor_of_a_bibliography_style_triple_bracket() {
         // The `[[id]]` inside `[[[id]]]` is recognized as an `Anchor` node
-        // (see the differential corpus above), but – outside a bibliography
-        // list item – the string pipeline renders it without cataloging its
+        // (see the differential corpus above), but — outside a bibliography
+        // list item — the string pipeline renders it without cataloging its
         // id (`is_bibliography_inner`); this mirrors that.
         let source = "[[[id]]]";
         let parser = Parser::default();
@@ -1205,7 +1205,7 @@ mod tests {
         // never answer the "preceded by `[`" question honestly. Unlike the
         // test above (a literal `[[[id]]]` in real source, suppressed), the
         // same shape reached through an attribute expansion is registered as
-        // an ordinary reference instead – the anchor is still recognized (its
+        // an ordinary reference instead — the anchor is still recognized (its
         // id is exact, per the fold-parity tests above), just not suppressed.
         use crate::parser::ModificationContext;
 
@@ -1238,8 +1238,8 @@ mod tests {
     #[test]
     fn leading_anchor_registered_suppresses_the_warning_for_the_anchor_at_the_start() {
         // Mirrors `DefinedTerm::substitute`'s own pre-registration dance: the
-        // id is already registered by the time this pass runs, and – because
-        // the anchor sits at byte offset `0` of `source` – the
+        // id is already registered by the time this pass runs, and — because
+        // the anchor sits at byte offset `0` of `source` — the
         // `leading_anchor_registered` flag suppresses the warning the second
         // (redundant) registration attempt would otherwise raise.
         let source = "[[install]]";
@@ -1351,7 +1351,7 @@ mod tests {
     use super::{apply_biblio_side_effects, biblio_anchor_level};
 
     /// A [`Parser`] flagged as substituting the principal text of a
-    /// bibliography list item – the context `blocks::list_item` puts the parser
+    /// bibliography list item — the context `blocks::list_item` puts the parser
     /// in, and the only one in which either pipeline recognizes a bibliography
     /// anchor.
     fn biblio_parser() -> Parser {
@@ -1386,7 +1386,7 @@ mod tests {
             // Not at the start of the entry: the `^`-anchored pass declines it,
             // exactly as the string step does.
             "See [[[mid]]] inline.",
-            // A backslash is not an escape here – `\\[[[x]]]` does not begin
+            // A backslash is not an escape here — `\\[[[x]]]` does not begin
             // with `[[[`, so it is not a bibliography anchor at all.
             "\\[[[gof]]] Gamma.",
             // An xreftext carrying flow constructs of its own: the label stays
@@ -1396,7 +1396,7 @@ mod tests {
             "[[[gof,see link:x.html[X]]]] a link macro inside the label",
             // A label carrying an escaped special: a `CharRef::Special` piece
             // contributes its canonical entity to this level's match string, so
-            // the label is reconstructed – and registered – exactly as the
+            // the label is reconstructed — and registered — exactly as the
             // string replacer captures it.
             "[[[gof,A & B]]] an escaped special inside the label",
             // Constructs after the entry's anchor.
@@ -1440,7 +1440,7 @@ mod tests {
         assert_eq!(anchor.location.line(), 1);
         assert_eq!(anchor.location.col(), 1);
 
-        // The node's own reference text is the *bracketed* label – what the
+        // The node's own reference text is the *bracketed* label — what the
         // entry is registered with, and what a cross-reference to it displays.
         let reftext = anchor.reftext.as_ref().unwrap();
         assert_eq!(reftext.len(), 1);
@@ -1450,7 +1450,7 @@ mod tests {
         }
 
         // The same bracketed label is *also* in the flow, as the sibling nodes
-        // that follow – each sliced from the match's own source characters (the
+        // that follow — each sliced from the match's own source characters (the
         // outer `[` at column 1, the label, and the outer `]` at column 13).
         assert_text(&nodes[1], "[", 1, 1);
         assert_text(&nodes[2], "GoF", 1, 8);
@@ -1484,7 +1484,7 @@ mod tests {
         // The same source, built against a parser that is *not* flagged: the
         // triple bracket falls through to the ordinary inline-anchor pass, whose
         // node carries no bibliography flag (and whose id the side-effect pass
-        // deliberately does not catalog – see
+        // deliberately does not catalog — see
         // `does_not_register_the_inner_anchor_of_a_bibliography_style_triple_bracket`).
         let nodes = build_src(Span::new("[[[gof]]]"));
 
@@ -1502,8 +1502,8 @@ mod tests {
     #[test]
     fn a_bibliography_anchor_inside_a_synthesized_run_is_recognized() {
         // A whole bibliography anchor supplied by an attribute reference: its
-        // id and label have no `'src` slice of their own, but – as with the
-        // ordinary anchor family's id – `text_slice` recovers their exact text,
+        // id and label have no `'src` slice of their own, but — as with the
+        // ordinary anchor family's id — `text_slice` recovers their exact text,
         // so the anchor is recognized (its `location` taking design §4.4's
         // coarse fallback), and the fold matches the string pipeline.
         use crate::parser::ModificationContext;
@@ -1533,15 +1533,15 @@ mod tests {
 
     #[test]
     fn a_bibliography_label_over_an_opaque_piece_is_a_documented_divergence() {
-        // A label crossing an opaque piece – a rendered span, a passthrough, or
+        // A label crossing an opaque piece — a rendered span, a passthrough, or
         // a character replacement, each a single placeholder in this level's
         // match string rather than the markup/entity the string pipeline's
-        // haystack holds there – cannot be reconstructed as the
+        // haystack holds there — cannot be reconstructed as the
         // already-substituted text the string replacer registers and shows, so
         // the anchor is left unrecognized. The entry then keeps the shape it had
         // before this increment (the inner `[[…]]` as an ordinary anchor), which
         // is what diverges. This is exactly the boundary the index-term family's
-        // own visible term documents, and – for the character replacements –
+        // own visible term documents, and — for the character replacements —
         // the same one every macro family already has at this point in the
         // pipeline (a `(C)` or a smart apostrophe is atomic by macro time).
         let parser = biblio_parser();
@@ -1610,7 +1610,7 @@ mod tests {
     fn matches_the_golden_pipelines_bibliography_registrations() {
         // Each side registers against its own *independent* parser (design
         // §5.3's two-independent-parsers discipline), so the staged side effect
-        // is compared with the real pipeline's own registrations – id, reference
+        // is compared with the real pipeline's own registrations — id, reference
         // text, and `RefType` alike.
         let fixtures = [
             "[[[gof]]] Gamma.",
@@ -1683,8 +1683,8 @@ mod tests {
     #[test]
     fn a_bibliography_anchor_is_registered_once_not_twice() {
         // `apply_ref_side_effects` skips a bibliography anchor (its own earlier
-        // pass owns it), so composing the two – as
-        // `apply_macro_side_effects` does – neither double-registers the entry
+        // pass owns it), so composing the two — as
+        // `apply_macro_side_effects` does — neither double-registers the entry
         // nor raises a spurious duplicate-id warning against itself.
         let source = "[[[gof]]] Gamma.";
         let parser = biblio_parser();
@@ -1706,7 +1706,7 @@ mod tests {
         // End-to-end, through the real parse path: the flag this pass reads is
         // set by `blocks::list_item` while the entry's principal text is
         // substituted, and `SubstitutionGroup::apply` clones the parser (flag
-        // included) to build the tree – so a real bibliography entry's tree
+        // included) to build the tree — so a real bibliography entry's tree
         // folds to exactly the rendered string the string pipeline produced.
         use crate::blocks::{FindBlocks, IsBlock};
 

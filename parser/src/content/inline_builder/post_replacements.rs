@@ -9,8 +9,8 @@ use crate::{
 /// ` +` has that ` +` replaced by a [`LineBreak`](InlineNode::LineBreak) leaf,
 /// the line content before it staying in place.
 ///
-/// Under the block-wide `hardbreaks` option – set on `attrlist` (the block's
-/// own attribute list) or via the document's `hardbreaks-option` attribute –
+/// Under the block-wide `hardbreaks` option — set on `attrlist` (the block's
+/// own attribute list) or via the document's `hardbreaks-option` attribute —
 /// [`apply_hardbreaks`] runs instead: *every* line ending becomes a break, not
 /// only one already marked with ` +`.
 pub(super) fn apply_post_replacements<'src>(
@@ -19,19 +19,32 @@ pub(super) fn apply_post_replacements<'src>(
     parser: &Parser,
     attrlist: Option<&Attrlist<'src>>,
 ) -> Vec<InlineNode<'src>> {
+    apply_level(nodes, root, parser, attrlist, true)
+}
+
+/// One level of the post-replacement pass. `is_root` marks the content's own
+/// top level, which is the only level whose end coincides with the end of the
+/// string pipeline's haystack — see the match filter below for why that
+/// decides whether a ` +` ending the level is a break.
+fn apply_level<'src>(
+    nodes: Vec<InlineNode<'src>>,
+    root: Span<'src>,
+    parser: &Parser,
+    attrlist: Option<&Attrlist<'src>>,
+    is_root: bool,
+) -> Vec<InlineNode<'src>> {
     // Descend into spans/refs first, matching the string pipeline's
-    // whole-string pass.
+    // whole-string pass. A nested level is never the root.
     let nodes: Vec<InlineNode<'src>> = nodes
         .into_iter()
         .map(|node| match node {
             InlineNode::Styled(mut styled) => {
-                styled.children = apply_post_replacements(styled.children, root, parser, attrlist);
+                styled.children = apply_level(styled.children, root, parser, attrlist, false);
                 InlineNode::Styled(styled)
             }
 
             InlineNode::Ref(mut reference) => {
-                reference.children =
-                    apply_post_replacements(reference.children, root, parser, attrlist);
+                reference.children = apply_level(reference.children, root, parser, attrlist, false);
                 InlineNode::Ref(reference)
             }
 
@@ -47,24 +60,43 @@ pub(super) fn apply_post_replacements<'src>(
 
     let (s, pieces) = build_match_string(&nodes);
 
-    // The string pipeline guards on both a `+` and a newline being present.
-    if !(s.contains('+') && s.contains('\n')) {
+    // A break needs a `+`, and — off the root level, where an end-of-level
+    // match is discarded below — a `\n` for the pattern's `$` to anchor
+    // against. The string pipeline's own pre-check is the root form of this: it
+    // guards on a `+` alone, since its haystack is the whole rendered string.
+    if !(s.contains('+') && (is_root || s.contains('\n'))) {
         return nodes;
     }
 
     // Each match's `[content.end, whole.end)` is the trailing ` +` the break
     // replaces; the line content before it is kept. Group 0 (the whole match)
     // and group 1 (the `(.*)` line content) always participate in this pattern.
+    //
+    // The pattern's `$` (multiline) matches before each `\n` *and* at the end
+    // of the haystack. The string pipeline's haystack is the whole rendered
+    // string, so its end-of-haystack match can only fire at the very end of the
+    // content; this transducer matches over one level at a time, where end of
+    // level and end of haystack coincide only at the root. A nested `Styled` or
+    // `Ref` level is always followed by its own closing markup (`</strong>`,
+    // `</a>`, …) in the string pipeline's haystack, so a ` +` ending a span is
+    // not at a line end there and stays literal: `*bold +*` renders
+    // `<strong>bold +</strong>`, not `<strong>bold<br></strong>`. Dropping the
+    // end-of-level match off the root reproduces that, while a ` +` before a
+    // `\n` is unaffected at every level.
     let breaks: Vec<std::ops::Range<usize>> = hard_line_break_pattern()
         .captures_iter(&s)
-        .map(|caps| {
+        .filter_map(|caps| {
             #[allow(clippy::unwrap_used)]
             let whole = caps.get(0).unwrap();
+
+            if !is_root && whole.end() == s.len() {
+                return None;
+            }
 
             #[allow(clippy::unwrap_used)]
             let content = caps.get(1).unwrap();
 
-            content.end()..whole.end()
+            Some(content.end()..whole.end())
         })
         .collect();
 
@@ -78,7 +110,7 @@ pub(super) fn apply_post_replacements<'src>(
 /// The `hardbreaks` form of the post-replacement substitution: every line
 /// ending (`\n`) in the level's match string becomes a break, mirroring the
 /// string pipeline's own `line.ends_with(" +")`-stripping, line-by-line
-/// rejoin exactly – a trailing ` +` is stripped rather than kept *and*
+/// rejoin exactly — a trailing ` +` is stripped rather than kept *and*
 /// doubled, and the level's *last* line (nothing follows its own `\n`, since
 /// there is none) never gets one, matching the string pipeline leaving the
 /// popped last line unbroken.
@@ -176,6 +208,98 @@ mod tests {
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),
             "foo<br>\nbar"
         );
+    }
+
+    #[test]
+    fn a_trailing_hard_line_break_with_no_newline_after_it_still_breaks() {
+        // The hard-line-break pattern anchors on `$` in multiline mode, which
+        // matches at the end of the haystack as well as before each `\n`, so a
+        // ` +` that *ends* the content is a break too — there is no newline
+        // anywhere in this source (issue #1067).
+        let nodes = build_src(Span::new("only +"));
+
+        assert_eq!(nodes.len(), 2);
+        assert_text(&nodes[0], "only", 1, 1);
+
+        match &nodes[1] {
+            InlineNode::LineBreak { location } => {
+                assert_eq!(location.data(), " +");
+            }
+
+            other => panic!("expected LineBreak, got {other:?}"),
+        }
+
+        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "only<br>");
+    }
+
+    #[test]
+    fn the_last_line_of_a_multi_line_level_breaks_too() {
+        // The same `$` anchor makes the *final* line eligible even when earlier
+        // lines are not: only the trailing ` +` here becomes a break.
+        let nodes = build_src(Span::new("first\nsecond +"));
+
+        assert_eq!(nodes.len(), 2);
+        assert_text(&nodes[0], "first\nsecond", 1, 1);
+        assert!(matches!(nodes[1], InlineNode::LineBreak { .. }));
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            "first\nsecond<br>"
+        );
+    }
+
+    /// Runs `source` through the string pipeline (the golden oracle) and
+    /// through [`super::super::build`] + [`fold_html`], asserting byte
+    /// parity.
+    fn assert_parity(source: &str) {
+        let parser = Parser::default();
+
+        let mut content = Content::from(Span::new(source));
+        SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+        let golden = content.rendered_str().to_string();
+
+        let nodes = super::super::build(Span::new(source), &parser, None);
+        let built = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+
+        assert_eq!(golden, built, "fold diverged for {source:?}");
+    }
+
+    #[test]
+    fn a_hard_line_break_ending_a_span_stays_literal() {
+        // The pattern's `$` reaches the end of a *level*, but in the string
+        // pipeline's whole-string haystack a span's content is followed by its
+        // own closing tag, so a ` +` there is not at a line end and never
+        // becomes a break. Only the content's root level ends where the
+        // haystack ends.
+        let nodes = build_src(Span::new("*bold +*"));
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            "<strong>bold +</strong>"
+        );
+
+        for source in [
+            // Every nesting the recursion descends into: a styled span, a
+            // reference's display text, and one inside the other.
+            "*bold +*",
+            "_em +_",
+            "`code +`",
+            "link:https://example.org[text +]",
+            "*_deep +_*",
+            "text *bold +* tail",
+            "*bold +*\ntail",
+            // A span that ends in ` +` *and* contains a real break: the interior
+            // one fires, the one ending the span does not. This case diverged
+            // even before the end-of-level match was allowed, because the
+            // level's own `\n` was enough to get past the cheap pre-check.
+            "*bold +\nmore +*",
+            // The root level still breaks at its end, inside or outside a span.
+            "*a +\nb* +",
+            "*x +* y +",
+            "foo +\n*bar +*",
+        ] {
+            assert_parity(source);
+        }
     }
 
     #[test]

@@ -359,10 +359,24 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
 "#
         );
 
+        // This table row describes the *metadata* lines in a document header
+        // (author and revision information, and attribute-entry values),
+        // which stay on the restricted `Header` substitution group and so
+        // never see character replacements: `(C)` on the revision line is
+        // left as literal text.
+        let doc = Parser::default().parse("= Title\nJane Doe\nv1, 2025-09-28: (C) So On");
+
+        let revremark = doc.header().revision_line().unwrap().revremark().unwrap();
+        assert_eq!(revremark, "(C) So On");
+
+        // The document *title* line itself is not part of this "Headers" row
+        // — it uses `SubstitutionGroup::Title` (the same steps as `Normal`),
+        // so the same `(C)` there is replaced (verified against Asciidoctor
+        // 2.0.26).
         let doc = Parser::default().parse("= Title (C) So On");
 
         let title = doc.header().title().unwrap();
-        assert_eq!(title, "Title (C) So On");
+        assert_eq!(title, "Title &#169; So On");
     }
 
     #[test]

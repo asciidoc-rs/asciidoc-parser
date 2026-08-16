@@ -14,8 +14,8 @@ use crate::{
 };
 
 /// Matches [`INLINE_INDEXTERM`] at this level's escaped text, replacing each
-/// recognized index term – the `((term))` / `(((primary, secondary,
-/// tertiary)))` shorthand and the `indexterm:[…]` / `indexterm2:[…]` macro –
+/// recognized index term — the `((term))` / `(((primary, secondary,
+/// tertiary)))` shorthand and the `indexterm:[…]` / `indexterm2:[…]` macro —
 /// with the [`IndexTerm`](InlineNode::IndexTerm) node it produces and leaving
 /// everything else in place.
 pub(super) fn indexterm_macros_level<'src>(
@@ -73,20 +73,20 @@ struct RecognizedIndexterm<'src> {
     rendered_nonempty: bool,
 
     /// Whether recognizing this match advances the string replacer via a
-    /// look-ahead retry (`SkipAheadAndRetry`) – true only for a shorthand that
+    /// look-ahead retry (`SkipAheadAndRetry`) — true only for a shorthand that
     /// absorbed trailing parens. The macro forms always `Continue`.
     is_skip: bool,
 }
 
 /// Reports whether the string replacer's index-term substitution over this
-/// level would be a **no-op** – returning `Cow::Borrowed` and so leaving the
+/// level would be a **no-op** — returning `Cow::Borrowed` and so leaving the
 /// content unchanged (see [`indexterm_macros_level`]).
 ///
 /// That happens exactly when the accumulated output is empty *and* the last
 /// recognized match advanced via a look-ahead retry: an empty gap before every
 /// match, every match rendering nothing, and the final match a paren-absorbing
-/// shorthand. Any non-empty gap or shown term – or a trailing macro form, which
-/// `Continue`s instead of retrying – makes the substitution `Cow::Owned` and
+/// shorthand. Any non-empty gap or shown term — or a trailing macro form, which
+/// `Continue`s instead of retrying — makes the substitution `Cow::Owned` and
 /// the terms are recognized normally.
 fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
     let mut emitted_nonempty = false;
@@ -113,15 +113,15 @@ fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
     last_is_skip && !emitted_nonempty
 }
 
-/// Finds every recognized index term at this level – both the macro forms
+/// Finds every recognized index term at this level — both the macro forms
 /// (`indexterm:[…]`, `indexterm2:[…]`) and the shorthand forms (`((term))`,
-/// `(((primary, secondary, tertiary)))`) – as a [`MacroMatch`].
+/// `(((primary, secondary, tertiary)))`) — as a [`MacroMatch`].
 ///
 /// # Concealed vs. visible, and the recognition boundary
 ///
-/// A **concealed** term (`indexterm:[…]`, `(((…)))`) renders to *nothing* –
+/// A **concealed** term (`indexterm:[…]`, `(((…)))`) renders to *nothing* —
 /// [`render_index_term`](crate::parser::InlineSubstitutionRenderer::render_index_term) emits
-/// no output for it – so, much like an inline anchor whose output is a function
+/// no output for it — so, much like an inline anchor whose output is a function
 /// of its id alone (see
 /// [`find_anchor_matches`](super::anchors::find_anchor_matches)), it is
 /// recognized regardless of what its argument crosses; the node simply carries
@@ -131,22 +131,22 @@ fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
 ///
 /// A **visible** (flow) term (`indexterm2:[…]`, `((term))`) shows its term text
 /// in the flow, so that text must be reconstructible from this level's escaped
-/// match string. It is – with the *same* entity bytes the string pipeline sees,
+/// match string. It is — with the *same* entity bytes the string pipeline sees,
 /// since a [`CharRef`](InlineNode::CharRef) contributes its canonical entity to
-/// the match string – whenever the term crosses no *opaque span* (an
+/// the match string — whenever the term crosses no *opaque span* (an
 /// earlier-recognized
 /// [`Styled`](crate::inlines::Styled)/[`Ref`](crate::inlines::Ref), carried
 /// here as a single [`SPAN_PLACEHOLDER`] rather than its rendered markup). A
 /// visible term crossing such a span, or an `indexterm2:[…]` term carrying an
 /// attribute list (an `=`, whose first positional attribute becomes the shown
-/// term), is **deferred** – the match is left as literal source for a later
+/// term), is **deferred** — the match is left as literal source for a later
 /// increment, each pinned by a divergence test.
 ///
 /// A term crossing a [`synthesized`](Piece::synthesized) run (an attribute
-/// expansion, or – reached at a tree's root – a filtered multi-line block's
+/// expansion, or — reached at a tree's root — a filtered multi-line block's
 /// own joined seed) is **not** deferred. The match string carries such a run's
-/// bytes exactly, and this family reads its term from nowhere else – it never
-/// slices `'src`, and an [`IndexTerm`] node carries no `Span`-typed field – so
+/// bytes exactly, and this family reads its term from nowhere else — it never
+/// slices `'src`, and an [`IndexTerm`] node carries no `Span`-typed field — so
 /// the shown text is recovered precisely; only the node's `location` takes
 /// design §4.4's coarse fallback. This is the same lift the anchor and
 /// bare-e-mail families already made, for the same reason.
@@ -214,7 +214,7 @@ fn find_indexterm_matches<'src>(
 /// A concealed `indexterm:[…]` is always recognized (it renders nothing, so its
 /// argument is never reconstructed). A visible `indexterm2:[…]` is deferred
 /// when its argument crosses an opaque span (unreconstructable from the escaped
-/// string) or carries an attribute list (an `=` the node cannot hold yet) – see
+/// string) or carries an attribute list (an `=` the node cannot hold yet) — see
 /// [`find_indexterm_matches`]. The visible term is normalized exactly as the
 /// string replacer does ([`normalize_index_text`] with bracket-unescaping) and
 /// baked into the node's `terms` in its already-substituted form, which is what
@@ -321,7 +321,7 @@ fn build_indexterm_macro_match<'src>(
 ///
 /// A single literal parenthesis kept beside the term is expressed by pointing
 /// the node's `consumed` sub-range one byte inside the match, so
-/// [`rebuild_macro_level`] emits that edge `(`/`)` as literal text – the same
+/// [`rebuild_macro_level`] emits that edge `(`/`)` as literal text — the same
 /// sub-range mechanism the auto-link pass uses for a bare URL's kept prefix.
 ///
 /// An **escaped** shorthand (`\((…))`) drops its backslash and stays literal
@@ -338,8 +338,8 @@ fn build_indexterm_shorthand_match<'src>(
 ) -> Option<RecognizedIndexterm<'src>> {
     // An escaped shorthand drops its backslash and keeps the rest (including any
     // absorbed parens) literal. The one form the string replacer treats
-    // specially – an escaped, paren-wrapped `\(((x)))`, which it collapses to
-    // `(x)` – is left literal here, a divergence documented and pinned by a
+    // specially — an escaped, paren-wrapped `\(((x)))`, which it collapses to
+    // `(x)` — is left literal here, a divergence documented and pinned by a
     // test. Every other escaped spelling matches the string replacer's plain
     // `caps[0][1..]` byte-for-byte.
     if escaped {
@@ -701,7 +701,7 @@ mod tests {
         // A *visible* term whose shown text crosses a rendered span (`*bold*`
         // became a `Styled` placeholder by macro time) cannot be reconstructed
         // from this level's escaped match string, so the builder leaves it
-        // unrecognized – the `((` / `))` stay literal around the span. The string
+        // unrecognized — the `((` / `))` stay literal around the span. The string
         // pipeline, by contrast, folds the span markup into the shown term and
         // consumes the delimiters.
         let source = "((*bold* term))";
@@ -761,7 +761,7 @@ mod tests {
     fn fold_matches_the_string_pipeline_for_index_terms_inside_expanded_values() {
         // A term whose shown text crosses a *synthesized* run (an attribute
         // expansion) is now recognized: this family reads a term from the
-        // match string alone – which carries such a run's bytes exactly – and
+        // match string alone — which carries such a run's bytes exactly — and
         // an [`IndexTerm`] node carries no `Span`-typed field, so nothing on
         // it needs an `'src` slice. The same lift the anchor and bare-e-mail
         // families already made; it closes the two divergences
@@ -814,8 +814,8 @@ mod tests {
 
     #[test]
     fn a_term_inside_an_expanded_value_keeps_a_coarse_location() {
-        // The shown term is exact – and necessarily owned, since an expanded
-        // value's bytes have no `'src` counterpart – while the node's
+        // The shown term is exact — and necessarily owned, since an expanded
+        // value's bytes have no `'src` counterpart — while the node's
         // `location` falls back to the whole match's source span (design
         // §4.4), exactly as an anchor's does.
         use crate::{
@@ -854,7 +854,7 @@ mod tests {
         // The one escaped shorthand the string replacer re-renders rather than
         // leaving literal: an escaped, paren-wrapped `\(((x)))`, which it
         // collapses to `(x)`. The builder drops the backslash and keeps the rest
-        // literal (`(((x)))`), a documented divergence – every other escaped
+        // literal (`(((x)))`), a documented divergence — every other escaped
         // spelling matches byte-for-byte (pinned by the corpus above).
         let source = "\\(((x)))";
         let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});

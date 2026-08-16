@@ -80,7 +80,7 @@ impl<'src> Document<'src> {
 
         // Publish the source map on the parser for the duration of the parse so
         // an AsciiDoc table cell can map a position in this (preprocessed)
-        // source back to the file and line it originally came from – needed to
+        // source back to the file and line it originally came from — needed to
         // report an unresolved `include::` directive inside such a cell against
         // the correct cursor. The document keeps its own copy of the map, so
         // clear the parser's reference once parsing completes.
@@ -126,9 +126,9 @@ impl<'src> Document<'src> {
             // the section-child boundary check only sees sections nested under
             // another section; flag the document-root case here.
             //
-            // Skipped for a title-less document or when `fragment` is set – both
+            // Skipped for a title-less document or when `fragment` is set — both
             // are treated as section fragments with no level-0 root to sequence
-            // against – and when `leveloffset` is in effect, since a shifted (or
+            // against — and when `leveloffset` is in effect, since a shifted (or
             // clamped) effective level no longer reflects the authored level
             // relationship and any degenerate offset is reported on its own.
             if header.title_source().is_some()
@@ -142,8 +142,8 @@ impl<'src> Document<'src> {
 
             // Warnings recorded while replacing attribute references (e.g. a
             // reference to a missing attribute under `attribute-missing=warn`)
-            // are collected on the parser, where only owned offsets – not
-            // borrowed spans – can live. Now that the document's owned source is
+            // are collected on the parser, where only owned offsets — not
+            // borrowed spans — can live. Now that the document's owned source is
             // available, turn each one back into a spanned `Warning`.
             let root = Span::new(owned_src);
 
@@ -221,8 +221,8 @@ impl<'src> Document<'src> {
             // Under `doctype: inline`, only the first eligible block is converted,
             // as bare inline content, and everything after it is dropped (the
             // rendering lives on the embed path). A compound or empty candidate
-            // has no inline content to emit, so warn here – matching
-            // Asciidoctor's `Document#convert` – and let the embed path render
+            // has no inline content to emit, so warn here — matching
+            // Asciidoctor's `Document#convert` — and let the embed path render
             // nothing. This runs on the final block list (after any preamble
             // split) and uses the same candidate selection as the renderer, so
             // the two always agree on which block is the candidate.
@@ -250,14 +250,14 @@ impl<'src> Document<'src> {
             // Capture the parser's fully-resolved attribute state so it can be
             // read back through the `Document` (via `attribute_value`,
             // `has_attribute`, and `is_attribute_set`) without a `Parser` in
-            // hand – the embed path a renderer uses for `convert_document`.
+            // hand — the embed path a renderer uses for `convert_document`.
             let mut attributes = parser.snapshot_attributes();
 
             // Materialize the derived `toc-position` / `toc-placement` /
             // `toc-class` document attributes from the resolved placement into
             // the snapshot (matching Asciidoctor), so they are queryable via
             // `attribute_value` without perturbing the parser's own attribute
-            // state – a reused parser must not carry this document's derived TOC
+            // state — a reused parser must not carry this document's derived TOC
             // values into the next parse, where they would change what
             // `TocMode::from_parser` observes.
             attributes.materialize_toc_attributes(toc.mode);
@@ -332,6 +332,21 @@ impl<'src> Document<'src> {
         self.header().doctitle()
     }
 
+    /// Return the document title (see [`doctitle`]) with any rendered markup
+    /// stripped down to plain text, mirroring Ruby Asciidoctor's
+    /// `Document#doctitle(sanitize: true)`.
+    ///
+    /// Use this in contexts where markup is not allowed, such as the text of
+    /// a standalone HTML `<title>` element: a title rendered with formatting
+    /// (`*bold*`) or an inline macro (`image:...[]`) has that markup removed
+    /// rather than passed through verbatim. Returns `None` when there is no
+    /// title, matching [`doctitle`].
+    ///
+    /// [`doctitle`]: Self::doctitle
+    pub fn doctitle_sanitized(&self) -> Option<String> {
+        self.header().doctitle_sanitized()
+    }
+
     /// Return the document subtitle, if the document title contained one.
     ///
     /// A subtitle is the text following the final subtitle separator (a colon
@@ -345,7 +360,7 @@ impl<'src> Document<'src> {
     /// attribute], as of the end of parsing.
     ///
     /// This mirrors [`Parser::attribute_value`] and is the accessor to use on
-    /// the *embed* path – rendering a [`Document`] you already hold, without a
+    /// the *embed* path — rendering a [`Document`] you already hold, without a
     /// [`Parser`] in hand. The value reflects the document's final attribute
     /// state: built-in defaults, values set in the header or body, and the
     /// current value of any counter of the same name. An attribute that is not
@@ -392,6 +407,36 @@ impl<'src> Document<'src> {
             .is_attribute_set(name)
     }
 
+    /// Resolves whether this document's title should be displayed, from the
+    /// `showtitle`/`notitle` [document attribute] pair (which are
+    /// complements), as of the end of parsing.
+    ///
+    /// This mirrors [`Parser::resolve_show_title`] and is the accessor to use
+    /// on the *embed* path -- rendering a [`Document`] you already hold,
+    /// without a [`Parser`] in hand. Use it instead of reading `notitle` or
+    /// `showtitle` directly: `notitle` and `showtitle` are two spellings of
+    /// one toggle (assigning either updates the other, per
+    /// [Asciidoctor#3804]), and precedence between the two default-then-decide
+    /// how a raw read of just one name resolves. Re-deriving that precedence
+    /// from a direct attribute read is easy to get subtly wrong -- see [issue
+    /// #1148], where a downstream re-implementation of this exact logic
+    /// repeatedly drifted out of sync with the parser's.
+    ///
+    /// `default_shown` decides the outcome when neither attribute is present:
+    /// a standalone document shows its title by default, while embedded
+    /// output does not.
+    ///
+    /// [document attribute]: https://docs.asciidoctor.org/asciidoc/latest/attributes/document-attributes/
+    /// [Asciidoctor#3804]: https://github.com/asciidoctor/asciidoctor/issues/3804
+    /// [issue #1148]: https://github.com/asciidoc-rs/asciidoc-parser/issues/1148
+    /// [`Parser::resolve_show_title`]: crate::Parser::resolve_show_title
+    pub fn show_title(&self, default_shown: bool) -> bool {
+        self.internal
+            .borrow_dependent()
+            .attributes
+            .resolve_show_title(default_shown)
+    }
+
     /// Return where (and whether) this document's table of contents is
     /// generated, resolved from the [`toc` attribute].
     ///
@@ -435,7 +480,7 @@ impl<'src> Document<'src> {
     /// private docinfo files (shared first, matching Asciidoctor), with
     /// `docinfosubs` substitutions already applied.
     ///
-    /// An empty string is returned when no docinfo applies to the location –
+    /// An empty string is returned when no docinfo applies to the location —
     /// for example when no [`DocinfoFileHandler`] was configured on the parser,
     /// the `docinfo` attribute did not enable that scope/location, or no
     /// matching file was found. Docinfo files are resolved through a
@@ -521,7 +566,7 @@ impl<'src> Document<'src> {
     /// Each call is a **full, independent resolution sweep**. Every
     /// cross-reference is re-resolved against `resolver`, overwriting any
     /// result from a previous pass, and the returned [`ReferenceWarning`]s
-    /// reflect only what *this* `resolver` could not resolve – a prior pass
+    /// reflect only what *this* `resolver` could not resolve — a prior pass
     /// having resolved a target does not suppress a warning here.
     /// Consequently, resolving with a resolver that knows fewer targets
     /// than an earlier pass (for example, calling this after
@@ -639,7 +684,7 @@ fn replace_reference_warnings<'src>(
     document_warnings.append(sweep_warnings);
 
     // A resolution sweep appends its unresolved-reference warnings at the end,
-    // so restore source order after folding them in – matching the order
+    // so restore source order after folding them in — matching the order
     // established at the end of the parse.
     sort_warnings(document_warnings);
 }
@@ -654,8 +699,8 @@ fn replace_reference_warnings<'src>(
 ///
 /// The sort is *stable*, and the tiebreaker is the warning's
 /// [`origin`](Warning::origin) line: two warnings anchored to the same document
-/// span – several failing `include::` directives inside one AsciiDoc table
-/// cell, whose `source` is the enclosing cell's directive line – order by where
+/// span — several failing `include::` directives inside one AsciiDoc table
+/// cell, whose `source` is the enclosing cell's directive line — order by where
 /// they actually live, and any remaining ties keep their deterministic assembly
 /// order. The result is therefore both source-ordered and stable across runs.
 fn sort_warnings(warnings: &mut [Warning<'_>]) {
@@ -1898,6 +1943,65 @@ mod tests {
                 doc.attribute_value("my-counter"),
                 InterpretedValue::Value("2".to_string())
             );
+        }
+    }
+
+    mod show_title {
+        use crate::{parser::ModificationContext, tests::prelude::*};
+
+        #[test]
+        fn default_shown_decides_when_neither_attribute_is_present() {
+            let doc = Parser::default().parse("= Title\n\nBody.");
+
+            assert!(doc.show_title(true));
+            assert!(!doc.show_title(false));
+        }
+
+        #[test]
+        fn header_notitle_hides_the_title() {
+            let doc = Parser::default().parse("= Title\n:notitle:\n\nBody.");
+
+            assert!(!doc.show_title(true));
+        }
+
+        #[test]
+        fn header_notitle_entry_shows_title_when_showtitle_is_api_hard_unset() {
+            // Issue #1148 (reopened): a hard-unset `showtitle` lock
+            // (`Options::unset("showtitle")`) combined with an unrelated
+            // document `:!notitle:` entry must still resolve to showing the
+            // title end-to-end through the `Document` accessor (parity
+            // oracle: `test/document_test.rb`, "should be able to enable
+            // doctitle for embedded document", case
+            // `[{ 'showtitle' => false }, [':!notitle:']]`).
+            let doc = Parser::default()
+                .with_intrinsic_attribute_bool("showtitle", false, ModificationContext::ApiOnly)
+                .parse("= Document Title\n:!notitle:\n\nBody.");
+
+            assert!(doc.show_title(false));
+        }
+
+        #[test]
+        fn header_showtitle_entry_shows_title_when_notitle_is_api_hard_unset() {
+            // Mirror of the above, in the other direction (same Ruby test,
+            // case `[{ 'notitle' => nil }, [':!showtitle:']]`).
+            let doc = Parser::default()
+                .with_intrinsic_attribute_bool("notitle", false, ModificationContext::ApiOnly)
+                .parse("= Document Title\n:!showtitle:\n\nBody.");
+
+            assert!(doc.show_title(false));
+        }
+
+        #[test]
+        fn matches_parser_state() {
+            let mut parser = Parser::default().with_intrinsic_attribute_bool(
+                "showtitle",
+                false,
+                ModificationContext::ApiOnly,
+            );
+            let doc = parser.parse("= Title\n:!notitle:\n\nBody.");
+
+            assert_eq!(doc.show_title(false), parser.resolve_show_title(false));
+            assert_eq!(doc.show_title(true), parser.resolve_show_title(true));
         }
     }
 }

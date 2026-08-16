@@ -113,7 +113,7 @@ pub(super) fn assert_styled<'a, 'src>(
 /// used as the golden oracle: the five steps [`build`] runs, in order
 /// (special characters, quotes, character replacements, macros, post
 /// replacement), with `parser` as the document context. Attribute
-/// references are skipped – exactly as the additive builder skips them – so
+/// references are skipped — exactly as the additive builder skips them — so
 /// the fixtures deliberately contain none.
 pub(super) fn golden_macros_with(source: &str, parser: &Parser) -> String {
     let mut content = Content::from(Span::new(source));
@@ -159,7 +159,7 @@ pub(super) fn link_text_of(reference: &Ref<'_>) -> String {
 /// extraction pass, [`Passthroughs::extract_from`]): extract passthroughs
 /// (including inline STEM macros), run the five steps [`build`] runs
 /// (special characters, quotes, character replacements, macros, post
-/// replacement), then restore them – exactly what
+/// replacement), then restore them — exactly what
 /// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup::apply)'s
 /// `run_pipeline` does for [`SubstitutionGroup::Normal`]. Attribute
 /// references are skipped, as elsewhere in this module's golden helpers.

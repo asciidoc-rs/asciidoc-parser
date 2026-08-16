@@ -405,7 +405,7 @@ fn document_title_with_nonpositive_offset_models_a_level_0_section() {
     // modeled as a level-0 section (Asciidoctor's `sect0`), not the document
     // title (the single-document-title rule forbids a second one) and not
     // clamped up into a level-1 section. A negative offset that would push it
-    // below 0 simply floors at level 0, so no out-of-range clamp is reported –
+    // below 0 simply floors at level 0, so no out-of-range clamp is reported —
     // only the level-0 warning, raised because the doctype is not `book`.
     let doc = Parser::default().parse(concat!(
         "= My Book\n\n",

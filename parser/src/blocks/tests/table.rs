@@ -598,6 +598,66 @@ fn malformed_style_operator_falls_back_to_default() {
 }
 
 #[test]
+fn header_cell_inherits_column_alignment() {
+    // A header cell with no alignment operator of its own falls back to its
+    // column's alignment, exactly like a body cell. Only the column *style* is
+    // suppressed for a header row, not the column alignment. Here column 1 is
+    // centered horizontally and bottom-aligned vertically (`^.>`); column 2 has
+    // no operators and keeps the defaults.
+    let table = parse_table(
+        "[cols=\"^.>2,1\",options=\"header\"]\n|===\n|Header A |Header B\n\n|body a |body b\n|===",
+    );
+
+    let header = table.header_row().unwrap();
+    let header_cells = header.cells();
+
+    assert_eq!(header_cells[0].h_align(), HorizontalAlignment::Center);
+    assert_eq!(header_cells[0].v_align(), VerticalAlignment::Bottom);
+    assert_eq!(header_cells[1].h_align(), HorizontalAlignment::Left);
+    assert_eq!(header_cells[1].v_align(), VerticalAlignment::Top);
+
+    // The body cells resolve to the same column alignment, confirming the header
+    // now matches the body.
+    let body_cells = table.body_rows()[0].cells();
+
+    assert_eq!(body_cells[0].h_align(), HorizontalAlignment::Center);
+    assert_eq!(body_cells[0].v_align(), VerticalAlignment::Bottom);
+    assert_eq!(body_cells[1].h_align(), HorizontalAlignment::Left);
+    assert_eq!(body_cells[1].v_align(), VerticalAlignment::Top);
+}
+
+#[test]
+fn header_cell_operator_overrides_column_alignment() {
+    // A header cell's own alignment operator still takes precedence over the
+    // column's alignment, just as for a body cell. The column is left/top by
+    // default; the first header cell's `>` operator right-aligns it.
+    let table = parse_table(
+        "[cols=\"2,1\",options=\"header\"]\n|===\n>|Header A |Header B\n\n|body a |body b\n|===",
+    );
+
+    let header_cells = table.header_row().unwrap().cells();
+
+    assert_eq!(header_cells[0].h_align(), HorizontalAlignment::Right);
+    assert_eq!(header_cells[1].h_align(), HorizontalAlignment::Left);
+}
+
+#[test]
+fn csv_header_cell_inherits_column_alignment() {
+    // A data-format (CSV) header cell carries no per-cell specifier, so its
+    // alignment comes entirely from the column — including in the header row.
+    let table = parse_table(
+        "[format=\"csv\",cols=\"^.>2,1\",options=\"header\"]\n|===\nHeader A,Header B\nbody a,body b\n|===",
+    );
+
+    let header_cells = table.header_row().unwrap().cells();
+
+    assert_eq!(header_cells[0].h_align(), HorizontalAlignment::Center);
+    assert_eq!(header_cells[0].v_align(), VerticalAlignment::Bottom);
+    assert_eq!(header_cells[1].h_align(), HorizontalAlignment::Left);
+    assert_eq!(header_cells[1].v_align(), VerticalAlignment::Top);
+}
+
+#[test]
 fn asciidoc_cell_resolves_references_in_nested_blocks() {
     // Cross-references inside an AsciiDoc cell are resolved during the document's
     // reference-resolution pass, which descends into the cell's nested blocks.
@@ -694,8 +754,8 @@ fn asciidoc_cell_exposes_inherited_attributes_for_introspection() {
     // The cell's attribute state is scoped to the cell and restored on the parser
     // once the cell is parsed, so it can no longer be read from the parser. The
     // cell nonetheless retains a snapshot of it, letting a caller introspect the
-    // nested document's attributes – both those inherited from the parent and any
-    // the cell set for itself – after parsing has finished.
+    // nested document's attributes — both those inherited from the parent and any
+    // the cell set for itself — after parsing has finished.
     let doc = Parser::default().parse(
         ":parent-attr: inherited\n\n[cols=\"a\"]\n|===\n|\n:cell-attr: local\ncontent\n|===",
     );
@@ -924,6 +984,71 @@ fn asciidoc_cell_may_set_an_attribute_unset_in_the_parent() {
         .unwrap();
 
     assert_eq!(asciidoc_cell_text(table, 0, 0), "value is child");
+}
+
+#[test]
+fn asciidoc_cell_may_set_sectnumlevels() {
+    // `sectnumlevels` has a built-in default value (`3`), but the parent did not
+    // set it, so the built-in default must not lock it inside the cell. An
+    // AsciiDoc cell is a nested, standalone document whose leading attribute lines
+    // are its own header, and `sectnumlevels` is header-settable, so a cell-body
+    // assignment is honored: the cell's resolved `sectnumlevels` reflects the
+    // value the cell set (`1`), not the inherited default (`3`), matching
+    // Asciidoctor.
+    let doc = Parser::default()
+        .parse("|===\na|\n:toc:\n:sectnums:\n:sectnumlevels: 1\n\n== Alpha\n\n=== Beta\n\nx\n|===");
+
+    let table = doc
+        .child_blocks()
+        .find_map(|block| match block {
+            Block::Table(table) => Some(table),
+            _ => None,
+        })
+        .unwrap();
+
+    let TableCellContent::AsciiDoc(cell) = table.body_rows()[0].cells()[0].content() else {
+        panic!("expected AsciiDoc cell content");
+    };
+
+    assert_eq!(
+        cell.attribute_value("sectnumlevels"),
+        crate::document::InterpretedValue::Value("1".to_string())
+    );
+
+    // The other attributes the cell set are likewise honored (a bare `:sectnums:`
+    // resolves to its `all` default).
+    assert_eq!(
+        cell.attribute_value("sectnums"),
+        crate::document::InterpretedValue::Value("all".to_string())
+    );
+
+    // Section numbering within the cell honors the cell-local depth, not just the
+    // resolved attribute: `Alpha` (level 1) is numbered, while `Beta` (level 2)
+    // falls beyond the cell's `sectnumlevels` of 1 and is left unnumbered.
+    let alpha = cell
+        .blocks()
+        .iter()
+        .find_map(|b| match b {
+            Block::Section(section) => Some(section),
+            _ => None,
+        })
+        .unwrap();
+    assert!(alpha.section_number().is_some());
+
+    let beta = alpha
+        .child_blocks()
+        .find_map(|b| match b {
+            Block::Section(section) => Some(section),
+            _ => None,
+        })
+        .unwrap();
+    assert!(beta.section_number().is_none());
+
+    // The parent document is unaffected: its `sectnumlevels` stays at the default.
+    assert_eq!(
+        doc.attribute_value("sectnumlevels"),
+        crate::document::InterpretedValue::Value("3".to_string())
+    );
 }
 
 #[test]
@@ -1212,7 +1337,7 @@ fn bare_duplication_operator_clones_once() {
 
 #[test]
 fn huge_duplication_factor_does_not_overallocate() {
-    // A duplication factor is an amplifier – `1000000000*` would otherwise
+    // A duplication factor is an amplifier — `1000000000*` would otherwise
     // materialize a billion cells (a multi-gigabyte allocation). The factor is
     // clamped to `MAX_DUPLICATION_FACTOR` (1,000), so the expansion stays
     // bounded. This is the one place the implementation diverges from Asciidoctor,

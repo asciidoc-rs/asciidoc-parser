@@ -1,5 +1,5 @@
 //! Builds an inline AST by **recording the string pipeline's own renderer
-//! calls** – the retired "Strategy A" construction, kept as **test-only oracle
+//! calls** — the retired "Strategy A" construction, kept as **test-only oracle
 //! machinery**.
 //!
 //! This module was the production tree source through Phase 2 and Phase 4's
@@ -34,15 +34,15 @@
 //!
 //! # Why a second pass
 //!
-//! Making the tree the recognition sink directly – so there is no second pass
-//! and no markers – is "Strategy B", the Phase 4 single-pass builder that has
+//! Making the tree the recognition sink directly — so there is no second pass
+//! and no markers — is "Strategy B", the Phase 4 single-pass builder that has
 //! now replaced this module in production. Here the tree is built by a
 //! **second, counter-safe substitution pass**: the caller clones the
 //! [`Parser`] *before* the authoritative pass advances any document counter,
 //! so the recording pass numbers footnotes, callouts, and counters exactly as
 //! the authoritative pass did, then discards the clone. The authoritative
 //! rendered string is never produced by the recorder, so the pass is purely
-//! additive and cannot regress output – which is also what makes it a clean
+//! additive and cannot regress output — which is also what makes it a clean
 //! *independent* construction for the cross-check to compare against.
 //!
 //! [`inline_recorder`]: ../../tests/inline_recorder.rs
@@ -437,7 +437,7 @@ impl InlineSubstitutionRenderer for RecordingRenderer {
         roles.extend(params.attrlist.roles().iter().map(|r| r.to_string()));
 
         // A link's display text is inserted verbatim between a fixed open/close,
-        // so – like a quote span – its wrapper is recovered by rendering once
+        // so — like a quote span — its wrapper is recovered by rendering once
         // with a placeholder body, and the real text becomes the container's
         // children (so `link:x[*bold*]` decomposes into a `Ref` over a `Styled`).
         let probe_params = LinkRenderParams {
@@ -1012,7 +1012,7 @@ pub(crate) fn build_inline_tree<'src>(
 /// registered.
 ///
 /// A footnote's text is extracted out of the flow of the block during the
-/// macros substitution step – only its marker is left behind – so it never
+/// macros substitution step — only its marker is left behind — so it never
 /// reaches the block's marked string and cannot be recovered by
 /// [`build_inline_tree`] alone. `texts` is the marked text of each footnote the
 /// recording pass defined, in registration order (as
@@ -1101,7 +1101,7 @@ pub(crate) fn fold_marked(marked: &str, events: &[Event]) -> String {
     out
 }
 
-/// The number of open-markers in a recorder-marked string – i.e. the number of
+/// The number of open-markers in a recorder-marked string — i.e. the number of
 /// recorded constructs that reached the string. Used by the differential tests
 /// to cross-check the recovered tree against the recorder.
 pub(crate) fn open_marker_count(marked: &str) -> usize {
@@ -1122,7 +1122,7 @@ mod tests {
     };
 
     /// A renderer that discards the body it is handed, so the recorder's
-    /// placeholder probe never survives – exercising the defensive
+    /// placeholder probe never survives — exercising the defensive
     /// "the wrapper did not contain the placeholder body" fallbacks in
     /// [`RecordingRenderer::split_quote`] and
     /// [`RecordingRenderer::render_link`]. A real renderer always echoes the

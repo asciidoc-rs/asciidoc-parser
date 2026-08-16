@@ -11,8 +11,8 @@ use crate::{
 
 /// A single opaque codepoint standing in for a whole [`Styled`] span (produced
 /// by an earlier sub) while a later sub matches at that span's level. It is in
-/// the Unicode Private Use Area, so – like a rendered `<strong>…</strong>` in
-/// the string pipeline – it is a single non-word, non-space boundary character
+/// the Unicode Private Use Area, so — like a rendered `<strong>…</strong>` in
+/// the string pipeline — it is a single non-word, non-space boundary character
 /// that a quote pattern treats as opaque content.
 pub(super) const SPAN_PLACEHOLDER: char = '\u{E0F0}';
 
@@ -37,7 +37,7 @@ pub(super) fn apply_quotes<'src>(
 }
 
 /// Applies one [`QuoteSub`] to `nodes`, first descending into the [`Styled`]
-/// spans earlier subs created (so this sub can match *inside* them – the
+/// spans earlier subs created (so this sub can match *inside* them — the
 /// nesting case), then matching and wrapping at this level.
 fn apply_quote_sub<'src>(
     sub: &QuoteSub,
@@ -87,7 +87,7 @@ pub(super) struct Piece {
     pub(super) atomic: bool,
 
     /// Whether the piece is a [`Text`](InlineNode::Text) run whose `value`
-    /// was synthesized (an attribute expansion, a `counter` directive, …) –
+    /// was synthesized (an attribute expansion, a `counter` directive, …) —
     /// its `value` differs from `location.data()`, so unlike a verbatim run
     /// its match-string bytes do **not** correspond one-to-one with source
     /// bytes. It contributes its `value` to the match string so a later step
@@ -131,7 +131,7 @@ fn match_level<'src>(
 /// value; a [`CharRef`](InlineNode::CharRef) contributes its canonical entity,
 /// so the boundary classes the quote patterns key off (`&`, `;`) see exactly
 /// what the string pipeline's escaped text presents; a *synthesized*
-/// `Text` run (design §3.4.1 – an attribute expansion, a `counter` directive)
+/// `Text` run (design §3.4.1 — an attribute expansion, a `counter` directive)
 /// contributes its `value` too, so [`apply_character_replacements`]
 /// (design §3.4.1: `replacements` still runs over an expanded value) can
 /// recognize a construct inside it, but is flagged
@@ -225,12 +225,12 @@ pub(super) fn build_match_string(nodes: &[InlineNode<'_>]) -> (String, Vec<Piece
 /// Reports whether any piece overlapping the match-string range `range` is
 /// [`synthesized`](Piece::synthesized). A macro family that reconstructs its
 /// *shown* text straight from the match string (rather than needing an honest
-/// `'src` slice – e.g. an index term's `arg`/`term_src`, already checked
+/// `'src` slice — e.g. an index term's `arg`/`term_src`, already checked
 /// against [`SPAN_PLACEHOLDER`] for a crossed span) still needs this check
 /// too: a synthesized run's bytes have no source counterpart, and design
 /// §3.4.1 leaves recognizing a macro *inside* one for a later increment (see
 /// [`apply_attribute_references`](super::attribute_refs::apply_attribute_references)'s
-/// doc comment) – distinct from
+/// doc comment) — distinct from
 /// [`range_is_verbatim`](super::macros::image::range_is_verbatim),
 /// which a family needing to *slice* `'src` (a target, an `Attrlist<'src>`)
 /// uses instead and which already rejects a synthesized piece outright.
@@ -539,7 +539,7 @@ pub(super) fn attributes_of<'src>(
     //
     // Unlike that replacer, this deliberately performs *no* side effect: it does
     // not `register_ref` an assigned id in the catalog, because the builder is
-    // additive and not yet the recognition sink – the authoritative string
+    // additive and not yet the recognition sink — the authoritative string
     // pipeline still registers it. The cutover (design §5.2 Phase 4, step 6)
     // must add that registration so cross-references to an inline id resolve
     // (tracked by #1087).
@@ -564,7 +564,7 @@ pub(super) fn emit_range<'src>(
     out: &mut Vec<InlineNode<'src>>,
 ) {
     // An empty range (e.g. a macro whose node consumes its whole match, so the
-    // kept-suffix range is zero-width) emits nothing – never a spurious empty
+    // kept-suffix range is zero-width) emits nothing — never a spurious empty
     // `Text` node sliced from a piece the range merely touches.
     if range.start >= range.end {
         return;
@@ -600,7 +600,7 @@ pub(super) fn emit_range<'src>(
             if piece.synthesized {
                 // No `'src` slice exists for these bytes: slice the node's
                 // *value* instead, keeping the whole original `location` as
-                // the coarse fallback span (design §4.4) – the same policy
+                // the coarse fallback span (design §4.4) — the same policy
                 // `split_attribute_value` already applies to every fragment
                 // of an expanded value.
                 let Some(sliced) = value.get(lo..hi) else {
@@ -626,15 +626,15 @@ pub(super) fn emit_range<'src>(
 /// Returns the literal text `range` covers, reusing [`emit_range`]'s own
 /// verbatim/synthesized slicing to recover it *exactly* even when `range`
 /// falls inside a [`synthesized`](Piece::synthesized) piece (an attribute
-/// expansion, or – reached at a tree's root – a filtered multi-line block's
+/// expansion, or — reached at a tree's root — a filtered multi-line block's
 /// own joined seed): unlike [`source_slice`], which snaps a boundary landing
 /// *inside* a synthesized piece to that piece's own coarse edge (design
 /// §4.4) because it must return an honest `'src` [`Span`], this slices the
 /// piece's own `value` instead, so the returned text is precise rather than
-/// approximate – the same recovery [`emit_range`] already gives a kept
+/// approximate — the same recovery [`emit_range`] already gives a kept
 /// [`Text`](InlineNode::Text) run, just concatenated into one value instead
 /// of a node list. Still yields `None` when `range` touches an
-/// [`atomic`](Piece::atomic) piece (an escaped special or a rendered span) –
+/// [`atomic`](Piece::atomic) piece (an escaped special or a rendered span) —
 /// that boundary is unchanged; a caller checks
 /// [`range_is_verbatim_or_synthesized`](super::macros::image::range_is_verbatim_or_synthesized)
 /// first and is expected to defer exactly as before when it fails.
@@ -685,11 +685,11 @@ pub(super) fn text_slice<'src>(
 /// A boundary inside a verbatim [`Text`](InlineNode::Text) run maps one-to-one
 /// (its match text is its source text); a boundary inside an atomic or
 /// [`synthesized`](Piece::synthesized) piece has no such honest source
-/// position, so it falls back to that piece's own edges (design §4.4) –
+/// position, so it falls back to that piece's own edges (design §4.4) —
 /// snapping to the *nearer* one for an atomic piece (it never legitimately
 /// falls there), or to the edge [`Bias`] names for a synthesized one, so a
 /// range wholly inside a synthesized run maps to that run's *whole* node span
-/// regardless of exactly where the range's boundaries land in it – the same
+/// regardless of exactly where the range's boundaries land in it — the same
 /// coarse policy `split_attribute_value` (in
 /// [`attribute_refs`](super::attribute_refs)) already gives every fragment of
 /// an expanded value.
@@ -732,7 +732,7 @@ fn s_to_src(pieces: &[Piece], x: usize, bias: Bias) -> usize {
         // the next piece's start edge are numerically the same value either
         // way), a synthesized piece's `value` generally has a *different*
         // byte length than its source span, so the plain linear mapping below
-        // is only honest at this piece's own `p_start` (a zero delta) – never
+        // is only honest at this piece's own `p_start` (a zero delta) — never
         // at `p_end`. Skipping to the next piece (or the past-the-last-piece
         // fallback, if there is none) lets that boundary resolve correctly
         // instead.
@@ -752,7 +752,7 @@ fn s_to_src(pieces: &[Piece], x: usize, bias: Bias) -> usize {
             }
 
             // A boundary strictly *inside* a synthesized piece (not on its
-            // `p_start` edge – already excluded `p_end` above, and `p_start`
+            // `p_start` edge — already excluded `p_end` above, and `p_start`
             // is exact via the plain mapping just like a verbatim piece) has
             // no honest source position, so it falls back to the edge `bias`
             // names (design §4.4's coarse fallback).
@@ -974,7 +974,7 @@ mod tests {
 
         // A boundary landing *strictly inside* a synthesized piece (its
         // match-string bytes have no honest source counterpart, since its
-        // `s_len` here – 9 – differs from its `src_len` – 10) falls back to
+        // `s_len` here — 9 — differs from its `src_len` — 10) falls back to
         // the whole node span: its start edge (100) for a `Bias::Start`
         // boundary, its end edge (110) for a `Bias::End` one.
         //
@@ -982,7 +982,7 @@ mod tests {
         // by `s_to_src_resolves_a_synthesized_pieces_own_edges_exactly`
         // below: `p_start` already has an honest position (delta zero) and
         // `p_end` is skipped to whatever comes next, so *neither* runs
-        // through this bias fallback – only interior positions like `3` do.
+        // through this bias fallback — only interior positions like `3` do.
         let synthesized = Piece {
             node_index: 0,
             s_start: 0,
@@ -1008,12 +1008,12 @@ mod tests {
         use super::{Bias, Piece, s_to_src};
 
         // A boundary landing exactly on a synthesized piece's own start or
-        // end edge has an honest position regardless of `bias` – unlike an
+        // end edge has an honest position regardless of `bias` — unlike an
         // interior boundary (see the test above), it never falls back to the
         // coarse whole-node span. This is what keeps a construct recognized
         // *immediately after* a synthesized run (e.g. a second `image:` macro
         // right after an `{sp}` attribute reference) from having its node's
-        // location wrongly swallow the synthesized run's own source bytes –
+        // location wrongly swallow the synthesized run's own source bytes —
         // a real regression this test reproduces at the `Piece` level
         // (see `image::tests::matches_the_golden_pipelines_registration_for_a_broad_fixture_set`
         // for the end-to-end fixture that first caught it).
@@ -1032,7 +1032,7 @@ mod tests {
         // A lone synthesized piece: its own start edge is exact for both
         // biases; its own end edge has no *next* piece to defer to, so it
         // falls back to the past-the-last-piece anchor, which for this piece
-        // alone is its own end – numerically the same as the whole-node-span
+        // alone is its own end — numerically the same as the whole-node-span
         // fallback here, but arrived at without going through `Bias` at all.
         let pieces = [synthesized_piece()];
         assert_eq!(s_to_src(&pieces, 5, Bias::Start), 100);
@@ -1040,7 +1040,7 @@ mod tests {
         assert_eq!(s_to_src(&pieces, 14, Bias::Start), 110);
         assert_eq!(s_to_src(&pieces, 14, Bias::End), 110);
 
-        // With a verbatim piece immediately following (the common case – a
+        // With a verbatim piece immediately following (the common case — a
         // recognized construct starting right where the synthesized run
         // ends), the shared boundary (`x == 14`) resolves through the
         // *following* piece's own honest linear mapping instead, giving the
@@ -1090,8 +1090,8 @@ mod tests {
 
         // A synthesized piece's `s_len` is expected to equal its node's
         // `value.len()` (how `build_match_string` constructs one); a piece
-        // declaring a longer `s_len` than its node's actual `value` – an
-        // internal invariant slip – is skipped rather than panicking, the
+        // declaring a longer `s_len` than its node's actual `value` — an
+        // internal invariant slip — is skipped rather than panicking, the
         // same defensive posture as a stale `node_index` above.
         let location = Span::new("{x}");
 
@@ -1164,8 +1164,8 @@ mod tests {
         use crate::{Span, inlines::InlineNode, strings::CowStr};
 
         // The recovered text ("value") differs from `location`'s own source
-        // bytes ("{x}") – the exact shape a spliced attribute expansion
-        // produces – which is what `source_slice`'s coarse fallback cannot
+        // bytes ("{x}") — the exact shape a spliced attribute expansion
+        // produces — which is what `source_slice`'s coarse fallback cannot
         // recover but `text_slice` can.
         let location = Span::new("{x}");
         let node = InlineNode::Text {
@@ -1287,7 +1287,7 @@ mod tests {
         };
 
         // Covers the concatenation loop's own atomic check for a piece past
-        // the *second* one – distinct from
+        // the *second* one — distinct from
         // `text_slice_returns_none_when_a_later_piece_is_atomic`, which stops
         // at the second.
         let loc_a = Span::new("a");
@@ -1448,7 +1448,7 @@ mod tests {
     fn crossed_delimiters_are_a_documented_divergence() {
         // `` `a *b` c* `` interleaves a monospace and a strong span so their
         // ranges *overlap* rather than nest. The string pipeline, rewriting a
-        // flat string, emits crossed – malformed – HTML tags (`<code>…<strong>…
+        // flat string, emits crossed — malformed — HTML tags (`<code>…<strong>…
         // </code>…</strong>`) that no tree can represent. The single-pass
         // builder instead treats an earlier span as opaque, so it produces a
         // well-formed tree (here, monospace wrapping a strong span). This is the

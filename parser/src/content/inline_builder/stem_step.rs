@@ -18,7 +18,7 @@ use crate::{
 /// Resolves the [`SubstitutionGroup`] a STEM macro's expression runs
 /// through: [`SubstitutionGroup::Stem`] (special characters only) for a bare
 /// macro, or the group an explicit substitution list (`stem:c,q[…]`)
-/// resolves to – mirroring [`SubstitutionGroup::from_custom_string`]/
+/// resolves to — mirroring [`SubstitutionGroup::from_custom_string`]/
 /// [`InlineStemMacroReplacer`](crate::content::passthroughs)'s own
 /// resolution exactly, including its "skip and keep going" handling of an
 /// unrecognized name. As throughout this module, this does *not* raise the
@@ -34,17 +34,17 @@ fn resolve_stem_subs(subs_list: Option<&str>) -> SubstitutionGroup {
 
 /// Reports whether `subs` is safe to apply independently to each `Text` run
 /// around an embedded, already-extracted [`Raw`](InlineNode::Raw) passthrough
-/// – the splicing [`stem_expression_value`] does when the expression embeds
+/// — the splicing [`stem_expression_value`] does when the expression embeds
 /// one.
 ///
 /// [`SubstitutionStep::SpecialCharacters`] (the *only* step
-/// [`SubstitutionGroup::Stem`] – a bare macro's default – ever runs) escapes
+/// [`SubstitutionGroup::Stem`] — a bare macro's default — ever runs) escapes
 /// each character in isolation, so running it per-fragment and splicing the
 /// `Raw` back in unprocessed reproduces exactly what running it once over the
 /// whole expression (with the `Raw`'s content protected) would. Every other
 /// step this crate's steps can resolve to needs more than one character of
-/// context to recognize its construct – a quote pair, a `{name}` reference, a
-/// `--`/arrow replacement, or a macro's own delimiters – so a construct whose
+/// context to recognize its construct — a quote pair, a `{name}` reference, a
+/// `--`/arrow replacement, or a macro's own delimiters — so a construct whose
 /// halves fall on either side of the `Raw` (`stem:q[*a +++x+++ b*]`) would
 /// escape recognition when matched against each fragment separately, even
 /// though the string pipeline (which substitutes the whole expression as one
@@ -65,19 +65,19 @@ fn subs_are_local(subs: &SubstitutionGroup) -> bool {
 /// extracts it last, after both passthrough-macro passes, *specifically so
 /// that a passthrough placeholder nested inside a STEM expression survives
 /// and is recursively restored* (its own doc comment). [`apply_stem`] mirrors
-/// that ordering – [`build`](super::build) runs it immediately after
+/// that ordering — [`build`](super::build) runs it immediately after
 /// [`apply_passthroughs`](super::passthrough_step::apply_passthroughs) and
-/// ahead of every other step – so a STEM expression's content is never
+/// ahead of every other step — so a STEM expression's content is never
 /// touched by specialcharacters, quotes, replacements, or macros, exactly
 /// like a `+++…+++`/`++…++`/`$$…$$`/`pass:[…]` passthrough. It reuses the
-/// string pipeline's *exact* recognition – [`INLINE_STEM_MACRO`] is now
+/// string pipeline's *exact* recognition — [`INLINE_STEM_MACRO`] is now
 /// shared `pub(crate)`, alongside the [`stem_notation`] helper that resolves
-/// a bare `stem:[…]` macro's notation from the `stem` document attribute –
+/// a bare `stem:[…]` macro's notation from the `stem` document attribute —
 /// so only the recognition *sink* differs (§4.1).
 ///
 /// Because it runs immediately after `apply_passthroughs`, the *only* node
 /// kinds `apply_stem` can ever see are `Text` and [`Raw`](InlineNode::Raw)
-/// (a nested, already-extracted passthrough) – no other step has run yet to
+/// (a nested, already-extracted passthrough) — no other step has run yet to
 /// build anything else. So, unlike every other macro family in this module,
 /// a STEM match is **never deferred** for crossing an already-recognized
 /// construct: [`build_stem_node`] embeds a crossed `Raw` node directly (see
@@ -88,8 +88,8 @@ fn subs_are_local(subs: &SubstitutionGroup) -> bool {
 /// enclosing `$…$` dropped for `latexmath` (backwards compatibility with
 /// AsciiDoc.py, mirroring [`InlineStemMacroReplacer`]), and is then run
 /// through the real substitution pipeline under its resolved substitution
-/// group – [`SubstitutionGroup::Stem`] (special characters only) for a bare
-/// macro – via [`passthrough_text`], so a custom
+/// group — [`SubstitutionGroup::Stem`] (special characters only) for a bare
+/// macro — via [`passthrough_text`], so a custom
 /// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)'s
 /// escaping is honored exactly as it would be for the string pipeline's own
 /// restore step. The result becomes the node's `value`; the cost is an owned
@@ -105,7 +105,7 @@ fn subs_are_local(subs: &SubstitutionGroup) -> bool {
 /// recognized too: [`resolve_stem_subs`] resolves the list to a
 /// [`SubstitutionGroup`] exactly as [`InlineStemMacroReplacer`] does, and
 /// [`stem_expression_value`] runs the expression through that group instead
-/// of the bare macro's [`SubstitutionGroup::Stem`] – the analogous
+/// of the bare macro's [`SubstitutionGroup::Stem`] — the analogous
 /// `pass:c,q[…]` form takes the same approach (see
 /// `passthrough_step::apply_passthroughs`'s doc comment), except a `Stem`
 /// node already has a single `value` field to hold the substituted result,
@@ -135,7 +135,7 @@ pub(super) fn apply_stem<'src>(
     rebuild_macro_level(&nodes, &pieces, &s, matches)
 }
 
-/// Finds every STEM macro at this level – both the bare form and one
+/// Finds every STEM macro at this level — both the bare form and one
 /// carrying an explicit substitution list (an optional group
 /// [`INLINE_STEM_MACRO`] captures ahead of the bracket).
 fn find_stem_matches<'src>(
@@ -168,10 +168,10 @@ fn find_stem_matches<'src>(
         let node = match build_stem_node(&caps, &full, nodes, pieces, root, parser) {
             Some(node) => node,
 
-            // A macro this increment defers – an explicit substitution list
+            // A macro this increment defers — an explicit substitution list
             // whose steps need more context than one `Text` run at a time,
             // embedding an already-extracted passthrough (see
-            // `subs_are_local`) – is left as literal source for a later
+            // `subs_are_local`) — is left as literal source for a later
             // increment.
             None => continue,
         };
@@ -188,7 +188,7 @@ fn find_stem_matches<'src>(
     matches
 }
 
-/// Builds one [`Stem`](InlineNode::Stem) node from a STEM macro match – see
+/// Builds one [`Stem`](InlineNode::Stem) node from a STEM macro match — see
 /// [`apply_stem`] for how the expression is unescaped, has its legacy `$…$`
 /// wrapper dropped, and is substituted into `value`. Returns `None` for a
 /// form this increment defers (see [`subs_are_local`]).
@@ -196,7 +196,7 @@ fn find_stem_matches<'src>(
 /// The expression body (capture group 4) is recovered via
 /// [`emit_range`] rather than sliced as one literal string, because it may
 /// embed an already-extracted [`Raw`](InlineNode::Raw) passthrough
-/// (`stem:[+++<b>x</b>+++]`) – the case `apply_stem`'s own doc comment
+/// (`stem:[+++<b>x</b>+++]`) — the case `apply_stem`'s own doc comment
 /// explains the extraction ordering exists to support.
 /// [`stem_expression_value`] does the actual reconstruction.
 fn build_stem_node<'src>(
@@ -255,8 +255,8 @@ fn build_stem_node<'src>(
 /// Computes a [`Stem`](InlineNode::Stem) node's `value` from the expression
 /// body's [`emit_range`]-recovered nodes.
 ///
-/// The common case – the whole expression is one `Text` run, no nested
-/// passthrough – matches the string pipeline exactly: the raw source is
+/// The common case — the whole expression is one `Text` run, no nested
+/// passthrough — matches the string pipeline exactly: the raw source is
 /// unescaped (`\]` → `]`), has its legacy `latexmath` `$…$` wrapper dropped
 /// (AsciiDoc.py backward-compat), and is run through the resolved
 /// substitution group ([`SubstitutionGroup::Stem`] for a bare macro).
@@ -264,7 +264,7 @@ fn build_stem_node<'src>(
 /// When the expression embeds one or more already-extracted
 /// [`Raw`](InlineNode::Raw) passthroughs, each `Text` run around them is
 /// unescaped and substituted the same way and each `Raw` run is spliced in
-/// **verbatim, with no further substitution** – mirroring how the string
+/// **verbatim, with no further substitution** — mirroring how the string
 /// pipeline's passthrough-restore recursion re-splices a nested passthrough
 /// into an outer construct's already-substituted text
 /// (`PassthroughRestoreReplacer`'s own recursive `if … contains('\u{96}')`
@@ -272,7 +272,7 @@ fn build_stem_node<'src>(
 /// case; a `$` immediately beside a nested passthrough is a narrower
 /// divergence, documented and pinned by a test.
 ///
-/// `subs` is the group the expression's `Text` runs are substituted through –
+/// `subs` is the group the expression's `Text` runs are substituted through —
 /// [`SubstitutionGroup::Stem`] for a bare macro, or the group an explicit
 /// substitution list resolves to (see [`resolve_stem_subs`]).
 fn stem_expression_value(
@@ -318,7 +318,7 @@ fn stem_expression_value(
             }
 
             // Unreachable: `apply_stem` runs immediately after
-            // `apply_passthroughs`, whose output is `Text`/`Raw` only – no
+            // `apply_passthroughs`, whose output is `Text`/`Raw` only — no
             // other step has run yet to build any other kind.
             _ => {}
         }
@@ -515,7 +515,7 @@ mod tests {
 
     #[test]
     fn a_stem_macro_with_an_explicit_subs_list_applies_only_the_named_steps() {
-        // `stem:c[…]` names an explicit substitution list – here, special
+        // `stem:c[…]` names an explicit substitution list — here, special
         // characters only, the same result the default `SubstitutionGroup::
         // Stem` produces for this input, but taking the explicit-list path
         // through `resolve_stem_subs` rather than the bare-macro default.
@@ -533,8 +533,8 @@ mod tests {
 
     #[test]
     fn a_stem_macro_with_multiple_subs_applies_them_in_the_order_given() {
-        // `stem:q,c[…]` resolves to `Custom([Quotes, SpecialCharacters])` –
-        // the order written, not the *normal* effective order – mirroring
+        // `stem:q,c[…]` resolves to `Custom([Quotes, SpecialCharacters])` —
+        // the order written, not the *normal* effective order — mirroring
         // the analogous `pass:q,c[…]` fixture exactly (see
         // `passthrough_step`'s own test of the same name).
         let source = "stem:q,c[<b> *bold*]";
@@ -602,11 +602,11 @@ mod tests {
 
     #[test]
     fn an_explicit_local_subs_list_still_applies_beside_a_nested_passthrough() {
-        // `stem:c[…]` resolves to `Custom([SpecialCharacters])` – the same,
+        // `stem:c[…]` resolves to `Custom([SpecialCharacters])` — the same,
         // purely local step the bare macro's default `SubstitutionGroup::
         // Stem` already applies safely per `Text` run around a nested
         // passthrough (see `fold_matches_the_string_pipeline_through_stem`'s
-        // own fixtures) – so `subs_are_local` does not defer it even though
+        // own fixtures) — so `subs_are_local` does not defer it even though
         // the expression embeds a `Raw` node.
         let source = "stem:c[a < b +++<i>or</i>+++ c]";
         let nodes = build_src(Span::new(source));
@@ -663,7 +663,7 @@ mod tests {
             "a stem:[x] and a stem:[y]",
             "*bold* stem:[x^2] *more bold*",
             r"\stem:[x]",
-            // A nested, already-extracted passthrough inside the expression –
+            // A nested, already-extracted passthrough inside the expression —
             // the case `Passthroughs::extract_from` orders STEM extraction
             // after both passthrough passes to support.
             "stem:[+++<b>x</b>+++]",

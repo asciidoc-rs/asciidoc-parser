@@ -58,8 +58,8 @@ If a term has an anchor, the anchor must be defined at the start of the same lin
     assert_eq!(entry.reftext.as_deref(), Some("CPU"));
     assert!(matches!(entry.ref_type, crate::document::RefType::Anchor));
 
-    // Conversely, an anchor that is not at the start of the term line – here it
-    // follows the delimiter – belongs to the description rather than the term,
+    // Conversely, an anchor that is not at the start of the term line — here it
+    // follows the delimiter — belongs to the description rather than the term,
     // so the term itself carries no anchor.
     let doc: crate::Document<'_> =
         Parser::default().parse("CPU:: [[cpu]] The brain of the computer.");

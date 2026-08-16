@@ -41,8 +41,8 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
     /// read-only representation of its inline nodes.
     ///
     /// This is the structured counterpart of
-    /// [`rendered_html_content`](Self::rendered_html_content) – the same blocks
-    /// carry each – so a block with no directly-contained content returns
+    /// [`rendered_html_content`](Self::rendered_html_content) — the same blocks
+    /// carry each — so a block with no directly-contained content returns
     /// `None` here too.
     ///
     /// The tree is populated only when inline-tree building is enabled on the
@@ -84,7 +84,7 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
             // The `source` style is not itself a context; it specializes the
             // `listing` context (a source block is a listing block with syntax
             // highlighting). A `source` style therefore resolves the context to
-            // `listing` – for example, `[source]` placed over a `....` literal
+            // `listing` — for example, `[source]` placed over a `....` literal
             // block makes it a listing block.
             if declared_style == "source" {
                 return "listing".into();
@@ -142,6 +142,26 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
             .and_then(|attr| attr.block_style())
     }
 
+    /// Returns the resolved style for this block.
+    ///
+    /// A block's style is usually the value the author declared (see
+    /// [`declared_style()`]), but a block can also acquire a style implicitly
+    /// during parsing. For example, a section carrying the `bibliography` style
+    /// implicitly adds that style to each of its top-level unordered lists, so
+    /// such a list resolves to `bibliography` even though the author declared
+    /// no style on the list itself. This is the crate's analog of
+    /// Asciidoctor's `AbstractBlock#style`.
+    ///
+    /// This transformation _is_ performed by this function, so it may differ
+    /// from [`declared_style()`]. The default implementation returns the
+    /// declared style unchanged; block types that resolve an implicit style
+    /// override it.
+    ///
+    /// [`declared_style()`]: Self::declared_style
+    fn resolved_style(&'src self) -> Option<&'src str> {
+        self.declared_style()
+    }
+
     /// Returns a mutable slice of the child blocks contained within this block.
     ///
     /// The default returns an empty slice; container blocks override it to
@@ -155,8 +175,8 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
         &mut []
     }
 
-    /// Returns a mutable reference to this block's own resolvable content – its
-    /// body or description-list term – if any.
+    /// Returns a mutable reference to this block's own resolvable content — its
+    /// body or description-list term — if any.
     ///
     /// The default returns `None`; content-bearing blocks override it. This is
     /// used by in-place passes such as cross-reference resolution. A section

@@ -10,7 +10,7 @@ use crate::Span;
 /// The map is stored as a sparse, sorted list of segments. Each segment anchors
 /// one preprocessed line to an origin (file, line); the lines that follow it
 /// map by simple offset until the next segment. A segment also records the
-/// [`Fidelity`] of the preprocessed line relative to its origin – whether the
+/// [`Fidelity`] of the preprocessed line relative to its origin — whether the
 /// preprocessor rewrote the line content (so a column can no longer be mapped
 /// back faithfully) or left it verbatim. All line numbers are 1-based.
 ///

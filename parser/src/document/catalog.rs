@@ -12,8 +12,8 @@ use crate::{content::FootnoteDeferred, internal::debug::DebugHashMapFrom, parser
 pub struct Catalog {
     /// Primary registry mapping IDs to reference entries.
     ///
-    /// A [`BTreeMap`] (rather than a `HashMap`) so that iteration – and thus
-    /// the public [`ids`](Self::ids)/[`entries`](Self::entries) accessors – is
+    /// A [`BTreeMap`] (rather than a `HashMap`) so that iteration — and thus
+    /// the public [`ids`](Self::ids)/[`entries`](Self::entries) accessors — is
     /// deterministic (sorted by ID) across process runs, which a
     /// multi-document pipeline relies on for reproducible output.
     pub(crate) refs: BTreeMap<String, RefEntry>,
@@ -32,7 +32,7 @@ pub struct Catalog {
     pub(crate) footnotes: Vec<Footnote>,
 
     /// Images referenced by `image:`/`image::` macros, recorded in document
-    /// order while substituting inline macros – but only when the parser was
+    /// order while substituting inline macros — but only when the parser was
     /// configured with
     /// [`with_catalog_assets(true)`](crate::Parser::with_catalog_assets)
     /// (Asciidoctor's `catalog_assets` API option). Empty otherwise.
@@ -40,7 +40,7 @@ pub struct Catalog {
 
     /// Link targets referenced by `link:`/`mailto:` macros and by bare URL and
     /// email autolinks, recorded in document order while substituting inline
-    /// macros – but only when the parser was configured with
+    /// macros — but only when the parser was configured with
     /// [`with_catalog_assets(true)`](crate::Parser::with_catalog_assets)
     /// (Asciidoctor's `catalog_assets` API option). Empty otherwise.
     ///
@@ -62,8 +62,8 @@ pub struct Catalog {
     /// this map via [`register_include`](Self::register_include), and it
     /// survives into the document's catalog. It lets an
     /// inter-document cross reference whose target names an included file
-    /// collapse to a same-document reference – the target's anchors are now
-    /// part of *this* document – but only when the file was included in
+    /// collapse to a same-document reference — the target's anchors are now
+    /// part of *this* document — but only when the file was included in
     /// full, since a partial include may not have carried the referenced
     /// anchor across. See [`interpret_xref_target`](crate::content).
     pub(crate) includes: HashMap<String, bool>,
@@ -296,7 +296,7 @@ impl Catalog {
 
     /// Returns `true` if the file named by `key` (an include target relative to
     /// the outermost document, without its AsciiDoc extension) was included
-    /// into this document *in full* – i.e. at least one `include::`
+    /// into this document *in full* — i.e. at least one `include::`
     /// directive merged the whole file, rather than only a `lines`/`tag(s)`
     /// portion of it.
     ///
@@ -383,7 +383,7 @@ impl Footnote {
     ///
     /// A footnote's text is extracted out of the block it was defined in, so
     /// the warning is anchored using the footnote's recorded
-    /// [`location`](Self::location) – the enclosing content it was written in –
+    /// [`location`](Self::location) — the enclosing content it was written in —
     /// reconstructed as a sub-span of `document_source`. When no location was
     /// recorded (a footnote defined inside an owned sub-source, whose offset
     /// does not map to the document), the warning falls back to the whole

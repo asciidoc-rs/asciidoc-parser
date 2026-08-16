@@ -5894,9 +5894,40 @@ mod macros {
         assert_eq!(images[0].imagesdir, None);
 
         // `data-uri` is set but no image file handler is registered, so the
-        // image degrades silently to a web path – no warning is emitted
+        // image degrades silently to a web path — no warning is emitted
         // (mirroring `assert logger.empty?`).
         assert_eq!(doc.warnings().count(), 0);
+    }
+
+    // The block `image::` macro (parsed via `MediaBlock`, a separate code
+    // path from the inline `image:` macro substitution above) must also
+    // register its target when `catalog_assets` is enabled, mirroring
+    // Asciidoctor's `doc.register :images, target` call in `Image#initialize`.
+    #[test]
+    fn catalog_records_block_image_targets_when_catalog_assets_enabled() {
+        let doc = Parser::default()
+            .with_catalog_assets(true)
+            .parse("image::foo.png[]");
+
+        let images = doc.catalog().images();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].target, "foo.png");
+        assert_eq!(images[0].imagesdir, None);
+    }
+
+    // Inline and block image macros share the same catalog, and both are
+    // recorded in document order regardless of which code path parsed them.
+    #[test]
+    fn catalog_records_inline_and_block_image_targets_in_document_order() {
+        let doc = Parser::default().with_catalog_assets(true).parse(
+            "An inline image:foo.png[] reference.\n\nimage::bar.png[]\n\nAnother image:baz.png[] reference.",
+        );
+
+        let images = doc.catalog().images();
+        assert_eq!(images.len(), 3);
+        assert_eq!(images[0].target, "foo.png");
+        assert_eq!(images[1].target, "bar.png");
+        assert_eq!(images[2].target, "baz.png");
     }
 
     // Asciidoctor's `catalog[:links]` registry: like `catalog[:images]`, link
@@ -8916,7 +8947,7 @@ mod passthroughs {
 
         // The quote-delimited role (`['role']`) is preserved as a verbatim role
         // on the passthrough span, so the rendered output includes
-        // `<span class="'role'">` – exactly matching Asciidoctor here.
+        // `<span class="'role'">` — exactly matching Asciidoctor here.
         let mut p = Parser::default();
         let maw =
             crate::blocks::Block::parse(crate::Span::new("['role']\\++This++++++++++++"), &mut p);

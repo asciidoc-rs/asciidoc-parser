@@ -1,7 +1,7 @@
 //! Regression coverage for the block-nesting depth cap (issue #885).
 //!
-//! Block parsing descends recursively – a delimited block's body, a section
-//! body, a table cell, and a nested list each parse on a fresh call stack – so
+//! Block parsing descends recursively — a delimited block's body, a section
+//! body, a table cell, and a nested list each parse on a fresh call stack — so
 //! without a bound a small crafted document can overflow the native stack and
 //! abort the whole process (an *uncatchable* failure). The `max-block-nesting`
 //! attribute (default 32, API-only) caps that recursion: past the limit the
@@ -47,7 +47,7 @@ fn nesting_warning_limits_on_large_stack(source: String) -> Vec<usize> {
 #[test]
 fn strictly_increasing_delimiters_are_capped_at_the_default() {
     // Each line is a longer example-block delimiter than the last, so it can
-    // never close the block it sits inside – every line opens a *nested*
+    // never close the block it sits inside — every line opens a *nested*
     // example block. Before the cap this drove unbounded recursion and aborted
     // with a stack overflow at a few hundred levels.
     let mut source = String::new();
@@ -209,7 +209,7 @@ fn limit_of_zero_refuses_all_nesting() {
 
 #[test]
 fn empty_over_nested_scope_is_truncated_silently() {
-    // An over-nested scope with no content is dropped without a warning –
+    // An over-nested scope with no content is dropped without a warning —
     // nothing is lost, so there is nothing to report.
     let doc = Parser::default()
         .with_intrinsic_attribute("max-block-nesting", "0", ModificationContext::ApiOnly)

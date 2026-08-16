@@ -27,7 +27,7 @@ use crate::{Parser, Span, inlines::InlineNode};
 /// (`doc@example.org`), replacing each with an
 /// [`Image`](InlineNode::Image), [`Ui`](InlineNode::Ui), or
 /// [`Ref`](InlineNode::Ref) node. An image node carries its own owned
-/// [`Attrlist`](crate::attributes::Attrlist) – the step that makes a macro node
+/// [`Attrlist`](crate::attributes::Attrlist) — the step that makes a macro node
 /// *self-describing*, so the fold reconstructs the render parameters and calls
 /// the same `render_image`/`render_icon` the string step calls; a UI node
 /// carries the keys / label / menu path the string replacer computed, so its
@@ -42,20 +42,20 @@ use crate::{Parser, Span, inlines::InlineNode};
 ///
 /// It also recognizes the **bibliography anchor** (`[[[label]]]`) that prefixes
 /// a bibliography list item, as an [`Anchor`](InlineNode::Anchor) node whose
-/// `is_bibliography` is set – the one family that is not a level pass, since
+/// `is_bibliography` is set — the one family that is not a level pass, since
 /// its pattern is `^`-anchored to the whole content (see
 /// [`biblio_anchor_level`]).
 ///
 /// Each family is applied at each level in the **same order the string step
-/// applies them** – keyboard/button, then menu, then image/icon, then
+/// applies them** — keyboard/button, then menu, then image/icon, then
 /// auto-links (`INLINE_LINK`), then the `link:`/`mailto:` macro
-/// (`INLINE_LINK_MACRO`), then a bare e-mail address (`INLINE_EMAIL`) – so a
+/// (`INLINE_LINK_MACRO`), then a bare e-mail address (`INLINE_EMAIL`) — so a
 /// level's overlapping constructs resolve
 /// identically. Like the other steps it descends
 /// into the [`Styled`](crate::inlines::Styled)/[`Ref`](InlineNode::Ref)
-/// children earlier steps created – a macro can appear inside a rendered span
+/// children earlier steps created — a macro can appear inside a rendered span
 /// (`*image:x[]*`), just as the string pipeline matches one inside a rendered
-/// `<strong>` tag – then matches at each level.
+/// `<strong>` tag — then matches at each level.
 ///
 /// # The UI macros are gated on `experimental`
 ///
@@ -68,7 +68,7 @@ use crate::{Parser, Span, inlines::InlineNode};
 /// # Scope: verbatim macros only
 ///
 /// A recognized macro is built into an `'src`-borrowing node only when its
-/// whole match is **verbatim source** – no special character (`< > &`, an
+/// whole match is **verbatim source** — no special character (`< > &`, an
 /// atomic [`CharRef`](InlineNode::CharRef)) and no rendered
 /// [`Styled`](crate::inlines::Styled) span falls inside it. The string pipeline
 /// matches macros over *escaped, already-rendered* text, so a macro containing
@@ -77,10 +77,10 @@ use crate::{Parser, Span, inlines::InlineNode};
 /// **left unrecognized** here for a later increment (the attribute-references
 /// step and the cutover), mirroring how the quotes step documents its own
 /// cross-span boundary (crossed delimiters). A family relaxes that gate only
-/// where the escaped piece is a delimiter *it consumes and never slices* – the
+/// where the escaped piece is a delimiter *it consumes and never slices* — the
 /// angle-bracketed URL's own `&lt;`/`&gt;` (see
 /// `links::build_inline_link_node`) and a menu's `&gt;` submenu caret (see
-/// `ui::menu_match_is_sliceable`) – not where the escaped text would have to
+/// `ui::menu_match_is_sliceable`) — not where the escaped text would have to
 /// ride on the node. The differential corpus pins the cases each increment
 /// claims.
 pub(super) fn apply_macros<'src>(
@@ -90,18 +90,18 @@ pub(super) fn apply_macros<'src>(
 ) -> Vec<InlineNode<'src>> {
     // The bibliography anchor (`[[[label]]]`) runs before every other family,
     // exactly as the string step runs its own `INLINE_BIBLIO_ANCHOR` pass
-    // first. It runs *only here*, at the content's own top level – its pattern
+    // first. It runs *only here*, at the content's own top level — its pattern
     // is `^`-anchored, so it can only ever match the very start of the whole
     // content, never the start of a span's children (see
-    // [`biblio_anchor_level`]) – which is why it sits outside
+    // [`biblio_anchor_level`]) — which is why it sits outside
     // [`apply_macro_families`]'s own recursion.
     let nodes = biblio_anchor_level(nodes, root, parser);
 
     apply_macro_families(nodes, root, parser)
 }
 
-/// Applies each macro family at this level – and, first, at every level nested
-/// inside it – in the string step's own family order. See
+/// Applies each macro family at this level — and, first, at every level nested
+/// inside it — in the string step's own family order. See
 /// [`apply_macros`], which wraps this with the once-per-content
 /// bibliography-anchor pass.
 fn apply_macro_families<'src>(
@@ -155,15 +155,15 @@ fn apply_macro_families<'src>(
 
     // A bare e-mail address (`doc@example.org`) runs after both URL-link
     // families and before the anchor pass, exactly where the string step runs
-    // `InlineEmailReplacer` – so an address that is really the tail of a URL, or
+    // `InlineEmailReplacer` — so an address that is really the tail of a URL, or
     // a `mailto:` macro's own target, is already inside an opaque node (there,
     // already-rendered `<a …>` markup) and is not re-recognized.
     let nodes = email_level(nodes, root);
 
     // Inline anchors (`[[id]]`, `anchor:id[…]`) run after the link families and
     // before cross-references, mirroring the string step's order. (The
-    // bibliography-anchor pass the string step runs *first* – a `^`-anchored
-    // `[[[id]]]`, recognized only inside a bibliography list item – runs in
+    // bibliography-anchor pass the string step runs *first* — a `^`-anchored
+    // `[[[id]]]`, recognized only inside a bibliography list item — runs in
     // [`apply_macros`], outside this recursion.)
     let nodes = anchor_macros_level(nodes, root);
 
@@ -177,13 +177,13 @@ fn apply_macro_families<'src>(
     // level" recursion (see the closure at the top of this function). A
     // footnote's assigned number is *not* order-independent, so it needs its
     // own recursive walk that visits nodes in true left-to-right source order
-    // regardless of nesting depth – see [`apply_footnotes`], run once, as its
+    // regardless of nesting depth — see [`apply_footnotes`], run once, as its
     // own step in [`build`], after `apply_macros` has fully resolved every
     // other family at every level.
 }
 
 /// The eventual cutover's single entry point (design §5.2, Phase 4 step 6) for
-/// **every** recognition side effect the macro families above defer –
+/// **every** recognition side effect the macro families above defer —
 /// composing [`anchors::apply_biblio_side_effects`],
 /// [`image::apply_image_side_effects`], [`links::apply_link_side_effects`], and
 /// [`anchors::apply_ref_side_effects`], each staged and tested as its own
@@ -194,21 +194,21 @@ fn apply_macro_families<'src>(
 ///
 /// The four are called in the same relative order the string pipeline's own
 /// macro passes run in (the bibliography anchor, then image/icon, …, links, …,
-/// anchors, …– see [`apply_macros`]'s own doc comment): bibliography anchor,
+/// anchors, … — see [`apply_macros`]'s own doc comment): bibliography anchor,
 /// then image, then link, then anchor/ref.
-/// This is not cosmetic – it is what keeps this function's output identical to
+/// This is not cosmetic — it is what keeps this function's output identical to
 /// the golden pipeline's whenever more than one family's side effect touches
 /// the *same* shared list. Concretely, [`Parser::record_substitution_warning`]
 /// appends to one shared warnings list, and both
 /// [`image::apply_image_side_effects`]'s dangerous-link-scheme warning and
-/// [`anchors::apply_ref_side_effects`]'s duplicate-id warning write to it – a
+/// [`anchors::apply_ref_side_effects`]'s duplicate-id warning write to it — a
 /// content whose image triggers the first and whose anchor triggers the
 /// second must see the image warning recorded first, exactly as it would from
 /// the string pipeline's own image-then-anchor pass order. The same holds one
 /// step earlier for [`anchors::apply_biblio_side_effects`]'s own duplicate-id
 /// warning, which the string pipeline's first pass records ahead of both. (The
 /// asset/ref catalogs the three write to are otherwise disjoint from one
-/// another – images, links, and refs are three separate lists – so this
+/// another — images, links, and refs are three separate lists — so this
 /// ordering does not, by itself, need to hold *within* a single catalog; see
 /// [`links::apply_link_side_effects`]'s own doc comment for the finer-grained
 /// ordering *within* the link family that the golden pipeline also requires.)
@@ -217,15 +217,15 @@ fn apply_macro_families<'src>(
 /// function: index terms and cross-references perform no recognition side
 /// effect at all (an index term has no catalog in the HTML backend; a
 /// cross-reference is resolved, not registered), and a footnote's one
-/// required side effect – its assigned number – is not deferred in the first
+/// required side effect — its assigned number — is not deferred in the first
 /// place (see [`apply_footnotes`](super::footnotes::apply_footnotes)'s own doc
 /// comment); it already runs during [`build`](super::build), not here.
 ///
 /// As with each of the three functions it composes, **nothing here is wired
-/// into a real parse path yet** – it is exercised only by this module's own
+/// into a real parse path yet** — it is exercised only by this module's own
 /// tests, against their own `Parser`. `source` and `leading_anchor_registered`
 /// are threaded straight through to
-/// [`anchors::apply_ref_side_effects`] – see its own doc comment for both.
+/// [`anchors::apply_ref_side_effects`] — see its own doc comment for both.
 pub(crate) fn apply_macro_side_effects(
     nodes: &[InlineNode<'_>],
     parser: &Parser,
@@ -252,7 +252,7 @@ pub(super) struct MacroMatch<'src> {
 pub(super) enum MacroMatchKind<'src> {
     /// An escaped macro (`\image:…`, `\kbd:[…]`, `\https://…`): drop the single
     /// backslash at `backslash` and keep the rest of the match as literal
-    /// nodes, replacing nothing – mirroring the string replacer's
+    /// nodes, replacing nothing — mirroring the string replacer's
     /// `caps[0][1..]`. The backslash is at the match start for the
     /// prefix-less macros, and at the scheme for an escaped auto-link whose
     /// match carries a boundary prefix.
@@ -260,7 +260,7 @@ pub(super) enum MacroMatchKind<'src> {
 
     /// A recognized macro, built into its node ([`Image`](InlineNode::Image),
     /// [`Ui`](InlineNode::Ui), [`Ref`](InlineNode::Ref), …). Boxed to keep this
-    /// enum small – a macro node is far larger than the
+    /// enum small — a macro node is far larger than the
     /// [`Unescape`](Self::Unescape) variant.
     ///
     /// The node replaces only the `consumed` sub-range of the match; the match
@@ -409,7 +409,7 @@ mod tests {
         // A content that exercises every family this function composes in one
         // go: an image whose `link=` targets a dangerous scheme (a warning
         // from the image family) *before* a duplicate anchor id (a warning
-        // from the anchor family) – the golden pipeline's own image-then-
+        // from the anchor family) — the golden pipeline's own image-then-
         // anchor pass order (`apply_macros`'s own doc comment) must land the
         // two warnings in that order, not the reverse. Each side uses its own
         // *independent* parser (design §5.3's two-independent-parsers
@@ -465,7 +465,7 @@ mod tests {
         // The string pipeline runs its bibliography-anchor pass *first*, ahead
         // of every other macro family, so a duplicate bibliography id must be
         // warned about before an image's dangerous-link-scheme warning in the
-        // one shared warnings list – the same ordering this function's own doc
+        // one shared warnings list — the same ordering this function's own doc
         // comment records for image-before-anchor, one step earlier. Each side
         // uses its own independent parser.
         let source = "[[[dup]]] image:x.png[alt,link=javascript:alert(1)] entry";

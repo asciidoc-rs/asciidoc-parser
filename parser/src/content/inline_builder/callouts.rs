@@ -20,7 +20,7 @@ use crate::{
 /// *normal* effective order [`build`](super::build) runs: callouts belong to
 /// [`SubstitutionGroup::Verbatim`](crate::content::SubstitutionGroup::Verbatim)
 /// (literal, listing, and source blocks), whose only steps are
-/// `SpecialCharacters` then `Callouts` – so `nodes` here can never contain a
+/// `SpecialCharacters` then `Callouts` — so `nodes` here can never contain a
 /// [`Styled`](crate::inlines::Styled) or [`Ref`](crate::inlines::Ref) span
 /// (`Quotes` and `Macros` never ran) and this function need not descend into
 /// anything; the level it matches against is the only level. It is additive
@@ -29,8 +29,8 @@ use crate::{
 /// after
 /// [`apply_special_characters`](super::special_chars::apply_special_characters).
 ///
-/// It reuses the string pipeline's *exact* recognition –
-/// [`build_callout_regexes`] is now shared `pub(crate)` – so only the
+/// It reuses the string pipeline's *exact* recognition —
+/// [`build_callout_regexes`] is now shared `pub(crate)` — so only the
 /// recognition *sink* differs (§4.1): a matched, trailing-position callout
 /// becomes a node instead of rendered markup, folding through the same
 /// `render_callout` the string step calls (see `fold_callout`) so the
@@ -118,7 +118,7 @@ enum CalloutMatchKind {
         is_xml: bool,
 
         /// The captured line-comment prefix, if any (its absence does not by
-        /// itself mean "no guard" – see [`rebuild_callout_level`], which also
+        /// itself mean "no guard" — see [`rebuild_callout_level`], which also
         /// consults `is_xml`).
         prefix: Option<std::ops::Range<usize>>,
     },
@@ -130,7 +130,7 @@ enum CalloutMatchKind {
 /// when nothing but further callouts follows it up to the end of the line.
 /// Unlike the string pipeline (whose `LookaheadReplacer` never skips ahead
 /// and retries for this step), a match that fails the lookahead is simply
-/// left out of the returned list – the surrounding gap then reproduces its
+/// left out of the returned list — the surrounding gap then reproduces its
 /// original nodes unchanged, exactly the same outcome as the string
 /// pipeline's `dest.push_str(&caps[0])` fallback.
 fn find_callout_matches(s: &str, callout_rx: &Regex, tail_rx: &Regex) -> Vec<CalloutMatch> {
@@ -201,7 +201,7 @@ fn find_callout_matches(s: &str, callout_rx: &Regex, tail_rx: &Regex) -> Vec<Cal
 /// [`CalloutReplacer`](crate::content::substitution_step)'s resolution: a
 /// captured line-comment prefix takes precedence; otherwise an XML callout
 /// uses the XML guard; failing both, an empty line-comment guard (there is no
-/// "no guard" state – the fold's non-icon fallback always guards with
+/// "no guard" state — the fold's non-icon fallback always guards with
 /// *something*).
 fn rebuild_callout_level<'src>(
     nodes: &[InlineNode<'src>],
@@ -260,8 +260,8 @@ fn rebuild_callout_level<'src>(
 /// The inverse of the classifier's value assignment: the
 /// [`CharacterReplacementType`] the fold renders a
 /// [`CharRef::Replacement`](crate::inlines::CharRef::Replacement) value with.
-/// The mapping is a bijection – each replacement type produces a
-/// distinct logical string – so the fold reproduces the string pipeline's bytes
+/// The mapping is a bijection — each replacement type produces a
+/// distinct logical string — so the fold reproduces the string pipeline's bytes
 /// through the same [`render_character_replacement`] the step calls.
 ///
 /// [`render_character_replacement`]:
@@ -336,7 +336,7 @@ mod tests {
     }
 
     /// Builds the tree through the **callouts** step for `source`: special
-    /// characters, then callouts – the two (and only) steps
+    /// characters, then callouts — the two (and only) steps
     /// [`SubstitutionGroup::Verbatim`](crate::content::SubstitutionGroup::Verbatim)(crate::content::SubstitutionGroup::Verbatim)
     /// runs.
     fn build_verbatim<'src>(

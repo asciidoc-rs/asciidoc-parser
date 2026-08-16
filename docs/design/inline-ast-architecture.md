@@ -750,7 +750,7 @@ Each phase is a reviewable unit with a clear exit gate.
   the new name ultimately implies (making `rendered_html()` a *fold* of the tree, and
   dropping the parse-time renderer so it is *always* the built-in HTML backend) are the
   deferred remainder of Phase 2 and Phase 4, unchanged by this step. The `render_with` /
-  `render_to` fold is the last Phase 3 piece – but attempting it revealed that a *faithful*
+  `render_to` fold is the last Phase 3 piece — but attempting it revealed that a *faithful*
   fold needs the per-construct attrlist/parser back at fold time, which the `'static`
   Strategy-A recorder cannot carry into a node (every `Styled`/`Image` node is therefore
   built with `attrs: None`). The self-describing nodes such a fold needs come from the
@@ -758,8 +758,8 @@ Each phase is a reviewable unit with a clear exit gate.
   that builder covers the inline vocabulary (see Phase 4's step list).
 
 - **Phase 4 — precision spans + single-pass builder + ASG output.** 🔶 **In progress.** Land
-  the single-pass builder (Strategy B) so the tree is built **directly from `'src`** – nodes
-  carrying honest per-node spans (#944) and their own `Attrlist<'src>` (self-describing) –
+  the single-pass builder (Strategy B) so the tree is built **directly from `'src`** — nodes
+  carrying honest per-node spans (#944) and their own `Attrlist<'src>` (self-describing) —
   then make `rendered_html()` a fold of the tree, add `Document::to_asg()`, validate against
   the ASG schema, and retire the `attribute-missing` per-line hack (#564).
   *Exit:* ASG output validates; #944 hard-case policies documented and tested; #564 hack
@@ -767,7 +767,7 @@ Each phase is a reviewable unit with a clear exit gate.
 
   *Step 1 landed as (the single-pass builder foundation + `SpecialCharacters`):* a new
   [`inline_builder`](../../parser/src/content/inline_builder.rs) module recasts a
-  substitution step as a **transducer** over a node list (`Vec<InlineNode> → Vec<InlineNode>`) –
+  substitution step as a **transducer** over a node list (`Vec<InlineNode> → Vec<InlineNode>`) —
   the shape §4.1 describes. [`build`](../../parser/src/content/inline_builder.rs) seeds one
   borrowed whole-source `Text` node and threads it through the steps;
   [`apply_special_characters`](../../parser/src/content/inline_builder.rs) splits each `Text`
@@ -775,8 +775,8 @@ Each phase is a reviewable unit with a clear exit gate.
   crate's own [`Span`](../../parser/src/span/slice.rs) primitives so each node's
   `line`/`col`/`offset` is honest (the precise spans #944 targets) and verbatim runs borrow
   from `'src`. [`fold_html`](../../parser/src/content/inline_builder.rs) is the **first fold
-  over the public `InlineNode` tree** – the recorder's `fold_into` folds an intermediate
-  representation, not the public tree – and is the seed of both `rendered_html()`-as-a-fold
+  over the public `InlineNode` tree** — the recorder's `fold_into` folds an intermediate
+  representation, not the public tree — and is the seed of both `rendered_html()`-as-a-fold
   and `render_with`. This step is **additive**: nothing is wired into the parse path, so the
   string pipeline and the Strategy-A [`inlines()`](../../parser/src/content/content.rs) tree
   are untouched, and a differential test asserts the fold reproduces the string pipeline's
@@ -785,34 +785,34 @@ Each phase is a reviewable unit with a clear exit gate.
 
   *Step 2 landed as (`Quotes` → `Styled`, introducing nesting):*
   [`apply_quotes`](../../parser/src/content/inline_builder.rs) recasts the quoted-text step as
-  a transducer: it reuses the *exact* recognition rules the string pipeline matches with –
-  [`quote_subs`](../../parser/src/content/substitution_step.rs), now shared `pub(crate)` – so
+  a transducer: it reuses the *exact* recognition rules the string pipeline matches with —
+  [`quote_subs`](../../parser/src/content/substitution_step.rs), now shared `pub(crate)` — so
   the recognition is unchanged and only the *sink* differs (§4.1). Each rule is applied to the
   node tree in order; before matching at a level the transducer descends into the
   [`Styled`](../../parser/src/inlines/styled.rs) spans earlier rules created, so a later rule
-  can match *inside* an earlier span – which is what makes `*a _b_ c*` and `*a `b` c*` nest
+  can match *inside* an earlier span — which is what makes `*a _b_ c*` and `*a `b` c*` nest
   into a tree. Matching runs over an **escaped working string** rebuilt from the level's leaves
   (a `CharRef` contributes its canonical entity, so the boundary classes the patterns key off
-  – `&`, `;` – see exactly what the string pipeline's escaped text presents; an earlier span is
+  — `&`, `;` — see exactly what the string pipeline's escaped text presents; an earlier span is
   one opaque placeholder), and each match maps back to precise `'src` spans: delimiters are
   consumed, the boundary prefix is kept, and an attributed span (`[.role]#…#`) parses and
-  **retains its own `Attrlist<'src>`** (self-describing – better than the recorder's
+  **retains its own `Attrlist<'src>`** (self-describing — better than the recorder's
   `attrs: None`), so [`fold_html`](../../parser/src/content/inline_builder.rs) renders it
   through the same `render_quoted_substitution` the string step calls. A broad differential
   corpus asserts the fold reproduces the string pipeline's output through the quotes step
   byte-for-byte (nesting, unconstrained forms, smart quotes, super/subscript, roles/ids,
   escapes, specials adjacent to delimiters, multi-line runs), alongside structural precise-span
-  assertions the Strategy-A tree cannot make. The one intended divergence – *crossed* delimiters
+  assertions the Strategy-A tree cannot make. The one intended divergence — *crossed* delimiters
   (`` `a *b` c* ``) whose overlapping ranges the string pipeline renders as malformed,
-  improperly-nested tags that no tree can represent – is documented and pinned by a test: the
+  improperly-nested tags that no tree can represent — is documented and pinned by a test: the
   builder seals the inner delimiter inside its opaque span and stays well-formed. This step is
   **additive**: nothing is wired into the parse path.
 
   *Step 3 landed as (`CharacterReplacements` → `CharRef`, `PostReplacement` → `LineBreak`):*
   two more transducer steps.
   [`apply_character_replacements`](../../parser/src/content/inline_builder.rs) recognizes the
-  typographic replacements – `(C)`/`(R)`/`(TM)`, em dashes, ellipsis, apostrophes, arrows, and
-  restored entities – replacing each with a
+  typographic replacements — `(C)`/`(R)`/`(TM)`, em dashes, ellipsis, apostrophes, arrows, and
+  restored entities — replacing each with a
   [`CharRef::Replacement`](../../parser/src/inlines/char_ref.rs) (logical character(s)) or
   [`CharRef::Entity`](../../parser/src/inlines/char_ref.rs) (a named/numeric entity as written)
   leaf, and [`apply_post_replacements`](../../parser/src/content/inline_builder.rs) turns a
@@ -839,12 +839,12 @@ Each phase is a reviewable unit with a clear exit gate.
   into the builder) is deferred to the cutover (step 6).
 
   *Step 4a landed as (`Macros` → `Image`, the first macro family):* the macros step is by far
-  the largest – seven construct families plus deferred-xref recording and footnote text
-  extraction – so it lands as its own sequence of sub-steps rather than one leap. The first,
+  the largest — seven construct families plus deferred-xref recording and footnote text
+  extraction — so it lands as its own sequence of sub-steps rather than one leap. The first,
   [`apply_macros`](../../parser/src/content/inline_builder.rs), recognizes **image and icon
   macros** (`image:target[…]`, `icon:target[…]`), replacing each with an
   [`Image`](../../parser/src/inlines/image.rs) node that captures its own owned
-  `Attrlist<'src>` – the step that makes a macro node **self-describing**, the property a
+  `Attrlist<'src>` — the step that makes a macro node **self-describing**, the property a
   faithful fold needs (§3.3.1, Phase 3 step 2). It reuses the string pipeline's *exact*
   recognition, now shared `pub(crate)`
   ([`INLINE_IMAGE_MACRO`](../../parser/src/content/macros.rs)), so only the *sink* differs
@@ -852,9 +852,9 @@ Each phase is a reviewable unit with a clear exit gate.
   pre-extracts the alt/width/height (`icon:` carries a `size`, read back from `attrs` at fold
   time) the way the string replacer does, and honors the `\image:` escape. An `is_icon` flag is
   added to the `Image` node so the two forms fold through the right renderer method. The
-  [`fold_html`](../../parser/src/content/inline_builder.rs) fold gains a `&Parser` argument –
+  [`fold_html`](../../parser/src/content/inline_builder.rs) fold gains a `&Parser` argument —
   rendering an image reads the document's safe mode, `data-uri`, and `icons`/`icontype`
-  attributes – and reconstructs `ImageRenderParams`/`IconRenderParams` to call the same
+  attributes — and reconstructs `ImageRenderParams`/`IconRenderParams` to call the same
   `render_image`/`render_icon`, so its output is byte-identical (differential corpora pin this
   under both the default document and one with `imagesdir`/`icons` set). Because the string
   pipeline matches macros over *escaped, already-rendered* text, a macro whose target or
@@ -869,14 +869,14 @@ Each phase is a reviewable unit with a clear exit gate.
 
   *Step 4b(i) landed as (`Macros` → `Ui`, the UI-macro family):*
   [`apply_macros`](../../parser/src/content/inline_builder.rs) now also recognizes the **UI
-  macros** – keyboard (`kbd:[…]`), button (`btn:[…]`), and menu (`menu:…[…]`) – replacing each
+  macros** — keyboard (`kbd:[…]`), button (`btn:[…]`), and menu (`menu:…[…]`) — replacing each
   with a [`Ui`](../../parser/src/inlines/ui.rs) node that carries the split keys / normalized
   label / menu path the string replacer computes. It reuses the string pipeline's *exact*
   recognition and splitting, now shared `pub(crate)`
   ([`INLINE_KBD_BTN_MACRO`](../../parser/src/content/macros.rs),
   [`INLINE_MENU_MACRO`](../../parser/src/content/macros.rs), `split_kbd_keys`,
   `normalize_index_text`), so only the *sink* differs (§4.1). Like the string step it runs the
-  families **in order** – keyboard/button, then menu, then image/icon – and recognizes the UI
+  families **in order** — keyboard/button, then menu, then image/icon — and recognizes the UI
   macros only under the `experimental` document attribute, mirroring the gate exactly (with it
   off a `kbd:[…]` stays literal, in the tree as in the string). The
   [`fold_html`](../../parser/src/content/inline_builder.rs) fold reconstructs the render
@@ -887,7 +887,7 @@ Each phase is a reviewable unit with a clear exit gate.
   plumbing is generalized into a shared `MacroMatch`/`rebuild_macro_level` seam the families
   now share. The one intended divergence is the `&gt;`-submenu form
   (`menu:View[Zoom > Reset]`): its `>` is always an escaped `CharRef` by the time macros run, so
-  it fails the verbatim boundary and is left **unrecognized** for a later increment – documented
+  it fails the verbatim boundary and is left **unrecognized** for a later increment — documented
   and pinned by a test, exactly as step 4a defers a macro over a special character (the
   comma-delimited and bare/single-item menu forms *are* verbatim and covered). This step is
   **additive**: nothing is wired into the parse path. The remaining macro families (`Ref`,
@@ -907,15 +907,15 @@ Each phase is a reviewable unit with a clear exit gate.
   build-time state), the `bare` role rides on the node's `roles`, and a `^` suffix sets `window`.
   The auto-link part reproduces the replacer's boundary-prefix preservation and bare-URL
   trailing-punctuation stripping by generalizing the shared `MacroMatch` seam so a macro node can
-  replace only a *sub-range* of its match – keeping a kept prefix before it and stripped
-  punctuation after it – which the image/UI/`link:` families use degenerately (the node consumes
+  replace only a *sub-range* of its match — keeping a kept prefix before it and stripped
+  punctuation after it — which the image/UI/`link:` families use degenerately (the node consumes
   the whole match). Because macros are matched over *escaped, already-rendered* text, a link whose
   URL crosses a special (`&`) or a rendered span is left **unrecognized** for a later increment,
   exactly the verbatim boundary step 4a documents; the angle-bracketed URL form (`<url>`) needs a
   leading `&lt;` and so is always non-verbatim, and a text carrying an attribute list (`=`, or a
   `mailto:` `,` subject) is deferred until the node can hold an `Attrlist<'src>`. The `link:` URL
   macro form (`link:https://…[…]`) is left to the `INLINE_LINK_MACRO` pass, which folds the
-  identical node – the two passes run in the string step's order (`INLINE_LINK` before
+  identical node — the two passes run in the string step's order (`INLINE_LINK` before
   `INLINE_LINK_MACRO`). Differential corpora pin the verbatim link forms (labeled / bare / pathed,
   `mailto:`, other schemes, the `^` suffix, escapes, `hide-uri-scheme`, links next to and inside
   spans) byte-for-byte, alongside structural precise-span assertions the Strategy-A tree cannot
@@ -926,17 +926,17 @@ Each phase is a reviewable unit with a clear exit gate.
   *Follow-up landed as (the link family's own attribute-list-bearing display text, closing
   `Ref{Link}`'s last deferred form):* both link-recognizing passes now recognize a display text
   carrying an `=` (`link:x[text,role=hl]`, `https://x[text,role=hl]`) and a `mailto:` text
-  carrying a `,` subject/body (`mailto:x[Team,Hello there]`) – the pair step 4b(ii) itself defers,
+  carrying a `,` subject/body (`mailto:x[Team,Hello there]`) — the pair step 4b(ii) itself defers,
   and the mirror of the `xref:` macro's own attribute-list text (part 3c below). Unlike that xref
   form, a link's attribute list cannot be reduced to a few plain fields: `render_link` reads an
   `id`, a `title`, and the `nofollow`/`noopener` options straight off the `Attrlist` itself (not
   just `roles`/`window`, which `XrefRenderParams` alone needs), so `Ref` gains an
-  `attrs: Option<Attrlist<'src>>` field – `None` unless a `Link`'s display text carried its own
+  `attrs: Option<Attrlist<'src>>` field — `None` unless a `Link`'s display text carried its own
   attribute list, always `None` for an `Xref`. This is also what step 4b(ii)'s own deferral notes
   as the blocker ("deferred until the node can hold an `Attrlist<'src>`"): the string replacers
   parse the attrlist from a *newline-normalized copy* of the text (so a multi-line
   `link[Foo\nBar,role=x]` reads as `Foo Bar`), which cannot become an honestly-borrowed
-  `Attrlist<'src>` – but when the text has **no embedded newline**, that copy is byte-identical to
+  `Attrlist<'src>` — but when the text has **no embedded newline**, that copy is byte-identical to
   the bracketed text's own `'src` slice, so the node can parse the *real* source span instead and
   carry a genuine borrow. A text that does embed a newline still needs the synthesized copy the
   node cannot hold, so that one narrow form remains deferred (pinned by its own divergence test,
@@ -946,17 +946,17 @@ Each phase is a reviewable unit with a clear exit gate.
   reference added nothing the by-value form doesn't already give a caller building a node with the
   *same* `'src` as its input) and
   [`encode_uri_component`](../../parser/src/content/macros.rs) (likewise now shared `pub(crate)`,
-  for the `mailto:` subject/body encoding), so the interpretation – including the "incidental `=`"
+  for the `mailto:` subject/body encoding), so the interpretation — including the "incidental `=`"
   fallback (`extract_attributes_from_text`'s own guard) and, for the `link:`/`mailto:` macro form,
   the exact unconditional-adoption behavior `InlineLinkMacroReplacer` has and
-  `InlineLinkReplacer` does not (see the two call sites' own doc comments) – is reused byte-for-byte
+  `InlineLinkReplacer` does not (see the two call sites' own doc comments) — is reused byte-for-byte
   rather than re-derived. [`fold_link`](../../parser/src/content/inline_builder/fold.rs) now passes
   the node's own `attrs` through to `render_link` when present, falling back to the empty attrlist
   every other link already folds through. A display or reference text crossing a rendered span
   (`link:x[*bold*]`, `xref:id[*bold*]`, `<<id,*bold*>>`) remains a **separate**, still-fully-open
   boundary for every reference-bearing family (not touched by this follow-up): by the time macros
   run, `*bold*` is already a `Styled` node, not text, so recognizing it would need the node's
-  display text to become structured children – the shape a footnote's own content already has –
+  display text to become structured children — the shape a footnote's own content already has —
   which no reference family has yet grown; each now carries its own divergence test pinning this
   (previously only the `<<id,*bold*>>` shorthand had one). Differential corpora extend the existing
   link/formal-URL fixtures with `role=`/multi-attribute and mailto subject/body combinations,
@@ -965,7 +965,7 @@ Each phase is a reviewable unit with a clear exit gate.
   *Step 4b(ii) part 3a landed as (`Macros` → `Ref{Xref}`, the same-document `xref:` macro form):*
   the builder now recognizes the **`xref:` cross-reference macro** (`xref:id[]`,
   `xref:id[Reference Text]`), each as a [`Ref`](../../parser/src/inlines/ref_node.rs)`{Xref}` node.
-  It reuses the string pipeline's *exact* recognition – `INLINE_XREF` is now shared `pub(crate)` –
+  It reuses the string pipeline's *exact* recognition — `INLINE_XREF` is now shared `pub(crate)` —
   so only the recognition *sink* changes (a node instead of the string step's deferred
   `XrefSegment` placeholder). As with links, no field is added to `Ref`: the provided text is baked
   into a single [`Text`](../../parser/src/inlines/inline_node.rs) child (verbatim text borrows from
@@ -973,7 +973,7 @@ Each phase is a reviewable unit with a clear exit gate.
   the fold reads as "no text provided" (the bracketed `[id]` fallback). The
   [`fold_html`](../../parser/src/content/inline_builder.rs) fold reconstructs `XrefRenderParams`
   from the node and routes through the same `render_xref` the string path feeds at resolution time,
-  so its output is byte-for-byte identical – pinned by a new differential corpus that finalizes the
+  so its output is byte-for-byte identical — pinned by a new differential corpus that finalizes the
   string pipeline's deferred cross-references to the same **unresolved** fallback the additive
   builder (no resolution pass) produces. Because the additive builder never resolves, the fold
   always takes `render_xref`'s unresolved branch, where `xrefstyle` and a *derived* destination play
@@ -982,10 +982,10 @@ Each phase is a reviewable unit with a clear exit gate.
   because its `&lt;`/`&gt;` delimiters are `CharRef`s by macro time, exactly as the angle-bracketed
   `<url>` link defers), an **inter-document** target (`xref:other.adoc#frag[]`, whose derived
   destination the node cannot carry yet), a **text carrying an attribute list** (`=`, parsed into
-  `window`/`role`/`xrefstyle`, deferred until the node can hold an `Attrlist<'src>` – as the
+  `window`/`role`/`xrefstyle`, deferred until the node can hold an `Attrlist<'src>` — as the
   formal-URL link defers the same), and a macro whose **target or text crosses a special character
   or a rendered span** (`xref:foo[a<b]`, matched by the string pipeline over the *escaped* text,
-  which a self-describing node cannot carry as an `'src` slice – the same verbatim boundary the
+  which a self-describing node cannot carry as an `'src` slice — the same verbatim boundary the
   image and auto-link increments document). This step is **additive**: nothing is wired into the
   parse path.
 
@@ -994,14 +994,14 @@ Each phase is a reviewable unit with a clear exit gate.
   as the same [`Ref`](../../parser/src/inlines/ref_node.rs)`{Xref}` node the `xref:` macro form
   produces, folding through the identical `render_xref` so the output is byte-for-byte identical
   (pinned by extending the part-3a differential corpus with shorthand fixtures). It reuses the
-  *same* shared `INLINE_XREF` pattern – the shorthand and macro forms are two branches of one
-  regex – so recognition is unchanged and only the *sink* differs. The shorthand's key wrinkle is
+  *same* shared `INLINE_XREF` pattern — the shorthand and macro forms are two branches of one
+  regex — so recognition is unchanged and only the *sink* differs. The shorthand's key wrinkle is
   that, because special characters run before macros, its `<<`/`>>` delimiters are already escaped
   [`CharRef`](../../parser/src/inlines/char_ref.rs)s (`&lt;&lt;`/`&gt;&gt;`) by macro time, so the
   match is never *wholly* verbatim the way a `xref:` macro is. The recognizer therefore relaxes its
   verbatim gate for this one form: the delimiters are `CharRef`s the node **consumes** (dropped by
   [`rebuild_macro_level`](../../parser/src/content/inline_builder.rs), which emits atomic pieces
-  whole) rather than slices, so only the shorthand's *inner* text – the id and any reference text –
+  whole) rather than slices, so only the shorthand's *inner* text — the id and any reference text —
   need be verbatim to slice from `'src`. The inner is split on the first `,` into an id and an
   optional reference text, each **trimmed** exactly as the string replacer's shorthand branch does;
   the trimmed text becomes the node's single [`Text`](../../parser/src/inlines/inline_node.rs) child
@@ -1009,68 +1009,68 @@ Each phase is a reviewable unit with a clear exit gate.
   `<<…>>` is the node's `location`. An escaped `\<<…>>` drops its backslash and stays literal, handled
   before the verbatim gate so it works even across a non-verbatim inner. Four forms are deferred, each
   documented and pinned by a divergence test: an **inter-document** shorthand (`<<other#frag>>`, whose
-  derived destination the node cannot carry yet – the same block as the inter-document `xref:` form),
+  derived destination the node cannot carry yet — the same block as the inter-document `xref:` form),
   a **document-as-a-whole** shorthand (`<<>>`, an empty id resolving through a derived destination, as
   `xref:#[]` defers), a **`<<id,>>` with an empty reference text** (which the string replacer records
-  as a *present-but-empty* text – an empty `<a>…</a>` – that an empty child vector cannot distinguish
+  as a *present-but-empty* text — an empty `<a>…</a>` — that an empty child vector cannot distinguish
   from "no text provided"), and a shorthand whose **id or text crosses a special character or a
   rendered span** (non-verbatim inner, the same boundary the macro form and the image/auto-link
   increments document; this also subsumes the string replacer's "id already contains rendered markup"
   guard, since such an id is non-verbatim). This step is **additive**: nothing is wired into the parse
-  path. The two node-blocked forms both spellings share – inter-document targets and attribute-list
-  text – remain for a later increment (part 3c), which needs new `Ref` fields pinned against a
+  path. The two node-blocked forms both spellings share — inter-document targets and attribute-list
+  text — remain for a later increment (part 3c), which needs new `Ref` fields pinned against a
   consumer.
 
   *Step 4b(ii) part 3c landed as (`Ref` grows a `derived` field, closing the inter-document half):*
-  part 3c turned out to split cleanly along its own two deferred forms – an inter-document/
+  part 3c turned out to split cleanly along its own two deferred forms — an inter-document/
   document-as-a-whole target needs only a *destination* the node can carry opaquely (the exact
   `DerivedReference` type [`ResolutionContext`](../../parser/src/parser/reference_resolver.rs)
   already produces for the string pipeline's own non-catalog case), while an attribute-list-bearing
   display text needs the node to parse and hold `window`/`role`/`xrefstyle`. The first needed no
-  "consumer" to pin its shape – it is a straight reuse of an existing, already-public type – so it
+  "consumer" to pin its shape — it is a straight reuse of an existing, already-public type — so it
   lands now; the second (part 3c's attribute-list half) remains deferred, still needing a real
   consumer to pin how (or whether) `Ref` grows an `Attrlist<'src>`.
-  [`Ref`](../../parser/src/inlines/ref_node.rs) gains `derived: Option<DerivedReference>` –
+  [`Ref`](../../parser/src/inlines/ref_node.rs) gains `derived: Option<DerivedReference>` —
   `None` for a same-document reference (unchanged: still resolves through the catalog at the
   cutover) and `always None` for a [`Link`](../../parser/src/inlines/ref_node.rs), populated only
   for a cross-reference whose target carries its own destination. A new
   `xref_target_and_derived` helper in
   [`xref.rs`](../../parser/src/content/inline_builder/macros/xref.rs) mirrors
-  `InlineXrefReplacer::replace_append`'s own target-interpretation match *exactly* – including its
+  `InlineXrefReplacer::replace_append`'s own target-interpretation match *exactly* — including its
   "a target naming this document, or a file included into it in full, is a same-document reference
-  after all" special case (`Parser::docname`/`Parser::catalog_include_is_full`) – so both the
+  after all" special case (`Parser::docname`/`Parser::catalog_include_is_full`) — so both the
   `xref:` macro form and the `<<id>>` shorthand (which shares the helper, differing only in
   `macro_form`) now recognize every target shape: a same-document id, an inter-document target
   (`xref:other.adoc#frag[]`, `<<other#frag>>`), and the document-as-a-whole form (`xref:#[]`,
   `<<>>`). [`fold_xref`](../../parser/src/content/inline_builder/fold.rs) reconstructs
   `XrefRenderParams.derived` straight from the node, so a derived-carrying reference now folds
   through `render_xref`'s `(None, Some(derived))` branch instead of the unresolved fallback,
-  byte-for-byte identical to the string pipeline (`xrefstyle` stays `None` – it plays no part in
+  byte-for-byte identical to the string pipeline (`xrefstyle` stays `None` — it plays no part in
   that branch, and the attribute-list half that would populate it for other cases is still
   deferred). As throughout this module, this performs *no* recognition side effect and nothing is
   wired into the parse path. A differential corpus extends the existing xref fixtures with
   inter-document (with and without a fragment, and a non-AsciiDoc extension kept as-is) and
   document-as-a-whole forms in both spellings, alongside a unit test pinning the
-  "target names this document" special case. The one remaining deferred xref form – a text
-  carrying an attribute list (part 3c's other half) – is unchanged, still pinned by its own
+  "target names this document" special case. The one remaining deferred xref form — a text
+  carrying an attribute list (part 3c's other half) — is unchanged, still pinned by its own
   divergence test.
 
   *Step 4b(ii) part 3c (attribute-list half) landed as (`Ref` grows `xrefstyle`, closing the last
-  deferred xref form):* the `xref:` macro's own remaining deferred form – a bracketed text
-  carrying an attribute list (an `=`, for `window`/`role`/`xrefstyle`) – is now recognized.
+  deferred xref form):* the `xref:` macro's own remaining deferred form — a bracketed text
+  carrying an attribute list (an `=`, for `window`/`role`/`xrefstyle`) — is now recognized.
   [`xref_macro_text`](../../parser/src/content/inline_builder/macros/xref.rs) mirrors
-  `InlineXrefReplacer::replace_append`'s own text interpretation exactly: it parses the text – from
+  `InlineXrefReplacer::replace_append`'s own text interpretation exactly: it parses the text — from
   a newline-normalized copy, since the parse is not necessarily verbatim, exactly as the string
-  replacer parses that same normalized copy rather than a source slice – as an
+  replacer parses that same normalized copy rather than a source slice — as an
   [`Attrlist`](../../parser/src/attributes/attrlist.rs) whose first positional attribute becomes the
   display text and whose `window`/`role` named attributes populate the node's existing fields; a new
   [`Ref::xrefstyle`](../../parser/src/inlines/ref_node.rs) field (`Option<XrefStyle>`) carries a
   `xrefstyle=` override. As with the `<<other#frag>>` half, this needed no consumer to pin its
-  shape – `window`/`roles` already existed as plain fields (not an `Attrlist<'src>`) because
+  shape — `window`/`roles` already existed as plain fields (not an `Attrlist<'src>`) because
   [`XrefRenderParams`](../../parser/src/parser/inline_substitution_renderer.rs) itself takes them
   that way, not a borrowed attribute list, so the node stores exactly what the fold already needs.
-  When the attrlist parse finds no named attribute – the sole positional value is the whole
-  normalized text – the `=` was incidental (mirroring Asciidoctor's own
+  When the attrlist parse finds no named attribute — the sole positional value is the whole
+  normalized text — the `=` was incidental (mirroring Asciidoctor's own
   `extract_attributes_from_text` fallback); the text is then used as plain display text with no
   named attributes, exactly as if it carried no `=` at all. The parsed positional text becomes a
   *synthesized* `Text` child (no `'src` slice of its own, since it comes from the normalized,
@@ -1078,14 +1078,14 @@ Each phase is a reviewable unit with a clear exit gate.
   the same synthesized-value policy `apply_attribute_references` (step 5b) already established.
 
   Landing this also closed a latent gap the fold carried since the cross-reference increment first
-  landed (part 3a): the *document-wide* `xrefstyle` attribute – which applies to every reference,
-  not only one carrying its own `xrefstyle=` override – was never applied at all, because
+  landed (part 3a): the *document-wide* `xrefstyle` attribute — which applies to every reference,
+  not only one carrying its own `xrefstyle=` override — was never applied at all, because
   [`fold_xref`](../../parser/src/content/inline_builder/fold.rs) hard-coded `xrefstyle: None`. It now
   combines the node's own override with the document-wide default exactly as
   `InlineXrefReplacer` does (`xrefstyle_override.or_else(|| document_xrefstyle(parser))`), reusing
   the string pipeline's own [`document_xrefstyle`](../../parser/src/content/macros.rs) helper (now
   shared `pub(crate)`) rather than a second implementation. The `<<id>>` shorthand has no
-  attribute-list text of its own – its node's `xrefstyle` override is always `None` – but still
+  attribute-list text of its own — its node's `xrefstyle` override is always `None` — but still
   observes the document-wide default through this same fold-time combination, closing the sub-step
   in full: every form the design names for part 3c is now recognized. A differential corpus extends
   the existing xref fixtures with `role=`/`window=`/`xrefstyle=` combinations, a positional-text-free
@@ -1093,37 +1093,37 @@ Each phase is a reviewable unit with a clear exit gate.
   matching, unlike the nested-macro-substitution route the string pipeline's own incidental case
   takes); hand-built-node tests in `fold.rs` pin the document-wide-default and override-precedence
   behavior directly, since neither is observable through an unresolved fold (the tree does not yet
-  reach catalog resolution – that remains step 6's job).
+  reach catalog resolution — that remains step 6's job).
 
   *Step 4b(ii) part 4a landed as (`Macros` → `Anchor`, inline anchors):* the builder now recognizes
-  **inline anchors** in both spellings – the `[[id]]` / `[[id,reftext]]` shorthand and the
-  `anchor:id[reftext]` macro – as an [`Anchor`](../../parser/src/inlines/anchor.rs) node, folding
+  **inline anchors** in both spellings — the `[[id]]` / `[[id,reftext]]` shorthand and the
+  `anchor:id[reftext]` macro — as an [`Anchor`](../../parser/src/inlines/anchor.rs) node, folding
   through the same `render_anchor` the string step calls so the output is byte-for-byte identical
-  (pinned by a new differential corpus). It reuses the string pipeline's *exact* recognition –
-  [`INLINE_ANCHOR`](../../parser/src/content/macros.rs) is now shared `pub(crate)` – so only the
+  (pinned by a new differential corpus). It reuses the string pipeline's *exact* recognition —
+  [`INLINE_ANCHOR`](../../parser/src/content/macros.rs) is now shared `pub(crate)` — so only the
   recognition *sink* changes (a node instead of rendered markup). Taken out of pipeline order (it is
   listed last under part 4) precisely because it is the cleanest of the remaining families: an
   anchor's rendering (`<a id="…"></a>`) is a function of its **id alone**, and the pattern admits no
-  special character in an id, so an id is always verbatim and an anchor is **always recognized** –
+  special character in an id, so an id is always verbatim and an anchor is **always recognized** —
   there is no deferred-output boundary the way the link and cross-reference families have one. The id
   borrows from `'src` and the whole `[[…]]` / `anchor:…[…]` is the node's `location`. An escaped
-  `\[[…` / `\anchor:…` drops its backslash and stays literal, and – because the id is always verbatim
-  while a reference text may not be – the unescape needs no verbatim gate at all.
+  `\[[…` / `\anchor:…` drops its backslash and stays literal, and — because the id is always verbatim
+  while a reference text may not be — the unescape needs no verbatim gate at all.
 
-  The optional reference text becomes the node's `reftext` – a single
-  [`Text`](../../parser/src/inlines/inline_node.rs) child – **when it is verbatim** (borrowing
+  The optional reference text becomes the node's `reftext` — a single
+  [`Text`](../../parser/src/inlines/inline_node.rs) child — **when it is verbatim** (borrowing
   `'src`; a shorthand's trailing whitespace is trimmed and a macro's escaped `\]` is unescaped into an
   owned value, mirroring the string replacer). A reference text carrying a rendered span or an escaped
   special is *non-verbatim*; because it never reaches the flow (the anchor renders from its id alone),
-  such an anchor is still recognized and rendered – the whole match, the rendered-span reference text
-  included, is **consumed** by the node – but its `reftext` is left `None` rather than sliced wrongly
+  such an anchor is still recognized and rendered — the whole match, the rendered-span reference text
+  included, is **consumed** by the node — but its `reftext` is left `None` rather than sliced wrongly
   from `'src`. This is the same verbatim boundary the other macro families document, expressed here as
   a node field the fold ignores rather than as a deferred construct; the field stays provisional
   pending a re-flow consumer (design §6.6). As the additive builder does throughout, the anchor pass
-  performs *no* recognition side effect – it does **not** `register_ref` the id in the reference
+  performs *no* recognition side effect — it does **not** `register_ref` the id in the reference
   catalog (so a cross-reference can resolve against it), nor raise the duplicate-id warning the string
   replacer does; those, and the bibliography-anchor form (`[[[id]]]`, which the string step recognizes
-  only inside a bibliography list item – a context the additive builder is not wired into), are the
+  only inside a bibliography list item — a context the additive builder is not wired into), are the
   cutover's job (step 6). This step is **additive**: nothing is wired into the parse path. The
   remaining macro families (`Footnote`, `IndexTerm`, `Stem`) and the node-blocked cross-reference
   forms (part 3c) are later sub-steps.
@@ -1131,18 +1131,18 @@ Each phase is a reviewable unit with a clear exit gate.
   *Follow-up landed as (an anchor id inside an expanded attribute value, a latent correctness gap):*
   an audit of every macro family's own verbatim gate, prompted by the design's own "a macro inside an
   expanded value" boundary (§3.4.1, §4.1's `apply_macros` note) still being open for this family after
-  step 5b closed it for `CharacterReplacements`, surfaced that part 4a's own claim – "an id is always
-  verbatim … an anchor is *always* recognized" – was true only against the escaped-special/rendered-span
+  step 5b closed it for `CharacterReplacements`, surfaced that part 4a's own claim — "an id is always
+  verbatim … an anchor is *always* recognized" — was true only against the escaped-special/rendered-span
   boundary every other macro family documents, not against the *synthesized* one: unlike every other
   family, [`find_anchor_matches`] never checked the id capture against [`range_is_verbatim`] before
   slicing it, so an attribute reference whose expanded value happened to contain `[[id]]` (e.g.
   `:myattr: [[custom-id]]` then `{myattr}`)
   built an [`Anchor`](../../parser/src/inlines/anchor.rs) node whose `id`/`location` silently fell back
-  to the *enclosing synthesized run's* coarse span (`{myattr}` itself) rather than the real id text –
+  to the *enclosing synthesized run's* coarse span (`{myattr}` itself) rather than the real id text —
   a wrong node, not a documented divergence, though unreachable from any real parse today since this
   module is not yet wired in (§5.2 Phase 4 step 6). [`build_anchor_node`] now checks the id's own range
   with the same [`range_is_verbatim`] every other family already uses and returns `None` when it fails,
-  leaving the anchor unrecognized for a later increment exactly like every other family's own boundary –
+  leaving the anchor unrecognized for a later increment exactly like every other family's own boundary —
   closing the gap between the doc comment's claim and the code. A new divergence test pins the exact
   scenario that exposed it (an attribute expanding to `[[custom-id]]`), alongside the golden pipeline's
   own confirmation that it *does* recognize the anchor once the value is spliced in, so a future
@@ -1153,18 +1153,18 @@ Each phase is a reviewable unit with a clear exit gate.
   [`range_is_verbatim`]: ../../parser/src/content/inline_builder/macros/image.rs
 
   *Step 4b(ii) part 4b landed as (`Macros` → `IndexTerm`, index terms):* the builder now recognizes
-  **index terms** in both spellings – the `((term))` / `(((primary, secondary, tertiary)))` shorthand
-  and the `indexterm:[…]` (concealed) / `indexterm2:[…]` (flow) macro – as an
+  **index terms** in both spellings — the `((term))` / `(((primary, secondary, tertiary)))` shorthand
+  and the `indexterm:[…]` (concealed) / `indexterm2:[…]` (flow) macro — as an
   [`IndexTerm`](../../parser/src/inlines/index_term.rs) node, folding through the same
   `render_index_term` the string step calls so the output is byte-for-byte identical (pinned by a new
-  differential corpus). It reuses the string pipeline's *exact* recognition –
+  differential corpus). It reuses the string pipeline's *exact* recognition —
   [`INLINE_INDEXTERM`](../../parser/src/content/macros.rs) is now shared `pub(crate)`, alongside the
-  `strip_see_and_seealso` helper – so only the recognition *sink* changes. Like the anchor increment,
+  `strip_see_and_seealso` helper — so only the recognition *sink* changes. Like the anchor increment,
   a **concealed** term renders to nothing (a function of no shown text), so it is recognized regardless
   of what its argument crosses and its node carries an empty `terms`; a **visible** term shows its
-  text in the flow and is recognized whenever that text – reconstructed from the level's escaped match
+  text in the flow and is recognized whenever that text — reconstructed from the level's escaped match
   string, so a `CharRef` entity or a stripped `see`/`see-also` clause (`&gt;&gt;` / `&amp;&gt;` by
-  macro time) is handled as parity, not a divergence – crosses no opaque span. The node mirrors the
+  macro time) is handled as parity, not a divergence — crosses no opaque span. The node mirrors the
   Strategy-A recorder's shape (the shown term for a visible node, empty for a concealed one), leaving
   the richer primary/secondary/tertiary structure to a re-flow consumer to pin (the field is
   provisional, per the node's Phase-0 note). The shorthand reproduces the string replacer's
@@ -1173,7 +1173,7 @@ Each phase is a reviewable unit with a clear exit gate.
   seam. One subtle string-pipeline behavior is reproduced exactly: a level of *only* concealed
   shorthand terms (`(((coffee)))`, `(((a)))(((b)))`) accumulates no output and ends in a look-ahead
   retry, so [`replace_with_lookahead`](../../parser/src/internal/regex.rs) returns `Cow::Borrowed` and
-  the string step leaves it **literal** – the builder detects that no-op and mirrors it. Two forms are
+  the string step leaves it **literal** — the builder detects that no-op and mirrors it. Two forms are
   deferred, each documented and pinned by a divergence test: a **visible term crossing a rendered
   span** (unreconstructable from the escaped string, the same verbatim boundary the other macro
   families document) and an **`indexterm2:[…]` carrying an attribute list** (an `=`, deferred until
@@ -1188,9 +1188,9 @@ Each phase is a reviewable unit with a clear exit gate.
   recognizes **footnotes** (`footnote:[…]`, `footnote:id[…]`, `footnote:id[]`) as a
   [`Footnote`](../../parser/src/inlines/footnote.rs) node, folding through the same `render_footnote`
   the string step calls so the output is byte-for-byte identical (pinned by a new differential
-  corpus). It reuses the string pipeline's *exact* recognition –
+  corpus). It reuses the string pipeline's *exact* recognition —
   [`INLINE_FOOTNOTE_MACRO`](../../parser/src/content/macros.rs) is now shared `pub(crate)`, alongside
-  the `normalize_footnote_text` helper – so only the recognition *sink* changes, and runs **last** in
+  the `normalize_footnote_text` helper — so only the recognition *sink* changes, and runs **last** in
   `apply_macros`, after cross-references, mirroring the string step's order exactly: a footnote's text
   is extracted from the flow, so any construct an earlier pass at this same level already recognized
   (an image, a link, an anchor, an index term, or now a cross-reference) is captured as *that
@@ -1202,85 +1202,85 @@ Each phase is a reviewable unit with a clear exit gate.
     `children` via [`emit_range`](../../parser/src/content/inline_builder.rs) rather than a literal
     `'src` slice gated by [`range_is_verbatim`](../../parser/src/content/inline_builder.rs) the way a
     target or display text is elsewhere. A content range crossing an already-recognized construct is
-    therefore *not* a boundary to defer on – nesting is the point, and `emit_range` clones that
+    therefore *not* a boundary to defer on — nesting is the point, and `emit_range` clones that
     construct's node whole into the footnote's subtree, exactly mirroring how the string pipeline's
     footnote text captures an already-substituted macro verbatim.
   - **One *required* recognition side effect.** Every prior macro family performs *no* recognition
     side effect (no catalog registration, no warning), deferring that to the cutover (step 6) because
     omitting it does not change the fold's output bytes. A footnote's marker digits *are* the assigned
     footnote number, so this pass must call `Parser::footnote_index_for_id` / `Parser::define_footnote`
-    – the same document-counter-advancing calls the string replacer makes – or the differential corpus
+    — the same document-counter-advancing calls the string replacer makes — or the differential corpus
     could never pass. The two code paths never share a `Parser` (each independently numbers footnotes
     over the same source in the same left-to-right order), so this never double-counts a registration.
     The registered catalog `text` is a best-effort normalized rendering of the raw bracket content, not
-    a fold (building the tree must not itself invoke a renderer), so – like every other deferred
-    registration in this module – a tree-built footnote's `Document::catalog().footnotes()` entry is
+    a fold (building the tree must not itself invoke a renderer), so — like every other deferred
+    registration in this module — a tree-built footnote's `Document::catalog().footnotes()` entry is
     not yet byte-faithful; only the returned *number* is relied on.
 
   Two forms are deferred, each documented and pinned by a divergence test: the deprecated
   `footnoteref:[id,text]` / `footnoteref:[id]` form (which packs its id and text into one bracket, split
-  differently, and – outside `compat-mode` – raises a deprecation warning neither of which this
+  differently, and — outside `compat-mode` — raises a deprecation warning neither of which this
   increment implements), and content carrying an escaped closing bracket (`\]`, which would need
-  splicing a literal `]` into the middle of a `Text` piece the content range slices – a rebuild this
+  splicing a literal `]` into the middle of a `Text` piece the content range slices — a rebuild this
   increment does not attempt). This step is **additive**: nothing is wired into the parse path. With it,
   every macro family the recorder covers now has a single-pass counterpart.
 
   *Follow-up landed as (the deprecated `footnoteref:` form):* the first of part 4c's two deferred forms
   is closed. [`build_footnoteref_node`](../../parser/src/content/inline_builder/footnotes.rs) mirrors
-  `InlineFootnoteMacroReplacer`'s own `raw.split_once(',')` exactly – `footnoteref:[id,text]` /
+  `InlineFootnoteMacroReplacer`'s own `raw.split_once(',')` exactly — `footnoteref:[id,text]` /
   `footnoteref:[id]` packs both into one bracket rather than taking the id from the macro target the way
   `footnote:id[…]` does, splitting on the *first* comma so a bracket with no comma is an id-only bare
   reference and a trailing comma (`footnoteref:[id,]`) yields *empty*, not absent, content (a defining
-  occurrence with empty text) – a distinct shape from `footnote:id[]`'s own no-comma-at-all reference.
+  occurrence with empty text) — a distinct shape from `footnote:id[]`'s own no-comma-at-all reference.
   Once split, the (id, content) pair resolves through the *same* three cases `build_footnote_node`
   already does (reuse an already-defined id's number, define a new id-carrying occurrence, or fall back
   to an unresolved reference for an id never defined), folding through the identical `render_footnote`,
   so the output is byte-for-byte identical to the golden pipeline's (pinned by extending the part 4c
   differential corpus with `footnoteref:` fixtures). The escape check
   (`whole.as_str().starts_with('\\')`) is hoisted ahead of the ref-vs-plain branch in
-  `find_footnote_matches`, mirroring the string replacer's own check order exactly – it previously ran
+  `find_footnote_matches`, mirroring the string replacer's own check order exactly — it previously ran
   *after* the (then early-`continue`ing) `footnoteref:` branch, so an escaped `\footnoteref:[…]` was left
   fully unrecognized (backslash and all) rather than unescaped; this is fixed as a side effect of
   recognizing the form at all. As with every other macro family, the one side effect this increment does
-  *not* yet perform is the deprecation warning itself (`DeprecatedFootnoterefMacro`) – a diagnostic that
-  does not change the fold's output bytes, so – unlike the footnote number, which does – it remains
+  *not* yet perform is the deprecation warning itself (`DeprecatedFootnoterefMacro`) — a diagnostic that
+  does not change the fold's output bytes, so — unlike the footnote number, which does — it remains
   deferred to the cutover (step 6) like every other family's own catalog/warning side effect. The one
   remaining deferred form from part 4c's own list, content carrying an escaped closing bracket (`\]`), is
   unchanged and applies identically to `footnoteref:`'s own bracket content (pinned by its own divergence
   test).
 
   *Step 5a landed as (Passthroughs → `Raw`, the delimited forms):* a new
-  [`apply_passthroughs`](../../parser/src/content/inline_builder.rs) step – the **first** step
-  [`build`](../../parser/src/content/inline_builder.rs) runs, ahead of `SpecialCharacters` –
+  [`apply_passthroughs`](../../parser/src/content/inline_builder.rs) step — the **first** step
+  [`build`](../../parser/src/content/inline_builder.rs) runs, ahead of `SpecialCharacters` —
   recognizes the triple-plus (`+++…+++`), double-plus (`++…++`), double-dollar (`$$…$$`), and bare
   `pass:[…]` macro (no explicit substitution list) as [`Raw`](../../parser/src/inlines/inline_node.rs)
   leaves, mirroring
   [`Passthroughs::extract_from`](../../parser/src/content/passthroughs.rs), which the string pipeline
-  runs *before* its own step loop – so a passthrough's content is never touched by specialcharacters,
+  runs *before* its own step loop — so a passthrough's content is never touched by specialcharacters,
   quotes, replacements, or macros: it is a leaf, and every later step's match-string builder already
   treats an unrecognized node kind as one opaque placeholder, exactly as it already does for an
-  earlier-built `Styled` span. It reuses the string pipeline's *exact* recognition –
-  [`INLINE_PASS_MACRO`](../../parser/src/content/passthroughs.rs) is now shared `pub(crate)` – so only
+  earlier-built `Styled` span. It reuses the string pipeline's *exact* recognition —
+  [`INLINE_PASS_MACRO`](../../parser/src/content/passthroughs.rs) is now shared `pub(crate)` — so only
   the recognition *sink* differs (§4.1). The triple-plus and bare `pass:[…]` forms resolve to
   `SubstitutionGroup::None` (nothing applies), so their content borrows `'src` directly (a `pass:[…]`
   body unescapes an escaped `\]`, as every other macro family's bracket content does, which makes the
   unescaped case owned instead); the double-plus and double-dollar forms resolve to
   `SubstitutionGroup::Verbatim` (special characters only) and are run through the real substitution
-  pipeline rather than hand-escaped, so a custom `InlineSubstitutionRenderer`'s escaping is honored –
+  pipeline rather than hand-escaped, so a custom `InlineSubstitutionRenderer`'s escaping is honored —
   the cost is an owned `Raw` value instead of a borrow.
 
   Three forms are deferred, each documented and pinned by a divergence test: an
   **attribute-list-prefixed** passthrough (`[quotes]++text++`, `[x-]\`text\``, `[attrs]+text+`), a
   **`pass:` macro carrying an explicit substitution list** (`pass:c,q[…]`, whose content would need a
-  richer subtree than a single `Raw` leaf can hold – the same reason a footnote's content is
+  richer subtree than a single `Raw` leaf can hold — the same reason a footnote's content is
   structured children rather than a literal value), and the **bare unconstrained form** (`+text+`,
-  matched by `INLINE_PASS` rather than `INLINE_PASS_MACRO` – its "must not follow a word" boundary
+  matched by `INLINE_PASS` rather than `INLINE_PASS_MACRO` — its "must not follow a word" boundary
   needs a lookbehind Rust's regex engine cannot express, which the string replacer works around with a
   retry loop this increment does not reproduce). That same deferred boundary shows up once more,
   indirectly: an **escaped triple- or double-plus** (`\+++text+++`, `\++text++`) drops its backslash
   and keeps the delimited text literal here, but the string pipeline's *second* extraction pass
   (`INLINE_PASS`) re-scans that same de-escaped text and consumes its leading `+++`/`++` as a bare
-  passthrough wrapping a shorter run – so these two escape forms are pinned as divergences rather than
+  passthrough wrapping a shorter run — so these two escape forms are pinned as divergences rather than
   folded into the main parity corpus; an escaped `$$…$$` or `pass:[…]` has no such residue and stays
   parity. Inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) is an implicit passthrough too,
   but folds through its own [`Stem`](../../parser/src/inlines/stem.rs) node rather than `Raw`, so it is
@@ -1288,34 +1288,34 @@ Each phase is a reviewable unit with a clear exit gate.
 
   *Step 5b landed as (`AttributeReferences` → expanded-value splicing):* a new
   [`apply_attribute_references`](../../parser/src/content/inline_builder.rs) step is inserted between
-  `Quotes` and `CharacterReplacements` – its position in the *normal* effective order
-  (`specialcharacters → quotes → attributes → replacements → macros`, §3.4.1) – so whatever it splices
+  `Quotes` and `CharacterReplacements` — its position in the *normal* effective order
+  (`specialcharacters → quotes → attributes → replacements → macros`, §3.4.1) — so whatever it splices
   into the tree is exactly what the two steps still ahead of it see. It reuses the string pipeline's
-  *exact* recognition – [`ATTRIBUTE_REFERENCE`](../../parser/src/content/substitution_step.rs) is now
-  shared `pub(crate)` – so only the recognition *sink* differs (§4.1): a reference to a **set**
+  *exact* recognition — [`ATTRIBUTE_REFERENCE`](../../parser/src/content/substitution_step.rs) is now
+  shared `pub(crate)` — so only the recognition *sink* differs (§4.1): a reference to a **set**
   attribute has its resolved value spliced into the node stream, classified into
   [`Text`](../../parser/src/inlines/inline_node.rs) and [`Raw`](../../parser/src/inlines/inline_node.rs)
-  runs by [`split_attribute_value`](../../parser/src/content/inline_builder.rs) – the §3.4.1 policy
+  runs by [`split_attribute_value`](../../parser/src/content/inline_builder.rs) — the §3.4.1 policy
   applied for the first time: because `SpecialCharacters` has already run and will not run again over
   spliced-in content, a literal `<`/`>`/`&` in the value becomes a `Raw` leaf (unescaped) rather than a
   `CharRef` (which the fold would re-escape), while everything else stays `Text`. An **escaped**
   reference (`\{name}`, `{name\}`, `\{name\}`) drops its backslash(es) and keeps the rest of its match
-  as literal nodes, replacing nothing, mirroring `AttributeReplacer`'s `caps[1]`/`caps[5]` branch – and,
+  as literal nodes, replacing nothing, mirroring `AttributeReplacer`'s `caps[1]`/`caps[5]` branch — and,
   because that check runs before any lookup, this works identically whether or not the named attribute
-  is set. An `InterpretedValue::Set`/`::Unset` attribute (no textual value – the language leaves this
+  is set. An `InterpretedValue::Set`/`::Unset` attribute (no textual value — the language leaves this
   case unclear, as the string replacer's own comment notes) expands to nothing, exactly as the string
   pipeline's replacer does.
 
   Three forms were initially deferred, each documented and pinned by a divergence test: a
-  **`counter`/`counter2` directive**, whose resolution *advances* a document counter – a required side
+  **`counter`/`counter2` directive**, whose resolution *advances* a document counter — a required side
   effect this additive step did not yet perform, the same reason every macro family deferred its own
   catalog/warning side effect until the footnote and cutover increments; a reference to a **missing**
   attribute under `AttributeMissing::Drop` / `::DropLine`, whose output *removes* content rather than
-  leaving the reference literal – the behavior this step *does* reproduce, since it is also what the
+  leaving the reference literal — the behavior this step *does* reproduce, since it is also what the
   default `AttributeMissing::Skip` and `AttributeMissing::Warn` modes do (so those two are full parity,
   not a divergence); and a **construct inside an expanded value** that `CharacterReplacements` or
   `Macros` would recognize per §3.4.1 (a `(C)` becoming a `CharRef`, a `link:` becoming a `Ref`) but do
-  not yet – a spliced value is a synthesized run with no `'src` slice of its own, and
+  not yet — a spliced value is a synthesized run with no `'src` slice of its own, and
   [`build_match_string`](../../parser/src/content/inline_builder.rs) (shared by those two steps and by
   `Quotes`) only treats a *verbatim* `Text` node (`value == location.data()`) as literal content for
   matching purposes; it does not yet look inside a synthesized one, so such a node is one opaque piece
@@ -1328,8 +1328,8 @@ Each phase is a reviewable unit with a clear exit gate.
   *Follow-up landed as (the `counter`/`counter2` directive):*
   [`find_attribute_matches`](../../parser/src/content/inline_builder/attribute_refs.rs) now recognizes a
   `counter`/`counter2` directive (`{counter:name}`, `{counter2:name:seed}`), resolving *and advancing* the
-  named counter via the parser's own [`counter`](../../parser/src/parser/parser.rs) method – the exact call
-  `AttributeReplacer`'s counter branch makes – so the digits this step produces are the real, advanced
+  named counter via the parser's own [`counter`](../../parser/src/parser/parser.rs) method — the exact call
+  `AttributeReplacer`'s counter branch makes — so the digits this step produces are the real, advanced
   sequence, not a placeholder. This is the same **required side effect** the footnote increment (part 4c)
   already established a precedent for: unlike every other macro family's catalog/warning side effect, a
   directive's resolved *value* is the number itself, so it cannot be deferred to the cutover without
@@ -1341,8 +1341,8 @@ Each phase is a reviewable unit with a clear exit gate.
   A review caught a genuine ordering bug in the first version of this follow-up:
   [`apply_attribute_references`](../../parser/src/content/inline_builder/attribute_refs.rs) recurses into a
   `Styled` child's own content *before* processing its own level (so a later quote sub can match *inside*
-  an earlier span – §4.1's nesting note), which means a directive nested in a span is, by construction,
-  advanced *before* a plain-text directive that precedes that span in the source – reversing the numbering
+  an earlier span — §4.1's nesting note), which means a directive nested in a span is, by construction,
+  advanced *before* a plain-text directive that precedes that span in the source — reversing the numbering
   whenever a directive and a sibling span's own nested directive interleave (`{counter:n} *{counter:n}*`
   numbered `2`, then `1`, backwards). The fix is a dedicated
   [`resolve_counters`](../../parser/src/content/inline_builder/attribute_refs.rs) pass that runs once, before
@@ -1350,7 +1350,7 @@ Each phase is a reviewable unit with a clear exit gate.
   siblings' placeholder positions (recursing into a sibling exactly when the merge reaches it), so every
   directive across the whole tree is advanced in true left-to-right document order regardless of nesting.
   Each resolved value is recorded keyed by the directive's absolute source byte offset, so the (unchanged)
-  splicing recursion – which still visits levels in its own, differently-ordered sequence – looks values up
+  splicing recursion — which still visits levels in its own, differently-ordered sequence — looks values up
   by that stable key instead of resolving them itself, and the two passes agree because a `Styled` node's
   own placeholder occupies exactly one codepoint in its parent's match string regardless of what its
   (already-spliced-or-not) children contain, so recursion order never perturbs a parent level's own byte
@@ -1358,39 +1358,39 @@ Each phase is a reviewable unit with a clear exit gate.
 
   Because this additive builder is not yet wired into any real parse, its own `Parser` is never the one the
   authoritative string pipeline advances, so a differential fixture is free to build and fold against one
-  independent default parser and compare against the golden string pipeline's own independent parser –
-  exactly the two-independent-parsers discipline the footnote differential corpus already established –
+  independent default parser and compare against the golden string pipeline's own independent parser —
+  exactly the two-independent-parsers discipline the footnote differential corpus already established —
   without the two sequences crossing over. The two forms 5b's own landed-as note still documents as
-  deferred – a missing attribute under `Drop`/`DropLine`, and a construct inside an expanded value – remain
+  deferred — a missing attribute under `Drop`/`DropLine`, and a construct inside an expanded value — remain
   outstanding.
 
   *Follow-up landed as (a character replacement inside an expanded value):* the *construct inside an
   expanded value* half of 5b's own deferred pair is closed for
   [`apply_character_replacements`](../../parser/src/content/inline_builder/char_replacements.rs) (the
-  *macro* half remains deferred – see below). The shared match-string builder,
+  *macro* half remains deferred — see below). The shared match-string builder,
   [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs), previously treated *any*
-  non-verbatim node – a rendered span exactly as much as a synthesized (attribute-expanded) `Text` run – as
+  non-verbatim node — a rendered span exactly as much as a synthesized (attribute-expanded) `Text` run — as
   one opaque placeholder, which is why a `(C)` inside `{note}` (`"(C) 2024"`) stayed unrecognized: the
   `Text` node's `value` differs from `location.data()`, so it fell through to that opaque case. It now
-  splits a synthesized run into its own [`Piece`](../../parser/src/content/inline_builder/quotes.rs) kind –
+  splits a synthesized run into its own [`Piece`](../../parser/src/content/inline_builder/quotes.rs) kind —
   contributing the run's own `value` bytes to the match string (so a pattern sweep can match inside it) but
   flagged [`synthesized`](../../parser/src/content/inline_builder/quotes.rs), since those bytes have no
   honest `'src` counterpart. [`emit_range`](../../parser/src/content/inline_builder/quotes.rs) slices a
   synthesized piece's *value* (not its `location`) to the overlap and keeps the whole original `location` as
-  every resulting fragment's coarse fallback span (design §4.4 – the same policy
+  every resulting fragment's coarse fallback span (design §4.4 — the same policy
   [`split_attribute_value`](../../parser/src/content/inline_builder/attribute_refs.rs) already gives every
   fragment of an expansion), and [`source_slice`](../../parser/src/content/inline_builder/quotes.rs) gained
   a start/end [`Bias`](../../parser/src/content/inline_builder/quotes.rs) so a boundary landing *inside* a
   synthesized piece falls back to that piece's whole node span while a boundary landing exactly on one of
   its own edges still resolves honestly (critically, to whatever construct comes immediately *after* it,
-  not back into the synthesized run – see below).
+  not back into the synthesized run — see below).
 
   Because [`build_match_string`] is shared by every step in this module, this fix is also what keeps a
   *macro* family's own verbatim gate correctly rejecting a synthesized run now that it is no longer
   atomic: [`range_is_verbatim`](../../parser/src/content/inline_builder/macros/image.rs) (every macro
   family's own gate) and a new, narrower
   [`range_overlaps_synthesized`](../../parser/src/content/inline_builder/quotes.rs) (for the two macro
-  families – the index-term shorthand and `indexterm2:[…]` – whose own recognition boundary was a bespoke
+  families — the index-term shorthand and `indexterm2:[…]` — whose own recognition boundary was a bespoke
   opaque-span check rather than `range_is_verbatim`, since neither needs an honest `'src` slice for its
   *output*, only for deciding whether its *shown text* is reconstructable) both now reject a synthesized
   piece explicitly, so a macro inside an expanded value remains a documented divergence exactly as before,
@@ -1400,7 +1400,7 @@ Each phase is a reviewable unit with a clear exit gate.
   of this same follow-up rather than left as new divergences: (1) a boundary landing *exactly* on a
   synthesized piece's own edge was initially resolved via the same coarse whole-node-span fallback as an
   interior boundary, which is wrong whenever the piece's match-string length differs from its source
-  length (the whole reason a piece is synthesized in the first place) – a construct recognized
+  length (the whole reason a piece is synthesized in the first place) — a construct recognized
   *immediately after* a synthesized run (e.g. a second `image:` macro right after an `{sp}` attribute
   reference) had its own location wrongly swallow the synthesized run's source bytes, corrupting an
   unrelated node's `is_icon` classification in one differential-corpus fixture; the fix skips that
@@ -1409,8 +1409,8 @@ Each phase is a reviewable unit with a clear exit gate.
   keeps its *own* copy of `emit_range`'s verbatim-slicing logic for the gaps around a recognized footnote
   ([`emit_range_recursing_footnotes`], which additionally recurses into a `Styled`/`Ref` child in place of
   cloning it whole); this copy had not been updated in step with `emit_range`'s own synthesized branch, so
-  a plain attribute reference sitting beside (not inside) a footnote – reachable through the ordinary
-  pipeline, since `apply_attribute_references` runs well before `apply_footnotes` – produced a corrupted,
+  a plain attribute reference sitting beside (not inside) a footnote — reachable through the ordinary
+  pipeline, since `apply_attribute_references` runs well before `apply_footnotes` — produced a corrupted,
   truncated `Text` value. Both are pinned by regression tests reproducing the exact fixture shapes that
   caught them, alongside unit tests exercising the fixed boundary-mapping helpers directly. This step is
   **additive**: nothing is wired into the parse path.
@@ -1422,10 +1422,10 @@ Each phase is a reviewable unit with a clear exit gate.
   string step calls so the output is byte-for-byte identical. This is the first increment for
   [`SubstitutionGroup::Verbatim`](../../parser/src/content/substitution_group.rs) rather than the
   *normal* order every step through 5b runs: literal/listing/source blocks apply only
-  `SpecialCharacters` ahead of `Callouts`, so – unlike every other transducer in this module – the
+  `SpecialCharacters` ahead of `Callouts`, so — unlike every other transducer in this module — the
   function need not descend into `Styled`/`Ref` children, since neither can exist at this point in that
-  group's order. It reuses the string pipeline's *exact* recognition and trailing-position lookahead –
-  [`build_callout_regexes`](../../parser/src/content/substitution_step.rs) is now shared `pub(crate)` –
+  group's order. It reuses the string pipeline's *exact* recognition and trailing-position lookahead —
+  [`build_callout_regexes`](../../parser/src/content/substitution_step.rs) is now shared `pub(crate)` —
   so only the recognition *sink* differs (§4.1): a match that fails the lookahead (not the last token on
   its line) is simply left out of the match list, so the surrounding gap reproduces its original nodes
   unchanged, the same outcome the string pipeline's `LookaheadReplacer` fallback produces.
@@ -1433,7 +1433,7 @@ Each phase is a reviewable unit with a clear exit gate.
   scoped to one block.
 
   This is also the node vocabulary's first real consumer for `Callout`, so its field set (Phase 0
-  provisional) was refined here: alongside `number`, it now carries a `guard` – a new
+  provisional) was refined here: alongside `number`, it now carries a `guard` — a new
   [`CalloutGuard`](../../parser/src/inlines/callout.rs) enum (`LineComment(prefix)` / `Xml`) recording
   which characters hide the callout in the raw source, decoupled from the render-seam's own
   `CalloutGuard` the same way every other node is decoupled from its `*RenderParams` counterpart (§4.6):
@@ -1458,20 +1458,20 @@ Each phase is a reviewable unit with a clear exit gate.
   macros (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) as a [`Stem`](../../parser/src/inlines/stem.rs)
   node, folding through the same `render_quoted_substitution` the string pipeline's passthrough-restore
   step calls for a STEM entry, so the output is byte-for-byte identical. STEM is an **implicit
-  passthrough** – `Passthroughs::extract_from` extracts it last, after both passthrough-macro passes, so
-  that a passthrough placeholder nested inside a STEM expression survives – and `apply_stem` mirrors that
+  passthrough** — `Passthroughs::extract_from` extracts it last, after both passthrough-macro passes, so
+  that a passthrough placeholder nested inside a STEM expression survives — and `apply_stem` mirrors that
   ordering exactly: it is its own step, run immediately after
   [`apply_passthroughs`](../../parser/src/content/inline_builder/passthrough_step.rs) and ahead of every
   other step, so a STEM expression's content is never touched by specialcharacters, quotes, replacements,
   or macros (a `stem:[…]` written inside an already-extracted `+++…+++` passthrough is therefore *not*
   re-extracted, matching the string pipeline). It reuses the string pipeline's *exact* recognition and
-  notation-resolution – `INLINE_STEM_MACRO` and `stem_notation` are now shared `pub(crate)` – so only the
+  notation-resolution — `INLINE_STEM_MACRO` and `stem_notation` are now shared `pub(crate)` — so only the
   recognition *sink* differs (§4.1). The node's `value` is *not* the untouched source slice (unlike a
   macro node's target/display text elsewhere in this module): a STEM expression is unescaped (`\]` → `]`),
   has its legacy `latexmath` `$…$` wrapper dropped, and is run through the real substitution pipeline
   under its resolved substitution group ([`SubstitutionGroup::Stem`](../../parser/src/content/substitution_group.rs),
   special characters only, for a bare macro) via the passthrough step's own `passthrough_text` helper
-  (now shared `pub(super)`) – so a custom `InlineSubstitutionRenderer`'s escaping is honored exactly as it
+  (now shared `pub(super)`) — so a custom `InlineSubstitutionRenderer`'s escaping is honored exactly as it
   would be for the string pipeline's own restore step, at the cost of an owned value rather than a `'src`
   borrow (the same trade-off the `++…++`/`$$…$$` passthrough forms make). The fold then passes that value
   straight through as `render_quoted_substitution`'s body, with no attribute list or id (the macro's
@@ -1481,20 +1481,20 @@ Each phase is a reviewable unit with a clear exit gate.
   An escaped macro (`\stem:[…]`) drops its backslash and stays literal, mirroring every other macro
   family's escape handling. One form was initially deferred, documented and pinned by a divergence test: a
   macro carrying an **explicit substitution list** (`stem:c,q[…]`). This step is **additive**: nothing is
-  wired into the parse path. The remaining three forms 5a already documents as deferred – an
+  wired into the parse path. The remaining three forms 5a already documents as deferred — an
   attribute-list-prefixed passthrough, a `pass:` macro with an explicit substitution list, and the bare
-  unconstrained `+text+` form – remain for a later increment.
+  unconstrained `+text+` form — remain for a later increment.
 
   *Follow-up landed as (the `stem:c,q[…]` explicit substitution list):* unlike a `pass:` macro's explicit
   list (deferred at the time, closed by step 5d part 3 below), a `Stem` node needs no richer subtree to
   carry this form: it already has a single `value` field, so the same treatment part 3 goes on to give
-  `pass:` – running the expression through the **real substitution pipeline** under the list's resolved
-  [`SubstitutionGroup`](../../parser/src/content/substitution_group.rs) – applies directly. A new
+  `pass:` — running the expression through the **real substitution pipeline** under the list's resolved
+  [`SubstitutionGroup`](../../parser/src/content/substitution_group.rs) — applies directly. A new
   `resolve_stem_subs` helper in
   [`stem_step.rs`](../../parser/src/content/inline_builder/stem_step.rs) resolves an explicit list (or
   falls back to [`SubstitutionGroup::Stem`] for a bare macro) via
-  [`SubstitutionGroup::from_custom_string`] – the exact call [`InlineStemMacroReplacer`] makes, including
-  its "skip and keep going" handling of an unrecognized name – and `stem_expression_value` substitutes the
+  [`SubstitutionGroup::from_custom_string`] — the exact call [`InlineStemMacroReplacer`] makes, including
+  its "skip and keep going" handling of an unrecognized name — and `stem_expression_value` substitutes the
   expression's `Text` runs through the resolved group instead of the hard-coded `Stem` group, so the fold
   is byte-for-byte identical to the string pipeline. As throughout this module, this does *not* raise the
   string pipeline's own `InvalidSubstitutionTypeForStemMacro` warning for an invalid name, deferring that
@@ -1507,16 +1507,16 @@ Each phase is a reviewable unit with a clear exit gate.
   embeds an already-extracted [`Raw`](../../parser/src/inlines/inline_node.rs) passthrough (the case
   `build_stem_node`'s own doc comment covers, e.g. `stem:[+++x+++ text]`), `stem_expression_value`
   substitutes each surrounding `Text` run *independently* and splices the `Raw` back in verbatim between
-  them. That is safe for the bare macro's default group (special characters only – a per-character,
-  context-free substitution), which is the only group this splicing ever ran under before this follow-up –
+  them. That is safe for the bare macro's default group (special characters only — a per-character,
+  context-free substitution), which is the only group this splicing ever ran under before this follow-up —
   but an explicit list naming a step that needs more than one `Text` run of context (`Quotes`,
   `AttributeReferences`, `CharacterReplacements`, `Macros`, `PostReplacement`) can miss a construct whose
   two halves fall on either side of the `Raw` (`stem:q[*a +++x+++ b*]`): the string pipeline substitutes
   the *whole* expression as one string (the passthrough's content merely protected by its own sentinel, not
   absent from the string), so it finds the quote pair; splicing per fragment never sees a complete pair in
-  either one. The fix is a new `subs_are_local` predicate – true when the resolved group's
+  either one. The fix is a new `subs_are_local` predicate — true when the resolved group's
   [`steps()`](../../parser/src/content/substitution_group.rs) are empty or contain only
-  `SpecialCharacters` – that `build_stem_node` checks whenever the expression's `emit_range` recovers more
+  `SpecialCharacters` — that `build_stem_node` checks whenever the expression's `emit_range` recovers more
   than one node: a non-local explicit list beside a nested passthrough is left unrecognized (the same
   "documented divergence" shape every other boundary in this module takes) rather than silently diverging,
   while a *local* explicit list (`stem:c[…]`) beside the same nested passthrough is unaffected and still
@@ -1528,60 +1528,60 @@ Each phase is a reviewable unit with a clear exit gate.
 
   *Step 5d part 2 landed as (an attribute-list-prefixed passthrough → `Styled`):*
   [`apply_passthroughs`](../../parser/src/content/inline_builder/passthrough_step.rs) now recognizes all
-  three attribute-list-prefixed forms 5a deferred – `[quotes]++text++`/`[quotes]+++text+++`/`[quotes]$$text$$`
+  three attribute-list-prefixed forms 5a deferred — `[quotes]++text++`/`[quotes]+++text+++`/`[quotes]$$text$$`
   (`INLINE_PASS_MACRO`'s own attrlist branch), `` [x-]`text` `` and `[attrs]+text+` (`INLINE_PASS`, now
-  shared `pub(crate)`) – each as a [`Styled`](../../parser/src/inlines/styled.rs) node (`Code` for
+  shared `pub(crate)`) — each as a [`Styled`](../../parser/src/inlines/styled.rs) node (`Code` for
   monospace, `Unquoted` otherwise; always `Unconstrained`) whose attrlist is parsed the same way an
   attributed quote's is (the quotes step's `attributes_of`, now shared `pub(super)`), folding through the
   same `render_quoted_substitution` `PassthroughRestoreReplacer` calls when its stored passthrough carries
   a `type_`, so the output is byte-for-byte identical. The bare forms run as a genuinely **second pass**
   ([`apply_bare_attrlisted_pass_level`](../../parser/src/content/inline_builder/passthrough_step.rs)) over
   what the delimited pass leaves behind, mirroring `Passthroughs::extract_from`'s own two-regex order
-  (`INLINE_PASS_MACRO` before `INLINE_PASS`) – which turns out to matter: an attribute-list-prefixed
+  (`INLINE_PASS_MACRO` before `INLINE_PASS`) — which turns out to matter: an attribute-list-prefixed
   *delimiter* escape (`[attrs]\++text++`) drops its one backslash and leaves literal, unopaqued text
   behind, which the second pass then legitimately **re-recognizes** as its own (different) match, exactly
-  as the string pipeline's own second regex pass does over its own once-substituted text – parity by
+  as the string pipeline's own second regex pass does over its own once-substituted text — parity by
   construction, not a coincidence, once both passes exist.
 
   The legacy **`x-` compatibility marker** (an attrlist of exactly `x-`, or one ending in ` x-`) is the
   one case whose body is not a single `Raw` leaf: it switches the variant to `Code` and re-threads the
-  body through the **full `Normal` substitution order** – special characters, quotes, attribute
+  body through the **full `Normal` substitution order** — special characters, quotes, attribute
   references, character replacements, macros, post-replacement, `SubstitutionGroup::Normal`'s own step
-  list minus the passthrough/STEM extraction that already ran once, ahead of it – via a new
+  list minus the passthrough/STEM extraction that already ran once, ahead of it — via a new
   [`apply_normal_subs`](../../parser/src/content/inline_builder/passthrough_step.rs) helper that chains
   the six existing step functions directly, mirroring `PassthroughRestoreReplacer`'s own recursive
   `pass.subs.apply(…)` call for that case as a node transducer rather than a second string pass. Only the
   `++` boundary (delimited) and the plus bare form trigger it; the backtick bare form's attrlist is
   *always* `x-`-eligible (the regex itself requires it) but its format mark keeps `subs` at `Verbatim`
-  regardless, and `+++`/`$$` never switch at all – both mirrored exactly from `handle_quoted_text` and
+  regardless, and `+++`/`$$` never switch at all — both mirrored exactly from `handle_quoted_text` and
   `InlinePassReplacer`.
 
   Two corner cases remain deferred, each documented and pinned by a divergence test: an **escaped
   bracket** (`\[attrs]++text++`), which unescapes to a literal `[attrs]` prefix *and* still recognizes the
-  delimited text as an ordinary (non-attrlisted) passthrough – a kept-literal-prefix-with-one-dropped-char
-  plus a node for the remainder, a shape neither `MacroMatchKind` variant expresses – and the
+  delimited text as an ordinary (non-attrlisted) passthrough — a kept-literal-prefix-with-one-dropped-char
+  plus a node for the remainder, a shape neither `MacroMatchKind` variant expresses — and the
   **"prohibited prefix"** the string replacer's own retry loop protects (a bare attrlisted match
   immediately preceded by `\`, `:`, or `;`): rather than reproduce the retry, such a match is simply left
   unrecognized. This step is **additive**: nothing is wired into the parse path. The remaining two forms 5a
-  documents as deferred – a `pass:` macro with an explicit substitution list, and the bare unconstrained
-  `+text+` form with no attribute list at all – remain for a later increment.
+  documents as deferred — a `pass:` macro with an explicit substitution list, and the bare unconstrained
+  `+text+` form with no attribute list at all — remain for a later increment.
 
   *Step 5d part 4 landed as (the bare unconstrained `+text+` form):* the last of the four forms 5a defers.
   [`find_bare_attrlisted_matches`](../../parser/src/content/inline_builder/passthrough_step.rs) now also
   recognizes `INLINE_PASS`'s third, attribute-list-free alternative, folding through a plain
-  [`Raw`](../../parser/src/inlines/inline_node.rs) leaf – like the double-plus/double-dollar forms, an
+  [`Raw`](../../parser/src/inlines/inline_node.rs) leaf — like the double-plus/double-dollar forms, an
   absent attrlist means no stored `type_`, so the restore never wraps the text in a rendered span, unlike
   the two attribute-list-prefixed bare forms part 2 landed. Unlike those two forms (matched via
   `\b{start-half}`, which does not by itself exclude a `\`/`:`/`;` prefix and so needed the "prohibited
   prefix" divergence just above), this form's own pattern already excludes that prefix directly in its
-  *consuming* boundary group (`[^\w;:\\]`, which also encodes the "must not follow a word" rule) – so no
+  *consuming* boundary group (`[^\w;:\\]`, which also encodes the "must not follow a word" rule) — so no
   runtime retry is needed at all: a match simply cannot start where the pattern's own character class would
   reject it, parity by construction rather than a divergence. The boundary character the pattern does
   consume ahead of the leading `+` (absent only when the match sits at the very start of the level) is not
   part of the construct itself; it is kept as literal text before the node, reusing the same kept-prefix
   `MacroMatch` sub-range the auto-link increment (part 2) introduced for a bare URL's own boundary prefix.
-  An escaped mark (`\+text+`) drops the single backslash and keeps the rest of the match – the boundary
-  character included – literal, with nothing left to re-scan it afterward (this is already the last pass),
+  An escaped mark (`\+text+`) drops the single backslash and keeps the rest of the match — the boundary
+  character included — literal, with nothing left to re-scan it afterward (this is already the last pass),
   so it is plain parity rather than a divergence.
 
   Landing this form also **retired** the two divergences 5a's own escape handling documented: an escaped
@@ -1589,7 +1589,7 @@ Each phase is a reviewable unit with a clear exit gate.
   literal at the pass-macro level, and now that the bare unconstrained form is recognized too, the
   bare-form second pass legitimately re-scans that same de-escaped text and consumes its leading `+++`/`++`
   as a bare passthrough wrapping a shorter run (`+text` / `text`, one `+` left over as trailing literal
-  text) – exactly what the string pipeline's own second regex pass does over its own once-substituted text.
+  text) — exactly what the string pipeline's own second regex pass does over its own once-substituted text.
   Both fixtures moved from their own divergence tests into the main differential corpus. The one form 5a
   documents as deferred that remains outstanding is a `pass:` macro with an explicit substitution list
   (`pass:c,q[…]`), which still needs a richer subtree than a single `Raw` leaf can hold. This step is
@@ -1598,7 +1598,7 @@ Each phase is a reviewable unit with a clear exit gate.
   *Step 5d part 3 landed as (a `pass:` macro with an explicit substitution list → `Raw`, the last of 5d's
   four deferred forms):* the one form step 5a and part 4 both name as outstanding,
   [`build_pass_macro_subs_value`](../../parser/src/content/inline_builder/passthrough_step.rs), is
-  recognized – but not, in the end, via a richer node subtree. Prototyping that shape first (threading the
+  recognized — but not, in the end, via a richer node subtree. Prototyping that shape first (threading the
   resolved [`SubstitutionGroup::Custom`] steps through this module's own transducers, the way the legacy
   `x-` compatibility marker's body already does via [`apply_normal_subs`](../../parser/src/content/inline_builder/passthrough_step.rs))
   surfaced a real bug, **pre-existing** in the already-landed `x-` marker path and independent of this
@@ -1606,15 +1606,15 @@ Each phase is a reviewable unit with a clear exit gate.
   so anything it splices is still visited by every one of `build`'s own later steps. That visit is a safe
   no-op for `Quotes` (delimiters are consumed, so a second pass finds nothing left) and
   `SpecialCharacters`/`CharacterReplacements`/`PostReplacement` (their own output is atomic or already
-  stripped of what they match on) – but **not** for `Macros`: a link or cross-reference node's display
+  stripped of what they match on) — but **not** for `Macros`: a link or cross-reference node's display
   text is *literal* text that reads exactly like the source it came from (by design, so the fold can
   recover it with no build-time state), so a second `Macros` pass recognizes it all over again and nests
   a second `Ref` inside the first. A prototype fixture (`[x-]++https://example.org++`, exercising the
   already-merged step 5d part 2) reproduces this today: `<code><a href="…"><a href="…">…</a></a></code>`,
   doubled. A list omitting a step `build`'s own fixed order still runs unconditionally (e.g. `pass:q[…]`,
   which never asks for `SpecialCharacters`) fails the opposite way: content the author's list deliberately
-  left raw gets escaped anyway by `build`'s own later `SpecialCharacters` step. Solving this properly – so
-  a spliced subtree is visited by *exactly* the steps its own resolved list named, once – is a splice-time
+  left raw gets escaped anyway by `build`'s own later `SpecialCharacters` step. Solving this properly — so
+  a spliced subtree is visited by *exactly* the steps its own resolved list named, once — is a splice-time
   protection mechanism this additive, pre-cutover module does not yet have; it is squarely the cutover's
   job (step 6, which does not splice mid-`build` at all).
 
@@ -1622,19 +1622,19 @@ Each phase is a reviewable unit with a clear exit gate.
   eventually adopts once it becomes tractable: the resolved list's body is rendered through the **real,
   string-based** substitution pipeline ([`SubstitutionGroup::apply`], via the passthrough step's own
   [`passthrough_text`](../../parser/src/content/inline_builder/passthrough_step.rs) helper already used for
-  `++…++`/`$$…$$`/the bare unconstrained form) – exactly the call `PassthroughRestoreReplacer` makes for a
-  stored `Passthrough` – producing an already-final HTML string that becomes a single
+  `++…++`/`$$…$$`/the bare unconstrained form) — exactly the call `PassthroughRestoreReplacer` makes for a
+  stored `Passthrough` — producing an already-final HTML string that becomes a single
   [`Raw`](../../parser/src/inlines/inline_node.rs) leaf's `value` verbatim, folding through the identical
   byte-for-byte output the string pipeline produces. A `Raw` leaf is *opaque* to every one of `build`'s own
   later steps (never descended into, never re-matched), so it sidesteps both failure modes above
-  regardless of which steps the author's list names or omits, and in which order – the list is applied
+  regardless of which steps the author's list names or omits, and in which order — the list is applied
   once, by the real pipeline, and never touched again. An unrecognized substitution name in the list (e.g.
-  `pass:bogus[…]`) is silently skipped – any recognized names are still honored – mirroring
+  `pass:bogus[…]`) is silently skipped — any recognized names are still honored — mirroring
   `SubstitutionGroup::from_custom_string`/`InlinePassMacroReplacer`'s own resolution; this additive pass
   does not yet raise the string pipeline's own `InvalidSubstitutionTypeForPassthroughMacro` warning for
   it, deferring that side effect to the cutover like every other macro family's own catalog/warning side
   effect, since it does not change the fold's output bytes. An escaped closing bracket (`pass:c[a\]b]`)
-  unescapes before rendering, the same treatment every other `pass:[…]` bracket content gets – no longer a
+  unescapes before rendering, the same treatment every other `pass:[…]` bracket content gets — no longer a
   deferred corner the way a structured-children shape (a footnote's own content) would have forced. A
   differential corpus pins single- and multi-step lists (applied in the order given, not the *normal*
   effective order), an unrecognized name skipped alongside a recognized one, an empty resolved list (the
@@ -1644,63 +1644,63 @@ Each phase is a reviewable unit with a clear exit gate.
 
   *Step 6 prep landed as (the image family's deferred recognition side effects, staged):* with step 5 done,
   every macro family the recorder covers now has a single-pass counterpart, but each one still skips the
-  **recognition side effect** its string-pipeline replacer performs at the same point – registering an id,
-  link, or image target in the document catalog, or recording a warning – deferring it "to the cutover"
+  **recognition side effect** its string-pipeline replacer performs at the same point — registering an id,
+  link, or image target in the document catalog, or recording a warning — deferring it "to the cutover"
   (step 6, below). Step 6 itself bundles a lot: swapping the recorder for the builder inside `Content`,
   making `rendered_html()` a fold, deleting the three sentinel systems, retiring the `with_inline_tree`
   flag, *and* re-attaching every deferred side effect all at once. Re-attaching the image family's own two
-  side effects – [`register_image`](../../parser/src/parser/parser.rs) (for `image:`, gated on
-  `catalog_assets`) and the `link=` dangerous-scheme/self-href warning `InlineImageMacroReplacer` records –
+  side effects — [`register_image`](../../parser/src/parser/parser.rs) (for `image:`, gated on
+  `catalog_assets`) and the `link=` dangerous-scheme/self-href warning `InlineImageMacroReplacer` records —
   turns out not to need the cutover itself: it is a standalone function,
   [`apply_image_side_effects`](../../parser/src/content/inline_builder/macros/image.rs), that walks an
   already-built tree and reads each [`Image`](../../parser/src/inlines/image.rs) node's own stored `target`
   and `attrs` instead of a regex capture, mirroring `InlineImageMacroReplacer::replace_append`'s own
   `link=self`/`link=`-scheme rejection logic (`link_self_resolves_to_src`, `has_dangerous_scheme`,
   `has_dangerous_self_href`, `is_uri_ish`) exactly. It recurses into every container an `Image` node can be
-  nested inside – a `Styled` span, a `Ref`, or a `Footnote`'s own children – so a nested or footnote-embedded
+  nested inside — a `Styled` span, a `Ref`, or a `Footnote`'s own children — so a nested or footnote-embedded
   image is found too. Landing it now, ahead of the rest of step 6, gives the eventual cutover one fewer thing
   to get right in one leap: this piece is already written, tested against a broad fixture set (including a
   differential comparison against the golden string pipeline's own registrations, using the same
   two-independent-parsers discipline the footnote increment established), and reviewed on its own. As with
-  every additive increment before it, **nothing is wired into a real parse path** – the function is called
-  only by its own tests, against their own `Parser` – so calling it for real still waits for step 6, when it
+  every additive increment before it, **nothing is wired into a real parse path** — the function is called
+  only by its own tests, against their own `Parser` — so calling it for real still waits for step 6, when it
   can be invoked exactly once per parse without double-counting a registration. A new
   [`Parser::catalog`](../../parser/src/parser/parser.rs) test-only accessor was added alongside it, so a test
   can inspect a `Parser`'s own live catalog directly (the registrations this function performs) without a
   full `Document` parse, whose own `Document::catalog()` is a separate, later snapshot. The remaining
-  deferred side effects – an attributed span's and an anchor's own `register_ref` (plus the anchor's
-  duplicate-id warning and the bibliography-anchor form), and `register_link` for the four link-macro forms –
+  deferred side effects — an attributed span's and an anchor's own `register_ref` (plus the anchor's
+  duplicate-id warning and the bibliography-anchor form), and `register_link` for the four link-macro forms —
   are unstaged and remain step 6's own work, alongside everything else step 6 bundles.
 
   *Step 6 prep landed as (the link family's deferred `register_link`, staged):* the same treatment, applied
   to the second of step 6's unstaged registrations. [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs)
   is a standalone function that walks an already-built tree and, for each [`Ref`](../../parser/src/inlines/ref_node.rs)`{Link}`
-  node, calls [`register_link`](../../parser/src/parser/parser.rs) with the node's own stored `target` –
+  node, calls [`register_link`](../../parser/src/parser/parser.rs) with the node's own stored `target` —
   no recomputation needed, since `target` already holds exactly the string the string pipeline's four link
-  replacers (the `link:`/`mailto:` macro, the auto-link, and the formal-URL link – the bare e-mail form is a
+  replacers (the `link:`/`mailto:` macro, the auto-link, and the formal-URL link — the bare e-mail form is a
   later increment, not yet built by this module) register. A cross-reference is also a `Ref` node but is
   never registered, mirroring the string pipeline's own link-only catalog. It recurses into every container
-  a `Ref` node can be nested inside – a `Styled` span, another `Ref`'s own display children (so a link
-  nested in a cross-reference's text, or vice versa, is found too), or a `Footnote`'s own children –
+  a `Ref` node can be nested inside — a `Styled` span, another `Ref`'s own display children (so a link
+  nested in a cross-reference's text, or vice versa, is found too), or a `Footnote`'s own children —
   mirroring the image increment's own recursion. As with the image side effects, **nothing is wired into a
-  real parse path** – the function is exercised only by its own tests, against their own `Parser` – so
+  real parse path** — the function is exercised only by its own tests, against their own `Parser` — so
   calling it for real still waits for step 6. A broad differential corpus compares its registrations against
   the golden string pipeline's own, using the same two-independent-parsers discipline the image increment
-  established. The remaining deferred side effect – an attributed span's and an anchor's own `register_ref`
-  (plus the anchor's duplicate-id warning and the bibliography-anchor form) – is unstaged and remains step
+  established. The remaining deferred side effect — an attributed span's and an anchor's own `register_ref`
+  (plus the anchor's duplicate-id warning and the bibliography-anchor form) — is unstaged and remains step
   6's own work.
 
-  *Step 6 prep landed as (the anchor and attributed-span family's deferred `register_ref`, staged – the
+  *Step 6 prep landed as (the anchor and attributed-span family's deferred `register_ref`, staged — the
   last of step 6's unstaged registrations):* [`apply_ref_side_effects`](../../parser/src/content/inline_builder/macros/anchors.rs)
   is a standalone function that walks an already-built tree and, for each [`Anchor`](../../parser/src/inlines/anchor.rs)
   node and each id-carrying [`Styled`](../../parser/src/inlines/styled.rs) span, calls
-  [`register_ref`](../../parser/src/parser/parser.rs) under `RefType::Anchor` – reading the node's own
+  [`register_ref`](../../parser/src/parser/parser.rs) under `RefType::Anchor` — reading the node's own
   stored `id`/`reftext` instead of a regex capture. It reproduces the two divergent behaviors the string
   pipeline's two call sites give this one catalog side effect: an inline anchor additionally raises the
   duplicate-id warning `InlineAnchorReplacer` records (an attributed span's own registration stays silently
   non-fatal, mirroring the quotes step's own `let _ = register_ref(...)`), and a shorthand `[[id]]`
-  immediately preceded by a `[` – the inner anchor of a `[[[id]]]` sequence appearing *outside* a
-  bibliography list item – is recognized (already, by the existing node builder) but never registered,
+  immediately preceded by a `[` — the inner anchor of a `[[[id]]]` sequence appearing *outside* a
+  bibliography list item — is recognized (already, by the existing node builder) but never registered,
   mirroring `InlineAnchorReplacer`'s own `is_bibliography_inner` check (recomputed here from the node's own
   source span rather than a haystack index, since the tree walk has no regex capture to read it from). The
   true bibliography-anchor construct itself (`[[[label]]]` inside a bibliography list item, `RefType::Bibliography`)
@@ -1709,29 +1709,29 @@ Each phase is a reviewable unit with a clear exit gate.
   pre-registration (`DefinedTerm::substitute`, `apply_macros_with_leading_anchor_registered`) is mirrored by
   a `leading_anchor_registered` parameter, so wiring this function in at that call site can suppress the same
   duplicate-id warning the string pipeline suppresses there. It recurses into every container an id-bearing
-  node can be nested inside – a `Styled` span, a `Ref`'s own display children, or a `Footnote`'s own children
-  – mirroring the image and link increments' own recursion. As with those, **nothing is wired into a real
-  parse path** – the function is exercised only by its own tests, against their own `Parser` – so calling it
+  node can be nested inside — a `Styled` span, a `Ref`'s own display children, or a `Footnote`'s own children
+  — mirroring the image and link increments' own recursion. As with those, **nothing is wired into a real
+  parse path** — the function is exercised only by its own tests, against their own `Parser` — so calling it
   for real still waits for step 6. A broad differential corpus compares its registrations against the golden
   string pipeline's own, using the same two-independent-parsers discipline the image increment established.
   With this landed, every recognition side effect step 5's macro families skip is now staged as its own
-  unwired building block; step 6 itself – swapping the recorder for the builder, the fold, the sentinel
-  deletions, and calling each staged function exactly once per parse – remains fully outstanding.
+  unwired building block; step 6 itself — swapping the recorder for the builder, the fold, the sentinel
+  deletions, and calling each staged function exactly once per parse — remains fully outstanding.
 
   *Step 6 prep landed as (a combined entry point for every staged side effect, plus a link-registration-order
   fix it surfaced):* with all three families' side effects staged individually, the cutover's own job of
   "calling each staged function exactly once per parse" needed one more piece: a single entry point that
   composes them in the right relative order, since the two link-recognizing families and the image/anchor
   families all write into catalogs and warnings the cutover must get right *together*, not just individually.
-  [`apply_macro_side_effects`](../../parser/src/content/inline_builder/macros/mod.rs) is that entry point –
+  [`apply_macro_side_effects`](../../parser/src/content/inline_builder/macros/mod.rs) is that entry point —
   it calls [`apply_image_side_effects`](../../parser/src/content/inline_builder/macros/image.rs), then
   [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs), then
-  [`apply_ref_side_effects`](../../parser/src/content/inline_builder/macros/anchors.rs) – the same relative
-  order the string pipeline's own macro passes run in (§4.1) – so that when more than one family's side
+  [`apply_ref_side_effects`](../../parser/src/content/inline_builder/macros/anchors.rs) — the same relative
+  order the string pipeline's own macro passes run in (§4.1) — so that when more than one family's side
   effect touches the *same* shared list (concretely, [`Parser::record_substitution_warning`](../../parser/src/parser/parser.rs)'s
   one shared warnings list, which both the image family's dangerous-scheme warning and the anchor family's
   duplicate-id warning write to) the combined call lands them in the golden pipeline's own order. A new
-  differential corpus exercises the composed call directly – a fixture mixing an image, both link forms, and
+  differential corpus exercises the composed call directly — a fixture mixing an image, both link forms, and
   an anchor in one content, and a fixture whose image and anchor *both* warn, asserting the two warnings land
   in image-then-anchor order against an independent golden parser (the same two-independent-parsers
   discipline every prior staged function's own corpus uses).
@@ -1740,37 +1740,37 @@ Each phase is a reviewable unit with a clear exit gate.
   [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs): the string pipeline
   registers a link's target when its *own* replacer's pass matches it, and the auto-link/formal-URL pass
   (`INLINE_LINK`) and the `link:`/`mailto:` macro pass (`INLINE_LINK_MACRO`) are two separate, sequential
-  whole-string passes (§4.1) – so the catalog ends up in **family-pass order, not true source order**: every
+  whole-string passes (§4.1) — so the catalog ends up in **family-pass order, not true source order**: every
   auto-link/formal-URL link registers before every `link:`/`mailto:` macro, regardless of which appears first
   in the source (already pinned, independently of this module, by
   `catalog_records_link_targets_when_catalog_assets_enabled` in `tests/asciidoctor_rb/substitutions_test.rs`).
   The originally-staged function instead made one tree walk in document order, which is only ever correct by
-  coincidence – a content that interleaves the two forms out of that relative order (`link:b.html[B] then
+  coincidence — a content that interleaves the two forms out of that relative order (`link:b.html[B] then
   https://a.example`) diverges: document order would register `b.html` first, but the golden catalog is
   `["https://a.example", "b.html"]`. No existing test exercised mixed forms in one content, so this had gone
-  unnoticed. The fix makes two passes over the tree – every auto-link/formal-URL match first, then every
-  `link:`/`mailto:` macro match – distinguishing the two from a node's own `location` alone (a `link:`/
+  unnoticed. The fix makes two passes over the tree — every auto-link/formal-URL match first, then every
+  `link:`/`mailto:` macro match — distinguishing the two from a node's own `location` alone (a `link:`/
   `mailto:` match's location always starts with its literal prefix, and the auto-link pass never builds a
-  node for `INLINE_LINK`'s own link-macro branch, deferring that whole form to the macro pass – see
-  [`inline_link_level`](../../parser/src/content/inline_builder/macros/links.rs)'s own doc comment – so this
+  node for `INLINE_LINK`'s own link-macro branch, deferring that whole form to the macro pass — see
+  [`inline_link_level`](../../parser/src/content/inline_builder/macros/links.rs)'s own doc comment — so this
   is a reliable signal, not a heuristic, and needs no new node field). A new test pins the interleaved case
   directly against the golden pipeline, and the broad differential fixture set gains an interleaved fixture
-  too. As with every prior increment in this module, nothing here is wired into a real parse path – calling
+  too. As with every prior increment in this module, nothing here is wired into a real parse path — calling
   [`apply_macro_side_effects`] for real still waits for the single-pass builder to replace the recorder as
   `Content`'s tree source, which remains step 6's own, still fully outstanding, job.
 
   *Step 6 prep landed as (a whole-pipeline differential corpus against the real `SubstitutionGroup::apply`
   entry point):* every differential corpus landed so far (one per step/family) hand-chains only the
-  [`SubstitutionStep`]s that step's own increment covers – skipping `AttributeReferences` unless the fixture
+  [`SubstitutionStep`]s that step's own increment covers — skipping `AttributeReferences` unless the fixture
   needs it, and never running passthrough extraction/restore or deferred cross-reference finalization
   alongside the other steps. That pins each step in isolation, but it had never exercised the *fully
   assembled* pipeline [`SubstitutionGroup::Normal::apply`](../../parser/src/content/substitution_group.rs)
-  runs in production – passthrough/STEM extraction, every step in true order, passthrough restore, and
-  deferred-reference finalization, all against one `Content` – which is exactly what [`build`] (this
+  runs in production — passthrough/STEM extraction, every step in true order, passthrough restore, and
+  deferred-reference finalization, all against one `Content` — which is exactly what [`build`] (this
   module's own single call) must reproduce once the cutover wires it in. A new differential corpus, in
   [`inline_builder`](../../parser/src/content/inline_builder/mod.rs)'s own test module, closes that gap: each
   fixture calls the real, public `SubstitutionGroup::Normal.apply` as the golden and `build` + `fold_html`
-  as the candidate, and – unlike every prior corpus, each scoped to one family – **combines** several
+  as the candidate, and — unlike every prior corpus, each scoped to one family — **combines** several
   construct families in one piece of content (quotes wrapping an attribute reference, a footnote whose own
   text carries a nested attribute reference, a passthrough beside an image macro, a `counter` directive
   beside a formatted span carrying an attribute reference and a STEM expression, an inline anchor beside an
@@ -1780,7 +1780,7 @@ Each phase is a reviewable unit with a clear exit gate.
   this module (an attribute value that itself embeds a construct `CharacterReplacements`/`Macros` would
   recognize, the `hardbreaks` option, a menu's `>` submenu form, …). Every fixture passed without needing a
   code change, giving the first real, end-to-end confirmation that the fully assembled single-pass builder
-  – not just its individual steps – reproduces the real production pipeline's output, ahead of step 6's own
+  — not just its individual steps — reproduces the real production pipeline's output, ahead of step 6's own
   wiring work. As with every prior increment, nothing here is wired into a real parse path.
 
   *Step 6 prep landed as (the `hardbreaks` option, closing a real cutover blocker):* auditing `build`'s
@@ -1790,11 +1790,11 @@ Each phase is a reviewable unit with a clear exit gate.
   §5.4's oracle), so cutting over `Content` to `build` while it stayed unhandled would have silently regressed
   them, not merely left a construct unrecognized. [`apply_post_replacements`](../../parser/src/content/inline_builder/post_replacements.rs)
   now takes the enclosing block's own `Attrlist` (`build` itself gains the same `Option<&Attrlist<'src>>`
-  parameter, threaded through from its caller – every other step ignores it) and, when
+  parameter, threaded through from its caller — every other step ignores it) and, when
   `parser.is_attribute_set("hardbreaks-option")` or the attrlist's own `%hardbreaks` option is set, runs a new
   `apply_hardbreaks` in place of the default ` +`-only form: every line ending in the level's own match string
   becomes a break, a redundant trailing ` +` is stripped rather than doubled, and the level's own last line
-  (nothing follows its `\n`) never gets one – mirroring the string pipeline's own `lines()`-split, per-line
+  (nothing follows its `\n`) never gets one — mirroring the string pipeline's own `lines()`-split, per-line
   `render_line_break`, rejoin exactly. Both forms now share one `emit_breaks` tail. A differential corpus pins
   the block-attrlist and document-attribute forms of the option, a redundant-` +`-stripping fixture, a
   single-line no-op, and recursion into a quoted span, against the real `SubstitutionGroup::Normal` pipeline;
@@ -1806,20 +1806,20 @@ Each phase is a reviewable unit with a clear exit gate.
   vocabulary essentially complete, the last thing missing before the real tree-source swap is the
   due-diligence design §4.1 and §5.5's own risk table call for directly: "the node stream is
   cross-checked against Strategy A's recorder to catch structural regressions the HTML oracle
-  cannot see" – because "two node trees fold to identical HTML, masking a structural bug" is
+  cannot see" — because "two node trees fold to identical HTML, masking a structural bug" is
   exactly the risk every prior corpus in this module, pinning HTML-fold parity alone, cannot rule
   out. A new test module,
   [`inline_builder_recorder_parity`](../../parser/src/tests/inline_builder_recorder_parity.rs),
-  builds both trees for the same fixture – the recorder's via `Content::inlines()` under
-  [`Parser::with_inline_tree`](../../parser/src/parser/parser.rs), the builder's via `build` – and
+  builds both trees for the same fixture — the recorder's via `Content::inlines()` under
+  [`Parser::with_inline_tree`](../../parser/src/parser/parser.rs), the builder's via `build` — and
   compares them structurally, node kind by node kind, over the same broad general-purpose and
   combined-constructs fixture sets [`inline_builder`](../../parser/src/content/inline_builder.rs)'s
   own whole-pipeline corpus already proved stay inside `build`'s claimed vocabulary.
 
   The comparator ignores exactly the fields already documented elsewhere as one-sidedly richer on
   the builder (`attrs`, `derived`, `xrefstyle`, `resolved`, an anchor's `reftext`, an image's
-  `is_icon`) and resolves every *leaf-boundary* difference – a builder `Text`/`Raw`/`CharRef` node
-  whose rendered bytes are only a sub-range of what the recorder recovered, or vice versa – through
+  `is_icon`) and resolves every *leaf-boundary* difference — a builder `Text`/`Raw`/`CharRef` node
+  whose rendered bytes are only a sub-range of what the recorder recovered, or vice versa — through
   one shared mechanism,
   [`consume_rendered_prefix`](../../parser/src/tests/inline_builder_recorder_parity.rs): it renders
   each recorder leaf back to the bytes it would fold to (a `Text` leaf verbatim, a `CharRef` leaf
@@ -1830,7 +1830,7 @@ Each phase is a reviewable unit with a clear exit gate.
   it. This one mechanism is what makes a combined `CharRef::Replacement` (an em dash surrounded by
   spaces, recovered by the recorder as three adjacent entity leaves), an attribute-expansion `Text`
   boundary the builder draws but the recorder cannot see, a passthrough's `Raw` content (which the
-  recorder – no renderer call to intercept during restore – recovers as plain `Text`/`CharRef`
+  recorder — no renderer call to intercept during restore — recovers as plain `Text`/`CharRef`
   leaves instead), and a source-written entity that coincides byte-for-byte with a live
   classification (`&amp;`, `&#8217;`, …) all resolve the same way, rather than as separate
   special cases.
@@ -1838,18 +1838,18 @@ Each phase is a reviewable unit with a clear exit gate.
   Two further, non-leaf differences turned out to be genuine (if narrow) structural facts, not
   bugs, and are excluded with their own documented reasoning: an **unresolved** cross-reference's
   `children` is legitimately empty on the recorder side (Asciidoctor's own unresolved-xref fallback
-  renders the bracketed target, never the author's display text, so the recorder – recovering only
-  what actually rendered – has nothing to see), while the builder always bakes the display text in
+  renders the bracketed target, never the author's display text, so the recorder — recovering only
+  what actually rendered — has nothing to see), while the builder always bakes the display text in
   as a structural fact independent of resolution; and a footnote **reference** occurrence's `id`
   stops reaching the renderer's own params the moment it resolves to a number (`fold_footnote`
   renders just the number then), so the recorder cannot recover it there either, while the builder
   still carries it. A `Link`'s `roles`/`window` fields are also skipped whenever its own
   attribute-list display text populated `attrs` instead (`render_link` reads `role`/`window`
-  straight off `attrs` in that case, so the plain fields are never populated from it – the same
+  straight off `attrs` in that case, so the plain fields are never populated from it — the same
   asymmetry `Ref::attrs`'s own doc comment already describes).
 
   Every fixture passed once these were accounted for, without needing a code change to `build`
-  itself – the first structural (not merely byte-parity) confirmation that the single-pass
+  itself — the first structural (not merely byte-parity) confirmation that the single-pass
   builder's tree is a faithful counterpart to the recorder's, ahead of the real swap. As with every
   prior increment, nothing here is wired into the parse path.
 
@@ -1859,13 +1859,13 @@ Each phase is a reviewable unit with a clear exit gate.
   single-surviving-line case
   ([`Content::from_filtered_lines`](../../parser/src/content/content.rs)) borrows a contiguous `'src`
   slice, but a genuinely multi-line block (or any other filtered value) joins its surviving lines into
-  an *owned* string with no honest `'src` slice of its own – exactly the shape
+  an *owned* string with no honest `'src` slice of its own — exactly the shape
   `build`'s own `source: Span<'src>` parameter could not accept. [`build_from_value`](../../parser/src/content/inline_builder.rs)
   closes this: it generalizes `build`'s seed from a bare `Span<'src>` to the `(value, location)` pair
   `Content` itself is already built from, so `build` becomes a thin wrapper
   (`build_from_value(CowStr::from(source.data()), source, …)`) over it. When `value` coincides with
   `location.data()` this is the existing verbatim path, unchanged; when it does not, the seed is
-  *synthesized* – and every downstream step already knows what to do with that, because it is the same
+  *synthesized* — and every downstream step already knows what to do with that, because it is the same
   verbatim/synthesized split [`apply_special_characters`](../../parser/src/content/inline_builder/special_chars.rs)'s
   own `split_text` already makes for a single node deeper in the tree, and the same coarse-fallback
   policy (design §4.4) an attribute-reference expansion or a `counter` directive's resolved value
@@ -1875,10 +1875,10 @@ Each phase is a reviewable unit with a clear exit gate.
   wholly-synthesized *root* seed is just the same mechanism reached one level higher than any increment
   had exercised it before.
 
-  This closes the gap for every step that never needed a verbatim `'src` slice in the first place –
+  This closes the gap for every step that never needed a verbatim `'src` slice in the first place —
   quotes, specialcharacters, attribute references, character replacements, post-replacement (including
   `hardbreaks`), and a macro family (a bare `footnote:[…]`) whose own content is captured as children
-  rather than a literal value – pinned by a differential corpus comparing `build_from_value` against the
+  rather than a literal value — pinned by a differential corpus comparing `build_from_value` against the
   real pipeline for a simulated multi-line, indentation-filtered block. It does **not** lift the
   existing "a macro inside a synthesized run is deferred" boundary (§4.1's `apply_macros` note,
   [`range_is_verbatim`](../../parser/src/content/inline_builder/macros/image.rs)) for a family that
@@ -1897,8 +1897,8 @@ Each phase is a reviewable unit with a clear exit gate.
   Strategy-A recording pass at all: when tree building is enabled
   ([`Parser::with_inline_tree`](../../parser/src/parser/parser.rs)), it snapshots the
   **pre-substitution content value** and a clone of the parser before the authoritative pass runs
-  – the same counter-safe discipline the recorder used, so footnote numbers and `{counter:…}`
-  values come out identical to the authoritative output – then builds the tree with a new
+  — the same counter-safe discipline the recorder used, so footnote numbers and `{counter:…}`
+  values come out identical to the authoritative output — then builds the tree with a new
   group-aware entry point,
   [`build_for_group`](../../parser/src/content/inline_builder/mod.rs), and stores it on
   [`Content::inlines`](../../parser/src/content/content.rs). `build_for_group` mirrors
@@ -1906,7 +1906,7 @@ Each phase is a reviewable unit with a clear exit gate.
   group's steps include `Macros` or the group is `Header` (the same gate `run_pipeline` places on
   `Passthroughs::extract_from`), then each of the group's
   [`steps()`](../../parser/src/content/substitution_group.rs) runs in the group's own order, each
-  recast as its node transducer – so a `subs=` custom list, the verbatim group's `Callouts`, the
+  recast as its node transducer — so a `subs=` custom list, the verbatim group's `Callouts`, the
   header/attribute-entry-value groups' two-step list, and the empty `Pass`/`None` lists (whose
   tree is the untouched seed) all follow the string pipeline's own selection, pinned by new
   per-group parity and structure tests. `build_from_value` is now the `Normal`-group special case
@@ -1914,30 +1914,30 @@ Each phase is a reviewable unit with a clear exit gate.
 
   What the swap changes for a tree consumer: every node now carries its **honest, precise span**
   (issue #944's precision stage, with the documented §4.4 coarse fallback for synthesized values)
-  and macro nodes are **self-describing** (their own `Attrlist<'src>`, `derived`, `xrefstyle`) –
+  and macro nodes are **self-describing** (their own `Attrlist<'src>`, `derived`, `xrefstyle`) —
   the recorder's whole-content-span, `attrs: None` tree is gone from production. The fold-parity
   guarantee is now scoped to the builder's claimed vocabulary: a form documented as deferred
-  (e.g. a display text crossing a rendered span) is left as **literal text** in the tree – never
-  a wrong node – where the recorder, recovering structure from rendered output, could represent
+  (e.g. a display text crossing a rendered span) is left as **literal text** in the tree — never
+  a wrong node — where the recorder, recovering structure from rendered output, could represent
   it. That scoping surfaced in exactly one production seam: the positional cross-reference
   resolution mirror (`mirror_tree_xref_resolution`), whose count-parity debug assertions assumed
   the tree holds one node per deferred segment. The mirror now **counts each list's slots first
-  and skips a list whose count diverges** – leaving those nodes in their honest unresolved state
-  rather than assigning destinations positionally onto the wrong nodes – pinned by new tests for
+  and skips a list whose count diverges** — leaving those nodes in their honest unresolved state
+  rather than assigning destinations positionally onto the wrong nodes — pinned by new tests for
   both the block-level and footnote-embedded skip paths. The recorder's stateful-renderer hazard
   (its debug assertion, and the "requires a side-effect-free renderer" caveat on
   `with_inline_tree`) retires with the second rendering pass itself: the builder consults the
   configured renderer only where a node's *value* is defined as already-substituted text (a
   delimited passthrough's or STEM expression's body), so a stateful custom renderer now gets a
-  logical, unpolluted tree – repinned by the corresponding test.
+  logical, unpolluted tree — repinned by the corresponding test.
 
   The recorder ([`inline_tree`](../../parser/src/content/inline_tree.rs)) is not deleted but
   **retired to test-only oracle machinery** (`#[cfg(test)]`), exactly the §4.1 bring-up-oracle
   role: the differential harness drives it directly, and the structural cross-check
   ([`inline_builder_recorder_parity`](../../parser/src/tests/inline_builder_recorder_parity.rs))
-  now builds its recorder side by driving that machinery itself – the production accessor returns
+  now builds its recorder side by driving that machinery itself — the production accessor returns
   the builder's tree, so reading `Content::inlines()` for both sides would compare the builder to
-  itself – keeping the two independent constructions honestly comparable. The remainder of step 6
+  itself — keeping the two independent constructions honestly comparable. The remainder of step 6
   is unchanged and still outstanding: making `rendered_html()` an authoritative fold of this
   tree, calling `apply_macro_side_effects` for real (which must wait for the fold, since until
   then the string pipeline still performs every registration), deleting the three production
@@ -1945,66 +1945,66 @@ Each phase is a reviewable unit with a clear exit gate.
 
   *Step 6 prep landed as (the §3.4.1 classification for an order that never escapes, closing a
   second real cutover blocker):* with the tree-source swap done, the next thing the remaining half
-  of step 6 needs – making `rendered_html()` an **authoritative** fold – is to know where the fold
+  of step 6 needs — making `rendered_html()` an **authoritative** fold — is to know where the fold
   still diverges from the string pipeline over the *whole* corpus, not over the hand-picked
   fixtures each family's own differential corpus uses. A corpus-wide audit (tree building forced on
   for every parse in the test suite, each content's tree folded and compared against that same
-  content's own rendered string) – the same due-diligence sweep that surfaced the `hardbreaks`
-  blocker above – found a second one of exactly that kind: not an unclaimed form the tree merely
+  content's own rendered string) — the same due-diligence sweep that surfaced the `hardbreaks`
+  blocker above — found a second one of exactly that kind: not an unclaimed form the tree merely
   leaves literal, but a **wrong answer** for content golden tests already exercise.
 
   The cause is design §3.4's own definition read one step too narrowly. A
   [`Text`](../../parser/src/inlines/inline_node.rs) node is *logical* text that **the fold
-  escapes**, which is exactly right when the `SpecialCharacters` step acted on the content – and
+  escapes**, which is exactly right when the `SpecialCharacters` step acted on the content — and
   exactly wrong when that step never runs, because there the string pipeline emits the author's
   `<`/`>`/`&` untouched. Every group whose effective order omits `specialcharacters` took that
   path and folded escaped entities where the string pipeline emits raw ones: a passthrough block
   ([`Pass`](../../parser/src/content/substitution_group.rs)), a comment block
   ([`None`](../../parser/src/content/substitution_group.rs)), and every `subs=` custom list that
   omits it (`subs=quotes`, `subs=attributes`, `subs=macros`, `subs=callouts` on a listing block,
-  the empty `subs=","` list, …). This is §3.4.1's own policy – "the kind a fragment becomes is
+  the empty `subs=","` list, …). This is §3.4.1's own policy — "the kind a fragment becomes is
   **not** a fixed property of where it came from; it is decided by which substitution steps still
-  act on it under the group's effective order" – applied to the *seed* rather than, as step 5b
+  act on it under the group's effective order" — applied to the *seed* rather than, as step 5b
   first applied it, to a spliced attribute value: a literal special no `SpecialCharacters` step
   ever acts on is a [`Raw`](../../parser/src/inlines/inline_node.rs) leaf.
 
   [`classify_unescaped_specials`](../../parser/src/content/inline_builder/special_chars.rs) is that
   classification. It shares its whole split with
-  [`apply_special_characters`](../../parser/src/content/inline_builder/special_chars.rs) – one
+  [`apply_special_characters`](../../parser/src/content/inline_builder/special_chars.rs) — one
   `SpecialLeaf` discriminant now selects `CharRef::Special` or `Raw`, so the two cannot drift on
-  where a boundary falls – and therefore keeps the same span discipline: a verbatim run's leaves
+  where a boundary falls — and therefore keeps the same span discipline: a verbatim run's leaves
   are sliced from `'src` with honest `line`/`col`/`offset` (#944) while a synthesized run's fall
   back to the whole enclosing span (§4.4). [`build_for_group`](../../parser/src/content/inline_builder/mod.rs)
   runs it **last**, after the group's own steps, gated on
-  `!steps.contains(&SubstitutionStep::SpecialCharacters)` – and running it last, rather than in
+  `!steps.contains(&SubstitutionStep::SpecialCharacters)` — and running it last, rather than in
   place of the step that is absent, is what keeps it faithful: under such an order the string
   pipeline's own steps also match over text in which the specials are still literal, so every
   transducer must go on seeing them as ordinary `Text` characters, not as the opaque leaf a `Raw`
   node is to [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs). Only the
   finished tree's *classification* differs; nothing about recognition changes. It recurses into
-  every container a text run can be nested inside – a `Styled` span, a `Ref`'s display children,
-  an `Anchor`'s reference text, and a `Footnote`'s own children – mirroring the containers
+  every container a text run can be nested inside — a `Styled` span, a `Ref`'s display children,
+  an `Anchor`'s reference text, and a `Footnote`'s own children — mirroring the containers
   [`fold_html`](../../parser/src/content/inline_builder/fold.rs) itself descends into, since a
   `subs=` list omitting `specialcharacters` can still name `quotes` and `macros`.
 
   A new differential corpus crosses a set of specials-bearing fixtures (bare specials in every
   position; specials that would look like a construct *once escaped*, so the classification is
-  pinned not to perturb – or depend on – recognition; specials beside and inside each construct
+  pinned not to perturb — or depend on — recognition; specials beside and inside each construct
   these orders can build; multi-line runs) with every real group that takes this path, each
   fixture driven through the real, public `SubstitutionGroup::apply` as the golden. Two existing
-  tests that pinned the *old* shape – "`Pass`/`None` yield one untouched `Text` run" and
-  `subs=quotes`'s own "`<` stays literal text" – are rewritten to assert the classification
+  tests that pinned the *old* shape — "`Pass`/`None` yield one untouched `Text` run" and
+  `subs=quotes`'s own "`<` stays literal text" — are rewritten to assert the classification
   instead; neither had called the module's own `assert_group_parity` helper, which is precisely
   why the divergence went unnoticed, so both now do. As with every prep piece before it, nothing
   further is wired in: `rendered_html()` remains the string pipeline's own string, and this changes
   only what a tree consumer reads back (and what the eventual authoritative fold will emit).
 
   The audit also leaves the rest of step 6 a map. Every remaining whole-corpus divergence under the
-  *normal* order is a form this file already documents as deferred – a display or reference text
+  *normal* order is a form this file already documents as deferred — a display or reference text
   crossing a rendered span, an angle-bracketed `<url>` link, a bare e-mail auto-link, `<<id,>>`'s
   present-but-empty text, the `menu:View[Zoom > Reset]` submenu form, a macro inside an expanded
   attribute value, a missing attribute under `AttributeMissing::Drop`/`::DropLine`, and the
-  bibliography anchor (`[[[label]]]`) – plus one category not previously named: an effective order
+  bibliography anchor (`[[[label]]]`) — plus one category not previously named: an effective order
   that runs `SpecialCharacters` **after** a step that already produced markup (`subs=quotes,
   specialcharacters`), where the string pipeline escapes the very tags the earlier step emitted.
   That last one is structurally different from the rest, and harder: a tree whose markup exists
@@ -2018,8 +2018,8 @@ Each phase is a reviewable unit with a clear exit gate.
   e-mail address** written in the flow (`doc.writer@example.com`) as the same
   [`Ref`](../../parser/src/inlines/ref_node.rs)`{Link}` node the two URL-link passes build, folding
   through the identical `render_link` so the output is byte-for-byte identical. It reuses the string
-  pipeline's *exact* recognition – [`INLINE_EMAIL`](../../parser/src/content/macros.rs) is now shared
-  `pub(crate)` – so only the recognition *sink* differs (§4.1), and no field is added to `Ref`: the
+  pipeline's *exact* recognition — [`INLINE_EMAIL`](../../parser/src/content/macros.rs) is now shared
+  `pub(crate)` — so only the recognition *sink* differs (§4.1), and no field is added to `Ref`: the
   target is the address prefixed with `mailto:` and the display text is the address itself, baked
   into a single [`Text`](../../parser/src/inlines/inline_node.rs) child, with no `bare` role and no
   `hide-uri-scheme` handling (`InlineEmailReplacer` passes `extra_roles: vec![]` and the raw address,
@@ -2027,7 +2027,7 @@ Each phase is a reviewable unit with a clear exit gate.
 
   [`email_level`](../../parser/src/content/inline_builder/macros/links.rs) runs **after** both
   URL-link passes and before the anchor pass, exactly where the string step runs
-  `InlineEmailReplacer` – which is what makes the pattern's own "prefix that causes a mismatch" group
+  `InlineEmailReplacer` — which is what makes the pattern's own "prefix that causes a mismatch" group
   reproduce identically: a `mailto:` macro's target or a URL's user-info/path is, by then, inside an
   opaque node here (inside already-rendered `<a …>` markup there), so it is never re-recognized in
   either pipeline. A `\` escape drops its backslash and leaves the address literal; any other
@@ -2035,15 +2035,15 @@ Each phase is a reviewable unit with a clear exit gate.
   no match at all does. Two forms are left unrecognized, each documented and pinned by its own
   divergence test. The first is an address carrying a literal `&` (`a&b@example.org`, admitted by the
   pattern's own `&amp;` local-part alternative), which is an atomic
-  [`CharRef`](../../parser/src/inlines/char_ref.rs) by macro time – the same escaped-special boundary
+  [`CharRef`](../../parser/src/inlines/char_ref.rs) by macro time — the same escaped-special boundary
   every other macro family documents.
 
   The second is new in kind, and worth recording as its own category for the authoritative fold: an
   address **abutting an already-recognized construct** (`**bold**doc@example.org`,
   `link:x[y]doc@example.org`). The mismatch-prefix group reads the character immediately *before* the
-  address, and in the string pipeline that character comes out of already-rendered markup –
+  address, and in the string pipeline that character comes out of already-rendered markup —
   `</strong>`, `</a>`, and `<img …>` all end in `>`, one of the three mismatch characters, so the
-  address stays literal there – while
+  address stays literal there — while
   [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) stands the construct in as
   one opaque `SPAN_PLACEHOLDER` that belongs to no mismatch class. This is the "a tree whose markup
   exists only at fold time has no rendered tags for a later step to act on" category the audit note
@@ -2051,7 +2051,7 @@ Each phase is a reviewable unit with a clear exit gate.
   version of this increment (which recognized the address, building a link the string pipeline does
   not) surfaced it. [`find_email_matches`](../../parser/src/content/inline_builder/macros/links.rs)
   now defers on a placeholder immediately before the address, so the tree carries literal text rather
-  than a wrong node – the same outcome the sibling **auto-link** family already reaches structurally,
+  than a wrong node — the same outcome the sibling **auto-link** family already reaches structurally,
   its own boundary-prefix group being *required*, so a placeholder simply fails its match. That
   pre-existing instance (`**bold**https://example.org`, which the string pipeline links and this
   module has always left literal) was undocumented; it now has its own divergence test alongside the
@@ -2059,23 +2059,23 @@ Each phase is a reviewable unit with a clear exit gate.
   deliberately **unconditional** rather than keyed on what the preceding node would render to: a
   construct that renders to nothing (a concealed index term) or that is still sentinel-masked when the
   macros step runs (a passthrough, a STEM expression) is one the string pipeline *does* link, so those
-  defer too – reading that would mean invoking a renderer while building the tree, which this module
+  defer too — reading that would mean invoking a renderer while building the tree, which this module
   does not do. (The Strategy-A recorder cannot pin this shape either: its marker-emitting renderer
   changes the very boundary character the pattern reads, so it links the address where the plain
-  pipeline does not – which is why the structural cross-check's fixture set deliberately excludes it.)
+  pipeline does not — which is why the structural cross-check's fixture set deliberately excludes it.)
 
   An address sitting inside a
   [`synthesized`](../../parser/src/content/inline_builder/quotes.rs) run is, by contrast, **not**
   deferred: like an anchor's id (and unlike a URL link's own target or attribute list), an e-mail node
   carries no `Span`-typed field, so [`text_slice`](../../parser/src/content/inline_builder/quotes.rs)
-  recovers the exact address from an attribute expansion – or from a filtered multi-line block's own
+  recovers the exact address from an attribute expansion — or from a filtered multi-line block's own
   joined seed, reached at a tree's root through
-  [`build_from_value`](../../parser/src/content/inline_builder.rs) – with only the node's `location`
+  [`build_from_value`](../../parser/src/content/inline_builder.rs) — with only the node's `location`
   taking design §4.4's coarse fallback.
 
   The family's own deferred recognition side effect is staged along with it:
-  [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) – already the
-  staged `register_link` for the four URL-link forms – now makes a **third** pass for the bare
+  [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) — already the
+  staged `register_link` for the four URL-link forms — now makes a **third** pass for the bare
   address, since the string pipeline's `InlineEmailReplacer` is a third whole-string pass after
   `INLINE_LINK` and `INLINE_LINK_MACRO`, so the catalog lands in family-pass order (an address
   registers after every URL link in the content regardless of source order), exactly the ordering
@@ -2091,22 +2091,22 @@ Each phase is a reviewable unit with a clear exit gate.
   it, nothing further is wired in.
 
   *Step 6 prep landed as (`Macros` → the angle-bracketed URL, the second of that map's divergences):*
-  the builder now recognizes [`INLINE_LINK`](../../parser/src/content/macros.rs)'s **ANGLE branch** –
+  the builder now recognizes [`INLINE_LINK`](../../parser/src/content/macros.rs)'s **ANGLE branch** —
   an angle-bracketed URL (`<https://example.org>`) and the bracketed spelling that keeps its `&lt;`
-  (`<https://example.org[text]`) – as the same [`Ref`](../../parser/src/inlines/ref_node.rs)`{Link}`
+  (`<https://example.org[text]`) — as the same [`Ref`](../../parser/src/inlines/ref_node.rs)`{Link}`
   node the branch's non-angle sibling builds, folding through the identical `render_link`.
 
   What blocked it was the *shape* of the family's verbatim gate rather than anything about the branch
   itself. Every macro family requires its whole match to be verbatim `'src` before it will build a
   self-describing node, and this branch's own delimiters are by construction the one thing that check
   rejects: `&lt;` and `&gt;` reach the macros step as escaped
-  [`CharRef`](../../parser/src/inlines/inline_node.rs) leaves – atomic pieces – under every effective
+  [`CharRef`](../../parser/src/inlines/inline_node.rs) leaves — atomic pieces — under every effective
   order that escapes specials, so `range_is_verbatim` refused the branch outright, whatever the URL
   between them looked like. But those delimiters carry no value a node ever slices: the string
   replacer's own angle path emits **neither** of them, replacing the whole match with the rendered
   link. So the gate moves out of `find_inline_link_matches` and into
-  [`build_inline_link_node`](../../parser/src/content/inline_builder/macros/links.rs) – where the
-  branch's own capture groups are already resolved – and, for the ANGLE branch, covers only the
+  [`build_inline_link_node`](../../parser/src/content/inline_builder/macros/links.rs) — where the
+  branch's own capture groups are already resolved — and, for the ANGLE branch, covers only the
   **interior** between the delimiters: the scheme, the URL, and any `[…]` attribute list, the only
   parts a node reads. Nothing about the boundary itself is relaxed: an angle URL crossing an escaped
   special (`<https://example.org/?a=1&b=2>`) or a display text crossing a rendered span
@@ -2115,23 +2115,23 @@ Each phase is a reviewable unit with a clear exit gate.
   documents (its target needs an honest `'src` slice).
 
   The branch's three alternatives then split the way the replacer's own
-  `is_angle && attrlist.is_none()` condition splits them. `<url>` is a *separate computation* there –
+  `is_angle && attrlist.is_none()` condition splits them. `<url>` is a *separate computation* there —
   no boundary prefix kept, no trailing-punctuation strip, no bare-scheme rejection (so `<http://;>`
   is a link whose target is `http://;`, the very target the bare branch rejects), always the `bare`
-  role – and is mirrored by a new
+  role — and is mirrored by a new
   [`build_angle_link_node`](../../parser/src/content/inline_builder/macros/links.rs) whose node
   `consumed` range is the **whole match**, delimiters included, so `rebuild_macro_level` re-emits
   neither. `<url[text]` keeps its `&lt;` and needs no new code at all: it flows through the general
   path, whose `consumed` range already starts at the scheme, so the kept prefix is emitted straight
-  from the `CharRef`'s own node. The third – an unterminated `<url`, with no closing `&gt;` and no
-  `[…]` – the replacer emits unchanged, so the builder builds nothing for it either. Both escapes the
+  from the `CharRef`'s own node. The third — an unterminated `<url`, with no closing `&gt;` and no
+  `[…]` — the replacer emits unchanged, so the builder builds nothing for it either. Both escapes the
   angle path honors (a `\` before the `<`, and one before the scheme) become the same
   `Unescape` the family already had, and no field is added to `Ref`: the target is the scheme plus
   the bracketed body, and the display text is that target under the `hide-uri-scheme` strip both
   forms already share.
 
   The family's staged registration needs no angle-specific case either: an angle link is
-  `InlineLinkReplacer`'s *own* pass – the first of the three link passes – and
+  `InlineLinkReplacer`'s *own* pass — the first of the three link passes — and
   [`link_form`](../../parser/src/content/inline_builder/macros/links.rs) already classifies it there
   from the node's `location` and `target`, so
   [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) picks it up in
@@ -2148,29 +2148,29 @@ Each phase is a reviewable unit with a clear exit gate.
   [`Ui`](../../parser/src/inlines/ui.rs) node its comma-delimited and bare/single-item siblings
   build, folding through the identical `render_menu` so the output is byte-for-byte identical.
   Nothing about the *split* changed: [`split_menu_items`](../../parser/src/content/inline_builder/macros/ui.rs)
-  has always reproduced `InlineMenuMacroReplacer`'s own delimiter handling in full – a `&gt;` taking
-  precedence over a comma, the last part the menu item and any earlier ones submenus – and was
+  has always reproduced `InlineMenuMacroReplacer`'s own delimiter handling in full — a `&gt;` taking
+  precedence over a comma, the last part the menu item and any earlier ones submenus — and was
   covered by its own unit test precisely because no *fixture* could reach that branch.
 
   What blocked it is the same thing the angle-bracketed URL increment directly above hit, in the
   one other family whose match legitimately carries a delimiter it never slices. A menu's level
   delimiter is written `>`, so by the time the macros step runs it is an escaped
-  [`CharRef`](../../parser/src/inlines/char_ref.rs) – an *atomic* piece
+  [`CharRef`](../../parser/src/inlines/char_ref.rs) — an *atomic* piece
   [`range_is_verbatim`](../../parser/src/content/inline_builder/macros/image.rs) rejects outright,
   which is why the whole-match gate refused the form whatever its item texts looked like. But a
   caret carries no value the node ever reads back out: like the `<<id>>` shorthand's own
   `&lt;&lt;`/`&gt;&gt;` delimiters, the string replacer *consumes* it as the item list's delimiter
   and emits it nowhere (the rendered caret between levels comes from `render_menu`, not from the
   source character). A new [`menu_match_is_sliceable`](../../parser/src/content/inline_builder/macros/ui.rs)
-  gate – applied inside [`build_menu_node`](../../parser/src/content/inline_builder/macros/ui.rs),
+  gate — applied inside [`build_menu_node`](../../parser/src/content/inline_builder/macros/ui.rs),
   where the match's own capture groups are already resolved, exactly as the angle branch moved its
-  gate into `build_inline_link_node` – therefore admits one atomic piece and one only: a `&gt;`
+  gate into `build_inline_link_node` — therefore admits one atomic piece and one only: a `&gt;`
   *inside the item list*. Everything else is unchanged and still deferred, each pinned by its own
   divergence test: any other escaped special in an item text (`menu:File[A & B]`), a `&`- or
-  `>`-carrying menu **name** (`menu:A&B[Save]`, `menu:a>b[Save]` – the pattern admits both, and
+  `>`-carrying menu **name** (`menu:A&B[Save]`, `menu:a>b[Save]` — the pattern admits both, and
   neither is a delimiter the node consumes), an item text crossing a rendered span
   (`menu:File[*S* > As]`), and a match crossing a [`synthesized`](../../parser/src/content/inline_builder/quotes.rs)
-  run (`menu:View[{zoom} > Reset]` – the relaxation is for an *atomic* piece, not for a run with no
+  run (`menu:View[{zoom} > Reset]` — the relaxation is for an *atomic* piece, not for a run with no
   `'src` slice for the name and item texts to borrow). The admitted caret is identified from its own
   match-string bytes rather than a new node lookup, which is unambiguous: a rendered span contributes
   a single placeholder character, and the only other atomic pieces are the two remaining
@@ -2179,13 +2179,13 @@ Each phase is a reviewable unit with a clear exit gate.
   Landing this also closed a small latent gap of exactly the kind the `footnoteref:` increment
   closed for its own family: the menu pass ran its escape branch *after* the verbatim gate, so an
   escaped macro whose match the gate rejected (`\menu:View[Zoom > Reset]`, and still today
-  `\menu:File[A & B]`) was left fully unrecognized – backslash and all – where the string replacer
+  `\menu:File[A & B]`) was left fully unrecognized — backslash and all — where the string replacer
   drops the backslash and keeps the rest. The check is hoisted ahead of the gate, and needs no gate
   of its own: dropping the backslash keeps the rest of the match as its *own original nodes* (an
   escaped special or a rendered span among them), which fold back to exactly the bytes
   `caps[0][1..]` emits. A differential corpus pins the submenu form with and without spaces, at one
   and several levels, taking precedence over a comma, with a leading caret, with an escaped closing
-  bracket, beside a second menu macro, inside a rendered span, and escaped – plus the escaped
+  bracket, beside a second menu macro, inside a rendered span, and escaped — plus the escaped
   non-sliceable match the hoist fixes; a structural test pins the node's own levels and its
   source-accurate `location` (the carets are one byte each there, four in the match string); and
   fixtures are added to the whole-pipeline combined-constructs corpus and to the structural recorder
@@ -2197,46 +2197,46 @@ Each phase is a reviewable unit with a clear exit gate.
   *Step 6 prep landed as (`Macros` → the bibliography anchor, the fourth of that map's
   divergences):* the builder now recognizes the **bibliography anchor** (`[[[label]]]`,
   `[[[label,xreftext]]]`) that prefixes a bibliography list item's principal text, as an
-  [`Anchor`](../../parser/src/inlines/anchor.rs) node carrying a new `is_bibliography` flag –
+  [`Anchor`](../../parser/src/inlines/anchor.rs) node carrying a new `is_bibliography` flag —
   the same "one node kind, two forms told apart by a flag rather than by re-reading the source"
   shape an [`Image`](../../parser/src/inlines/image.rs)'s own `is_icon` already has. It reuses the
-  string pipeline's *exact* recognition – [`INLINE_BIBLIO_ANCHOR`](../../parser/src/content/macros.rs)
-  is now shared `pub(crate)` – and its gate: the pass fires only when the parser flags that it is
+  string pipeline's *exact* recognition — [`INLINE_BIBLIO_ANCHOR`](../../parser/src/content/macros.rs)
+  is now shared `pub(crate)` — and its gate: the pass fires only when the parser flags that it is
   substituting a bibliography list item's principal text
   ([`in_bibliography_list_item`](../../parser/src/parser/parser.rs), set in
   [`list_item`](../../parser/src/blocks/list_item.rs)), which the tree build sees because
-  [`SubstitutionGroup::apply`](../../parser/src/content/substitution_group.rs) clones the parser –
-  flag included – before the authoritative pass runs. This is the divergence the audit's own map
+  [`SubstitutionGroup::apply`](../../parser/src/content/substitution_group.rs) clones the parser —
+  flag included — before the authoritative pass runs. This is the divergence the audit's own map
   reached *through the parse context* rather than through a construct's spelling: with the
   tree-source swap landed, a real bibliography entry's tree was folding to
   `[<a id="gof"></a>]` where the string pipeline emits `<a id="gof"></a>[gof]`.
 
   Two things make it unlike the other macro families. First, it is **not a level pass**: its
   pattern is `^`-anchored to the whole content (a `[[[…]]]` later in the entry is left to the
-  ordinary inline-anchor pass, which renders it but never catalogs its id – the `is_bibliography_inner`
+  ordinary inline-anchor pass, which renders it but never catalogs its id — the `is_bibliography_inner`
   suppression already mirrored in [`anchors`](../../parser/src/content/inline_builder/macros/anchors.rs)),
   so it runs once, outside `apply_macros`'s own recursion, ahead of every other family exactly as the
   string step runs it first. Second, the bracketed label the replacer renders (`[label]`, or
-  `[xreftext]`) is **left in the flow** – emitted as the sibling nodes following the anchor, sliced
-  from the match's own outer brackets and its label range – rather than becoming the node's children:
+  `[xreftext]`) is **left in the flow** — emitted as the sibling nodes following the anchor, sliced
+  from the match's own outer brackets and its label range — rather than becoming the node's children:
   that is what lets every family after it see the label exactly as the string pipeline's own later
   passes see the text the replacer pushed (an auto-link or a `link:` macro written in an xreftext is
-  linked in both), with no new container for any walk – recognition, side effects, or the eventual
-  fold – to descend into. The node's own `reftext` instead carries that bracketed label as the
-  **registered** reference text – what a cross-reference to the entry displays – taken from the level's
+  linked in both), with no new container for any walk — recognition, side effects, or the eventual
+  fold — to descend into. The node's own `reftext` instead carries that bracketed label as the
+  **registered** reference text — what a cross-reference to the entry displays — taken from the level's
   match string, i.e. in the *already-substituted* form the replacer itself registers (the contract an
   [`IndexTerm`](../../parser/src/inlines/index_term.rs)'s `terms` already uses), so `[[[gof,A & B]]]`
   catalogs `[A &amp; B]` byte-for-byte as the string path does. [`fold_anchor`](../../parser/src/content/inline_builder/fold.rs)
   passes `render_anchor` a `None` reftext for such a node, mirroring the replacer's own
-  `render_anchor(id, None, …)` – the label reaches the output from the flow, not from the node.
+  `render_anchor(id, None, …)` — the label reaches the output from the flow, not from the node.
 
   One shape is deferred, documented and pinned by its own divergence test: a label crossing an
-  **opaque piece** – a rendered span, a passthrough or STEM expression (not restored yet), or a
-  character replacement (`(C)`, a smart apostrophe) – which
+  **opaque piece** — a rendered span, a passthrough or STEM expression (not restored yet), or a
+  character replacement (`(C)`, a smart apostrophe) — which
   [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) stands in as a single
   placeholder rather than the markup or entity the string haystack holds there, so the
   already-substituted label cannot be reconstructed. That is exactly the boundary the index-term
-  family's own visible term documents, and – for the character replacements – the one every macro
+  family's own visible term documents, and — for the character replacements — the one every macro
   family already has at this point (the shared match string serves the quotes step too, where the
   replacements have not yet run). An escaped special is *not* affected (a `CharRef::Special`
   contributes its canonical entity), and a bibliography anchor reached through a synthesized run (an
@@ -2248,7 +2248,7 @@ Each phase is a reviewable unit with a clear exit gate.
   the entry under `RefType::Bibliography` with the node's bracketed reftext and raises the same
   duplicate-id warning, and
   [`apply_macro_side_effects`](../../parser/src/content/inline_builder/macros/mod.rs) calls it
-  **first**, before the image, link, and anchor/ref functions – the string pipeline's own pass order,
+  **first**, before the image, link, and anchor/ref functions — the string pipeline's own pass order,
   which matters because a bibliography anchor's duplicate-id warning and an image's
   dangerous-link-scheme warning land in the one shared warnings list (the same ordering concern that
   entry point already records for image-before-anchor, one step earlier). `apply_ref_side_effects`
@@ -2259,17 +2259,17 @@ Each phase is a reviewable unit with a clear exit gate.
   special, and constructs after the anchor; structural tests pin the node and the flow nodes that
   follow it; registration parity is asserted against an independent golden parser (id, reference text,
   and `RefType` alike), as is the cross-family warning order; and fixtures are added to the
-  whole-pipeline combined-constructs corpus and to the structural recorder cross-check – where the two
+  whole-pipeline combined-constructs corpus and to the structural recorder cross-check — where the two
   constructions reach the same anchor-then-label shape from opposite directions, the recorder
   recovering it from the rendered output. A whole-document test drives the real parse path end to end,
   folding a real bibliography list's trees to their own rendered strings. As with every prep piece
   before it, nothing further is wired in.
 
   *Step 6 prep landed as (`AttributeReferences` → the `attribute-missing` drop modes, the fifth
-  of that map's divergences – and its third real blocker):* the builder now honors the two
+  of that map's divergences — and its third real blocker):* the builder now honors the two
   [`attribute-missing`](https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing)
-  modes that *remove* content – `drop` (drop the reference, and the line if that emptied it) and
-  `drop-line` (drop the whole line the reference sits on) – closing the last of the audit's
+  modes that *remove* content — `drop` (drop the reference, and the line if that emptied it) and
+  `drop-line` (drop the whole line the reference sits on) — closing the last of the audit's
   divergences that golden tests already exercise. Like `hardbreaks` and the unescaped-specials
   classification before it, this is a **blocker** rather than an unclaimed form: real fixtures in
   `tests/asciidoctor_rb/attributes_test.rs` set both modes, so an authoritative fold over a tree
@@ -2280,13 +2280,13 @@ Each phase is a reviewable unit with a clear exit gate.
 
   What the two dropping modes need, and what the node stream did not have, is **line
   granularity**: `apply_attributes` gets it by splitting `Content::rendered` on `\n` and
-  processing – and sometimes discarding – one line at a time. A new
+  processing — and sometimes discarding — one line at a time. A new
   [`MissingHandling`](../../parser/src/content/inline_builder/attribute_refs.rs) carries the
   resolved mode down the transducer's own recursion, a missing reference becomes a
   `DropMissing` match (consumed, splicing nothing) rather than being skipped, and
   [`surviving_lines`](../../parser/src/content/inline_builder/attribute_refs.rs) reproduces that
-  same split over a level's own **match string** – whose `\n` bytes are the very ones the rendered
-  string carries – returning the line ranges the level still emits. It mirrors the string loop's
+  same split over a level's own **match string** — whose `\n` bytes are the very ones the rendered
+  string carries — returning the line ranges the level still emits. It mirrors the string loop's
   own two decisions exactly: `drop-line` drops a line once it carries a missing reference, `drop`
   only when removing that reference is all it took to empty the line (Asciidoctor's
   `reject_if_empty`, reconstructed by
@@ -2294,22 +2294,22 @@ Each phase is a reviewable unit with a clear exit gate.
   own matches, `\r` guard included).
   [`rebuild_attribute_level`](../../parser/src/content/inline_builder/attribute_refs.rs) then emits
   one survivor at a time, re-emitting between consecutive survivors the `\n` that terminated the
-  *previous* survivor – a real source byte, so a dropped line costs the tree no honest span (#944):
+  *previous* survivor — a real source byte, so a dropped line costs the tree no honest span (#944):
   every surviving node still borrows from `'src` with its own precise `line`/`col`, pinned by a
-  structural test. When nothing is dropped – every level under `skip`/`warn`, and the overwhelming
-  majority under the other two – the line list is the single whole-level range, so the rebuild is
+  structural test. When nothing is dropped — every level under `skip`/`warn`, and the overwhelming
+  majority under the other two — the line list is the single whole-level range, so the rebuild is
   byte- and structure-identical to the flat walk it has always been.
 
   Two shapes are deferred, each documented and pinned by a divergence test, and both falling back
   to leaving the reference literal (this step's own pre-increment behavior). The first is a
   **`Styled` span straddling a line break**: a span is one opaque `SPAN_PLACEHOLDER` piece in the
   match string, so its interior `\n`s are invisible here while the string pipeline, holding the
-  span's *rendered markup* inline by this point, still splits on them – the line correspondence the
+  span's *rendered markup* inline by this point, still splits on them — the line correspondence the
   drop rests on would be wrong, so the drop is disabled for the whole content when one is present
   (a masked passthrough or STEM expression is *not* affected: the string pipeline holds a sentinel
   for it here too, so a multi-line one collapses its lines on both sides alike). The second is a
   missing reference **nested inside a span, under `drop-line`** *when that span is the one being
-  dropped from within* – the nested level cannot see the enclosing line, so the enclosing level
+  dropped from within* — the nested level cannot see the enclosing line, so the enclosing level
   detects it instead, via a recursive `subtree_has_missing_reference` walk that reuses
   `find_attribute_matches`' own recognition; only the multi-line case above escapes it. Under
   `drop` the nested case needs no such detection at all, since removing a reference is a purely
@@ -2319,13 +2319,13 @@ Each phase is a reviewable unit with a clear exit gate.
   [`styled_drop_indices`](../../parser/src/content/inline_builder/attribute_refs.rs) must run
   **before** the splicing recursion, not from inside the level that consumes it. The string
   pipeline replaces every reference on a line in one `replace_all` pass, which never re-scans its
-  own replacements – so an attribute whose value happens to *be* reference-shaped (`:x: {nope}`,
+  own replacements — so an attribute whose value happens to *be* reference-shaped (`:x: {nope}`,
   then `{x}`) leaves that text in the output literally, and it neither is nor arms a missing
   reference. Run after the recursion, the walk would have read the already-spliced value as one and
   dropped a line the string pipeline keeps. Hoisting the whole detection to
-  `apply_attribute_references` – which then hands the resulting node indices down, translated to
+  `apply_attribute_references` — which then hands the resulting node indices down, translated to
   match-string offsets at the level that uses them (sound because the recursion only rewrites a
-  span's *children*, and a span contributes one placeholder piece whatever they are) – is what keeps
+  span's *children*, and a span contributes one placeholder piece whatever they are) — is what keeps
   the two in step, and it keeps a synthesized *seed* scanned, since its text is pre-expansion
   content in its own right. The corpus gains fixtures for both halves of this: a reference-shaped
   value, and a value carrying a newline (where the two pipelines agree by construction, since both
@@ -2346,7 +2346,7 @@ Each phase is a reviewable unit with a clear exit gate.
   end to end. As with every prep piece before it, nothing further is wired in.
 
   *Step 6 prep landed as (`<<id,>>`'s present-but-empty reference text, the sixth of that map's
-  divergences – and its fourth real blocker):* the builder now recognizes the one cross-reference
+  divergences — and its fourth real blocker):* the builder now recognizes the one cross-reference
   form it still deferred, closing out the `Ref{Xref}` family. A shorthand's reference text is made
   *present* by its **comma**, not by what follows it: `InlineXrefReplacer`'s own
   `inner.split_once(',')` records `<<id,>>` (and `<<id,   >>`) as `Some("")`, which renders an
@@ -2360,14 +2360,14 @@ Each phase is a reviewable unit with a clear exit gate.
 
   What had blocked it was the *representation*, not the recognition, and closing it needed no new
   node field. The step-3b note reads "an empty child vector cannot distinguish a present-but-empty
-  text from no text provided" – true, but the distinction was never the *vector's* to carry:
+  text from no text provided" — true, but the distinction was never the *vector's* to carry:
   [`build_xref_shorthand_node`](../../parser/src/content/inline_builder/macros/xref.rs) now builds
   exactly one [`Text`](../../parser/src/inlines/inline_node.rs) child whenever the shorthand carries
   a comma, empty value and all (a zero-length `'src` borrow where the trim left it, so even the
   degenerate case keeps an honest span), and
   [`fold_xref`](../../parser/src/content/inline_builder/fold.rs) keys `XrefRenderParams::provided_text`
   on the **presence of a child** rather than on the bytes the children fold to. Every text the
-  builder recognizes is baked into exactly one child, so the two cases cannot collide – the
+  builder recognizes is baked into exactly one child, so the two cases cannot collide — the
   `xref:` macro form's own empty text (`xref:id[]`, and an attribute list whose positional value is
   absent or empty) records `None` in the string replacer too, and correspondingly builds no child.
   With this the shorthand builder is **total**: what a cross-reference defers is now decided
@@ -2378,7 +2378,7 @@ Each phase is a reviewable unit with a clear exit gate.
   That representation has one invariant to keep, and it is the one thing outside the family this
   step touched: an empty `Text` node must survive the steps that walk one. Both splitters in
   [`special_chars`](../../parser/src/content/inline_builder/special_chars.rs) deliberately never
-  emit an empty run (there is nothing in one to escape), so splitting an empty node *deletes* it –
+  emit an empty run (there is nothing in one to escape), so splitting an empty node *deletes* it —
   which is exactly what happened to a shorthand recognized under an effective order that omits
   `specialcharacters` and therefore ends in
   [`classify_unescaped_specials`](../../parser/src/content/inline_builder/special_chars.rs) (a
@@ -2391,9 +2391,9 @@ Each phase is a reviewable unit with a clear exit gate.
   group rather than only under those that ran a splitting step.
 
   A differential corpus extends the existing xref fixtures with both spellings of the empty text
-  (bare and whitespace-only) and one over a *derived* destination – `render_xref`'s
+  (bare and whitespace-only) and one over a *derived* destination — `render_xref`'s
   `(None, Some(derived))` branch, which unlike the resolved branch renders `Some("")` as an empty
-  body rather than falling back – alongside structural tests pinning the empty child's own
+  body rather than falling back — alongside structural tests pinning the empty child's own
   zero-length span, its absence for a comma-less shorthand, and the classification fixture above;
   fixtures are added to the whole-pipeline combined-constructs corpus, the broad general-purpose
   sweep, and the structural recorder cross-check. A whole-document test drives the real parse path
@@ -2408,14 +2408,14 @@ Each phase is a reviewable unit with a clear exit gate.
   *Step 6 prep landed as (the UI and index-term families inside an expanded attribute value, the
   seventh of that map's divergences):* the audit's map names "a macro inside an expanded attribute
   value" as one of its remaining items, and the two macro families whose nodes carry **no
-  `Span`-typed field at all** – [`Ui`](../../parser/src/inlines/ui.rs) (`kbd:`/`btn:`/`menu:`) and
-  [`IndexTerm`](../../parser/src/inlines/index_term.rs) – now close their half of it. This is the
+  `Span`-typed field at all** — [`Ui`](../../parser/src/inlines/ui.rs) (`kbd:`/`btn:`/`menu:`) and
+  [`IndexTerm`](../../parser/src/inlines/index_term.rs) — now close their half of it. This is the
   *same* lift the anchor family made for its id (the "prep (anchor synthesized boundary lifted)"
   note above) and the bare-e-mail family made for its address, applied to the two families that
   were left: a family that never needs a real `'src` slice has no reason to defer inside a
   [`synthesized`](../../parser/src/content/inline_builder/quotes.rs) run, and each of these
-  computes every value it holds either straight out of the level's **match string** – which carries
-  a synthesized run's bytes exactly – or, for the one exception, through
+  computes every value it holds either straight out of the level's **match string** — which carries
+  a synthesized run's bytes exactly — or, for the one exception, through
   [`text_slice`](../../parser/src/content/inline_builder/quotes.rs).
 
   The change is correspondingly small, which is the point: the boundary was drawn by *one gate per
@@ -2425,7 +2425,7 @@ Each phase is a reviewable unit with a clear exit gate.
   (its keys and label already came from the match string via `split_kbd_keys` /
   `normalize_index_text`); `menu:` drops the `piece.synthesized` rejection from
   [`menu_match_is_sliceable`](../../parser/src/content/inline_builder/macros/ui.rs) and reads its
-  one `'src`-sliced value – the menu *name* – through `text_slice` instead of
+  one `'src`-sliced value — the menu *name* — through `text_slice` instead of
   [`source_slice`](../../parser/src/content/inline_builder/quotes.rs), which would have offered
   only that run's coarse span (§4.4) rather than the name's exact bytes; and both index-term
   spellings drop their `range_overlaps_synthesized` check, keeping only the
@@ -2436,17 +2436,17 @@ Each phase is a reviewable unit with a clear exit gate.
   an attribute list. As throughout, only the node's **`location`** takes the coarse enclosing-span
   fallback (§4.4); the values themselves are exact.
 
-  Differential corpora drive each family's expanded-value forms – an expanded menu name, item
+  Differential corpora drive each family's expanded-value forms — an expanded menu name, item
   list, and submenu path; expanded keyboard keys and button labels; a whole macro arriving from an
   expanded value; both index-term spellings, visible and concealed, whole and partial, and a kept
-  literal parenthesis beside an expanded term – through the real, public
+  literal parenthesis beside an expanded term — through the real, public
   `SubstitutionGroup::Normal::apply` as the golden, since these need the `AttributeReferences`
   step the family-scoped `golden_macros` helper deliberately omits. Structural tests pin the
   exact-value/coarse-location split; the wholly-synthesized **seed** path
   ([`build_from_value`](../../parser/src/content/inline_builder/mod.rs), a filtered multi-line
   block) is covered for both families; a whole-document test drives the real parse path end to end;
   and fixtures are added to the whole-pipeline combined-constructs corpus and to the structural
-  recorder cross-check – where the recorder side, which has always recovered these from the string
+  recorder cross-check — where the recorder side, which has always recovered these from the string
   pipeline's own render params, can now be compared *structurally* against a builder that
   recognizes them too. Re-running the corpus-wide fold-parity audit (tree building forced on for
   every parse in the suite) confirms the divergence set strictly **shrank**: the three sources the
@@ -2463,7 +2463,7 @@ Each phase is a reviewable unit with a clear exit gate.
   spellings, because the `xref:` macro's own attribute-list text is parsed from a *newline-normalized
   copy* rather than a source slice
   ([`xref_macro_text`](../../parser/src/content/inline_builder/macros/xref.rs), mirroring
-  `InlineXrefReplacer`, which parses that same copy) – and every other value the node holds is a
+  `InlineXrefReplacer`, which parses that same copy) — and every other value the node holds is a
   computed `String` or a display text. So the family needs no honest `'src` slice at all, and the
   same lift the anchor, bare-e-mail, UI, and index-term families made applies to it unchanged.
 
@@ -2472,7 +2472,7 @@ Each phase is a reviewable unit with a clear exit gate.
   [`range_is_verbatim`](../../parser/src/content/inline_builder/macros/image.rs) for
   [`range_is_verbatim_or_synthesized`](../../parser/src/content/inline_builder/macros/image.rs), and
   the two builders read what used to come from an `'src` slice out of the level's **match string**
-  instead – which carries a [`synthesized`](../../parser/src/content/inline_builder/quotes.rs) run's
+  instead — which carries a [`synthesized`](../../parser/src/content/inline_builder/quotes.rs) run's
   bytes exactly, and is the very text the string replacer's own `inner.split_once(',')` /
   `raw_text.contains('=')` see. `build_xref_shorthand_node` splits the shorthand's inner on the match
   string rather than on the inner's source slice, and both builders take a display text's value from
@@ -2481,22 +2481,22 @@ Each phase is a reviewable unit with a clear exit gate.
   (§4.5). Only the node's `location` (and its children's) takes §4.4's coarse enclosing-span
   fallback; every value is exact.
   Every other boundary the family draws is untouched: an [`atomic`](../../parser/src/content/inline_builder/quotes.rs)
-  piece – an escaped special, a rendered span, or an expanded value's own unescaped `<` (a
-  [`Raw`](../../parser/src/inlines/inline_node.rs) leaf, §3.4.1) – still defers, each with its own
+  piece — an escaped special, a rendered span, or an expanded value's own unescaped `<` (a
+  [`Raw`](../../parser/src/inlines/inline_node.rs) leaf, §3.4.1) — still defers, each with its own
   divergence test, and the string pipeline's own `id.contains('<')` guard leaves that last one
   literal too, so the two agree.
 
-  Differential corpora drive both spellings' expanded-value forms – an expanded id, reference text,
+  Differential corpora drive both spellings' expanded-value forms — an expanded id, reference text,
   attribute-list text, and inter-document target; an expanded shorthand id and trimmed reference
-  text; a present-but-empty text behind an expanded id; a cross-reference inside a rendered span –
+  text; a present-but-empty text behind an expanded id; a cross-reference inside a rendered span —
   through the real, public `SubstitutionGroup::Normal::apply` as the golden, since these need the
   `AttributeReferences` step the family-scoped `golden_xref_with` helper deliberately omits.
   Structural tests pin the exact-value/coarse-location split for both spellings; a whole-document
   test drives the real parse path end to end; and fixtures are added to the whole-pipeline
   combined-constructs corpus and to the structural recorder cross-check. The wholly-synthesized
   **seed** path ([`build_from_value`](../../parser/src/content/inline_builder/mod.rs)) gains
-  cross-reference fixtures too, and the test that pinned that path's deferral – which used an
-  `<<target>>` fixture – now pins it with a `link:` macro, the family for which
+  cross-reference fixtures too, and the test that pinned that path's deferral — which used an
+  `<<target>>` fixture — now pins it with a `link:` macro, the family for which
   [`Attrlist::parse`](../../parser/src/attributes/attrlist.rs) genuinely does read its `source:
   Span<'src>`'s bytes as content, so a real `'src` slice is not optional. Re-running the corpus-wide
   fold-parity audit (tree building forced on for every parse in the suite) confirms the divergence
@@ -2506,14 +2506,14 @@ Each phase is a reviewable unit with a clear exit gate.
   *Step 6 prep landed as (the image and link families inside an expanded attribute value,
   closing the last of that divergence):* the two increments above closed "a macro inside an
   expanded attribute value" for every family whose node carries no `Span`-typed field; the two
-  that are left – [`Image`](../../parser/src/inlines/image.rs) and the
+  that are left — [`Image`](../../parser/src/inlines/image.rs) and the
   [`Ref`](../../parser/src/inlines/ref_node.rs)`{Link}` family, the two that hold a real
-  [`Attrlist`](../../parser/src/attributes/attrlist.rs)`<'src>` – now make the same lift for
+  [`Attrlist`](../../parser/src/attributes/attrlist.rs)`<'src>` — now make the same lift for
   everything *except* that attribute list, which is the one value in this whole module that a
   match string genuinely cannot supply:
   [`Attrlist::parse`](../../parser/src/attributes/attrlist.rs) reads its `source: Span<'src>`'s
-  bytes **as content**, not merely as a location tag, so an expanded value – which has no `'src`
-  slice of its own – leaves it nothing to parse. The boundary therefore moves from *the family*
+  bytes **as content**, not merely as a location tag, so an expanded value — which has no `'src`
+  slice of its own — leaves it nothing to parse. The boundary therefore moves from *the family*
   to *the one capture that needs a slice*, which is what makes the common real-world spellings
   (`image:{logo}[Logo]`, `link:{url}[Docs]`, `https://{host}/path`) work while the genuinely
   blocked ones stay documented divergences.
@@ -2527,13 +2527,13 @@ Each phase is a reviewable unit with a clear exit gate.
     reads the macro *name* from the level's match string rather than from `location.data()` (which
     is the coarse enclosing span for a wholly-expanded macro, so the `image:`-vs-`icon:`
     discriminant would otherwise be read off the attribute *reference*), and its *target* through
-    [`text_slice`](../../parser/src/content/inline_builder/quotes.rs) – still borrowing from `'src`
+    [`text_slice`](../../parser/src/content/inline_builder/quotes.rs) — still borrowing from `'src`
     when the target is verbatim (§4.5), exact when it is not. The **bracket** keeps the verbatim
     check: a non-empty attribute list crossing a synthesized run leaves the macro literal, while an
     **empty** one (`image:{logo}[]`) needs no bytes at all and parses from the same zero-length span
-    an absent group already used – so even a wholly-expanded `image:x.png[]` is recognized.
-  - **Links.** Every value the three URL-link passes hold – the scheme, the URL, the bracketed
-    display text – is already computed out of the match string, so
+    an absent group already used — so even a wholly-expanded `image:x.png[]` is recognized.
+  - **Links.** Every value the three URL-link passes hold — the scheme, the URL, the bracketed
+    display text — is already computed out of the match string, so
     [`build_inline_link_node`](../../parser/src/content/inline_builder/macros/links.rs) and
     [`find_link_macro_matches`](../../parser/src/content/inline_builder/macros/links.rs) needed only
     the gate swap. The **attribute-list-bearing display text** (a `link:`/formal-URL `=`, a
@@ -2544,8 +2544,8 @@ Each phase is a reviewable unit with a clear exit gate.
     `:m: link:index.html[Docs]`) stays literal. The reason is not the node but the staged side
     effect: [`link_form`](../../parser/src/content/inline_builder/macros/links.rs) tells this pass's
     nodes from the other two link passes' by whether the node's `location` starts with that literal
-    marker – the "no new node field" signal the combined-entry-point increment introduced to replay
-    the string pipeline's family-pass registration order – and a coarse §4.4 location cannot carry
+    marker — the "no new node field" signal the combined-entry-point increment introduced to replay
+    the string pipeline's family-pass registration order — and a coarse §4.4 location cannot carry
     it. A marker written in the source (`link:{url}[Docs]`) keeps an honest location end to end and
     is recognized. The URL-link and bare-e-mail passes need no such rule: their own targets never
     carry the `link:`/`mailto:` scheme `link_form` keys on, so a wholly expanded `{site}`
@@ -2557,21 +2557,21 @@ Each phase is a reviewable unit with a clear exit gate.
   omits the `AttributeReferences` step, so a fixture carrying a reference makes the two sides read
   *different* text. The link family's own registration corpus used `{sp}` as an interleaving
   separator, which was inert only while every link family deferred inside a synthesized run: with
-  the lift, the builder sees the expanded space and links a following bare URL where the golden –
-  still holding a literal `}` boundary character `INLINE_LINK` rejects – does not. Those separators
+  the lift, the builder sees the expanded space and links a following bare URL where the golden —
+  still holding a literal `}` boundary character `INLINE_LINK` rejects — does not. Those separators
   are now plain spaces, which is what the fixture always meant (and which makes its interleaved
   registration-order assertion non-vacuous for the first time). Every expanded-value fixture in this
   increment is driven through the real, public `SubstitutionGroup::Normal::apply` instead.
 
-  Differential corpora drive each family's expanded-value forms – an expanded image/icon target,
+  Differential corpora drive each family's expanded-value forms — an expanded image/icon target,
   whole or partial, with a verbatim, an empty, and a positional/named attribute list; an expanded
   `link:`/`mailto:` target and display text; expanded auto-link, formal-URL and angle-bracketed
-  hosts; a wholly expanded auto-link – through that real entry point as the golden, alongside
+  hosts; a wholly expanded auto-link — through that real entry point as the golden, alongside
   structural tests pinning the exact-value/coarse-location split and the match-string-read macro
   name. Registration parity is asserted for both staged side effects against an independent golden
   parser (the same two-independent-parsers discipline), including the interleaved link forms that
   pin the marker rule above. Fixtures are added to the whole-pipeline combined-constructs corpus,
-  the synthesized-seed sweep (whose own deferral test keeps its `link:` macro fixture – now
+  the synthesized-seed sweep (whose own deferral test keeps its `link:` macro fixture — now
   deferred by the marker rule rather than by a whole-family gate), and the structural recorder
   cross-check. Re-running the corpus-wide fold-parity audit (tree building forced on for every
   parse in the suite) confirms the divergence set strictly **shrank**: one more whole-corpus source
@@ -2581,7 +2581,7 @@ Each phase is a reviewable unit with a clear exit gate.
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
   3. ✅ `CharacterReplacements` → `CharRef::Replacement`, and `PostReplacement` → `LineBreak`.
-  4. ✅ `Macros`, sliced by construct family, each capturing the owned `Attrlist<'src>` it carries –
+  4. ✅ `Macros`, sliced by construct family, each capturing the owned `Attrlist<'src>` it carries —
      the step that makes nodes **self-describing** (and the one that finally unblocks
      `render_with`):
      - ✅ **4a.** `Image` / icon (`image:` / `icon:`).
@@ -2596,25 +2596,25 @@ Each phase is a reviewable unit with a clear exit gate.
            - ✅ **part 3b.** the same-document `<<id>>` shorthand (`<<id>>` / `<<id,text>>`).
            - ✅ **part 3c.** the node-blocked forms both spellings share, split in two once landed:
              - ✅ inter-document targets and the document-as-a-whole form (a *derived*
-               destination) – needed only an existing, already-public type (`Ref` gains
+               destination) — needed only an existing, already-public type (`Ref` gains
                `derived: Option<DerivedReference>`), no consumer required to pin its shape.
              - ✅ an attribute-list text (`window`/`role` reuse `Ref`'s existing plain fields; a
-               new `Ref::xrefstyle: Option<XrefStyle>` field carries the macro-level override) –
+               new `Ref::xrefstyle: Option<XrefStyle>` field carries the macro-level override) —
                needed no consumer to pin its shape, since `XrefRenderParams` itself takes plain
                fields, not a borrowed `Attrlist<'src>`.
          - ✅ **part 4.** `Anchor`, `IndexTerm`, `Footnote`, each its own sub-step (inline `Stem` is
-           *not* a macros-step family – it is extracted at passthrough time, so it lands in step 5):
+           *not* a macros-step family — it is extracted at passthrough time, so it lands in step 5):
            - ✅ **part 4a.** inline anchors (`[[id]]` / `anchor:id[…]`, `INLINE_ANCHOR`) → `Anchor`.
            - ✅ **part 4b.** index terms (`((term))` / `(((primary, secondary)))` / `indexterm:[…]` /
              `indexterm2:[…]`, `INLINE_INDEXTERM`) → `IndexTerm`.
            - ✅ **part 4c.** footnotes (`footnote:[…]` / `footnote:id[…]` / `footnote:id[]`,
-             `INLINE_FOOTNOTE_MACRO`) → `Footnote` – the last macro family.
+             `INLINE_FOOTNOTE_MACRO`) → `Footnote` — the last macro family.
   5. `AttributeReferences` (expanded-value splicing, §3.4.1), passthroughs (`Raw`), and
-     `Callouts` – completing the vocabulary the recorder covers, each its own sub-step:
+     `Callouts` — completing the vocabulary the recorder covers, each its own sub-step:
      - ✅ **5a.** Passthroughs, the delimited forms (`+++…+++`, `++…++`, `$$…$$`, bare
        `pass:[…]`) → `Raw`.
      - ✅ **5b.** `AttributeReferences` (expanded-value splicing, §3.4.1).
-     - ✅ **5c.** `Callouts` (verbatim-group content – literal, listing, and source blocks).
+     - ✅ **5c.** `Callouts` (verbatim-group content — literal, listing, and source blocks).
      - ✅ **5d.** the deferred forms `5a` documents, itself sliced into parts:
        - ✅ **part 1.** inline STEM (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) → `Stem`,
          including an explicit substitution list (`stem:c,q[…]`).
@@ -2627,7 +2627,7 @@ Each phase is a reviewable unit with a clear exit gate.
   6. **Cut over:** swap the recorder for the single-pass builder in `Content`, make
      `rendered_html()` a fold, delete the three production sentinel systems (§4.2), and retire
      the `with_inline_tree` opt-in flag (the deferred remainder of Phase 2). Re-attach the
-     recognition **side effects** the string pipeline performs that the additive builder skips –
+     recognition **side effects** the string pipeline performs that the additive builder skips —
      registering an inline id (an attributed span's anchor) in the reference catalog so
      cross-references resolve (#1087), registering a link target (`register_link`) and an image
      target (`register_image`) in the asset catalog so `Document::catalog()` stays complete, and
@@ -2637,29 +2637,29 @@ Each phase is a reviewable unit with a clear exit gate.
      - ✅ **prep.** The image family's own two side effects (`register_image`, the `link=`
        dangerous-scheme/self-href warning) are already written and tested as a standalone,
        unwired function, [`apply_image_side_effects`](../../parser/src/content/inline_builder/macros/image.rs)
-       – see the step's own "landed as" note above.
+       — see the step's own "landed as" note above.
      - ✅ **prep (links).** `register_link` for the four link-macro forms is likewise staged as a
        standalone, unwired function,
-       [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) – see the
+       [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) — see the
        step's own "landed as" note above.
-     - ✅ **prep (anchors).** The anchor/attributed-span `register_ref` pair – the last of step 6's
-       unstaged registrations – is likewise staged as a standalone, unwired function,
-       [`apply_ref_side_effects`](../../parser/src/content/inline_builder/macros/anchors.rs) – see the
+     - ✅ **prep (anchors).** The anchor/attributed-span `register_ref` pair — the last of step 6's
+       unstaged registrations — is likewise staged as a standalone, unwired function,
+       [`apply_ref_side_effects`](../../parser/src/content/inline_builder/macros/anchors.rs) — see the
        step's own "landed as" note above. Every deferred recognition side effect is now staged;
        calling each one for real, exactly once per parse, remains this step's own job.
      - ✅ **prep (whole-pipeline parity).** A combined, multi-family differential corpus confirms
        `build` reproduces the real, public `SubstitutionGroup::Normal::apply` entry point
-       byte-for-byte – see the step's own "landed as" note above. Wiring `build` into `Content` in
+       byte-for-byte — see the step's own "landed as" note above. Wiring `build` into `Content` in
        place of the recorder, and calling `apply_macro_side_effects` for real, remain this step's
        own job.
-     - ✅ **prep (hardbreaks).** The `hardbreaks` block option – identified as a real cutover
-       blocker, not merely an unclaimed form, since golden tests already exercise it – is now
+     - ✅ **prep (hardbreaks).** The `hardbreaks` block option — identified as a real cutover
+       blocker, not merely an unclaimed form, since golden tests already exercise it — is now
        recognized by `apply_post_replacements`, which takes the enclosing block's `Attrlist` for
        it; see the step's own "landed as" note above. `build`'s new `Attrlist` parameter is `None`
        at every existing call site, so this is unwired like every other prep piece.
      - ✅ **prep (structural cross-check).** A corpus-wide comparison of the builder's tree against
-       the Strategy-A recorder's, structurally rather than by HTML-fold parity alone – the
-       due-diligence design §4.1/§5.5 call for before the swap – found every difference to be
+       the Strategy-A recorder's, structurally rather than by HTML-fold parity alone — the
+       due-diligence design §4.1/§5.5 call for before the swap — found every difference to be
        already-documented one-sided richness or a leaf-boundary artifact of recovering structure
        from rendered output, and none a genuine regression; see the step's own "landed as" note
        above. Wiring `build` into `Content` in place of the recorder remains this step's own job.
@@ -2667,42 +2667,42 @@ Each phase is a reviewable unit with a clear exit gate.
        generalizes `build`'s seed from a bare `Span<'src>` to the `(value, location)` pair `Content`
        itself is built from, so a genuinely multi-line, filtered block (whose joined `rendered` text
        has no single contiguous `'src` slice) can be processed too, not only the common
-       single-surviving-line case – see the step's own "landed as" note above. A macro family needing
+       single-surviving-line case — see the step's own "landed as" note above. A macro family needing
        its own verbatim target/id remains deferred for a wholly-synthesized seed, a documented
        divergence pinned by its own test. Wiring `build`/`build_from_value` into `Content` in place of
        the recorder remains this step's own job.
      - ✅ **prep (anchor synthesized boundary lifted).** The "macro inside a synthesized run"
-       boundary §4.1/§4.4 describe – and the synthesized-seed note directly above still pins for
-       link/image/xref – is **lifted for the anchor family**, the one macro whose node needs no
+       boundary §4.1/§4.4 describe — and the synthesized-seed note directly above still pins for
+       link/image/xref — is **lifted for the anchor family**, the one macro whose node needs no
        `Span`-typed field beyond its own `location` (an id and an optional reftext, both plain
        text). A new [`text_slice`](../../parser/src/content/inline_builder/quotes.rs) helper
        reuses `emit_range`'s own verbatim/synthesized slicing to recover a macro's target *text*
-       exactly – concatenating a synthesized piece's `value` instead of `source_slice`'s coarse
-       whole-piece fallback – and a new
+       exactly — concatenating a synthesized piece's `value` instead of `source_slice`'s coarse
+       whole-piece fallback — and a new
        [`range_is_verbatim_or_synthesized`](../../parser/src/content/inline_builder/macros/image.rs)
        gate accepts a synthesized overlap while still rejecting an atomic one (an escaped special
        or a rendered span, the boundary every family keeps). `build_anchor_node` and
        `build_anchor_reftext` (`macros/anchors.rs`) now use these instead of deferring: an id or
-       reftext coming from an attribute expansion, or – reached at a tree's root via
-       `build_from_value` – a filtered multi-line block's own joined seed, is recognized with its
+       reftext coming from an attribute expansion, or — reached at a tree's root via
+       `build_from_value` — a filtered multi-line block's own joined seed, is recognized with its
        exact text, while the node's `location` keeps the coarse enclosing-span fallback design §4.4
        already establishes elsewhere (only the *text* needed precision; `Attrlist`-bearing families
        like image/link still cannot lift this boundary the same way, since `Attrlist::parse` reads
-       its `source: Span<'src>`'s bytes as content, not just as a location tag – a real `'src` slice
+       its `source: Span<'src>`'s bytes as content, not just as a location tag — a real `'src` slice
        is not optional there). The `an_anchor_inside_an_expanded_attribute_value_is_a_documented_
        divergence` test #1177 added is now a parity test instead of a divergence test, per its own
        "if lifted, fold this into a parity corpus" note. Wiring `build`/`build_from_value` into
        `Content` in place of the recorder remains this step's own job.
      - ✅ **first half: the tree-source swap.** `SubstitutionGroup::apply` builds each content's
-       tree with the single-pass builder – via the new group-aware
+       tree with the single-pass builder — via the new group-aware
        [`build_for_group`](../../parser/src/content/inline_builder/mod.rs), mirroring
-       `run_pipeline`'s own step selection per substitution group – in place of the Strategy-A
+       `run_pipeline`'s own step selection per substitution group — in place of the Strategy-A
        recording pass, which is retired to test-only oracle machinery; see the step's own
-       "landed as" note above. The remaining half – `rendered_html()` as an authoritative fold,
+       "landed as" note above. The remaining half — `rendered_html()` as an authoritative fold,
        `apply_macro_side_effects` called for real, the sentinel deletions, and the flag's
-       retirement – is still outstanding.
-     - ✅ **prep (unescaped specials).** A corpus-wide fold-parity audit – the same sweep that
-       identified `hardbreaks` – surfaced a second real blocker: under an effective order whose
+       retirement — is still outstanding.
+     - ✅ **prep (unescaped specials).** A corpus-wide fold-parity audit — the same sweep that
+       identified `hardbreaks` — surfaced a second real blocker: under an effective order whose
        steps omit `specialcharacters` (a `Pass` or `None` block, or a `subs=` list without it),
        a literal `<`/`>`/`&` must be a `Raw` leaf the fold emits verbatim, not the `Text` run the
        fold escapes (§3.4.1 applied to the seed).
@@ -2713,22 +2713,22 @@ Each phase is a reviewable unit with a clear exit gate.
      - ✅ **prep (bare e-mail auto-link).** The first of that audit's own itemized divergences is
        closed: [`email_level`](../../parser/src/content/inline_builder/macros/links.rs) recognizes a
        bare address (`doc@example.org`, `INLINE_EMAIL`) as the same `Ref{Link}` node the two
-       URL-link passes build – the last of the link family's spellings – and
+       URL-link passes build — the last of the link family's spellings — and
        [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) gains
        the third registration pass its own family-pass order requires; see the step's own "landed
        as" note above. Recognized inside a synthesized run too (an e-mail node carries no
        `Span`-typed field, like an anchor's id). Two forms defer: an address carrying an escaped
-       `&`, and one abutting an already-recognized construct – the latter a newly-named category
+       `&`, and one abutting an already-recognized construct — the latter a newly-named category
        (a *boundary class* the string pipeline reads out of rendered markup, which a placeholder
        hides), whose pre-existing mirror image in the auto-link family
        (`**bold**https://example.org`) is now documented and pinned too.
      - ✅ **prep (angle-bracketed URL).** The second of that audit's divergences is closed:
-       `INLINE_LINK`'s **ANGLE branch** – `<https://example.org>`, and the
-       `<https://example.org[text]` spelling that keeps its `&lt;` – is recognized as the same
+       `INLINE_LINK`'s **ANGLE branch** — `<https://example.org>`, and the
+       `<https://example.org[text]` spelling that keeps its `&lt;` — is recognized as the same
        `Ref{Link}` node its non-angle sibling builds. The family's verbatim gate moves into
        [`build_inline_link_node`](../../parser/src/content/inline_builder/macros/links.rs) and, for
-       this branch, covers only the *interior* between the `&lt;`/`&gt;` delimiters – themselves
-       escaped `CharRef`s, and emitted by neither pipeline – with
+       this branch, covers only the *interior* between the `&lt;`/`&gt;` delimiters — themselves
+       escaped `CharRef`s, and emitted by neither pipeline — with
        [`build_angle_link_node`](../../parser/src/content/inline_builder/macros/links.rs) mirroring
        the replacer's own `<url>` special case (whole match consumed, no trailing-punctuation strip,
        always `bare`); see the step's own "landed as" note above. The branch's third alternative (an
@@ -2738,14 +2738,14 @@ Each phase is a reviewable unit with a clear exit gate.
        `menu:View[Zoom > Reset]` is recognized as the same `Ui` node the comma-delimited and
        bare/single-item forms build, via a new
        [`menu_match_is_sliceable`](../../parser/src/content/inline_builder/macros/ui.rs) gate that
-       admits one atomic piece – a `&gt;` caret *inside the item list*, which the node consumes as
-       the list's delimiter and neither pipeline emits – applied inside `build_menu_node` exactly as
+       admits one atomic piece — a `&gt;` caret *inside the item list*, which the node consumes as
+       the list's delimiter and neither pipeline emits — applied inside `build_menu_node` exactly as
        the angle branch moved its own gate; see the step's own "landed as" note above. Any other
        escaped special, a caret or `&` in the menu *name*, a rendered span, and a synthesized run all
        still defer, each with its own divergence test. The family's escape check is hoisted ahead of
        the gate (the `footnoteref:` increment's own fix, for the identical reason), so an escaped
        macro the gate rejects still drops its backslash.
-     - ✅ **prep (bibliography anchor).** The fourth of that audit's divergences is closed – and the
+     - ✅ **prep (bibliography anchor).** The fourth of that audit's divergences is closed — and the
        first it reached through the *parse context* rather than a construct's spelling:
        `[[[label]]]` prefixing a bibliography list item's principal text is recognized as an `Anchor`
        node carrying a new `is_bibliography` flag (as an `Image`'s `is_icon` tells its two forms
@@ -2761,7 +2761,7 @@ Each phase is a reviewable unit with a clear exit gate.
        note above. A label crossing an opaque piece (a rendered span, a passthrough, or a character
        replacement) still defers, with its own divergence test.
      - ✅ **prep (`attribute-missing` drop modes).** The fifth of that audit's divergences is
-       closed – and, like `hardbreaks` and the unescaped-specials classification, a **blocker**
+       closed — and, like `hardbreaks` and the unescaped-specials classification, a **blocker**
        rather than an unclaimed form, since golden tests set both modes:
        [`apply_attribute_references`](../../parser/src/content/inline_builder/attribute_refs.rs)
        now honors `attribute-missing=drop` and `=drop-line`. A new
@@ -2775,20 +2775,20 @@ Each phase is a reviewable unit with a clear exit gate.
        hidden behind one placeholder), with its own divergence test; the `drop-line` diagnostic is
        deferred to the cutover like every other family's warning.
      - ✅ **prep (`<<id,>>`'s present-but-empty text).** The sixth of that audit's divergences is
-       closed – a **blocker** like the three before it, since a golden test exercises it – and with
+       closed — a **blocker** like the three before it, since a golden test exercises it — and with
        it the `Ref{Xref}` family: a shorthand's comma is what makes its reference text *present*,
        so [`build_xref_shorthand_node`](../../parser/src/content/inline_builder/macros/xref.rs)
        always builds one [`Text`](../../parser/src/inlines/inline_node.rs) child for a
        comma-carrying shorthand (empty value and all) and
        [`fold_xref`](../../parser/src/content/inline_builder/fold.rs) keys `provided_text` on that
-       child's *presence* rather than on what it folds to – no new node field, and the family's
+       child's *presence* rather than on what it folds to — no new node field, and the family's
        "this increment defers" machinery removed, its verbatim gate now the only deferral. Keeping
        the marker alive made [`split_text`](../../parser/src/content/inline_builder/special_chars.rs)
        preserve an empty `Text` node instead of splitting it away to nothing, and
        [`build_for_group`](../../parser/src/content/inline_builder/mod.rs) stop seeding one for
        empty content. See the step's own "landed as" note above.
      - ✅ **prep (UI + index terms inside an expanded value).** The seventh of that audit's
-       divergences – "a macro inside an expanded attribute value" – is closed for the two macro
+       divergences — "a macro inside an expanded attribute value" — is closed for the two macro
        families whose nodes carry no `Span`-typed field, which is the same reason the anchor and
        bare-e-mail families already lifted it: `kbd:`/`btn:`/`menu:`
        ([`ui`](../../parser/src/content/inline_builder/macros/ui.rs)) and index terms
@@ -2797,21 +2797,21 @@ Each phase is a reviewable unit with a clear exit gate.
        run, computing every value from the level's match string (or, for the menu *name*, through
        [`text_slice`](../../parser/src/content/inline_builder/quotes.rs)) with only the node's
        `location` taking §4.4's coarse fallback; see the step's own "landed as" note above. Every
-       other boundary the two families draw – an escaped special or a rendered span in a bracket,
-       a menu name, or a visible term, and an `indexterm2:` attribute-list term – is unchanged.
+       other boundary the two families draw — an escaped special or a rendered span in a bracket,
+       a menu name, or a visible term, and an `indexterm2:` attribute-list term — is unchanged.
        The families that carry an [`Attrlist`](../../parser/src/attributes/attrlist.rs)`<'src>` or
        another `Span`-typed field (image, link, cross-reference) still defer here, so that half of
        the map item remains open.
      - ✅ **prep (cross-references inside an expanded value).** The same map item, closed for a
-       third family: a `Ref{Xref}` node is built with `attrs: None` in both spellings – the `xref:`
-       macro's own attribute list is parsed from a newline-normalized *copy*, not a source slice –
+       third family: a `Ref{Xref}` node is built with `attrs: None` in both spellings — the `xref:`
+       macro's own attribute list is parsed from a newline-normalized *copy*, not a source slice —
        so the cross-reference family never needed an honest `'src` slice either, and
        [`find_xref_matches`](../../parser/src/content/inline_builder/macros/xref.rs) makes the same
        one-gate swap to `range_is_verbatim_or_synthesized`, reading its target and reference text
        out of the match string and through `text_slice`; see the step's own "landed as" note above.
      - ✅ **prep (images and links inside an expanded value).** The map item closed in full, for the
        two families that hold a real `Attrlist<'src>`: the same one-gate swap, with the boundary
-       moved from *the family* to *the one capture that still needs an `'src` slice* – an image's
+       moved from *the family* to *the one capture that still needs an `'src` slice* — an image's
        non-empty attribute list and a link's attribute-list-bearing display text, since
        `Attrlist::parse` reads its own source span's bytes as content. An image's macro name and
        target now come from the match string / `text_slice`, and an empty bracket parses from a

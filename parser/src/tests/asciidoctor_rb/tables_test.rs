@@ -3430,6 +3430,27 @@ mod psv {
     }
 
     #[test]
+    fn asciidoc_table_cell_hides_its_title_by_default() {
+        // An AsciiDoc table cell that opens with a level-0 title but sets neither
+        // `showtitle` nor `notitle` behaves like embedded output: its doctitle is
+        // hidden. Asciidoctor 2.0.26 emits no `<h1>` for such a cell (the "neither
+        // set" default), whereas enabling `showtitle` in the cell renders it.
+        let default_doc = Parser::default()
+            .parse("= Document Title\n\n|===\na|\n= Nested Document Title\n\ncontent\n|===");
+
+        // Neither attribute set: the cell hides its title.
+        assert_css(&default_doc, ".tableblock h1", 0);
+
+        // With `showtitle` enabled in the cell, the same title renders — proving
+        // only the "neither set" default changed.
+        let shown_doc = Parser::default().parse(
+            "= Document Title\n\n|===\na|\n= Nested Document Title\n:showtitle:\n\ncontent\n|===",
+        );
+
+        assert_css(&shown_doc, ".tableblock h1", 1);
+    }
+
+    #[test]
     fn asciidoc_content() {
         verifies!(
             r#"

@@ -144,7 +144,7 @@ static QUOTED_TEXT_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
 ///
 /// The rules are `pub(crate)` (via [`quote_subs`]) so the single-pass
 /// [`inline_builder`](crate::content::inline_builder) reuses the *exact* same
-/// patterns the string pipeline matches with – the design's core principle of
+/// patterns the string pipeline matches with — the design's core principle of
 /// changing the recognition *sink*, not the recognition itself (§4.1).
 pub(crate) struct QuoteSub {
     pub(crate) type_: QuoteType,
@@ -582,7 +582,7 @@ impl AttributeMissing {
 /// # Why a per-line, positional correlation
 ///
 /// Attribute references are replaced during the *attributes* substitution,
-/// which operates on [`Content::rendered`] – text that earlier steps (special
+/// which operates on [`Content::rendered`] — text that earlier steps (special
 /// characters, quotes) have already transformed, and from which passthroughs
 /// have been masked to placeholder tokens. A byte offset in that rendered text
 /// therefore has no constant delta back to the original source `Span`, so a
@@ -592,13 +592,13 @@ impl AttributeMissing {
 ///
 /// 1. **Thread a source-offset map through every substitution step.** Fully
 ///    general, but adds offset-tracking state to `Content` and every mutating
-///    step – a large surface and regression risk disproportionate to a
+///    step — a large surface and regression risk disproportionate to a
 ///    diagnostic-only refinement.
 /// 2. **Scan the whole original source positionally.** Pair the *k*-th
 ///    reference found in `rendered` with the *k*-th `{name}` in
 ///    `content.original()`. Simple, but the raw source still contains `{name}`
-///    tokens that never reach substitution – inside removed comment lines and
-///    inside passthroughs – so the pairing drifts out of alignment.
+///    tokens that never reach substitution — inside removed comment lines and
+///    inside passthroughs — so the pairing drifts out of alignment.
 /// 3. **Per-line positional correlation (chosen).** Anchor each rendered line
 ///    to the source `Span` of the line it came from (retained at construction,
 ///    see [`Content::from_filtered_lines`]), then pair the *k*-th reference on
@@ -636,7 +636,7 @@ struct AttributeReplacer<'p> {
 
     /// Source span used to locate a recorded warning when a precise
     /// per-reference span cannot be recovered. This is the whole content (or
-    /// line/target) span – the coarse fallback described in the type-level
+    /// line/target) span — the coarse fallback described in the type-level
     /// docs.
     fallback_source: Span<'p>,
 
@@ -680,8 +680,8 @@ impl<'p> AttributeReplacer<'p> {
         source_line: Option<Span<'p>>,
     ) -> Self {
         // The per-reference ranges are only consulted when a warning may be
-        // recorded – `warn` mode, and `drop-line` mode (which records a
-        // diagnostic for each dropped reference) – so skip the extra scan
+        // recorded — `warn` mode, and `drop-line` mode (which records a
+        // diagnostic for each dropped reference) — so skip the extra scan
         // otherwise.
         let source_matches = match (mode, source_line) {
             (AttributeMissing::Warn | AttributeMissing::DropLine, Some(line)) => {
@@ -710,7 +710,7 @@ impl<'p> AttributeReplacer<'p> {
     ///
     /// Falls back to [`fallback_source`](Self::fallback_source) unless a
     /// retained source-line match at `index` exists *and* its text equals
-    /// `matched` – the text check guards against a correlation that has
+    /// `matched` — the text check guards against a correlation that has
     /// drifted (see the type-level docs).
     fn warning_source(&self, index: usize, matched: &str) -> Span<'p> {
         if let Some(line) = self.source_line
@@ -732,7 +732,7 @@ impl Replacer for AttributeReplacer<'_> {
         self.match_index += 1;
 
         // A backslash immediately before the opening brace (`\{name}`) or before
-        // the closing brace (`{name\}`) – or both, as in `\{name\}` – escapes
+        // the closing brace (`{name\}`) — or both, as in `\{name\}` — escapes
         // the reference: it is emitted literally with the escaping backslash(es)
         // removed and left unexpanded, whether or not the attribute is set. An
         // escaped reference is never treated as a missing reference, so it
@@ -786,8 +786,14 @@ impl Replacer for AttributeReplacer<'_> {
         // `key = $2.downcase`. The original spelling is still what is emitted
         // literally for a skipped or missing reference below.
         let lookup_name = attribute_lookup_name(attr_name);
+        let value = self.parser.attribute_value(&lookup_name);
 
-        if !self.parser.has_attribute(&lookup_name) {
+        // A reference is "missing" for `attribute-missing` purposes both when
+        // the attribute was never assigned at all and when it was explicitly
+        // unset (a document `:name!:` entry or an API override that unsets
+        // it) — both resolve to `InterpretedValue::Unset`. Only a value-less
+        // `Set` attribute or a concrete `Value` counts as present.
+        if !self.parser.has_attribute(&lookup_name) || matches!(value, InterpretedValue::Unset) {
             match self.mode {
                 AttributeMissing::Skip => dest.push_str(&caps[0]),
                 AttributeMissing::Drop => {
@@ -820,12 +826,11 @@ impl Replacer for AttributeReplacer<'_> {
             return;
         }
 
-        if let InterpretedValue::Value(value) = self.parser.attribute_value(&lookup_name) {
+        // A value-less `Set` attribute (e.g. `:foo:` with no `=value`)
+        // substitutes to an empty string, matching Asciidoctor.
+        if let InterpretedValue::Value(value) = value {
             dest.push_str(value.as_ref());
         }
-
-        // Language description is unclear as to what happens for "set" and
-        // "unset" attribute values. For now, we'll replace those with nothing.
     }
 }
 
@@ -929,8 +934,8 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
 /// Block macro targets are always a single line, so (unlike
 /// [`apply_attributes`]) there is no line splitting. Returns `None` when the
 /// target references a missing attribute under
-/// [`AttributeMissing::DropLine`] – signaling that the entire block should be
-/// dropped – and otherwise returns the substituted target.
+/// [`AttributeMissing::DropLine`] — signaling that the entire block should be
+/// dropped — and otherwise returns the substituted target.
 ///
 /// [`attribute-missing`]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing
 pub(crate) fn substitute_attributes_in_macro_target<'src>(
@@ -1098,7 +1103,7 @@ fn apply_character_replacements(
 ///
 /// The rules are `pub(crate)` (via [`character_replacements`]) so the
 /// single-pass [`inline_builder`](crate::content::inline_builder) reuses the
-/// *exact* same patterns the string pipeline matches with – the design's core
+/// *exact* same patterns the string pipeline matches with — the design's core
 /// principle of changing the recognition *sink*, not the recognition itself
 /// (§4.1). This mirrors how [`quote_subs`] is shared.
 pub(crate) struct CharacterReplacement {
@@ -1319,7 +1324,15 @@ fn apply_post_replacements(
         content.rendered = new_result.into();
     } else {
         let rendered = content.rendered.as_ref();
-        if !(rendered.contains('+') && rendered.contains('\n')) {
+
+        // A hard line break is a ` +` at the end of a line. Because the
+        // `HARD_LINE_BREAK` regex anchors on `$` in multiline mode — which
+        // matches at the end of the haystack as well as before each `\n` — the
+        // final line of the content is eligible too, even when it is not
+        // followed by a newline (e.g. a one-line paragraph, a block title, or a
+        // section title ending in ` +`). So the cheap pre-check requires only a
+        // `+`, not also a `\n`.
+        if !rendered.contains('+') {
             return;
         }
 
@@ -2037,6 +2050,19 @@ mod tests {
             }
 
             #[test]
+            fn drop_line_removes_a_line_referencing_an_api_unset_attribute() {
+                // An attribute explicitly unset via the API (as opposed to one
+                // that was never assigned at all) still counts as "missing" for
+                // `attribute-missing` purposes (issue #1117).
+                let p = parser_with_mode("drop-line").with_intrinsic_attribute_bool(
+                    "version",
+                    false,
+                    ModificationContext::ApiOnly,
+                );
+                assert_eq!(render("bootstrap.{version}.min.js", &p), "");
+            }
+
+            #[test]
             fn drop_line_records_a_warning_for_the_dropped_reference() {
                 // Dropping the line is silent in Asciidoctor's output, but it
                 // logs an `INFO` diagnostic naming the missing attribute; the
@@ -2116,7 +2142,7 @@ mod tests {
             /// than the block substitution pipeline.
             mod free_standing_text {
                 use super::parser_with_mode;
-                use crate::content::substitute_attributes_in_text;
+                use crate::content::substitution_step::substitute_attributes_in_text;
 
                 #[test]
                 fn drop_removes_line_that_only_contained_the_reference() {

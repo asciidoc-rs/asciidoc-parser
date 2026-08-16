@@ -21,7 +21,7 @@ use crate::{
 /// Folds an inline node tree to output bytes through `renderer`.
 ///
 /// This is the fold over the *public* [`InlineNode`] tree. It handles the node
-/// kinds the transducer steps produce so far – [`Text`](InlineNode::Text),
+/// kinds the transducer steps produce so far — [`Text`](InlineNode::Text),
 /// [`CharRef`](InlineNode::CharRef), [`Styled`](crate::inlines::Styled),
 /// [`Image`](InlineNode::Image), [`Ui`](InlineNode::Ui),
 /// [`Ref`](InlineNode::Ref) (both link and cross-reference),
@@ -43,9 +43,9 @@ pub(crate) fn fold_html(
 /// Appends the fold of `nodes` to `out` (the recursive worker for
 /// [`fold_html`]).
 ///
-/// `parser` is threaded through because rendering some nodes – an
+/// `parser` is threaded through because rendering some nodes — an
 /// [`Image`](InlineNode::Image), whose `render_image`/`render_icon` reads the
-/// document's safe mode, `data-uri`, and `icons`/`icontype` attributes – is a
+/// document's safe mode, `data-uri`, and `icons`/`icontype` attributes — is a
 /// function of document context, not of the node alone.
 fn fold_into_html(
     nodes: &[InlineNode<'_>],
@@ -211,7 +211,7 @@ fn render_char(ch: char, renderer: &dyn InlineSubstitutionRenderer, out: &mut St
 /// byte-for-byte identical. The pre-extracted `alt` (and, for an image,
 /// `width`/`height`) come straight off the node; an icon's `size` and every
 /// other rendered attribute (`title`, `link`, `format`, roles, …) are read back
-/// from the node's own [`Attrlist`] – which is why the macro step
+/// from the node's own [`Attrlist`] — which is why the macro step
 /// captured it.
 fn fold_image(
     image: &Image<'_>,
@@ -368,13 +368,13 @@ fn fold_link(
 /// straight off the node.
 ///
 /// This increment recognizes both a same-document reference to a specific id
-/// (unresolved – no catalog-resolution pass runs, so `resolved` is always
+/// (unresolved — no catalog-resolution pass runs, so `resolved` is always
 /// `None` here) and a target that carries its own destination without a
-/// catalog (`derived`, populated at build time – see the `Ref::derived` field
+/// catalog (`derived`, populated at build time — see the `Ref::derived` field
 /// docs): an inter-document target, and the empty target naming the current
 /// document as a whole. The effective `xrefstyle` is the node's own
 /// macro-level override if present, otherwise the document-wide `xrefstyle`
-/// attribute in effect for this reference – mirroring `InlineXrefReplacer`'s
+/// attribute in effect for this reference — mirroring `InlineXrefReplacer`'s
 /// own `xrefstyle_override.or_else(|| document_xrefstyle(parser))` exactly
 /// (see the `Ref::xrefstyle` field docs); the cutover (design §5.2 Phase 4,
 /// step 6) wires catalog resolution to the tree.
@@ -390,7 +390,7 @@ fn fold_xref(
     // Whether a display text was *provided* is the presence of a child, not
     // what that child folds to: the `<<id,>>` shorthand records a
     // present-but-empty text (one empty `Text` child) that the string replacer
-    // carries as `Some("")` – an empty `<a>…</a>` – which an absent text
+    // carries as `Some("")` — an empty `<a>…</a>` — which an absent text
     // (`None`, the bracketed `[id]` / reference-text fallback) renders quite
     // differently. Every text the builder recognizes is baked into exactly one
     // child, so the two cases never collide.
@@ -429,7 +429,7 @@ fn fold_xref(
 /// span or an escaped special) is `None` on the node (see
 /// `build_anchor_reftext`), so `render_anchor` receives `None` here where the
 /// string replacer would have passed the substituted text. This changes no HTML
-/// output – the built-in backend ignores the reference text entirely – and is
+/// output — the built-in backend ignores the reference text entirely — and is
 /// the same verbatim boundary the node documents; a custom backend that needs
 /// the full reference text unconditionally will get it once a re-flow consumer
 /// pins richer `reftext` population.
@@ -437,8 +437,8 @@ fn fold_xref(
 /// A **bibliography** anchor (`[[[label]]]`) passes `None` regardless of what
 /// its node carries, mirroring its own replacer exactly: that pass calls
 /// `render_anchor(id, None, …)` and pushes the bracketed label into the flow
-/// itself. The label is in the flow here too – as the sibling nodes following
-/// this one (see `biblio_anchor_level`) – so folding the node's `reftext`,
+/// itself. The label is in the flow here too — as the sibling nodes following
+/// this one (see `biblio_anchor_level`) — so folding the node's `reftext`,
 /// which holds that same bracketed label as the entry's *registered* reference
 /// text, into `render_anchor` would hand a custom backend a reference text the
 /// string pipeline never passes it.
@@ -465,14 +465,14 @@ fn fold_anchor(
 /// `render_index_term` the string step's macros pass calls.
 ///
 /// A **concealed** term (`visible == false`) has an empty `terms` and renders
-/// nothing – the HTML backend generates no index. A **visible** (flow) term
+/// nothing — the HTML backend generates no index. A **visible** (flow) term
 /// carries its shown text as `terms[0]` in the *already-substituted* form the
 /// recognizer computed (matching the seam's "already-substituted visible term"
 /// contract), so `render_index_term` emits it verbatim and the fold reproduces
 /// the string pipeline's bytes exactly.
 ///
 /// The node's `terms` mirrors what the
-/// (test-only) `inline_tree` recorder stores – the single
+/// (test-only) `inline_tree` recorder stores — the single
 /// shown term for a visible node, empty for a concealed one; the richer
 /// primary/secondary/tertiary structure the field can hold is left to a re-flow
 /// consumer to pin (the field is provisional, per the node's Phase-0 note),
@@ -494,19 +494,19 @@ fn fold_index_term(
 /// Folds a [`Footnote`](InlineNode::Footnote) through the same
 /// `render_footnote` the string step calls, reconstructing
 /// [`FootnoteRenderParams`] entirely from the node's `is_reference`, `number`,
-/// and `id` fields – no build-time state is needed (design §3.3.1).
+/// and `id` fields — no build-time state is needed (design §3.3.1).
 ///
 /// Only the in-flow **marker** is folded here (`[1]`, or `[id]` for an
 /// unresolved reference): `render_footnote` never emits the footnote's own
-/// text into the flow – that text belongs in the document's separate
-/// footnote list, a concern outside a single block's fold – so
+/// text into the flow — that text belongs in the document's separate
+/// footnote list, a concern outside a single block's fold — so
 /// `footnote.children` is not folded into `out` at all, the same relationship
 /// [`fold_anchor`]'s `reftext` has to its own marker.
 ///
 /// A defining occurrence (`is_reference == false`) always carries its number
 /// (see `build_footnote_node`) and folds its own `id`, when it has one, into
 /// the marker's `id` attribute. A reference either reuses an existing
-/// footnote's number (`number: Some`, `id` never folded – matching the string
+/// footnote's number (`number: Some`, `id` never folded — matching the string
 /// replacer, which renders a reference's `id` attribute only for the
 /// *defining* occurrence) or, unresolved (`number: None`), falls back to
 /// displaying its own `id` as the render params' `text`.
@@ -537,7 +537,7 @@ fn fold_footnote(
 
 /// Folds a [`Callout`](InlineNode::Callout) through the same `render_callout`
 /// the string step's `Callouts` group calls, reconstructing
-/// [`CalloutRenderParams`] from the node's `number` and `guard` – no
+/// [`CalloutRenderParams`] from the node's `number` and `guard` — no
 /// build-time state is needed, mirroring [`fold_footnote`]. This is the
 /// decoupling design §4.6 previews for Phase 5: the node is the canonical,
 /// structured record; the `*RenderParams` struct is rebuilt from it fresh at
@@ -568,7 +568,7 @@ fn fold_callout(
 /// calls for a STEM entry (design §3.3.1's fold-time seam). The node's `value`
 /// already carries the resolved substitution group's output (special
 /// characters only, by default), so the fold passes it straight through as
-/// the body – no further processing is needed, mirroring how a STEM
+/// the body — no further processing is needed, mirroring how a STEM
 /// passthrough is restored with no attribute list or id (`INLINE_STEM_MACRO`
 /// captures neither).
 fn fold_stem(stem: &Stem<'_>, renderer: &dyn InlineSubstitutionRenderer, out: &mut String) {
@@ -643,7 +643,7 @@ mod tests {
     fn fold_folds_a_hand_built_image_without_an_attribute_list() {
         // The node types are public, so a consumer may hand-build an
         // [`Image`](InlineNode::Image) directly rather than through the macro
-        // step – with no [`Attrlist`]. The fold handles that by folding through
+        // step — with no [`Attrlist`]. The fold handles that by folding through
         // an empty attribute list sliced from the node's own location, so a
         // hand-built image renders like the same macro would. (The macro step
         // always attaches an attribute list, so only a hand-built node reaches
@@ -670,7 +670,7 @@ mod tests {
     }
 
     /// A resolved cross-reference to a target that carries a signifier (a
-    /// numbered/captioned element), with no explicit display text – the shape
+    /// numbered/captioned element), with no explicit display text — the shape
     /// `xrefstyle` formatting actually changes (design's `apply_xrefstyle`
     /// only alters output when a signifier is present).
     fn resolved_xref_with_signifier(xrefstyle: Option<XrefStyle>) -> InlineNode<'static> {
@@ -701,7 +701,7 @@ mod tests {
         // document-wide `xrefstyle` attribute in effect for the reference,
         // mirroring `InlineXrefReplacer`'s own
         // `xrefstyle_override.or_else(|| document_xrefstyle(parser))` (see the
-        // `Ref::xrefstyle` field docs) – this is the document-wide default a
+        // `Ref::xrefstyle` field docs) — this is the document-wide default a
         // hand-built node with no override still observes.
         let renderer = HtmlSubstitutionRenderer {};
         let nodes = [resolved_xref_with_signifier(None)];

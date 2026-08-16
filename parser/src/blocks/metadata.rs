@@ -27,8 +27,9 @@ pub(crate) struct BlockMetadata<'src> {
     /// closing square brace pair, nor reftext if it exists.
     pub(crate) anchor: Option<Span<'src>>,
 
-    /// The block anchor's reftext, if any. The span includes only the portion
-    /// from the first comma to just inside the closing square brace pair.
+    /// The block anchor's reftext, if any. The span covers the portion from
+    /// just after the first comma to just inside the closing square brace
+    /// pair, with any leading or trailing whitespace trimmed.
     pub(crate) anchor_reftext: Option<Span<'src>>,
 
     /// The block's attribute list, if any.
@@ -72,7 +73,7 @@ impl<'src> BlockMetadata<'src> {
             // single `.` marker followed by the title text. Per Asciidoctor's
             // `BlockTitleRx` (`^\.(\.?[^ \t.]…)$`), the title text may itself
             // begin with a single period as long as that period is not
-            // followed by a space, tab, or another period – so `..gitignore`
+            // followed by a space, tab, or another period — so `..gitignore`
             // is the block title `.gitignore`.
             if title_source.is_none() {
                 let maybe_title = block_start.take_normalized_line();
@@ -104,9 +105,12 @@ impl<'src> BlockMetadata<'src> {
                             end: comma_position,
                         });
 
-                        let reftext_span = anchor_content.slice_from(RangeFrom {
-                            start: comma_position + 1,
-                        });
+                        let reftext_span = anchor_content
+                            .slice_from(RangeFrom {
+                                start: comma_position + 1,
+                            })
+                            .discard_whitespace()
+                            .trim_trailing_whitespace();
 
                         // Validate anchor name.
                         if anchor_span.is_xml_name() {
@@ -287,7 +291,7 @@ impl<'src> BlockMetadata<'src> {
 /// comment.
 ///
 /// Returns `None` unless at least one comment was skipped *and* the run lands
-/// on a section heading – every other case (no comment, or a comment that a
+/// on a section heading — every other case (no comment, or a comment that a
 /// metadata line directly decorates with no following section) leaves the
 /// comment in place for normal block dispatch, preserving this crate's
 /// retention of comment blocks as ordinary blocks.
@@ -305,7 +309,7 @@ fn skip_comments_before_section(source: Span<'_>, level_offset: i32) -> Option<S
         let data = line.item.data();
 
         // A comment block (`////`, or a longer run of slashes) is consumed
-        // through its matching closing delimiter – or to end of input if it is
+        // through its matching closing delimiter — or to end of input if it is
         // never closed, matching Asciidoctor's `read_lines_until terminator`.
         if data.len() >= 4 && data.chars().all(|c| c == '/') {
             let mut next = line.after;
@@ -335,8 +339,8 @@ fn skip_comments_before_section(source: Span<'_>, level_offset: i32) -> Option<S
     }
 }
 
-/// Determine whether `line` is a block title – a line introduced by a single
-/// `.` marker – and, if so, return the span of the title text that follows the
+/// Determine whether `line` is a block title — a line introduced by a single
+/// `.` marker — and, if so, return the span of the title text that follows the
 /// marker.
 ///
 /// Mirrors Asciidoctor's `BlockTitleRx` (`^\.(\.?[^ \t.]…)$`): the marker `.`
@@ -388,8 +392,8 @@ fn parse_maybe_block_anchor(
     let anchor_src = line.slice(2..line.len() - 2);
     if anchor_src.is_empty() {
         // An empty `[[]]` anchor is still a recognized (if do-nothing) anchor
-        // line: it names nothing, so the caller consumes it – setting no anchor
-        // – rather than leaving it to render as a literal paragraph (matching
+        // line: it names nothing, so the caller consumes it — setting no anchor
+        // — rather than leaving it to render as a literal paragraph (matching
         // Asciidoctor, which drops it). The `None` payload signals the empty
         // form, and the warning notes that the anchor name was empty.
         return MatchAndWarnings {
@@ -581,6 +585,11 @@ mod tests {
 
     #[test]
     fn title_does_not_extend_via_plus_syntax() {
+        // A trailing ` +` on a block title does not join the following line
+        // (`def`) into the title: the title is a single line and `def` remains a
+        // separate paragraph. The ` +` is, however, still a hard line break, so
+        // the post_replacements step renders it as `<br>` within the title
+        // itself (the raw `title_source` keeps the literal ` +`).
         let doc: crate::Document<'_> =
             Parser::default().parse(".Title abc +\ndef\n****\nStuff > nonsense\n****");
 
@@ -625,7 +634,7 @@ mod tests {
                             col: 2,
                             offset: 1,
                         },),
-                        title: Some("Title abc +",),
+                        title: Some("Title abc<br>",),
                         caption: None,
                         number: None,
                         anchor: None,

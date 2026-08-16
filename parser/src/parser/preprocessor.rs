@@ -57,7 +57,7 @@ pub(crate) fn preprocess_with_initial_file_name(
     // directives. `if` covers `ifdef`/`ifndef`/`ifeval`; `endif` is checked
     // separately because it does not share that prefix, and a stray `endif`
     // (with no opening conditional) is itself a directive that must be
-    // processed – otherwise it would be emitted as literal content and its
+    // processed — otherwise it would be emitted as literal content and its
     // unmatched-directive diagnostic would be lost.
     if !source.starts_with("include::")
         && !source.starts_with("if")
@@ -105,7 +105,7 @@ struct PreprocessorState<'p> {
     output: String,
     source_map: SourceMap,
 
-    /// The [`Fidelity`] currently in effect for emitted lines – that of the
+    /// The [`Fidelity`] currently in effect for emitted lines — that of the
     /// segment governing the current output run, or [`Fidelity::Verbatim`] when
     /// no segment has been appended for it yet (e.g. the root document's
     /// leading lines, which map implicitly). A new segment is started
@@ -137,7 +137,7 @@ struct PreprocessorState<'p> {
     includes: Vec<(String, bool)>,
 
     /// The include-depth limit currently in effect, or `None` when
-    /// `max-include-depth` is 0 – which disables the include directive
+    /// `max-include-depth` is 0 — which disables the include directive
     /// entirely. See [`MaxIncludeDepth`].
     max_include_depth: Option<MaxIncludeDepth>,
 
@@ -202,8 +202,8 @@ impl<'p> PreprocessorState<'p> {
     fn new(parser: &'p mut Parser) -> Self {
         // Asciidoctor reads `max-include-depth` once, when the reader is
         // constructed, so the value in effect at the start of preprocessing
-        // governs the entire pass. (The attribute is API-only – see
-        // `built_in_attrs.rs` – so the document cannot change it anyway.) The
+        // governs the entire pass. (The attribute is API-only — see
+        // `built_in_attrs.rs` — so the document cannot change it anyway.) The
         // value is coerced as Ruby's `to_i` would; a non-positive result
         // disables the include directive entirely.
         let max_include_depth = match parser.attribute_value("max-include-depth") {
@@ -350,7 +350,7 @@ impl<'p> PreprocessorState<'p> {
                 if caps.get(1).is_some() {
                     // Escaped directive (e.g. `\ifdef::foo[]`): not processed.
                     // The leading backslash is stripped and the remainder is
-                    // emitted literally, matching Asciidoctor – unless we're
+                    // emitted literally, matching Asciidoctor — unless we're
                     // skipping, in which case it's discarded like any other line.
                     if !self.skipping() {
                         // The leading backslash is removed, so the emitted line
@@ -489,417 +489,14 @@ impl<'p> PreprocessorState<'p> {
             } else if line.starts_with("include::")
                 && let Some(caps) = INCLUDE_DIRECTIVE.captures(line.data())
             {
-                // Asciidoctor substitutes attributes into an include target
-                // using the `attribute-missing` policy in effect, except that
-                // `warn` is mapped to `drop-line`: a warning here names the
-                // whole directive, not the individual reference. Under either
-                // of those policies a reference to a missing attribute empties
-                // the entire target, and the directive is dropped before the
-                // include file handler is ever consulted. See issue #776.
-                let attribute_missing = AttributeMissing::from_parser(self.parser);
-
-                let missing_policy = match attribute_missing {
-                    AttributeMissing::Skip => MissingAttribute::KeepLiteral,
-                    AttributeMissing::Drop => MissingAttribute::Drop,
-                    AttributeMissing::DropLine | AttributeMissing::Warn => {
-                        MissingAttribute::DropLine
-                    }
-                };
-
-                let (target, missing_reference) =
-                    self.substitute_attributes_tracking(&caps[1], missing_policy);
-
-                if missing_reference
-                    && matches!(
-                        attribute_missing,
-                        AttributeMissing::DropLine | AttributeMissing::Warn
-                    )
-                {
-                    // Under `drop-line` (and for an include marked
-                    // `opts=optional`) the directive line is removed with no
-                    // replacement text. Asciidoctor logs this at INFO level;
-                    // this crate has no INFO channel, so – as everywhere else
-                    // `drop-line` applies – the line is dropped silently.
-                    // Re-anchor the source map so the lines that follow map
-                    // back to their correct original line numbers.
-                    if attribute_missing == AttributeMissing::DropLine
-                        || parse_attrlist(&caps, self.parser).has_option("optional")
-                    {
-                        has_reported_file = false;
-                        continue;
-                    }
-
-                    // Under `warn` the directive is replaced by an "Unresolved
-                    // directive" message, as it is for a target that could not
-                    // be resolved, and a warning naming the whole directive is
-                    // recorded.
-                    self.emit_unresolved_directive(
-                        line.data(),
-                        WarningType::IncludeDroppedDueToMissingAttribute(line.data().to_owned()),
-                        file_name,
-                        source_line_number,
-                        &mut has_reported_file,
-                    );
-
-                    continue;
-                }
-
-                if self.parser.safe >= SafeMode::Secure {
-                    // The include directive is disabled at `SafeMode::Secure`
-                    // and above (the default): rather than embed the contents of
-                    // an arbitrary file, the directive is converted to a link to
-                    // its target, matching Asciidoctor. The include file handler
-                    // is never consulted in this case.
-                    self.record_origin(
-                        file_name,
-                        source_line_number,
-                        Fidelity::Synthetic(Transform::SecureLinkRewrite),
-                        &mut has_reported_file,
-                    );
-
-                    // A target containing a space would break the link macro,
-                    // so it is wrapped in a `pass:c[…]` macro (matching
-                    // Asciidoctor).
-                    let replacement = if target.contains(' ') {
-                        format!("link:pass:c[{target}][role=include]")
-                    } else {
-                        format!("link:{target}[role=include]")
-                    };
-                    self.output_line_number += 1;
-                    self.output.push_str(&replacement);
-                    self.output.push('\n');
-
-                    continue;
-                }
-
-                // `max-include-depth=0` disables the include directive
-                // entirely: the directive line is left in the output verbatim,
-                // with no diagnostic, and the include file handler is never
-                // consulted (matching Asciidoctor).
-                let Some(max_depth) = self.max_include_depth else {
-                    self.emit_line(
-                        line.data(),
-                        file_name,
-                        source_line_number,
-                        content_fidelity,
-                        &mut has_reported_file,
-                    );
-                    continue;
-                };
-
-                // When the file containing the directive already sits at the
-                // maximum include depth, the directive is likewise left
-                // verbatim, and a "maximum include depth exceeded" error is
-                // recorded at the directive's own file and line (matching
-                // Asciidoctor). `include_depth` counts the current file as 1,
-                // so the containing file's depth – which the limit is compared
-                // against – is `include_depth - 1`, making the depth-exceeded
-                // condition `include_depth - 1 >= curr`, i.e.:
-                if self.include_depth > max_depth.curr {
-                    self.warnings.push(DeferredWarning {
-                        offset: self.output.len(),
-                        len: line.data().len(),
-                        warning: WarningType::MaxIncludeDepthExceeded(max_depth.rel),
-                        origin: None,
-                    });
-
-                    self.emit_line(
-                        line.data(),
-                        file_name,
-                        source_line_number,
-                        content_fidelity,
-                        &mut has_reported_file,
-                    );
-                    continue;
-                }
-
-                let attrlist = parse_attrlist(&caps, self.parser);
-
-                // A URI target is only fetched when the URI read permission has
-                // been granted (`allow-uri-read`). This is disabled by default,
-                // so a URI include that is not permitted is not fetched; instead
-                // the directive is converted to a `link:` macro to its target –
-                // the same rewrite applied at `SafeMode::Secure` above – and no
-                // warning is recorded (matching Asciidoctor). See
-                // `include-uri.adoc`.
-                if is_uri(&target) && !self.parser.is_attribute_set("allow-uri-read") {
-                    self.record_origin(
-                        file_name,
-                        source_line_number,
-                        Fidelity::Synthetic(Transform::SecureLinkRewrite),
-                        &mut has_reported_file,
-                    );
-
-                    // A target containing a space would break the link macro,
-                    // so it is wrapped in a `pass:c[…]` macro (matching
-                    // Asciidoctor).
-                    let replacement = if target.contains(' ') {
-                        format!("link:pass:c[{target}][role=include]")
-                    } else {
-                        format!("link:{target}[role=include]")
-                    };
-                    self.output_line_number += 1;
-                    self.output.push_str(&replacement);
-                    self.output.push('\n');
-
-                    continue;
-                }
-
-                // Ask the handler to resolve the target. With no handler
-                // configured, the target is treated as not found. The failure
-                // reason (`NotFound`, `NotReadable`, or `NotDecodable`) selects
-                // the warning recorded below, mirroring Asciidoctor's distinct
-                // `include file not found`, `include file not readable`, and
-                // `invalid byte sequence in UTF-8` messages.
-                let resolution = self
-                    .parser
-                    .include_file_handler
-                    .as_ref()
-                    .map_or(IncludeResolution::NotFound, |ifh| {
-                        ifh.resolve_target(file_name, &target, &attrlist, self.parser)
-                    });
-
-                // Matched exhaustively (no catch-all) on purpose: although
-                // `IncludeResolution` is `non_exhaustive` for downstream crates,
-                // within this crate a new reason must be handled here
-                // deliberately – with its own warning – rather than silently
-                // collapsing into "not found". Each failure reason carries the
-                // `WarningType` constructor (a `fn(String) -> WarningType`) used
-                // to build its warning below, once the target is available to
-                // move in. The constructor paired with `Found` is never used.
-                let (include_content, failure_warning): (_, fn(String) -> WarningType) =
-                    match resolution {
-                        IncludeResolution::Found(content) => {
-                            (Some(content), WarningType::IncludeFileNotFound)
-                        }
-
-                        IncludeResolution::NotReadable => {
-                            (None, WarningType::IncludeFileNotReadable)
-                        }
-
-                        IncludeResolution::NotDecodable => {
-                            (None, WarningType::IncludeFileNotDecodable)
-                        }
-
-                        IncludeResolution::NotFound => (None, WarningType::IncludeFileNotFound),
-                    };
-
-                if let Some(include_content) = include_content {
-                    // Apply `lines`/`tag(s)` selection and `indent` normalization
-                    // to the raw included content before it is merged, matching
-                    // Asciidoctor. Any nested include/conditional directives in an
-                    // AsciiDoc include are therefore interpreted only on the
-                    // selected, re-indented lines.
-                    let (selected, tag_diagnostics) =
-                        select_included_lines(include_content.content(), &attrlist);
-                    let (selected, nested_reindent) =
-                        reindent_included_lines(selected, &attrlist, self.parser);
-
-                    // A malformed or unmatched tag directive (or a requested tag
-                    // that was never found) is reported against the include
-                    // directive's own cursor.
-                    self.emit_tag_filter_warnings(&tag_diagnostics, file_name, source_line_number);
-
-                    // The parser only handles UTF-8 content, so an `encoding`
-                    // attribute requesting any other encoding cannot be honored
-                    // by the parser itself; record a warning (emitted below, once
-                    // the offset of the included content is known). See
-                    // `include.adoc`. A handler that transcodes the content to
-                    // UTF-8 itself signals this via `IncludeContent::transcoded`,
-                    // in which case the encoding has been honored and no warning
-                    // is recorded. See
-                    // https://github.com/asciidoc-rs/asciidoc-parser/issues/611.
-                    let non_utf8_encoding = (!include_content.encoding_handled())
-                        .then(|| {
-                            attrlist
-                                .named_attribute("encoding")
-                                .map(|a| a.value())
-                                .filter(|v| !is_utf8_encoding(v))
-                        })
-                        .flatten();
-
-                    // `leveloffset` wraps the included content in `:leveloffset:`
-                    // attribute entries: the offset is applied to the included
-                    // content and reset afterward (see
-                    // `include-with-leveloffset.adoc`). The running `leveloffset`
-                    // document attribute is applied to section levels during
-                    // parsing (see `SectionBlock::parse` and
-                    // `Parser::level_offset`), so this wrapping shifts the
-                    // effective heading levels of the included content.
-                    let leveloffset = attrlist
-                        .named_attribute("leveloffset")
-                        .map(|a| a.value())
-                        .filter(|v| !v.is_empty());
-
-                    // Capture the restore value *before* processing the include:
-                    // an included AsciiDoc file may itself set `:leveloffset:`,
-                    // which would mutate the running attribute state, so reading it
-                    // afterward would restore the included file's value rather than
-                    // the one in effect before the include.
-                    let restore_leveloffset = leveloffset.map(|offset| {
-                        let restore = match self.parser.attribute_value("leveloffset") {
-                            InterpretedValue::Value(v) if !v.is_empty() => {
-                                format!(":leveloffset: {v}")
-                            }
-                            _ => ":leveloffset!:".to_string(),
-                        };
-                        let wrapper = Fidelity::Synthetic(Transform::LevelOffsetWrapper);
-                        self.emit_line(
-                            &format!(":leveloffset: {offset}"),
-                            file_name,
-                            source_line_number,
-                            wrapper,
-                            &mut has_reported_file,
-                        );
-                        self.emit_line(
-                            "",
-                            file_name,
-                            source_line_number,
-                            wrapper,
-                            &mut has_reported_file,
-                        );
-                        restore
-                    });
-
-                    let content_start = self.output.len();
-
-                    if is_asciidoc_file(&target) {
-                        // Register the included AsciiDoc file so an
-                        // inter-document cross reference whose target names it
-                        // can later collapse to a same-document reference (its
-                        // anchors are now part of this document). A `lines` or
-                        // partial `tag(s)` selection records a *partial* include,
-                        // which does not collapse the reference. A file
-                        // included both fully and partially resolves to full;
-                        // that merge is applied by
-                        // [`Catalog::register_include`] when these entries are
-                        // replayed into the catalog.
-                        //
-                        // Only a directive written in the *outermost* document
-                        // (depth 1) is recorded: its target is already in the
-                        // coordinate system an inter-document xref target uses.
-                        // A nested include's target is relative to the file
-                        // containing it, so registering it as written could
-                        // collide with – and falsely collapse – a root-relative
-                        // xref that names a different file. A nested include is
-                        // therefore not recorded at all: an xref to it keeps
-                        // its ordinary inter-document destination.
-                        //
-                        // [`Catalog::register_include`]: crate::document::Catalog::register_include
-                        if self.include_depth == 1 {
-                            let full = is_full_include(&attrlist);
-                            self.includes
-                                .push((include_catalog_key(&target).to_string(), full));
-                        }
-
-                        // The directive's `depth` attribute lowers the maximum
-                        // include depth while the included file (and anything
-                        // it includes) is processed; the previous limit is
-                        // restored once the include has been merged. A positive
-                        // value permits that many more levels below the
-                        // included file, clamped to the absolute
-                        // `max-include-depth` limit; zero (or a value that
-                        // coerces to zero) permits none. `include_depth` here
-                        // is the containing file's depth plus one – i.e. the
-                        // depth of the included file itself.
-                        let saved_max_depth = self.max_include_depth;
-
-                        if let Some(depth_attr) = attrlist.named_attribute("depth")
-                            && let Some(max_depth) = self.max_include_depth.as_mut()
-                        {
-                            let rel = ruby_to_i(depth_attr.value());
-                            if rel > 0 {
-                                // A request too large for `usize` (possible on
-                                // 32-bit targets) saturates rather than
-                                // wrapping into a restrictive value; the clamp
-                                // below then reduces it to the absolute limit.
-                                let mut rel = usize::try_from(rel).unwrap_or(usize::MAX);
-                                let mut curr = self.include_depth.saturating_add(rel);
-                                if curr > max_depth.abs {
-                                    curr = max_depth.abs;
-                                    rel = max_depth.abs;
-                                }
-                                max_depth.curr = curr;
-                                max_depth.rel = rel;
-                            } else {
-                                max_depth.curr = self.include_depth;
-                                max_depth.rel = 0;
-                            }
-                        }
-
-                        // AsciiDoc files are run through the preprocessor, so the
-                        // include (and other) directives they contain are
-                        // interpreted.
-                        self.process_adoc_include(&selected, Some(&target), &nested_reindent);
-
-                        self.max_include_depth = saved_max_depth;
-                    } else {
-                        // Non-AsciiDoc files are merged verbatim; the preprocessor
-                        // does not interpret any AsciiDoc directives within them
-                        // (matching Asciidoctor).
-                        self.process_nonadoc_include(&selected, Some(&target), &nested_reindent);
-                    }
-
-                    if let Some(encoding) = non_utf8_encoding {
-                        // Point the warning at the first line of the included
-                        // content (the directive line itself is not present in the
-                        // output once it has been expanded).
-                        let len = self.output[content_start..]
-                            .find('\n')
-                            .unwrap_or(self.output.len() - content_start);
-                        self.warnings.push(DeferredWarning {
-                            offset: content_start,
-                            len,
-                            warning: WarningType::NonUtf8IncludeEncoding(encoding.to_string()),
-                            origin: None,
-                        });
-                    }
-
-                    if let Some(restore) = restore_leveloffset {
-                        // Reset the level offset to whatever was in effect before
-                        // the include (unset unless a `:leveloffset:` was active).
-                        let wrapper = Fidelity::Synthetic(Transform::LevelOffsetWrapper);
-                        self.emit_line(
-                            "",
-                            file_name,
-                            source_line_number,
-                            wrapper,
-                            &mut has_reported_file,
-                        );
-                        self.emit_line(
-                            &restore,
-                            file_name,
-                            source_line_number,
-                            wrapper,
-                            &mut has_reported_file,
-                        );
-                    }
-
-                    // Re-report the including file if there's more content.
-                    has_reported_file = false;
-                } else if attrlist.has_option("optional") {
-                    // `opts=optional`: a target that can't be resolved is dropped
-                    // silently – neither the "Unresolved directive" text nor a
-                    // warning is produced (matching Asciidoctor). Nothing is
-                    // emitted for this line; re-anchor the source map so the lines
-                    // that follow map back to their correct original line numbers.
-                    has_reported_file = false;
-                } else {
-                    // The target could not be resolved. Replace the directive with
-                    // an "Unresolved directive" message and record a warning. A
-                    // file that exists but can't be read (or can't be decoded as
-                    // UTF-8) is reported distinctly from a missing one, matching
-                    // Asciidoctor.
-                    let warning = failure_warning(target);
-
-                    self.emit_unresolved_directive(
-                        line.data(),
-                        warning,
-                        file_name,
-                        source_line_number,
-                        &mut has_reported_file,
-                    );
-                }
+                self.process_include_directive(
+                    &caps,
+                    line.data(),
+                    file_name,
+                    source_line_number,
+                    content_fidelity,
+                    &mut has_reported_file,
+                );
             } else {
                 // If none of the above apply, add the line to output.
                 //
@@ -936,6 +533,468 @@ impl<'p> PreprocessorState<'p> {
         }
 
         self.include_depth -= 1;
+    }
+
+    /// Process an `include::` directive line: resolve its target through the
+    /// configured include file handler (honoring the safe mode, the URI-read
+    /// permission, and the include-depth limits) and merge the resulting
+    /// content, or record the appropriate diagnostic. Extracted from the main
+    /// preprocessing loop so it can be shared with a single-line conditional
+    /// whose bracketed body is itself an include directive (see
+    /// [`process_single_line_content`]).
+    ///
+    /// `line_data` is the directive line as written (the raw source line for a
+    /// top-level include, or the bracketed body for a single-line conditional);
+    /// `caps` are its [`INCLUDE_DIRECTIVE`] captures.
+    ///
+    /// [`process_single_line_content`]: Self::process_single_line_content
+    fn process_include_directive(
+        &mut self,
+        caps: &Captures<'_>,
+        line_data: &str,
+        file_name: Option<&str>,
+        source_line_number: usize,
+        content_fidelity: Fidelity,
+        has_reported_file: &mut bool,
+    ) {
+        // Asciidoctor substitutes attributes into an include target
+        // using the `attribute-missing` policy in effect, except that
+        // `warn` is mapped to `drop-line`: a warning here names the
+        // whole directive, not the individual reference. Under either
+        // of those policies a reference to a missing attribute empties
+        // the entire target, and the directive is dropped before the
+        // include file handler is ever consulted. See issue #776.
+        let attribute_missing = AttributeMissing::from_parser(self.parser);
+
+        let missing_policy = match attribute_missing {
+            AttributeMissing::Skip => MissingAttribute::KeepLiteral,
+            AttributeMissing::Drop => MissingAttribute::Drop,
+            AttributeMissing::DropLine | AttributeMissing::Warn => MissingAttribute::DropLine,
+        };
+
+        let (target, missing_reference) =
+            self.substitute_attributes_tracking(&caps[1], missing_policy);
+
+        if missing_reference
+            && matches!(
+                attribute_missing,
+                AttributeMissing::DropLine | AttributeMissing::Warn
+            )
+        {
+            // Under `drop-line` (and for an include marked
+            // `opts=optional`) the directive line is removed with no
+            // replacement text. Asciidoctor logs this at INFO level;
+            // this crate has no INFO channel, so — as everywhere else
+            // `drop-line` applies — the line is dropped silently.
+            // Re-anchor the source map so the lines that follow map
+            // back to their correct original line numbers.
+            if attribute_missing == AttributeMissing::DropLine
+                || parse_attrlist(caps, self.parser).has_option("optional")
+            {
+                *has_reported_file = false;
+                return;
+            }
+
+            // Under `warn` the directive is replaced by an "Unresolved
+            // directive" message, as it is for a target that could not
+            // be resolved, and a warning naming the whole directive is
+            // recorded.
+            self.emit_unresolved_directive(
+                line_data,
+                WarningType::IncludeDroppedDueToMissingAttribute(line_data.to_owned()),
+                file_name,
+                source_line_number,
+                has_reported_file,
+            );
+
+            return;
+        }
+
+        if self.parser.safe >= SafeMode::Secure {
+            // The include directive is disabled at `SafeMode::Secure`
+            // and above (the default): rather than embed the contents of
+            // an arbitrary file, the directive is converted to a link to
+            // its target, matching Asciidoctor. The include file handler
+            // is never consulted in this case.
+            self.record_origin(
+                file_name,
+                source_line_number,
+                Fidelity::Synthetic(Transform::SecureLinkRewrite),
+                has_reported_file,
+            );
+
+            // A target containing a space would break the link macro,
+            // so it is wrapped in a `pass:c[…]` macro (matching
+            // Asciidoctor).
+            let replacement = if target.contains(' ') {
+                format!("link:pass:c[{target}][role=include]")
+            } else {
+                format!("link:{target}[role=include]")
+            };
+            self.output_line_number += 1;
+            self.output.push_str(&replacement);
+            self.output.push('\n');
+
+            return;
+        }
+
+        // `max-include-depth=0` disables the include directive
+        // entirely: the directive line is left in the output verbatim,
+        // with no diagnostic, and the include file handler is never
+        // consulted (matching Asciidoctor).
+        let Some(max_depth) = self.max_include_depth else {
+            self.emit_line(
+                line_data,
+                file_name,
+                source_line_number,
+                content_fidelity,
+                has_reported_file,
+            );
+            return;
+        };
+
+        // When the file containing the directive already sits at the
+        // maximum include depth, the directive is likewise left
+        // verbatim, and a "maximum include depth exceeded" error is
+        // recorded at the directive's own file and line (matching
+        // Asciidoctor). `include_depth` counts the current file as 1,
+        // so the containing file's depth — which the limit is compared
+        // against — is `include_depth - 1`, making the depth-exceeded
+        // condition `include_depth - 1 >= curr`, i.e.:
+        if self.include_depth > max_depth.curr {
+            self.warnings.push(DeferredWarning {
+                offset: self.output.len(),
+                len: line_data.len(),
+                warning: WarningType::MaxIncludeDepthExceeded(max_depth.rel),
+                origin: None,
+            });
+
+            self.emit_line(
+                line_data,
+                file_name,
+                source_line_number,
+                content_fidelity,
+                has_reported_file,
+            );
+            return;
+        }
+
+        let attrlist = parse_attrlist(caps, self.parser);
+
+        // A URI target is only fetched when the URI read permission has
+        // been granted (`allow-uri-read`). This is disabled by default,
+        // so a URI include that is not permitted is not fetched; instead
+        // the directive is converted to a `link:` macro to its target —
+        // the same rewrite applied at `SafeMode::Secure` above — and no
+        // warning is recorded (matching Asciidoctor). See
+        // `include-uri.adoc`.
+        if is_uri(&target) && !self.parser.is_attribute_set("allow-uri-read") {
+            self.record_origin(
+                file_name,
+                source_line_number,
+                Fidelity::Synthetic(Transform::SecureLinkRewrite),
+                has_reported_file,
+            );
+
+            // A target containing a space would break the link macro,
+            // so it is wrapped in a `pass:c[…]` macro (matching
+            // Asciidoctor).
+            let replacement = if target.contains(' ') {
+                format!("link:pass:c[{target}][role=include]")
+            } else {
+                format!("link:{target}[role=include]")
+            };
+            self.output_line_number += 1;
+            self.output.push_str(&replacement);
+            self.output.push('\n');
+
+            return;
+        }
+
+        // Ask the handler to resolve the target. With no handler
+        // configured, the target is treated as not found. The failure
+        // reason (`NotFound`, `NotReadable`, or `NotDecodable`) selects
+        // the warning recorded below, mirroring Asciidoctor's distinct
+        // `include file not found`, `include file not readable`, and
+        // `invalid byte sequence in UTF-8` messages.
+        let resolution = self
+            .parser
+            .include_file_handler
+            .as_ref()
+            .map_or(IncludeResolution::NotFound, |ifh| {
+                ifh.resolve_target(file_name, &target, &attrlist, self.parser)
+            });
+
+        // Matched exhaustively (no catch-all) on purpose: although
+        // `IncludeResolution` is `non_exhaustive` for downstream crates,
+        // within this crate a new reason must be handled here
+        // deliberately — with its own warning — rather than silently
+        // collapsing into "not found". Each failure reason carries the
+        // `WarningType` constructor (a `fn(String) -> WarningType`) used
+        // to build its warning below, once the target is available to
+        // move in. The constructor paired with `Found` is never used.
+        let (include_content, failure_warning): (_, fn(String) -> WarningType) = match resolution {
+            IncludeResolution::Found(content) => (Some(content), WarningType::IncludeFileNotFound),
+
+            IncludeResolution::NotReadable => (None, WarningType::IncludeFileNotReadable),
+
+            IncludeResolution::NotDecodable => (None, WarningType::IncludeFileNotDecodable),
+
+            IncludeResolution::NotFound => (None, WarningType::IncludeFileNotFound),
+        };
+
+        if let Some(include_content) = include_content {
+            // Apply `lines`/`tag(s)` selection and `indent` normalization
+            // to the raw included content before it is merged, matching
+            // Asciidoctor. Any nested include/conditional directives in an
+            // AsciiDoc include are therefore interpreted only on the
+            // selected, re-indented lines.
+            let (selected, tag_diagnostics) =
+                select_included_lines(include_content.content(), &attrlist);
+            let (selected, nested_reindent) =
+                reindent_included_lines(selected, &attrlist, self.parser);
+
+            // A malformed or unmatched tag directive (or a requested tag
+            // that was never found) is reported against the include
+            // directive's own cursor.
+            self.emit_tag_filter_warnings(&tag_diagnostics, file_name, source_line_number);
+
+            // The parser only handles UTF-8 content, so an `encoding`
+            // attribute requesting any other encoding cannot be honored
+            // by the parser itself; record a warning (emitted below, once
+            // the offset of the included content is known). See
+            // `include.adoc`. A handler that transcodes the content to
+            // UTF-8 itself signals this via `IncludeContent::transcoded`,
+            // in which case the encoding has been honored and no warning
+            // is recorded. See
+            // https://github.com/asciidoc-rs/asciidoc-parser/issues/611.
+            let non_utf8_encoding = (!include_content.encoding_handled())
+                .then(|| {
+                    attrlist
+                        .named_attribute("encoding")
+                        .map(|a| a.value())
+                        .filter(|v| !is_utf8_encoding(v))
+                })
+                .flatten();
+
+            // `leveloffset` wraps the included content in `:leveloffset:`
+            // attribute entries: the offset is applied to the included
+            // content and reset afterward (see
+            // `include-with-leveloffset.adoc`). The running `leveloffset`
+            // document attribute is applied to section levels during
+            // parsing (see `SectionBlock::parse` and
+            // `Parser::level_offset`), so this wrapping shifts the
+            // effective heading levels of the included content.
+            let leveloffset = attrlist
+                .named_attribute("leveloffset")
+                .map(|a| a.value())
+                .filter(|v| !v.is_empty());
+
+            // Capture the restore value *before* processing the include:
+            // an included AsciiDoc file may itself set `:leveloffset:`,
+            // which would mutate the running attribute state, so reading it
+            // afterward would restore the included file's value rather than
+            // the one in effect before the include.
+            let restore_leveloffset = leveloffset.map(|offset| {
+                let restore = match self.parser.attribute_value("leveloffset") {
+                    InterpretedValue::Value(v) if !v.is_empty() => {
+                        format!(":leveloffset: {v}")
+                    }
+                    _ => ":leveloffset!:".to_string(),
+                };
+                let wrapper = Fidelity::Synthetic(Transform::LevelOffsetWrapper);
+                self.emit_line(
+                    &format!(":leveloffset: {offset}"),
+                    file_name,
+                    source_line_number,
+                    wrapper,
+                    has_reported_file,
+                );
+                self.emit_line(
+                    "",
+                    file_name,
+                    source_line_number,
+                    wrapper,
+                    has_reported_file,
+                );
+                restore
+            });
+
+            let content_start = self.output.len();
+
+            // The file name to record for the included content: the target
+            // combined with the directory of the file containing this
+            // directive, so a further-nested include inside it — and any
+            // diagnostic or `SourceMap` entry attached to its content —
+            // resolves against the right directory rather than just the
+            // target as written here. See `nested_file_name`.
+            //
+            // A directive written directly in the primary document is
+            // joined against `None` rather than `file_name`: there,
+            // `file_name` is the primary document's own name, which may
+            // carry a directory (or be a full filesystem path) that has
+            // nothing to do with how the target was written. Folding it
+            // in would record an absolute path in the `SourceMap` instead
+            // of the target as written/joined relative to the primary
+            // document, unlike Asciidoctor's own sourcemap. See
+            // `nested_file_name`'s doc comment: `container` is `None` for
+            // the primary document.
+            //
+            // This is *not* simply `include_depth == 1`: a table cell
+            // that itself came from an included file is preprocessed in
+            // its own top-level (depth 1) pass — see the `include::`
+            // handling in `blocks::table` — with that file's own
+            // (already directory-joined) name as `file_name`, and a
+            // directive directly in such a cell must still resolve
+            // against *that* directory, not `None`. Comparing against
+            // the parser's `primary_file_name` (rather than the depth
+            // counter, which resets to 0 for that inner pass) tells the
+            // two cases apart: it is only `Some(file_name) ==
+            // primary_file_name` when this call is processing the actual
+            // primary document text, at any depth-1 pass.
+            let nested_name = if file_name == self.parser.primary_file_name.as_deref() {
+                nested_file_name(None, &target)
+            } else {
+                nested_file_name(file_name, &target)
+            };
+
+            if is_asciidoc_file(&target) {
+                // Register the included AsciiDoc file so an
+                // inter-document cross reference whose target names it
+                // can later collapse to a same-document reference (its
+                // anchors are now part of this document). A `lines` or
+                // partial `tag(s)` selection records a *partial* include,
+                // which does not collapse the reference. A file
+                // included both fully and partially resolves to full;
+                // that merge is applied by
+                // [`Catalog::register_include`] when these entries are
+                // replayed into the catalog.
+                //
+                // Only a directive written in the *outermost* document
+                // (depth 1) is recorded: its target is already in the
+                // coordinate system an inter-document xref target uses.
+                // A nested include's target is relative to the file
+                // containing it, so registering it as written could
+                // collide with — and falsely collapse — a root-relative
+                // xref that names a different file. A nested include is
+                // therefore not recorded at all: an xref to it keeps
+                // its ordinary inter-document destination.
+                //
+                // [`Catalog::register_include`]: crate::document::Catalog::register_include
+                if self.include_depth == 1 {
+                    let full = is_full_include(&attrlist);
+                    self.includes
+                        .push((include_catalog_key(&target).to_string(), full));
+                }
+
+                // The directive's `depth` attribute lowers the maximum
+                // include depth while the included file (and anything
+                // it includes) is processed; the previous limit is
+                // restored once the include has been merged. A positive
+                // value permits that many more levels below the
+                // included file, clamped to the absolute
+                // `max-include-depth` limit; zero (or a value that
+                // coerces to zero) permits none. `include_depth` here
+                // is the containing file's depth plus one — i.e. the
+                // depth of the included file itself.
+                let saved_max_depth = self.max_include_depth;
+
+                if let Some(depth_attr) = attrlist.named_attribute("depth")
+                    && let Some(max_depth) = self.max_include_depth.as_mut()
+                {
+                    let rel = ruby_to_i(depth_attr.value());
+                    if rel > 0 {
+                        // A request too large for `usize` (possible on
+                        // 32-bit targets) saturates rather than
+                        // wrapping into a restrictive value; the clamp
+                        // below then reduces it to the absolute limit.
+                        let mut rel = usize::try_from(rel).unwrap_or(usize::MAX);
+                        let mut curr = self.include_depth.saturating_add(rel);
+                        if curr > max_depth.abs {
+                            curr = max_depth.abs;
+                            rel = max_depth.abs;
+                        }
+                        max_depth.curr = curr;
+                        max_depth.rel = rel;
+                    } else {
+                        max_depth.curr = self.include_depth;
+                        max_depth.rel = 0;
+                    }
+                }
+
+                // AsciiDoc files are run through the preprocessor, so the
+                // include (and other) directives they contain are
+                // interpreted.
+                self.process_adoc_include(&selected, Some(&nested_name), &nested_reindent);
+
+                self.max_include_depth = saved_max_depth;
+            } else {
+                // Non-AsciiDoc files are merged verbatim; the preprocessor
+                // does not interpret any AsciiDoc directives within them
+                // (matching Asciidoctor).
+                self.process_nonadoc_include(&selected, Some(&nested_name), &nested_reindent);
+            }
+
+            if let Some(encoding) = non_utf8_encoding {
+                // Point the warning at the first line of the included
+                // content (the directive line itself is not present in the
+                // output once it has been expanded).
+                let len = self.output[content_start..]
+                    .find('\n')
+                    .unwrap_or(self.output.len() - content_start);
+                self.warnings.push(DeferredWarning {
+                    offset: content_start,
+                    len,
+                    warning: WarningType::NonUtf8IncludeEncoding(encoding.to_string()),
+                    origin: None,
+                });
+            }
+
+            if let Some(restore) = restore_leveloffset {
+                // Reset the level offset to whatever was in effect before
+                // the include (unset unless a `:leveloffset:` was active).
+                let wrapper = Fidelity::Synthetic(Transform::LevelOffsetWrapper);
+                self.emit_line(
+                    "",
+                    file_name,
+                    source_line_number,
+                    wrapper,
+                    has_reported_file,
+                );
+                self.emit_line(
+                    &restore,
+                    file_name,
+                    source_line_number,
+                    wrapper,
+                    has_reported_file,
+                );
+            }
+
+            // Re-report the including file if there's more content.
+            *has_reported_file = false;
+        } else if attrlist.has_option("optional") {
+            // `opts=optional`: a target that can't be resolved is dropped
+            // silently — neither the "Unresolved directive" text nor a
+            // warning is produced (matching Asciidoctor). Nothing is
+            // emitted for this line; re-anchor the source map so the lines
+            // that follow map back to their correct original line numbers.
+            *has_reported_file = false;
+        } else {
+            // The target could not be resolved. Replace the directive with
+            // an "Unresolved directive" message and record a warning. A
+            // file that exists but can't be read (or can't be decoded as
+            // UTF-8) is reported distinctly from a missing one, matching
+            // Asciidoctor.
+            let warning = failure_warning(target);
+
+            self.emit_unresolved_directive(
+                line_data,
+                warning,
+                file_name,
+                source_line_number,
+                has_reported_file,
+            );
+        }
     }
 
     /// Merge the content of a non-AsciiDoc include verbatim.
@@ -986,9 +1045,9 @@ impl<'p> PreprocessorState<'p> {
     /// Returns `Some(true)` when `line` is an attribute list whose positional
     /// block style is `comment`, `Some(false)` when it sets some other
     /// positional style (which overrides an earlier `[comment]`), and `None`
-    /// when it is not a style-setting line – a block title, an anchor
+    /// when it is not a style-setting line — a block title, an anchor
     /// (`[[id]]`), a shorthand- or named-only attribute list, or any
-    /// non-attribute-list line – so the pending style is left unchanged.
+    /// non-attribute-list line — so the pending style is left unchanged.
     fn attrlist_block_style_is_comment(&self, line: &str) -> Option<bool> {
         // Only a bracketed attribute list carries a positional block style.
         let inner = line.strip_prefix('[')?.strip_suffix(']')?;
@@ -1015,7 +1074,7 @@ impl<'p> PreprocessorState<'p> {
     /// Apply attribute substitution as [`substitute_attributes`] does, also
     /// reporting whether a (non-escaped) reference to an unset attribute was
     /// found. In [`MissingAttribute::DropLine`] mode the substituted text is
-    /// meaningless once that flag is set – the caller drops the line it came
+    /// meaningless once that flag is set — the caller drops the line it came
     /// from.
     ///
     /// [`substitute_attributes`]: Self::substitute_attributes
@@ -1043,7 +1102,7 @@ impl<'p> PreprocessorState<'p> {
                 let attr_name = &caps[2];
 
                 // A backslash immediately before the opening brace (`\{id}`) or
-                // before the closing brace (`{id\}`) – or both, as in `\{id\}` –
+                // before the closing brace (`{id\}`) — or both, as in `\{id\}` —
                 // escapes the reference: it is emitted literally with the
                 // escaping backslash(es) removed, whether or not the attribute is
                 // set. This mirrors the content-substitution path and
@@ -1100,7 +1159,7 @@ impl<'p> PreprocessorState<'p> {
     ///
     /// A new segment is appended when the origin has not yet been reported
     /// since the last re-anchor (`has_reported_file` is `false`), or when
-    /// `fidelity` differs from the previously appended segment's – so a run
+    /// `fidelity` differs from the previously appended segment's — so a run
     /// of verbatim lines interrupted by a transformed one splits into
     /// separate segments and each carries its own [`Fidelity`]. Otherwise
     /// the current run continues and nothing is appended.
@@ -1221,7 +1280,7 @@ impl<'p> PreprocessorState<'p> {
             // with non-empty brackets (e.g. `endif::name[text]`) is malformed
             // and closes nothing; a mismatched or unmatched `endif` likewise
             // closes nothing. Asciidoctor logs an error in each case (but stays
-            // silent while an enclosing conditional is already skipping – the
+            // silent while an enclosing conditional is already skipping — the
             // stray `endif` is just discarded along with the skipped region).
             if !content.is_empty() {
                 if !already_skipping {
@@ -1446,6 +1505,28 @@ impl<'p> PreprocessorState<'p> {
         source_line_number: usize,
         has_reported_file: &mut bool,
     ) {
+        // A single-line conditional whose body is itself an include directive is
+        // re-fed through include processing rather than emitted literally,
+        // matching Asciidoctor: its reader restores the body as the next line and
+        // decrements the look-ahead so a line beginning `include::` is processed
+        // again (`replace_next_line`/`@look_ahead -= 1`). The body is right-
+        // trimmed first (Asciidoctor's `replace_next_line text.rstrip`) so the
+        // anchored include-directive pattern still matches.
+        let include_body = content.trim_end();
+        if include_body.starts_with("include::")
+            && let Some(caps) = INCLUDE_DIRECTIVE.captures(include_body)
+        {
+            self.process_include_directive(
+                &caps,
+                include_body,
+                file_name,
+                source_line_number,
+                Fidelity::Transformed(Transform::Rewritten),
+                has_reported_file,
+            );
+            return;
+        }
+
         let can_have_attribute = self.can_have_attribute;
         let mut applied_attribute = false;
 
@@ -1483,8 +1564,8 @@ impl<'p> PreprocessorState<'p> {
     /// Evaluate an `ifdef`/`ifndef` condition, returning `true` if the enclosed
     /// content should be included.
     ///
-    /// Multiple attribute names may be combined with `,` (any is set – logical
-    /// OR) or `+` (all are set – logical AND). The spec forbids mixing the two
+    /// Multiple attribute names may be combined with `,` (any is set — logical
+    /// OR) or `+` (all are set — logical AND). The spec forbids mixing the two
     /// combinators in a single expression; when they are mixed anyway, the
     /// combinator that appears *first* governs the whole expression and the
     /// target is split on that delimiter alone, so the other delimiter becomes
@@ -1783,7 +1864,7 @@ fn directive_text(keyword: &str, target: &str, content: &str) -> String {
 /// Per the [include directive] spec, a file is treated as AsciiDoc if it has
 /// one of these extensions: `.asciidoc`, `.adoc`, `.ad`, `.asc`, or `.txt`. The
 /// comparison is case-sensitive, and a target with no extension is not
-/// considered AsciiDoc – both matching Asciidoctor.
+/// considered AsciiDoc — both matching Asciidoctor.
 ///
 /// [include directive]: https://docs.asciidoctor.org/asciidoc/latest/directives/include/#include-nonasciidoc
 fn is_asciidoc_file(target: &str) -> bool {
@@ -1798,6 +1879,210 @@ fn is_asciidoc_file(target: &str) -> bool {
     }
 }
 
+/// Computes the file name to record for the content of a nested `include::`
+/// directive's target — the `source` a further-nested `include::` inside it
+/// resolves relative to (see [`IncludeFileHandler::resolve_target`]) and the
+/// file name attached to its content in diagnostics and the [`SourceMap`].
+///
+/// `target` is the directive's target exactly as written, which is relative
+/// to the directory of the file that contains the directive (`container`;
+/// `None` for the primary document). A target several levels deep must
+/// therefore be combined with `container`'s own directory to still name the
+/// right file — otherwise a directive nested inside a file that itself lives
+/// in a subdirectory resolves as if that subdirectory did not exist. This
+/// mirrors the path arithmetic Asciidoctor's `PreprocessorReader` performs
+/// when it pushes a nested include onto its stack (deriving the new cursor's
+/// `dir` from the containing cursor's `dir` and the target), but — like
+/// [`IncludeFileHandler::resolve_target`] itself — stays purely lexical: no
+/// filesystem access, and no safe-mode jailing (that is the handler's
+/// responsibility; see `resolve_target`'s contract).
+///
+/// An absolute target (a leading `/` or `\`, a Windows drive prefix such as
+/// `C:`, or a URI such as `https://…`) is kept as-is: however the handler
+/// interprets it, it does not need `container`'s directory to make sense of
+/// it.
+///
+/// A `container` that is itself a URI (a host-supplied
+/// [`IncludeFileHandler`](crate::parser::IncludeFileHandler) may fetch remote
+/// content, even though this crate's own handlers never
+/// resolve one — see the `remote-fetch-not-planned` note on
+/// [`IncludeFileHandler::resolve_target`]) is joined with [`join_uri_path`],
+/// which folds `target`'s segments into the URI's path *without* disturbing
+/// its scheme and authority (`scheme://host:port`) — the naive
+/// separator-based join [`join_local_path`] performs would collapse the `//`
+/// after the scheme, since it looks like a doubled path separator.
+///
+/// [`IncludeFileHandler::resolve_target`]: crate::parser::IncludeFileHandler::resolve_target
+fn nested_file_name(container: Option<&str>, target: &str) -> String {
+    if is_uri(target) || is_absolute_path(target) {
+        return target.to_owned();
+    }
+
+    match container {
+        Some(container) if is_uri(container) => join_uri_path(container, target),
+        _ => join_local_path(container, target),
+    }
+}
+
+/// Joins `target` onto the directory of `container` (or, with no `container`,
+/// returns `target`'s own cleaned-up path) using plain `/`-separated
+/// (filesystem-style) path arithmetic. See [`nested_file_name`], which
+/// dispatches here for a `container` that is not a URI.
+///
+/// `container`'s directory may itself be absolute (a Posix `/`, a Windows `\`
+/// or drive prefix, or a UNC/verbatim `\\` — see [`path_root`]); that root is
+/// carried through to the result rather than folded as a segment, so an
+/// absolute container's own absoluteness is not lost. Feeding it through
+/// [`push_path_segment`] undistinguished from an ordinary segment — as an
+/// earlier version of this function did — collapses a leading `/` (or `\\`)
+/// into an empty component and silently drops it, the same way a doubled
+/// separator would, turning `/tmp/docs/doc.adoc` into a relative-looking
+/// `tmp/docs/…`.
+fn join_local_path(container: Option<&str>, target: &str) -> String {
+    // The root must be split off *before* taking the directory: a container
+    // that names a file directly at its root (e.g. `/doc.adoc`) has nothing
+    // before its last separator, so finding the directory first and only then
+    // looking for a root would see an empty string and miss the root that was
+    // right there in the separator itself.
+    let (root, dir) = match container.map(path_root) {
+        Some((root, rest)) => (root, directory_of(rest)),
+        None => (String::new(), ""),
+    };
+
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in dir.split(['/', '\\']) {
+        push_path_segment(&mut segments, segment);
+    }
+    for segment in target.split(['/', '\\']) {
+        push_path_segment(&mut segments, segment);
+    }
+
+    format!("{root}{}", segments.join("/"))
+}
+
+/// Splits `path` into its root — a Posix `/`, a UNC/verbatim authority
+/// (`//server/share`), or a Windows drive prefix such as `C:/` or `C:\` —
+/// and the remainder that follows it, normalizing the root to forward
+/// slashes (with a single trailing one) so it concatenates directly onto the
+/// `/`-joined result [`join_local_path`] builds around it. A `path` with none
+/// of these (a relative path) has an empty root and is returned unchanged as
+/// the remainder.
+///
+/// Mirrors what [`is_absolute_path`] treats as absolute, but — unlike that
+/// predicate, which only asks yes/no — also hands back the root text
+/// separately from the rest of the path, so a caller can fold the remainder's
+/// segments (resolving `.`/`..`) without that folding mistaking the root's
+/// own separator(s) for empty segments to drop, or — for a UNC path — its
+/// server and share components for ordinary foldable segments a `..` could
+/// pop past. A UNC path's authority is exactly two components (`server` and
+/// `share`); Windows requires both, so both are folded into the root here —
+/// leaving either foldable, as an earlier version of this function did,
+/// would let enough `..` segments in the target climb past the share, or even
+/// the server, producing a malformed result such as `//server/other.adoc` or
+/// `//../other.adoc`. The same reasoning is why [`join_uri_path`] carves a
+/// URI's `scheme://host` out as an untouched origin rather than folding it.
+fn path_root(path: &str) -> (String, &str) {
+    if path.starts_with("//") || path.starts_with(r"\\") {
+        let rest = &path[2..];
+
+        // Consume the server and share components (each up to its own
+        // trailing separator, or the rest of the string if there is no
+        // further separator) into the root before folding begins.
+        let mut end = 0;
+        for _ in 0..2 {
+            end += match rest[end..].find(['/', '\\']) {
+                Some(index) => index + 1,
+                None => rest.len() - end,
+            };
+        }
+        let authority = rest[..end].trim_end_matches(['/', '\\']).replace('\\', "/");
+
+        return (format!("//{authority}/"), &rest[end..]);
+    }
+
+    if let Some(rest) = path.strip_prefix(['/', '\\']) {
+        return ("/".to_owned(), rest);
+    }
+
+    let mut chars = path.chars();
+    if let (Some(letter), Some(':')) = (chars.next(), chars.next())
+        && letter.is_ascii_alphabetic()
+    {
+        let rest = path[2..].strip_prefix(['/', '\\']).unwrap_or(&path[2..]);
+        return (format!("{}:/", letter.to_ascii_uppercase()), rest);
+    }
+
+    (String::new(), path)
+}
+
+/// Joins `target` onto the directory of `container`, a URI (`container` must
+/// satisfy [`is_uri`]), keeping its scheme and authority
+/// (`scheme://host:port`) intact and folding path segments only in the
+/// portion that follows. See [`nested_file_name`], which dispatches here for
+/// a URI `container`.
+fn join_uri_path(container: &str, target: &str) -> String {
+    // `container` matched `is_uri`, so it has a `scheme://` prefix; the
+    // authority runs from there to the next `/` (or the end of the string, if
+    // the URI has no path component).
+    let scheme_end = container.find("://").map_or(0, |index| index + 3);
+    let authority_end = container[scheme_end..]
+        .find('/')
+        .map_or(container.len(), |index| scheme_end + index);
+    let origin = &container[..authority_end];
+    let path = &container[authority_end..];
+
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in directory_of(path).split('/') {
+        push_path_segment(&mut segments, segment);
+    }
+    for segment in target.split(['/', '\\']) {
+        push_path_segment(&mut segments, segment);
+    }
+
+    format!("{origin}/{}", segments.join("/"))
+}
+
+/// Folds a single path `segment` onto `segments`: `.` and empty components
+/// (e.g. from a doubled separator) are dropped, and `..` pops the previous
+/// segment — unless there is nothing to pop (an empty stack, or a `..` on
+/// top), in which case it is kept, so a target may still climb above the
+/// directory it started from.
+fn push_path_segment<'a>(segments: &mut Vec<&'a str>, segment: &'a str) {
+    match segment {
+        "" | "." => {}
+        ".." => match segments.last() {
+            Some(&last) if last != ".." => {
+                segments.pop();
+            }
+            _ => segments.push(".."),
+        },
+        other => segments.push(other),
+    }
+}
+
+/// Returns the directory portion of `path`: everything before the final path
+/// separator, or the empty string when `path` has none. Both `/` and `\` are
+/// honored, since a directive's target may have been written on either
+/// platform.
+fn directory_of(path: &str) -> &str {
+    match path.rfind(['/', '\\']) {
+        Some(index) => &path[..index],
+        None => "",
+    }
+}
+
+/// Whether `path` is absolute: it begins with `/` or `\`, or with a Windows
+/// drive prefix such as `C:`.
+fn is_absolute_path(path: &str) -> bool {
+    path.starts_with('/') || path.starts_with('\\') || {
+        let mut chars = path.chars();
+        matches!(
+            (chars.next(), chars.next()),
+            (Some(letter), Some(':')) if letter.is_ascii_alphabetic()
+        )
+    }
+}
+
 /// The [`Catalog`](crate::document::Catalog) include-registry key for an
 /// AsciiDoc include `target`: the target with its AsciiDoc file extension
 /// removed, matching the path an inter-document xref target interprets to (see
@@ -1807,7 +2092,7 @@ fn is_asciidoc_file(target: &str) -> bool {
 /// The key is the target as written in the `include::` directive. Only
 /// directives written in the outermost document are registered (see the
 /// `includes` field of [`PreprocessorState`]), so the key is always relative to
-/// that document – the coordinate system an inter-document xref target uses.
+/// that document — the coordinate system an inter-document xref target uses.
 fn include_catalog_key(target: &str) -> &str {
     // `target` names an AsciiDoc file, so its final `.`-delimited segment is the
     // extension to strip; only the trailing extension is removed, so a path that
@@ -1823,7 +2108,7 @@ fn include_catalog_key(target: &str) -> &str {
 ///
 /// A `lines` selection is always partial. A `tag(s)` selection is partial too,
 /// except for the `**` wildcard, which selects every line of the file (both
-/// tagged and untagged regions) and so is a full include – matching
+/// tagged and untagged regions) and so is a full include — matching
 /// Asciidoctor's `catalog[:includes]` bookkeeping.
 fn is_full_include(attrlist: &Attrlist<'_>) -> bool {
     if attrlist
@@ -2017,7 +2302,7 @@ fn select_by_tags(text: &str, spec: &str) -> (String, Vec<TagFilterDiagnostic>) 
     }
 
     // The set of requested, non-negated tag names (excluding the `*`/`**`
-    // wildcards), in request order – used to report any that are never found.
+    // wildcards), in request order — used to report any that are never found.
     let requested_named: Vec<String> = inc_tags
         .iter()
         .filter(|(name, include)| *include && name != "*" && name != "**")
@@ -2245,7 +2530,7 @@ fn reindent_included_lines(
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
 
     // Keep the pre-transform lines so each output line's fidelity can be
-    // determined by comparison – only the lines that actually changed lose
+    // determined by comparison — only the lines that actually changed lose
     // their verbatim column mapping.
     let originals = lines.clone();
 
@@ -2564,6 +2849,115 @@ mod tests {
         assert_eq!(
             source_map.original_file_and_line(6),
             Some(SourceLine(Some("main.adoc".to_owned()), 5))
+        );
+    }
+
+    // Regression test for #131: a three-level include where the middle file
+    // lives in a subdirectory must resolve the *inner* include relative to
+    // that subdirectory (its own containing file's directory), not relative
+    // to the top-level document's directory. `InlineFileHandler` (used by the
+    // other tests in this module) ignores `source` entirely, so it can't
+    // exercise this; this handler instead mimics a filesystem-backed one by
+    // joining a relative `target` onto the directory of `source`, the way
+    // `FsIncludeFileHandler` (the crate's `html5` consumer's handler) does.
+    // Before the fix, the innermost include's `source` names the target as
+    // written in the *outer* file's directive (`subdir/middle-include.adoc`)
+    // rather than the middle file's own path
+    // (`fixtures/subdir/middle-include.adoc`), so this join lands on the
+    // wrong key and the include is left unresolved.
+    #[test]
+    fn nested_include_in_subdirectory_resolves_relative_to_its_own_file() {
+        #[derive(Debug)]
+        struct RecordingHandler {
+            calls: std::cell::RefCell<Vec<(Option<String>, String)>>,
+        }
+
+        impl IncludeFileHandler for RecordingHandler {
+            fn resolve_target<'src>(
+                &self,
+                source: Option<&str>,
+                target: &str,
+                _attrlist: &Attrlist<'src>,
+                _parser: &Parser,
+            ) -> IncludeResolution {
+                self.calls
+                    .borrow_mut()
+                    .push((source.map(str::to_owned), target.to_owned()));
+
+                let dir = source.and_then(|s| s.rfind('/').map(|i| &s[..i]));
+                let path = match dir {
+                    Some(dir) => format!("{dir}/{target}"),
+                    None => target.to_owned(),
+                };
+
+                let content = match path.as_str() {
+                    "fixtures/outer-include.adoc" => {
+                        "first line of outer\n\ninclude::subdir/middle-include.adoc[]\n\nlast line of outer"
+                    }
+                    "fixtures/subdir/middle-include.adoc" => {
+                        "first line of middle\n\ninclude::inner-include.adoc[]\n\nlast line of middle"
+                    }
+                    "fixtures/subdir/inner-include.adoc" => {
+                        "first line of inner\n\nlast line of inner"
+                    }
+                    _ => return IncludeResolution::NotFound,
+                };
+                IncludeResolution::Found(IncludeContent::new(content))
+            }
+        }
+
+        let handler = RecordingHandler {
+            calls: std::cell::RefCell::new(Vec::new()),
+        };
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_include_file_handler(handler);
+
+        let (processed_source, _source_map, _warnings, _includes) =
+            preprocess("include::fixtures/outer-include.adoc[]", &parser);
+
+        assert_eq!(
+            processed_source,
+            "first line of outer\n\nfirst line of middle\n\nfirst line of inner\n\nlast line of inner\n\nlast line of middle\n\nlast line of outer\n"
+        );
+    }
+
+    #[test]
+    fn first_level_include_is_not_joined_against_the_primary_documents_own_directory() {
+        // Regression test for
+        // https://github.com/asciidoc-rs/asciidoc-parser/issues/1157: a
+        // first-level include (one written directly in the primary
+        // document, not nested inside another include) must record its
+        // target as given/joined relative to the primary document — e.g.
+        // `partials/section.adoc` — not resolved against the *primary
+        // document's own* directory (which would turn it into
+        // `docs/partials/section.adoc`, or an absolute filesystem path if
+        // the primary document's name were one), matching Asciidoctor's
+        // sourcemap.
+        let source = "= Document Title\n\ninclude::partials/section.adoc[]";
+
+        let handler =
+            InlineFileHandler::from_pairs([("partials/section.adoc", "== Section\n\nParagraph.")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("docs/doc.adoc")
+            .with_include_file_handler(handler);
+
+        let (processed_source, source_map, _warnings, _includes) = preprocess(source, &parser);
+
+        assert_eq!(
+            processed_source,
+            "= Document Title\n\n== Section\n\nParagraph.\n"
+        );
+
+        assert_eq!(
+            source_map.original_file_and_line(3),
+            Some(SourceLine(Some("partials/section.adoc".to_owned()), 1))
+        );
+        assert_eq!(
+            source_map.original_file_and_line(5),
+            Some(SourceLine(Some("partials/section.adoc".to_owned()), 3))
         );
     }
 
@@ -3214,7 +3608,7 @@ mod tests {
     #[test]
     fn dropped_include_attrlist_does_not_leak_counter_state() {
         // Checking `opts=optional` on a directive that is about to be dropped
-        // means parsing its attribute list, which applies substitutions – so a
+        // means parsing its attribute list, which applies substitutions — so a
         // stateful expression such as `{counter:n}` is evaluated there. It
         // cannot be observed afterward: the preprocessor runs against a
         // throwaway clone of the parser, so every attribute and counter it
@@ -3238,7 +3632,7 @@ mod tests {
     #[test]
     fn include_target_with_brace_that_is_not_an_attribute_reference() {
         // A `{` that doesn't open a well-formed attribute reference gets past
-        // the fast path but matches nothing, so the target is used verbatim –
+        // the fast path but matches nothing, so the target is used verbatim —
         // and it is not treated as a missing reference under any
         // `attribute-missing` policy.
         let source = "include::{}partial.adoc[]";
@@ -3361,8 +3755,8 @@ mod tests {
 
     #[test]
     fn escaped_closing_brace_in_include_target_drops_backslash() {
-        // A backslash before the closing brace (`{missing\}`) – or both braces
-        // (`\{missing\}`) – escapes the reference the same way a leading
+        // A backslash before the closing brace (`{missing\}`) — or both braces
+        // (`\{missing\}`) — escapes the reference the same way a leading
         // backslash does: every escaping backslash is removed and the reference
         // is left unexpanded, so the include target resolves against the literal
         // `{missing}` form. This matches the content-substitution path and
@@ -3413,15 +3807,24 @@ mod tests {
 
         assert_eq!(
             source_map.original_file_and_line(8),
-            Some(SourceLine(Some("parts/section1.adoc".to_owned()), 1))
+            Some(SourceLine(
+                Some("content/parts/section1.adoc".to_owned()),
+                1
+            ))
         );
         assert_eq!(
             source_map.original_file_and_line(9),
-            Some(SourceLine(Some("parts/section1.adoc".to_owned()), 2))
+            Some(SourceLine(
+                Some("content/parts/section1.adoc".to_owned()),
+                2
+            ))
         );
         assert_eq!(
             source_map.original_file_and_line(10),
-            Some(SourceLine(Some("parts/section1.adoc".to_owned()), 3))
+            Some(SourceLine(
+                Some("content/parts/section1.adoc".to_owned()),
+                3
+            ))
         );
     }
 
@@ -3559,6 +3962,82 @@ mod tests {
         assert_eq!(
             conditional_output("head\n\nifdef::foo[dropped]\n\ntail"),
             "head\n\n\ntail\n"
+        );
+    }
+
+    #[test]
+    fn ifdef_single_line_processes_include_directive_in_brackets() {
+        // A single-line conditional whose bracketed body is itself an include
+        // directive processes the include (rather than emitting the directive
+        // text literally), matching Asciidoctor.
+        let handler = InlineFileHandler::from_pairs([("snippet.adoc", "snippet content\n")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let source = ":foo:\n\nifdef::foo[include::snippet.adoc[]]";
+        let (output, source_map, _warnings, _includes) = preprocess(source, &parser);
+
+        assert_eq!(output, ":foo:\n\nsnippet content\n");
+
+        // The merged include content is attributed to the included file, so a
+        // diagnostic in it points at the right source.
+        assert_eq!(
+            source_map.original_file_and_line(3),
+            Some(SourceLine(Some("snippet.adoc".to_owned()), 1))
+        );
+    }
+
+    #[test]
+    fn ifdef_single_line_include_in_brackets_honors_rstrip() {
+        // Asciidoctor right-trims the single-line body before re-reading it, so a
+        // trailing space inside the brackets still leaves an include directive
+        // the anchored pattern matches.
+        let handler = InlineFileHandler::from_pairs([("snippet.adoc", "snippet content\n")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let source = ":foo:\n\nifdef::foo[include::snippet.adoc[]   ]";
+        let (output, _source_map, _warnings, _includes) = preprocess(source, &parser);
+
+        assert_eq!(output, ":foo:\n\nsnippet content\n");
+    }
+
+    #[test]
+    fn ifdef_single_line_escaped_include_in_brackets_keeps_backslash() {
+        // An *escaped* include in a single-line conditional body is emitted
+        // literally with its backslash intact, matching Asciidoctor. Its reader
+        // decrements the look-ahead — forcing the body to be re-read as an
+        // include — only when the body starts with the unescaped `include::`, so
+        // `\include::…` is left as written rather than being unescaped the way a
+        // normal reader line is. A normal line `\include::…` does drop the
+        // backslash; the two paths legitimately differ.
+        let handler = InlineFileHandler::from_pairs([("snippet.adoc", "snippet content\n")]);
+
+        let parser = Parser::default()
+            .with_safe_mode(SafeMode::Server)
+            .with_primary_file_name("main.adoc")
+            .with_include_file_handler(handler);
+
+        let source = ":foo:\n\nifdef::foo[\\include::snippet.adoc[]]";
+        let (output, _source_map, _warnings, _includes) = preprocess(source, &parser);
+
+        assert_eq!(output, ":foo:\n\n\\include::snippet.adoc[]\n");
+    }
+
+    #[test]
+    fn ifdef_single_line_include_in_brackets_becomes_link_when_secure() {
+        // At `SafeMode::Secure` (the default) the include directive is disabled,
+        // so the single-line body is rewritten to a link to its target — the
+        // same rewrite a top-level include gets — rather than being resolved.
+        assert_eq!(
+            conditional_output(":foo:\n\nifdef::foo[include::snippet.adoc[]]"),
+            ":foo:\n\nlink:snippet.adoc[role=include]\n"
         );
     }
 
@@ -4405,7 +4884,7 @@ mod tests {
         // A `depth` request larger than the absolute `max-include-depth` limit
         // is clamped to it: with a limit of 2, `depth=10` still refuses the
         // third nesting level, and the diagnostic reports the clamped limit
-        // (2), not the requested relative depth (10) – matching Asciidoctor.
+        // (2), not the requested relative depth (10) — matching Asciidoctor.
         let handler = InlineFileHandler::from_pairs([
             ("a.adoc", "include::b.adoc[]"),
             ("b.adoc", "include::c.adoc[]"),
@@ -4427,8 +4906,8 @@ mod tests {
 
     #[test]
     fn huge_max_include_depth_acts_as_large_limit() {
-        // A positive `max-include-depth` too large to represent exactly –
-        // whether beyond `usize` on a 32-bit target or beyond `i64` entirely –
+        // A positive `max-include-depth` too large to represent exactly —
+        // whether beyond `usize` on a 32-bit target or beyond `i64` entirely —
         // is a very large limit, not the 0 = disabled sentinel: an ordinary
         // include still expands. (Ruby's integers are unbounded, so
         // Asciidoctor honors any such value.)
@@ -4450,8 +4929,8 @@ mod tests {
 
     #[test]
     fn huge_depth_request_is_clamped_not_wrapped() {
-        // A huge positive `depth` request – again, whether beyond `usize` on a
-        // 32-bit target or beyond `i64` entirely – is treated like any other
+        // A huge positive `depth` request — again, whether beyond `usize` on a
+        // 32-bit target or beyond `i64` entirely — is treated like any other
         // greater-than-the-limit request, clamped to the absolute
         // `max-include-depth`, rather than wrapping or collapsing into a small
         // (or zero) value that would restrict nesting further than asked.
@@ -4562,6 +5041,260 @@ mod tests {
             // A `lines` selection is partial even when `tags=**` is also present
             // (`lines` wins, matching the selection the preprocessor applies).
             assert!(!is_full("lines=1..2,tags=**"));
+        }
+    }
+
+    mod nested_file_name_tests {
+        use super::super::nested_file_name;
+
+        // With no containing file (the primary document), the target is
+        // returned as its own cleaned-up path.
+        #[test]
+        fn no_container_returns_the_target_unchanged() {
+            assert_eq!(nested_file_name(None, "chapter.adoc"), "chapter.adoc");
+            assert_eq!(
+                nested_file_name(None, "parts/chapter.adoc"),
+                "parts/chapter.adoc"
+            );
+        }
+
+        // A relative target combines with the *directory* of the containing
+        // file — the fix for #131: a target several levels deep must still
+        // resolve against the directory of the file that named it, not just
+        // the top-level document's directory.
+        #[test]
+        fn relative_target_joins_the_containers_directory() {
+            assert_eq!(
+                nested_file_name(Some("fixtures/outer-include.adoc"), "subdir/middle.adoc"),
+                "fixtures/subdir/middle.adoc"
+            );
+            assert_eq!(
+                nested_file_name(
+                    Some("fixtures/subdir/middle-include.adoc"),
+                    "inner-include.adoc"
+                ),
+                "fixtures/subdir/inner-include.adoc"
+            );
+        }
+
+        // A containing file with no directory (a bare file name) contributes
+        // no offset.
+        #[test]
+        fn container_without_a_directory_contributes_no_offset() {
+            assert_eq!(
+                nested_file_name(Some("main.adoc"), "chapter.adoc"),
+                "chapter.adoc"
+            );
+        }
+
+        // `.` and doubled separators are dropped, and `..` pops a preceding
+        // segment — including one contributed by the container's directory,
+        // so a target may climb back out of it.
+        #[test]
+        fn dot_and_parent_segments_are_resolved() {
+            assert_eq!(
+                nested_file_name(Some("parts/chapter.adoc"), "./section.adoc"),
+                "parts/section.adoc"
+            );
+            assert_eq!(
+                nested_file_name(Some("parts/chapter.adoc"), "../shared/notes.adoc"),
+                "shared/notes.adoc"
+            );
+        }
+
+        // A `..` with nothing to pop is kept, so the result can still climb
+        // above where it started (this performs no filesystem access or
+        // safe-mode jailing; a handler applies those separately).
+        #[test]
+        fn unpoppable_parent_segments_are_preserved() {
+            assert_eq!(nested_file_name(None, "../escape.adoc"), "../escape.adoc");
+            // `main.adoc` has no directory to contribute, so both `..`
+            // segments have nothing to pop and are kept.
+            assert_eq!(
+                nested_file_name(Some("main.adoc"), "../../escape.adoc"),
+                "../../escape.adoc"
+            );
+        }
+
+        // An absolute target (Posix root, or a Windows drive prefix) is kept
+        // as-is; the container's directory is irrelevant to it.
+        #[test]
+        fn absolute_target_is_kept_as_is() {
+            assert_eq!(
+                nested_file_name(Some("parts/chapter.adoc"), "/etc/passwd"),
+                "/etc/passwd"
+            );
+            assert_eq!(
+                nested_file_name(Some(r"parts\chapter.adoc"), r"C:\Windows\system32"),
+                r"C:\Windows\system32"
+            );
+        }
+
+        // A backslash-separated target or container (as a directive written
+        // on Windows might use) is handled the same as a forward-slash one.
+        #[test]
+        fn backslash_separators_are_honored() {
+            assert_eq!(
+                nested_file_name(Some(r"fixtures\outer-include.adoc"), r"subdir\middle.adoc"),
+                "fixtures/subdir/middle.adoc"
+            );
+        }
+
+        // A URI target is kept as-is, just like any other absolute target — a
+        // host-supplied `IncludeFileHandler` that fetches remote content
+        // (this crate's own handlers never resolve a URI; see
+        // `remote-fetch-not-planned`) does not need `container`'s directory
+        // to make sense of a fully-qualified URI.
+        #[test]
+        fn uri_target_is_kept_as_is() {
+            assert_eq!(
+                nested_file_name(
+                    Some("fixtures/outer-include.adoc"),
+                    "https://example.com/other.adoc"
+                ),
+                "https://example.com/other.adoc"
+            );
+        }
+
+        // A relative target joins onto the *path* of a URI container without
+        // disturbing its scheme and authority. A naive separator-based join
+        // would fold the `//` after the scheme as if it were a doubled path
+        // separator, corrupting it to a single `/` (breaking the URI); this
+        // is the regression this test guards against.
+        #[test]
+        fn relative_target_joins_a_uri_containers_path_without_corrupting_its_scheme() {
+            assert_eq!(
+                nested_file_name(
+                    Some("https://example.com/fixtures/outer-include.adoc"),
+                    "subdir/middle-include.adoc"
+                ),
+                "https://example.com/fixtures/subdir/middle-include.adoc"
+            );
+
+            // A further level nests the same way, each time relative to the
+            // immediately containing file's own directory.
+            assert_eq!(
+                nested_file_name(
+                    Some("https://example.com/fixtures/subdir/middle-include.adoc"),
+                    "inner-include.adoc"
+                ),
+                "https://example.com/fixtures/subdir/inner-include.adoc"
+            );
+        }
+
+        // A URI container with no path component (just an origin) still joins
+        // correctly, and a `..` that has nothing to pop is dropped at the
+        // origin root rather than climbing into the authority.
+        #[test]
+        fn uri_container_with_no_path_joins_at_the_origin_root() {
+            assert_eq!(
+                nested_file_name(Some("https://example.com"), "chapter.adoc"),
+                "https://example.com/chapter.adoc"
+            );
+        }
+
+        // A URI container's authority (host and port) is preserved verbatim
+        // and is never mistaken for a path segment to fold `..` against.
+        #[test]
+        fn uri_container_with_a_port_preserves_the_authority() {
+            assert_eq!(
+                nested_file_name(
+                    Some("http://example.com:9876/fixtures/outer-include.adoc"),
+                    "subdir/middle-include.adoc"
+                ),
+                "http://example.com:9876/fixtures/subdir/middle-include.adoc"
+            );
+        }
+
+        // A Posix-absolute container (e.g. a canonicalized primary document
+        // path, as a host application might supply) keeps its leading `/` in
+        // the result. Regression test: an earlier version fed the container's
+        // directory through the same segment-folding loop as an ordinary
+        // relative one, which treats a leading `/` as an empty (doubled
+        // separator) component and drops it — silently turning
+        // `/tmp/docs/doc.adoc` into a relative-looking `tmp/docs/…`.
+        #[test]
+        fn posix_absolute_container_keeps_its_leading_slash() {
+            assert_eq!(
+                nested_file_name(Some("/tmp/docs/doc.adoc"), "partials/section.adoc"),
+                "/tmp/docs/partials/section.adoc"
+            );
+
+            // A container that is itself the root has no directory segments
+            // to contribute, but the root is still kept.
+            assert_eq!(
+                nested_file_name(Some("/doc.adoc"), "chapter.adoc"),
+                "/chapter.adoc"
+            );
+        }
+
+        // A Windows drive-letter container keeps its drive prefix, normalized
+        // to a forward slash regardless of which separator the original path
+        // used.
+        #[test]
+        fn windows_drive_container_keeps_its_drive_prefix() {
+            assert_eq!(
+                nested_file_name(Some(r"C:\docs\doc.adoc"), r"partials\section.adoc"),
+                "C:/docs/partials/section.adoc"
+            );
+            assert_eq!(
+                nested_file_name(Some("d:/docs/doc.adoc"), "section.adoc"),
+                "D:/docs/section.adoc"
+            );
+        }
+
+        // A UNC (or Windows verbatim) container keeps its two-separator root
+        // rather than having it folded away as a doubled separator.
+        #[test]
+        fn unc_container_keeps_its_double_separator_root() {
+            assert_eq!(
+                nested_file_name(Some(r"\\server\share\docs\doc.adoc"), "section.adoc"),
+                "//server/share/docs/section.adoc"
+            );
+        }
+
+        // A target with enough `..` segments to climb past a UNC container's
+        // directory must not be able to pop the server or share components
+        // themselves — those are the UNC path's authority, not ordinary
+        // foldable segments. Regression test: an earlier version protected
+        // only the leading `//` and left `server`/`share` in the same
+        // foldable stack as everything else, so three levels of `..` here
+        // (one for `docs`, two more with nothing left to pop but the
+        // authority) would have popped `share` and then `server` too,
+        // producing the malformed `//other.adoc` — losing the authority
+        // outright rather than the harmless (if unresolved) `..` a caller can
+        // still recognize and clean up further, as this fix now produces.
+        #[test]
+        fn unc_authority_cannot_be_climbed_past_with_parent_segments() {
+            assert_eq!(
+                nested_file_name(Some(r"\\server\share\docs\doc.adoc"), "../../../other.adoc"),
+                "//server/share/../../other.adoc"
+            );
+        }
+
+        // A UNC container with nothing below its share still keeps the full
+        // authority as its root.
+        #[test]
+        fn unc_container_with_no_further_path_keeps_the_full_authority() {
+            assert_eq!(
+                nested_file_name(Some(r"\\server\share\doc.adoc"), "chapter.adoc"),
+                "//server/share/chapter.adoc"
+            );
+        }
+
+        // A UNC container whose authority is *incomplete* — cut off before a
+        // separator ends its second (share) component, here because the
+        // container is exactly the share itself with nothing beyond it —
+        // still doesn't panic. `path_root`'s authority scan looks for a
+        // trailing separator to end each of the two components it consumes;
+        // with none left to find for the second, it takes the rest of the
+        // string instead of indexing past the end.
+        #[test]
+        fn unc_container_with_no_trailing_separator_after_the_share_still_works() {
+            assert_eq!(
+                nested_file_name(Some(r"\\server\share"), "doc.adoc"),
+                "//server/share/doc.adoc"
+            );
         }
     }
 }

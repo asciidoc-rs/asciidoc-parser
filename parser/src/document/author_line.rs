@@ -31,10 +31,10 @@ impl<'src> AuthorLine<'src> {
             .collect();
 
         // Populate the derived author document attributes from the implicit
-        // author line – the unsuffixed first-author keys (`author`,
+        // author line — the unsuffixed first-author keys (`author`,
         // `firstname`, ...), the `author_N` companions, the `_1` companions
         // (mirrored once a second author appears), and the combined,
-        // comma-joined `authors` attribute – exactly as Asciidoctor's
+        // comma-joined `authors` attribute — exactly as Asciidoctor's
         // `process_authors` does. Setting them here, during header parsing,
         // keeps `{author}`, `{authors}`, etc. available to later header lines.
         if !authors.is_empty() {
@@ -50,14 +50,14 @@ impl<'src> AuthorLine<'src> {
     }
 }
 
-/// Matches a numeric HTML character reference – decimal (`&#174;`) or
+/// Matches a numeric HTML character reference — decimal (`&#174;`) or
 /// hexadecimal (`&#xAE;`). The terminating semicolon of such a reference must
 /// never be treated as an author separator.
 ///
 /// Only numeric references are recognized here. A named reference such as
 /// `&reg;` cannot be distinguished structurally from arbitrary `&word;` text
 /// (the crate does not carry a table of valid entity names), so treating every
-/// `&word;` as a reference would suppress genuine separators – e.g. the
+/// `&word;` as a reference would suppress genuine separators — e.g. the
 /// semicolon in `Alice &Development; Bob`. Numeric references are unambiguous,
 /// and they are what the implicit author line needs to guard (see issue #757).
 static NUMERIC_CHARACTER_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
@@ -70,8 +70,8 @@ static NUMERIC_CHARACTER_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
 /// Following Asciidoctor, a semicolon separates authors only when it is
 /// immediately followed by a space or the end of the line. A semicolon that is
 /// followed by any other character (as in `Joe Doe;Smith Johnson`) is part of a
-/// single author's name. Blank entries – produced by a trailing separator or an
-/// empty middle entry – are left in place; [`Author::parse`] trims each entry
+/// single author's name. Blank entries — produced by a trailing separator or an
+/// empty middle entry — are left in place; [`Author::parse`] trims each entry
 /// and discards the empty ones.
 ///
 /// Semicolons that terminate a numeric HTML character reference (such as
@@ -119,6 +119,8 @@ impl<'src> HasSpan<'src> for AuthorLine<'src> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use crate::{parser::ModificationContext, tests::prelude::*};
 
     #[test]
@@ -142,10 +144,50 @@ mod tests {
     }
 
     #[test]
-    fn attr_sub_with_html_encoding_fallback() {
-        // Test case for code coverage: input contains attributes but after expansion
-        // doesn't match AUTHOR regex and contains angle brackets that need HTML
-        // encoding.
+    fn implicit_author_name_is_always_header_substituted() {
+        // The header substitution group (special characters + attribute
+        // references) is applied to the implicit author-line name consistently,
+        // whether or not the line contains an attribute reference. Previously the
+        // name was returned raw unless it happened to carry an attribute
+        // reference, which forced a downstream converter to guess whether the
+        // value was already substituted.
+        let author_name = |src: &str| {
+            let mut parser = Parser::default();
+            let doc = parser.parse(src);
+
+            doc.header()
+                .author_line()
+                .unwrap()
+                .authors()
+                .next()
+                .unwrap()
+                .name()
+                .to_string()
+        };
+
+        // A plain line with literal special characters: escaped, even though it
+        // has no attribute reference.
+        assert_eq!(author_name("= T\n<x> Blogs\n\nbody\n"), "&lt;x&gt; Blogs");
+
+        // Special characters and an attribute reference together: the literal
+        // `<x>` is escaped and `{v}` is resolved.
+        assert_eq!(
+            author_name(":v: RESOLVED\n= T\n(C) <x> {v} Blogs\n\nbody\n"),
+            "(C) &lt;x&gt; RESOLVED Blogs"
+        );
+
+        // A plain line with no special characters is unchanged.
+        assert_eq!(author_name("= T\n(C) Blogs\n\nbody\n"), "(C) Blogs");
+    }
+
+    #[test]
+    fn attr_reference_value_is_inserted_verbatim() {
+        // The header substitution group runs special characters *before*
+        // attribute references (Asciidoctor's `HEADER_SUBS = [:specialcharacters,
+        // :attributes]`), so an attribute reference's value is inserted verbatim
+        // rather than being escaped a second time. Here the literal text carries
+        // no special characters, so the resolved value's `<`, `>`, and `&` are
+        // left as they are.
         let mut parser = Parser::default().with_intrinsic_attribute(
             "weird-content",
             "Complex <weird> & stuff",
@@ -161,8 +203,8 @@ mod tests {
             al,
             AuthorLine {
                 authors: &[Author {
-                    name: "Some Complex &lt;weird&gt; &amp; stuff pattern",
-                    firstname: "Some Complex &lt;weird&gt; &amp; stuff pattern",
+                    name: "Some Complex <weird> & stuff pattern",
+                    firstname: "Some Complex <weird> & stuff pattern",
                     middlename: None,
                     lastname: None,
                     email: None,
@@ -286,8 +328,12 @@ mod tests {
             al,
             AuthorLine {
                 authors: &[Author {
-                    name: "Four Names Not Supported <doc@example.com>",
-                    firstname: "Four Names Not Supported <doc@example.com>",
+                    // A line with four or more names doesn't match the author
+                    // pattern, so the whole line becomes the name — with the
+                    // header substitution group applied, escaping the literal
+                    // angle brackets.
+                    name: "Four Names Not Supported &lt;doc@example.com&gt;",
+                    firstname: "Four Names Not Supported &lt;doc@example.com&gt;",
                     middlename: None,
                     lastname: None,
                     email: None,
@@ -1131,10 +1177,13 @@ mod tests {
             AuthorLine {
                 authors: &[
                     Author {
-                        name: "Alice &Development",
+                        // The bare `&` is not a numeric character reference, so
+                        // the header substitution group escapes it — unlike a
+                        // `&#nnn;` reference, which is preserved.
+                        name: "Alice &amp;Development",
                         firstname: "Alice",
                         middlename: None,
-                        lastname: Some("&Development"),
+                        lastname: Some("&amp;Development"),
                         email: None,
                     },
                     Author {

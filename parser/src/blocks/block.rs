@@ -124,9 +124,9 @@ impl<'src> std::fmt::Debug for Block<'src> {
 /// Outcome of attempting to parse a single [`Block`].
 ///
 /// Most blocks parse to [`Parsed`](Self::Parsed). [`Dropped`](Self::Dropped)
-/// covers input that was consumed but yields no block – a drop-line block
+/// covers input that was consumed but yields no block — a drop-line block
 /// macro, or block metadata (such as a lone empty `[[]]` anchor) that decorates
-/// no block – which the parser must distinguish both from a successful parse
+/// no block — which the parser must distinguish both from a successful parse
 /// and from "no block matched" (so the block-collection loops advance past the
 /// consumed source rather than spinning or mis-parsing it).
 // `Parsed` embeds a `Block`, which is itself a large enum (see the matching
@@ -144,8 +144,8 @@ pub(crate) enum BlockParseOutcome<'src> {
     /// * A block macro whose target referenced a missing attribute under
     ///   `attribute-missing=drop-line`, which Asciidoctor discards entirely.
     ///
-    /// * Block metadata that named nothing and decorates no block – notably a
-    ///   lone empty `[[]]` anchor at the end of a block scope – which is
+    /// * Block metadata that named nothing and decorates no block — notably a
+    ///   lone empty `[[]]` anchor at the end of a block scope — which is
     ///   dropped rather than rendered.
     Dropped(Span<'src>),
 
@@ -214,7 +214,7 @@ impl<'src> Block<'src> {
     /// [`parse_for_list_item`](Self::parse_for_list_item).
     ///
     /// This wraps [`parse_internal_inner`](Self::parse_internal_inner) so that
-    /// every parsed block – whichever branch produced it – passes through the
+    /// every parsed block — whichever branch produced it — passes through the
     /// unknown-block-style check on the way out. Every block is born here (the
     /// block-collection loops call one of the public `parse_*` entry points,
     /// which funnel into this), so this is the single point at which a declared
@@ -248,9 +248,9 @@ impl<'src> Block<'src> {
         if let BlockParseOutcome::Parsed(matched_item) = &result.item
             && let Some(warning) = unknown_block_style_warning(&matched_item.item)
         {
-            // Anchor the diagnostic at the block's first content line – the
+            // Anchor the diagnostic at the block's first content line — the
             // delimiter of a delimited block, or the opening line of a paragraph
-            // – matching Asciidoctor, which reports `unknown style for …` at that
+            // — matching Asciidoctor, which reports `unknown style for …` at that
             // line rather than at the `[style]` line above it. `content_start` is
             // always set when a block carries a declared style (that requires an
             // attribute list, which only the metadata path parses).
@@ -356,7 +356,7 @@ impl<'src> Block<'src> {
         } = BlockMetadata::parse(source, parser);
 
         // A block title stashed by an enclosing section heading (see
-        // `SectionBlock::parse`) is claimed by the next block parsed – this
+        // `SectionBlock::parse`) is claimed by the next block parsed — this
         // one. A title of the block's own wins, discarding the carried title.
         // The carried title has no source line adjacent to this block, so
         // `title_source` stays `None` (the same shape as a `title=` attribute).
@@ -402,7 +402,7 @@ impl<'src> Block<'src> {
         // Resolve attribute references in a `[[id,reftext]]` anchor reftext now,
         // while the parser still holds the attributes in effect where the anchor
         // appears. A compound block's body (parsed below) can redefine those
-        // attributes, so deferring this to registration – after the body – would
+        // attributes, so deferring this to registration — after the body — would
         // record the wrong value. The result is threaded into `block_reftext`.
         let anchor_reftext = metadata
             .anchor_reftext
@@ -866,7 +866,7 @@ impl<'src> Block<'src> {
     ///
     /// `anchor_reftext` is the block's `[[id,reftext]]` anchor reftext with its
     /// attribute references already resolved (by the caller, against the
-    /// attributes in effect where the anchor appears – captured before the
+    /// attributes in effect where the anchor appears — captured before the
     /// block's body is parsed, since a compound block's body may itself
     /// redefine those attributes). This matches how the anchor ID and a
     /// `reftext=` attribute (both substituted when the attribute list is
@@ -940,7 +940,7 @@ impl<'src> Block<'src> {
         // heading, which `content_mut` deliberately does not expose (see
         // `SectionBlock`). Headings are resolved by the document-order title
         // pass (`title_refs::resolve_title_references`), which coordinates
-        // cross-references *between* titles (forward and circular) – something
+        // cross-references *between* titles (forward and circular) — something
         // per-content resolution cannot see.
         if let Some(content) = self.content_mut() {
             content.resolve_references(resolver, renderer, warnings);
@@ -1025,6 +1025,25 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Break(b) => b.declared_style(),
             Self::Toc(b) => b.declared_style(),
             Self::DocumentAttribute(b) => b.declared_style(),
+        }
+    }
+
+    fn resolved_style(&'src self) -> Option<&'src str> {
+        match self {
+            Self::Simple(b) => b.resolved_style(),
+            Self::Media(b) => b.resolved_style(),
+            Self::Section(b) => b.resolved_style(),
+            Self::List(b) => b.resolved_style(),
+            Self::ListItem(b) => b.resolved_style(),
+            Self::RawDelimited(b) => b.resolved_style(),
+            Self::CompoundDelimited(b) => b.resolved_style(),
+            Self::Admonition(b) => b.resolved_style(),
+            Self::Quote(b) => b.resolved_style(),
+            Self::Table(b) => b.resolved_style(),
+            Self::Preamble(b) => b.resolved_style(),
+            Self::Break(b) => b.resolved_style(),
+            Self::Toc(b) => b.resolved_style(),
+            Self::DocumentAttribute(b) => b.resolved_style(),
         }
     }
 
@@ -1334,9 +1353,9 @@ const ADMONITION_STYLES: &[&str] = &["NOTE", "TIP", "IMPORTANT", "WARNING", "CAU
 ///
 /// A declared block style (the first positional attribute, e.g. `[source]`) is
 /// recognized when it names a built-in context this parser can adopt (any
-/// [`is_built_in_context`] style – `example`, `listing`, `sidebar`, `image`,
-/// `table`, and so on), one of these interpreting keywords, or – via
-/// [`ADMONITION_STYLES`] – an admonition label. Anything else is an unknown
+/// [`is_built_in_context`] style — `example`, `listing`, `sidebar`, `image`,
+/// `table`, and so on), one of these interpreting keywords, or — via
+/// [`ADMONITION_STYLES`] — an admonition label. Anything else is an unknown
 /// style.
 ///
 /// Deferring the built-in contexts to [`is_built_in_context`] keeps this check
@@ -1344,7 +1363,7 @@ const ADMONITION_STYLES: &[&str] = &["NOTE", "TIP", "IMPORTANT", "WARNING", "CAU
 /// [`resolved_context`](crate::blocks::IsBlock::resolved_context), which adopts
 /// exactly those styles as the block's context: a style that
 /// `resolved_context` acts on is never reported as unknown. These keywords are
-/// the remaining styles this parser interprets without their being a context –
+/// the remaining styles this parser interprets without their being a context —
 /// `source` specializes `listing`, `abstract` an open block, the `stem`
 /// flavors a `stem` block, and `comment`/`normal`/`partintro` round out
 /// Asciidoctor's `PARAGRAPH_STYLES`.
@@ -1426,7 +1445,7 @@ fn unknown_block_style_warning(block: &Block<'_>) -> Option<WarningType> {
     ))
 }
 
-/// Whether `style` looks like an authored block-style name – a non-empty token
+/// Whether `style` looks like an authored block-style name — a non-empty token
 /// of ASCII letters, digits, `_`, or `-`. This screens out the debris a
 /// malformed attribute list can leave in the first positional slot (values
 /// carrying spaces, brackets, `=`, quotes, and so on), which is not a style the
@@ -1568,6 +1587,40 @@ mod tests {
             assert!(!is_plausible_style_name("-foo = bar"));
             assert!(!is_plausible_style_name("a,b"));
             assert!(!is_plausible_style_name("has space"));
+        }
+    }
+
+    mod resolved_style {
+        use crate::{
+            Parser,
+            blocks::{FindBlocks, IsBlock},
+        };
+
+        #[test]
+        fn forwards_to_every_block_variant() {
+            // `Block::resolved_style` forwards to each variant. Exercise every
+            // arm with a document that contains one of each block kind, and
+            // confirm the forwarded value: none of these blocks acquires an
+            // implicit style, so the resolved style equals the declared style
+            // for every one. (The one case where the two differ — a bibliography
+            // list that inherits its style from its section — is covered by the
+            // list block's own tests.)
+            let doc = Parser::default().parse(
+                "= Doc Title\n\nPreamble para.\n\nimage::pic.png[]\n\n'''\n\ntoc::[]\n\n== Section One\n\n:body-attr: x\n\nA paragraph.\n\n* list item\n\n[quote]\n____\nA quote.\n____\n\n[NOTE]\n====\nAn admonition.\n====\n\n----\nlisting\n----\n\n|===\n| cell\n|===\n\n--\nopen block\n--\n",
+            );
+
+            let mut count = 0;
+            for block in doc.descendant_blocks() {
+                assert_eq!(block.resolved_style(), block.declared_style());
+                count += 1;
+            }
+
+            // Guard against the document silently parsing into fewer blocks than
+            // the variants it is meant to cover.
+            assert!(
+                count >= 14,
+                "expected the sample document to yield every block variant, saw {count} blocks"
+            );
         }
     }
 }

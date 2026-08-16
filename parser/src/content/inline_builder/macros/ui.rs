@@ -17,7 +17,7 @@ use crate::{
 /// The delimiter a menu macro's item list is split on: the *escaped* form of
 /// the source `>` submenu caret, which is what the string replacer sees (the
 /// special-characters step runs long before macros) and therefore what this
-/// module's own match string presents too – as an atomic
+/// module's own match string presents too — as an atomic
 /// [`CharRef`](InlineNode::CharRef) piece.
 const SUBMENU_DELIMITER: &str = "&gt;";
 
@@ -69,10 +69,10 @@ fn find_kbd_btn_matches<'src>(
         // escaped/rendered text, which the node cannot hold.
         //
         // A [`synthesized`](Piece::synthesized) run (an attribute expansion,
-        // or – reached at a tree's root – a filtered multi-line block's own
+        // or — reached at a tree's root — a filtered multi-line block's own
         // joined seed) *is* admitted: this family never slices `'src` for a
-        // value at all – its keys and label come straight from the match
-        // string, which carries a synthesized run's bytes exactly – so only
+        // value at all — its keys and label come straight from the match
+        // string, which carries a synthesized run's bytes exactly — so only
         // the node's `location` takes design §4.4's coarse fallback. The same
         // lift the anchor and bare-e-mail families already made, for the same
         // reason (see [`build_kbd_btn_node`]).
@@ -113,7 +113,7 @@ fn find_kbd_btn_matches<'src>(
 /// Every value it computes comes from the **match string**, never from an
 /// `'src` slice: on a verbatim match those bytes *are* the source text, and on
 /// a [`synthesized`](Piece::synthesized) one they are the expanded value the
-/// string pipeline itself matched over – which is precisely what lets this
+/// string pipeline itself matched over — which is precisely what lets this
 /// family recognize a macro inside an expanded attribute value where a family
 /// carrying an [`Attrlist`](crate::attributes::Attrlist)`<'src>` cannot. Only
 /// the node's `location` falls back to the enclosing run's coarse span
@@ -158,7 +158,7 @@ fn build_kbd_btn_node<'src>(
 /// [`CharRef`](InlineNode::CharRef)s by the time macros run and so need the
 /// relaxed gate [`menu_match_is_sliceable`] applies (see its own doc comment).
 /// A name or item text crossing any *other* escaped special, or a rendered
-/// [`Styled`](crate::inlines::Styled) span, is still deferred – the verbatim
+/// [`Styled`](crate::inlines::Styled) span, is still deferred — the verbatim
 /// boundary every macro family documents. A
 /// [`synthesized`](Piece::synthesized) run is **not** deferred: see
 /// [`menu_match_is_sliceable`].
@@ -201,8 +201,8 @@ fn find_menu_matches<'src>(
         let full = whole.start()..whole.end();
 
         // The menu pattern's escape is an uncaptured leading `\?`. It is
-        // checked *before* the sliceability gate – and needs no gate of its
-        // own – because dropping the backslash keeps the rest of the match as
+        // checked *before* the sliceability gate — and needs no gate of its
+        // own — because dropping the backslash keeps the rest of the match as
         // its own original nodes (an escaped special or a rendered span among
         // them), which fold back to exactly the bytes the string replacer's
         // `caps[0][1..]` emits. Mirrors the same hoist the `footnoteref:`
@@ -245,7 +245,7 @@ fn find_menu_matches<'src>(
 /// [`SUBMENU_DELIMITER`] (`&gt;`) *inside the item list*. Every other macro
 /// family requires its whole match to be verbatim before it will build a
 /// self-describing node, and an escaped special is an atomic piece that check
-/// rejects outright – which is what made the `&gt;`-submenu form
+/// rejects outright — which is what made the `&gt;`-submenu form
 /// (`menu:View[Zoom > Reset]`) unrecognizable, whatever its item texts looked
 /// like. But a submenu caret carries no value the node ever slices: like the
 /// `<<id>>` shorthand's own `&lt;&lt;`/`&gt;&gt;` delimiters, the string
@@ -255,15 +255,15 @@ fn find_menu_matches<'src>(
 /// and they are checked here exactly as before.
 ///
 /// Everything else is unchanged: an atomic piece that is *not* an item-list
-/// caret – another escaped special (`menu:File[A & B]`, and a `&`/`>` in the
+/// caret — another escaped special (`menu:File[A & B]`, and a `&`/`>` in the
 /// menu *name*, which the pattern admits) or a rendered
-/// [`Styled`](crate::inlines::Styled) span – still fails.
+/// [`Styled`](crate::inlines::Styled) span — still fails.
 ///
-/// A [`synthesized`](Piece::synthesized) run (an attribute expansion, or –
-/// reached at a tree's root – a filtered multi-line block's own joined seed)
+/// A [`synthesized`](Piece::synthesized) run (an attribute expansion, or —
+/// reached at a tree's root — a filtered multi-line block's own joined seed)
 /// is admitted: the item list is split straight out of the match string, and
 /// the menu *name*, the one value that used to need an `'src` slice, is now
-/// recovered exactly by [`text_slice`] – the same lift the anchor family made
+/// recovered exactly by [`text_slice`] — the same lift the anchor family made
 /// for its id, and for the same reason (a [`Ui`] node carries no `Span`-typed
 /// field, so nothing on it needs real source bytes). Only the node's
 /// `location` keeps design §4.4's coarse fallback.
@@ -288,7 +288,7 @@ fn menu_match_is_sliceable(
 
         // The one admitted atomic piece: a submenu caret the node consumes as
         // the item list's delimiter. Its match-string bytes identify it
-        // unambiguously – a rendered span contributes a single placeholder
+        // unambiguously — a rendered span contributes a single placeholder
         // character, and the only other atomic pieces are the two remaining
         // special-character entities.
         if s.get(p_start..p_end) != Some(SUBMENU_DELIMITER) {
@@ -306,7 +306,7 @@ fn menu_match_is_sliceable(
 }
 
 /// Builds one [`Ui`](InlineNode::Ui) menu node from a match whose own text
-/// [`menu_match_is_sliceable`] accepts – the gate lives here rather than in
+/// [`menu_match_is_sliceable`] accepts — the gate lives here rather than in
 /// [`find_menu_matches`] because it needs the match's own capture groups to
 /// know which sub-range may carry a submenu caret. Returns `None` for a match
 /// it rejects, which the caller leaves unrecognized.
@@ -337,7 +337,7 @@ fn build_menu_node<'src>(
     let location = source_slice(pieces, full.clone(), root);
 
     // The gate above admits no atomic piece in the name, so `text_slice`
-    // always yields its exact text – borrowed from `'src` when the name is
+    // always yields its exact text — borrowed from `'src` when the name is
     // verbatim, owned when it comes from a synthesized run.
     let menu = text_slice(nodes, pieces, name.start()..name.end())?;
 
@@ -360,11 +360,11 @@ fn build_menu_node<'src>(
 /// delimiter the whole (right-trimmed) list is a single item, and an absent
 /// list (an empty `[]`) is a bare menu reference.
 ///
-/// The list it splits is the *match string* text – the same escaped text the
-/// string replacer splits – so the caret branch keys off `&gt;` here exactly as
+/// The list it splits is the *match string* text — the same escaped text the
+/// string replacer splits — so the caret branch keys off `&gt;` here exactly as
 /// it does there. Every part the split yields is verbatim source text (the
 /// carets are the only non-source pieces a match may carry, and they are
-/// consumed by the split itself – see [`menu_match_is_sliceable`]), so each
+/// consumed by the split itself — see [`menu_match_is_sliceable`]), so each
 /// part is the very text `render_menu` receives from the string pipeline.
 fn split_menu_items<'src>(items: Option<&str>) -> (Vec<CowStr<'src>>, Option<CowStr<'src>>) {
     let Some(items) = items else {
@@ -645,7 +645,7 @@ mod tests {
 
     #[test]
     fn an_escaped_ui_macro_stays_literal() {
-        // `\kbd:[X]` drops the backslash and keeps the macro as literal text –
+        // `\kbd:[X]` drops the backslash and keeps the macro as literal text —
         // no UI node.
         let nodes = build_ui(Span::new("\\kbd:[X]"));
 
@@ -685,7 +685,7 @@ mod tests {
     fn a_menu_with_a_submenu_caret_splits_into_levels() {
         // The submenu form uses `>` as the level delimiter, and by the time
         // macros run the special-characters step has turned each one into a
-        // `&gt;` `CharRef` – an atomic piece the family's verbatim gate used to
+        // `&gt;` `CharRef` — an atomic piece the family's verbatim gate used to
         // reject outright. A caret carries no value the node slices (the string
         // replacer consumes it as the delimiter and emits it nowhere), so the
         // relaxed gate admits it and the node splits into its levels, with only
@@ -710,7 +710,7 @@ mod tests {
             other => panic!("expected Menu, got {other:?}"),
         }
 
-        // Its location covers the whole macro in *source* terms – the carets
+        // Its location covers the whole macro in *source* terms — the carets
         // are one byte each there, four in the match string.
         assert_eq!(ui.location.data(), "menu:View[Tools > Options > Advanced]");
         assert_eq!(ui.location.line(), 1);
@@ -720,9 +720,9 @@ mod tests {
     #[test]
     fn a_menu_over_a_special_character_is_a_documented_divergence() {
         // A submenu caret is the *only* escaped special a menu match may carry
-        // (the node consumes it as the item list's delimiter). Any other one –
+        // (the node consumes it as the item list's delimiter). Any other one —
         // an `&` in the item list, or in the menu name the pattern also admits
-        // it in – is matched by the string pipeline over the *escaped* text
+        // it in — is matched by the string pipeline over the *escaped* text
         // (`menu:File[A &amp; B]`), which a self-describing node cannot carry
         // as an `'src` slice, so the single-pass builder leaves the macro
         // *unrecognized* here (deferred to a later increment), exactly as the
@@ -730,7 +730,7 @@ mod tests {
         for source in [
             "menu:File[A & B]",
             "menu:A&B[Save]",
-            // A caret in the *name* – which the pattern admits – is not a
+            // A caret in the *name* — which the pattern admits — is not a
             // delimiter the node consumes, so it is not admitted either: the
             // name would have to carry the escaped `&gt;` the node cannot
             // slice from `'src`.
@@ -744,7 +744,7 @@ mod tests {
                 "a menu crossing a non-caret special must be left unrecognized: {nodes:?}"
             );
 
-            // The string pipeline, by contrast, *does* build a menu here – the
+            // The string pipeline, by contrast, *does* build a menu here — the
             // divergence this test documents.
             assert!(
                 golden_macros_with(source, &experimental_parser()).contains(r#"class="menu"#),
@@ -787,7 +787,7 @@ mod tests {
             .with_intrinsic_attribute("macro-src", "kbd:[Esc]", ModificationContext::Anywhere)
     }
 
-    /// The real, public pipeline's output for `source` – the golden for the
+    /// The real, public pipeline's output for `source` — the golden for the
     /// expanded-value fixtures, which need the `AttributeReferences` step the
     /// module's own [`golden_macros`] helper deliberately omits.
     fn golden_normal(source: &str, parser: &Parser) -> String {
@@ -803,8 +803,8 @@ mod tests {
         // A UI macro whose name, keys, label, or item list crosses a
         // *synthesized* run (an attribute expansion) is now recognized: a
         // [`Ui`] node carries no `Span`-typed field, so every value it holds
-        // comes straight from the match string – which carries a synthesized
-        // run's bytes exactly – or, for the menu name, from `text_slice`. This
+        // comes straight from the match string — which carries a synthesized
+        // run's bytes exactly — or, for the menu name, from `text_slice`. This
         // is the same lift the anchor family made for its id, and it closes
         // the divergence `a_menu_inside_an_expanded_value_is_a_documented_
         // divergence` used to pin.
@@ -989,7 +989,7 @@ mod tests {
             (vec!["a]b".to_string()], Some("c".to_string()))
         );
 
-        // The `&gt;` submenu delimiter takes precedence over a comma – checked
+        // The `&gt;` submenu delimiter takes precedence over a comma — checked
         // directly here on the escaped text the split actually receives, since
         // a fixture's own source spells the delimiter `>`.
         assert_eq!(

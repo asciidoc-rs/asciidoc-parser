@@ -18,16 +18,16 @@ use crate::{
 ///
 /// Like the string pipeline's step, the rules match over the level's
 /// **escaped** text (built by [`build_match_string`], where a
-/// [`CharRef::Special`] contributes its canonical entity) – which is exactly
+/// [`CharRef::Special`] contributes its canonical entity) — which is exactly
 /// why the arrow (`-&gt;`, `&lt;-`) and entity (`&amp;copy;`) rules can
 /// straddle a `Text`/`CharRef` boundary, and, since a
 /// [`synthesized`](super::quotes::Piece::synthesized) run (an
 /// attribute-expanded value) contributes its own `value` there too, why they
-/// can straddle a `Text`/synthesized-`Text` boundary as well (design §3.4.1) –
+/// can straddle a `Text`/synthesized-`Text` boundary as well (design §3.4.1) —
 /// pinned by
 /// `attribute_refs::tests::a_replacement_straddling_a_synthesized_and_a_real_piece_is_recognized`.
 /// `root` is the whole-content source span; every leaf's precise `location`
-/// is sliced from it – or, for a leaf recognized *inside* a synthesized run,
+/// is sliced from it — or, for a leaf recognized *inside* a synthesized run,
 /// falls back to that run's own whole span (design §4.4), since its bytes
 /// have no honest source counterpart of their own.
 pub(super) fn apply_character_replacements<'src>(
@@ -86,7 +86,7 @@ struct ReplacementMatch {
 enum ReplacementKind {
     /// An escaped construct (`\(C)`, `\-&gt;`, …): drop the single backslash at
     /// this offset and keep the rest of the match as literal nodes, replacing
-    /// nothing – mirroring the string replacer's `caps[0].replace("\\", "")`.
+    /// nothing — mirroring the string replacer's `caps[0].replace("\\", "")`.
     Unescape { backslash: usize },
 
     /// A recognized typographic replacement. Only the `consumed` sub-range
@@ -301,8 +301,8 @@ mod tests {
     /// The string pipeline's output through the **post-replacement** step for
     /// `source`, used as the golden oracle: the four steps [`build`] runs, in
     /// order (special characters, quotes, character replacements, post
-    /// replacement). Attribute references and macros are skipped – exactly as
-    /// the additive builder skips them – so the fixtures deliberately contain
+    /// replacement). Attribute references and macros are skipped — exactly as
+    /// the additive builder skips them — so the fixtures deliberately contain
     /// neither.
     fn golden_replacements(source: &str) -> String {
         let parser = crate::Parser::default();
@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn an_escaped_replacement_stays_literal() {
-        // `\(C)` drops the backslash and keeps `(C)` as literal text – no
+        // `\(C)` drops the backslash and keeps `(C)` as literal text — no
         // replacement leaf.
         let nodes = build_src(Span::new("\\(C)"));
 
