@@ -79,24 +79,24 @@ pub(super) fn assert_text(node: &InlineNode<'_>, data: &str, line: usize, col: u
 /// rather than baking into a `Text` — and returns its `location` for further
 /// inspection.
 ///
-/// Deliberately written as an `assert!` over a [`matches!`] rather than as a
-/// destructuring `let … else { panic!(…) }`: the latter puts its
-/// never-executed failure arm on a line of its own, which the coverage report
-/// then counts as a miss at every call site (five of them in `links.rs`
-/// alone). Here the whole assertion is one executed expression.
+/// Deliberately written as a whole-node [`assert_eq!`] rather than as a
+/// destructuring `let … else { panic!(…) }` or an `assert!` carrying a message:
+/// both of those put a *failure-only* region on a line of its own — the
+/// `panic!` arm, or the message argument of a wrapped macro call — which the
+/// coverage report counts as an uncovered line at every call site (five of them
+/// in `links.rs` alone). Every line here executes on the passing path, and
+/// `assert_eq!` already prints both nodes when it fails.
 pub(super) fn assert_special_char<'src>(node: &InlineNode<'src>, ch: char) -> Span<'src> {
-    assert!(
-        matches!(
-            node,
-            InlineNode::CharRef {
-                value: CharRef::Special(got),
-                ..
-            } if *got == ch
-        ),
-        "expected the special character {ch:?}, got {node:?}"
-    );
+    let location = node.span();
 
-    node.span()
+    let expected = InlineNode::CharRef {
+        value: CharRef::Special(ch),
+        location,
+    };
+
+    assert_eq!(*node, expected);
+
+    location
 }
 
 /// Asserts that `node` is a [`Raw`](InlineNode::Raw) with the given

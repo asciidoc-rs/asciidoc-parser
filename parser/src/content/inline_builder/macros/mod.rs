@@ -495,16 +495,15 @@ mod tests {
                 None,
             );
 
-            assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
-                content.rendered_html(),
-                "fold diverged from the real pipeline for {source:?}"
-            );
+            // The golden itself carries no backslash — the escaped reference
+            // drops it — so this one comparison pins both the parity and the
+            // drop. (No `{source:?}` message: a multi-line assertion's message
+            // argument is a failure-only region, which the coverage report
+            // counts as an uncovered line in a file whose tests it measures.)
+            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser);
 
-            assert!(
-                !fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser).contains('\\'),
-                "the escaped reference's backslash must be dropped for {source:?}"
-            );
+            assert_eq!(folded, content.rendered_html());
+            assert!(!folded.contains('\\'));
         }
     }
 
