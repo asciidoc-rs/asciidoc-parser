@@ -937,6 +937,32 @@ mod tests {
             "See *xref:{id}[{label}]* and <<{id},the {product} steps>> plus a (C) mark.",
             with_xref_attributes,
         );
+
+        // Links and images spliced in by attribute references – the last two
+        // families to make that lift, and the two that hold a real
+        // `Attrlist<'src>`. Their targets and display texts come from the
+        // match string like every other family's values; what still defers is
+        // an image's non-empty attribute list, a link's attribute-list-bearing
+        // display text, and a wholly expanded `link:` macro (each pinned by
+        // its own divergence test in `macros/image.rs` and `macros/links.rs`).
+        let with_link_attributes = || {
+            Parser::default()
+                .with_intrinsic_attribute("url", "index.html", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("host", "example.org", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("label", "Docs", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("logo", "sunset.jpg", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+        };
+
+        assert_parity_with(
+            "Read *link:{url}[{label}]* or visit https://{host}/docs about {product}.",
+            with_link_attributes,
+        );
+
+        assert_parity_with(
+            "See image:{logo}[Logo] and image:{logo}[] beside <https://{host}> and a (C) mark.",
+            with_link_attributes,
+        );
     }
 
     /// [`build_from_value`] against the real pipeline, seeded from a
@@ -1008,6 +1034,21 @@ mod tests {
             (
                 "  see <<target>> and\n  xref:other[the other one]",
                 "see <<target>> and\nxref:other[the other one]",
+            ),
+            // The URL-link family in a wholly-synthesized seed, and an image
+            // macro with an *empty* bracket: neither needs an `'src` slice
+            // (the empty attribute list parses from a zero-length span). An
+            // image with a non-empty bracket, and the `link:`/`mailto:` macro
+            // in any spelling, still defer – see
+            // `a_macro_construct_is_deferred_when_the_whole_seed_is_synthesized`
+            // below.
+            (
+                "  visit https://example.org[the site]\n  or https://plain.example",
+                "visit https://example.org[the site]\nor https://plain.example",
+            ),
+            (
+                "  see image:sunset.jpg[] and\n  icon:home[] here",
+                "see image:sunset.jpg[] and\nicon:home[] here",
             ),
         ];
 
@@ -1361,27 +1402,38 @@ mod tests {
         }
     }
 
-    /// A documented divergence, not a bug: a macro family that holds a real
-    /// [`Attrlist`](crate::attributes::Attrlist)`<'src>` – a link or an image,
-    /// the two that are left – is still unrecognized when the *whole* seed is
-    /// synthesized, because
+    /// A documented divergence, not a bug: two shapes stay unrecognized when
+    /// the *whole* seed is synthesized.
+    ///
+    /// The first is a construct needing a real
+    /// [`Attrlist`](crate::attributes::Attrlist)`<'src>` – an image macro's
+    /// non-empty attribute list, or a link's attribute-list-bearing display
+    /// text – because
     /// [`Attrlist::parse`](crate::attributes::Attrlist::parse) reads its
     /// `source: Span<'src>`'s bytes as content, not merely as a location tag,
     /// so a real `'src` slice is not optional there. This is the same
     /// [`range_is_verbatim`](macros::image::range_is_verbatim) boundary that
-    /// defers those families *nested inside* an attribute expansion's spliced
+    /// defers those shapes *nested inside* an attribute expansion's spliced
     /// value (see [`apply_attribute_references`]'s own doc comment), now
     /// reached at the tree's root instead of a nested splice.
     ///
-    /// [`build_from_value`] does not lift this boundary: it only unblocks a
-    /// synthesized (filtered/joined multi-line) seed for the steps and
-    /// families that never needed a verbatim slice in the first place (quotes,
-    /// specialcharacters, attribute references, character replacements,
-    /// post-replacement, and the anchor / bare-e-mail / UI / index-term /
-    /// cross-reference families, each of which computes every value it holds
-    /// from the match string or [`text_slice`](quotes::text_slice) – all
-    /// exercised by the parity sweep above). Lifting it for a link's or an
-    /// image's own target remains a later increment's job.
+    /// The second – exercised by this test's own fixture – is a
+    /// `link:`/`mailto:` macro whose own marker is not verbatim, which a
+    /// wholly-synthesized seed guarantees: that marker is what keeps the
+    /// node's `location` telling this pass's nodes from the other link
+    /// passes' when
+    /// [`apply_link_side_effects`](macros::links::apply_link_side_effects)
+    /// replays the string pipeline's registration order (see
+    /// [`link_macro_level`](macros::links::link_macro_level)).
+    ///
+    /// Everything else is recognized here, including an image macro with an
+    /// *empty* bracket and every URL-link spelling – both exercised by the
+    /// parity sweep above, alongside the steps and families that never needed
+    /// a verbatim slice in the first place (quotes, specialcharacters,
+    /// attribute references, character replacements, post-replacement, and the
+    /// anchor / bare-e-mail / UI / index-term / cross-reference families, each
+    /// of which computes every value it holds from the match string or
+    /// [`text_slice`](quotes::text_slice)).
     #[test]
     fn a_macro_construct_is_deferred_when_the_whole_seed_is_synthesized() {
         let filtered = "see link:https://example.org[Example] here";
