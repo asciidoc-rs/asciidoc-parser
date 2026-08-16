@@ -1,8 +1,7 @@
 //! Cross-reference recognition (`xref:id[…]`, `<<id>>`).
 
 use super::{
-    MacroMatch, MacroMatchKind,
-    image::{range_has_no_opaque_piece, range_is_verbatim, range_is_verbatim_or_synthesized},
+    MacroMatch, MacroMatchKind, image::range_has_no_opaque_piece, macro_text_children,
     rebuild_macro_level,
 };
 use crate::{
@@ -10,7 +9,7 @@ use crate::{
     attributes::{Attrlist, AttrlistContext},
     content::{
         INLINE_XREF,
-        inline_builder::quotes::{Piece, build_match_string, emit_range, source_slice},
+        inline_builder::quotes::{Piece, build_match_string, source_slice},
         xref_target::{
             XrefTarget, interpret_xref_target, other_document_reference, this_document_reference,
         },
@@ -134,7 +133,7 @@ pub(super) fn xref_macros_level<'src>(
 /// `raw_text.contains('=')` attribute-list probe, the attrlist parse itself,
 /// the shorthand's `split_once(',')`) sees exactly what the string replacer
 /// sees. The reference *text* is then rebuilt as structured children rather
-/// than one sliced [`Text`](InlineNode::Text) (see [`xref_text_children`]), so
+/// than one sliced [`Text`](InlineNode::Text) (see [`macro_text_children`]), so
 /// the escaped special folds back to its own entity instead of being escaped
 /// twice. A **rendered span** stays deferred: it is one opaque placeholder
 /// here where the string pipeline's haystack holds its markup inline, and that
@@ -402,112 +401,27 @@ fn plain_xref_text<'src>(
 
     let text_range = span.start()..span.end();
 
-    xref_text_children(raw_text, text_range, true, nodes, pieces, root)
-}
-
-/// Builds the reference-text children both spellings share, for a text taken
-/// straight from the level's match string (rather than computed by an
-/// attribute-list parse).
-///
-/// `unescape_bracket` selects the one behavior the two spellings do *not*
-/// share: the `xref:` macro form unescapes an escaped closing bracket (`\]`)
-/// in its bracketed text, mirroring `InlineXrefReplacer`'s own
-/// `raw_text.replace("\\]", "]")`, while the `<<id,text>>` shorthand — which
-/// has no bracket to escape, and whose own branch of that replacer performs no
-/// such replace — keeps the pair literal.
-///
-/// The common case is one [`Text`](InlineNode::Text) child: an unescaped
-/// bracket makes its logical value a computed (owned) one — a *synthesized*
-/// `Text` whose value need not coincide with its source — while without one a
-/// verbatim text borrows
-/// the very bytes its location covers (the builder's `'src`-borrowing goal,
-/// §4.5) and a text crossing a [`synthesized`](Piece::synthesized) run takes
-/// the match string's bytes — the expanded value exactly, and the very text the
-/// string replacer matched over — as an owned value, with only its location
-/// falling back to the enclosing run's coarse span (design §4.4).
-///
-/// A text crossing an **escaped special** (`xref:sec[a<b]`) instead becomes
-/// **structured children**, recovered with
-/// [`emit_range`]: the special is its own
-/// [`CharRef`](InlineNode::CharRef) child that folds back to the same entity
-/// the string replacer's text carries, where one `Text` child holding the
-/// match string's `&lt;` would be escaped a second time by the fold. This is
-/// the shape a footnote's own content already has, reached here for the one
-/// piece kind the tree can reproduce exactly; a text crossing an *opaque*
-/// piece never reaches this function at all (the gate in
-/// [`find_xref_matches`] rejects it).
-fn xref_text_children<'src>(
-    raw_text: &str,
-    text_range: std::ops::Range<usize>,
-    unescape_bracket: bool,
-    nodes: &[InlineNode<'src>],
-    pieces: &[Piece],
-    root: Span<'src>,
-) -> Vec<InlineNode<'src>> {
-    let text_location = source_slice(pieces, text_range.clone(), root);
-
-    if !range_is_verbatim_or_synthesized(pieces, &text_range) {
-        // The text crosses an escaped special (the only atomic piece the gate
-        // admits). Rebuild it out of the nodes it covers, so each special
-        // stays the `CharRef` it already is.
-        //
-        // The macro form's `\]` unescape is expressed here as a *gap* in the
-        // emitted ranges — every byte but the backslash is emitted — rather
-        // than as a `replace` over each recovered node. Doing it per node would
-        // miss a pair astride two adjacent runs, which two `Text` nodes can be
-        // without an atomic piece between them: an attribute expansion splices
-        // its value as its own node, so a value ending in a backslash followed
-        // by a literal `]` (`:t: b\`, then `xref:foo[a<{t}]x]`) puts the two
-        // characters in different runs. Skipping the backslash by range is
-        // boundary-agnostic, and leaves every surviving fragment borrowing
-        // `'src` (§4.5) where a rebuilt value would have had to own its bytes.
-        let mut children = Vec::new();
-        let mut cursor = text_range.start;
-
-        if unescape_bracket {
-            // `match_indices` scans non-overlapping and left to right, exactly
-            // as `str::replace` does, so a run of backslashes pairs off
-            // identically.
-            for (offset, _) in raw_text.match_indices("\\]") {
-                let backslash = text_range.start + offset;
-                emit_range(nodes, pieces, cursor..backslash, &mut children);
-                cursor = backslash + 1;
-            }
-        }
-
-        emit_range(nodes, pieces, cursor..text_range.end, &mut children);
-
-        return children;
-    }
-
-    let value = if unescape_bracket && raw_text.contains("\\]") {
-        CowStr::from(raw_text.replace("\\]", "]"))
-    } else if range_is_verbatim(pieces, &text_range) {
-        CowStr::from(text_location.data())
-    } else {
-        CowStr::from(raw_text.to_string())
-    };
-
-    vec![InlineNode::Text {
-        value,
-        location: text_location,
-    }]
+    macro_text_children(raw_text, text_range, true, nodes, pieces, root)
 }
 
 /// Puts the three character entities a level's match string can carry back to
 /// the characters they stand for.
 ///
 /// [`build_match_string`] gives a
-/// [`CharRef`](InlineNode::CharRef)`::Special` leaf its canonical entity, so a
-/// value a family computes *off that string* (here, an attribute list's
-/// positional value) is already-escaped text, while a
+/// [`CharRef`](InlineNode::CharRef)`::Special` leaf its canonical entity, so
+/// a value a family *computes* off that string — this family's attribute list's
+/// positional value — is already-escaped text, while a
 /// [`Text`](InlineNode::Text) node holds logical text the fold escapes (design
-/// §3.4). Undoing the escape is exact rather than heuristic: inside a range the
-/// gate admitted, an `&` can only ever be the first byte of one of these three
-/// entities — a verbatim run holds no special at all (the `SpecialCharacters`
-/// step split every one into its own leaf), a synthesized run's own specials
-/// are [`Raw`](InlineNode::Raw) leaves (opaque, and so rejected by the gate),
-/// and an author-written entity is a `CharRef::Entity` (likewise opaque).
+/// §3.4). Undoing the escape is exact rather than heuristic: inside a range
+/// that crosses an escaped special, an `&` can only ever be the first byte of
+/// one of these three entities — a verbatim run holds no special at all (the
+/// `SpecialCharacters` step split every one into its own leaf), a synthesized
+/// run's own specials are [`Raw`](InlineNode::Raw) leaves (opaque, and so
+/// rejected by every caller's gate), and an author-written entity is a
+/// `CharRef::Entity` (likewise opaque). A caller therefore applies this only
+/// where its value's own source range crosses such a special: under an
+/// effective order that never escapes (§3.4.1), a literal `&` *does* survive
+/// into a verbatim run, and there is no entity to undo.
 ///
 /// `&amp;` is undone **last** so a doubly-escaped sequence unwinds one level,
 /// exactly as the fold re-escapes one level: `&amp;lt;` (a literal `&`
@@ -532,7 +446,7 @@ fn unescape_specials(text: &str) -> String {
 /// on the first `,` into an id and an optional reference text, each trimmed —
 /// mirroring the string replacer's `inner.split_once(',')` with `id.trim()` /
 /// `text.trim()`, which runs over the very same bytes. The reference text
-/// becomes the node's children through [`xref_text_children`] — a single
+/// becomes the node's children through [`macro_text_children`] — a single
 /// [`Text`](InlineNode::Text) borrowed from `'src` in the common verbatim case
 /// (§4.5), owned when it crosses a synthesized run, structured when it crosses
 /// an escaped special — and the whole `<<…>>` — its `CharRef` delimiters
@@ -545,7 +459,7 @@ fn unescape_specials(text: &str) -> String {
 /// rather than the bracketed `[id]` fallback `None` renders — so a shorthand
 /// carrying a comma always builds at least one child, empty value and
 /// all (a zero-length `'src` borrow at the position the trim left — an empty
-/// text crosses nothing, so it takes [`xref_text_children`]'s single-child
+/// text crosses nothing, so it takes [`macro_text_children`]'s single-child
 /// path). The fold
 /// keys "was a text provided?" on the *presence* of a child rather than on
 /// what it folds to, so the two cases stay distinct end to end; see
@@ -627,7 +541,7 @@ fn build_xref_shorthand_node<'src>(
             // whitespace-only) text crosses nothing, so it takes the helper's
             // single-child path and keeps the zero-length child the fold keys
             // `provided_text` on.
-            xref_text_children(trimmed, text_range, false, nodes, pieces, root)
+            macro_text_children(trimmed, text_range, false, nodes, pieces, root)
         }
     };
 
@@ -1590,7 +1504,7 @@ mod tests {
             )
             // A value *ending* in a backslash, so an expansion followed by a
             // literal `]` puts an escaped bracket astride two adjacent `Text`
-            // runs (see `xref_text_children`'s own note).
+            // runs (see `macro_text_children`'s own note).
             .with_intrinsic_attribute("trailing-backslash", "b\\", ModificationContext::Anywhere)
     }
 

@@ -2,8 +2,8 @@
 
 use super::{
     MacroMatch, MacroMatchKind,
-    image::{range_is_verbatim, range_is_verbatim_or_synthesized},
-    rebuild_macro_level,
+    image::{range_has_no_opaque_piece, range_is_verbatim, range_is_verbatim_or_synthesized},
+    macro_text_children, rebuild_macro_level,
 };
 use crate::{
     Parser, Span,
@@ -507,13 +507,13 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 }
 
 /// The `link:`/`mailto:` macro pass at a level: matches [`INLINE_LINK_MACRO`]
-/// over the level's escaped text and replaces each verbatim, recognized match
-/// with the [`Ref`](InlineNode::Ref) link node it produces.
+/// over the level's escaped text and replaces each recognized match with the
+/// [`Ref`](InlineNode::Ref) link node it produces.
 ///
 /// # Scope
 ///
 /// This increment covers the **explicit `link:`/`mailto:` macro** in its
-/// verbatim, attribute-list-free forms: `link:target[text]`, `link:target[]`
+/// attribute-list-free forms: `link:target[text]`, `link:target[]`
 /// (a bare link), `mailto:addr[text]`, and `mailto:addr[]`, plus the `^`
 /// new-window suffix and the `\` escape. It deliberately leaves several forms
 /// **unrecognized** for a later increment, each left as literal source here (so
@@ -526,14 +526,16 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 ///   (its `subject`/`body`) or an `=` in a `link:` text (roles / id / title /
 ///   window) — is deferred unless the bracketed text is verbatim `'src`,
 ///   because that attribute list is parsed from a newline-normalized *copy* of
-///   the text and only a text with no embedded newline and no
-///   [`synthesized`](Piece::synthesized) run in it has a source slice that copy
-///   coincides with — the one thing an [`Attrlist`]`<'src>` cannot do without.
-/// - **A match crossing an [`atomic`](Piece::atomic) piece** — a macro whose
-///   target or text crosses an escaped special
-///   ([`CharRef`](InlineNode::CharRef)) or a rendered
-///   [`Styled`](crate::inlines::Styled) span (`link:a&b[]`, `link:x[*bold*]`) —
-///   is deferred exactly as the image increment defers `image:a&b.png[]`.
+///   the text and only a text with no embedded newline, no
+///   [`synthesized`](Piece::synthesized) run, and no escaped special in it has
+///   a source slice that copy coincides with — the one thing an
+///   [`Attrlist`]`<'src>` cannot do without. This is the one capture that keeps
+///   the escaped-special boundary the rest of the family lifts below.
+/// - **A match crossing a rendered [`Styled`](crate::inlines::Styled) span**
+///   (`link:x[*bold*]`) — one opaque piece here where the string pipeline's own
+///   haystack holds its markup inline, and that markup, which exists only at
+///   fold time, is what the replacer's attribute-list probe and the pattern's
+///   `]` boundary read.
 /// - **A macro whose own `link:`/`mailto:` marker is not verbatim** — a
 ///   *wholly* expanded macro (`:m: link:index.html[Docs]`, then `{m}`) — is
 ///   deferred. Its target and bracketed text could be read from the match
@@ -548,6 +550,18 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 /// Apart from that marker, a [`synthesized`](Piece::synthesized) run is
 /// admitted: the target and display text are read out of the level's match
 /// string, which carries an expanded value's bytes exactly.
+///
+/// An **escaped special** ([`CharRef`](InlineNode::CharRef)`::Special`) is
+/// admitted too, anywhere but the attribute-list text above (`link:a&b.html[]`,
+/// `link:index.html[a < b]`). The match string carries such a leaf's canonical
+/// entity — the very bytes the string replacer's own escaped haystack holds
+/// there — so the target this pass computes off that string (`a&amp;b.html`)
+/// *is* the one the replacer computed, and no value on the node needs the
+/// source's own `<`/`>`/`&`. The display text then becomes **structured
+/// children** rather than one baked `Text` (see [`macro_text_children`]), so
+/// the special folds back to its own entity instead of being escaped twice —
+/// for a bare macro too, whose shown text is a slice of the target group rather
+/// than a computed string (see [`build_link_node`]).
 ///
 /// A `link:` (not `mailto:`) target whose scheme could execute script
 /// (`javascript:`, `data:`, `vbscript:`) is likewise left literal — matching
@@ -567,7 +581,7 @@ pub(super) fn link_macro_level<'src>(
         return nodes;
     }
 
-    let matches = find_link_macro_matches(&s, &pieces, root, parser);
+    let matches = find_link_macro_matches(&nodes, &s, &pieces, root, parser);
 
     if matches.is_empty() {
         return nodes;
@@ -577,9 +591,11 @@ pub(super) fn link_macro_level<'src>(
 }
 
 /// Finds every recognized `link:`/`mailto:` macro at this level, skipping any
-/// match that is not wholly verbatim source or that this increment defers (see
-/// [`link_macro_level`]).
+/// match that crosses an **opaque** piece (see
+/// [`range_has_no_opaque_piece`]), whose own marker is not verbatim source, or
+/// that [`build_link_node`] defers (see [`link_macro_level`]).
 fn find_link_macro_matches<'src>(
+    nodes: &[InlineNode<'src>],
     s: &str,
     pieces: &[Piece],
     root: Span<'src>,
@@ -594,10 +610,34 @@ fn find_link_macro_matches<'src>(
 
         let full = whole.start()..whole.end();
 
-        // A match crossing an escaped special or a rendered span is left for a
-        // later increment; one crossing an expanded attribute value is
-        // admitted, since the target and text are read from the match string.
-        if !range_is_verbatim_or_synthesized(pieces, &full) {
+        // An escape (`\link:`) is honored by dropping the backslash and keeping
+        // the rest literal, mirroring `InlineLinkMacroReplacer`'s own leading
+        // `caps[0].starts_with('\\')` check — which it makes *before* looking
+        // at anything else, so the escape needs no gate of its own here either:
+        // dropping the backslash keeps the rest of the match as its **own
+        // original nodes** (a rendered span or an escaped special among them),
+        // which fold back to exactly the bytes the replacer's `caps[0][1..]`
+        // emits. (This is the same check-order fix the `footnoteref:`, menu, and
+        // cross-reference increments made for their own families; before it, an
+        // escaped `\link:x[*bold*]` whose match the gate rejected was left
+        // unrecognized, backslash and all.)
+        if whole.as_str().starts_with('\\') {
+            matches.push(MacroMatch {
+                kind: MacroMatchKind::Unescape {
+                    backslash: full.start,
+                },
+                full,
+            });
+
+            continue;
+        }
+
+        // A match crossing a rendered span is left for a later increment; one
+        // crossing an expanded attribute value or an escaped special is
+        // admitted, since the target and text are read from the match string —
+        // whose bytes are, for both, exactly the ones the string replacer's own
+        // haystack carries there.
+        if !range_has_no_opaque_piece(nodes, pieces, &full) {
             continue;
         }
 
@@ -616,18 +656,7 @@ fn find_link_macro_matches<'src>(
             continue;
         }
 
-        if whole.as_str().starts_with('\\') {
-            matches.push(MacroMatch {
-                kind: MacroMatchKind::Unescape {
-                    backslash: full.start,
-                },
-                full,
-            });
-
-            continue;
-        }
-
-        match build_link_node(&caps, &full, pieces, root, parser) {
+        match build_link_node(&caps, &full, nodes, pieces, root, parser) {
             Some(node) => matches.push(MacroMatch {
                 kind: MacroMatchKind::Node {
                     consumed: full.clone(),
@@ -647,18 +676,32 @@ fn find_link_macro_matches<'src>(
     matches
 }
 
-/// Builds one [`Ref`](InlineNode::Ref) link node from a verbatim
+/// Builds one [`Ref`](InlineNode::Ref) link node from a recognized
 /// `link:`/`mailto:` match, computing the target, display text, window, and
 /// roles exactly as the string replacer does so the fold reproduces the same
 /// bytes. Returns `None` for a form this increment defers (see
 /// [`link_macro_level`]): a rejected dangerous `link:` scheme, or a link text
-/// that carries an attribute list.
+/// that carries an attribute list this builder cannot parse from `'src`.
 ///
-/// The display text is baked into a single [`Text`](InlineNode::Text) child, so
-/// the fold recovers `link_text` by folding the children and needs no
-/// build-time state (bare-vs-labeled, `hide-uri-scheme`, `mailto:`) at fold
-/// time; the `bare` role, when the string step would add one, rides on the
-/// node's `roles`.
+/// The display text becomes the node's children, so the fold recovers
+/// `link_text` by folding them and needs no build-time state
+/// (bare-vs-labeled, `hide-uri-scheme`, `mailto:`) at fold time; the `bare`
+/// role, when the string step would add one, rides on the node's `roles`.
+/// Which shape those children take follows what the text *is*:
+///
+/// - a **bracketed text** is sliced out of the bracket by
+///   [`macro_text_children`] — borrowed from `'src` in the common case,
+///   structured (a [`CharRef`](InlineNode::CharRef) of its own per escaped
+///   special) when it crosses one;
+/// - a **bare macro's** text is the target itself, which is likewise a slice —
+///   the whole target group, or (under `hide-uri-scheme`) its scheme-stripped
+///   tail, always a *suffix* since [`URI_SNIFF`] is `^`-anchored — so it takes
+///   the same treatment rather than baking the already-escaped target into one
+///   `Text` the fold would escape a second time (design §3.4);
+/// - an **attribute list's positional value** is the one text this builder
+///   *computes*, out of a parse of the bracket's own verbatim `'src` slice, so
+///   it stays a single synthesized `Text` (that slice carries no entity to
+///   undo).
 ///
 /// As in the additive builder generally, this performs *no* recognition side
 /// effect — notably it does **not** `register_link` the target in the asset
@@ -667,6 +710,7 @@ fn find_link_macro_matches<'src>(
 pub(super) fn build_link_node<'src>(
     caps: &regex::Captures<'_>,
     full: &std::ops::Range<usize>,
+    nodes: &[InlineNode<'src>],
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
@@ -696,7 +740,18 @@ pub(super) fn build_link_node<'src>(
     let mut attrs: Option<Attrlist<'src>> = None;
 
     let raw_text_m = caps.get(5);
-    let mut link_text = raw_text_m.map_or_else(String::new, |m| m.as_str().to_string());
+    let raw_text = raw_text_m.map_or("", |m| m.as_str());
+    let mut link_text = raw_text.to_string();
+
+    // Set when the display text stops being one the children can *slice* out of
+    // the bracketed text: an attribute list's positional value is computed by
+    // `extract_attributes_from_text`, and a bare macro's text is derived from
+    // the target below.
+    let mut computed_text = false;
+
+    // Set when the `^` new-window suffix was trimmed off the display text, so
+    // the children's range stops one (ASCII) byte short of the bracket's end.
+    let mut caret_stripped = false;
 
     if !link_text.is_empty() {
         link_text = link_text.replace("\\]", "]");
@@ -730,6 +785,7 @@ pub(super) fn build_link_node<'src>(
 
                 let (lt, parsed) = extract_attributes_from_text(text_span, parser, None);
                 link_text = lt;
+                computed_text = true;
 
                 if let Some(target_attr) = parsed.nth_attribute(2) {
                     target = format!(
@@ -764,56 +820,101 @@ pub(super) fn build_link_node<'src>(
 
             let (lt, parsed) = extract_attributes_from_text(text_span, parser, None);
             link_text = lt;
+            computed_text = true;
             attrs = Some(parsed);
         }
 
         if link_text.ends_with('^') {
             link_text.truncate(link_text.len() - 1);
             window = Some(CowStr::from("_blank"));
+            caret_stripped = true;
         }
     }
 
     let mut roles: Vec<CowStr<'src>> = vec![];
+
+    // A bare macro's display text is the target itself — the whole target, or
+    // (under `hide-uri-scheme`) its scheme-stripped tail — so it is a *slice*
+    // of the target group rather than a value this builder computes, and its
+    // children are recovered from that range below. For a `mailto:` the slice
+    // is the address as written (group 3), which is also what the target's own
+    // `mailto:` prefix was built from.
+    let mut bare_text_range: Option<std::ops::Range<usize>> = None;
 
     if link_text.is_empty() {
         if is_mailto {
             // A bare `mailto:` shows the address (group 3) and takes no `bare`
             // role.
             link_text = target_str.to_string();
+            bare_text_range = caps.get(3).map(|m| m.start()..m.end());
         } else {
-            // A bare `link:` shows the target (with the scheme optionally hidden)
-            // and takes the `bare` role.
-            link_text = if parser.is_attribute_set("hide-uri-scheme") {
-                let stripped = URI_SNIFF.replace_all(&target, "").into_owned();
-
-                if stripped.is_empty() {
-                    target.clone()
-                } else {
-                    stripped
-                }
+            // A bare `link:` shows the target (with the scheme optionally
+            // hidden) and takes the `bare` role. `target` is `target_str` here:
+            // only the `mailto:` branch above ever rewrites it, and that branch
+            // takes the address path instead.
+            let stripped = if parser.is_attribute_set("hide-uri-scheme") {
+                // `URI_SNIFF` is `^`-anchored, so `replace_all` strips exactly
+                // one prefix and the shown text is always a suffix of the
+                // target. A strip that would leave nothing falls back to the
+                // whole target, mirroring the string replacer's own
+                // `if lt.is_empty()` guard.
+                URI_SNIFF
+                    .find(&target)
+                    .map(|m| m.end())
+                    .filter(|end| *end < target.len())
+                    .unwrap_or(0)
             } else {
-                target.clone()
+                0
             };
+
+            link_text = target.get(stripped..).unwrap_or(&target).to_string();
+            bare_text_range = caps.get(3).map(|m| (m.start() + stripped)..m.end());
 
             roles.push(CowStr::from("bare"));
         }
     }
 
     // The display text becomes the node's children, located at the bracketed
-    // text (or the whole macro when there is none). `link_text` is a computed
-    // (owned) value, so this is a *synthesized* `Text` whose value need not
-    // coincide with its source.
-    let text_location = caps
-        .get(5)
-        .map_or(location, |m| source_slice(pieces, m.start()..m.end(), root));
+    // text (or the whole macro when there is none).
+    let text_location =
+        raw_text_m.map_or(location, |m| source_slice(pieces, m.start()..m.end(), root));
 
     let children = if link_text.is_empty() {
         vec![]
-    } else {
+    } else if let Some(range) = bare_text_range {
+        // A bare macro's display text, recovered from the target's own range so
+        // an escaped special in it stays the `CharRef` it already is (see
+        // `macro_text_children`) rather than being baked — already escaped —
+        // into one `Text` node the fold would escape a second time. There is no
+        // `\]` bracket unescape here: this text comes from the target group,
+        // which the pattern's own character class never lets a bracket into.
+        macro_text_children(&link_text, range, false, nodes, pieces, root)
+    } else if computed_text {
+        // A value this builder *computed* rather than sliced: an attribute
+        // list's positional value, so a *synthesized* `Text` whose value need
+        // not coincide with its source. It needs no unescaping — that branch
+        // requires a verbatim `'src` slice, which carries no entity.
         vec![InlineNode::Text {
             value: CowStr::from(link_text),
             location: text_location,
         }]
+    } else {
+        // A text sliced straight out of the bracket. `macro_text_children`
+        // borrows it from `'src` in the common verbatim case (§4.5), owns it
+        // when it crosses an expanded attribute value, and rebuilds it as
+        // structured children — each escaped special staying the `CharRef` it
+        // already is — when it crosses one, applying the same `\]` unescape
+        // `InlineLinkMacroReplacer` performs. The `^` window suffix is one
+        // ASCII byte at the end of the bracketed text, so the range simply
+        // stops short of it.
+        #[allow(clippy::unwrap_used)]
+        let m = raw_text_m.unwrap();
+
+        let end = if caret_stripped { m.end() - 1 } else { m.end() };
+
+        let trimmed = raw_text.get(..end - m.start()).unwrap_or(raw_text);
+
+        macro_text_children(trimmed, m.start()..end, true, nodes, pieces, root)
     };
 
     Some(InlineNode::Ref(Ref {
@@ -1217,8 +1318,12 @@ mod tests {
             "link:downloads/report.pdf[Report]",
             "link:index.html[]",
             "link:index.html[Read the docs]",
-            // The `^` suffix opens the link in a new window.
+            // The `^` suffix opens the link in a new window — including when it
+            // is the whole text, which leaves a *bare* link that still opens in
+            // one.
             "link:index.html[Open^]",
+            "link:index.html[^]",
+            "mailto:hello@example.org[^]",
             // An escaped `]` inside the text is unescaped.
             "link:index.html[a\\]b]",
             // A text carrying an attribute list (an `=`): the first positional
@@ -1251,6 +1356,27 @@ mod tests {
             // A macro inside a rendered span (recognized inside the span body).
             "*see link:x.html[X]*",
             "_link:y.html[Y] in em_",
+            // An escaped special (a `CharRef` by macro time) in the target, in
+            // the display text, and in both — the match string carries its
+            // canonical entity, which is exactly what the string replacer's own
+            // haystack holds there.
+            "link:a&b.html[x]",
+            "link:a&b.html[]",
+            "mailto:a&b@example.org[]",
+            "mailto:a&b@example.org[Write us]",
+            "link:index.html[a < b]",
+            "link:index.html[Tom & Jerry]",
+            "link:a&b.html[a > b]",
+            // The `\]` unescape and the `^` window suffix still apply around a
+            // special.
+            "link:index.html[a\\] < b]",
+            "link:index.html[a < b^]",
+            // A special beside the macro, and two specials inside one text.
+            "a & b then link:index.html[x < y & z]",
+            // An escaped macro crossing a special or a rendered span: the
+            // backslash is dropped and the rest stays literal.
+            "\\link:a&b.html[x]",
+            "\\link:index.html[with *bold* text]",
         ];
 
         let renderer = HtmlSubstitutionRenderer {};
@@ -1411,21 +1537,237 @@ mod tests {
     }
 
     #[test]
-    fn a_link_over_a_special_character_is_a_documented_divergence() {
+    fn a_link_macro_target_crossing_an_escaped_special_is_recognized() {
         // The string pipeline matches macros over *escaped* text, so a target
-        // containing `&` is matched as `a&amp;b.html`. A self-describing node
-        // cannot carry that escaped text as an `'src` slice, so the single-pass
-        // builder leaves such a macro *unrecognized* for a later increment,
-        // exactly as the image increment defers `image:a&b.png[]`.
-        let nodes = build_src(Span::new("link:a&b.html[x]"));
+        // containing `&` is matched as `a&amp;b.html` — and the level's match
+        // string carries those very bytes for the `CharRef::Special` the
+        // `SpecialCharacters` step made, so the node's target is exactly the
+        // one the string replacer computed. `target` is a computed value, not
+        // an `'src` slice, so nothing here needs the source's own `&`.
+        let source = "link:a&b.html[x]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "a&amp;b.html");
+        assert_eq!(link_text_of(reference), "x");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_bare_link_macro_shows_its_target_as_structured_children() {
+        // A *bare* macro's display text is the target itself, so it is a slice
+        // of the target group rather than a computed value: an escaped special
+        // in it stays the `CharRef` it already is (with its own precise `'src`
+        // span), where one `Text` child holding the already-escaped `a&amp;b`
+        // would be escaped a second time by the fold.
+        let source = "link:a&b.html[]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "a&amp;b.html");
+        assert_eq!(reference.roles, vec![CowStr::from("bare")]);
+        assert_eq!(reference.children.len(), 3);
+
+        assert_text(&reference.children[0], "a", 1, 6);
+
+        let InlineNode::CharRef {
+            value: CharRef::Special(ch),
+            location,
+        } = &reference.children[1]
+        else {
+            panic!("expected a special character: {:?}", reference.children[1]);
+        };
+
+        assert_eq!(*ch, '&');
+        assert_eq!(location.data(), "&");
+
+        assert_text(&reference.children[2], "b.html", 1, 8);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_bare_mailto_shows_its_address_as_structured_children() {
+        // The same treatment for the other bare spelling, whose display text is
+        // the address as written (and which takes no `bare` role).
+        let source = "mailto:a&b@example.org[]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "mailto:a&amp;b@example.org");
+        assert!(reference.roles.is_empty());
+
+        assert_eq!(reference.children.len(), 3);
+        assert_text(&reference.children[0], "a", 1, 8);
+        assert_text(&reference.children[2], "b@example.org", 1, 10);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_bare_link_macro_under_hide_uri_scheme_slices_past_the_scheme() {
+        // Under `hide-uri-scheme` the shown text is the target's
+        // scheme-stripped tail — still a *suffix* of the target, since
+        // `URI_SNIFF` is `^`-anchored — so the children start that many bytes
+        // into the target's own range rather than being recomputed.
+        use crate::parser::ModificationContext;
+
+        let parser = Parser::default().with_intrinsic_attribute_bool(
+            "hide-uri-scheme",
+            true,
+            ModificationContext::Anywhere,
+        );
+
+        let source = "link:foo:a&b[]";
+        let nodes = build(Span::new(source), &parser, None);
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "foo:a&amp;b");
+
+        // `foo:` is stripped; what remains is `a`, the `&`, and `b`.
+        assert_eq!(reference.children.len(), 3);
+        assert_text(&reference.children[0], "a", 1, 10);
+        assert_text(&reference.children[2], "b", 1, 12);
+
+        assert_eq!(
+            crate::content::inline_builder::fold_html(
+                &nodes,
+                &HtmlSubstitutionRenderer {},
+                &parser
+            ),
+            golden_macros_with(source, &parser)
+        );
+    }
+
+    #[test]
+    fn a_link_macro_display_text_crossing_an_escaped_special_becomes_structured_children() {
+        // A display text crossing an escaped special is rebuilt out of the
+        // nodes it covers rather than baked into one `Text` child: the special
+        // stays the `CharRef` it already is — keeping its own precise `'src`
+        // span (#944) — and folds back to the same entity the string replacer's
+        // text carries, where a single `Text` holding `&lt;` would be escaped a
+        // second time.
+        let source = "link:index.html[a < b]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "index.html");
+        assert_eq!(reference.children.len(), 3);
+
+        assert_text(&reference.children[0], "a ", 1, 17);
+
+        let InlineNode::CharRef {
+            value: CharRef::Special(ch),
+            location,
+        } = &reference.children[1]
+        else {
+            panic!("expected a special character: {:?}", reference.children[1]);
+        };
+
+        assert_eq!(*ch, '<');
+        assert_eq!(location.data(), "<");
+        assert_eq!(location.byte_offset(), 18);
+
+        assert_text(&reference.children[2], " b", 1, 20);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_link_macro_display_text_crossing_an_escaped_special_keeps_its_own_escapes() {
+        // The structured rebuild still applies `InlineLinkMacroReplacer`'s own
+        // `\]` unescape (as a gap in the emitted ranges, so a pair astride two
+        // runs is caught too) and still strips the `^` window suffix, which
+        // sits one byte past the text the children cover.
+        let source = "link:index.html[a\\] < b^]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.window.as_deref(), Some("_blank"));
+
+        // The backslash is a gap in the emitted ranges (so the `]` survives on
+        // its own run), the `^` is outside them, and the special is its own
+        // child — `link_text_of` sees only the `Text` runs.
+        assert_eq!(link_text_of(reference), "a]  b");
+
+        assert!(
+            reference.children.iter().any(|child| matches!(
+                child,
+                InlineNode::CharRef {
+                    value: CharRef::Special('<'),
+                    ..
+                }
+            )),
+            "the escaped special must survive as its own child: {:?}",
+            reference.children
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn an_escaped_link_macro_crossing_a_rendered_span_still_drops_its_backslash() {
+        // The escape check runs *before* the gate, mirroring
+        // `InlineLinkMacroReplacer`'s own `caps[0].starts_with('\\')`-first
+        // order: an escaped macro whose match the gate rejects still drops its
+        // backslash and keeps the rest — which, for a rendered span, means the
+        // span's own nodes fold back to exactly the markup `caps[0][1..]`
+        // emits.
+        let source = "\\link:index.html[with *bold* text]";
+        let nodes = build_src(Span::new(source));
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "a macro crossing an escaped special must be left unrecognized: {nodes:?}"
+            "an escaped macro must not build a link node: {nodes:?}"
         );
 
-        // The string pipeline, by contrast, *does* build a link here.
-        assert!(golden_macros("link:a&b.html[x]").contains("<a href"));
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_link_text_attribute_list_over_a_special_character_is_a_documented_divergence() {
+        // A text carrying an attribute list is parsed as a real
+        // `Attrlist<'src>`, which reads its own source span's bytes *as
+        // content* — and those bytes are the source's `<`, not the `&lt;` the
+        // string replacer parses from its escaped copy. That one capture keeps
+        // the escaped-special boundary the rest of the family just lifted, for
+        // both the `link:` (`=`) and `mailto:` (`,`) spellings.
+        //
+        // If this boundary is ever lifted, fold these fixtures into the parity
+        // corpus above.
+        for source in [
+            "link:index.html[a < b,role=hl]",
+            "mailto:hello@example.org[Sub & ject,Hello there]",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+                "an attribute-list text crossing an escaped special must stay literal: {nodes:?}"
+            );
+
+            // The string pipeline, by contrast, *does* build a link here.
+            assert!(golden_macros(source).contains("<a href"));
+        }
     }
 
     #[test]
@@ -2664,6 +3006,11 @@ mod tests {
             "\\doc@example.com",
             "doc@example.com then link:b.html[B]",
             "a@example.org link:b.html[B] https://c.example d@example.org",
+            // A macro whose target crosses an escaped special registers the
+            // *escaped* target, exactly as the string replacer does.
+            "link:a&b.html[x]",
+            "mailto:a&b@example.org[]",
+            "link:a&b.html[x] then link:c.html[C]",
         ];
 
         for fixture in fixtures {
