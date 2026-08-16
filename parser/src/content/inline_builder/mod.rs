@@ -712,6 +712,8 @@ mod tests {
             "https://example.org[Example^]",
             "a https://example.org[] bare-macro link",
             "visit https://example.org/path?q=1 now",
+            "write to a&b@example.com about it",
+            "an user@ex&ample.com non-address",
             "image:a.png[An image with spaces,role=thumb]",
             "before image:b.svg[Vector] after",
             "<<a>> and <<b>> and <<c,C text>> and <<d,>>",
@@ -849,6 +851,16 @@ mod tests {
         assert_parity_with(
             "See https://example.org/?a=1&b=2 and <https://other.example/x&y>, \
              or https://docs.example[Tom & Jerry] about *{product}*.",
+            with_product,
+        );
+
+        // The last of the link family's spellings to take the same lift: a
+        // bare address whose local part carries an *escaped special* (the
+        // pattern's own `&amp;` alternative), beside a plain address, a quoted
+        // span, and a live attribute reference — its shown text becoming
+        // structured children while the other families run around it.
+        assert_parity_with(
+            "Write to a&b@example.com or plain@example.org about *{product}*.",
             with_product,
         );
 

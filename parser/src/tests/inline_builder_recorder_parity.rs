@@ -737,6 +737,7 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "A link:https://example.org[example] link.",
         "mailto:a@b.com[email me]",
         "write to doc.writer@example.com today",
+        "write to a&b@example.com today",
         "an image:photo.png[Alt Text] inline",
         "image:pic.png[Scaled,200,100]",
         "see <<target>> for more",
@@ -876,6 +877,12 @@ fn shapes_match_across_combined_constructs() {
         "Visit https://example.org or link:docs.html[the docs], \
          or just write to doc@example.org.",
     );
+
+    // A bare address whose local part carries an escaped special: the builder
+    // recovers its shown text as structured children (the `&` staying its own
+    // `CharRef`), which is the shape the recorder reaches from the opposite
+    // direction — recovering it from the rendered anchor text.
+    assert_shapes("Write to a&b@example.com or plain@example.org today.");
 
     assert_shapes_with(
         "{counter:step}. Step one uses *{product}* and stem:[x+1].",
