@@ -2848,6 +2848,71 @@ Each phase is a reviewable unit with a clear exit gate.
   bracket is the one value in this module a match string genuinely cannot supply. As with every
   prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (the image family crossing an escaped special — the fifth and last
+  family, closing the boundary as a **family** boundary altogether):* the increment above named
+  the **image** family as the one still holding the escaped-special boundary, "whose
+  [`Attrlist`](../../parser/src/attributes/attrlist.rs)`<'src>` bracket is the one value in this
+  module a match string genuinely cannot supply". That is true of the *bracket* — and of nothing
+  else the family holds. The expanded-value increment had already moved the family's boundary onto
+  that one capture for a synthesized run (an image's macro name and target read from the match
+  string and [`text_slice`](../../parser/src/content/inline_builder/quotes.rs), an empty bracket
+  parsed from a zero-length span); this makes the same one-gate swap for an escaped special, so
+  [`find_image_matches`](../../parser/src/content/inline_builder/macros/image.rs) takes
+  [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs) and
+  `image:a&b.png[]` is recognized as the same
+  [`Image`](../../parser/src/inlines/image.rs) node its verbatim spelling builds. The target
+  comes off the match string (`a&amp;b.png` — the very bytes `InlineImageMacroReplacer` reads as
+  `caps[1]`, renders as the `src`, derives its `default_alt` from, and
+  [`apply_image_side_effects`](../../parser/src/content/inline_builder/macros/image.rs)
+  registers), reached as `text_slice`'s fallback so a verbatim or synthesized target still
+  borrows `'src` (§4.5) rather than allocating.
+
+  This family needs no display-text recovery at all — an image has no shown text, only an `alt`
+  the attribute list or the target's own basename supplies — so
+  [`macro_text_children`](../../parser/src/content/inline_builder/macros/mod.rs), the shared helper
+  its four predecessors each needed, has no part here. Nor can a boundary split an entity: the
+  pattern's match begins at `i` (or a backslash) and ends at `]`, and each capture is delimited by
+  `image:`/`icon:`, `[`, and `]` — none of which occurs in `&lt;`, `&gt;`, or `&amp;` — so every
+  atomic overlap an image range can have is a **wholly contained** entity, the same structural
+  argument the bare-e-mail family makes for its own classes. What survives is therefore exactly the
+  bracket: a **non-empty attribute list** crossing a special keeps
+  [`range_is_verbatim`](../../parser/src/content/inline_builder/macros/image.rs), since
+  `Attrlist::parse` reads its `source: Span<'src>`'s bytes *as content* and the source holds one
+  character where the match string holds an entity. The escaped-special boundary is no longer a
+  *family* boundary anywhere in the macros step — only a **capture** boundary, and only for the
+  three attribute lists (a link's and a cross-reference's attribute-list-bearing display text, and
+  an image's bracket) that must ride on their node as a real `Attrlist<'src>`.
+
+  The family's escape check is hoisted ahead of the gate — the same fix the `footnoteref:`, menu,
+  cross-reference, and link increments each made, closing the same latent gap: before it, an
+  escaped `\image:x.png[*bold*]` whose match the gate rejected was left unrecognized *with its
+  backslash*, where the string replacer's own leading `caps[0].starts_with('\\')` check drops it.
+  That is a fold-parity fix in its own right, pinned by its own test.
+
+  Differential corpora extend the family's fixtures with a target crossing each of the three
+  specials, doubled, carrying a verbatim attribute list (positional alt, positional width/height,
+  named attributes, and both `link=` forms `apply_image_side_effects` reads), in flow, beside a
+  sibling family that took the same lift, inside a rendered span, escaped, and beside — rather than
+  crossing — a special; plus a target crossing *both* a synthesized run and an escaped special,
+  which only the level's own match string carries the bytes of. The
+  `a_macro_over_a_special_character_is_a_documented_divergence` test becomes a **parity** test with
+  a structural companion asserting the entity-bearing target, the derived default alt, and the
+  node's still-precise `location`, per the "if lifted, fold this into a parity corpus" convention;
+  the two boundaries that remain get divergence tests of their own — a non-empty bracket crossing a
+  special, and a *restored entity* in the target (`image:a&amp;b.png[]`, where
+  `CharacterReplacements` un-escapes what `SpecialCharacters` escaped, leaving an opaque leaf
+  rather than entity bytes) — as does the rendered span the old test's fixture is repointed at.
+  Registration parity is asserted for the escaped-special forms against an independent golden
+  parser, and fixtures are added to the whole-pipeline combined-constructs corpus, the broad
+  general-purpose sweep, and the structural recorder cross-check. Re-running the corpus-wide
+  fold-parity audit (tree building forced on for every parse in the suite) confirms the divergence
+  set strictly **shrank**: one previously-surviving source is gone
+  (`image:data:image/svg+xml,<svg onload='alert(1)'></svg>[alt,link=self]`, a real golden fixture
+  in `parser/src/tests/security.rs`) and no new one appeared. The only escaped-special divergence
+  left anywhere in the macros step is an attribute list; a display or reference text crossing a
+  **rendered span** still defers everywhere. As with every prep piece before it, nothing further is
+  wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -3154,6 +3219,21 @@ Each phase is a reviewable unit with a clear exit gate.
        too. See the step's own "landed as" note above. Only the **image** family still keeps the
        escaped-special boundary, and a display text crossing a rendered span still defers
        everywhere.
+     - ✅ **prep (the image family crossing an escaped special).** The fifth and last family to
+       lift that boundary, which closes it as a *family* boundary altogether: `image:a&b.png[]`
+       is recognized as the same `Image` node its verbatim spelling builds, its target read off
+       the match string (`a&amp;b.png`, the `caps[1]` the string replacer renders as the `src`,
+       derives `default_alt` from, and registers) through `text_slice`'s own fallback, so a
+       verbatim or synthesized target still borrows `'src`. An image has no shown text, so the
+       shared `macro_text_children` has no part here; and no capture boundary can split an entity,
+       since each is delimited by `image:`/`icon:`, `[`, or `]`. What remains is exactly the
+       **non-empty attribute list**, which keeps `range_is_verbatim` because `Attrlist::parse`
+       reads its own source span's bytes as content — so the escaped special is now only a
+       *capture* boundary, for the three attribute lists that must ride on a node as a real
+       `Attrlist<'src>`. The family's escape check is hoisted ahead of the gate, closing the same
+       latent gap its four predecessors did. A restored entity in the target, and a rendered span
+       anywhere in the match, still defer, each with its own divergence test. See the step's own
+       "landed as" note above.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
