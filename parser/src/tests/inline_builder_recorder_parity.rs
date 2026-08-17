@@ -1018,4 +1018,8 @@ fn shapes_match_across_combined_constructs() {
     // recovers from the rendered markup, so the two constructions can finally
     // be compared for this form.
     assert_shapes("See xref:sec[the *bold* steps] and <<sec,a _slanted_ label>> here.");
+
+    // The `link:`/`mailto:` macro's own version of that lift, the second family
+    // to take it — comparable here for the same reason.
+    assert_shapes("Read link:index.html[the *bold* docs] or mailto:a@example.org[write _now_].");
 }

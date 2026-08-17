@@ -3058,6 +3058,61 @@ Each phase is a reviewable unit with a clear exit gate.
   `subs=quotes,specialcharacters`) is unchanged, still needing its own policy rather than another
   recognition increment.
 
+  *Step 6 prep landed as (a display text crossing a rendered span — the `link:`/`mailto:` macro
+  family, second of that last class):* the same lift, applied to the second of the three families
+  the increment above left holding the boundary, and by the same move: not a gate relaxation but a
+  change of *which bytes the gate covers*. The `link:`/`mailto:` macro reads exactly one value off
+  the level's match string — its **target** — so
+  [`find_link_macro_matches`](../../parser/src/content/inline_builder/macros/links.rs) now applies
+  [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs) to the
+  target group (`INLINE_LINK_MACRO`'s group 3) rather than to the whole match. The bracketed
+  **display text** reads nothing: it becomes the node's children through the shared
+  [`macro_text_children`](../../parser/src/content/inline_builder/macros/mod.rs), whose
+  [`emit_range`](../../parser/src/content/inline_builder/quotes.rs) path clones the opaque piece's
+  own node whole into them, so the text carries the construct rather than the markup it will fold
+  to. The macro's own `link:`/`mailto:` marker and its brackets need no gate — those bytes are
+  literal, and no atomic piece (a placeholder, or an entity delimited by `&` and `;`) can supply
+  them — and the marker keeps its own stricter, verbatim gate for `link_form`'s sake. **No builder
+  changed at all**, and neither did `apply_link_side_effects`: a node's target, which is what it
+  registers, is exactly the value that kept the gate.
+
+  What still defers here is what the cross-reference increment's own boundary predicted, one family
+  over: a **target** crossing an opaque piece (a target carrying an unconstrained code span, and —
+  the shape the audit actually surfaces — a target wrapped in a passthrough,
+  `link:++https://…++[]`), since a target is computed off the match string; and a display text
+  carrying its own **attribute list**
+  (`link:x[a *b* c,role=hl]`, `mailto:a@x.org[a *b* c,Subj]`), whose value comes back from an
+  `Attrlist` parse of the source's bytes, where a placeholder inside a *parsed* value has no node
+  to be mapped back to. Each gets its own divergence test.
+
+  The recognition-agreement gap this class introduces takes the same three shapes it did for the
+  cross-reference family, read through this family's own pattern and probes: a `]` inside the span
+  (which ends `INLINE_LINK_MACRO`'s lazy text capture early for the string replacer), markup
+  carrying an `=` beside a comma elsewhere in a `link:` text (the replacer's attribute-list probe,
+  fired on the markup this side never sees), and a comma inside the span of a `mailto:` text (that
+  spelling's own probe). Each is pinned by its own test, and in each the string pipeline's reading
+  is the markup-perturbed one while the tree's is the well-formed one — so the test asserts *both*
+  that the two disagree and that the tree still builds the well-formed node.
+
+  A differential corpus pins the display text crossing every opaque shape the earlier steps can
+  produce — each quoted form (including an attributed span, whose markup carries the `=` the string
+  replacer's own probe reads and this one does not), an image, an icon, a UI macro, an index term, a
+  span beside an escaped special and beside a restored entity, a span in a target that itself
+  crosses an escaped special, under the `\]` unescape and the `^` window suffix, escaped, in flow,
+  beside a sibling macro, and inside a rendered span of its own — in both the `link:` and `mailto:`
+  spellings, alongside a structural test asserting the recovered children's own precise spans (three
+  children where the single-`Text` shape this replaced could express one). As before, the
+  passthrough fixtures live in the whole-pipeline sweep rather than the family's own step-driven
+  corpus, since only the real `SubstitutionGroup::apply` brackets the steps with the extraction that
+  makes a passthrough opaque on *both* sides. Fixtures are added to that sweep, the broad
+  general-purpose sweep, the group-parity corpus, and the structural recorder cross-check.
+
+  Re-running the corpus-wide fold-parity audit confirms the divergence set strictly **shrank**: one
+  previously-surviving source is gone — `link:https://example.org[with *bold* text]`, a real fixture
+  in the Phase 1 byte-parity corpus — and no new one appeared. As with every prep piece before it,
+  nothing further is wired in. The auto-link / formal-URL family and the image family's own
+  attribute list still defer a capture crossing a rendered span, each a later increment.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -3413,6 +3468,20 @@ Each phase is a reviewable unit with a clear exit gate.
        text carrying its own attribute list keeps the stricter gate outright. See the step's own
        "landed as" note above. The `link:`/`mailto:`, auto-link/formal-URL, and image families keep
        the boundary, each a later increment.
+     - ✅ **prep (a display text crossing a rendered span — the `link:`/`mailto:` macro family).**
+       The second family of that last class, by the identical move:
+       [`find_link_macro_matches`](../../parser/src/content/inline_builder/macros/links.rs) gates
+       the **target** (`INLINE_LINK_MACRO`'s group 3) — the one value this family computes off the
+       match string — rather than the whole match, while the bracketed **display text**, which
+       computes nothing, is carried structurally through the shared
+       [`macro_text_children`](../../parser/src/content/inline_builder/macros/mod.rs). No builder
+       changed, and neither did `apply_link_side_effects` (a node's target, what it registers, is
+       exactly the value that kept the gate). What defers is a target crossing an opaque piece and
+       a display text carrying its own `Attrlist`, each with its own divergence test; the
+       recognition-agreement gap takes this family's own three shapes (a `]` inside the span, an
+       `=` beside a comma in a `link:` text, a comma inside the span of a `mailto:` text). See the
+       step's own "landed as" note above. The auto-link / formal-URL family and the image family's
+       own attribute list keep the boundary, each a later increment.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
