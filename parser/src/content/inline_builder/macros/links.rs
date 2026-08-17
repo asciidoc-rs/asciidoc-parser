@@ -1447,8 +1447,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::super::super::test_support::{
-        assert_link, assert_special_char, assert_styled, assert_text, build_src, fold_html,
-        golden_macros, golden_macros_with, link_text_of,
+        assert_entity, assert_link, assert_special_char, assert_styled, assert_text, build_src,
+        fold_html, golden_macros, golden_macros_with, link_text_of,
     };
     use crate::{
         Parser, Span,
@@ -2761,23 +2761,108 @@ mod tests {
     }
 
     #[test]
-    fn an_auto_link_over_a_restored_entity_is_a_documented_divergence() {
-        // The relaxed gate admits an escaped special because the match string
-        // carries its canonical entity — the string pipeline's own haystack
-        // bytes. A *restored entity* (`&amp;` written in the source, which the
-        // character-replacements step turns back into a `CharRef::Entity`) is
-        // not that: `build_match_string` stands it in as one opaque
-        // placeholder, so it is rejected like a rendered span.
-        let source = "https://example.org[a &amp; b]";
+    fn fold_matches_the_string_pipeline_for_a_link_crossing_a_restored_entity() {
+        // A *restored entity* (`&amp;copy;` written in the source, which the
+        // character-replacements step turns back into a `CharRef::Entity`
+        // whose value is `&copy;`) is admitted for the same reason an escaped
+        // special is: its match-string bytes are the string pipeline's own
+        // haystack bytes there, and the fold emits them verbatim. It is
+        // recovered as its own `CharRef` child rather than baked into a `Text`
+        // the fold would escape a second time.
+        let fixtures = [
+            // A display text crossing one, in each of the four link spellings.
+            "https://example.org[a &amp; b]",
+            "https://example.org[a &copy; b]",
+            "link:index.html[a &copy; b]",
+            "mailto:a@b.com[Tom &copy; Jerry]",
+            "<https://example.org/a&copy;b>",
+            // A *target* crossing one, bare and bracketed.
+            "https://example.org/?a=&copy;b",
+            "link:a&copy;b.html[]",
+            "link:a&copy;b.html[Text]",
+            // A bare e-mail address, the family's fifth spelling.
+            "doc&copy;a@example.org",
+            // A target crossing both a restored entity and an escaped special.
+            "link:a&copy;b&c.html[]",
+            // In flow, doubled, inside a rendered span, and escaped.
+            "see link:a&copy;b.html[Docs] now",
+            "link:a&copy;b.html[] link:c&reg;d.html[]",
+            "*link:a&copy;b.html[Docs]*",
+            "\\link:a&copy;b.html[Docs]",
+            // An entity beside the macro rather than inside it.
+            "&copy;link:x.html[Docs]&reg;",
+            // The numeric spellings, as three real-world fixtures elsewhere in
+            // this crate's Asciidoctor port write them: a display text
+            // carrying an escaped `]`, a target carrying an escaped space, and
+            // a typographic apostrophe immediately before a bare auto-link.
+            "http://example.com[sam&#93;ple]bracket]",
+            "link:My&#32;Documents/report.pdf[Get Report]",
+            "l&#8217;http://www.irit.fr[IRIT]",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_display_text_crossing_a_restored_entity_keeps_the_entity_as_its_own_child() {
+        // The structural companion: the text is rebuilt through
+        // `macro_text_children`'s `emit_range` path, so the entity stays the
+        // `CharRef::Entity` leaf it already is — folding back to its own bytes
+        // — with `Text` runs on either side borrowing `'src`.
+        let source = "https://example.org[a &copy; b]";
         let nodes = build_src(Span::new(source));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "a display text crossing a restored entity must stay literal: {nodes:?}"
-        );
+        assert_eq!(nodes.len(), 1);
+        let reference = assert_link(&nodes[0]);
 
-        // The string pipeline, by contrast, *does* build a link here.
-        assert!(golden_macros(source).contains("<a href"));
+        assert_eq!(reference.target.as_ref(), "https://example.org");
+        assert_eq!(reference.children.len(), 3);
+        assert_text(&reference.children[0], "a ", 1, 21);
+
+        // The leaf's own span is precise — the entity as the author wrote it,
+        // which is also the value it carries (the `SpecialCharacters` escape
+        // the replacements step undid leaves no trace in either).
+        let entity = assert_entity(&reference.children[1], "&copy;");
+        assert_eq!(entity.data(), "&copy;");
+        assert_eq!(entity.col(), 23);
+
+        assert_text(&reference.children[2], " b", 1, 29);
+    }
+
+    #[test]
+    fn an_attribute_list_text_crossing_a_restored_entity_is_a_documented_divergence() {
+        // The one capture in this family that still needs a real `'src` slice
+        // keeps the boundary for a restored entity too: the source holds
+        // `&amp;copy;` where the match string holds `&copy;`, so
+        // `Attrlist::parse` would read the wrong bytes as content.
+        //
+        // If this boundary is ever lifted, fold these fixtures into the parity
+        // corpus above.
+        for source in [
+            "https://example.org[a &copy; b,role=hl]",
+            "link:index.html[a &copy; b,role=hl]",
+            "mailto:a@b.com[Tom &copy; Jerry,Subject here]",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+                "an attribute-list text crossing a restored entity must stay literal: {nodes:?}"
+            );
+
+            // The string pipeline, by contrast, *does* build a link here.
+            assert!(golden_macros(source).contains("<a href"));
+        }
     }
 
     #[test]

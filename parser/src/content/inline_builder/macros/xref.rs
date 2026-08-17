@@ -9,12 +9,13 @@ use crate::{
     attributes::{Attrlist, AttrlistContext},
     content::{
         INLINE_XREF,
-        inline_builder::quotes::{Piece, build_match_string, source_slice},
+        inline_builder::quotes::{Piece, build_match_string, source_slice, special_entity},
+        restored_entity_pattern,
         xref_target::{
             XrefTarget, interpret_xref_target, other_document_reference, this_document_reference,
         },
     },
-    inlines::{InlineNode, Ref, RefVariant},
+    inlines::{CharRef, InlineNode, Ref, RefVariant},
     parser::{DerivedReference, XrefStyle},
     strings::CowStr,
 };
@@ -125,20 +126,24 @@ pub(super) fn xref_macros_level<'src>(
 /// already made, and for the same reason; the families that hold a real
 /// [`Attrlist`]`<'src>` (image, link) still cannot make it.
 ///
-/// An **escaped special** (`xref:sec[a<b]`, `<<sec,Tom & Jerry>>`) is admitted
-/// for the same reason: the level's match string carries the
-/// [`CharRef`](InlineNode::CharRef)`::Special`'s canonical entity — the very
-/// bytes the string replacer's own escaped haystack holds there — so every
+/// An **escaped special** (`xref:sec[a<b]`, `<<sec,Tom & Jerry>>`) and a
+/// **restored entity** (`xref:sec[Tom &copy; Jerry]`) are admitted for the same
+/// reason: the level's match string carries the
+/// [`CharRef`](InlineNode::CharRef) leaf's own bytes — a `Special`'s canonical
+/// entity, an `Entity`'s entity itself — the very bytes the string replacer's
+/// own escaped haystack holds there — so every
 /// value this family computes off that string (the target, the
 /// `raw_text.contains('=')` attribute-list probe, the attrlist parse itself,
 /// the shorthand's `split_once(',')`) sees exactly what the string replacer
 /// sees. The reference *text* is then rebuilt as structured children rather
 /// than one sliced [`Text`](InlineNode::Text) (see [`macro_text_children`]), so
-/// the escaped special folds back to its own entity instead of being escaped
-/// twice. A **rendered span** stays deferred: it is one opaque placeholder
-/// here where the string pipeline's haystack holds its markup inline, and that
-/// markup — which only exists at fold time — is what the string replacer's own
-/// `=` probe and the pattern's `]` boundary read.
+/// the leaf folds back to its own bytes instead of being escaped
+/// twice — and the attribute-list branch, whose value comes back from a parse
+/// rather than from a range, re-derives the same split with
+/// [`escaped_value_children`]. A **rendered span** stays deferred: it is one
+/// opaque placeholder here where the string pipeline's haystack holds its
+/// markup inline, and that markup — which only exists at fold time — is what
+/// the string replacer's own `=` probe and the pattern's `]` boundary read.
 fn find_xref_matches<'src>(
     nodes: &[InlineNode<'src>],
     s: &str,
@@ -348,27 +353,16 @@ fn xref_macro_text<'src>(
                     #[allow(clippy::unwrap_used)]
                     let span = text_span.unwrap();
 
-                    vec![InlineNode::Text {
-                        // The positional value is *already-escaped* text (it
-                        // was parsed out of the level's match string, where an
-                        // escaped special is its entity), while a
-                        // `Text` node holds *logical* text the fold escapes
-                        // (design §3.4). `unescape_specials` puts the three
-                        // entities the match string can carry back to their
-                        // characters, so the round trip through the fold is
-                        // byte-exact; it is a no-op for a text carrying no
-                        // escaped special, which is every text this branch saw
-                        // before the gate admitted one.
-                        value: CowStr::from(unescape_specials(&text)),
-                        // The parsed positional attribute is a synthesized
-                        // value with no `'src` slice of its own (it comes
-                        // from the normalized, attrlist-parsed copy, not the
-                        // source directly); it falls back to the bracketed
-                        // text's own span (design §4.4), mirroring the
-                        // synthesized-value location policy
-                        // `apply_attribute_references` already establishes.
-                        location: source_slice(pieces, span.start()..span.end(), root),
-                    }]
+                    // The parsed positional attribute is a synthesized value
+                    // with no `'src` slice of its own (it comes from the
+                    // normalized, attrlist-parsed copy, not the source
+                    // directly); it falls back to the bracketed text's own
+                    // span (design §4.4), mirroring the synthesized-value
+                    // location policy `apply_attribute_references` already
+                    // establishes.
+                    let location = source_slice(pieces, span.start()..span.end(), root);
+
+                    escaped_value_children(&text, location)
                 }
             };
 
@@ -404,33 +398,109 @@ fn plain_xref_text<'src>(
     macro_text_children(raw_text, text_range, true, nodes, pieces, root)
 }
 
-/// Puts the three character entities a level's match string can carry back to
-/// the characters they stand for.
+/// Rebuilds an **already-escaped computed value** — a value a family read off
+/// the level's own match string rather than out of the tree, here this family's
+/// attribute list's positional value — as the nodes that fold back to exactly
+/// those bytes, all sharing `location` (the value has no `'src` slice of its
+/// own, so design §4.4's coarse fallback is the only honest span for any part
+/// of it).
 ///
-/// [`build_match_string`] gives a
-/// [`CharRef`](InlineNode::CharRef)`::Special` leaf its canonical entity, so
-/// a value a family *computes* off that string — this family's attribute list's
-/// positional value — is already-escaped text, while a
-/// [`Text`](InlineNode::Text) node holds logical text the fold escapes (design
-/// §3.4). Undoing the escape is exact rather than heuristic: inside a range
-/// that crosses an escaped special, an `&` can only ever be the first byte of
-/// one of these three entities — a verbatim run holds no special at all (the
-/// `SpecialCharacters` step split every one into its own leaf), a synthesized
-/// run's own specials are [`Raw`](InlineNode::Raw) leaves (opaque, and so
-/// rejected by every caller's gate), and an author-written entity is a
-/// `CharRef::Entity` (likewise opaque). A caller therefore applies this only
-/// where its value's own source range crosses such a special: under an
-/// effective order that never escapes (§3.4.1), a literal `&` *does* survive
-/// into a verbatim run, and there is no entity to undo.
+/// The rebuild is design §3.4's trichotomy applied to a string:
+/// [`build_match_string`] gives an escaped special its canonical entity and a
+/// *restored* entity its own bytes, while a [`Text`](InlineNode::Text) node
+/// holds **logical** text the fold escapes. So the two classes come apart here
+/// — the special becomes the character it stands for (inside a `Text` the fold
+/// escapes back), and the restored entity becomes its own
+/// [`CharRef`](InlineNode::CharRef)`::Entity` leaf (which the fold emits
+/// verbatim) — where one `Text` holding both would escape the entity's `&` a
+/// second time.
 ///
-/// `&amp;` is undone **last** so a doubly-escaped sequence unwinds one level,
-/// exactly as the fold re-escapes one level: `&amp;lt;` (a literal `&`
-/// followed by the text `lt;`) becomes `&lt;`, which the fold escapes back to
-/// `&amp;lt;`.
-fn unescape_specials(text: &str) -> String {
-    text.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
+/// The scan is left to right, one `&` at a time, precisely because the two
+/// classes can nest: `&amp;copy;` is a literal `&` followed by the letters
+/// `copy;`, **not** a `&copy;` entity, and only consuming the `&amp;` first
+/// tells them apart. That is the same one-level unwind the fold performs in
+/// reverse.
+///
+/// Splitting on the three specials is exact rather than heuristic: inside such
+/// a value an `&` can only ever open one of these two classes or stand alone —
+/// a verbatim run holds no special at all (the `SpecialCharacters` step split
+/// every one into its own leaf) and a synthesized run's own specials are
+/// [`Raw`](InlineNode::Raw) leaves, which are opaque and so rejected by the
+/// caller's gate. Under an effective order that never escapes (§3.4.1) a
+/// literal `&` *does* survive into a verbatim run, and is left exactly as it
+/// is here, since neither class matches it.
+fn escaped_value_children<'src>(text: &str, location: Span<'src>) -> Vec<InlineNode<'src>> {
+    let mut children: Vec<InlineNode<'src>> = Vec::new();
+    let mut pending = String::new();
+    let mut rest = text;
+
+    while let Some(at) = rest.find('&') {
+        let (before, from_amp) = rest.split_at(at);
+
+        // Everything before this `&` is ordinary logical text.
+        pending.push_str(before);
+
+        let consumed = if let Some((ch, len)) = special_of(from_amp) {
+            // An escaped special: the character it stands for, which the fold
+            // escapes back to these very bytes.
+            pending.push(ch);
+            len
+        } else if let Some(entity) = restored_entity_pattern().find(from_amp) {
+            // A restored entity: its own leaf, emitted verbatim by the fold.
+            if !pending.is_empty() {
+                children.push(InlineNode::Text {
+                    value: CowStr::from(std::mem::take(&mut pending)),
+                    location,
+                });
+            }
+
+            children.push(InlineNode::CharRef {
+                value: CharRef::Entity(CowStr::from(entity.as_str().to_string())),
+                location,
+            });
+
+            // The pattern is `^`-anchored, so the match ends where the entity
+            // does.
+            entity.end()
+        } else {
+            // A bare `&` that opens neither class (an effective order that
+            // never escaped, §3.4.1): ordinary logical text like any other
+            // byte.
+            pending.push('&');
+            '&'.len_utf8()
+        };
+
+        rest = from_amp.get(consumed..).unwrap_or_default();
+    }
+
+    pending.push_str(rest);
+
+    if !pending.is_empty() {
+        children.push(InlineNode::Text {
+            value: CowStr::from(pending),
+            location,
+        });
+    }
+
+    children
+}
+
+/// The character an escaped special's canonical entity at the start of `rest`
+/// stands for, with the entity's own length, or `None` when `rest` does not
+/// open one.
+fn special_of(rest: &str) -> Option<(char, usize)> {
+    // The same three characters `SpecialCharacters` splits into their own
+    // leaves, read through `build_match_string`'s own mapping rather than a
+    // second copy of it.
+    for ch in ['<', '>', '&'] {
+        let entity = special_entity(ch);
+
+        if rest.starts_with(entity) {
+            return Some((ch, entity.len()));
+        }
+    }
+
+    None
 }
 
 /// Builds one [`Ref`](InlineNode::Ref)`{Xref}` node from a `<<id>>` shorthand
@@ -566,10 +636,10 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::super::super::test_support::{
-        assert_styled, assert_text, build_src, fold_html, link_text_of,
+        assert_entity, assert_styled, assert_text, build_src, fold_html, link_text_of,
     };
     use crate::{
-        Parser, Span,
+        HasSpan, Parser, Span,
         content::{Content, SubstitutionStep},
         inlines::{CharRef, InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
         parser::{HtmlSubstitutionRenderer, XrefStyle},
@@ -1243,6 +1313,146 @@ mod tests {
         assert_eq!(link_text_of(reference), "Tom & Jerry");
         assert_eq!(reference.roles.len(), 1);
         assert_eq!(reference.roles[0].as_ref(), "hl");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_for_a_cross_reference_crossing_a_restored_entity() {
+        // A restored entity (`&copy;`, `&#8217;`) is admitted for the same
+        // reason an escaped special is: the level's match string carries its
+        // own bytes — the string pipeline's haystack bytes from the
+        // replacements step onward — and the fold emits them verbatim.
+        let fixtures = [
+            // A reference text crossing one, in both spellings.
+            "xref:sec[Tom &copy; Jerry]",
+            "<<sec,Tom &copy; Jerry>>",
+            "xref:sec[&copy;]",
+            "xref:sec[&#8217;t is]",
+            // A *target* crossing one, in both spellings.
+            "xref:s&copy;c[Text]",
+            "<<s&copy;c>>",
+            // An attribute-list text crossing one — the capture this family
+            // parses from a normalized copy rather than an `'src` slice, so
+            // (unlike the link and image families) it takes the lift too.
+            "xref:sec[Tom &copy; Jerry,role=hl]",
+            "xref:sec[&copy;&reg;,role=hl,window=_blank]",
+            // A text crossing both a restored entity and an escaped special.
+            "xref:sec[a &copy; b < c]",
+            "xref:sec[a &copy; b < c,role=hl]",
+            // A *doubly* escaped entity: `&amp;copy;` is a literal `&`
+            // followed by the letters `copy;`, not an entity, and the fold
+            // must unwind exactly one level.
+            "xref:sec[Tom &amp;copy; Jerry]",
+            "xref:sec[Tom &amp;copy; Jerry,role=hl]",
+            // In flow, inside a rendered span, doubled, and escaped.
+            "see xref:sec[Tom &copy; Jerry] now",
+            "*xref:sec[Tom &copy; Jerry]*",
+            "xref:a[&copy;] and xref:b[&reg;]",
+            "\\xref:sec[Tom &copy; Jerry]",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_xref(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reference_text_crossing_a_restored_entity_keeps_the_entity_as_its_own_child() {
+        // The plain-text path rebuilds the text through `emit_range`, so the
+        // entity stays the leaf it already is rather than being baked into a
+        // `Text` the fold would escape a second time.
+        let source = "xref:sec[Tom &copy; Jerry]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.children.len(), 3);
+        assert_text(&reference.children[0], "Tom ", 1, 10);
+
+        // The leaf's own span is precise — the entity as the author wrote it,
+        // which is also the value it carries (the `SpecialCharacters` escape
+        // the replacements step undid leaves no trace in either).
+        let entity = assert_entity(&reference.children[1], "&copy;");
+        assert_eq!(entity.data(), "&copy;");
+        assert_eq!(entity.col(), 14);
+
+        assert_text(&reference.children[2], " Jerry", 1, 20);
+    }
+
+    #[test]
+    fn an_attribute_list_text_crossing_a_restored_entity_splits_the_entity_out() {
+        // The attribute-list branch has no range to rebuild from — its value
+        // comes back from an `Attrlist` parse of a normalized *copy* — so
+        // `escaped_value_children` re-derives the same split from the value's
+        // own bytes: the escaped special becomes the character a `Text` holds
+        // logically, and the restored entity its own `CharRef` leaf. Both fold
+        // back to one escape level, as the string replacer's own text does.
+        let source = "xref:sec[Tom &copy; & Jerry,role=hl]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.roles.len(), 1);
+        assert_eq!(reference.children.len(), 3);
+
+        // Every part of a parsed positional value shares the bracketed text's
+        // own coarse span (design §4.4) — it has no `'src` slice of its own.
+        let text_span = reference.children[0].span();
+        assert_eq!(text_span.data(), "Tom &copy; & Jerry,role=hl");
+
+        match &reference.children[0] {
+            InlineNode::Text { value, location } => {
+                assert_eq!(value.as_ref(), "Tom ");
+                assert_eq!(*location, text_span);
+            }
+
+            other => panic!("expected a Text run, got {other:?}"),
+        }
+
+        assert_eq!(assert_entity(&reference.children[1], "&copy;"), text_span);
+
+        match &reference.children[2] {
+            InlineNode::Text { value, location } => {
+                // The escaped special comes back as the *character*, which the
+                // fold escapes once.
+                assert_eq!(value.as_ref(), " & Jerry");
+                assert_eq!(*location, text_span);
+            }
+
+            other => panic!("expected a Text run, got {other:?}"),
+        }
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
+    }
+
+    #[test]
+    fn a_doubly_escaped_entity_in_an_attribute_list_text_unwinds_one_level() {
+        // `&amp;copy;` in the source is a literal `&` followed by the letters
+        // `copy;`, which the match string carries as `&amp;copy;` too (the
+        // `SpecialCharacters` escape of the `&`, which the restore-entities
+        // rule declines because `amp;copy` is not an entity name). Scanning
+        // left to right consumes the `&amp;` first, so the value is one `Text`
+        // holding `&copy;` *logically* — which the fold escapes back to
+        // `&amp;copy;` — not an entity leaf that would emit `&copy;`.
+        let source = "xref:sec[Tom &amp;copy; Jerry,role=hl]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.children.len(), 1);
+        assert_eq!(link_text_of(reference), "Tom &copy; Jerry");
 
         assert_eq!(
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),

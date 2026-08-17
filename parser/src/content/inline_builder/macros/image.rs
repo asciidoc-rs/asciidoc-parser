@@ -184,28 +184,31 @@ pub(in crate::content::inline_builder) fn range_is_verbatim_or_synthesized(
 /// The most relaxed of the three gates: accepts a range whose overlapping
 /// pieces are all ones the tree can reproduce **exactly** — a
 /// [`Text`](InlineNode::Text) run (verbatim or
-/// [`synthesized`](Piece::synthesized)) or an *escaped special*, a
-/// [`CharRef`](InlineNode::CharRef)`::Special` leaf — rejecting only an
-/// **opaque** piece: a rendered [`Styled`](crate::inlines::Styled) span, an
-/// earlier-recognized macro node, a masked passthrough or STEM expression, or a
-/// character replacement, each of which
+/// [`synthesized`](Piece::synthesized)) or either
+/// [`CharRef`](InlineNode::CharRef) leaf, an *escaped special*
+/// ([`Special`](CharRef::Special)) or a *restored entity*
+/// ([`Entity`](CharRef::Entity)) — rejecting only an **opaque** piece: a
+/// rendered [`Styled`](crate::inlines::Styled) span, an earlier-recognized
+/// macro node, a masked passthrough or STEM expression, or a character
+/// replacement, each of which
 /// [`build_match_string`] stands in as one
 /// `SPAN_PLACEHOLDER` rather than the markup or entity the string pipeline's
 /// own haystack holds there.
 ///
-/// An escaped special is admissible because its match-string bytes are its
-/// canonical entity (`&lt;`, `&gt;`, `&amp;`) — the very byte sequence the
-/// string pipeline's own escaped haystack carries at that position — so a
-/// family that reads its values out of the match string sees exactly what the
-/// string replacer sees. What such a family cannot do is *slice* those bytes
-/// from `'src` (the source holds one character where the match string holds an
-/// entity), so a value that must ride on the node as an `'src` slice — an
-/// [`Attrlist`]`<'src>`, an [`Image`](InlineNode::Image)'s bracket — keeps
-/// [`range_is_verbatim`], and a *display text* recovered under this gate is
-/// rebuilt as structured children with
-/// [`emit_range`](super::super::quotes::emit_range) (the escaped special
-/// becoming its own `CharRef` child, which folds back to the same entity)
-/// rather than as one sliced `Text`.
+/// Both `CharRef` leaves are admissible for the same reason: their
+/// match-string bytes — a special's canonical entity (`&lt;`, `&gt;`,
+/// `&amp;`), a restored entity's own text (`&copy;`, `&#8217;`) — are the very
+/// byte sequence the string pipeline's own haystack carries at that position,
+/// so a family that reads its values out of the match string sees exactly what
+/// the string replacer sees. What such a family cannot do is *slice* those
+/// bytes from `'src` (the source holds one character where the match string
+/// holds an entity, and `&amp;copy;` where it holds `&copy;`), so a value that
+/// must ride on the node as an `'src` slice — an [`Attrlist`]`<'src>`, an
+/// [`Image`](InlineNode::Image)'s bracket — keeps [`range_is_verbatim`], and a
+/// *display text* recovered under this gate is rebuilt as structured children
+/// with [`emit_range`](super::super::quotes::emit_range) (the leaf staying its
+/// own `CharRef` child, which folds back to the same bytes) rather than as one
+/// sliced `Text`.
 pub(in crate::content::inline_builder) fn range_has_no_opaque_piece(
     nodes: &[InlineNode<'_>],
     pieces: &[Piece],
@@ -224,12 +227,13 @@ pub(in crate::content::inline_builder) fn range_has_no_opaque_piece(
             continue;
         }
 
-        // The only atomic piece `build_match_string` gives real bytes to is an
-        // escaped special; everything else it stands in as one placeholder.
+        // The atomic pieces `build_match_string` gives real bytes to are the
+        // two `CharRef` leaves — an escaped special and a restored entity;
+        // everything else it stands in as one placeholder.
         let recoverable = matches!(
             nodes.get(piece.node_index),
             Some(InlineNode::CharRef {
-                value: CharRef::Special(_),
+                value: CharRef::Special(_) | CharRef::Entity(_),
                 ..
             })
         );
@@ -810,24 +814,93 @@ mod tests {
     }
 
     #[test]
-    fn a_target_crossing_a_restored_entity_is_a_documented_divergence() {
-        // An author-written entity (`&amp;`, `&lt;`) is escaped by
-        // `SpecialCharacters` and then *restored* by
-        // `CharacterReplacements`, which the builder represents as an opaque
-        // [`CharRef::Replacement`] leaf rather than the entity bytes the
-        // string pipeline's haystack carries. `range_has_no_opaque_piece`
-        // rejects it, so the macro stays literal — the same class every other
-        // family already defers (a rendered span, a passthrough, a character
-        // replacement).
+    fn fold_matches_the_string_pipeline_for_a_target_crossing_a_restored_entity() {
+        // An author-written entity (`&amp;copy;`, `&amp;#8217;`) is escaped by
+        // `SpecialCharacters` and then *restored* by `CharacterReplacements`
+        // into a `CharRef::Entity` leaf whose value is the entity itself. Those
+        // bytes are what the string pipeline's own haystack carries from the
+        // replacements step onward, and what the fold emits verbatim, so
+        // `range_has_no_opaque_piece` admits the leaf exactly as it admits an
+        // escaped special.
+        let fixtures = [
+            // A target crossing a restored entity — the `&amp;` spelling of
+            // `&`, a named entity, and a numeric one.
+            "image:a&amp;b.png[]",
+            "image:&lt;.png[]",
+            "image:a&copy;b.png[]",
+            "image:a&#8217;b.png[]",
+            "icon:a&copy;b[]",
+            // Beside a verbatim attribute list, and doubled.
+            "image:a&copy;b.png[Alt]",
+            "image:a&copy;b.png[Alt,200,100]",
+            "image:a&copy;b&reg;c.png[]",
+            // A target crossing *both* a restored entity and an escaped
+            // special, which only the match string carries the bytes of.
+            "image:a&copy;b&c.png[]",
+            // In surrounding flow, inside a rendered span, and beside a
+            // sibling family that takes the same lift.
+            "before image:a&copy;b.png[A] after",
+            "*image:a&copy;b.png[A]*",
+            "image:a&copy;b.png[Alt] and link:x&reg;y.html[]",
+            // The escape still keeps the macro literal, backslash dropped.
+            "\\image:a&copy;b.png[A]",
+            // An entity *beside* the macro rather than inside it.
+            "&copy;image:sunset.jpg[]&reg;",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_target_crossing_a_restored_entity_carries_the_entity_bytes() {
+        // As for an escaped special, the node's `target` is the string
+        // replacer's own `caps[1]` — here the *restored* entity's bytes, which
+        // are also the source's own — and the default alt derives from that
+        // same string.
+        let source = "image:a&copy;b.png[]";
+        let nodes = build_src(Span::new(source));
+
+        assert_eq!(nodes.len(), 1);
+        let image = assert_image(&nodes[0]);
+
+        assert_eq!(image.target.as_ref(), "a&copy;b.png");
+        assert_eq!(image.alt.as_deref(), Some("a&copy;b"));
+
+        // The whole macro's span is still precise: neither the match's start
+        // nor its end can fall inside an entity.
+        assert_eq!(image.location.data(), source);
+        assert_eq!(image.location.line(), 1);
+        assert_eq!(image.location.col(), 1);
+    }
+
+    #[test]
+    fn an_attribute_list_crossing_a_restored_entity_is_a_documented_divergence() {
+        // The bracket keeps `range_is_verbatim` for a restored entity too, and
+        // for the same reason it keeps it for an escaped special: the source
+        // holds `&amp;copy;` where the match string holds `&copy;`, so
+        // `Attrlist::parse` would read the wrong bytes as content.
         //
         // If this boundary is ever lifted, fold these fixtures into the parity
         // corpus above.
-        for source in ["image:a&amp;b.png[]", "image:&lt;.png[]"] {
+        for source in [
+            "image:x.png[Tom &amp; Jerry]",
+            "image:x.png[alt=a &copy; b]",
+        ] {
             let nodes = build_src(Span::new(source));
 
             assert!(
                 nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
-                "an image whose target crosses a restored entity must stay literal: {nodes:?}"
+                "an image whose bracket crosses a restored entity must stay literal: {nodes:?}"
             );
 
             assert!(

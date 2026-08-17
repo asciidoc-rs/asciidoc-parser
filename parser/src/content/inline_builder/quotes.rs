@@ -128,9 +128,11 @@ fn match_level<'src>(
 /// to its nodes.
 ///
 /// A verbatim [`Text`](InlineNode::Text) run contributes its (special-free)
-/// value; a [`CharRef`](InlineNode::CharRef) contributes its canonical entity,
-/// so the boundary classes the quote patterns key off (`&`, `;`) see exactly
-/// what the string pipeline's escaped text presents; a *synthesized*
+/// value; a [`CharRef`](InlineNode::CharRef) contributes its canonical entity
+/// (a [`Special`](CharRef::Special)) or the entity itself (a *restored*
+/// [`Entity`](CharRef::Entity)), so the boundary classes the quote patterns key
+/// off (`&`, `;`) see exactly what the string pipeline's escaped text presents
+/// — and so does a later step reading a value across one; a *synthesized*
 /// `Text` run (design §3.4.1 — an attribute expansion, a `counter` directive)
 /// contributes its `value` too, so [`apply_character_replacements`]
 /// (design §3.4.1: `replacements` still runs over an expanded value) can
@@ -198,6 +200,35 @@ pub(super) fn build_match_string(nodes: &[InlineNode<'_>]) -> (String, Vec<Piece
                 });
             }
 
+            InlineNode::CharRef {
+                value: CharRef::Entity(entity),
+                location,
+            } => {
+                // A *restored* entity (`&amp;copy;` un-escaped back to
+                // `&copy;` by the character-replacements step) contributes its
+                // own bytes for the same reason a `Special` contributes its
+                // canonical entity: those bytes *are* what the string
+                // pipeline's own haystack holds at that position from the
+                // replacements step onward, and the fold emits them verbatim
+                // (see `fold`'s `CharRef::Entity` arm), so the two agree with
+                // no renderer involved. It stays `atomic` — the leaf is one
+                // indivisible node, never sliced — but is *recoverable*, which
+                // is the distinction
+                // [`range_has_no_opaque_piece`](super::macros::image::range_has_no_opaque_piece)
+                // draws.
+                s.push_str(entity);
+
+                pieces.push(Piece {
+                    node_index,
+                    s_start,
+                    s_len: entity.len(),
+                    src_offset: location.byte_offset(),
+                    src_len: location.data().len(),
+                    atomic: true,
+                    synthesized: false,
+                });
+            }
+
             other => {
                 // A span from an earlier sub (or any other synthesized-value
                 // node, e.g. a `Raw` leaf) is opaque: a single placeholder
@@ -249,7 +280,11 @@ pub(in crate::content::inline_builder) fn range_overlaps_synthesized(
 /// The canonical special-character entity a [`CharRef::Special`] contributes to
 /// the match string. These are the AsciiDoc-standard escapes the quote patterns
 /// were written against, independent of the render-time backend.
-fn special_entity(ch: char) -> &'static str {
+///
+/// Shared with the macro families, which need the same mapping in reverse to
+/// take an already-escaped *computed* value apart (see
+/// `xref::escaped_value_children`), so the two directions cannot drift.
+pub(super) fn special_entity(ch: char) -> &'static str {
     match ch {
         '<' => "&lt;",
         '>' => "&gt;",
@@ -1442,6 +1477,46 @@ mod tests {
             style_variant(crate::parser::QuoteType::Unquoted, false),
             StyleVariant::Unquoted
         );
+    }
+
+    #[test]
+    fn a_restored_entity_contributes_its_own_bytes_to_the_match_string() {
+        // The two `CharRef` leaves are the atomic pieces `build_match_string`
+        // gives real bytes to: a `Special` its canonical entity, and an
+        // `Entity` the entity itself. Both are what the string pipeline's own
+        // haystack holds at that position, which is what lets a family read a
+        // value across one; both stay `atomic`, since a leaf is one
+        // indivisible node.
+        let nodes = vec![
+            InlineNode::Text {
+                value: CowStr::from("a"),
+                location: Span::new("a"),
+            },
+            InlineNode::CharRef {
+                value: CharRef::Entity(CowStr::from("&copy;")),
+                location: Span::new("&copy;"),
+            },
+            InlineNode::CharRef {
+                value: CharRef::Special('&'),
+                location: Span::new("&"),
+            },
+        ];
+
+        let (s, pieces) = super::build_match_string(&nodes);
+
+        assert_eq!(s, "a&copy;&amp;");
+        assert_eq!(pieces.len(), 3);
+
+        assert!(!pieces[0].atomic);
+
+        assert_eq!(pieces[1].s_start, 1);
+        assert_eq!(pieces[1].s_len, "&copy;".len());
+        assert!(pieces[1].atomic);
+        assert!(!pieces[1].synthesized);
+
+        assert_eq!(pieces[2].s_start, "a&copy;".len());
+        assert_eq!(pieces[2].s_len, "&amp;".len());
+        assert!(pieces[2].atomic);
     }
 
     #[test]

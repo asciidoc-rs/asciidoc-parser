@@ -1220,9 +1220,40 @@ static REPLACEMENTS: LazyLock<Vec<CharacterReplacement>> = LazyLock::new(|| {
             // Restore entities
             type_: CharacterReplacementType::CharacterReference("".to_owned()),
             #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?&amp;((?:[a-zA-Z][a-zA-Z]+\d{0,2}|#\d\d\d{0,4}|#x[\da-fA-F][\da-fA-F][\da-fA-F]{0,3}));"#).unwrap(),
+            pattern: Regex::new(&format!(r#"\\?&amp;({ENTITY_NAME});"#)).unwrap(),
         },
     ]
+});
+
+/// The name an entity reference must carry for the **restore entities**
+/// replacement rule above to recognize it: a named entity (`copy`, `hellip`,
+/// `frac12`), a decimal numeric reference (`#8217`), or a hexadecimal one
+/// (`#x2014`).
+///
+/// Shared with [`restored_entity_pattern`] so the two spellings of the same
+/// class — the rule that *produces* a restored entity, and the pattern that
+/// recognizes one already produced — cannot drift.
+const ENTITY_NAME: &str =
+    r#"(?:[a-zA-Z][a-zA-Z]+\d{0,2}|#\d\d\d{0,4}|#x[\da-fA-F][\da-fA-F][\da-fA-F]{0,3})"#;
+
+/// A **restored** entity reference (`&copy;`, `&#8217;`) as it appears once the
+/// **restore entities** replacement rule above has un-escaped it — that is, the
+/// same class that rule matches, minus the `&amp;` escaping its `&` had before
+/// the rule ran.
+///
+/// Shared with the single-pass
+/// [`inline_builder`](crate::content::inline_builder), which needs to find such
+/// an entity inside a value a macro family *computed* off an already-escaped
+/// string, so the entity becomes its own
+/// [`CharRef`](crate::inlines::InlineNode::CharRef)`::Entity` child rather than
+/// text a fold would escape a second time.
+pub(crate) fn restored_entity_pattern() -> &'static Regex {
+    &RESTORED_ENTITY
+}
+
+static RESTORED_ENTITY: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(&format!(r#"^&{ENTITY_NAME};"#)).unwrap()
 });
 
 #[derive(Debug)]

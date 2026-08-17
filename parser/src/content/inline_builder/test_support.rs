@@ -99,6 +99,26 @@ pub(super) fn assert_special_char<'src>(node: &InlineNode<'src>, ch: char) -> Sp
     location
 }
 
+/// Asserts that `node` is a [`CharRef`](InlineNode::CharRef)`::Entity` for
+/// `entity` — a *restored* entity a macro family recovers as its own child
+/// rather than baking into a `Text` the fold would escape a second time — and
+/// returns its `location` for further inspection.
+///
+/// Written as a whole-node [`assert_eq!`] for the same coverage reason
+/// [`assert_special_char`] is.
+pub(super) fn assert_entity<'src>(node: &InlineNode<'src>, entity: &str) -> Span<'src> {
+    let location = node.span();
+
+    let expected = InlineNode::CharRef {
+        value: CharRef::Entity(CowStr::from(entity.to_string())),
+        location,
+    };
+
+    assert_eq!(*node, expected);
+
+    location
+}
+
 /// Asserts that `node` is a [`Raw`](InlineNode::Raw) with the given
 /// `value`, returning its `location`.
 pub(super) fn assert_raw<'src>(node: &InlineNode<'src>, value: &str) -> Span<'src> {
