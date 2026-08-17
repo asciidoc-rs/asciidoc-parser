@@ -80,23 +80,27 @@ use crate::{Parser, Span, inlines::InlineNode, strings::CowStr};
 /// the escaped piece is a delimiter *it consumes and never slices* — the
 /// angle-bracketed URL's own `&lt;`/`&gt;` (see
 /// `links::build_inline_link_node`) and a menu's `&gt;` submenu caret (see
-/// `ui::menu_match_is_sliceable`) — or, for the **cross-reference**, the
-/// **`link:`/`mailto:` macro**, and the **auto-link / formal-URL** families,
-/// wherever the escaped text need not
-/// ride on the node as an `'src` slice at all: no such family's target is
-/// `Span`-typed, so each reads its values out of the match string (whose entity
-/// bytes *are* the string pipeline's own) and rebuilds its display text as
-/// structured children through [`macro_text_children`], keeping each special as
-/// its own `CharRef` (see `xref::find_xref_matches`,
-/// `links::find_link_macro_matches`, `links::build_inline_link_node`, and
-/// [`range_has_no_opaque_piece`](image::range_has_no_opaque_piece)). The one
-/// capture that keeps the stricter gate in any of the three is a display text
-/// carrying an attribute list, which is parsed as a real
-/// [`Attrlist`](crate::attributes::Attrlist)`<'src>` from the source's own
-/// bytes; the auto-link family additionally keeps a narrow deferral of its own
-/// for a bare URL whose trailing-punctuation strip would cut inside an escaped
-/// special. A rendered span stays deferred for every family. The differential
-/// corpus pins the cases each increment claims.
+/// `ui::menu_match_is_sliceable`) — or, for **every** family that can carry a
+/// target or a display text (the **cross-reference**, the **`link:`/`mailto:`
+/// macro**, the **auto-link / formal-URL**, the **bare e-mail**, and the
+/// **image/icon** families), wherever the escaped text need not
+/// ride on the node as an `'src` slice at all: none of those families' targets
+/// is `Span`-typed, so each reads its values out of the match string (whose
+/// entity bytes *are* the string pipeline's own) and rebuilds its display text
+/// as structured children through [`macro_text_children`], keeping each special
+/// as its own `CharRef` (see `xref::find_xref_matches`,
+/// `links::find_link_macro_matches`, `links::build_inline_link_node`,
+/// `links::email_level`, `image::build_image_node`, and
+/// [`range_has_no_opaque_piece`](image::range_has_no_opaque_piece)). What keeps
+/// the stricter gate is never a *family* now, only the one **capture** that
+/// must ride on the node as a real
+/// [`Attrlist`](crate::attributes::Attrlist)`<'src>`, parsed from the source's
+/// own bytes: a link's or cross-reference's attribute-list-bearing display
+/// text, and an image's non-empty bracket. The auto-link family additionally
+/// keeps a narrow deferral of its own for a bare URL whose trailing-punctuation
+/// strip would cut inside an escaped special, and the e-mail family one for an
+/// address *abutting* an opaque piece. A rendered span stays deferred for every
+/// family. The differential corpus pins the cases each increment claims.
 pub(super) fn apply_macros<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,

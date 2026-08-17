@@ -716,6 +716,7 @@ mod tests {
             "an user@ex&ample.com non-address",
             "image:a.png[An image with spaces,role=thumb]",
             "before image:b.svg[Vector] after",
+            "an image:a&b.png[Query] target",
             "<<a>> and <<b>> and <<c,C text>> and <<d,>>",
             "a ((flow term)) and (((c1, c2, c3))) end",
             "indexterm:[primary, secondary]",
@@ -863,6 +864,23 @@ mod tests {
             "Write to a&b@example.com or plain@example.org about *{product}*.",
             with_product,
         );
+
+        // The last family to take the escaped-special lift, and the only one
+        // that keeps it for a *capture* rather than for the whole match: two
+        // images whose targets cross a special (their entity bytes read off
+        // the match string), beside a quoted span and a live attribute
+        // reference. The bracket that still defers is a divergence, so it is
+        // pinned in `image.rs`'s own test rather than here.
+        assert_parity_with(
+            "See image:a&b.png[Chart] and image:c<d.png[Diagram] \
+             about *{product}*.",
+            with_product,
+        );
+
+        // The same lift reached through an expansion: a target crossing *both*
+        // a synthesized run and an escaped special, which only the level's own
+        // match string carries the bytes of.
+        assert_parity_with("See image:{product}/a&b.png[Chart] here.", with_product);
 
         // A bare e-mail address spliced in by an attribute reference — a
         // *synthesized* run, which the e-mail family recognizes exactly the

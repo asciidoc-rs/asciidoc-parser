@@ -41,7 +41,7 @@ pub(super) fn image_macros_level<'src>(
 }
 
 /// Finds every image/icon macro at this level, skipping any whose match crosses
-/// an [`atomic`](Piece::atomic) piece (see
+/// an [`opaque`](range_has_no_opaque_piece) piece (see
 /// [`apply_macros`](super::apply_macros)) or whose attribute list
 /// [`build_image_node`] cannot slice from `'src`.
 fn find_image_matches<'src>(
@@ -60,14 +60,18 @@ fn find_image_matches<'src>(
 
         let full = whole.start()..whole.end();
 
-        // A match crossing an escaped special or a rendered span is left for a
-        // later increment; one crossing a `synthesized` run (an expanded
-        // attribute value) is admitted here and gated more narrowly — on its
-        // attribute list alone — inside `build_image_node`.
-        if !range_is_verbatim_or_synthesized(pieces, &full) {
-            continue;
-        }
-
+        // An escape (`\image:`) is honored by dropping the backslash and
+        // keeping the rest literal, mirroring `InlineImageMacroReplacer`'s own
+        // leading `caps[0].starts_with('\\')` check — which it makes *before*
+        // looking at anything else, so the escape needs no gate of its own
+        // here either: dropping the backslash keeps the rest of the match as
+        // its **own original nodes** (a rendered span or an escaped special
+        // among them), which fold back to exactly the bytes the replacer's
+        // `caps[0][1..]` emits. (This is the same check-order fix the
+        // `footnoteref:`, menu, cross-reference, and link increments made for
+        // their own families; before it, an escaped `\image:x.png[*bold*]`
+        // whose match the gate rejected was left unrecognized, backslash and
+        // all.)
         if whole.as_str().starts_with('\\') {
             matches.push(MacroMatch {
                 kind: MacroMatchKind::Unescape {
@@ -79,13 +83,23 @@ fn find_image_matches<'src>(
             continue;
         }
 
+        // A match crossing a rendered span is left for a later increment; one
+        // crossing an expanded attribute value or an escaped special is
+        // admitted here and gated more narrowly — on its attribute list alone —
+        // inside `build_image_node`, since the macro name and target are read
+        // from the match string, whose bytes are, for both, exactly the ones
+        // the string replacer's own haystack carries there.
+        if !range_has_no_opaque_piece(nodes, pieces, &full) {
+            continue;
+        }
+
         let Some(node) =
             build_image_node(&caps, whole.as_str(), &full, pieces, root, parser, nodes)
         else {
-            // A non-empty attribute list crossing a synthesized run: an
-            // `Attrlist<'src>` reads its own source span's bytes as content, so
-            // there is nothing honest to parse it from. Left as literal source
-            // for a later increment.
+            // A non-empty attribute list crossing a synthesized run or an
+            // escaped special: an `Attrlist<'src>` reads its own source span's
+            // bytes as content, so there is nothing honest to parse it from.
+            // Left as literal source for a later increment.
             continue;
         };
 
@@ -238,17 +252,21 @@ pub(in crate::content::inline_builder) fn range_has_no_opaque_piece(
 /// string** (`whole`, and [`text_slice`] for the target) rather than from a
 /// source slice, so both are exact even when they come from a
 /// [`synthesized`](Piece::synthesized) run — an expanded attribute value
-/// (`image:{logo}[Logo]`), or a filtered multi-line block's own joined seed.
-/// Only the node's `location` then takes design §4.4's coarse fallback.
+/// (`image:{logo}[Logo]`) or a filtered multi-line block's own joined seed —
+/// or cross an **escaped special** (`image:a&b.png[]`, whose target the string
+/// replacer reads as `a&amp;b.png` out of its own escaped haystack: the very
+/// bytes this match string carries, and the ones
+/// [`apply_image_side_effects`] registers). Only the node's `location` then
+/// takes design §4.4's coarse fallback.
 ///
 /// The **attribute list** is the one part that cannot follow: an
 /// [`Attrlist`]`<'src>` reads its own `Span<'src>`'s bytes *as content*, not
 /// merely as a location tag, so it needs a real source slice. A non-empty
-/// bracket crossing a synthesized run therefore returns `None` — the macro is
-/// left literal for a later increment, exactly as the other boundaries in this
-/// module are. An **empty** bracket (`image:{logo}[]`) needs no bytes at all
-/// and parses from the same zero-length span an absent group already uses, so
-/// it is recognized.
+/// bracket crossing a synthesized run or an escaped special therefore returns
+/// `None` — the macro is left literal for a later increment, exactly as the
+/// other boundaries in this module are. An **empty** bracket
+/// (`image:{logo}[]`) needs no bytes at all and parses from the same
+/// zero-length span an absent group already uses, so it is recognized.
 fn build_image_node<'src>(
     caps: &regex::Captures<'_>,
     whole: &str,
@@ -270,10 +288,14 @@ fn build_image_node<'src>(
     let target = match caps.get(1) {
         None => CowStr::from(""),
 
-        // The caller admitted no atomic piece in the match, so `text_slice`
-        // always yields a value here — borrowed from `'src` for a verbatim
-        // target, the expansion's own exact bytes for a synthesized one.
-        Some(m) => text_slice(nodes, pieces, m.start()..m.end())?,
+        // Borrowed from `'src` for a verbatim target (§4.5), the expansion's
+        // own exact bytes for a synthesized one. A target crossing an escaped
+        // special has no `'src` slice at all — the source holds one character
+        // where the match string holds an entity — so it falls back to the
+        // match string's own bytes, which is what `text_slice` declines to
+        // recover and precisely what the string replacer reads as `caps[1]`.
+        Some(m) => text_slice(nodes, pieces, m.start()..m.end())
+            .unwrap_or_else(|| CowStr::from(m.as_str().to_string())),
     };
 
     // Group 2 always participates — its own pattern carries an empty
@@ -291,8 +313,9 @@ fn build_image_node<'src>(
         // a zero-length span wherever the macro sits.
         location.slice(0..0)
     } else {
-        // A non-empty attribute list crossing a synthesized run: deferred (see
-        // this function's own "what must be verbatim" note).
+        // A non-empty attribute list crossing a synthesized run or an escaped
+        // special: deferred (see this function's own "what must be verbatim"
+        // note).
         return None;
     };
 
@@ -660,27 +683,223 @@ mod tests {
     }
 
     #[test]
-    fn a_macro_over_a_special_character_is_a_documented_divergence() {
+    fn an_escaped_macro_over_a_rendered_span_still_drops_its_backslash() {
+        // The escape check runs *ahead* of the gate (the same check-order fix
+        // the `footnoteref:`, menu, cross-reference, and link families made),
+        // so a macro the gate would reject still honors its own escape:
+        // dropping the backslash leaves the rest as its own nodes, which fold
+        // back to exactly the bytes `caps[0][1..]` emits.
+        let source = "\\image:x.png[*bold*]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
+            "an escaped macro must not produce an image node: {nodes:?}"
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_for_a_target_crossing_an_escaped_special() {
         // The string pipeline matches macros over *escaped* text, so a target
-        // containing `&` is matched as `a&amp;b.png`. A self-describing node
-        // cannot carry that escaped text as an `'src` slice, so the single-pass
-        // builder leaves such a macro *unrecognized* for a later increment (the
-        // attribute-references step and the cutover). This is the documented
-        // boundary of the additive image increment; the differential corpus
-        // above deliberately excludes it.
+        // containing `&` is matched as `a&amp;b.png`. Those entity bytes are
+        // exactly what this level's match string carries, so the node's target
+        // is read off it and the fold reproduces the same `src`/default alt —
+        // the escaped special being the one atomic piece
+        // `range_has_no_opaque_piece` admits.
+        let fixtures = [
+            // A target crossing each of the three specials, alone and doubled.
+            "image:a&b.png[]",
+            "image:a<b.png[]",
+            "image:a>b.png[]",
+            "image:a&b&c.png[]",
+            "icon:a&b[]",
+            // A verbatim attribute list beside such a target: positional alt,
+            // positional width/height, and named attributes (including the
+            // `link=` forms `apply_image_side_effects` reads).
+            "image:a&b.png[Alt]",
+            "image:a&b.png[Alt,200,100]",
+            "image:a&b.png[alt=Alt Text,role=thumb]",
+            "image:a&b.png[link=self]",
+            "image:a&b.png[alt=X,link=javascript:alert(1)]",
+            // In surrounding flow, doubled, inside a rendered span, and beside
+            // a sibling family that takes the same lift.
+            "before image:a&b.png[A] after",
+            "image:a&b.png[] image:c&d.png[]",
+            "*image:a&b.png[A]*",
+            "image:a&b.png[Alt] and link:x&y.html[]",
+            // A special the target's own character classes reject (a newline
+            // is impossible, but a space ends the target), so neither pipeline
+            // builds a macro.
+            "image:a & b.png[]",
+            // The escape still keeps the macro literal, backslash dropped.
+            "\\image:a&b.png[A]",
+            // A special *beside* the macro rather than inside it.
+            "image:sunset.jpg[]&amp;",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_target_crossing_an_escaped_special_carries_the_entity_bytes() {
+        // The node's `target` is the string replacer's own `caps[1]` — the
+        // escaped haystack's bytes, not the source's single `&` — which is
+        // also what `apply_image_side_effects` registers. The default alt
+        // derives from that same string, exactly as `default_alt` does.
+        let source = "image:a&b.png[]";
+        let nodes = build_src(Span::new(source));
+
+        assert_eq!(nodes.len(), 1);
+        let image = assert_image(&nodes[0]);
+
+        assert_eq!(image.target.as_ref(), "a&amp;b.png");
+        assert_eq!(image.alt.as_deref(), Some("a&amp;b"));
+
+        // The whole macro's span is still precise: neither the match's start
+        // (`i`, or a backslash) nor its end (`]`) can fall inside an entity,
+        // so no boundary lands in an atomic piece.
+        assert_eq!(image.location.data(), source);
+        assert_eq!(image.location.line(), 1);
+        assert_eq!(image.location.col(), 1);
+    }
+
+    #[test]
+    fn an_attribute_list_crossing_an_escaped_special_is_a_documented_divergence() {
+        // The attribute list is the one capture that still needs an honest
+        // `'src` slice: `Attrlist::parse` reads its own source span's bytes
+        // *as content*, and the source holds one character where the match
+        // string holds an entity. A non-empty bracket crossing one is
+        // therefore left literal rather than parsed from the wrong bytes —
+        // the same boundary the expanded-value divergence test below pins for
+        // a synthesized run.
+        //
+        // If this boundary is ever lifted, fold these fixtures into the parity
+        // corpus above.
+        for source in [
+            "image:x.png[a < b]",
+            "image:x.png[alt=a & b]",
+            "image:a&b.png[a < b]",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
+                "an image whose bracket crosses an escaped special must stay literal: {nodes:?}"
+            );
+
+            assert!(
+                golden_macros(source).contains("<img"),
+                "the golden fixture stopped recognizing the image for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_target_crossing_a_restored_entity_is_a_documented_divergence() {
+        // An author-written entity (`&amp;`, `&lt;`) is escaped by
+        // `SpecialCharacters` and then *restored* by
+        // `CharacterReplacements`, which the builder represents as an opaque
+        // [`CharRef::Replacement`] leaf rather than the entity bytes the
+        // string pipeline's haystack carries. `range_has_no_opaque_piece`
+        // rejects it, so the macro stays literal — the same class every other
+        // family already defers (a rendered span, a passthrough, a character
+        // replacement).
+        //
+        // If this boundary is ever lifted, fold these fixtures into the parity
+        // corpus above.
+        for source in ["image:a&amp;b.png[]", "image:&lt;.png[]"] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
+                "an image whose target crosses a restored entity must stay literal: {nodes:?}"
+            );
+
+            assert!(
+                golden_macros(source).contains("<img"),
+                "the golden fixture stopped recognizing the image for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_macro_over_a_rendered_span_is_a_documented_divergence() {
+        // A rendered span inside the match is the boundary this family keeps:
+        // `build_match_string` stands it in as one `SPAN_PLACEHOLDER`, so
+        // neither the target nor the bracket has bytes to read there.
+        //
+        // If this boundary is ever lifted, fold these fixtures into the parity
+        // corpus above.
+        let source = "image:x.png[*bold*]";
+
         let nodes = apply_macros(
-            build_through_special_and_replacements(Span::new("image:a&b.png[]")),
-            Span::new("image:a&b.png[]"),
+            build_through_special_and_replacements(Span::new(source)),
+            Span::new(source),
             &Parser::default(),
         );
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
-            "a macro crossing an escaped special must be left unrecognized: {nodes:?}"
+            "a macro crossing a rendered span must be left unrecognized: {nodes:?}"
         );
 
         // The string pipeline, by contrast, *does* build an image here.
-        assert!(golden_macros("image:a&b.png[]").contains("<img"));
+        assert!(golden_macros(source).contains("<img"));
+    }
+
+    #[test]
+    fn matches_the_golden_pipelines_registration_for_a_target_crossing_an_escaped_special() {
+        // The staged `register_image` reads the node's own stored `target`,
+        // which is now the escaped one — so it must be byte-identical to the
+        // `caps[1]` the string replacer registers. Two independent parsers, as
+        // elsewhere in this module.
+        let fixtures = [
+            "image:a&b.png[]",
+            "image:a<b.png[Alt]",
+            "image:a&b.png[] image:c&d.png[]",
+            "icon:a&b[]",
+            "\\image:a&b.png[A]",
+        ];
+
+        for fixture in fixtures {
+            let builder_parser = Parser::default().with_catalog_assets(true);
+            let nodes = build_with(Span::new(fixture), &builder_parser);
+            apply_image_side_effects(&nodes, &builder_parser, Span::new(fixture));
+
+            let golden_parser = Parser::default().with_catalog_assets(true);
+            golden_macros_with(fixture, &golden_parser);
+
+            let got: Vec<_> = builder_parser
+                .catalog()
+                .images()
+                .iter()
+                .map(|i| i.target.clone())
+                .collect();
+
+            let want: Vec<_> = golden_parser
+                .catalog()
+                .images()
+                .iter()
+                .map(|i| i.target.clone())
+                .collect();
+
+            assert_eq!(got, want, "registered images diverged for {fixture:?}");
+        }
     }
 
     /// Builds the tree **through character replacements** (special characters,
@@ -1015,6 +1234,11 @@ mod tests {
             // A partially-expanded target: the expansion is one piece of it.
             "image:{dir}/sunset.jpg[Sunset]",
             "image:{dir}/{logo}[]",
+            // A target crossing *both* a synthesized run and an escaped
+            // special, so neither the source nor the expansion alone carries
+            // its bytes — only the level's own match string does.
+            "image:{dir}/a&b.png[]",
+            "image:{dir}/a&b.png[Alt]",
             // A verbatim attribute list beside an expanded target, including
             // the positional width/height and a named attribute.
             "image:{logo}[Alt Text,200,100]",

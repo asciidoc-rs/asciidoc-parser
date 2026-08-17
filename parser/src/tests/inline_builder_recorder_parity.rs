@@ -740,6 +740,7 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "write to a&b@example.com today",
         "an image:photo.png[Alt Text] inline",
         "image:pic.png[Scaled,200,100]",
+        "an image:a&b.png[Query] inline",
         "see <<target>> for more",
         "see <<target,the target>> now",
         "see <<target,Tom & Jerry>> now",
@@ -883,6 +884,12 @@ fn shapes_match_across_combined_constructs() {
     // `CharRef`), which is the shape the recorder reaches from the opposite
     // direction — recovering it from the rendered anchor text.
     assert_shapes("Write to a&b@example.com or plain@example.org today.");
+
+    // The last family to lift the escaped-special boundary: an image whose
+    // target carries one, beside a plain image whose bracket does *not* — the
+    // capture that still defers — so both the recognized and the literal shape
+    // meet the recorder's own reconstruction.
+    assert_shapes("See image:a&b.png[Chart] and image:plain.png[Alt Text] today.");
 
     assert_shapes_with(
         "{counter:step}. Step one uses *{product}* and stem:[x+1].",
