@@ -13,8 +13,25 @@ impl<'src> Span<'src> {
     /// A line is terminated by end-of-input or a single `\n` character
     /// or a single `\r\n` sequence. The end of line sequence is consumed
     /// but not included in the returned line.
+    ///
+    /// # Why `memchr` rather than `str::find`
+    ///
+    /// This is the hottest scan in the parser — every block, every line, every
+    /// pass over the source runs through it — so which code the compiler picks
+    /// for the newline search dominates the whole parse. `self.find('\n')`
+    /// leaves that to inlining luck: `str::find` with a `char` pattern goes
+    /// through `CharSearcher`, whose SIMD fast path reaches the same `memchr`
+    /// underneath *only when the searcher is inlined away*. Whether it is
+    /// varies with unrelated codegen changes elsewhere in the crate, which has
+    /// repeatedly moved the `repeated example delimiters` benchmark by ±10-14%
+    /// in either direction on pull requests that never touched this file.
+    ///
+    /// Calling [`memchr::memchr`] directly pins the fast path. The two are
+    /// exactly equivalent on UTF-8: byte `0x0A` can only ever be a standalone
+    /// ASCII newline, since every continuation byte is `>= 0x80`, so the byte
+    /// index this finds is the same one `str::find` returns.
     pub(crate) fn take_line(self) -> MatchedItem<'src, Self> {
-        let line = match self.find('\n') {
+        let line = match memchr::memchr(b'\n', self.data().as_bytes()) {
             Some(index) => self.into_parse_result(index),
             None => self.into_parse_result(self.len()),
         };
