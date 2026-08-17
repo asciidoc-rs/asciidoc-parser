@@ -2913,6 +2913,72 @@ Each phase is a reviewable unit with a clear exit gate.
   **rendered span** still defers everywhere. As with every prep piece before it, nothing further is
   wired in.
 
+  *Step 6 prep landed as (a **restored entity** as the second recoverable piece, closing that
+  divergence for every family at once):* the increment above left a restored entity
+  (`&amp;copy;` written in the source, which `SpecialCharacters` escapes to `&amp;amp;copy;` and
+  `CharacterReplacements` then un-escapes back to `&amp;copy;`) as the image family's own last
+  deferral, and the auto-link family's alongside it. Both are closed here, and not family by
+  family: recoverability is a property of the **piece**, not of the family reading across it, so
+  naming the new class once lifts the boundary everywhere a family's gate is already
+  [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs).
+
+  [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) gives a
+  [`CharRef`](../../parser/src/inlines/char_ref.rs)`::Entity` leaf its **own bytes**, exactly as it
+  already gives a `CharRef::Special` its canonical entity, and for the identical reason: those
+  bytes *are* what the string pipeline's haystack holds at that position from the replacements step
+  onward, and the fold emits them verbatim (`fold`'s `Entity` arm), so the two sides agree with **no
+  renderer involved** — the distinction that separates this class from a rendered span, whose markup
+  exists only at fold time. The leaf stays `atomic` (it is one indivisible node, never sliced) but
+  becomes *recoverable*, which is precisely the distinction the third gate draws. Nothing else in
+  any family changes: a target or computed value reads the entity's bytes off the match string, and
+  a display text keeps the leaf as its own child through `macro_text_children`'s `emit_range` path,
+  where one `Text` holding `&amp;copy;` would have had its `&amp;` escaped a second time.
+
+  One computed value had no range to rebuild from, and is the increment's only new code: a
+  cross-reference's **attribute-list positional text**, which comes back from an `Attrlist` parse of
+  a normalized *copy* of the match string rather than from a range of it. The single-`Text`
+  `unescape_specials` that branch used is replaced by
+  [`escaped_value_children`](../../parser/src/content/inline_builder/macros/xref.rs), which
+  re-derives §3.4's trichotomy from the value's own bytes: an escaped special becomes the character
+  a `Text` holds *logically* (re-escaped once at fold time), a restored entity becomes its own
+  `CharRef::Entity` child (emitted verbatim). The scan is left to right, one `&amp;` at a time,
+  because the two classes nest — `&amp;amp;copy;` is a literal `&amp;` followed by the letters
+  `copy;`, **not** a `&amp;copy;` entity — and only consuming the `&amp;amp;` first tells them
+  apart, the same one-level unwind the fold performs in reverse. The entity-name class itself is
+  hoisted into a shared `ENTITY_NAME` constant that both the restore-entities replacement rule and
+  the new [`restored_entity_pattern`](../../parser/src/content/substitution_step.rs) are built from,
+  so the two spellings of one class cannot drift.
+
+  What does **not** move is the boundary held by a gate other than the opaque-piece one: the UI
+  family (a `kbd:`/`btn:` key or label, a menu name or item) and a footnote's text each still need a
+  value they can slice from `'src`, for a restored entity exactly as for an escaped special, and a
+  test pins the two spellings side by side so they move together whenever that boundary is lifted.
+  The three attribute-list captures that must ride on a node as a real `Attrlist<'src>` (a link's
+  attribute-list-bearing display text, an image's non-empty bracket) likewise keep
+  `range_is_verbatim` — the source holds `&amp;amp;copy;` where the match string holds `&amp;copy;`
+  — while a cross-reference's own attribute list, parsed from a normalized copy, takes both lifts.
+
+  Differential corpora gain, per family, a target and a display text crossing a restored entity in
+  each of its spellings (`&amp;amp;`, a named entity, a numeric one), doubled, crossing *both* an
+  entity and an escaped special, in flow, inside a rendered span, beside a sibling family, escaped,
+  and beside — rather than crossing — an entity; plus structural companions asserting the recovered
+  child's own precise span, the entity-bearing target and derived default alt, and the one-level
+  unwind of a doubly-escaped entity. The two `…_over_a_restored_entity_is_a_documented_divergence`
+  tests become **parity** tests per the "if lifted, fold this into a parity corpus" convention, and
+  the boundaries that remain get divergence tests of their own. Fixtures are added to the
+  whole-pipeline broad sweep, the group-parity corpus (so an order that never reaches the
+  replacements step is exercised too), and the structural recorder cross-check.
+
+  Re-running the corpus-wide fold-parity audit (tree building forced on for every parse in the
+  suite) confirms the divergence set strictly **shrank**: five previously-surviving sources are
+  gone, all of them real golden fixtures rather than constructed ones —
+  `http://example.com[sam&#93;ple]bracket]`, `l&#8217;http://www.irit.fr[IRIT]`,
+  `link:My&#32;Documents/report.pdf[Get Report]`, and the two `menu:Tools[… &gt; …]` submenu forms,
+  whose caret is a restored entity — and no pre-existing one appeared. (The set's only additions are
+  this increment's own new divergence-pinning fixtures for the untouched UI/footnote boundary.) As
+  with every prep piece before it, nothing further is wired in: `rendered_html()` remains the string
+  pipeline's own string.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -3234,6 +3300,23 @@ Each phase is a reviewable unit with a clear exit gate.
        latent gap its four predecessors did. A restored entity in the target, and a rendered span
        anywhere in the match, still defer, each with its own divergence test. See the step's own
        "landed as" note above.
+     - ✅ **prep (a restored entity, the second recoverable piece).** The escaped-special lift's own
+       leftover — a *restored* entity (`&amp;copy;`, `&#8217;`), which the image and auto-link
+       families each pinned as their last deferral — is closed for **every** family at once, since
+       recoverability is a property of the piece rather than of the family reading across it:
+       [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) gives a
+       `CharRef::Entity` leaf its own bytes (what the string pipeline's haystack holds there, and
+       what the fold emits verbatim — no renderer involved, which is what separates it from a
+       rendered span) and
+       [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs) admits
+       it. The one computed value with no range to rebuild from — a cross-reference's attribute-list
+       positional text — gets
+       [`escaped_value_children`](../../parser/src/content/inline_builder/macros/xref.rs), which
+       re-derives §3.4's trichotomy from the value's own bytes, scanning left to right so a
+       doubly-escaped `&amp;amp;copy;` unwinds exactly one level. The UI family and a footnote's
+       text keep their own stricter gates (pinned for both spellings side by side), as do the
+       attribute-list captures that need a real `Attrlist<'src>`. See the step's own "landed as"
+       note above. Only a **rendered span** now defers as a whole class.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

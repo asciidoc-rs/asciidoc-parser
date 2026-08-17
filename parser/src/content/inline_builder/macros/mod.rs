@@ -91,15 +91,23 @@ use crate::{Parser, Span, inlines::InlineNode, strings::CowStr};
 /// as its own `CharRef` (see `xref::find_xref_matches`,
 /// `links::find_link_macro_matches`, `links::build_inline_link_node`,
 /// `links::email_level`, `image::build_image_node`, and
-/// [`range_has_no_opaque_piece`](image::range_has_no_opaque_piece)). What keeps
+/// [`range_has_no_opaque_piece`](image::range_has_no_opaque_piece)). A
+/// **restored entity** (`&copy;`, `&#8217;` — an author-written entity the
+/// replacements step un-escaped) rides on that same gate, since
+/// [`build_match_string`](super::quotes::build_match_string) gives it its own
+/// bytes too; it needs no per-family work, so it is admitted for the
+/// index-term, anchor and STEM families as well. What keeps
 /// the stricter gate is never a *family* now, only the one **capture** that
 /// must ride on the node as a real
 /// [`Attrlist`](crate::attributes::Attrlist)`<'src>`, parsed from the source's
-/// own bytes: a link's or cross-reference's attribute-list-bearing display
-/// text, and an image's non-empty bracket. The auto-link family additionally
-/// keeps a narrow deferral of its own for a bare URL whose trailing-punctuation
-/// strip would cut inside an escaped special, and the e-mail family one for an
-/// address *abutting* an opaque piece. A rendered span stays deferred for every
+/// own bytes: a link's attribute-list-bearing display text and an image's
+/// non-empty bracket (a cross-reference's own attribute list is parsed from a
+/// normalized *copy*, so it takes both lifts). The auto-link family
+/// additionally keeps a narrow deferral of its own for a bare URL whose
+/// trailing-punctuation strip would cut inside an escaped special, and the
+/// e-mail family one for an address *abutting* an opaque piece; the UI family
+/// and a footnote's text keep their own stricter gates for either `CharRef`
+/// leaf. A rendered span stays deferred for every
 /// family. The differential corpus pins the cases each increment claims.
 pub(super) fn apply_macros<'src>(
     nodes: Vec<InlineNode<'src>>,
@@ -376,12 +384,14 @@ pub(super) fn rebuild_macro_level<'src>(
 /// longer carries. Slicing the pieces themselves, as [`emit_range`] already
 /// does for the structured path below, cannot reintroduce it.
 ///
-/// A text crossing an **escaped special** (`xref:sec[a<b]`, `link:x[a<b]`) —
-/// or, degenerately, one [`text_slice`] declines to recover — instead becomes
+/// A text crossing an **escaped special** (`xref:sec[a<b]`, `link:x[a<b]`) or a
+/// **restored entity** (`xref:sec[a &copy; b]`) — or, degenerately, one
+/// [`text_slice`] declines to recover — instead becomes
 /// **structured children**, recovered with [`emit_range`]: the
-/// special is its own [`CharRef`](crate::inlines::CharRef) child that folds
-/// back to the same entity the string replacer's text carries, where one `Text`
-/// child holding the match string's `&lt;` would be escaped a second time by
+/// leaf is its own [`CharRef`](crate::inlines::CharRef) child that folds
+/// back to the same bytes the string replacer's text carries, where one `Text`
+/// child holding the match string's `&lt;` (or `&copy;`) would be escaped a
+/// second time by
 /// the fold (design §3.4). A text crossing an *opaque* piece never reaches this
 /// function at all — each caller's own gate
 /// ([`range_has_no_opaque_piece`](image::range_has_no_opaque_piece)) rejects
@@ -463,7 +473,7 @@ mod tests {
             inline_builder::{build, build_for_group, fold_html},
         },
         inlines::{InlineNode, Ref, RefVariant},
-        parser::HtmlSubstitutionRenderer,
+        parser::{HtmlSubstitutionRenderer, ModificationContext},
         strings::CowStr,
         warnings::WarningType,
     };
@@ -508,6 +518,102 @@ mod tests {
 
             assert_eq!(folded, content.rendered_html());
             assert!(!folded.contains('\\'));
+        }
+    }
+
+    #[test]
+    fn the_other_families_recognize_a_construct_crossing_a_restored_entity() {
+        // A restored entity is a property of the *piece*, not of any one
+        // family, so admitting it lifts the boundary wherever a family's own
+        // gate is the opaque-piece one — including the families with no
+        // escaped-special corpus of their own, which this pins. (The UI
+        // family and a footnote's text keep their own stricter gates, for a
+        // restored entity exactly as for an escaped special; see
+        // `the_ui_and_footnote_families_keep_their_own_boundary` below.)
+        let parser = Parser::default().with_intrinsic_attribute(
+            "experimental",
+            "",
+            ModificationContext::Anywhere,
+        );
+
+        for source in [
+            // Index terms: the flow form, the concealed form, and both macros.
+            "((term &copy; other))",
+            "(((a &copy; b, c)))",
+            "indexterm:[a &copy; b]",
+            "indexterm2:[a &copy; b]",
+            // Anchors: the macro form, the shorthand, and the bibliography
+            // anchor.
+            "anchor:id[Tom &copy; Jerry]",
+            "[[i&copy;d]]text",
+            "[[[b&copy;bref]]] entry",
+            // A footnote *id*, which is read off the match string (its text
+            // is a separate capture — see the companion test).
+            "footnote:i&copy;d[Tom]",
+            // A bare e-mail address, whose own local part admits an entity.
+            "doc&copy;a@example.org",
+            // Inline STEM, whose expression is a passthrough.
+            "stem:[a &copy; b]",
+        ] {
+            let mut content = Content::from(Span::new(source));
+            SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+
+            let nodes = build_for_group(
+                &SubstitutionGroup::Normal,
+                CowStr::from(source),
+                Span::new(source),
+                &parser,
+                None,
+            );
+
+            assert_eq!(
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
+                content.rendered_html(),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_ui_and_footnote_families_keep_their_own_boundary() {
+        // The two families whose gate is *not* the opaque-piece one keep the
+        // boundary they already keep for an escaped special: a `kbd:`/`btn:`
+        // key or label, a menu name or item, and a footnote's text each still
+        // need a value they can slice from `'src`. A restored entity is
+        // neither better nor worse for them than an escaped special — this
+        // pins the two spellings side by side so the pair moves together
+        // whenever that boundary is lifted.
+        let parser = Parser::default().with_intrinsic_attribute(
+            "experimental",
+            "",
+            ModificationContext::Anywhere,
+        );
+
+        for (special, entity) in [
+            ("kbd:[Ctrl&C]", "kbd:[Ctrl&copy;C]"),
+            ("btn:[Save & Close]", "btn:[Save &copy; Close]"),
+            ("menu:F&le[Save]", "menu:F&copy;le[Save]"),
+            ("menu:File[Save & Exit]", "menu:File[Save &copy; Exit]"),
+            ("footnote:[Tom & Jerry]", "footnote:[Tom &copy; Jerry]"),
+        ] {
+            for source in [special, entity] {
+                let mut content = Content::from(Span::new(source));
+                SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+
+                let nodes = build_for_group(
+                    &SubstitutionGroup::Normal,
+                    CowStr::from(source),
+                    Span::new(source),
+                    &parser,
+                    None,
+                );
+
+                assert_ne!(
+                    fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
+                    content.rendered_html(),
+                    "{source:?} is now recognized; fold it into the parity corpus above"
+                );
+            }
         }
     }
 

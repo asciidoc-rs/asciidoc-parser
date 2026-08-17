@@ -717,6 +717,9 @@ mod tests {
             "image:a.png[An image with spaces,role=thumb]",
             "before image:b.svg[Vector] after",
             "an image:a&b.png[Query] target",
+            "an image:a&copy;b.png[Entity] target",
+            "link:a&copy;b.html[a &copy; b] and xref:s&copy;c[a &copy; b]",
+            "https://example.org/?a=&copy;b and doc&copy;a@example.org",
             "<<a>> and <<b>> and <<c,C text>> and <<d,>>",
             "a ((flow term)) and (((c1, c2, c3))) end",
             "indexterm:[primary, secondary]",
@@ -1479,6 +1482,17 @@ mod tests {
                 "&lt;&lt;install,&gt;&gt;",
                 "&#169; stays literal",
                 "-> and <- stay literal",
+                // A restored entity beside — and inside — a construct these
+                // orders can recognize, so the piece's own match-string bytes
+                // are exercised under an order that reaches the replacements
+                // step and one that does not.
+                "a &copy; b and image:x&copy;y.png[]",
+                // A cross-reference attribute-list text carrying a bare `&`,
+                // which only an order *without* `specialcharacters` can
+                // present: the value's own bytes open neither recoverable
+                // class, so `escaped_value_children` keeps the `&` as
+                // ordinary logical text.
+                "xref:sec[a & b,role=hl]",
                 // Specials beside each construct these orders *can*
                 // recognize, so the classification is exercised inside and
                 // around a built node's own children.

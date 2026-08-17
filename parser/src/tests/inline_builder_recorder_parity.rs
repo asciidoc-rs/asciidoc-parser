@@ -891,6 +891,12 @@ fn shapes_match_across_combined_constructs() {
     // meet the recorder's own reconstruction.
     assert_shapes("See image:a&b.png[Chart] and image:plain.png[Alt Text] today.");
 
+    // A *restored* entity, the second atomic piece the match string carries
+    // real bytes for: a target crossing one, and a display text crossing one
+    // (which the builder keeps as its own `CharRef::Entity` child, the shape
+    // the recorder reaches by re-reading the rendered anchor text).
+    assert_shapes("See image:a&copy;b.png[Chart] and link:x.html[a &copy; b] today.");
+
     assert_shapes_with(
         "{counter:step}. Step one uses *{product}* and stem:[x+1].",
         with_product,
