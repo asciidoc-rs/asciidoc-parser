@@ -1202,14 +1202,16 @@ fn inline_tree_for_a_listing_block_carries_callout_nodes() {
 
 #[test]
 fn xref_mirror_is_skipped_when_the_tree_defers_a_reference_form() {
-    // `xref:sec[with *bold* reftext]` is a documented builder divergence (a
-    // display text crossing a rendered span is left unrecognized), so the
+    // `xref:sec[*bold*,role=hl]` is a documented builder divergence (an
+    // *attribute-list* display text crossing a rendered span is left
+    // unrecognized, since its display text comes back from a parse rather
+    // than from a range the span's node can be recovered out of), so the
     // tree holds *fewer* cross-reference nodes than the string pipeline
     // deferred. The positional resolution mirror must detect the count
     // mismatch and skip — leaving the tree in its honest unresolved state —
     // rather than assign destinations to the wrong nodes (or panic).
     let mut parser = Parser::default().with_inline_tree(true);
-    let doc = parser.parse("[[sec]]The target.\n\nSee xref:sec[with *bold* reftext].");
+    let doc = parser.parse("[[sec]]The target.\n\nSee xref:sec[*bold*,role=hl].");
 
     // The rendered output is unaffected (the string pipeline is
     // authoritative), …
@@ -1236,9 +1238,12 @@ fn footnote_xref_mirror_is_skipped_when_the_subtree_defers_a_reference_form() {
     // subtree's slot count (1) differs from the re-homed segment count (2)
     // and the footnote mirror must skip rather than misassign. The block-side
     // mirror is unaffected and still resolves the block-level reference.
+    // (The deferred form here is a shorthand whose *id* crosses an opaque
+    // piece — a character replacement — since a footnote's own bracketed text
+    // ends at the first `]`, which rules out the bracket-carrying spellings.)
     let mut parser = Parser::default().with_inline_tree(true);
     let doc = parser
-        .parse("[[a]]A target.\n\n[[c]]Another.\n\nSee <<c>>.footnote:[see <<a,*b*>> and <<c>>]");
+        .parse("[[a]]A target.\n\n[[c]]Another.\n\nSee <<c>>.footnote:[see <<a -- b>> and <<c>>]");
 
     let refs = collect_refs(&doc);
 

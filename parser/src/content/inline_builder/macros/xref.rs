@@ -106,11 +106,19 @@ pub(super) fn xref_macros_level<'src>(
 }
 
 /// Finds every recognized cross-reference at this level — the `xref:` macro
-/// form and the `<<id>>` shorthand — skipping any match that crosses an
-/// **opaque** piece (see
-/// [`range_has_no_opaque_piece`]). That gate is the family's *only* deferral:
-/// both builders claim every target and text shape an admitted match can
-/// carry.
+/// form and the `<<id>>` shorthand — skipping any match whose **computed
+/// values** cross an **opaque** piece (see [`range_has_no_opaque_piece`]).
+/// That gate is the family's *only* deferral: both builders claim every target
+/// and text shape an admitted match can carry.
+///
+/// The gate covers the bytes the node *reads*, not the whole match. A
+/// cross-reference computes two values from the level's match string — its
+/// **target** (the `xref:` macro's group 3, the shorthand's own id half) and,
+/// when the text carries an attribute list, that list's parsed positional value
+/// — and each needs a match string whose bytes are the string replacer's own.
+/// A **reference text**, by contrast, becomes *structured children*
+/// ([`macro_text_children`]), so it needs no recoverable bytes at all; see the
+/// rendered-span section below.
 ///
 /// A [`synthesized`](Piece::synthesized) run (an attribute expansion, or —
 /// reached at a tree's root — a filtered multi-line block's own joined seed)
@@ -140,10 +148,51 @@ pub(super) fn xref_macros_level<'src>(
 /// the leaf folds back to its own bytes instead of being escaped
 /// twice — and the attribute-list branch, whose value comes back from a parse
 /// rather than from a range, re-derives the same split with
-/// [`escaped_value_children`]. A **rendered span** stays deferred: it is one
-/// opaque placeholder here where the string pipeline's haystack holds its
-/// markup inline, and that markup — which only exists at fold time — is what
-/// the string replacer's own `=` probe and the pattern's `]` boundary read.
+/// [`escaped_value_children`].
+///
+/// # A rendered span inside the reference text
+///
+/// A **rendered span** — a [`Styled`](crate::inlines::Styled) span, an
+/// already-recognized macro node, a masked passthrough — is *not* recoverable:
+/// it is one opaque placeholder here where the string pipeline's haystack holds
+/// its markup (or its own passthrough mask) inline, and that markup exists only
+/// at fold time. It is nonetheless admitted **inside a reference text**,
+/// because a reference text is the one capture this family never reads as
+/// bytes: it becomes the node's children through [`macro_text_children`], whose
+/// [`emit_range`](super::super::quotes::emit_range) path clones the opaque
+/// piece's own node whole into them — so the text is carried *structurally*,
+/// and the fold re-renders exactly the markup the string replacer captured
+/// there. This is the same "nesting is the point" recovery a footnote's own
+/// content has always used, applied to the display text of a reference.
+///
+/// What that admission cannot do is make the *recognition* agree in every case,
+/// because the string replacer matches over the markup itself where this
+/// matches over one placeholder standing in for it. The two read the same
+/// extent unless the markup carries a character the pattern is sensitive to,
+/// which leaves two documented divergences of *extent* (each pinned by its own
+/// test), both of them cases where the string pipeline's own reading is the
+/// markup-perturbed one and the tree's is the well-formed one — exactly as the
+/// quotes step's crossed-delimiter divergence is:
+///
+/// - a `]` inside the span (`xref:sec[*a ] b*]`), which ends the macro form's
+///   own lazy text capture early for the string replacer but not here;
+/// - a `&gt;&gt;` inside the span (`<<sec,*a >> b*>>`), the shorthand's own
+///   terminator, for the same reason.
+///
+/// A text carrying an **attribute list** keeps the stricter gate, and is
+/// therefore deferred whenever it crosses an opaque piece: its display text
+/// comes back from an [`Attrlist`] parse of the match string rather than from a
+/// range of it (see [`xref_macro_text`]), and a placeholder inside a *parsed*
+/// value cannot be mapped back to the node it stands in for — the same reason
+/// the image and link families defer their own `Attrlist`-bearing captures. The
+/// probe for that branch is `raw_text.contains('=')`, read here off the match
+/// string; the string replacer reads it off the markup, so a span whose markup
+/// carries an `=` (an attributed span, a link, an image) sends the string
+/// pipeline down its attribute-list branch where this one stays plain. That
+/// costs nothing wherever the parse finds the `=` incidental (an attribute list
+/// with no comma to split on yields one positional value equal to the whole
+/// text, which is every unattributed markup shape) and is a third documented
+/// divergence otherwise.
 fn find_xref_matches<'src>(
     nodes: &[InlineNode<'src>],
     s: &str,
@@ -160,19 +209,44 @@ fn find_xref_matches<'src>(
 
         let full = whole.start()..whole.end();
 
-        // The `xref:` macro (group 3) and the `<<…>>` shorthand (group 2) differ
-        // in how much of the match the gate covers. The macro's whole match is
-        // read as one construct, so all of it must be admitted. The shorthand's
-        // `&lt;&lt;` / `&gt;&gt;` delimiters are always `CharRef`s that the node
-        // *consumes* rather than reads, so only its inner text (group 2) — the
-        // id and any reference text — is gated. (The gate now admits an escaped
-        // special anywhere, so the delimiters would pass the whole-match check
-        // too; keeping the inner-only form states which bytes the *node* reads.)
+        // The `xref:` macro (group 3) and the `<<…>>` shorthand (group 2) reach
+        // the same two computed values by different spellings. Whichever it is,
+        // the gate covers exactly the bytes the node *reads* — its target, and
+        // an attribute-list text's parsed value — and not the ones it carries
+        // structurally (a reference text) or consumes without reading (the
+        // shorthand's own `&lt;&lt;` / `&gt;&gt;` delimiters, always `CharRef`s
+        // by macro time).
         let shorthand_inner = caps.get(2).map(|inner| inner.start()..inner.end());
 
         let recoverable = match &shorthand_inner {
-            Some(inner) => range_has_no_opaque_piece(nodes, pieces, inner),
-            None => range_has_no_opaque_piece(nodes, pieces, &full),
+            Some(inner) => {
+                // The shorthand's id is its inner up to the first `,` — the very
+                // split `build_xref_shorthand_node` (and the string replacer)
+                // makes. A comma the *markup* of an opaque piece contributes
+                // cannot move that split unnoticed: such a piece would have to
+                // sit in the id half, which this gate then rejects.
+                range_has_no_opaque_piece(nodes, pieces, &shorthand_id_range(s, inner))
+            }
+
+            None => {
+                // The macro form's target (group 3) always participates in this
+                // branch. Its `xref:` prefix and brackets need no gate of their
+                // own: those bytes are literal, and no atomic piece — a
+                // placeholder, or an entity delimited by `&` and `;` — can
+                // supply them.
+                #[allow(clippy::unwrap_used)]
+                let target = caps.get(3).unwrap();
+
+                // A text carrying an `=` is read as an attribute list, whose
+                // parsed positional value no placeholder can be mapped back
+                // out of, so that one text shape keeps the gate too.
+                let attrlist_text = caps.get(4).filter(|text| text.as_str().contains('='));
+
+                range_has_no_opaque_piece(nodes, pieces, &(target.start()..target.end()))
+                    && attrlist_text.is_none_or(|text| {
+                        range_has_no_opaque_piece(nodes, pieces, &(text.start()..text.end()))
+                    })
+            }
         };
 
         // An escape (`\xref:` / `\<<`) is honored by dropping the backslash and
@@ -221,6 +295,23 @@ fn find_xref_matches<'src>(
     }
 
     matches
+}
+
+/// The match-string range of a `<<…>>` shorthand's **id half**: its inner up to
+/// the first `,`, or the whole inner when it carries none — the very split
+/// [`build_xref_shorthand_node`] then makes on the same bytes, and the string
+/// replacer's own `inner.split_once(',')`.
+///
+/// This is the half [`find_xref_matches`] gates, since the id is the one value
+/// the shorthand *reads* off the match string; the reference text after the
+/// comma is carried structurally and so needs no gate.
+fn shorthand_id_range(s: &str, inner: &std::ops::Range<usize>) -> std::ops::Range<usize> {
+    let inner_data = s.get(inner.start..inner.end).unwrap_or_default();
+
+    match inner_data.find(',') {
+        Some(comma) => inner.start..inner.start + comma,
+        None => inner.clone(),
+    }
 }
 
 /// Builds one [`Ref`](InlineNode::Ref)`{Xref}` node from a verbatim `xref:`
@@ -508,18 +599,22 @@ fn special_of(rest: &str) -> Option<(char, usize)> {
 /// replacer's shorthand branch does so the fold reproduces the same bytes.
 ///
 /// `inner` is the shorthand's inner text (`INLINE_XREF` group 2) in
-/// match-string coordinates; the caller guarantees it crosses no **opaque**
-/// piece (see [`range_has_no_opaque_piece`]), so the match string carries its
-/// bytes exactly — whether they are source bytes (a verbatim run), an expanded
-/// attribute value's (a [`synthesized`](Piece::synthesized) run), or an escaped
-/// special's own entity. It is split
-/// on the first `,` into an id and an optional reference text, each trimmed —
-/// mirroring the string replacer's `inner.split_once(',')` with `id.trim()` /
-/// `text.trim()`, which runs over the very same bytes. The reference text
-/// becomes the node's children through [`macro_text_children`] — a single
-/// [`Text`](InlineNode::Text) borrowed from `'src` in the common verbatim case
-/// (§4.5), owned when it crosses a synthesized run, structured when it crosses
-/// an escaped special — and the whole `<<…>>` — its `CharRef` delimiters
+/// match-string coordinates. It is split on the first `,` into an id and an
+/// optional reference text, each trimmed — mirroring the string replacer's
+/// `inner.split_once(',')` with `id.trim()` / `text.trim()`, which runs over
+/// the very same bytes.
+///
+/// The caller guarantees the **id half** (see [`shorthand_id_range`]) crosses
+/// no **opaque** piece (see [`range_has_no_opaque_piece`]), so the match string
+/// carries the id's bytes exactly — whether they are source bytes (a verbatim
+/// run), an expanded attribute value's (a [`synthesized`](Piece::synthesized)
+/// run), or an escaped special's own entity — and so, therefore, does the
+/// comma that split them. The reference text after that comma carries no such
+/// guarantee: it becomes the node's children through [`macro_text_children`] —
+/// a single [`Text`](InlineNode::Text) borrowed from `'src` in the common
+/// verbatim case (§4.5), owned when it crosses a synthesized run, structured
+/// when it crosses an escaped special or an opaque piece (whose own node the
+/// children then carry). The whole `<<…>>` — its `CharRef` delimiters
 /// included — is the node's `location` (a synthesized run's coarse enclosing
 /// span, per design §4.4).
 ///
@@ -924,11 +1019,12 @@ mod tests {
     fn an_escaped_xref_the_gate_rejects_still_drops_its_backslash() {
         // The escape check runs *ahead* of the gate, mirroring the string
         // replacer's own `caps.get(1)`-first order: a macro the gate rejects
-        // (here, a display text crossing a rendered span) still drops its
+        // (here, an *attribute-list* display text crossing a rendered span,
+        // the one text shape that still needs its own bytes) still drops its
         // backslash and keeps the rest — the rendered span included — as its
         // own nodes, which fold to exactly what `caps[0][1..]` emits. Before
         // this order, such a match was left unrecognized, backslash and all.
-        let source = "\\xref:sec[with *bold* reftext]";
+        let source = "\\xref:sec[*bold*,role=hl]";
         let nodes = build_src(Span::new(source));
 
         let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
@@ -1180,21 +1276,37 @@ mod tests {
     }
 
     #[test]
-    fn an_xref_shorthand_over_a_rendered_span_is_a_documented_divergence() {
-        // A shorthand whose reference text is a rendered span (`<<x,*bold*>>`) has
-        // a non-verbatim inner — the span is opaque — so the builder cannot slice
-        // its text from `'src` and leaves the shorthand unrecognized, exactly as
-        // it defers a macro crossing a rendered span.
-        let source = "<<x,*bold*>>";
+    fn a_shorthand_reference_text_carries_a_rendered_span_as_its_own_child() {
+        // A reference text crossing a rendered span is carried *structurally*:
+        // the span is one opaque placeholder in the match string, but
+        // `macro_text_children` recovers the text with `emit_range`, which
+        // clones the span's own node whole into the reference's children. The
+        // fold then re-renders exactly the markup the string replacer captured
+        // in its own reference text.
+        let source = "<<x,a *bold* b>>";
         let nodes = build_src(Span::new(source));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "a shorthand crossing a rendered span must be left unrecognized: {nodes:?}"
+        let reference = assert_xref(&nodes[0]);
+
+        // Three children: the text before the span, the span itself, the text
+        // after it — each borrowing its own precise `'src` slice, which the
+        // one-`Text`-child shape this replaced could not express.
+        assert_eq!(reference.children.len(), 3);
+        assert_text(&reference.children[0], "a ", 1, 5);
+
+        let styled = assert_styled(
+            &reference.children[1],
+            StyleVariant::Strong,
+            SpanForm::Constrained,
         );
 
-        // The string pipeline, by contrast, *does* build a reference here.
-        assert!(golden_xref(source).contains("<a href"));
+        assert_text(&styled[0], "bold", 1, 8);
+        assert_text(&reference.children[2], " b", 1, 13);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
     }
 
     #[test]
@@ -1509,24 +1621,126 @@ mod tests {
     }
 
     #[test]
-    fn an_xref_macro_display_text_over_a_rendered_span_is_a_documented_divergence() {
-        // The macro form's own version of the boundary
-        // `an_xref_shorthand_over_a_rendered_span_is_a_documented_divergence`
-        // pins for the shorthand: a display text containing a quoted span
-        // (`*bold*`) has already become a `Styled` node by the time macros
-        // run, which the node's single `Text` child cannot absorb.
-        let source = "xref:sec[with *bold* reftext]";
+    fn fold_matches_the_string_pipeline_for_a_text_crossing_a_rendered_span() {
+        // The differential corpus for this increment: a display or reference
+        // text crossing an **opaque** piece — a rendered span, an
+        // already-recognized macro node, a masked passthrough — in both
+        // spellings. The text is carried structurally (each opaque piece's own
+        // node becomes a child), so the fold re-renders exactly the markup the
+        // string replacer captured in its own text.
+        let fixtures = [
+            // (A masked passthrough is opaque here too — and in the string
+            // pipeline, which restores passthroughs only after every step — but
+            // this oracle runs the steps directly, without the extraction the
+            // real `SubstitutionGroup::apply` performs around them, so those
+            // fixtures live in the whole-pipeline sweep instead; see
+            // `inline_builder::tests`.)
+            //
+            // The macro form: a span at the end, in the middle, at the start,
+            // and spanning the whole text.
+            "xref:sec[with *bold* reftext]",
+            "xref:sec[*bold* leads]",
+            "xref:sec[*bold*]",
+            "xref:sec[_em_ and `code` and #mark#]",
+            // Every quoted form the earlier step can have produced, including
+            // an attributed span (whose markup carries an `=` the string
+            // replacer's own attribute-list probe reads, and this one does not:
+            // with no comma to split on, the parse yields one positional value
+            // equal to the whole text, so both take the plain-text path).
+            "xref:sec[[.hl]#roled#]",
+            "xref:sec[super^script^ and sub~script~]",
+            // An already-recognized macro node of another family: an image, a
+            // link, an anchor, an index term.
+            "xref:sec[the image:logo.png[Logo] here]",
+            "xref:sec[a link:https://example.org[site] inside]",
+            "xref:sec[an ((index term)) inside]",
+            // A span *and* an escaped special / restored entity in one text —
+            // the recoverable and structural recoveries side by side.
+            "xref:sec[a < b and *bold*]",
+            "xref:sec[a &copy; b and *bold*]",
+            // Escaped: the backslash is dropped and the span stays in the flow.
+            "\\xref:sec[with *bold* reftext]",
+            // In surrounding flow, and inside a rendered span of its own.
+            "See xref:sec[the *bold* one] for details.",
+            "*see xref:sec[a _b_ c]*",
+            // The shorthand: the same shapes after the comma.
+            "<<x,*bold*>>",
+            "<<x,a *bold* b>>",
+            "<<x,_em_ then `code`>>",
+            "<<x,[.hl]#roled#>>",
+            "<<x,the image:logo.png[Logo] here>>",
+            "<<x, *trimmed* >>",
+            "<<x,a < b and *bold*>>",
+            "\\<<x,*bold*>>",
+            "a copyright (C) then <<x,*bold*>>",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_xref(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_attribute_list_text_crossing_a_rendered_span_is_a_documented_divergence() {
+        // The one text shape that keeps the stricter gate. A text carrying an
+        // `=` is read as an attribute list, and its display text comes back
+        // from that *parse* rather than from a range of the match string — so
+        // a placeholder inside the parsed value has no node to map back to,
+        // exactly as the image and link families' own `Attrlist`-bearing
+        // captures cannot be rebuilt from one. The reference is therefore left
+        // unrecognized where the string pipeline builds one over the markup.
+        let source = "xref:sec[*bold*,role=hl]";
         let nodes = build_src(Span::new(source));
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "a display text crossing a rendered span must be left unrecognized: {nodes:?}"
+            "an attribute-list text crossing a rendered span must be left unrecognized: {nodes:?}"
         );
 
-        // The string pipeline, by contrast, *does* build a reference here,
-        // with the span rendered inside the anchor text.
+        // The string pipeline, by contrast, does build a reference here.
         assert!(golden_xref(source).contains("<a href"));
-        assert!(golden_xref(source).contains("<strong>bold</strong>"));
+    }
+
+    #[test]
+    fn a_span_whose_markup_perturbs_the_string_pipeline_is_a_documented_divergence() {
+        // What the structural recovery cannot do is make the *recognition*
+        // agree in every case: the string replacer matches over the span's
+        // markup where this matches over the one placeholder standing in for
+        // it, so the two read the same extent only while that markup carries
+        // no character the pattern is sensitive to. These are the three shapes
+        // where it does — and in each the string pipeline's reading is the
+        // markup-perturbed one (a truncated text, a text the attribute-list
+        // parse cut in half) and the tree's the well-formed one, exactly as
+        // the quotes step's own crossed-delimiter divergence is.
+        for source in [
+            // A `]` inside the span ends the macro form's lazy text capture
+            // early for the string replacer, but not here.
+            "xref:sec[a *b ] c* d]",
+            // A `>>` inside the span is the shorthand's own terminator, seen
+            // as `&gt;&gt;` in the string pipeline's haystack.
+            "<<x,a *b >> c* d>>",
+            // Markup carrying an `=` (an attributed span) *and* a comma
+            // elsewhere in the text: the string replacer's attribute-list
+            // probe fires on the markup's own `=`, and the parse then splits
+            // the text at that comma, keeping only what precedes it.
+            "xref:sec[one, [.hl]#two#]",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert_ne!(
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                golden_xref(source),
+                "{source:?} now agrees with the string pipeline; fold it into the parity corpus"
+            );
+        }
     }
 
     #[test]

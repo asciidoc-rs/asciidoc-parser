@@ -107,8 +107,17 @@ use crate::{Parser, Span, inlines::InlineNode, strings::CowStr};
 /// trailing-punctuation strip would cut inside an escaped special, and the
 /// e-mail family one for an address *abutting* an opaque piece; the UI family
 /// and a footnote's text keep their own stricter gates for either `CharRef`
-/// leaf. A rendered span stays deferred for every
-/// family. The differential corpus pins the cases each increment claims.
+/// leaf. The differential corpus pins the cases each increment claims.
+///
+/// An **opaque** piece — a rendered span, an earlier-recognized macro node, a
+/// masked passthrough — is admitted where a family carries it *structurally*
+/// rather than reading its bytes: a **reference text** built with
+/// [`macro_text_children`] keeps the piece's own node as a child (see
+/// `xref::find_xref_matches`, so far the only family to take that lift), the
+/// way a footnote's content always has. Every value a family *computes* — a
+/// target, an attribute list, a display text baked into one `Text` — still
+/// defers on it, since the markup an opaque piece folds to exists only at fold
+/// time.
 pub(super) fn apply_macros<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -392,10 +401,17 @@ pub(super) fn rebuild_macro_level<'src>(
 /// back to the same bytes the string replacer's text carries, where one `Text`
 /// child holding the match string's `&lt;` (or `&copy;`) would be escaped a
 /// second time by
-/// the fold (design §3.4). A text crossing an *opaque* piece never reaches this
-/// function at all — each caller's own gate
-/// ([`range_has_no_opaque_piece`](image::range_has_no_opaque_piece)) rejects
-/// it.
+/// the fold (design §3.4).
+///
+/// A text crossing an **opaque** piece (a rendered span, an
+/// earlier-recognized macro node, a masked passthrough) takes that same
+/// structured path, and is where it earns its keep: [`emit_range`] clones the
+/// piece's whole node into the children, so the text carries the construct
+/// itself rather than the markup it will fold to — the recovery a footnote's
+/// own content has always used. Only a caller that admits such a piece reaches
+/// this (see `xref::find_xref_matches`); the callers whose gate is still
+/// [`range_has_no_opaque_piece`](image::range_has_no_opaque_piece) throughout
+/// never hand one in.
 pub(super) fn macro_text_children<'src>(
     raw_text: &str,
     text_range: std::ops::Range<usize>,
