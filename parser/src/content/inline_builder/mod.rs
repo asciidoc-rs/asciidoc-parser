@@ -1064,6 +1064,24 @@ mod tests {
             "See image:{logo}[Logo] and image:{logo}[] beside <https://{host}> and a (C) mark.",
             with_link_attributes,
         );
+
+        // A cross-reference whose reference text crosses a *rendered span*, in
+        // both spellings and beside the other families: the text is carried
+        // structurally (the span's own node becomes a child), so the fold
+        // re-renders exactly the markup the string replacer captured.
+        assert_parity_with(
+            "See xref:{id}[the *bold* steps] and <<{id},a _slanted_ label>> about {product}.",
+            with_xref_attributes,
+        );
+
+        // The same lift where the opaque piece is a **masked passthrough** —
+        // the one opaque class the string pipeline also holds as a placeholder
+        // of its own, since it restores passthroughs only after every step.
+        // These need the real `SubstitutionGroup::apply` (which brackets the
+        // steps with that extraction), so they cannot live in the family's own
+        // step-driven corpus.
+        assert_parity("See the <<tigers, `+[tigers]+`>> section about tigers.");
+        assert_parity("See xref:sec[a +[literal]+ text] and <<sec,a +++<b>x</b>+++ text>>.");
     }
 
     /// [`build_from_value`] against the real pipeline, seeded from a
@@ -1493,6 +1511,11 @@ mod tests {
                 // class, so `escaped_value_children` keeps the `&` as
                 // ordinary logical text.
                 "xref:sec[a & b,role=hl]",
+                // A cross-reference reference text crossing a *rendered span*,
+                // carried as structured children: under these orders the span
+                // is opaque exactly as it is under the normal one, and the
+                // classification must reach the children it recovered.
+                "xref:sec[a *bold* c] and a < b",
                 // Specials beside each construct these orders *can*
                 // recognize, so the classification is exercised inside and
                 // around a built node's own children.

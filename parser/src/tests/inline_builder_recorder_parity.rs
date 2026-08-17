@@ -1011,4 +1011,11 @@ fn shapes_match_across_combined_constructs() {
         "See image:{logo}[Logo] and image:{logo}[] beside a *bold* run.",
         with_link_attributes,
     );
+
+    // A cross-reference whose reference text crosses a **rendered span**, in
+    // both spellings: the builder now carries that text as structured children
+    // (the span's own node cloned into them), which is the shape the recorder
+    // recovers from the rendered markup, so the two constructions can finally
+    // be compared for this form.
+    assert_shapes("See xref:sec[the *bold* steps] and <<sec,a _slanted_ label>> here.");
 }

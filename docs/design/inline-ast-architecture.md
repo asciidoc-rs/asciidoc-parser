@@ -2979,6 +2979,85 @@ Each phase is a reviewable unit with a clear exit gate.
   with every prep piece before it, nothing further is wired in: `rendered_html()` remains the string
   pipeline's own string.
 
+  *Step 6 prep landed as (a **reference text** crossing a rendered span — the cross-reference
+  family, first of the last remaining class):* with every recoverable piece now admitted, a
+  **rendered span** — a [`Styled`](../../parser/src/inlines/styled.rs) span, an already-recognized
+  macro node, a masked passthrough — was the one class still deferring as a whole, and the audit
+  map's own last *normal*-order item ("a display or reference text crossing a rendered span"). It
+  is closed here for the cross-reference family, in both spellings, the same family that went
+  first for the escaped-special lift and for the same reason: nothing on a `Ref{Xref}` node is
+  `Span`-typed.
+
+  The lift is not another gate relaxation but a change of *which bytes the gate covers*. A
+  rendered span is genuinely unrecoverable —
+  [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) stands it in as one
+  placeholder where the string pipeline's haystack holds markup that exists only at fold time,
+  which is exactly what separates it from a `CharRef` leaf — so every value this family *computes*
+  off the match string (its target, an attribute list's parsed positional value) still needs
+  [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs). A
+  **reference text** computes nothing: it becomes structured children through
+  [`macro_text_children`](../../parser/src/content/inline_builder/macros/mod.rs), whose
+  [`emit_range`](../../parser/src/content/inline_builder/quotes.rs) path clones the opaque piece's
+  own **node** whole into them, so the text carries the construct itself rather than the markup it
+  will fold to — the "nesting is the point" recovery a footnote's own content has always used,
+  applied to a reference's display text.
+  [`find_xref_matches`](../../parser/src/content/inline_builder/macros/xref.rs) therefore gates
+  the macro form's *target* (group 3) rather than its whole match, and the shorthand's *id half*
+  (its inner up to the first `,`, factored out as `shorthand_id_range` so the gate and
+  [`build_xref_shorthand_node`](../../parser/src/content/inline_builder/macros/xref.rs) split on
+  the same byte) rather than its whole inner. That the shorthand's split cannot be moved unnoticed
+  by a comma inside the markup falls straight out of it: such a piece would have to sit in the id
+  half, which the gate then rejects. No builder changed at all — `macro_text_children` already
+  routed a range it could not slice through `emit_range`, which already cloned an atomic piece
+  whole.
+
+  What the structural recovery cannot do is make the *recognition* agree in every case, and this
+  is the first increment where that gap is real rather than avoidable: the string replacer matches
+  over the markup where the builder matches over one placeholder standing in for it, so the two
+  read the same extent only while that markup carries no character the pattern is sensitive to —
+  and the builder cannot know what it carries without folding, which building a tree must never do
+  (a fold is renderer-dependent; recognition must not be). Three shapes are therefore documented
+  divergences, each pinned by its own test, and in each the string pipeline's reading is the
+  markup-perturbed one while the tree's is the well-formed one — the same shape of intended
+  divergence the quotes step's own crossed delimiters have: a `]` inside the span (which ends the
+  macro form's lazy text capture early for the string replacer), a `&gt;&gt;` inside it (the
+  shorthand's own terminator), and markup carrying an `=` beside a comma elsewhere in the text
+  (which sends the string replacer down its attribute-list branch, where the parse then keeps only
+  what precedes that comma). The text shape that keeps the stricter gate outright is a text
+  carrying its own **attribute list**: its display text comes back from an `Attrlist` parse of the
+  match string rather than from a range of it, and a placeholder inside a *parsed* value has no
+  node to be mapped back to — the same reason the image and link families defer their own
+  `Attrlist`-bearing captures.
+
+  A differential corpus pins the reference text crossing every opaque shape the earlier steps can
+  produce — each quoted form (including an attributed span, whose markup carries the `=` the
+  string replacer's own probe reads and this one does not), an image, a link, an anchor, an index
+  term, a masked passthrough, a span beside an escaped special and beside a restored entity,
+  escaped, in flow, and inside a rendered span of its own — in both spellings, alongside a
+  structural test asserting the recovered children's own precise spans (three children where the
+  single-`Text` shape this replaced could express one). The passthrough fixtures live in the
+  whole-pipeline sweep rather than the family's own step-driven corpus, since only the real
+  `SubstitutionGroup::apply` brackets the steps with the extraction that makes a passthrough
+  opaque on *both* sides. Fixtures are added to that sweep, to the group-parity corpus (so an
+  order that never escapes exercises the recovered children too), and to the structural recorder
+  cross-check — where this form can finally be compared at all, since the tree the builder now
+  produces is the shape the recorder recovers from the rendered markup. Two tests that used this
+  very divergence as their *vehicle* — the resolution mirror's own count-mismatch skip, block-side
+  and footnote-side — move to forms that still defer.
+
+  Re-running the corpus-wide fold-parity audit confirms the divergence set strictly **shrank**:
+  four previously-surviving sources are gone — the two spellings of
+  `xref:sec[with *bold* reftext]`, one nesting an image macro
+  (`See xref:sec[image:logo.png[Logo]] now.`), and the golden corpus's own tigers fixture, whose
+  reference text is a code span wrapping a passthrough — and the set's only addition is this
+  increment's own new divergence-pinning fixture. As with every prep piece before it, nothing
+  further is wired in. The remaining families — the `link:`/`mailto:` macro, the auto-link /
+  formal-URL family, and the image family's own attribute list — still defer a capture crossing a
+  rendered span, each a later increment; and the audit's one structurally different item (an
+  effective order that runs `SpecialCharacters` *after* a step that already produced markup,
+  `subs=quotes,specialcharacters`) is unchanged, still needing its own policy rather than another
+  recognition increment.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -3317,6 +3396,23 @@ Each phase is a reviewable unit with a clear exit gate.
        text keep their own stricter gates (pinned for both spellings side by side), as do the
        attribute-list captures that need a real `Attrlist<'src>`. See the step's own "landed as"
        note above. Only a **rendered span** now defers as a whole class.
+     - ✅ **prep (a reference text crossing a rendered span — the cross-reference family).** The
+       first family of that last class, and the first lift that is not a gate relaxation but a
+       change of *which bytes the gate covers*: a rendered span stays unrecoverable (its markup
+       exists only at fold time), so every value a family **computes** keeps
+       [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs), while
+       a **reference text** — which computes nothing, becoming structured children whose
+       [`emit_range`](../../parser/src/content/inline_builder/quotes.rs) path clones the piece's own
+       node whole — needs no gate at all.
+       [`find_xref_matches`](../../parser/src/content/inline_builder/macros/xref.rs) therefore gates
+       the macro form's target and the shorthand's id half (`shorthand_id_range`) rather than the
+       whole match; no builder changed. Three shapes stay divergent because the string replacer
+       matches over the markup where this matches over one placeholder — a `]` or a `&gt;&gt;`
+       inside the span, and markup carrying an `=` beside a comma — each the markup-perturbed
+       reading against the tree's well-formed one, as the quotes step's crossed delimiters are; a
+       text carrying its own attribute list keeps the stricter gate outright. See the step's own
+       "landed as" note above. The `link:`/`mailto:`, auto-link/formal-URL, and image families keep
+       the boundary, each a later increment.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
