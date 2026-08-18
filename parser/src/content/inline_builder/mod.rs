@@ -144,23 +144,27 @@
 //!   (`https://example.org/a&`, whose match-string tail `&amp;` ends in the
 //!   very `;` the strip keys off) — a boundary no node list can be split at.
 //!   A display/reference text crossing a rendered *span*
-//!   (`xref:id[*bold*]`, `<<id,*bold*>>`, `link:x[*bold*]`) is admitted for the
-//!   **cross-reference** and **`link:`/`mailto:` macro** families, which carry
-//!   it *structurally*: a span really is unrecoverable — it is one opaque
-//!   placeholder here where the string pipeline's haystack holds markup that
-//!   only exists at fold time — but a display text is never read as bytes, and
+//!   (`xref:id[*bold*]`, `<<id,*bold*>>`, `link:x[*bold*]`,
+//!   `https://example.org[*bold*]`) is admitted for every
+//!   **reference-bearing** family — the cross-reference one, the
+//!   `link:`/`mailto:` macro, and the auto-link / formal-URL family — each of
+//!   which carries it *structurally*: a span really is unrecoverable — it is
+//!   one opaque placeholder here where the string pipeline's haystack holds
+//!   markup that only exists at fold time — but a display text is never read as
+//!   bytes, and
 //!   [`macro_text_children`](macros::macro_text_children)'s
 //!   [`emit_range`](quotes::emit_range) path clones the piece's own **node**
 //!   into the children, the way a footnote's content always has. What each
 //!   family *computes* off the match string — a target, an attribute list's
-//!   parsed value — keeps the gate, and so does the recognition's own
+//!   parsed value, a bare link's shown text (a slice of its own target) —
+//!   keeps the gate, and so does the recognition's own
 //!   agreement: the string replacer matches over the markup where this matches
 //!   over one placeholder, which leaves a handful of documented divergences of
 //!   extent (a `]` or a `&gt;&gt;` inside the span, markup carrying the
 //!   replacer's own attribute-list `=`/`,` probe beside a comma), each the
-//!   markup-perturbed reading against the tree's well-formed one. The
-//!   auto-link / formal-URL family and an image's attribute list still defer it
-//!   outright. An anchor
+//!   markup-perturbed reading against the tree's well-formed one. An image's
+//!   attribute list — the one capture with no display text to carry — still
+//!   defers it outright. An anchor
 //!   renders from its id alone, so it is recognized whenever that id does not
 //!   cross a rendered span — its character class rules out an escaped special
 //!   entirely. Unlike every other reference-bearing family, an anchor is now
@@ -751,6 +755,9 @@ mod tests {
             "link:index.html[a *bold* label] macro",
             "mailto:a@example.org[write _now_] address",
             "link:index.html[the image:logo.png[Logo] one] macro",
+            "https://example.org[a *bold* label] auto-link",
+            "<https://example.org[an _angle_ label] auto-link",
+            "https://example.org[the image:logo.png[Logo] one] auto-link",
             "   ",
             "a\nb\nc",
         ];
@@ -1111,6 +1118,22 @@ mod tests {
         // **masked passthrough**.
         assert_parity("Read link:index.html[a +[literal]+ label] now.");
         assert_parity("Mail mailto:team@example.org[a +++<b>x</b>+++ label] today.");
+
+        // The auto-link / formal-URL family's own version of that lift — the
+        // third family to take it — with the target still expanded from an
+        // attribute reference, so the display text's structural recovery and
+        // the target's own synthesized-run lift are exercised together, in the
+        // plain spelling and in the ANGLE branch's `[…]` alternative (which
+        // keeps its `&lt;`).
+        assert_parity_with(
+            "Visit https://{host}/docs[the *bold* {label}] or <https://{host}[_here_].",
+            with_link_attributes,
+        );
+
+        // And the same, where the opaque piece inside the display text is a
+        // **masked passthrough**.
+        assert_parity("Visit https://example.org[a +[literal]+ label] now.");
+        assert_parity("Visit https://example.org[a +++<b>x</b>+++ label] today.");
     }
 
     /// [`build_from_value`] against the real pipeline, seeded from a
@@ -1546,8 +1569,10 @@ mod tests {
                 // classification must reach the children it recovered.
                 "xref:sec[a *bold* c] and a < b",
                 // The same, for the `link:`/`mailto:` macro's own display text
-                // — the second family to carry an opaque piece structurally.
+                // — the second family to carry an opaque piece structurally —
+                // and for the auto-link / formal-URL family's, the third.
                 "link:index.html[a *bold* c] and a < b",
+                "https://example.org[a *bold* c] and a < b",
                 // Specials beside each construct these orders *can*
                 // recognize, so the classification is exercised inside and
                 // around a built node's own children.

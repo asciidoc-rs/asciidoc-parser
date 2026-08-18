@@ -48,10 +48,11 @@ use crate::{
 ///   no embedded newline *and* no [`synthesized`](Piece::synthesized) run in it
 ///   has an `'src` slice that copy coincides with — the one thing an
 ///   [`Attrlist`]`<'src>` cannot do without.
-/// - A match crossing an **opaque** piece — a rendered
+/// - A **target** — or, for a bare link, the whole match, whose shown text is a
+///   slice of that same target — crossing an **opaque** piece: a rendered
 ///   [`Styled`](crate::inlines::Styled) span, or any other construct
-///   [`build_match_string`] stands in as one [`SPAN_PLACEHOLDER`] — is
-///   deferred, exactly as every family in this module defers one.
+///   [`build_match_string`] stands in as one [`SPAN_PLACEHOLDER`]. A
+///   **bracketed display text** crossing one is admitted (see below).
 /// - A **bare URL whose stripped trailing punctuation is not its own**: the
 ///   strip keys off the target's final character (`;` or `:`, plus an adjacent
 ///   `)`), and a bare URL ending in an escaped special has an entity there
@@ -84,6 +85,48 @@ use crate::{
 /// instead of being escaped twice — for a bare URL too, whose shown text is a
 /// slice of the URL's own range rather than a computed string.
 ///
+/// # A rendered span inside the display text
+///
+/// A **rendered span** — a [`Styled`](crate::inlines::Styled) span, an
+/// already-recognized macro node of another family, a masked passthrough — is
+/// *not* recoverable: [`build_match_string`] stands it in as one
+/// [`SPAN_PLACEHOLDER`] where the string pipeline's haystack holds its markup
+/// (or its own passthrough mask) inline, and that markup exists only at fold
+/// time. It is nonetheless admitted **inside the bracketed display text** of a
+/// formal URL link (`https://example.org[a *b* c]`, and the angle spelling
+/// `<https://example.org[a *b* c]` that keeps its `&lt;`), because that text is
+/// the one capture this family never reads as bytes: it becomes the node's
+/// children through [`macro_text_children`], whose
+/// [`emit_range`](super::super::quotes::emit_range) path clones the opaque
+/// piece's own node whole into them — so the text is carried *structurally*,
+/// and the fold re-renders exactly the markup the string replacer captured
+/// there. Everything this pass *computes* stays gated: the **target**, and
+/// with it a **bare** link's shown text (a slice of the target's own range)
+/// and the `<url>` form's whole interior (see [`build_angle_link_node`]), as
+/// does an attribute-list text, for the reason above. This is the third family
+/// to take that lift, after the cross-reference one
+/// (`xref::find_xref_matches`) and the `link:`/`mailto:` macro
+/// ([`find_link_macro_matches`]).
+///
+/// What the admission cannot do is make the *recognition* agree in every case,
+/// because the string replacer matches over the markup itself where this
+/// matches over one placeholder standing in for it — and this pass cannot know
+/// what that markup carries without folding, which building a tree must never
+/// do. The two read the same extent unless the markup carries a character the
+/// pattern (or the replacer's own attribute-list probe) is sensitive to, which
+/// leaves two documented divergences of *extent*, each pinned by its own test
+/// and each one where the string pipeline's reading is the markup-perturbed one
+/// and the tree's the well-formed one — exactly as the quotes step's own
+/// crossed-delimiter divergence is:
+///
+/// - a `]` inside the span (`https://example.org[a *b ] c* d]`), which ends
+///   [`INLINE_LINK`]'s own lazy text capture early for the string replacer but
+///   not here;
+/// - markup carrying an `=` beside a comma elsewhere in the text
+///   (`…example.org[one, [.hl]#two#]`): the replacer's attribute-list probe
+///   fires on the markup's own `=`, and the parse then keeps only what precedes
+///   that comma.
+///
 /// An invalid quoted bare URL (`"https://example.org`) and a bare scheme with no
 /// body (`http://;`) are left literal by the string step *and* the builder, so
 /// they render identically and are covered by the differential corpus rather
@@ -114,10 +157,10 @@ pub(super) fn inline_link_level<'src>(
 
 /// Finds every recognized auto-link / formal-URL / angle-bracketed link at this
 /// level, skipping a `link:` macro match and any form
-/// [`build_inline_link_node`] defers — including a match crossing an opaque
-/// piece, whose gate lives inside that function (it needs the branch's own
-/// capture groups to know which sub-range the gate covers, and must run after
-/// the escape checks; see [`inline_link_level`]).
+/// [`build_inline_link_node`] defers — including one whose *computed* bytes
+/// cross an opaque piece, whose gate lives inside that function (it needs the
+/// branch's own capture groups to know which sub-range the gate covers, and
+/// must run after the escape checks; see [`inline_link_level`]).
 fn find_inline_link_matches<'src>(
     nodes: &[InlineNode<'src>],
     s: &str,
@@ -174,13 +217,18 @@ fn find_inline_link_matches<'src>(
 ///
 /// # The gate lives here
 ///
-/// A match crossing an **opaque** piece — a rendered
-/// [`Styled`](crate::inlines::Styled) span, or anything else
-/// [`build_match_string`] stands in as one [`SPAN_PLACEHOLDER`] — is deferred.
-/// The check sits here, not in [`find_inline_link_matches`], for two reasons:
-/// it must run *after* the escape checks (so an escaped link the gate would
-/// reject still drops its backslash, mirroring the replacer's own check order),
-/// and the ANGLE branch gates only its own interior (see
+/// The bytes this pass *computes* off the match string — the boundary prefix it
+/// inspects, the scheme, and the URL that becomes the target — must not cross
+/// an **opaque** piece: a rendered [`Styled`](crate::inlines::Styled) span, or
+/// anything else [`build_match_string`] stands in as one [`SPAN_PLACEHOLDER`].
+/// The gate therefore covers the match up to the bracketed display text, which
+/// reads nothing and is carried structurally (see [`inline_link_level`]'s own
+/// rendered-span section) — and, for a **bare** link, the whole match, whose
+/// shown text is a slice of the target's own range. The check sits here, not in
+/// [`find_inline_link_matches`], for two reasons: it must run *after* the
+/// escape checks (so an escaped link the gate would reject still drops its
+/// backslash, mirroring the replacer's own check order), and the ANGLE
+/// branch's `<url>` form gates only its own interior (see
 /// [`build_angle_link_node`]).
 ///
 /// A [`synthesized`](Piece::synthesized) run and an *escaped special* (a
@@ -244,12 +292,26 @@ fn build_inline_link_node<'src>(
         });
     }
 
-    // A match crossing a rendered span is left for a later increment; one
-    // crossing an expanded attribute value or an escaped special is admitted,
-    // since every value below is read from the match string — whose bytes are,
-    // for both, exactly the ones the string replacer's own haystack carries
-    // there.
-    if !range_has_no_opaque_piece(nodes, pieces, full) {
+    // The gate covers the bytes this pass *reads*, not the whole match. Every
+    // value it computes lies before the bracketed display text: the boundary
+    // prefix it inspects, the scheme, and the URL that becomes the target — out
+    // of which a *bare* link's shown text is sliced too, which is why that form
+    // keeps the whole match gated. The bracketed **display text** reads
+    // nothing: it becomes structured children through `macro_text_children`,
+    // whose `emit_range` path carries an opaque piece's own node, so it is
+    // admitted — see [`inline_link_level`]'s own rendered-span note. Its
+    // closing `]` needs no gate of its own: that byte is literal, and no atomic
+    // piece — a placeholder, or an entity delimited by `&` and `;` — can supply
+    // it. (A text carrying an attribute list keeps its own stricter, verbatim
+    // gate below, for `Attrlist<'src>`'s sake.)
+    //
+    // An expanded attribute value and an escaped special are admitted
+    // throughout, since every value read here comes off the match string —
+    // whose bytes are, for both, exactly the ones the string replacer's own
+    // haystack carries there.
+    let computed_end = n.attrlist().map_or(full.end, |m| m.start());
+
+    if !range_has_no_opaque_piece(nodes, pieces, &(full.start..computed_end)) {
         return None;
     }
 
@@ -458,7 +520,8 @@ fn build_inline_link_node<'src>(
         // borrows it from `'src` in the common verbatim case (§4.5), owns it
         // when it crosses an expanded attribute value, and rebuilds it as
         // structured children — each escaped special staying the `CharRef` it
-        // already is — when it crosses one, applying the same `\]` unescape
+        // already is, each **opaque** piece staying its own node — when it
+        // crosses either, applying the same `\]` unescape
         // `InlineLinkReplacer` performs. The `^` window suffix is one ASCII
         // byte at the end of the bracketed text, so the range simply stops
         // short of it.
@@ -529,8 +592,11 @@ fn build_inline_link_node<'src>(
 /// the scheme and the URL. As in the general path an escaped special inside
 /// that interior is admitted — the target is read off the match string, and the
 /// display text derived from it is recovered as structured children — while an
-/// **opaque** piece defers. The two escape checks above run ahead of the gate,
-/// for the same reason the general path's does.
+/// **opaque** piece defers. This form has no *bracketed* display text to carry
+/// structurally, so every byte the gate covers is one the target is computed
+/// from and the gate stays whole, where its `[…]` sibling — handled by the
+/// general path — admits an opaque piece inside its text. The two escape checks
+/// above run ahead of the gate, for the same reason the general path's does.
 ///
 /// Like the rest of this additive builder it performs no `register_link` side
 /// effect; [`apply_link_side_effects`] stages that for the cutover, and needs
@@ -1509,6 +1575,19 @@ mod tests {
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
     };
+
+    /// A parser with the `experimental` attribute set, so a UI macro inside a
+    /// link's display text is recognized (the string step gates the UI family
+    /// on it, and the builder mirrors that gate).
+    fn experimental_parser() -> Parser {
+        use crate::parser::ModificationContext;
+
+        Parser::default().with_intrinsic_attribute_bool(
+            "experimental",
+            true,
+            ModificationContext::Anywhere,
+        )
+    }
 
     #[test]
     fn fold_matches_the_string_pipeline_through_link_macros() {
@@ -2636,20 +2715,227 @@ mod tests {
     }
 
     #[test]
-    fn an_angle_bracketed_link_text_over_a_rendered_span_is_a_documented_divergence() {
-        // The `[…]` alternative inherits the general path's own deferral: a
-        // display text containing a quoted span is a `Styled` node by macro
-        // time, so the match is not verbatim.
-        let source = "<https://example.org[*bold*]";
+    fn fold_matches_the_string_pipeline_for_a_formal_url_display_text_crossing_a_rendered_span() {
+        // The differential corpus for this increment: a formal URL link whose
+        // bracketed display text crosses an **opaque** piece — a rendered span,
+        // an already-recognized macro node of another family, a masked
+        // passthrough. The text is carried structurally (each opaque piece's
+        // own node becomes a child), so the fold re-renders exactly the markup
+        // the string replacer captured in its own text.
+        let fixtures = [
+            // (A masked passthrough is opaque here too — and in the string
+            // pipeline, which restores passthroughs only after every step — but
+            // this oracle runs the steps directly, without the extraction the
+            // real `SubstitutionGroup::apply` performs around them, so those
+            // fixtures live in the whole-pipeline sweep instead; see
+            // `inline_builder::tests`.)
+            //
+            // A span at the end of the text, at the start, in the middle, and
+            // spanning the whole of it.
+            "https://example.org[with *bold* text]",
+            "https://example.org[*bold* leads]",
+            "https://example.org[a *b* c]",
+            "https://example.org[*bold*]",
+            // Every quoted form the earlier step can have produced, including
+            // an attributed span (whose markup carries an `=` the string
+            // replacer's own attribute-list probe reads, and this one does not:
+            // with no comma to split on, the parse yields one positional value
+            // equal to the whole text, so both take the plain-text path).
+            "https://example.org[_em_ and `code` and #mark#]",
+            "https://example.org[super^script^ and sub~script~]",
+            "https://example.org[[.hl]#roled#]",
+            // An already-recognized macro node of another family — an image, an
+            // icon, an index term — and a character replacement, which is
+            // opaque here for the same reason (`build_match_string` stands each
+            // in as one placeholder).
+            "https://example.org[the image:logo.png[Logo] here]",
+            "https://example.org[the icon:tags[] here]",
+            "https://example.org[a ((index term)) *b*]",
+            "https://example.org[Acme(C) *now*]",
+            // A span *and* an escaped special / restored entity in one text —
+            // the recoverable and structural recoveries side by side — and a
+            // span beside the target's own escaped special.
+            "https://example.org[a < b and *bold*]",
+            "https://example.org[a &copy; b and _em_]",
+            "https://example.org/a&b[*bold* text]",
+            // The `\]` unescape and the `^` window suffix still apply around a
+            // span, as does a text that is only whitespace around one.
+            "https://example.org[a\\] *b* c]",
+            "https://example.org[*Open*^]",
+            "https://example.org[ *b* ]",
+            // The ANGLE branch's `[…]` alternative, which keeps its `&lt;` and
+            // takes this same general path.
+            "<https://example.org[*bold*]",
+            "<https://example.org[a *b* c]",
+            // Escaped: the backslash is dropped and the span stays in the flow.
+            "\\https://example.org[*bold*]",
+            // In surrounding flow, beside a sibling link of each spelling, and
+            // inside a rendered span of its own.
+            "See https://example.org[the *bold* one] for details.",
+            "See https://x.org[*a*] and https://y.org[_b_].",
+            "See https://x.org[*a*] and link:y.html[_b_].",
+            "_a https://x.org[*b*] c_",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+
+        // The UI family is recognized only under `experimental`, so its own
+        // fixtures take a parser that sets it — on both sides of the
+        // comparison.
+        let parser = experimental_parser();
+
+        for fixture in [
+            // The UI pass runs *before* this one, so the macro's own `]` is
+            // already inside the placeholder by the time the link's lazy text
+            // capture runs — exactly as it is inside `<kbd>…</kbd>` on the
+            // string side.
+            "https://example.org[a kbd:[Ctrl+T] b]",
+            "https://example.org[a btn:[Save] *b*]",
+            "https://example.org[a menu:File[Save] b]",
+        ] {
+            let folded = fold_html(&build(Span::new(fixture), &parser, None), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_macros_with(fixture, &parser),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_formal_url_display_text_carries_a_rendered_span_as_its_own_child() {
+        // A display text crossing a rendered span is carried *structurally*:
+        // the span is one opaque placeholder in the match string, but
+        // `macro_text_children` recovers the text with `emit_range`, which
+        // clones the span's own node whole into the link's children. The fold
+        // then re-renders exactly the markup the string replacer captured in
+        // its own display text.
+        let source = "https://example.org[a *bold* b]";
         let nodes = build_src(Span::new(source));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an angle link text crossing a rendered span must stay literal: {nodes:?}"
+        let reference = assert_link(&nodes[0]);
+
+        // Three children: the text before the span, the span itself, the text
+        // after it — each borrowing its own precise `'src` slice, which the
+        // one-`Text`-child shape this replaced could not express.
+        assert_eq!(reference.children.len(), 3);
+        assert_text(&reference.children[0], "a ", 1, 21);
+
+        let styled = assert_styled(
+            &reference.children[1],
+            StyleVariant::Strong,
+            SpanForm::Constrained,
         );
 
-        // The string pipeline, by contrast, *does* build a link here.
-        assert!(golden_macros(source).contains("<a href"));
+        assert_text(&styled[0], "bold", 1, 24);
+        assert_text(&reference.children[2], " b", 1, 29);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_formal_url_target_over_a_rendered_span_is_a_documented_divergence() {
+        // The **target** is a value this pass computes off the match string,
+        // where a rendered span is one opaque placeholder standing in for
+        // markup that exists only at fold time — so the target keeps
+        // `range_has_no_opaque_piece` while the display text lifts it.
+        //
+        // If this boundary is ever lifted, fold these fixtures into the parity
+        // corpus above.
+        for source in [
+            "https://example.org/a``b``c[x]",
+            "<https://example.org/a``b``c[x]",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+                "a target crossing a rendered span must stay literal: {nodes:?}"
+            );
+
+            // The string pipeline, by contrast, *does* build a link here.
+            assert!(golden_macros(source).contains("<a href"));
+        }
+    }
+
+    #[test]
+    fn a_formal_url_attribute_list_text_over_a_rendered_span_is_a_documented_divergence() {
+        // A text carrying an attribute list is parsed as a real
+        // `Attrlist<'src>` from the source's own bytes, and a placeholder
+        // inside a *parsed* value has no node it can be mapped back to — the
+        // same reason the cross-reference and `link:`/`mailto:` macro families
+        // defer their own `Attrlist`-bearing capture. That one text shape keeps
+        // the stricter gate outright.
+        //
+        // If this boundary is ever lifted, fold these fixtures into the parity
+        // corpus above.
+        for source in [
+            "https://example.org[a *b* c,role=hl]",
+            "https://example.org[a *b* c,window=_blank]",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+                "an attribute-list text crossing a rendered span must stay literal: {nodes:?}"
+            );
+
+            // The string pipeline, by contrast, *does* build a link here.
+            assert!(golden_macros(source).contains("<a href"));
+        }
+    }
+
+    #[test]
+    fn a_span_whose_markup_perturbs_the_inline_link_pattern_is_a_documented_divergence() {
+        // What the structural recovery cannot do is make the *recognition*
+        // agree in every case: the string replacer matches over the span's
+        // markup where this matches over the one placeholder standing in for
+        // it, so the two read the same extent only while that markup carries
+        // no character the pattern (or the replacer's own attribute-list
+        // probe) is sensitive to. These are the two shapes where it does — and
+        // in each the string pipeline's reading is the markup-perturbed one (a
+        // truncated text, a text the attribute-list parse cut in half) and the
+        // tree's the well-formed one, exactly as the quotes step's own
+        // crossed-delimiter divergence is.
+        for source in [
+            // A `]` inside the span ends `INLINE_LINK`'s own lazy text capture
+            // early for the string replacer, but not here.
+            "https://example.org[a *b ] c* d]",
+            // Markup carrying an `=` (an attributed span) *and* a comma
+            // elsewhere in the text: the string replacer's attribute-list probe
+            // fires on the markup's own `=`, and the parse then splits the text
+            // at that comma, keeping only what precedes it.
+            "https://example.org[one, [.hl]#two#]",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert_ne!(
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                golden_macros(source),
+                "{source:?} now agrees with the string pipeline; fold it into the parity corpus"
+            );
+
+            // The tree's own reading is the well-formed one: one link node
+            // whose text carries the whole span.
+            assert!(
+                nodes.iter().any(|n| matches!(n, InlineNode::Ref(_))),
+                "the tree's own reading must still build a link: {nodes:?}"
+            );
+        }
     }
 
     #[test]
