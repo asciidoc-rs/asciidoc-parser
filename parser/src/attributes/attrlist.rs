@@ -29,6 +29,31 @@ pub struct Attrlist<'src> {
 }
 
 impl<'src> Attrlist<'src> {
+    /// Rebuilds this attribute list with every borrowed string copied into an
+    /// owned one and `source` as its new span, so it can outlive the text it
+    /// was parsed from.
+    ///
+    /// [`parse`](Self::parse) reads its `source` span's bytes **as content**,
+    /// so an attribute list can only be parsed from a span that actually holds
+    /// the attrlist text. A caller that has those bytes only in a temporary
+    /// string — the inline AST builder, whose match string carries an escaped
+    /// or attribute-expanded value that no `'src` slice reproduces — parses
+    /// from a [`Span::new`] over that temporary and calls this to keep the
+    /// result, passing the coarser source span the text corresponds to as the
+    /// list's own location tag. Every parsed field is a [`CowStr`], so nothing
+    /// but the location depends on the original span.
+    pub(crate) fn into_owned<'dst>(self, source: Span<'dst>) -> Attrlist<'dst> {
+        Attrlist {
+            attributes: self
+                .attributes
+                .into_iter()
+                .map(ElementAttribute::into_owned)
+                .collect(),
+            anchor: self.anchor.map(CowStr::into_owned),
+            source,
+        }
+    }
+
     /// **IMPORTANT:** This `source` span passed to this function should NOT
     /// include the opening or closing square brackets for the attrlist.
     /// This is because the rules for closing brackets differ when parsing

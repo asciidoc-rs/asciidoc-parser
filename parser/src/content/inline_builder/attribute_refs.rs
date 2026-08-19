@@ -1398,23 +1398,39 @@ mod tests {
     }
 
     #[test]
-    fn an_attrlist_bearing_macro_inside_an_expanded_value_is_a_documented_divergence() {
-        // Most macro families are now recognized inside a spliced value (see
-        // this module's own doc comment, and each family's own parity corpus).
-        // What still defers is a construct needing an `Attrlist<'src>`, which
-        // reads its own source span's bytes *as content*: an image macro's
-        // non-empty attribute list here, alongside a link's own
-        // attribute-list-bearing display text (pinned in `macros/links.rs`).
+    fn an_attrlist_bearing_display_text_inside_an_expanded_value_is_a_documented_divergence() {
+        // Every macro family is now recognized inside a spliced value (see
+        // this module's own doc comment, and each family's own parity corpus)
+        // — an image macro's own attribute list included, since a bracket with
+        // no `'src` slice is parsed from the match string and owned off it
+        // (`macros/image.rs`). What still defers is a **display text** that
+        // carries its own attribute list, which the link families must split
+        // apart before they can build their node.
+        let parser = parser_with_attribute("label", "Docs");
+        let source = "see link:index.html[{label},role=hl] now";
+        let nodes = build(Span::new(source), &parser, None);
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an attrlist-bearing display text inside a spliced value must not yet be \
+             recognized: {nodes:?}"
+        );
+
+        assert!(golden_attributes_with(source, &parser).contains("<a href"));
+    }
+
+    #[test]
+    fn an_attrlist_bearing_image_inside_an_expanded_value_is_recognized() {
+        // The counterpart of the divergence above, and the case this test used
+        // to pin: an image macro's non-empty attribute list no longer needs an
+        // `'src` slice, so a wholly-spliced `image:…[…]` is recognized.
         let parser = parser_with_attribute("imgtext", "image:sunset.jpg[Sunset]");
         let nodes = build(Span::new("see {imgtext} now"), &parser, None);
 
         assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
-            "an attrlist-bearing macro inside a spliced value must not yet be recognized: \
-             {nodes:?}"
+            nodes.iter().any(|n| matches!(n, InlineNode::Image(_))),
+            "an image inside a spliced value should be recognized: {nodes:?}"
         );
-
-        assert!(golden_attributes_with("see {imgtext} now", &parser).contains("<img"));
     }
 
     #[test]

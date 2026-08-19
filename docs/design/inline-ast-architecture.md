@@ -3376,6 +3376,56 @@ Each phase is a reviewable unit with a clear exit gate.
   is now only the three `Attrlist<'src>` captures and the `subs=quotes,specialcharacters` policy
   item. As with every prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (an **image's attribute list** with no `'src` slice — the first of the
+  three `Attrlist<'src>` captures):* with every family's own gate now the shared opaque-piece one,
+  what the audit still names beside the `subs=quotes,specialcharacters` policy item is the
+  **three attribute-list captures** — an image's non-empty bracket, and the `link:`/`mailto:` and
+  auto-link families' attribute-list-bearing display texts — each of which every previous increment
+  held back for the same structural reason: [`Attrlist::parse`](../../parser/src/attributes/attrlist.rs)
+  reads its `source: Span<'src>`'s bytes **as content**, not merely as a location tag, so a capture
+  with no honest `'src` slice had nothing to parse from. That reason turns out to be about
+  *parsing*, not about *holding*: an [`Attrlist`](../../parser/src/attributes/attrlist.rs) keeps
+  nothing `Span`-typed but its own location — its
+  [`ElementAttribute`](../../parser/src/attributes/element_attribute.rs)s are
+  [`CowStr`](../../parser/src/strings.rs)s and everything else is plain data — so a list parsed from
+  a temporary can be *kept* if its strings are detached from it.
+
+  A new [`Attrlist::into_owned`](../../parser/src/attributes/attrlist.rs) is that detachment (built
+  on [`ElementAttribute::into_owned`](../../parser/src/attributes/element_attribute.rs) and
+  [`CowStr::into_owned`](../../parser/src/strings.rs), which prefers the inline representation for a
+  short string exactly as `Clone` does): it rebuilds the list with every borrowed string copied and
+  a caller-supplied span as its new location tag. The image family is the first capture to use it.
+  [`bracket_attrlist`](../../parser/src/content/inline_builder/macros/image.rs) keeps the `'src`
+  slice — and so the borrow (§4.5) — for a verbatim bracket, and for every other one parses the
+  **match string's** own bytes instead, which is not a substitute for the source but the *exact*
+  thing `InlineImageMacroReplacer` parses (`Attrlist::parse(Span::new(&caps[2]), …)`, over its own
+  escaped, already-expanded haystack), then owns the result onto the bracket's coarse source span —
+  design §4.4's fallback, the same one the node's `location` already takes. So
+  `image:sunset.jpg[{caption}]`, `image:tiger.svg[A <b> & "c",opts=interactive]`, and
+  `image:x.png[Tom &amp; Jerry]` are now recognized, the family's remaining `range_is_verbatim`
+  call disappears with them, and `build_image_node` becomes **total** — the whole match keeping
+  only [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs), the
+  boundary every family keeps, since a rendered span's markup exists only at fold time and the
+  string replacer parses that markup where this would parse one placeholder.
+
+  Nothing about the family's staged side effects changes: `register_image` reads the node's
+  `target`, and the `link=` dangerous-scheme warning reads the very attribute list this increment
+  makes available, so a `link=` in a bracket with no `'src` slice now records its warning too (its
+  own test). The three `…_is_a_documented_divergence` tests this closes — for an escaped special, a
+  restored entity, and an expanded value — become parity corpora per the "if lifted, fold this into
+  a parity corpus" convention, joined by structural companions pinning the owned values and the
+  coarse location tag; `attribute_refs.rs`'s own "an attrlist-bearing macro inside a spliced value"
+  divergence is re-pointed at the link family, which still holds it, with the image half rewritten
+  as a recognition test. Fixtures are added to the whole-pipeline combined-constructs corpus, the
+  synthesized-seed sweep (where an image's *non-empty* bracket now joins the empty one), the
+  group-parity corpus, and the structural recorder cross-check — comparable there for the first
+  time, since both constructions now read the same `caps[2]`. Re-running the corpus-wide
+  fold-parity audit confirms the divergence set strictly **shrank**: seven sources are gone, four of
+  them real golden ones (`image:tiger.svg[…]`, `image:missing.svg[…]`, and two
+  `image:pause.png[title=…]` forms), and no new one appeared. What survives is the two remaining
+  `Attrlist<'src>` captures, the `subs=quotes,specialcharacters` policy item, and the opaque-piece
+  boundary itself. As with every prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -3808,6 +3858,19 @@ Each phase is a reviewable unit with a clear exit gate.
        [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs), so a
        rendered span in it defers with its own divergence test. See the step's own "landed as" note
        above.
+     - ✅ **prep (an image's attribute list).** The first of the three `Attrlist<'src>` captures —
+       the last boundary drawn around a *capture* rather than around an opaque piece — is lifted:
+       an [`Attrlist`](../../parser/src/attributes/attrlist.rs) holds nothing `Span`-typed but its
+       own location tag, so a new
+       [`Attrlist::into_owned`](../../parser/src/attributes/attrlist.rs) lets a list parsed from a
+       temporary be kept, and
+       [`bracket_attrlist`](../../parser/src/content/inline_builder/macros/image.rs) parses a
+       bracket with no `'src` slice from the level's **match string** — the same
+       `Attrlist::parse(Span::new(&caps[2]), …)` the string replacer performs — owning the result
+       onto §4.4's coarse span. `image:sunset.jpg[{caption}]` and
+       `image:tiger.svg[A <b> & "c",opts=interactive]` are recognized; the family's last
+       `range_is_verbatim` call is gone and `build_image_node` is total. See the step's own "landed
+       as" note above. The two link-family display-text captures are later increments.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

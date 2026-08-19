@@ -54,16 +54,21 @@
 //!   an expanded value ((C) → ©, `--`, …) is recognized, a follow-up increment
 //!   having taught [`build_match_string`](quotes::build_match_string) to look
 //!   inside a [`synthesized`](quotes::Piece::synthesized) run instead of
-//!   treating it as opaque; a **macro** needing an honest `'src` slice for its
-//!   own target/attribute list (a link or an image, the two that are left)
-//!   still defers when that slice sits inside one, since a synthesized run's
-//!   bytes have no source counterpart to slice for a type that requires a real
-//!   `Span` (see [`range_is_verbatim`](macros::image::range_is_verbatim)) — but
-//!   a macro needing only its own *text* (no `Span`-typed field) — an anchor's
-//!   id, a bare e-mail address, a UI macro's keys/label/menu path, an index
-//!   term's shown text, or a cross-reference's target and reference text — can
-//!   now be recovered exactly via [`text_slice`](quotes::text_slice) or
-//!   straight out of the match string instead (see
+//!   treating it as opaque; a **macro** needing an honest `'src` slice for a
+//!   value that must ride on its node as one — now only a **link's**
+//!   attribute-list-bearing display text, whose residual text the same slice is
+//!   split out of — still defers when that slice sits inside one, since a
+//!   synthesized run's bytes have no source counterpart to slice for a type
+//!   that requires a real `Span` (see
+//!   [`range_is_verbatim`](macros::image::range_is_verbatim)). An [`Attrlist`]
+//!   that *is* the whole capture — an image's bracket — needs no such slice: it
+//!   is parsed from the level's own match string (the bytes the string replacer
+//!   parses too) and [`into_owned`](Attrlist::into_owned)ed off it. And a macro
+//!   needing only its own *text* (no `Span`-typed field) — an anchor's id, a
+//!   bare e-mail address, a UI macro's keys/label/menu path, an index term's
+//!   shown text, or a cross-reference's target and reference text — can now be
+//!   recovered exactly via [`text_slice`](quotes::text_slice) or straight out
+//!   of the match string instead (see
 //!   [`range_is_verbatim_or_synthesized`](macros::image::range_is_verbatim_or_synthesized),
 //!   and [`range_has_no_opaque_piece`](macros::image::range_has_no_opaque_piece)
 //!   for the families whose gate also admits an escaped special or a restored
@@ -1134,9 +1139,11 @@ mod tests {
         // families to make that lift, and the two that hold a real
         // `Attrlist<'src>`. Their targets and display texts come from the
         // match string like every other family's values; what still defers is
-        // an image's non-empty attribute list, a link's attribute-list-bearing
-        // display text, and a wholly expanded `link:` macro (each pinned by
-        // its own divergence test in `macros/image.rs` and `macros/links.rs`).
+        // a link's attribute-list-bearing display text and a wholly expanded
+        // `link:` macro (each pinned by its own divergence test in
+        // `macros/links.rs`). An image's own attribute list no longer does:
+        // a bracket with no `'src` slice is parsed from the match string —
+        // the same bytes the string replacer parses — and owned off it.
         let with_link_attributes = || {
             Parser::default()
                 .with_intrinsic_attribute("url", "index.html", ModificationContext::Anywhere)
@@ -1153,6 +1160,14 @@ mod tests {
 
         assert_parity_with(
             "See image:{logo}[Logo] and image:{logo}[] beside <https://{host}> and a (C) mark.",
+            with_link_attributes,
+        );
+
+        // An image whose *attribute list* has no `'src` slice of its own, in
+        // both spellings of that: crossing an expansion and crossing an
+        // escaped special, with the other families live around it.
+        assert_parity_with(
+            "See image:{logo}[{label},200] and image:x.png[a < b,role=hl] about *{product}*.",
             with_link_attributes,
         );
 
@@ -1284,10 +1299,11 @@ mod tests {
                 "see <<target>> and\nxref:other[the other one]",
             ),
             // The URL-link family in a wholly-synthesized seed, and an image
-            // macro with an *empty* bracket: neither needs an `'src` slice
-            // (the empty attribute list parses from a zero-length span). An
-            // image with a non-empty bracket, and the `link:`/`mailto:` macro
-            // in any spelling, still defer — see
+            // macro in either spelling of its bracket: neither needs an `'src`
+            // slice — an empty attribute list parses from a zero-length span,
+            // and a non-empty one is parsed from the match string and owned
+            // off it. The `link:`/`mailto:` macro, whose own literal marker
+            // must be verbatim, still defers — see
             // `a_macro_construct_is_deferred_when_the_whole_seed_is_synthesized`
             // below.
             (
@@ -1297,6 +1313,10 @@ mod tests {
             (
                 "  see image:sunset.jpg[] and\n  icon:home[] here",
                 "see image:sunset.jpg[] and\nicon:home[] here",
+            ),
+            (
+                "  see image:sunset.jpg[Sunset,200] and\n  icon:home[2x,role=gold] here",
+                "see image:sunset.jpg[Sunset,200] and\nicon:home[2x,role=gold] here",
             ),
         ];
 
@@ -1667,6 +1687,12 @@ mod tests {
                 "keep *bold < text* and a < b",
                 "a < b {product} > c",
                 "an <b>image</b> image:pic.png[Alt] here",
+                // An image whose *attribute list* comes from an expansion, so
+                // the bracket is parsed from the match string and owned off
+                // it: under an order that omits `specialcharacters` the
+                // classification pass runs last, over a tree that already
+                // holds that owned list, and must leave it alone.
+                "image:x.png[{product} < y] here",
                 "a footnote:[note < text] and a < b",
                 // A UI macro whose key crosses a bare `&`, which only an order
                 // *without* `specialcharacters` can present: the family reads

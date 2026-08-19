@@ -998,11 +998,11 @@ fn shapes_match_across_combined_constructs() {
     );
 
     // Links and images spliced in by attribute references — the last two
-    // families to make that lift. What each still defers (an image's non-empty
-    // attribute list, a link's attribute-list-bearing display text, and a
-    // wholly expanded `link:` macro) is deliberately absent here: the recorder
-    // recognizes those, so a fixture carrying one would compare a node against
-    // literal text rather than two constructions of the same node.
+    // families to make that lift. What the link family still defers (an
+    // attribute-list-bearing display text, and a wholly expanded `link:`
+    // macro) is deliberately absent here: the recorder recognizes those, so a
+    // fixture carrying one would compare a node against literal text rather
+    // than two constructions of the same node.
     let with_link_attributes = || {
         Parser::default()
             .with_intrinsic_attribute("url", "index.html", ModificationContext::Anywhere)
@@ -1019,6 +1019,16 @@ fn shapes_match_across_combined_constructs() {
 
     assert_shapes_with(
         "See image:{logo}[Logo] and image:{logo}[] beside a *bold* run.",
+        with_link_attributes,
+    );
+
+    // An image whose *attribute list* has no `'src` slice — crossing an
+    // expansion, and crossing an escaped special. The builder now parses the
+    // bracket from its match string, which is the same haystack the string
+    // replacer the recorder wraps reads its own `caps[2]` out of, so the two
+    // constructions carry the same attributes and can be compared.
+    assert_shapes_with(
+        "See image:{logo}[{label},200] and image:x.png[a < b,role=hl] here.",
         with_link_attributes,
     );
 
