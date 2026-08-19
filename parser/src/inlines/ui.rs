@@ -2,6 +2,15 @@ use crate::{HasSpan, Span, strings::CowStr};
 
 /// A UI macro: `kbd:`, `btn:`, or `menu:`.
 ///
+/// Every text this node carries — a keyboard macro's keys, a button's label, a
+/// menu's name, submenu path, and item — is held in **already-substituted**
+/// form, i.e. with special characters escaped (`kbd:[Ctrl&C]`'s single key is
+/// `Ctrl&amp;C`) and author-written entities kept as written. That is the form
+/// the renderer emits verbatim, and the form the string pipeline's own render
+/// parameters carry; it is not the *logical* text a
+/// [`Text`](super::InlineNode::Text) node holds, which the fold escapes. An
+/// [`IndexTerm`](super::IndexTerm)'s `terms` use the same contract.
+///
 /// Field set is provisional (Phase 0) and will be refined against the first
 /// consumer.
 #[derive(Clone, Debug, Eq, PartialEq)]

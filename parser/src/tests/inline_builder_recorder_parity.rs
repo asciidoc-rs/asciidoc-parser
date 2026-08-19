@@ -869,6 +869,16 @@ fn shapes_match_across_combined_constructs() {
         with_experimental,
     );
 
+    // The same comparison for the family's last lift: a keyboard key crossing
+    // an escaped special and a menu name crossing a restored entity. Both
+    // constructions hold these values in their already-substituted form (the
+    // recorder because it reads the string pipeline's own render params, the
+    // builder because it reads the match string), so the two meet exactly.
+    assert_shapes_with(
+        "Press kbd:[Ctrl&C] then choose menu:&#8942;[More Tools, Extensions].",
+        with_experimental,
+    );
+
     assert_shapes(
         "Visit https://example.org[the site] or mailto:a@example.org[email us], \
          then see <<conclusion,the conclusion>>.",

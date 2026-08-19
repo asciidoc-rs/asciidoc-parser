@@ -79,24 +79,27 @@ use crate::{Parser, Span, inlines::InlineNode, strings::CowStr};
 /// cross-span boundary (crossed delimiters). A family relaxes that gate where
 /// the escaped piece is a delimiter *it consumes and never slices* — the
 /// angle-bracketed URL's own `&lt;`/`&gt;` (see
-/// `links::build_inline_link_node`) and a menu's `&gt;` submenu caret (see
-/// `ui::menu_match_is_sliceable`) — or, for **every** family that can carry a
-/// target or a display text (the **cross-reference**, the **`link:`/`mailto:`
-/// macro**, the **auto-link / formal-URL**, the **bare e-mail**, and the
-/// **image/icon** families), wherever the escaped text need not
+/// `links::build_inline_link_node`) — or, for **every** family that can carry a
+/// target, a display text, or any other computed value (the
+/// **cross-reference**, the **`link:`/`mailto:` macro**, the **auto-link /
+/// formal-URL**, the **bare e-mail**, the **image/icon**, and the **UI**
+/// families), wherever the escaped text need not
 /// ride on the node as an `'src` slice at all: none of those families' targets
 /// is `Span`-typed, so each reads its values out of the match string (whose
 /// entity bytes *are* the string pipeline's own) and rebuilds its display text
 /// as structured children through [`macro_text_children`], keeping each special
 /// as its own `CharRef` (see `xref::find_xref_matches`,
 /// `links::find_link_macro_matches`, `links::build_inline_link_node`,
-/// `links::email_level`, `image::build_image_node`, and
+/// `links::email_level`, `image::build_image_node`, `ui::find_kbd_btn_matches`,
+/// `ui::find_menu_matches`, and
 /// [`range_has_no_opaque_piece`](image::range_has_no_opaque_piece)). A
 /// **restored entity** (`&copy;`, `&#8217;` — an author-written entity the
 /// replacements step un-escaped) rides on that same gate, since
 /// [`build_match_string`](super::quotes::build_match_string) gives it its own
 /// bytes too; it needs no per-family work, so it is admitted for the
-/// index-term, anchor and STEM families as well. What keeps
+/// index-term, anchor and STEM families as well, and a footnote's text — which
+/// is structured children rather than a sliced value — carries either leaf as
+/// its own child with no gate at all. What keeps
 /// the stricter gate is never a *family* now, only the one **capture** that
 /// must ride on the node as a real
 /// [`Attrlist`](crate::attributes::Attrlist)`<'src>`, parsed from the source's
@@ -105,9 +108,8 @@ use crate::{Parser, Span, inlines::InlineNode, strings::CowStr};
 /// normalized *copy*, so it takes both lifts). The auto-link family
 /// additionally keeps a narrow deferral of its own for a bare URL whose
 /// trailing-punctuation strip would cut inside an escaped special, and the
-/// e-mail family one for an address *abutting* an opaque piece; the UI family
-/// and a footnote's text keep their own stricter gates for either `CharRef`
-/// leaf. The differential corpus pins the cases each increment claims.
+/// e-mail family one for an address *abutting* an opaque piece. The
+/// differential corpus pins the cases each increment claims.
 ///
 /// An **opaque** piece — a rendered span, an earlier-recognized macro node, a
 /// masked passthrough — is admitted where a family carries it *structurally*
@@ -546,9 +548,10 @@ mod tests {
         // family, so admitting it lifts the boundary wherever a family's own
         // gate is the opaque-piece one — including the families with no
         // escaped-special corpus of their own, which this pins. (The UI
-        // family and a footnote's text keep their own stricter gates, for a
-        // restored entity exactly as for an escaped special; see
-        // `the_ui_and_footnote_families_keep_their_own_boundary` below.)
+        // family and a footnote's text reach the same parity through their
+        // own route; see
+        // `the_ui_and_footnote_families_recognize_a_construct_crossing_a_recoverable_piece`
+        // below.)
         let parser = Parser::default().with_intrinsic_attribute(
             "experimental",
             "",
@@ -594,19 +597,55 @@ mod tests {
     }
 
     #[test]
-    fn the_ui_and_footnote_families_keep_their_own_boundary() {
-        // The two families whose gate is *not* the opaque-piece one keep the
-        // boundary they already keep for an escaped special: a `kbd:`/`btn:`
-        // key or label, a menu name or item, and a footnote's text each still
-        // need a value they can slice from `'src`. A restored entity is
-        // neither better nor worse for them than an escaped special — this
-        // pins the two spellings side by side so the pair moves together
-        // whenever that boundary is lifted.
-        let parser = Parser::default().with_intrinsic_attribute(
-            "experimental",
-            "",
-            ModificationContext::Anywhere,
-        );
+    fn the_ui_and_footnote_families_recognize_a_construct_crossing_a_recoverable_piece() {
+        // The two families this module's `the_other_families_recognize_a_
+        // construct_crossing_a_restored_entity` companion once excluded now
+        // take the same lift, closing the escaped-special / restored-entity
+        // boundary for every macro family:
+        //
+        // - The **UI** family (`kbd:`/`btn:`/`menu:`) swapped its own gate for the
+        //   shared opaque-piece one. Every value a `Ui` node holds is
+        //   already-substituted text read out of the match string, which is exactly
+        //   what the string replacer computes from its own escaped haystack.
+        //
+        // - A **footnote's text** needed no code change at all: its content is
+        //   structured children (`emit_range` keeps a `CharRef` leaf as its own child),
+        //   so it never sliced `'src` for a value in the first place. What made this
+        //   look like a boundary was the *harness*: the test that pinned it drove the
+        //   golden pipeline and the builder from one shared `Parser`, so each fixture's
+        //   footnote was numbered twice (`1` on the golden side, `2` on the built side)
+        //   and the two sides "diverged" for a reason that had nothing to do with the
+        //   entity. Hence `parity`, below, which configures one parser per side — the
+        //   two-independent-parsers discipline every footnote-bearing corpus in this
+        //   module already uses.
+        let configure = || {
+            Parser::default().with_intrinsic_attribute(
+                "experimental",
+                "",
+                ModificationContext::Anywhere,
+            )
+        };
+
+        let parity = |source: &str| {
+            let mut content = Content::from(Span::new(source));
+            SubstitutionGroup::Normal.apply(&mut content, &configure(), None);
+
+            let built_parser = configure();
+
+            let nodes = build_for_group(
+                &SubstitutionGroup::Normal,
+                CowStr::from(source),
+                Span::new(source),
+                &built_parser,
+                None,
+            );
+
+            assert_eq!(
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}, &built_parser),
+                content.rendered_html(),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+        };
 
         for (special, entity) in [
             ("kbd:[Ctrl&C]", "kbd:[Ctrl&copy;C]"),
@@ -615,24 +654,8 @@ mod tests {
             ("menu:File[Save & Exit]", "menu:File[Save &copy; Exit]"),
             ("footnote:[Tom & Jerry]", "footnote:[Tom &copy; Jerry]"),
         ] {
-            for source in [special, entity] {
-                let mut content = Content::from(Span::new(source));
-                SubstitutionGroup::Normal.apply(&mut content, &parser, None);
-
-                let nodes = build_for_group(
-                    &SubstitutionGroup::Normal,
-                    CowStr::from(source),
-                    Span::new(source),
-                    &parser,
-                    None,
-                );
-
-                assert_ne!(
-                    fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
-                    content.rendered_html(),
-                    "{source:?} is now recognized; fold it into the parity corpus above"
-                );
-            }
+            parity(special);
+            parity(entity);
         }
     }
 

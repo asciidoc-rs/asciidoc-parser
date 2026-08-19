@@ -61,7 +61,10 @@
 //!   term's shown text, or a cross-reference's target and reference text — can
 //!   now be recovered exactly via [`text_slice`](quotes::text_slice) or
 //!   straight out of the match string instead (see
-//!   [`range_is_verbatim_or_synthesized`](macros::image::range_is_verbatim_or_synthesized)).
+//!   [`range_is_verbatim_or_synthesized`](macros::image::range_is_verbatim_or_synthesized),
+//!   and [`range_has_no_opaque_piece`](macros::image::range_has_no_opaque_piece)
+//!   for the families whose gate also admits an escaped special or a restored
+//!   entity).
 //! - [`apply_character_replacements`] recognizes [character replacements] —
 //!   `(C)`, `--`, `...`, arrows, apostrophes, and restored entities — replacing
 //!   each with a [`CharRef::Replacement`](crate::inlines::CharRef::Replacement)
@@ -817,6 +820,21 @@ mod tests {
             with_experimental,
         );
 
+        // The UI family across a *recoverable* piece, with the other families
+        // live around it: a keyboard macro whose key crosses an escaped
+        // special, a menu whose name crosses a restored entity, and a button
+        // label crossing one — each read out of the match string, whose bytes
+        // there are the string replacer's own.
+        assert_parity_with(
+            "Press kbd:[Ctrl&C] then menu:&#8942;[More Tools, Extensions] in *bold* text.",
+            with_experimental,
+        );
+
+        assert_parity_with(
+            "Click btn:[Save &copy; Close] beside a footnote:[note & text] and image:x.png[X].",
+            with_experimental,
+        );
+
         // Several link forms and a cross-reference in one sentence.
         assert_parity(
             "Visit https://example.org[the site] or mailto:a@example.org[email us], \
@@ -1263,12 +1281,14 @@ mod tests {
             strings::CowStr,
         };
 
+        /// The parser both sides of every parity assertion in this module
+        /// are configured with: `product` for the fixtures carrying an
+        /// attribute reference, and `experimental` for the one carrying a UI
+        /// macro (the gate the string step and the builder share).
         fn parser_with_product() -> Parser {
-            Parser::default().with_intrinsic_attribute(
-                "product",
-                "Widget",
-                ModificationContext::Anywhere,
-            )
+            Parser::default()
+                .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+                .with_intrinsic_attribute_bool("experimental", true, ModificationContext::Anywhere)
         }
 
         fn build_group<'src>(
@@ -1580,6 +1600,13 @@ mod tests {
                 "a < b {product} > c",
                 "an <b>image</b> image:pic.png[Alt] here",
                 "a footnote:[note < text] and a < b",
+                // A UI macro whose key crosses a bare `&`, which only an order
+                // *without* `specialcharacters` can present: the family reads
+                // its keys from the match string either way, so the group that
+                // runs `macros` recognizes the very bytes the author wrote.
+                // (The UI macros are gated on `experimental`, which
+                // `parser_with_product` sets for both sides.)
+                "kbd:[Ctrl&C] and a < b",
                 "line one < +\nline two > end",
                 // Multi-line, so a run spanning a newline is split the same
                 // way as a single-line one.
