@@ -63,6 +63,25 @@ impl std::fmt::Debug for ElementAttribute<'_> {
 }
 
 impl<'src> ElementAttribute<'src> {
+    /// Rebuilds this attribute with every borrowed string copied into an owned
+    /// one, so it can outlive the text it was parsed from.
+    ///
+    /// Nothing here is a [`Span`]: an attribute's name and value are already
+    /// [`CowStr`]s and every other field is plain data, so the conversion is a
+    /// per-string [`CowStr::into_owned`] and nothing more. See
+    /// [`Attrlist::into_owned`](crate::attributes::Attrlist::into_owned) for
+    /// why the crate needs one.
+    pub(crate) fn into_owned<'dst>(self) -> ElementAttribute<'dst> {
+        ElementAttribute {
+            name: self.name.map(CowStr::into_owned),
+            value: self.value.into_owned(),
+            shorthand_item_indices: self.shorthand_item_indices,
+            positional_index: self.positional_index,
+            value_is_quoted: self.value_is_quoted,
+            value_is_substituted: self.value_is_substituted,
+        }
+    }
+
     pub(crate) fn parse(
         source_text: &CowStr<'src>,
         start_index: usize,

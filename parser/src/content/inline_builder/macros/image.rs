@@ -42,8 +42,7 @@ pub(super) fn image_macros_level<'src>(
 
 /// Finds every image/icon macro at this level, skipping any whose match crosses
 /// an [`opaque`](range_has_no_opaque_piece) piece (see
-/// [`apply_macros`](super::apply_macros)) or whose attribute list
-/// [`build_image_node`] cannot slice from `'src`.
+/// [`apply_macros`](super::apply_macros)).
 fn find_image_matches<'src>(
     s: &str,
     pieces: &[Piece],
@@ -83,25 +82,17 @@ fn find_image_matches<'src>(
             continue;
         }
 
-        // A match crossing a rendered span is left for a later increment; one
-        // crossing an expanded attribute value or an escaped special is
-        // admitted here and gated more narrowly — on its attribute list alone —
-        // inside `build_image_node`, since the macro name and target are read
-        // from the match string, whose bytes are, for both, exactly the ones
-        // the string replacer's own haystack carries there.
+        // A match crossing a rendered span is left for a later increment;
+        // every other piece the match string reproduces exactly — an expanded
+        // attribute value, an escaped special, a restored entity — is
+        // admitted, since the macro name, the target, and now the attribute
+        // list are all read from bytes the string replacer's own haystack
+        // carries there too.
         if !range_has_no_opaque_piece(nodes, pieces, &full) {
             continue;
         }
 
-        let Some(node) =
-            build_image_node(&caps, whole.as_str(), &full, pieces, root, parser, nodes)
-        else {
-            // A non-empty attribute list crossing a synthesized run or an
-            // escaped special: an `Attrlist<'src>` reads its own source span's
-            // bytes as content, so there is nothing honest to parse it from.
-            // Left as literal source for a later increment.
-            continue;
-        };
+        let node = build_image_node(&caps, whole.as_str(), &full, pieces, root, parser, nodes);
 
         matches.push(MacroMatch {
             kind: MacroMatchKind::Node {
@@ -263,14 +254,19 @@ pub(in crate::content::inline_builder) fn range_has_no_opaque_piece(
 /// [`apply_image_side_effects`] registers). Only the node's `location` then
 /// takes design §4.4's coarse fallback.
 ///
-/// The **attribute list** is the one part that cannot follow: an
+/// The **attribute list** follows the same rule, one step removed. An
 /// [`Attrlist`]`<'src>` reads its own `Span<'src>`'s bytes *as content*, not
-/// merely as a location tag, so it needs a real source slice. A non-empty
-/// bracket crossing a synthesized run or an escaped special therefore returns
-/// `None` — the macro is left literal for a later increment, exactly as the
-/// other boundaries in this module are. An **empty** bracket
-/// (`image:{logo}[]`) needs no bytes at all and parses from the same
-/// zero-length span an absent group already uses, so it is recognized.
+/// merely as a location tag, so a bracket with no honest `'src` slice — one
+/// crossing a [`synthesized`](Piece::synthesized) run
+/// (`image:sunset.jpg[{caption}]`), an escaped special
+/// (`image:x.png[a < b]`), or a restored entity (`image:x.png[Tom &amp;
+/// Jerry]`) — cannot be parsed from the source. It is parsed from the **match
+/// string** instead, through [`bracket_attrlist`], which is what the string
+/// replacer itself parses (`Attrlist::parse(Span::new(&caps[2]), …)`, over its
+/// own escaped, already-expanded haystack); the resulting list is then
+/// [`into_owned`](Attrlist::into_owned)ed off that temporary and tagged with
+/// design §4.4's coarse span. A bracket that *is* verbatim keeps its `'src`
+/// slice, so its attribute values still borrow (§4.5).
 fn build_image_node<'src>(
     caps: &regex::Captures<'_>,
     whole: &str,
@@ -279,7 +275,7 @@ fn build_image_node<'src>(
     root: Span<'src>,
     parser: &Parser,
     nodes: &[InlineNode<'src>],
-) -> Option<InlineNode<'src>> {
+) -> InlineNode<'src> {
     let location = source_slice(pieces, full.clone(), root);
 
     // The macro name (past any — here absent — escape) is `image:` or `icon:`.
@@ -303,29 +299,14 @@ fn build_image_node<'src>(
     };
 
     // Group 2 always participates — its own pattern carries an empty
-    // alternative — so the degenerate fallback range here is unreachable, and
-    // stands in for the same empty attribute list an absent group would mean
-    // rather than adding a branch of its own that no input can take.
-    let bracket_range = caps
-        .get(2)
-        .map_or(full.end..full.end, |m| m.start()..m.end());
+    // alternative — so the degenerate fallback here is unreachable, and stands
+    // in for the same empty attribute list an absent group would mean rather
+    // than adding a branch of its own that no input can take.
+    let (bracket_text, bracket_range) = caps.get(2).map_or(("", full.end..full.end), |m| {
+        (m.as_str(), m.start()..m.end())
+    });
 
-    let bracket = if range_is_verbatim(pieces, &bracket_range) {
-        source_slice(pieces, bracket_range, root)
-    } else if bracket_range.is_empty() {
-        // An empty attribute list carries no bytes to slice, so it parses from
-        // a zero-length span wherever the macro sits.
-        location.slice(0..0)
-    } else {
-        // A non-empty attribute list crossing a synthesized run or an escaped
-        // special: deferred (see this function's own "what must be verbatim"
-        // note).
-        return None;
-    };
-
-    let attrlist = Attrlist::parse(bracket, parser, AttrlistContext::Inline)
-        .item
-        .item;
+    let attrlist = bracket_attrlist(bracket_text, bracket_range, pieces, root, parser);
 
     // The default alt text derives from the target's basename, with `_`/`-`
     // read as spaces — exactly the string replacer's `default_alt`.
@@ -359,7 +340,7 @@ fn build_image_node<'src>(
         (Some(CowStr::from(alt)), width, height)
     };
 
-    Some(InlineNode::Image(Image {
+    InlineNode::Image(Image {
         is_icon,
         target,
         alt,
@@ -367,7 +348,58 @@ fn build_image_node<'src>(
         height,
         attrs: Some(attrlist),
         location,
-    }))
+    })
+}
+
+/// Parses the macro's bracket into the [`Attrlist`]`<'src>` its node carries.
+///
+/// A **verbatim** bracket is parsed straight from its `'src` slice, so its
+/// attribute names and values borrow from the source (§4.5) — the shape every
+/// ordinary `image:x.png[Alt,200]` takes.
+///
+/// Any other bracket has no `'src` slice whose bytes are the attrlist text: a
+/// [`synthesized`](Piece::synthesized) run holds the expansion's bytes where
+/// the source holds `{caption}`, and a
+/// [`CharRef`](InlineNode::CharRef) leaf holds one character (`<`) or the
+/// entity as written (`&amp;copy;`) where the match string holds the escaped
+/// or restored form (`&lt;`, `&copy;`). Those *match-string* bytes are exactly
+/// the ones `InlineImageMacroReplacer` parses out of its own haystack, so this
+/// parses the same bytes — from a [`Span::new`] over the capture, whose
+/// `line`/`col`/`offset` are meaningless and never escape this function —
+/// and [`into_owned`](Attrlist::into_owned)s the result onto the bracket's
+/// coarse source span (design §4.4), the same fallback the node's `location`
+/// takes.
+///
+/// An **empty** bracket carries no bytes either way and parses from a
+/// zero-length slice of the macro's own span.
+fn bracket_attrlist<'src>(
+    bracket_text: &str,
+    bracket_range: std::ops::Range<usize>,
+    pieces: &[Piece],
+    root: Span<'src>,
+    parser: &Parser,
+) -> Attrlist<'src> {
+    let bracket = source_slice(pieces, bracket_range.clone(), root);
+
+    if bracket_range.is_empty() {
+        // An empty attribute list carries no bytes to slice, so it parses from
+        // a zero-length span wherever the macro sits.
+        return parse_attrlist(bracket.slice(0..0), parser);
+    }
+
+    if range_is_verbatim(pieces, &bracket_range) {
+        return parse_attrlist(bracket, parser);
+    }
+
+    parse_attrlist(Span::new(bracket_text), parser).into_owned(bracket)
+}
+
+/// Parses one inline attribute list, discarding the warnings — the shared
+/// spelling both of [`bracket_attrlist`]'s paths use.
+fn parse_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
+    Attrlist::parse(source, parser, AttrlistContext::Inline)
+        .item
+        .item
 }
 
 /// Performs the recognition side effects the string pipeline's own
@@ -476,7 +508,7 @@ mod tests {
         golden_macros_with,
     };
     use crate::{
-        Parser, Span,
+        HasSpan, Parser, Span,
         content::inline_builder::{
             build, char_replacements::apply_character_replacements, macros::apply_macros,
         },
@@ -783,34 +815,78 @@ mod tests {
     }
 
     #[test]
-    fn an_attribute_list_crossing_an_escaped_special_is_a_documented_divergence() {
-        // The attribute list is the one capture that still needs an honest
-        // `'src` slice: `Attrlist::parse` reads its own source span's bytes
-        // *as content*, and the source holds one character where the match
-        // string holds an entity. A non-empty bracket crossing one is
-        // therefore left literal rather than parsed from the wrong bytes —
-        // the same boundary the expanded-value divergence test below pins for
-        // a synthesized run.
-        //
-        // If this boundary is ever lifted, fold these fixtures into the parity
-        // corpus above.
-        for source in [
+    fn fold_matches_the_string_pipeline_for_an_attribute_list_crossing_an_escaped_special() {
+        // The bracket has no `'src` slice here — the source holds one
+        // character where the match string holds an entity — so it is parsed
+        // from the match string, which is the very `caps[2]` the string
+        // replacer parses out of its own escaped haystack, and owned off that
+        // temporary. Every attribute the two read is therefore the same.
+        let fixtures = [
+            // A special in a positional alt, in a named value, and in both a
+            // named value and the target at once.
             "image:x.png[a < b]",
             "image:x.png[alt=a & b]",
             "image:a&b.png[a < b]",
-        ] {
-            let nodes = build_src(Span::new(source));
+            // Every special, and more than one in the same bracket.
+            "image:x.png[a > b]",
+            "image:x.png[a < b & c > d]",
+            // Beside the positional width/height, and with a role.
+            "image:x.png[a & b,200,100]",
+            "image:x.png[a & b,role=thumb]",
+            // The `icon:` spelling, whose size is read back from `attrs` at
+            // fold time rather than pre-extracted.
+            "icon:home[a & b]",
+            "icon:home[2x,role=a & b]",
+            // In surrounding flow, inside a rendered span, and doubled.
+            "before image:x.png[a < b] after",
+            "*image:x.png[a < b]*",
+            "image:x.png[a & b] image:y.png[c & d]",
+            // The escape still keeps the macro literal, backslash dropped.
+            "\\image:x.png[a < b]",
+        ];
 
-            assert!(
-                nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
-                "an image whose bracket crosses an escaped special must stay literal: {nodes:?}"
-            );
+        let renderer = HtmlSubstitutionRenderer {};
 
-            assert!(
-                golden_macros(source).contains("<img"),
-                "the golden fixture stopped recognizing the image for {source:?}"
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
             );
         }
+    }
+
+    #[test]
+    fn an_attribute_list_crossing_an_escaped_special_is_owned_and_coarsely_located() {
+        // The parsed values are the *escaped* ones the string replacer reads
+        // (`a &lt; b`, not `a < b`), they own their bytes rather than
+        // borrowing from the temporary they were parsed from, and the list's
+        // own span falls back to the bracket's coarse source range (design
+        // §4.4) — the same split the node's `location` already takes for a
+        // synthesized run.
+        let source = "image:x.png[a < b,role=hl]";
+        let nodes = build_src(Span::new(source));
+
+        assert_eq!(nodes.len(), 1);
+        let image = assert_image(&nodes[0]);
+
+        assert_eq!(image.alt.as_deref(), Some("a &lt; b"));
+
+        let attrs = image.attrs.as_ref().unwrap();
+        assert_eq!(attrs.nth_attribute(1).unwrap().value(), "a &lt; b");
+        assert_eq!(attrs.named_attribute("role").unwrap().value(), "hl");
+
+        // The location tag is the bracket's own source text, which is *not*
+        // what was parsed — the coarse fallback, kept honest as a location.
+        assert_eq!(attrs.span().data(), "a < b,role=hl");
+
+        // The whole macro's span is still precise: neither the match's start
+        // nor its end can fall inside an entity.
+        assert_eq!(image.location.data(), source);
+        assert_eq!(image.location.line(), 1);
+        assert_eq!(image.location.col(), 1);
     }
 
     #[test]
@@ -884,28 +960,38 @@ mod tests {
     }
 
     #[test]
-    fn an_attribute_list_crossing_a_restored_entity_is_a_documented_divergence() {
-        // The bracket keeps `range_is_verbatim` for a restored entity too, and
-        // for the same reason it keeps it for an escaped special: the source
-        // holds `&amp;copy;` where the match string holds `&copy;`, so
-        // `Attrlist::parse` would read the wrong bytes as content.
-        //
-        // If this boundary is ever lifted, fold these fixtures into the parity
-        // corpus above.
-        for source in [
+    fn fold_matches_the_string_pipeline_for_an_attribute_list_crossing_a_restored_entity() {
+        // A restored entity takes the same lift as an escaped special, for the
+        // same reason: the source holds `&amp;copy;` where the match string
+        // holds `&copy;`, so the bracket has no `'src` slice — and the match
+        // string's bytes are the ones the string replacer parses.
+        let fixtures = [
             "image:x.png[Tom &amp; Jerry]",
             "image:x.png[alt=a &copy; b]",
-        ] {
-            let nodes = build_src(Span::new(source));
+            "image:x.png[a &#8217; b]",
+            // An entity in the bracket *and* in the target.
+            "image:a&copy;b.png[Tom &amp; Jerry]",
+            // An entity and an escaped special in the same bracket.
+            "image:x.png[a &copy; b < c]",
+            // Beside the positional width/height, and the `icon:` spelling.
+            "image:x.png[Tom &amp; Jerry,200,100]",
+            "icon:home[Tom &amp; Jerry]",
+            // In surrounding flow and inside a rendered span.
+            "before image:x.png[Tom &amp; Jerry] after",
+            "*image:x.png[Tom &amp; Jerry]*",
+            // The escape still keeps the macro literal, backslash dropped.
+            "\\image:x.png[Tom &amp; Jerry]",
+        ];
 
-            assert!(
-                nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
-                "an image whose bracket crosses a restored entity must stay literal: {nodes:?}"
-            );
+        let renderer = HtmlSubstitutionRenderer {};
 
-            assert!(
-                golden_macros(source).contains("<img"),
-                "the golden fixture stopped recognizing the image for {source:?}"
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
             );
         }
     }
@@ -1104,6 +1190,11 @@ mod tests {
             "image:sunset.jpg[Sunset]{sp}image:other.png[]",
             "image without a bracket image:foo.png stays literal",
             "\\image:sunset.jpg[Sunset]",
+            // A bracket with no `'src` slice of its own: the attribute list
+            // is parsed from the match string, but `register_image` reads the
+            // node's `target`, so the catalogs must still agree.
+            "image:sunset.jpg[a < b]",
+            "image:a&b.png[Tom &amp; Jerry,200]",
         ];
 
         for fixture in fixtures {
@@ -1129,6 +1220,27 @@ mod tests {
 
             assert_eq!(got, want, "registered images diverged for {fixture:?}");
         }
+    }
+
+    #[test]
+    fn records_the_dangerous_scheme_warning_from_a_bracket_with_no_source_slice() {
+        // The `link=` warning reads the node's stored attribute list, so a
+        // bracket parsed from the match string must carry it exactly as a
+        // verbatim one does — here reached through an escaped special earlier
+        // in the same bracket, which is what denies it an `'src` slice.
+        let source = "image:safe.png[a < b,link=javascript:alert(1)]";
+        let parser = Parser::default();
+        let nodes = build_with(Span::new(source), &parser);
+
+        let before = parser.substitution_warnings_len();
+        apply_image_side_effects(&nodes, &parser, Span::new(source));
+        let warnings = parser.drain_substitution_warnings_since(before);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].warning,
+            WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_string())
+        );
     }
 
     #[test]
@@ -1395,37 +1507,81 @@ mod tests {
     }
 
     #[test]
-    fn an_attribute_list_inside_an_expanded_value_is_a_documented_divergence() {
-        // A non-empty attribute list crossing a synthesized run is the one
-        // part of an image macro that cannot follow the lift: an
-        // `Attrlist<'src>` reads its own `Span<'src>`'s bytes *as content*, and
-        // an expanded value has no source slice carrying them. The macro is
-        // left literal rather than built with a wrong attribute list.
-        //
-        // If this boundary is ever lifted, fold these fixtures into the parity
-        // corpus above.
+    fn fold_matches_the_string_pipeline_for_an_attribute_list_inside_an_expanded_value() {
+        // A non-empty attribute list crossing a synthesized run takes the same
+        // lift: the expansion's bytes live only in the level's match string —
+        // which is exactly the already-substituted haystack the string
+        // replacer parses its own `caps[2]` out of — so the bracket is parsed
+        // from there and owned off it.
         let parser = expanding_parser();
 
-        for source in [
+        let fixtures = [
+            // An expanded alt, whole and in part, with and without an
+            // expanded target beside it.
             "image:sunset.jpg[{caption}]",
+            "image:{logo}[{caption}]",
+            "image:sunset.jpg[The {caption} photo]",
+            // An expanded value in a *named* attribute, and beside the
+            // positional width/height.
+            "image:sunset.jpg[alt={caption}]",
             "image:{logo}[{caption},200]",
+            "image:{logo}[{caption},role=thumb]",
             // The whole macro arriving from an expanded value, this time with
             // a non-empty bracket — the empty-bracket spelling of the same
-            // shape *is* recognized (see the parity corpus above).
+            // shape was already recognized.
             "see {img-src-alt} here",
-        ] {
-            let nodes = build(Span::new(source), &parser, None);
+            // An expansion and an escaped special in the same bracket, so
+            // neither the source nor the expansion alone carries its bytes.
+            "image:sunset.jpg[{caption} < x]",
+            // The `icon:` spelling, in surrounding flow, and inside a
+            // rendered span.
+            "icon:{iconname}[{caption}]",
+            "See image:sunset.jpg[{caption}] here.",
+            "*image:sunset.jpg[{caption}]*",
+            // An escape still keeps the macro literal.
+            "\\image:sunset.jpg[{caption}]",
+        ];
 
-            assert!(
-                nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
-                "an image whose attribute list crosses an expansion must stay literal: {nodes:?}"
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = crate::content::inline_builder::fold_html(
+                &build(Span::new(fixture), &parser, None),
+                &renderer,
+                &parser,
             );
 
-            assert!(
-                golden_normal(source, &parser).contains("<img"),
-                "the golden fixture stopped recognizing the image for {source:?}"
+            assert_eq!(
+                folded,
+                golden_normal(fixture, &parser),
+                "fold diverged from the string pipeline for {fixture:?}"
             );
         }
+    }
+
+    #[test]
+    fn an_attribute_list_inside_an_expanded_value_is_owned_and_coarsely_located() {
+        // The attribute values are the expansion's own bytes, owned rather
+        // than borrowed from the temporary they were parsed from; the list's
+        // span takes design §4.4's coarse fallback — here the whole enclosing
+        // synthesized run — exactly as the node's `location` does.
+        let parser = expanding_parser();
+        let source = "image:sunset.jpg[{caption},role=hl]";
+        let nodes = build(Span::new(source), &parser, None);
+
+        assert_eq!(nodes.len(), 1);
+        let image = assert_image(&nodes[0]);
+
+        assert_eq!(image.alt.as_deref(), Some("Sunset"));
+
+        let attrs = image.attrs.as_ref().unwrap();
+        assert_eq!(attrs.nth_attribute(1).unwrap().value(), "Sunset");
+        assert_eq!(attrs.named_attribute("role").unwrap().value(), "hl");
+
+        // The location tag covers the bracket's own source, `{caption}`
+        // included — the coarse fallback, not the parsed text.
+        assert_eq!(attrs.span().data(), "{caption},role=hl");
+        assert_eq!(image.location.data(), source);
     }
 
     #[test]
