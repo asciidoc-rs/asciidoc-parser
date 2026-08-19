@@ -1038,4 +1038,34 @@ fn shapes_match_across_combined_constructs() {
     // `&lt;`.
     assert_shapes("Visit https://example.org[the *bold* docs] now.");
     assert_shapes("Visit <https://example.org[an _angle_ label] now.");
+
+    // A footnote spliced in by an attribute reference — the externalized
+    // footnote idiom — and one whose id alone comes from an expansion. The
+    // recorder has always recovered these (it reads the string pipeline's own
+    // render params, and the pipeline expands the reference before matching);
+    // the builder now reads the id from the expansion too, so the two
+    // constructions' *structures* can be compared for this shape rather than a
+    // node against one carrying the reference as its id.
+    assert_shapes_with(
+        "A bold statement about *{product}*!{fn-disclaimer} \
+         Another outrageous statement.{fn-disclaimer}",
+        || {
+            Parser::default()
+                .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+                .with_intrinsic_attribute(
+                    "fn-disclaimer",
+                    "footnote:disclaimer[Opinions are my own.]",
+                    ModificationContext::Anywhere,
+                )
+        },
+    );
+
+    assert_shapes_with(
+        "A claim.footnote:{id}[a {product} note] and again.footnote:disc[]",
+        || {
+            Parser::default()
+                .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("id", "disc", ModificationContext::Anywhere)
+        },
+    );
 }

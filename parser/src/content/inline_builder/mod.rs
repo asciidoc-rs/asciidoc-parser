@@ -990,6 +990,38 @@ mod tests {
             with_product,
         );
 
+        // The externalized-footnote idiom: a document attribute whose *whole
+        // value* is a footnote macro, inserted twice (the second occurrence a
+        // reference reusing the first's number), beside a quoted span and a
+        // live attribute reference. The id reaches the node from the
+        // expansion's own bytes, not from the `{fn-disclaimer}` reference
+        // that spliced it.
+        assert_parity_with(
+            "A bold statement about *{product}*!{fn-disclaimer} \
+             Another outrageous statement.{fn-disclaimer}",
+            || {
+                Parser::default()
+                    .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+                    .with_intrinsic_attribute(
+                        "fn-disclaimer",
+                        "footnote:disclaimer[Opinions are my own.]",
+                        ModificationContext::Anywhere,
+                    )
+            },
+        );
+
+        // The same lift reached through the id alone: a footnote whose
+        // `footnote:{id}[…]` target comes from an expansion, referenced later
+        // by that id's literal spelling.
+        assert_parity_with(
+            "A claim.footnote:{id}[a {product} note] and again.footnote:disc[]",
+            || {
+                Parser::default()
+                    .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+                    .with_intrinsic_attribute("id", "disc", ModificationContext::Anywhere)
+            },
+        );
+
         // The document-wide `hardbreaks-option` attribute breaking every
         // line, one of which carries a quoted span and an attribute
         // reference.
@@ -1211,6 +1243,14 @@ mod tests {
             (
                 "  A claim.footnote:[the *evidence*]\n  continues here.",
                 "A claim.footnote:[the *evidence*]\ncontinues here.",
+            ),
+            // An *id-carrying* footnote in a wholly-synthesized seed, defined
+            // and then referenced: like an anchor's id and a bare address, the
+            // id is recovered exactly by `text_slice` rather than taken from
+            // the seed's own coarse span (which is the whole block here).
+            (
+                "  A claim.footnote:disc[the evidence]\n  and again.footnote:disc[]",
+                "A claim.footnote:disc[the evidence]\nand again.footnote:disc[]",
             ),
             ("  first line +\n  second line", "first line +\nsecond line"),
             // A bare e-mail address in a wholly-synthesized seed: like an

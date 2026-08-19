@@ -1,8 +1,8 @@
 //! The footnote substitution step.
 
 use super::{
-    macros::{MacroMatch, MacroMatchKind},
-    quotes::{Piece, build_match_string, emit_range, source_slice},
+    macros::{MacroMatch, MacroMatchKind, image::range_has_no_opaque_piece},
+    quotes::{Piece, build_match_string, emit_range, source_slice, text_slice},
 };
 use crate::{
     Parser, Span,
@@ -386,12 +386,18 @@ fn build_footnote_node<'src>(
 ) -> Option<InlineNode<'src>> {
     let location = source_slice(pieces, full.clone(), root);
 
-    // The id (`[\w-]+`) admits no special character or opaque span, so a
-    // captured id is always verbatim and borrows `'src`; `id` is `None` only
-    // when the macro carries none (an anonymous `footnote:[…]`).
+    // The id (`[\w-]+`) admits neither a special character (an entity's own
+    // `&`/`;` fits no character class it has) nor the `SPAN_PLACEHOLDER` an
+    // opaque piece contributes (Unicode category `Co`, which `\w` does not
+    // match), so its range can only ever overlap `Text` pieces — verbatim or
+    // [`synthesized`](Piece::synthesized) — and needs no gate of its own, the
+    // same structural argument the bare e-mail family makes for its address.
+    // [`footnote_id_text`] therefore recovers it exactly in both cases. `id`
+    // is `None` only when the macro carries none (an anonymous
+    // `footnote:[…]`).
     let id: Option<CowStr<'src>> = caps
         .get(2)
-        .map(|m| CowStr::from(source_slice(pieces, m.start()..m.end(), root).data()));
+        .map(|m| footnote_id_text(m.start()..m.end(), s, pieces, nodes));
 
     let content_match = caps.get(3);
 
@@ -516,7 +522,18 @@ fn build_footnoteref_node<'src>(
         None => (raw.range(), None),
     };
 
-    let id = CowStr::from(source_slice(pieces, id_range, root).data());
+    // Unlike the `footnote:` form's own `[\w-]+` id — which no opaque piece
+    // can reach — this id is *whatever precedes the first comma* in an
+    // arbitrary bracket, so it can cross a rendered span, whose markup the
+    // string replacer splits on and reads as the id while this side sees one
+    // placeholder standing in for it. Such a macro is left unrecognized (the
+    // boundary every macro family keeps), rather than built with an id no
+    // pipeline would produce.
+    if !range_has_no_opaque_piece(nodes, pieces, &id_range) {
+        return None;
+    }
+
+    let id = footnote_id_text(id_range, s, pieces, nodes);
 
     if let Some(number) = parser.footnote_index_for_id(id.as_ref()) {
         // A reference to an already-defined footnote: reuse its number.
@@ -557,6 +574,40 @@ fn build_footnoteref_node<'src>(
             location,
         })),
     }
+}
+
+/// Recovers a footnote **id** from the level's match-string `range` — the
+/// *already-substituted* text the string replacer itself reads out of its own
+/// escaped haystack (`caps[2]`, or the first half of a `footnoteref:`
+/// bracket), and the exact string it looks the footnote up by, registers under,
+/// and — for an unresolved reference — renders.
+///
+/// [`text_slice`] recovers that text precisely wherever the range's pieces are
+/// [`Text`](InlineNode::Text) runs: borrowed from `'src` for a verbatim one
+/// (design §4.5), and the expansion's own bytes for a
+/// [`synthesized`](Piece::synthesized) one — an attribute reference
+/// (`{fn-disclaimer}` expanding to `footnote:disclaimer[…]`), or a filtered
+/// multi-line block's own joined seed. That is the lift this helper exists for:
+/// reading the id from the enclosing span instead (as this family did before)
+/// yields the *reference* (`{fn-disclaimer}`) rather than the id, a wrong node
+/// whose registration and rendered `id="_footnote_…"` attribute both diverge.
+///
+/// A [`CharRef`](InlineNode::CharRef) leaf in the range — an escaped special or
+/// a restored entity, reachable only through a `footnoteref:` id — has no
+/// `'src` slice at all (the source holds one character where the match string
+/// holds an entity), which is exactly what `text_slice` declines to recover, so
+/// it falls back to the match string's own bytes: `footnoteref:[a&b,…]`
+/// registers `a&amp;b`, precisely what the string replacer's
+/// `raw.split_once(',')` reads from its own haystack. Only an **opaque** piece
+/// cannot be recovered this way, and its one reachable call site rejects such a
+/// range before calling here.
+fn footnote_id_text<'src>(
+    range: std::ops::Range<usize>,
+    s: &str,
+    pieces: &[Piece],
+    nodes: &[InlineNode<'src>],
+) -> CowStr<'src> {
+    text_slice(nodes, pieces, range.clone()).unwrap_or_else(|| CowStr::from(s[range].to_string()))
 }
 
 /// Builds a footnote's `children` from its bracket content's match-string
@@ -1188,5 +1239,263 @@ mod tests {
              [<a id=\"_footnoteref_1\" class=\"footnote\" href=\"#_footnotedef_1\" \
              title=\"View footnote.\">1</a>]</sup>"
         );
+    }
+
+    /// A parser carrying the attributes the expanded-value fixtures below
+    /// reference — including two whose *whole value* is a footnote macro, the
+    /// externalized-footnote idiom the AsciiDoc docs themselves document
+    /// (`tests::asciidoc_lang::macros::footnote::externalized_footnote`).
+    fn expanding_parser() -> crate::Parser {
+        use crate::{Parser, parser::ModificationContext};
+
+        Parser::default()
+            .with_intrinsic_attribute("id", "disc", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+            .with_intrinsic_attribute(
+                "fn-disclaimer",
+                "footnote:disclaimer[Opinions are my own.]",
+                ModificationContext::Anywhere,
+            )
+            .with_intrinsic_attribute(
+                "fn-anon",
+                "footnote:[An unnamed aside.]",
+                ModificationContext::Anywhere,
+            )
+    }
+
+    /// The real, public pipeline's output for `source` — the golden for the
+    /// expanded-value fixtures, which need the `AttributeReferences` step the
+    /// module's own [`golden_macros`] helper deliberately omits.
+    fn golden_normal(source: &str, parser: &crate::Parser) -> String {
+        use crate::content::{Content, SubstitutionGroup};
+
+        let mut content = Content::from(Span::new(source));
+        SubstitutionGroup::Normal.apply(&mut content, parser, None);
+        content.rendered_str().to_string()
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_for_footnotes_inside_expanded_values() {
+        // A footnote whose id — or whose whole macro — comes from an expanded
+        // attribute value is now recognized with that id's *exact* text. This
+        // is the same lift the anchor, bare-e-mail, UI, index-term,
+        // cross-reference, image, and link families each made for their own
+        // values; unlike those, this family did not *defer* such a macro
+        // before, it built one whose id came from the enclosing `{reference}`
+        // instead — a wrong node, and (since the id is what a footnote is
+        // registered and looked up under) one that renumbered every later
+        // reference to it.
+        //
+        // Each fixture uses its own pair of *independent* parsers (design
+        // §5.3's discipline), since both `build` and the real pipeline
+        // advance the `footnote-number` counter for real.
+        use crate::content::inline_builder::build;
+
+        let fixtures = [
+            // The whole macro arriving from an expanded value: the
+            // externalized-footnote idiom, defining and then referencing.
+            "{fn-disclaimer}",
+            "A bold statement!{fn-disclaimer}",
+            "First.{fn-disclaimer} Then again.{fn-disclaimer}",
+            "{fn-anon} and {fn-anon}",
+            "{fn-disclaimer} then footnote:disclaimer[]",
+            // The id alone arriving from an expanded value, whole or partial.
+            "footnote:{id}[a note]",
+            "footnote:{id}x[a note]",
+            "footnote:{id}[a note] then footnote:disc[]",
+            "footnote:{id}[] with nothing defined",
+            // The deprecated form's own id half, likewise.
+            "footnoteref:[{id},a note]",
+            "footnoteref:[{id},a note] then footnoteref:[{id}]",
+            // Content from an expanded value (already parity before this
+            // increment — its children never needed an `'src` slice).
+            "footnote:[a {product} note]",
+            "footnote:{id}[a {product} note]",
+        ];
+
+        for source in fixtures {
+            let nodes = build(Span::new(source), &expanding_parser(), None);
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    &nodes,
+                    &HtmlSubstitutionRenderer {},
+                    &expanding_parser()
+                ),
+                golden_normal(source, &expanding_parser()),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_footnote_inside_an_expanded_value_keeps_a_coarse_location() {
+        // The id is exact — recovered from the expansion's own bytes by
+        // `footnote_id_text`, and necessarily owned — while only the node's
+        // `location` falls back to the enclosing synthesized run's coarse
+        // span (design §4.4), since an expanded value's bytes have no `'src`
+        // counterpart of their own.
+        use crate::content::inline_builder::build;
+
+        let source = "A bold statement!{fn-disclaimer}";
+        let nodes = build(Span::new(source), &expanding_parser(), None);
+
+        let footnote = assert_footnote(&nodes[1]);
+
+        // The id is the *expansion's* own text, which — having no `'src`
+        // bytes of its own — the node necessarily owns; the `location`
+        // assertion below is the other half of that same split.
+        assert_eq!(footnote.id.as_deref(), Some("disclaimer"));
+        assert_eq!(footnote.number.as_deref(), Some("1"));
+        assert!(!footnote.is_reference);
+
+        // The whole attribute *reference* is the node's location: its bytes
+        // are the source's `{fn-disclaimer}`, not the expanded macro's.
+        assert_eq!(footnote.location.data(), "{fn-disclaimer}");
+        assert_eq!(footnote.location.line(), 1);
+        assert_eq!(footnote.location.col(), 18);
+    }
+
+    #[test]
+    fn footnotes_are_recognized_when_the_whole_seed_is_synthesized() {
+        // The same lift reached at the tree's *root* rather than a nested
+        // splice: `build_from_value`'s synthesized-seed path (the shape
+        // `Content::from_filtered_lines` produces for a genuinely multi-line,
+        // filtered block), mirroring the sibling families' own
+        // `…_are_recognized_when_the_whole_seed_is_synthesized` tests. Before
+        // this increment an id-carrying footnote reached this way took the
+        // *whole seed* as its id.
+        use crate::{
+            Parser,
+            content::{Content, SubstitutionGroup, inline_builder::build_from_value},
+            strings::CowStr,
+        };
+
+        for (filtered, source) in [
+            (
+                "a claim.footnote:disc[a note]
+and a reference.footnote:disc[]",
+                "  a claim.footnote:disc[a note]
+  and a reference.footnote:disc[]",
+            ),
+            (
+                "an anonymous.footnote:[note one]
+and another.footnote:[note two]",
+                "  an anonymous.footnote:[note one]
+  and another.footnote:[note two]",
+            ),
+        ] {
+            let nodes = build_from_value(
+                CowStr::from(filtered),
+                Span::new(source),
+                &Parser::default(),
+                None,
+            );
+
+            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+
+            let mut golden = Content::from(Span::new(filtered));
+            SubstitutionGroup::Normal.apply(&mut golden, &Parser::default(), None);
+
+            assert_eq!(
+                folded,
+                golden.rendered_str(),
+                "for {filtered:?}: {nodes:#?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_footnoteref_id_crossing_an_escaped_special_reads_the_match_string() {
+        // The deprecated form's id half is *whatever precedes the first
+        // comma*, so — unlike the `footnote:` form's own `[\w-]+` id — it can
+        // cross an escaped special. `text_slice` declines such a range (the
+        // source holds one character where the match string holds an entity),
+        // so `footnote_id_text` falls back to the match string's own bytes:
+        // exactly what the string replacer's `raw.split_once(',')` reads out
+        // of its own escaped haystack, and registers.
+        let source = "footnoteref:[a&b,a note] then footnoteref:[a&b]";
+        let nodes = build_src(Span::new(source));
+
+        let defining = assert_footnote(&nodes[0]);
+        assert_eq!(defining.id.as_deref(), Some("a&amp;b"));
+        assert_eq!(defining.number.as_deref(), Some("1"));
+
+        let reference = assert_footnote(&nodes[2]);
+        assert_eq!(reference.id.as_deref(), Some("a&amp;b"));
+        assert_eq!(reference.number.as_deref(), Some("1"));
+        assert!(reference.is_reference);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn a_footnoteref_id_crossing_a_rendered_span_is_a_documented_divergence() {
+        // The one piece class `footnote_id_text` cannot recover: a rendered
+        // span, whose markup exists only at fold time, is one opaque
+        // placeholder here where the string replacer's own haystack holds the
+        // `<strong>…</strong>` tags it happily splits on and registers as the
+        // id. Such a macro is left unrecognized — literal text, never a wrong
+        // node — the boundary every macro family keeps. (If a later increment
+        // lifts it, fold this fixture into the parity corpus above.)
+        let source = "footnoteref:[*bold*,a note]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Footnote(_))),
+            "a footnoteref: id crossing a rendered span must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, does build a footnote here.
+        assert!(golden_macros(source).contains("class=\"footnote\""));
+    }
+
+    #[test]
+    fn a_real_documents_externalized_footnote_reaches_its_tree() {
+        // End-to-end, through the real parse path, on the AsciiDoc docs' own
+        // externalized-footnote shape (the fixture
+        // `tests::asciidoc_lang::macros::footnote::externalized_footnote`
+        // parses): the second reference to `{fn-disclaimer}` reuses the first
+        // occurrence's number, which only works once the id is read from the
+        // expansion rather than from the `{fn-disclaimer}` reference itself.
+        use crate::{
+            Parser,
+            blocks::{FindBlocks, IsBlock},
+        };
+
+        let doc = Parser::default().with_inline_tree(true).parse(
+            ":fn-disclaimer: footnote:disclaimer[Opinions are my own.]\n\n\
+             A bold statement!{fn-disclaimer}\n\n\
+             Another outrageous statement.{fn-disclaimer}",
+        );
+
+        let blocks: Vec<_> = doc.descendant_blocks().collect();
+
+        for block in &blocks {
+            let rendered = block.rendered_html_content().unwrap();
+            let inlines = block.inlines().unwrap();
+
+            assert!(
+                inlines.iter().any(|n| matches!(n, InlineNode::Footnote(_))),
+                "expected a Footnote node in the block's tree: {inlines:?}"
+            );
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &Parser::default()
+                ),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+        }
+
+        // The second occurrence is a *reference* to the first: one footnote
+        // definition, one `sup.footnoteref` marker.
+        assert_eq!(doc.catalog().footnotes().len(), 1);
     }
 }
