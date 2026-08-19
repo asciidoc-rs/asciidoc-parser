@@ -3249,6 +3249,70 @@ Each phase is a reviewable unit with a clear exit gate.
   name and item carry a restored entity — and no new one appeared. As with every prep piece before
   it, nothing further is wired in.
 
+  *Step 6 prep landed as (`AttributeReferences` under an order that escapes **after** expanding,
+  closing the last category the audit map named):* the corpus-wide audit that surfaced the
+  `hardbreaks` and unescaped-specials blockers left step 6 an itemized list of divergences to close,
+  and named one category as not previously seen: "an effective order that runs `SpecialCharacters`
+  **after** a step that already produced markup (`subs=quotes, specialcharacters`), where the string
+  pipeline escapes the very tags the earlier step emitted". Re-running that audit now that every
+  itemized *normal*-order divergence is closed leaves exactly two sources in it, and they turn out to
+  be two different problems wearing one label. This closes the first, and pins the second.
+
+  The first is **not** about markup at all: it is `AttributeReferences`, whose spliced value is
+  ordinary *text* at the moment the step runs. [`split_attribute_value`](../../parser/src/content/inline_builder/attribute_refs.rs)
+  has always classified a literal `<`/`>`/`&` in a resolved value as a
+  [`Raw`](../../parser/src/inlines/inline_node.rs) leaf, on the stated ground that
+  "`apply_special_characters` has already run and will not run again over spliced-in content". That
+  ground holds for every *built-in* group that runs both steps — `Normal`, `Title`, `Header`, and
+  `AttributeEntryValue` all escape first and expand later — but a `subs=` list can reverse the two,
+  and **`subs=attributes+`**, which *prepends* the step, is the documented AsciiDoc idiom for
+  inspecting what a `pass:quotes[…]` attribute entry actually stores. So `MyApp<sup>2</sup>` renders
+  as `MyApp&lt;sup&gt;2&lt;/sup&gt;` — a wrong answer for content a golden test already exercises,
+  making this a **blocker** like `hardbreaks`, the unescaped-specials classification, the
+  `attribute-missing` drop modes, and `<<id,>>`'s present-but-empty text before it, not an unclaimed
+  form.
+
+  The fix is §3.4.1 read the same way that policy has been read at every other seam — "the kind a
+  fragment becomes is decided by which substitution steps still act on it under the group's effective
+  order" — applied here to one question: does a `SpecialCharacters` step still run *after* this one?
+  A new [`SplicedSpecials`](../../parser/src/content/inline_builder/attribute_refs.rs) carries the
+  answer, decided in [`build_for_group`](../../parser/src/content/inline_builder/mod.rs) where the
+  order is in hand and threaded down to the classifier. Under `Verbatim` (every built-in order, and
+  every order that never escapes at all) nothing changes. Under `EscapedLater` the value is spliced
+  as one ordinary [`Text`](../../parser/src/inlines/inline_node.rs) run and **left unsplit**, for
+  [`apply_special_characters`](../../parser/src/content/inline_builder/special_chars.rs) to split at
+  its own position in the order — the same "classify where the step actually sits" discipline
+  [`classify_unescaped_specials`](../../parser/src/content/inline_builder/special_chars.rs) follows by
+  running last. Deferring the split there rather than doing it here is also what keeps the
+  *intervening* steps faithful: a `Raw` leaf is opaque to
+  [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) where a `Text` run's bytes
+  are not, so a macro reading across a spliced `&` (`link:{host}/x[go]` with `host` set to
+  `a&b.example.org`) is now recognized exactly as the string pipeline's own macros pass recognizes it
+  over the already-escaped text. The value's spliced nodes keep the §4.4 coarse fallback span they
+  always had.
+
+  The second source is the one the map's own example names, and it stays deferred with a divergence
+  test of its own: `subs=quotes,specialcharacters`, where the quotes step's `<strong>` tags are what
+  the escaping step acts on. That is structurally different — a tree's markup exists only at fold
+  time, so there is nothing for the escaping transducer to act on — and settling it means deciding
+  what the tree should even hold (a `Styled` node whose fold is escaped, or pre-rendered text that
+  abandons the structure), which is a policy question rather than another classification. It is
+  reachable both as a block's own `subs=` list and, nested, through a `pass:q,c[…]` passthrough,
+  and both spellings are pinned.
+
+  A differential corpus crosses specials-bearing fixtures — the stored value alone and in flow, an
+  author's own special beside a spliced one, adjacent splices, a value-less `Set` attribute that
+  splices nothing, an escaped and a missing reference, a `counter` directive, a multi-line seed, and
+  a macro recognized *across* a spliced special — with every real group that takes this path:
+  `attributes+` over each of the two base groups it is written on (a paragraph's `Normal` and a
+  listing block's `Verbatim`) and the explicit `subs=` lists naming the two steps in that order.
+  Structural tests pin the leaf kinds from both directions (`CharRef` under the reversed order,
+  `Raw` under the built-in one, the same coarse span either way), and a whole-document test drives
+  the AsciiDoc docs' own `subs=attributes+` listing block end to end through the real parse path.
+  Re-running the corpus-wide fold-parity audit confirms the divergence set strictly **shrank**: the
+  real golden fixture `{app-name}` under `subs=attributes+` is gone, and no new divergence appeared.
+  As with every prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -3649,6 +3713,22 @@ Each phase is a reviewable unit with a clear exit gate.
        rewritten as a two-independent-parsers parity corpus. See the step's own "landed as" note
        above. What remains is the opaque-piece boundary every family keeps, plus the three
        `Attrlist<'src>` captures.
+     - ✅ **prep (an order that escapes after expanding).** The last category the corpus-wide audit
+       named — "an effective order that runs `SpecialCharacters` **after** a step that already
+       produced markup" — is closed for the half that is not about markup at all, and a **blocker**
+       like the four before it since a golden test exercises it: under `subs=attributes+` (the
+       documented idiom for inspecting a `pass:quotes[…]` attribute entry) the string pipeline
+       escapes the spliced value, so
+       [`split_attribute_value`](../../parser/src/content/inline_builder/attribute_refs.rs) can no
+       longer assume the escaping step already ran. A new
+       [`SplicedSpecials`](../../parser/src/content/inline_builder/attribute_refs.rs), decided in
+       [`build_for_group`](../../parser/src/content/inline_builder/mod.rs) where the effective order
+       is in hand, splices the value as one ordinary `Text` run for the still-ahead
+       `SpecialCharacters` step to split — §3.4.1 applied to the step's *position*, not merely its
+       presence; see the step's own "landed as" note above. The category's other half — a
+       markup-producing step (`subs=quotes,specialcharacters`) whose emitted tags the escaping step
+       acts on — needs a policy of its own rather than another classification, and stays deferred
+       with its own divergence test.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
