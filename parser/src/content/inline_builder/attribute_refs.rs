@@ -56,6 +56,14 @@ use crate::{
 /// Phase 4, step 6). The same applies to `Warn` mode's warning, whose output
 /// this step already reproduces.
 ///
+/// A literal `<`, `>`, or `&` **in the expanded value** is classified by
+/// design §3.4.1 — "the kind a fragment becomes is decided by which
+/// substitution steps still act on it under the group's effective order" —
+/// which for this step means one question: does a
+/// [`SpecialCharacters`](crate::content::SubstitutionStep::SpecialCharacters)
+/// step still run *after* this one? [`SplicedSpecials`] carries the answer,
+/// and [`split_attribute_value`] acts on it.
+///
 /// A **character replacement** *inside* an expanded value ((C) → © and
 /// friends) is, by contrast, recognized: [`build_match_string`] (shared by
 /// [`apply_character_replacements`](super::char_replacements::apply_character_replacements),
@@ -105,6 +113,7 @@ pub(super) fn apply_attribute_references<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
+    specials: SplicedSpecials,
 ) -> Vec<InlineNode<'src>> {
     let mut counters = HashMap::new();
     resolve_counters(&nodes, root, parser, &mut counters);
@@ -120,13 +129,55 @@ pub(super) fn apply_attribute_references<'src>(
         Vec::new()
     };
 
-    apply_attribute_references_recursive(nodes, root, parser, &counters, missing, &span_drops)
+    apply_attribute_references_recursive(
+        nodes,
+        root,
+        parser,
+        &counters,
+        missing,
+        &span_drops,
+        specials,
+    )
+}
+
+/// Whether a
+/// [`SpecialCharacters`](crate::content::SubstitutionStep::SpecialCharacters)
+/// step still runs **after** the attribute-references step under the group's
+/// effective order — the one thing that decides what a literal `<`, `>`, or
+/// `&` in a spliced attribute value becomes (design §3.4.1).
+///
+/// In every *built-in* group that runs both steps the answer is
+/// [`Verbatim`](Self::Verbatim):
+/// [`Normal`](crate::content::SubstitutionGroup::Normal),
+/// [`Title`](crate::content::SubstitutionGroup::Title),
+/// [`Header`](crate::content::SubstitutionGroup::Header), and
+/// [`AttributeEntryValue`](crate::content::SubstitutionGroup::AttributeEntryValue)
+/// all escape first and expand later. Only a
+/// [`Custom`](crate::content::SubstitutionGroup::Custom) `subs=` list can put
+/// the two the other way round — and the shorthand `subs=attributes+`, which
+/// *prepends* the step, is the documented AsciiDoc idiom for inspecting a
+/// stored attribute value ("Internally, the value is stored as
+/// `MyApp<sup>2</sup>`"), so this is a real order, not a corner case.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SplicedSpecials {
+    /// A `SpecialCharacters` step is still ahead, so it will escape the
+    /// spliced value exactly as it escapes the author's own text: the value is
+    /// spliced as one ordinary [`Text`](InlineNode::Text) run and left for that
+    /// step to split.
+    EscapedLater,
+
+    /// No `SpecialCharacters` step runs after this one — because it already
+    /// ran (the built-in orders) or because the group never runs it at all —
+    /// so the string pipeline emits the value's specials untouched, and each
+    /// becomes a [`Raw`](InlineNode::Raw) leaf the fold emits verbatim.
+    Verbatim,
 }
 
 /// `span_drops` names this level's own [`Styled`](crate::inlines::Styled)
 /// nodes that force a line drop (see [`styled_drop_indices`]); a nested level
 /// never has any of its own, since a drop is only ever decided at the
 /// content's top level.
+#[allow(clippy::too_many_arguments)]
 fn apply_attribute_references_recursive<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -134,6 +185,7 @@ fn apply_attribute_references_recursive<'src>(
     counters: &HashMap<usize, String>,
     missing: MissingHandling,
     span_drops: &[usize],
+    specials: SplicedSpecials,
 ) -> Vec<InlineNode<'src>> {
     let nodes: Vec<InlineNode<'src>> = nodes
         .into_iter()
@@ -146,6 +198,7 @@ fn apply_attribute_references_recursive<'src>(
                     counters,
                     missing.nested(),
                     &[],
+                    specials,
                 );
                 InlineNode::Styled(styled)
             }
@@ -154,7 +207,7 @@ fn apply_attribute_references_recursive<'src>(
         })
         .collect();
 
-    attribute_references_level(nodes, root, parser, counters, missing, span_drops)
+    attribute_references_level(nodes, root, parser, counters, missing, span_drops, specials)
 }
 
 /// How a level treats a reference to a **missing** attribute — this module's
@@ -410,6 +463,7 @@ fn attribute_references_level<'src>(
     counters: &HashMap<usize, String>,
     missing: MissingHandling,
     span_drops: &[usize],
+    specials: SplicedSpecials,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
@@ -458,7 +512,7 @@ fn attribute_references_level<'src>(
     // a mistyped `(0..n).collect()`.)
     let lines = lines.unwrap_or_else(|| std::iter::once(0..s.len()).collect());
 
-    rebuild_attribute_level(&nodes, &pieces, &matches, root, counters, &lines)
+    rebuild_attribute_level(&nodes, &pieces, &matches, root, counters, &lines, specials)
 }
 
 /// The indices into `nodes` of every [`Styled`](crate::inlines::Styled) span
@@ -814,6 +868,7 @@ fn find_attribute_matches(
 /// lines *were* dropped, each survivor is emitted in turn with one `\n` — the
 /// very byte that terminated the previous *survivor* in the source — re-emitted
 /// between consecutive survivors.
+#[allow(clippy::too_many_arguments)]
 fn rebuild_attribute_level<'src>(
     nodes: &[InlineNode<'src>],
     pieces: &[Piece],
@@ -821,6 +876,7 @@ fn rebuild_attribute_level<'src>(
     root: Span<'src>,
     counters: &HashMap<usize, String>,
     lines: &[std::ops::Range<usize>],
+    specials: SplicedSpecials,
 ) -> Vec<InlineNode<'src>> {
     let mut out = Vec::new();
     let mut previous_end: Option<usize> = None;
@@ -862,7 +918,7 @@ fn rebuild_attribute_level<'src>(
                     emit_range(nodes, pieces, cursor..m.full.start, &mut out);
 
                     let location = source_slice(pieces, m.full.clone(), root);
-                    split_attribute_value(value, location, &mut out);
+                    split_attribute_value(value, location, specials, &mut out);
                 }
 
                 AttributeMatchKind::Counter { display } => {
@@ -874,7 +930,7 @@ fn rebuild_attribute_level<'src>(
                     if *display {
                         let location = source_slice(pieces, m.full.clone(), root);
                         let value = counter_value(pieces, &m.full, root, counters);
-                        split_attribute_value(value, location, &mut out);
+                        split_attribute_value(value, location, specials, &mut out);
                     }
                 }
 
@@ -899,25 +955,53 @@ fn rebuild_attribute_level<'src>(
     out
 }
 
-/// Splits a resolved attribute `value` into [`Text`](InlineNode::Text) and
-/// [`Raw`](InlineNode::Raw) runs (design §3.4.1). By the time this step runs,
-/// [`apply_special_characters`](super::special_chars::apply_special_characters)
-/// has already run and will not run again over spliced-in content, so a literal
-/// `<`, `>`, or `&` in `value` must **not** be re-escaped by the fold: it
-/// becomes a `Raw` leaf (verbatim). Everything else stays `Text` — logical
-/// content that design §3.4.1 says
-/// [`apply_character_replacements`](super::char_replacements::apply_character_replacements) and [`apply_macros`](super::macros::apply_macros) (still ahead in the
-/// effective order) should recognize normally (a `(C)` in the value becomes
-/// a `CharRef`, a `link:` in it becomes a `Ref`) — true today for the former
-/// (a follow-up to this step extended [`build_match_string`] to look inside a
-/// synthesized run, so no change was needed here), still deferred for the
-/// latter (see [`apply_attribute_references`]'s doc comment for why).
+/// Splices a resolved attribute `value` into the node stream, classifying its
+/// literal `<`, `>`, and `&` by design §3.4.1 — which, here, is exactly the
+/// question [`SplicedSpecials`] answers.
 ///
-/// Both node kinds carry the reference's own `location` as their coarse
+/// Under [`SplicedSpecials::Verbatim`] — every built-in group that runs both
+/// steps, plus any order that never runs `SpecialCharacters` at all —
+/// [`apply_special_characters`](super::special_chars::apply_special_characters)
+/// will not act on this spliced-in content, so a literal special must **not**
+/// be escaped by the fold: it becomes a [`Raw`](InlineNode::Raw) leaf
+/// (verbatim) and the surrounding runs stay [`Text`](InlineNode::Text). That is
+/// the classification this step has always emitted.
+///
+/// Under [`SplicedSpecials::EscapedLater`] the step is still ahead, so the
+/// string pipeline *does* escape the spliced value — `subs=attributes+` on a
+/// verbatim block renders `pass:quotes[MyApp^2^]`'s stored
+/// `MyApp<sup>2</sup>` as `MyApp&lt;sup&gt;2&lt;/sup&gt;`. The value is
+/// therefore spliced as one ordinary `Text` run and **left unsplit**, for
+/// `apply_special_characters` to split at its own position in the order. Doing
+/// it there rather than here is what keeps the intervening steps faithful: the
+/// string pipeline's own `quotes`/`replacements`/`macros` passes match over
+/// text whose specials are still literal, and a `Raw` leaf is *opaque* to
+/// [`build_match_string`] where a `Text` run's bytes are not — the same
+/// argument
+/// [`classify_unescaped_specials`](super::special_chars::classify_unescaped_specials)
+/// makes for running last.
+///
+/// Every node emitted carries the reference's own `location` as its coarse
 /// fallback span (design §4.4: a synthesized value has no source of its own).
 /// A run is never emitted empty, and an empty `value` (a value-less
 /// `InterpretedValue::Set` attribute) emits no node at all.
-fn split_attribute_value<'src>(value: &str, location: Span<'src>, out: &mut Vec<InlineNode<'src>>) {
+fn split_attribute_value<'src>(
+    value: &str,
+    location: Span<'src>,
+    specials: SplicedSpecials,
+    out: &mut Vec<InlineNode<'src>>,
+) {
+    if specials == SplicedSpecials::EscapedLater {
+        if !value.is_empty() {
+            out.push(InlineNode::Text {
+                value: CowStr::from(value.to_string()),
+                location,
+            });
+        }
+
+        return;
+    }
+
     let mut rest = value;
 
     while let Some(pos) = rest.find(is_special) {
@@ -954,12 +1038,18 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use super::super::test_support::{assert_raw, assert_styled, assert_text, fold_html};
+    use super::super::test_support::{
+        assert_raw, assert_special_char, assert_styled, assert_text, fold_html,
+    };
     use crate::{
         Parser, Span,
-        content::{Content, SubstitutionStep, inline_builder::build},
+        content::{
+            Content, SubstitutionGroup, SubstitutionStep,
+            inline_builder::{build, build_for_group},
+        },
         inlines::{InlineNode, SpanForm, StyleVariant},
         parser::HtmlSubstitutionRenderer,
+        strings::CowStr,
     };
 
     /// A default parser with `name` set to `value` (an
@@ -1167,6 +1257,75 @@ mod tests {
 
         // The fold emits the tag verbatim, unescaped.
         assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "<b>");
+    }
+
+    #[test]
+    fn a_reference_expanding_to_a_special_character_stays_text_when_escaping_follows() {
+        // The mirror image of the test above, under the one order that
+        // reverses the two steps: `subs=attributes+` on a verbatim block
+        // resolves to `[attributes, specialcharacters, callouts]`, so the
+        // `SpecialCharacters` step is still *ahead* when the value is spliced
+        // and the string pipeline escapes it like any other text.
+        //
+        // Design §3.4.1: what the fragment becomes is decided by which steps
+        // still act on it, so the value is spliced as one ordinary `Text` run
+        // (`SplicedSpecials::EscapedLater`) and `apply_special_characters`
+        // splits it at its own position in the order — leaving the `CharRef`
+        // leaves an author-written `<b>` would get under the same order, not
+        // the `Raw` leaves the built-in orders produce.
+        let (group, invalid) = SubstitutionGroup::from_custom_string(
+            Some(&SubstitutionGroup::Verbatim),
+            "attributes+",
+        );
+        assert!(invalid.is_empty());
+        assert_eq!(
+            group,
+            SubstitutionGroup::Custom(vec![
+                SubstitutionStep::AttributeReferences,
+                SubstitutionStep::SpecialCharacters,
+                SubstitutionStep::Callouts,
+            ])
+        );
+
+        let parser = parser_with_attribute("tag", "<b>");
+        let source = "{tag}";
+        let nodes = build_for_group(
+            &group,
+            CowStr::from(source),
+            Span::new(source),
+            &parser,
+            None,
+        );
+
+        // `CharRef("<")`, `Text("b")`, `CharRef(">")` — not the `Raw` mix the
+        // normal order yields for the same value.
+        assert_eq!(nodes.len(), 3);
+        let char_ref_location = assert_special_char(&nodes[0], '<');
+
+        match &nodes[1] {
+            InlineNode::Text { value, location } => {
+                assert_eq!(value.as_ref(), "b");
+                // Still the coarse §4.4 fallback: a synthesized value has no
+                // source of its own, whichever leaf kind its specials take.
+                assert_eq!(*location, char_ref_location);
+            }
+
+            other => panic!("expected Text(\"b\"), got {other:?}"),
+        }
+
+        assert_special_char(&nodes[2], '>');
+
+        // And the fold escapes the tag, byte-for-byte as the real pipeline
+        // does — the documented `subs=attributes+` trick for inspecting a
+        // stored attribute value.
+        let mut content = Content::from(Span::new(source));
+        group.apply(&mut content, &parser_with_attribute("tag", "<b>"), None);
+
+        assert_eq!(content.rendered_str(), "&lt;b&gt;");
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            content.rendered_str()
+        );
     }
 
     #[test]
@@ -1691,6 +1850,37 @@ mod tests {
         let inlines = blocks[0].inlines().unwrap();
 
         assert_eq!(rendered, "First line.\nThird line.");
+
+        assert_eq!(
+            super::super::fold_html(inlines, &HtmlSubstitutionRenderer {}, &Parser::default()),
+            rendered,
+            "fold diverged from the rendered string for {inlines:?}"
+        );
+    }
+
+    #[test]
+    fn a_real_documents_prepended_attributes_step_reaches_its_tree() {
+        // End-to-end, through the real parse path, for the AsciiDoc docs' own
+        // `subs=attributes+` trick: a listing block whose substitution list
+        // puts `attributes` *first* renders `pass:quotes[…]`'s stored markup
+        // escaped, and the tree `SubstitutionGroup::apply` builds alongside it
+        // must fold to exactly those bytes. This is the shape that makes the
+        // reversed order a *blocker* for the authoritative fold rather than an
+        // unclaimed form: a golden test already exercises it (design §5.3's
+        // oracle — see `attribute_entry_substitutions`).
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = Parser::default().with_inline_tree(true).parse(
+            ":app-name: pass:quotes[MyApp^2^]\n\n[subs=attributes+]\n------\n{app-name}\n------\n",
+        );
+
+        let blocks: Vec<_> = doc.descendant_blocks().collect();
+        assert_eq!(blocks.len(), 1, "expected one listing block: {blocks:?}");
+
+        let rendered = blocks[0].rendered_html_content().unwrap();
+        let inlines = blocks[0].inlines().unwrap();
+
+        assert_eq!(rendered, "MyApp&lt;sup&gt;2&lt;/sup&gt;");
 
         assert_eq!(
             super::super::fold_html(inlines, &HtmlSubstitutionRenderer {}, &Parser::default()),

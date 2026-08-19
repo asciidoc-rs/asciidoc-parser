@@ -40,23 +40,26 @@
 //!   splicing a set attribute's resolved value into the node stream, classified
 //!   into [`Text`](InlineNode::Text) and [`Raw`](InlineNode::Raw) runs per
 //!   design §3.4.1 — a literal `<`/`>`/`&` in the value is *not* re-escaped,
-//!   since [`apply_special_characters`] has already run. It reuses the shared
-//!   [`ATTRIBUTE_REFERENCE`](crate::content::ATTRIBUTE_REFERENCE) pattern, so
-//!   only the recognition *sink* differs. A `counter`/`counter2` directive
-//!   resolves *and advances* the named counter via [`Parser::counter`], the
-//!   same required side effect [`apply_footnotes`] performs for footnote
-//!   numbering. A missing-attribute reference under `AttributeMissing::Drop` /
-//!   `::DropLine` is deferred (see [`apply_attribute_references`] for why). A
-//!   character replacement *inside* an expanded value ((C) → ©, `--`, …) is
-//!   recognized, a follow-up increment having taught
-//!   [`build_match_string`](quotes::build_match_string) to look inside a
-//!   [`synthesized`](quotes::Piece::synthesized) run instead of treating it as
-//!   opaque; a **macro** needing an honest `'src` slice for its own
-//!   target/attribute list (a link or an image, the two that are left) still
-//!   defers when that slice sits inside one, since a synthesized run's bytes
-//!   have no source counterpart to slice for a type that requires a real `Span`
-//!   (see [`range_is_verbatim`](macros::image::range_is_verbatim)) — but a
-//!   macro needing only its own *text* (no `Span`-typed field) — an anchor's
+//!   since [`apply_special_characters`] has already run, unless the group's
+//!   effective order puts that step *after* this one (only a `subs=` list can,
+//!   and `subs=attributes+` does), in which case the value is spliced as one
+//!   ordinary `Text` run for it to escape (see [`SplicedSpecials`]). It reuses
+//!   the shared [`ATTRIBUTE_REFERENCE`](crate::content::ATTRIBUTE_REFERENCE)
+//!   pattern, so only the recognition *sink* differs. A `counter`/`counter2`
+//!   directive resolves *and advances* the named counter via
+//!   [`Parser::counter`], the same required side effect [`apply_footnotes`]
+//!   performs for footnote numbering. A missing-attribute reference under
+//!   `AttributeMissing::Drop` / `::DropLine` is deferred (see
+//!   [`apply_attribute_references`] for why). A character replacement *inside*
+//!   an expanded value ((C) → ©, `--`, …) is recognized, a follow-up increment
+//!   having taught [`build_match_string`](quotes::build_match_string) to look
+//!   inside a [`synthesized`](quotes::Piece::synthesized) run instead of
+//!   treating it as opaque; a **macro** needing an honest `'src` slice for its
+//!   own target/attribute list (a link or an image, the two that are left)
+//!   still defers when that slice sits inside one, since a synthesized run's
+//!   bytes have no source counterpart to slice for a type that requires a real
+//!   `Span` (see [`range_is_verbatim`](macros::image::range_is_verbatim)) — but
+//!   a macro needing only its own *text* (no `Span`-typed field) — an anchor's
 //!   id, a bare e-mail address, a UI macro's keys/label/menu path, an index
 //!   term's shown text, or a cross-reference's target and reference text — can
 //!   now be recovered exactly via [`text_slice`](quotes::text_slice) or
@@ -330,7 +333,7 @@ mod stem_step;
 #[cfg(test)]
 mod test_support;
 
-use attribute_refs::apply_attribute_references;
+use attribute_refs::{SplicedSpecials, apply_attribute_references};
 use callouts::apply_callouts;
 use char_replacements::apply_character_replacements;
 // Consumed only by `cfg(test)` callers and future external callers until the
@@ -495,7 +498,7 @@ pub(crate) fn build_for_group<'src>(
         nodes = apply_stem(nodes, location, parser);
     }
 
-    for step in steps {
+    for (position, step) in steps.iter().enumerate() {
         nodes = match step {
             SubstitutionStep::SpecialCharacters => apply_special_characters(nodes),
 
@@ -506,8 +509,24 @@ pub(crate) fn build_for_group<'src>(
             // point `<`/`>`/`&` are already `CharRef` leaves and quoted spans
             // are already `Styled` nodes, and whatever this step splices in
             // is exactly what the steps still ahead see and refine.
+            //
+            // A `Custom` order can put `SpecialCharacters` *after* this step
+            // instead — `subs=attributes+` prepends it — and then the string
+            // pipeline escapes the spliced value like any other text. That is
+            // the one thing a spliced value's classification turns on, so it
+            // is decided here, where the order is in hand, and carried down as
+            // `SplicedSpecials`.
             SubstitutionStep::AttributeReferences => {
-                apply_attribute_references(nodes, location, parser)
+                let specials = if steps
+                    .get(position + 1..)
+                    .is_some_and(|ahead| ahead.contains(&SubstitutionStep::SpecialCharacters))
+                {
+                    SplicedSpecials::EscapedLater
+                } else {
+                    SplicedSpecials::Verbatim
+                };
+
+                apply_attribute_references(nodes, location, parser, specials)
             }
 
             SubstitutionStep::CharacterReplacements => {
@@ -1283,12 +1302,21 @@ mod tests {
 
         /// The parser both sides of every parity assertion in this module
         /// are configured with: `product` for the fixtures carrying an
-        /// attribute reference, and `experimental` for the one carrying a UI
-        /// macro (the gate the string step and the builder share).
+        /// attribute reference, `experimental` for the one carrying a UI macro
+        /// (the gate the string step and the builder share), and three values
+        /// carrying a literal `<`, `>`, or `&` for the corpus that pins how a
+        /// spliced value's specials are classified under an order that escapes
+        /// *after* expanding (see
+        /// [`a_group_that_escapes_after_expanding_folds_its_spliced_specials_escaped`]).
         fn parser_with_product() -> Parser {
             Parser::default()
                 .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
                 .with_intrinsic_attribute_bool("experimental", true, ModificationContext::Anywhere)
+                // The very shape the AsciiDoc docs use to show what
+                // `pass:quotes[…]` stores in an attribute entry.
+                .with_intrinsic_attribute("tag", "MyApp<sup>2</sup>", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("amp", "a & b", ModificationContext::Anywhere)
+                .with_intrinsic_attribute("host", "a&b.example.org", ModificationContext::Anywhere)
         }
 
         fn build_group<'src>(
@@ -1618,6 +1646,158 @@ mod tests {
                     assert_group_parity(group, source);
                 }
             }
+        }
+
+        /// The complement of the corpus above, for the *other* order §3.4.1
+        /// has to answer for: not a group that never escapes, but one that
+        /// escapes **after** expanding an attribute reference.
+        ///
+        /// Every built-in group that runs both steps escapes first and expands
+        /// later, which is why a spliced value's literal `<`/`>`/`&` has always
+        /// been a `Raw` leaf here (nothing left to escape it). Only a `subs=`
+        /// list can reverse the two — and `subs=attributes+`, which *prepends*
+        /// the step, is the documented AsciiDoc idiom for inspecting what a
+        /// `pass:quotes[…]` attribute entry actually stores, so the reversed
+        /// order is a real one. Under it the string pipeline escapes the
+        /// spliced value like any other text (`MyApp<sup>2</sup>` renders as
+        /// `MyApp&lt;sup&gt;2&lt;/sup&gt;`), which every fixture below folded
+        /// verbatim — and so diverged — before `SplicedSpecials` landed.
+        ///
+        /// The corpus crosses specials-bearing fixtures with the real groups
+        /// that take this path: `attributes+` over each of the two base groups
+        /// it is written on (a paragraph's `Normal` and a listing block's
+        /// `Verbatim`), and the explicit `subs=` lists that name the two steps
+        /// in that order. Each list keeps `specialcharacters` ahead of every
+        /// *markup-producing* step, because a step that emits markup before
+        /// the escaping one is a different question — the string pipeline
+        /// escapes the tags that step already wrote, while a tree's markup
+        /// exists only at fold time — and is pinned as its own divergence by
+        /// [`a_markup_producing_step_before_the_escaping_one_is_a_documented_divergence`].
+        #[test]
+        fn a_group_that_escapes_after_expanding_folds_its_spliced_specials_escaped() {
+            let custom = |subs: &str| {
+                let (group, invalid) = SubstitutionGroup::from_custom_string(None, subs);
+                assert!(invalid.is_empty(), "unexpected invalid subs in {subs:?}");
+                group
+            };
+
+            let prepended = |base: &SubstitutionGroup| {
+                let (group, invalid) =
+                    SubstitutionGroup::from_custom_string(Some(base), "attributes+");
+                assert!(invalid.is_empty());
+                group
+            };
+
+            let groups = [
+                // `[attributes, specialcharacters, quotes, replacements,
+                // macros, post_replacements]` — the step appears once, first,
+                // because `from_custom_string` dedupes.
+                prepended(&SubstitutionGroup::Normal),
+                // `[attributes, specialcharacters, callouts]` — the listing
+                // block the AsciiDoc docs use for the inspection trick.
+                prepended(&SubstitutionGroup::Verbatim),
+                custom("attributes,specialcharacters"),
+                custom("attributes,specialcharacters,quotes"),
+                custom("attributes,specialcharacters,macros"),
+                custom("attributes,specialcharacters,callouts"),
+                custom("attributes,specialcharacters,quotes,replacements,macros,post_replacements"),
+            ];
+
+            let fixtures = [
+                // The stored value on its own, and in flow.
+                "{tag}",
+                "before {tag} after",
+                "{amp}",
+                // The author's own specials beside a spliced one: both are
+                // escaped, by the one step, in one pass.
+                "a < {tag} > b",
+                "{amp} & {amp}",
+                // Adjacent splices, so a run boundary falls between two
+                // synthesized values rather than against source text.
+                "{tag}{amp}",
+                // A *value-less* `Set` attribute expands to nothing, so the
+                // splice emits no node at all — the one path through the
+                // classifier that pushes nothing. (`experimental` is set as a
+                // bare flag by `parser_with_product`.)
+                "{experimental}",
+                "a < {experimental} > b",
+                // A reference the step leaves alone still reaches the escaping
+                // step as ordinary text.
+                "{undefined-thing} < b",
+                "\\{tag} stays literal",
+                // A `counter` directive splices through the same classifier.
+                "{counter:step} < {counter:step}",
+                // Multi-line, so a spliced value sits on one line of several.
+                "a < b\n{tag}\nc & d",
+                // A construct *recognized over* a spliced special — the
+                // fidelity half of this policy, not just the classification
+                // half. A `Raw` leaf is opaque to `build_match_string`, so
+                // splicing one here would have hidden the `&` from the macros
+                // step that runs later in the order; a `Text` run the escaping
+                // step turns into a `CharRef` is exactly what that step's own
+                // gate admits, matching the string pipeline (whose macros pass
+                // likewise runs over the already-escaped `a&amp;b.example.org`).
+                "link:{host}/x[go]",
+                "https://{host}/docs auto-link",
+                // The same, for the two steps that read a spliced run's own
+                // bytes rather than a macro's captures.
+                "*{tag}* and _{amp}_",
+                "{amp} (C) {tag}",
+            ];
+
+            for group in &groups {
+                for source in fixtures {
+                    assert_group_parity(group, source);
+                }
+            }
+        }
+
+        /// The other half of "an order that escapes late", pinned as a
+        /// documented divergence rather than closed: a step that produces
+        /// **markup** ahead of the escaping one.
+        ///
+        /// `subs=quotes,specialcharacters` runs the quotes step first, so the
+        /// string pipeline holds `<strong>bold</strong>` by the time
+        /// `specialcharacters` runs — and escapes those very tags, emitting
+        /// `&lt;strong&gt;bold&lt;/strong&gt;`. A tree has no rendered tags at
+        /// that point: a [`Styled`](crate::inlines::Styled) span's markup
+        /// exists only at fold time, so there is nothing for the escaping
+        /// transducer to act on and the fold emits a real `<strong>` element.
+        ///
+        /// That is structurally unlike the spliced-value case the corpus above
+        /// closes, where the fragment *is* text at the moment the step runs and
+        /// §3.4.1 only has to say which leaf kind it becomes. Deciding what a
+        /// tree should even hold here — a `Styled` node whose fold is escaped,
+        /// or pre-rendered text that abandons the structure — is a policy
+        /// question of its own, and the design doc names it as such (§5.2,
+        /// Phase 4 step 6). Both spellings of the order are pinned here,
+        /// including the nested one a `pass:q,c[…]` passthrough reaches.
+        ///
+        /// The author's own specials are already right on both sides, so the
+        /// fixture asserts exactly where the two part company.
+        #[test]
+        fn a_markup_producing_step_before_the_escaping_one_is_a_documented_divergence() {
+            let (group, invalid) =
+                SubstitutionGroup::from_custom_string(None, "quotes,specialcharacters");
+            assert!(invalid.is_empty());
+
+            let source = "<b> *bold*";
+            let golden = golden_for_group(&group, source);
+            assert_eq!(golden, "&lt;b&gt; &lt;strong&gt;bold&lt;/strong&gt;");
+
+            let built_parser = parser_with_product();
+            let nodes = build_group(&group, source, &built_parser);
+            let built = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &built_parser);
+
+            assert_ne!(
+                built, golden,
+                "expected the documented divergence to still reproduce; the policy may have \
+                 been settled — if so, fold this fixture into the parity corpus above"
+            );
+
+            // The author's own `<b>` is escaped on both sides; only the quotes
+            // step's own markup differs.
+            assert_eq!(built, "&lt;b&gt; <strong>bold</strong>");
         }
     }
 
