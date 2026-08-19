@@ -3180,6 +3180,75 @@ Each phase is a reviewable unit with a clear exit gate.
   `subs=quotes,specialcharacters`), which still needs its own policy rather than another recognition
   increment.
 
+  *Step 6 prep landed as (the UI family crossing an escaped special or a restored entity — the
+  last family holding a gate of its own, and a harness hazard it uncovered in the footnote
+  family):* every prior increment in this sequence names the **UI** family
+  ([`Ui`](../../parser/src/inlines/ui.rs): `kbd:`/`btn:`/`menu:`) and **a footnote's text** as the
+  two that keep a stricter gate than
+  [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs) "for a
+  restored entity exactly as for an escaped special", pinned side by side so the pair moves
+  together. Auditing that pairing found the two are not alike, and neither needed what the note
+  assumed.
+
+  The **UI family** takes the same one-gate-per-family swap its five predecessors made, and needs
+  nothing else: every value a `Ui` node holds — a keyboard macro's split keys, a button's
+  normalized label, a menu's name, submenu path, and item — is text the string replacer itself
+  computes from its own **escaped haystack**, which `render_keyboard`/`render_button`/`render_menu`
+  then emit *verbatim*. The node therefore holds it in that same already-substituted form (the
+  contract an [`IndexTerm`](../../parser/src/inlines/index_term.rs)'s `terms` already uses, now
+  recorded on the node's own docs) and reads it straight out of the level's **match string**, whose
+  bytes at either [`CharRef`](../../parser/src/inlines/char_ref.rs) leaf are exactly the ones that
+  haystack carries. So `kbd:[Ctrl&C]`, `btn:[Save &copy; Close]`, `menu:F&le[Save]`,
+  `menu:File[Save & Exit]`, and — a real golden fixture — `menu:&#8942;[More Tools, Extensions]`
+  are now recognized, folding byte-for-byte identically. The menu's own bespoke gate
+  (`menu_match_is_sliceable`, which admitted one atomic piece and one only: a `&gt;` submenu caret
+  *inside the item list*) is **deleted** rather than relaxed — that case is now just an instance of
+  the general one — and with it the family's `Option`-returning "this increment defers" machinery,
+  leaving [`build_menu_node`](../../parser/src/content/inline_builder/macros/ui.rs) total, exactly
+  as the `<<id,>>` and bare-e-mail increments retired their own families'. The one value the menu
+  used to slice from `'src`, its **name**, still borrows through
+  [`text_slice`](../../parser/src/content/inline_builder/quotes.rs) whenever it can and falls back
+  to the match string only when it crosses a leaf `text_slice` cannot slice. As in the
+  `footnoteref:`, menu, cross-reference, link, and image increments, the keyboard/button pass's own
+  escape check is **hoisted ahead of the gate**, closing the same latent gap: an escaped
+  `\kbd:[*a*]` whose match the gate rejects now still drops its backslash.
+
+  The **footnote text** needed no code change at all — it was already at parity, and had been since
+  the family landed: a footnote's content is *structured children*
+  ([`emit_range`](../../parser/src/content/inline_builder/quotes.rs) keeps a `CharRef` leaf as its
+  own child), so the family never sliced `'src` for that value and never had a gate to relax. What
+  made it look like a boundary was the **test harness**: the divergence test that pinned it drove
+  the golden pipeline and the builder from *one shared `Parser`*, so each fixture's footnote was
+  numbered twice (`1` on the golden side, `2` on the built side) and the two sides "diverged" for a
+  reason that had nothing to do with the entity. That is precisely the hazard the
+  two-independent-parsers discipline exists for (established by the footnote increment itself, and
+  recorded again when the link family's own registration corpus was found using `{sp}` as an inert
+  separator that stopped being inert): the test is rewritten to configure one parser per side, and
+  both families' fixtures move into it as a **parity** corpus, per the "if lifted, fold this into a
+  parity corpus" convention.
+
+  With this, the escaped-special / restored-entity boundary is closed for **every** macro family:
+  what keeps [`range_is_verbatim`](../../parser/src/content/inline_builder/macros/image.rs) is only
+  the three attribute-list captures that must ride on their node as a real
+  [`Attrlist`](../../parser/src/attributes/attrlist.rs)`<'src>`. The UI family's remaining boundary
+  is the one every family keeps — a match crossing an **opaque** piece (a rendered span, an
+  already-recognized macro node, a character replacement), whose markup exists only at fold time —
+  now pinned by its own divergence test in place of the two this increment retires. A differential
+  corpus pins each family's keys, label, name, and item list crossing each escaped special and each
+  spelling of a restored entity, both at once, in flow, doubled, beside a sibling family, inside a
+  rendered span, escaped, and beside — rather than crossing — a special; structural tests pin the
+  already-substituted values and the node's still-precise source `location`; fixtures are added to
+  the whole-pipeline combined-constructs corpus, the group-parity corpus (an order that never
+  escapes, where the author's own `&` survives into a verbatim run), the synthesized-seed sweep, and
+  the structural recorder cross-check — where the two constructions reach the same values from
+  opposite directions, the recorder recovering them from the string pipeline's own render params.
+  A whole-document test drives the real parse path end to end. Re-running the corpus-wide
+  fold-parity audit (tree building forced on for every parse in the suite) confirms the divergence
+  set strictly **shrank**: ten previously-surviving sources are gone — among them the two real
+  golden fixtures `menu:&#8942;[More Tools, Extensions]` and `menu:File[Save As&#8230;]`, whose
+  name and item carry a restored entity — and no new one appeared. As with every prep piece before
+  it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -3566,6 +3635,20 @@ Each phase is a reviewable unit with a clear exit gate.
        this pattern has no `mailto:` comma probe of its own). See the step's own "landed as" note
        above. Only the **image** family's attribute list — the one capture with no display text to
        carry — still keeps the boundary.
+     - ✅ **prep (the UI family crossing an escaped special or a restored entity).** The last
+       family holding a gate of its own takes the same one-gate swap to
+       [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs):
+       every value a [`Ui`](../../parser/src/inlines/ui.rs) node holds is already-substituted text
+       read out of the match string — the very bytes the string replacer computes from its own
+       escaped haystack and `render_keyboard`/`render_button`/`render_menu` emit verbatim — so the
+       menu family's bespoke caret-only gate is deleted rather than relaxed, and
+       [`build_menu_node`](../../parser/src/content/inline_builder/macros/ui.rs) becomes total. A
+       **footnote's text**, pinned beside it as the other half of that boundary, turned out to be
+       at parity already (its content is structured children, never a sliced value); the
+       "divergence" was a shared-`Parser` numbering artifact in the test that pinned it, now
+       rewritten as a two-independent-parsers parity corpus. See the step's own "landed as" note
+       above. What remains is the opaque-piece boundary every family keeps, plus the three
+       `Attrlist<'src>` captures.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

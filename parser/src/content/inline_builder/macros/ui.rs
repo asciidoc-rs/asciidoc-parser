@@ -1,8 +1,6 @@
 //! UI macro recognition (`kbd:[…]`, `btn:[…]`, `menu:…[…]`).
 
-use super::{
-    MacroMatch, MacroMatchKind, image::range_is_verbatim_or_synthesized, rebuild_macro_level,
-};
+use super::{MacroMatch, MacroMatchKind, image::range_has_no_opaque_piece, rebuild_macro_level};
 use crate::{
     Span,
     content::{
@@ -39,7 +37,7 @@ pub(super) fn kbd_btn_macros_level<'src>(
         return nodes;
     }
 
-    let matches = find_kbd_btn_matches(&s, &pieces, root);
+    let matches = find_kbd_btn_matches(&nodes, &s, &pieces, root);
 
     if matches.is_empty() {
         return nodes;
@@ -49,8 +47,9 @@ pub(super) fn kbd_btn_macros_level<'src>(
 }
 
 /// Finds every keyboard/button macro at this level, skipping any whose match
-/// crosses an atomic piece (see [`apply_macros`](super::apply_macros)).
+/// crosses an **opaque** piece (see [`apply_macros`](super::apply_macros)).
 fn find_kbd_btn_matches<'src>(
+    nodes: &[InlineNode<'src>],
     s: &str,
     pieces: &[Piece],
     root: Span<'src>,
@@ -64,23 +63,14 @@ fn find_kbd_btn_matches<'src>(
 
         let full = whole.start()..whole.end();
 
-        // A match crossing an escaped special or a rendered span is left for a
-        // later increment: its bracket content would have to carry that
-        // escaped/rendered text, which the node cannot hold.
-        //
-        // A [`synthesized`](Piece::synthesized) run (an attribute expansion,
-        // or — reached at a tree's root — a filtered multi-line block's own
-        // joined seed) *is* admitted: this family never slices `'src` for a
-        // value at all — its keys and label come straight from the match
-        // string, which carries a synthesized run's bytes exactly — so only
-        // the node's `location` takes design §4.4's coarse fallback. The same
-        // lift the anchor and bare-e-mail families already made, for the same
-        // reason (see [`build_kbd_btn_node`]).
-        if !range_is_verbatim_or_synthesized(pieces, &full) {
-            continue;
-        }
-
-        // Group 1 is the (optional) escape backslash.
+        // Group 1 is the (optional) escape backslash. It is honored *before*
+        // the gate below — and needs no gate of its own — because dropping
+        // the backslash keeps the rest of the match as its own original nodes
+        // (a rendered span among them), which fold back to exactly the bytes
+        // the string replacer's `caps[0][1..]` emits. Mirrors that replacer's
+        // own escape-first check order, and closes the same latent gap the
+        // `footnoteref:`, menu, cross-reference, link, and image increments
+        // each closed for their own families.
         if caps.get(1).is_some() {
             matches.push(MacroMatch {
                 kind: MacroMatchKind::Unescape {
@@ -89,6 +79,31 @@ fn find_kbd_btn_matches<'src>(
                 full,
             });
 
+            continue;
+        }
+
+        // A match crossing an **opaque** piece — a rendered span, an
+        // earlier-recognized macro node, a masked passthrough, a character
+        // replacement — is left for a later increment: `build_match_string`
+        // stands each in as one placeholder where the string pipeline's own
+        // haystack holds the markup it will fold to, so the keys or label
+        // read out of the match string would not be the replacer's.
+        //
+        // Every *recoverable* piece is admitted: a
+        // [`synthesized`](Piece::synthesized) run (an attribute expansion,
+        // or — reached at a tree's root — a filtered multi-line block's own
+        // joined seed), an escaped special (`kbd:[Ctrl&C]`), and a restored
+        // entity (`kbd:[Ctrl&copy;C]`). This family never slices `'src` for a
+        // value at all — its keys and label come straight from the match
+        // string, which carries all three pieces' bytes exactly — so only the
+        // node's `location` takes design §4.4's coarse fallback (see
+        // [`build_kbd_btn_node`]). Nor can a boundary split such a leaf: the
+        // match is delimited by `kbd:`/`btn:`, `[`, and `]`, and its keys by
+        // `,`/`+` — none of which occurs in `&lt;`, `&gt;`, `&amp;`, or a
+        // restored entity's own `&name;` — so every atomic overlap is a
+        // *wholly contained* entity, the same structural argument the
+        // bare-e-mail and image families make for their own patterns.
+        if !range_has_no_opaque_piece(nodes, pieces, &full) {
             continue;
         }
 
@@ -111,13 +126,17 @@ fn find_kbd_btn_matches<'src>(
 /// does so the fold reproduces the same bytes.
 ///
 /// Every value it computes comes from the **match string**, never from an
-/// `'src` slice: on a verbatim match those bytes *are* the source text, and on
-/// a [`synthesized`](Piece::synthesized) one they are the expanded value the
-/// string pipeline itself matched over — which is precisely what lets this
-/// family recognize a macro inside an expanded attribute value where a family
-/// carrying an [`Attrlist`](crate::attributes::Attrlist)`<'src>` cannot. Only
-/// the node's `location` falls back to the enclosing run's coarse span
-/// (design §4.4) in the synthesized case.
+/// `'src` slice: on a verbatim match those bytes *are* the source text; on a
+/// [`synthesized`](Piece::synthesized) one they are the expanded value the
+/// string pipeline itself matched over; and across an escaped special or a
+/// restored entity they are that leaf's own entity bytes (`&amp;`, `&copy;`) —
+/// which is what the string replacer's own escaped haystack holds there, and
+/// what `render_keyboard`/`render_button` then emit *verbatim*. That is
+/// precisely what lets this family recognize a macro inside an expanded
+/// attribute value, or across an entity, where a family carrying an
+/// [`Attrlist`](crate::attributes::Attrlist)`<'src>` cannot. Only the node's
+/// `location` falls back to the enclosing run's coarse span (design §4.4) in
+/// the synthesized case.
 fn build_kbd_btn_node<'src>(
     caps: &regex::Captures<'_>,
     full: &std::ops::Range<usize>,
@@ -155,13 +174,17 @@ fn build_kbd_btn_node<'src>(
 /// All three item-list spellings are handled: the bare/single-item form, the
 /// comma-delimited form, and the `&gt;`-submenu form
 /// (`menu:View[Zoom > Reset]`), whose delimiters are escaped
-/// [`CharRef`](InlineNode::CharRef)s by the time macros run and so need the
-/// relaxed gate [`menu_match_is_sliceable`] applies (see its own doc comment).
-/// A name or item text crossing any *other* escaped special, or a rendered
-/// [`Styled`](crate::inlines::Styled) span, is still deferred — the verbatim
-/// boundary every macro family documents. A
-/// [`synthesized`](Piece::synthesized) run is **not** deferred: see
-/// [`menu_match_is_sliceable`].
+/// [`CharRef`](InlineNode::CharRef)s by the time macros run. A name or item
+/// text crossing any *other* escaped special (`menu:File[Save & Exit]`) or a
+/// restored entity (`menu:&#8942;[More Tools, Extensions]`) is recognized too:
+/// like a keyboard macro's keys, every value a menu node holds is read out of
+/// the match string, whose bytes at such a leaf are exactly the ones the
+/// string replacer's own escaped haystack carries and `render_menu` emits
+/// verbatim (see [`find_menu_matches`]). What is still deferred is a name or
+/// item text crossing an **opaque** piece — a rendered
+/// [`Styled`](crate::inlines::Styled) span, an earlier-recognized macro node,
+/// a masked passthrough, a character replacement — the one boundary every
+/// macro family keeps.
 pub(super) fn menu_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -181,10 +204,29 @@ pub(super) fn menu_macros_level<'src>(
     rebuild_macro_level(&nodes, &pieces, &s, matches)
 }
 
-/// Finds every menu macro at this level, skipping any whose name or item text
-/// cannot be recovered (see [`menu_match_is_sliceable`], which
-/// [`build_menu_node`] applies once the match's own capture groups are
-/// resolved).
+/// Finds every menu macro at this level, skipping any whose match crosses an
+/// **opaque** piece — the one boundary this family keeps, and the same
+/// [`range_has_no_opaque_piece`] gate its keyboard/button sibling and every
+/// other macro family applies.
+///
+/// A menu match may legitimately carry an atomic
+/// [`CharRef`](InlineNode::CharRef) leaf, and always did for one spelling: the
+/// `&gt;` submenu caret (`menu:View[Zoom > Reset]`), which is an escaped
+/// special by the time macros run. That case used to be admitted by a bespoke,
+/// caret-only check; it is now the general one, because *every* value a menu
+/// node holds comes from the match string, whose bytes at such a leaf — a
+/// special's canonical entity, a restored entity's own text — are exactly the
+/// ones the string replacer's own escaped haystack carries and `render_menu`
+/// emits verbatim. So a name or item text crossing any escaped special
+/// (`menu:File[Save & Exit]`, `menu:a>b[Save]`) or restored entity
+/// (`menu:&#8942;[More Tools, Extensions]`) is recognized, exactly as the
+/// string pipeline recognizes it.
+///
+/// No boundary can split such a leaf, either: the match is delimited by
+/// `menu:`, `[`, and `]`, and its item list by `&gt;` or `,` — none of which
+/// occurs in `&lt;`, `&amp;`, or a restored entity's own `&name;`, while a
+/// `&gt;` *is* the delimiter both pipelines split on — so every atomic overlap
+/// is either wholly contained or consumed as the delimiter itself.
 fn find_menu_matches<'src>(
     nodes: &[InlineNode<'src>],
     s: &str,
@@ -218,12 +260,14 @@ fn find_menu_matches<'src>(
             continue;
         }
 
-        let Some(node) = build_menu_node(&caps, &full, s, pieces, root, nodes) else {
-            // A name or item text this increment cannot slice from `'src`:
-            // left unrecognized, so the surrounding gap reproduces the source
-            // unchanged (see [`menu_macros_level`]).
+        // A match crossing an opaque piece is left unrecognized, so the
+        // surrounding gap reproduces the source unchanged (see
+        // [`menu_macros_level`]).
+        if !range_has_no_opaque_piece(nodes, pieces, &full) {
             continue;
-        };
+        }
+
+        let node = build_menu_node(&caps, &full, pieces, root, nodes);
 
         matches.push(MacroMatch {
             kind: MacroMatchKind::Node {
@@ -237,120 +281,48 @@ fn find_menu_matches<'src>(
     matches
 }
 
-/// Reports whether a menu match's own text can be recovered, the menu
-/// family's counterpart of
-/// [`range_is_verbatim_or_synthesized`].
+/// Builds one [`Ui`](InlineNode::Ui) menu node from a match
+/// [`find_menu_matches`]' gate accepts. It is **total**: with an opaque piece
+/// already excluded, every shape the pattern can match yields a node (the
+/// family's own "this increment defers" machinery retired with the gate that
+/// needed the match's capture groups to decide).
 ///
-/// It differs from that check in exactly one admitted case: a
-/// [`SUBMENU_DELIMITER`] (`&gt;`) *inside the item list*. Every other macro
-/// family requires its whole match to be verbatim before it will build a
-/// self-describing node, and an escaped special is an atomic piece that check
-/// rejects outright — which is what made the `&gt;`-submenu form
-/// (`menu:View[Zoom > Reset]`) unrecognizable, whatever its item texts looked
-/// like. But a submenu caret carries no value the node ever slices: like the
-/// `<<id>>` shorthand's own `&lt;&lt;`/`&gt;&gt;` delimiters, the string
-/// replacer *consumes* it as the list's delimiter and emits it nowhere (the
-/// rendered caret between levels comes from `render_menu`, not from the source
-/// character). Only the item texts on either side of it need to be verbatim,
-/// and they are checked here exactly as before.
-///
-/// Everything else is unchanged: an atomic piece that is *not* an item-list
-/// caret — another escaped special (`menu:File[A & B]`, and a `&`/`>` in the
-/// menu *name*, which the pattern admits) or a rendered
-/// [`Styled`](crate::inlines::Styled) span — still fails.
-///
-/// A [`synthesized`](Piece::synthesized) run (an attribute expansion, or —
-/// reached at a tree's root — a filtered multi-line block's own joined seed)
-/// is admitted: the item list is split straight out of the match string, and
-/// the menu *name*, the one value that used to need an `'src` slice, is now
-/// recovered exactly by [`text_slice`] — the same lift the anchor family made
-/// for its id, and for the same reason (a [`Ui`] node carries no `Span`-typed
-/// field, so nothing on it needs real source bytes). Only the node's
-/// `location` keeps design §4.4's coarse fallback.
-fn menu_match_is_sliceable(
-    s: &str,
-    pieces: &[Piece],
-    full: &std::ops::Range<usize>,
-    items: Option<&std::ops::Range<usize>>,
-) -> bool {
-    for piece in pieces {
-        let p_start = piece.s_start;
-        let p_end = piece.s_start + piece.s_len;
-
-        // Skip pieces that do not overlap the match.
-        if p_end <= full.start || p_start >= full.end {
-            continue;
-        }
-
-        if !piece.atomic {
-            continue;
-        }
-
-        // The one admitted atomic piece: a submenu caret the node consumes as
-        // the item list's delimiter. Its match-string bytes identify it
-        // unambiguously — a rendered span contributes a single placeholder
-        // character, and the only other atomic pieces are the two remaining
-        // special-character entities.
-        if s.get(p_start..p_end) != Some(SUBMENU_DELIMITER) {
-            return false;
-        }
-
-        let inside_items = items.is_some_and(|items| p_start >= items.start && p_end <= items.end);
-
-        if !inside_items {
-            return false;
-        }
-    }
-
-    true
-}
-
-/// Builds one [`Ui`](InlineNode::Ui) menu node from a match whose own text
-/// [`menu_match_is_sliceable`] accepts — the gate lives here rather than in
-/// [`find_menu_matches`] because it needs the match's own capture groups to
-/// know which sub-range may carry a submenu caret. Returns `None` for a match
-/// it rejects, which the caller leaves unrecognized.
-///
-/// The menu name borrows from `'src` in the verbatim case (and is recovered as
-/// an owned value from a [`synthesized`](Piece::synthesized) run, via
-/// [`text_slice`]); the submenu path and trailing item are split exactly as the
-/// string replacer splits them (owned, because a split part is trimmed).
+/// The menu name borrows from `'src` when it is verbatim, is recovered as an
+/// owned value from a [`synthesized`](Piece::synthesized) run (via
+/// [`text_slice`]), and — when it crosses an escaped special or a restored
+/// entity, which [`text_slice`] declines because it cannot slice one — comes
+/// from the **match string**, i.e. in the already-substituted form
+/// `render_menu` receives from the string pipeline and emits verbatim
+/// (`menu:F&le[Save]`'s name is `F&amp;le` on both sides). The submenu path
+/// and trailing item are split exactly as the string replacer splits them, out
+/// of that same match string (owned, because a split part is trimmed).
 fn build_menu_node<'src>(
     caps: &regex::Captures<'_>,
     full: &std::ops::Range<usize>,
-    s: &str,
     pieces: &[Piece],
     root: Span<'src>,
     nodes: &[InlineNode<'src>],
-) -> Option<InlineNode<'src>> {
+) -> InlineNode<'src> {
     // Group 1 (the menu name) is mandatory in the pattern; group 2 (the items)
     // is optional. `unwrap` is safe: the pattern cannot match without group 1.
     #[allow(clippy::unwrap_used)]
     let name = caps.get(1).unwrap();
 
-    let items = caps.get(2).map(|m| m.start()..m.end());
-
-    if !menu_match_is_sliceable(s, pieces, full, items.as_ref()) {
-        return None;
-    }
-
     let location = source_slice(pieces, full.clone(), root);
 
-    // The gate above admits no atomic piece in the name, so `text_slice`
-    // always yields its exact text — borrowed from `'src` when the name is
-    // verbatim, owned when it comes from a synthesized run.
-    let menu = text_slice(nodes, pieces, name.start()..name.end())?;
+    let menu = text_slice(nodes, pieces, name.start()..name.end())
+        .unwrap_or_else(|| CowStr::from(name.as_str().to_string()));
 
     let (submenus, item) = split_menu_items(caps.get(2).map(|m| m.as_str()));
 
-    Some(InlineNode::Ui(Ui {
+    InlineNode::Ui(Ui {
         kind: UiKind::Menu {
             menu,
             submenus,
             item,
         },
         location,
-    }))
+    })
 }
 
 /// Splits a menu macro's item list into its submenu path and trailing item,
@@ -362,10 +334,10 @@ fn build_menu_node<'src>(
 ///
 /// The list it splits is the *match string* text — the same escaped text the
 /// string replacer splits — so the caret branch keys off `&gt;` here exactly as
-/// it does there. Every part the split yields is verbatim source text (the
-/// carets are the only non-source pieces a match may carry, and they are
-/// consumed by the split itself — see [`menu_match_is_sliceable`]), so each
-/// part is the very text `render_menu` receives from the string pipeline.
+/// it does there, and so does every other part: an item carrying an escaped
+/// special or a restored entity keeps that leaf's own entity bytes, which is
+/// precisely the text `render_menu` receives from the string pipeline and
+/// emits verbatim.
 fn split_menu_items<'src>(items: Option<&str>) -> (Vec<CowStr<'src>>, Option<CowStr<'src>>) {
     let Some(items) = items else {
         return (vec![], None);
@@ -718,60 +690,184 @@ mod tests {
     }
 
     #[test]
-    fn a_menu_over_a_special_character_is_a_documented_divergence() {
-        // A submenu caret is the *only* escaped special a menu match may carry
-        // (the node consumes it as the item list's delimiter). Any other one —
-        // an `&` in the item list, or in the menu name the pattern also admits
-        // it in — is matched by the string pipeline over the *escaped* text
-        // (`menu:File[A &amp; B]`), which a self-describing node cannot carry
-        // as an `'src` slice, so the single-pass builder leaves the macro
-        // *unrecognized* here (deferred to a later increment), exactly as the
-        // image increment defers a macro over a special character.
-        for source in [
-            "menu:File[A & B]",
-            "menu:A&B[Save]",
-            // A caret in the *name* — which the pattern admits — is not a
-            // delimiter the node consumes, so it is not admitted either: the
-            // name would have to carry the escaped `&gt;` the node cannot
-            // slice from `'src`.
-            "menu:a>b[Save]",
-            "menu:File[*S* > As]",
-        ] {
-            let nodes = build_ui(Span::new(source));
+    fn fold_matches_the_string_pipeline_for_ui_macros_crossing_a_recoverable_piece() {
+        // A UI macro whose name, keys, label, or item list crosses an
+        // **escaped special** (`&`, `<`, `>`) or a **restored entity**
+        // (`&copy;`, `&#8942;`) is recognized: both are atomic pieces
+        // `build_match_string` gives *real bytes* to — the very bytes the
+        // string replacer's own escaped haystack carries there — and every
+        // value a `Ui` node holds is read out of that match string and emitted
+        // verbatim by `render_keyboard`/`render_button`/`render_menu`. So the
+        // fold reproduces the string pipeline's output byte-for-byte, which is
+        // what these fixtures pin. (This closes the boundary the
+        // `a_menu_over_a_special_character_is_a_documented_divergence` and
+        // `a_kbd_macro_over_a_special_character_is_a_documented_divergence`
+        // tests used to pin, per their own "fold this into a parity corpus"
+        // convention.)
+        let parser = experimental_parser();
+        let renderer = HtmlSubstitutionRenderer {};
 
-            assert!(
-                nodes.iter().all(|n| !matches!(n, InlineNode::Ui(_))),
-                "a menu crossing a non-caret special must be left unrecognized: {nodes:?}"
+        let fixtures = [
+            // Keyboard keys crossing each escaped special, alone and in a
+            // sequence.
+            "kbd:[Ctrl&C]",
+            "kbd:[a<b]",
+            "kbd:[a>b]",
+            "kbd:[Ctrl+a&b]",
+            "kbd:[a&b,c<d]",
+            // A button label crossing one, and one crossing two.
+            "btn:[Save & Close]",
+            "btn:[a<b>c]",
+            // A menu *name* crossing a special the pattern admits, including
+            // the `>` that is not an item-list delimiter.
+            "menu:F&le[Save]",
+            "menu:a>b[Save]",
+            "menu:A&B[]",
+            // A menu *item list* crossing one, beside and instead of the
+            // submenu caret the family already admitted.
+            "menu:File[A & B]",
+            "menu:File[Save & Exit > Now]",
+            "menu:File[Save > A & B]",
+            // Restored entities, the second recoverable piece: a key, a
+            // label, a menu name, and an item.
+            "kbd:[Ctrl&copy;C]",
+            "btn:[Save &copy; Close]",
+            "menu:&#8942;[More Tools, Extensions]",
+            "menu:F&copy;le[Save]",
+            "menu:File[Save &copy; Exit]",
+            "menu:File[Save As&#8230;]",
+            // A match crossing *both* kinds of recoverable piece at once.
+            "kbd:[a&b&copy;c]",
+            "menu:File[A & B &copy; C]",
+            // In flow, doubled, and beside a sibling macro family.
+            "press kbd:[Ctrl&C] to copy",
+            "kbd:[a&b] then kbd:[c&d]",
+            "menu:File[A & B] and btn:[Go &copy; Now]",
+            "kbd:[a&b] then image:x.png[X]",
+            // Inside a rendered span (the span encloses the macro rather than
+            // crossing it, so the gate is satisfied at the span's own level).
+            "*press kbd:[Ctrl&C]*",
+            "_menu:File[A & B]_",
+            // Escaped: the backslash is dropped and the rest stays literal,
+            // entity and all.
+            "\\kbd:[Ctrl&C]",
+            "\\menu:File[A & B]",
+            "\\btn:[Save &copy; Close]",
+            // Beside — rather than crossing — a special.
+            "a & kbd:[Enter] b",
+        ];
+
+        for fixture in fixtures {
+            let folded = crate::content::inline_builder::fold_html(
+                &build(Span::new(fixture), &parser, None),
+                &renderer,
+                &parser,
             );
 
-            // The string pipeline, by contrast, *does* build a menu here — the
-            // divergence this test documents.
-            assert!(
-                golden_macros_with(source, &experimental_parser()).contains(r#"class="menu"#),
-                "expected the golden pipeline to build a menu for {source:?}"
+            assert_eq!(
+                folded,
+                golden_macros_with(fixture, &parser),
+                "fold diverged from the string pipeline for {fixture:?}"
             );
         }
     }
 
     #[test]
-    fn a_kbd_macro_over_a_special_character_is_a_documented_divergence() {
-        // A `kbd:` whose bracket content contains a special character (`<`) is
-        // matched by the string pipeline over the *escaped* text (`kbd:[a&lt;b]`),
-        // but a self-describing node cannot carry that escaped text as an `'src`
-        // slice, so the single-pass builder leaves the macro *unrecognized* here
-        // (deferred to a later increment), exactly as the image increment defers
-        // a macro over a special. Unlike a menu's own submenu caret, a keyboard
-        // macro's specials are part of a key the node *does* slice, so there is
-        // nothing here to relax.
-        let nodes = build_ui(Span::new("kbd:[a<b]"));
+    fn a_kbd_macro_crossing_a_recoverable_piece_keeps_the_substituted_bytes() {
+        // The structural counterpart of the parity corpus above: a `Ui` node's
+        // values are *already-substituted* text (the contract an `IndexTerm`'s
+        // `terms` already uses), because that is what `render_keyboard` and
+        // friends receive from the string pipeline and emit verbatim. So a key
+        // crossing an escaped special carries the entity, not the source's own
+        // `&` — while the node's `location` still covers the macro in *source*
+        // terms (the entity is one byte there, five in the match string).
+        let nodes = build_ui(Span::new("kbd:[Ctrl&C]"));
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ui(_))),
-            "a kbd macro crossing an escaped special must be left unrecognized: {nodes:?}"
-        );
+        assert_eq!(nodes.len(), 1, "{nodes:?}");
+        let ui = assert_ui(&nodes[0]);
 
-        // The string pipeline, by contrast, *does* build a keyboard macro here.
-        assert!(golden_macros_with("kbd:[a<b]", &experimental_parser()).contains("<kbd>"));
+        match &ui.kind {
+            UiKind::Keyboard(keys) => assert_eq!(keys, &[CowStr::from("Ctrl&amp;C")]),
+
+            other => panic!("expected Keyboard, got {other:?}"),
+        }
+
+        assert_eq!(ui.location.data(), "kbd:[Ctrl&C]");
+        assert_eq!(ui.location.line(), 1);
+        assert_eq!(ui.location.col(), 1);
+    }
+
+    #[test]
+    fn a_menu_name_crossing_a_restored_entity_keeps_the_entity_bytes() {
+        // The menu name is the one value this family used to slice from
+        // `'src` (through `text_slice`). When it crosses a recoverable atomic
+        // piece — here a restored entity, which `text_slice` declines because
+        // it cannot slice one — the name comes from the match string instead,
+        // in the same already-substituted form the string replacer's own
+        // params carry. The item list, split from that same string, is
+        // unaffected.
+        let nodes = build_ui(Span::new("menu:&#8942;[More Tools, Extensions]"));
+
+        assert_eq!(nodes.len(), 1, "{nodes:?}");
+        let ui = assert_ui(&nodes[0]);
+
+        match &ui.kind {
+            UiKind::Menu {
+                menu,
+                submenus,
+                item,
+            } => {
+                assert_eq!(menu.as_ref(), "&#8942;");
+                assert_eq!(submenus, &[CowStr::from("More Tools")]);
+                assert_eq!(item.as_deref(), Some("Extensions"));
+            }
+
+            other => panic!("expected Menu, got {other:?}"),
+        }
+
+        assert_eq!(ui.location.data(), "menu:&#8942;[More Tools, Extensions]");
+    }
+
+    #[test]
+    fn a_ui_macro_crossing_an_opaque_piece_is_a_documented_divergence() {
+        // The one boundary this family keeps, and the same one every other
+        // macro family keeps: a match crossing an **opaque** piece — a
+        // rendered span, an already-recognized macro node, a character
+        // replacement — is left unrecognized. `build_match_string` stands each
+        // in as a single placeholder where the string pipeline's own haystack
+        // holds the markup or entity it will fold to, so a value read out of
+        // the match string would not be the replacer's, and reading the markup
+        // would mean folding while building the tree (which this module never
+        // does).
+        for source in [
+            // A rendered span inside a keyboard, button, and menu macro.
+            "kbd:[*a*]",
+            "btn:[a `b` c]",
+            "menu:File[*S* > As]",
+            // A character replacement — an atomic piece with no bytes of its
+            // own in the match string.
+            "kbd:[a(C)b]",
+            "menu:File[Save (C) Exit]",
+        ] {
+            let nodes = build_ui(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Ui(_))),
+                "a UI macro crossing an opaque piece must be left unrecognized: {nodes:?}"
+            );
+
+            // The string pipeline, by contrast, *does* build a UI macro here —
+            // the divergence this test documents. (If a later increment lifts
+            // it, fold these fixtures into the parity corpus above.)
+            let golden = golden_macros_with(source, &experimental_parser());
+
+            assert!(
+                golden.contains("<kbd>")
+                    || golden.contains(r#"class="button"#)
+                    || golden.contains(r#"class="menu"#),
+                "expected the golden pipeline to build a UI macro for {source:?}"
+            );
+        }
     }
 
     /// A parser with `experimental` plus the attributes the
@@ -891,33 +987,46 @@ mod tests {
         // `an_anchor_is_recognized_when_the_whole_seed_is_synthesized`.
         use crate::content::inline_builder::build_from_value;
 
-        let filtered = "press kbd:[Ctrl+T]\nor menu:View[Zoom > Reset]";
-        let source = "  press kbd:[Ctrl+T]\n  or menu:View[Zoom > Reset]";
-
         let parser = experimental_parser();
-        let nodes = build_from_value(
-            CowStr::from(filtered.to_string()),
-            Span::new(source),
-            &parser,
-            None,
-        );
 
-        let ui_nodes = nodes
-            .iter()
-            .filter(|n| matches!(n, InlineNode::Ui(_)))
-            .count();
-
-        assert_eq!(ui_nodes, 2, "expected both UI macros: {nodes:?}");
-
-        assert_eq!(
-            crate::content::inline_builder::fold_html(
-                &nodes,
-                &HtmlSubstitutionRenderer {},
-                &parser
+        for (filtered, source) in [
+            (
+                "press kbd:[Ctrl+T]\nor menu:View[Zoom > Reset]",
+                "  press kbd:[Ctrl+T]\n  or menu:View[Zoom > Reset]",
             ),
-            golden_normal(filtered, &parser),
-            "fold diverged from the string pipeline for the synthesized seed"
-        );
+            // The two recoverable pieces reached through a synthesized seed:
+            // a key crossing an escaped special and a menu name crossing a
+            // restored entity, neither of which has an `'src` slice of its own
+            // here — both values still come from the match string.
+            (
+                "press kbd:[Ctrl&C]\nor menu:&#8942;[Zoom > Reset]",
+                "  press kbd:[Ctrl&C]\n  or menu:&#8942;[Zoom > Reset]",
+            ),
+        ] {
+            let nodes = build_from_value(
+                CowStr::from(filtered.to_string()),
+                Span::new(source),
+                &parser,
+                None,
+            );
+
+            let ui_nodes = nodes
+                .iter()
+                .filter(|n| matches!(n, InlineNode::Ui(_)))
+                .count();
+
+            assert_eq!(ui_nodes, 2, "expected both UI macros: {nodes:?}");
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    &nodes,
+                    &HtmlSubstitutionRenderer {},
+                    &parser
+                ),
+                golden_normal(filtered, &parser),
+                "fold diverged from the string pipeline for {filtered:?}"
+            );
+        }
     }
 
     #[test]
@@ -944,6 +1053,47 @@ mod tests {
         assert!(
             inlines.iter().any(|n| matches!(n, InlineNode::Ui(_))),
             "expected a Ui node in the block's tree: {inlines:?}"
+        );
+
+        assert_eq!(
+            crate::content::inline_builder::fold_html(
+                inlines,
+                &HtmlSubstitutionRenderer {},
+                &Parser::default()
+            ),
+            rendered,
+            "fold diverged from the rendered string for {inlines:?}"
+        );
+    }
+
+    #[test]
+    fn a_real_documents_ui_macro_crossing_an_entity_reaches_its_tree() {
+        // End-to-end, through the real parse path, for the piece class this
+        // increment admits: a keyboard macro whose key crosses an escaped
+        // special and a menu whose name crosses a restored entity. The
+        // rendered string and the fold of the block's own tree agree, and the
+        // tree carries recognized nodes rather than the literal text it used
+        // to.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = Parser::default().with_inline_tree(true).parse(
+            ":experimental:\n\nPress kbd:[Ctrl&C] then menu:&#8942;[More Tools, Extensions].",
+        );
+
+        let blocks: Vec<_> = doc.descendant_blocks().collect();
+        let rendered = blocks[0].rendered_html_content().unwrap();
+        let inlines = blocks[0].inlines().unwrap();
+
+        assert!(rendered.contains("Ctrl&amp;C"), "rendered: {rendered}");
+        assert!(rendered.contains("&#8942;"), "rendered: {rendered}");
+
+        assert_eq!(
+            inlines
+                .iter()
+                .filter(|n| matches!(n, InlineNode::Ui(_)))
+                .count(),
+            2,
+            "expected both Ui nodes in the block's tree: {inlines:?}"
         );
 
         assert_eq!(
