@@ -113,8 +113,9 @@ use crate::{Parser, Span, inlines::InlineNode, strings::CowStr};
 /// masked passthrough — is admitted where a family carries it *structurally*
 /// rather than reading its bytes: a **display or reference text** built with
 /// [`macro_text_children`] keeps the piece's own node as a child (see
-/// `xref::find_xref_matches` and `links::find_link_macro_matches`, the two
-/// families to have taken that lift), the way a footnote's content always has.
+/// `xref::find_xref_matches`, `links::find_link_macro_matches`, and
+/// `links::build_inline_link_node`, the three reference-bearing families to
+/// have taken that lift), the way a footnote's content always has.
 /// Every value a family *computes* — a target, an attribute list, a display
 /// text baked into one `Text` — still defers on it, since the markup an opaque
 /// piece folds to exists only at fold time.
@@ -409,7 +410,8 @@ pub(super) fn rebuild_macro_level<'src>(
 /// piece's whole node into the children, so the text carries the construct
 /// itself rather than the markup it will fold to — the recovery a footnote's
 /// own content has always used. Only a caller that admits such a piece reaches
-/// this (see `xref::find_xref_matches` and `links::find_link_macro_matches`);
+/// this (see `xref::find_xref_matches`, `links::find_link_macro_matches`, and
+/// `links::build_inline_link_node`);
 /// the callers whose gate is still
 /// [`range_has_no_opaque_piece`](image::range_has_no_opaque_piece) throughout
 /// never hand one in.

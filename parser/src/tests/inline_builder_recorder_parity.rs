@@ -1022,4 +1022,10 @@ fn shapes_match_across_combined_constructs() {
     // The `link:`/`mailto:` macro's own version of that lift, the second family
     // to take it — comparable here for the same reason.
     assert_shapes("Read link:index.html[the *bold* docs] or mailto:a@example.org[write _now_].");
+
+    // And the auto-link / formal-URL family's, the third — in the plain
+    // spelling and in the ANGLE branch's `[…]` alternative, which keeps its
+    // `&lt;`.
+    assert_shapes("Visit https://example.org[the *bold* docs] now.");
+    assert_shapes("Visit <https://example.org[an _angle_ label] now.");
 }
