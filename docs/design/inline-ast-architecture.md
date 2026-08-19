@@ -3313,6 +3313,69 @@ Each phase is a reviewable unit with a clear exit gate.
   real golden fixture `{app-name}` under `subs=attributes+` is gone, and no new divergence appeared.
   As with every prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (a **footnote** inside an expanded attribute value — the last family to
+  make that lift, and the only one that was building a **wrong node** rather than deferring):* the
+  "a macro inside an expanded attribute value" map item was closed family by family — anchors,
+  the bare e-mail address, the UI and index-term families, cross-references, and finally images and
+  links — but the list those increments worked through was the list of families that *defer* inside
+  a [`synthesized`](../../parser/src/content/inline_builder/quotes.rs) run, and the **footnote**
+  family was never on it. It does not defer: it has no gate at all, so it recognized such a macro
+  all along and read its **id** through
+  [`source_slice`](../../parser/src/content/inline_builder/quotes.rs), whose only answer for a
+  synthesized range is §4.4's coarse enclosing span. For the AsciiDoc docs' own
+  *externalized-footnote* idiom (`:fn-disclaimer: footnote:disclaimer[…]`, then `{fn-disclaimer}`)
+  that span is the attribute **reference**, so the node's id came out as `{fn-disclaimer}` — a wrong
+  node, of exactly the kind #1177 fixed for an anchor's own id, and a *worse* one here because a
+  footnote's id is the key the family's one required side effect registers and looks a number up
+  by: every later reference to the real id renumbered, and the rendered
+  `id="_footnote_{fn-disclaimer}"` attribute carried the reference too. Three real golden fixtures
+  exercised it (`externalized_footnote` and `externalized_footnote_with_text_formatting` in
+  `tests/asciidoc_lang/macros/footnote.rs`, and
+  `should_not_register_footnote_with_id_and_text_if_id_already_registered` in
+  `tests/asciidoctor_rb/substitutions_test.rs`), which makes this a **blocker** for the
+  authoritative fold like `hardbreaks`, the unescaped-specials classification, the
+  `attribute-missing` drop modes, `<<id,>>`'s present-but-empty text, and an order that escapes
+  after expanding before it — not an unclaimed form.
+
+  The fix is the one every sibling family already made, reached through the value rather than
+  through a gate: a new
+  [`footnote_id_text`](../../parser/src/content/inline_builder/footnotes.rs) recovers the id with
+  [`text_slice`](../../parser/src/content/inline_builder/quotes.rs) — borrowing `'src` for a
+  verbatim id (§4.5), the expansion's own exact bytes for a synthesized one — falling back to the
+  level's **match string** where `text_slice` declines, which is what the string replacer itself
+  reads (`caps[2]`, or the first half of a `footnoteref:` bracket, out of its own escaped haystack)
+  and precisely the string it registers under. Only the node's `location` keeps §4.4's coarse
+  fallback. The `footnote:` form needs **no gate** for this, on the same structural argument the
+  bare-e-mail family makes for its address: its id is `[\w-]+`, which admits neither an entity's
+  `&`/`;` nor the `SPAN_PLACEHOLDER` an opaque piece contributes (category `Co`, which `\w` does
+  not match), so such a range can only ever overlap `Text` pieces. The deprecated `footnoteref:`
+  form's id is *whatever precedes the first comma* in an arbitrary bracket, so it can cross both
+  recoverable pieces — where the match-string fallback gives it exactly the already-substituted id
+  the replacer splits out (`footnoteref:[a&b,…]` registers `a&amp;b`) — and an **opaque** one,
+  which is the one shape it now rejects with
+  [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs), leaving
+  the macro literal rather than building an id no pipeline would produce (its own divergence test).
+
+  A differential corpus drives the expanded-value forms — the whole macro arriving from an
+  expansion (defining, then referencing, and the anonymous spelling), an id expanded whole or in
+  part, the deprecated form's own id half, and content from an expansion — through the real, public
+  `SubstitutionGroup::Normal::apply` as the golden, since these need the `AttributeReferences` step
+  the family-scoped `golden_macros` helper deliberately omits, each fixture with its own pair of
+  independent parsers (the two-independent-parsers discipline this family established). Structural
+  tests pin the exact-id/coarse-location split and the match-string-read `footnoteref:` id; the
+  wholly-synthesized **seed** path
+  ([`build_from_value`](../../parser/src/content/inline_builder/mod.rs), a filtered multi-line
+  block) gains an id-carrying footnote, which used to take the whole seed as its id; a
+  whole-document test drives the externalized-footnote shape end to end through the real parse
+  path; and fixtures are added to the whole-pipeline combined-constructs corpus, the
+  synthesized-seed sweep, and the structural recorder cross-check — where the recorder side, which
+  has always recovered these from the string pipeline's own render params, can now be compared
+  *structurally* against a builder that reads the same id. Re-running the corpus-wide fold-parity
+  audit (tree building forced on for every parse in the suite) confirms the divergence set strictly
+  **shrank**: the three real golden sources above are gone and no new one appeared. What survives it
+  is now only the three `Attrlist<'src>` captures and the `subs=quotes,specialcharacters` policy
+  item. As with every prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -3729,6 +3792,22 @@ Each phase is a reviewable unit with a clear exit gate.
        markup-producing step (`subs=quotes,specialcharacters`) whose emitted tags the escaping step
        acts on — needs a policy of its own rather than another classification, and stays deferred
        with its own divergence test.
+     - ✅ **prep (a footnote inside an expanded value).** The last family to make that lift, and the
+       only one that was not deferring but building a **wrong node**: the footnote family has no
+       gate, so it always recognized such a macro and read its id through `source_slice`, whose
+       coarse §4.4 fallback for a synthesized range is the attribute *reference* itself
+       (`{fn-disclaimer}`) — the id being the key its one required side effect registers and looks
+       a number up by, so every later reference renumbered. A **blocker**, like the five before it,
+       since three real golden fixtures exercise the externalized-footnote idiom. A new
+       [`footnote_id_text`](../../parser/src/content/inline_builder/footnotes.rs) recovers the id
+       with [`text_slice`](../../parser/src/content/inline_builder/quotes.rs), falling back to the
+       level's match string — what the string replacer itself reads and registers — with only the
+       node's `location` keeping the coarse span. The `footnote:` form needs no gate (its `[\w-]+`
+       id admits neither an entity's `&`/`;` nor the `SPAN_PLACEHOLDER`, the bare-e-mail family's
+       own structural argument); the deprecated `footnoteref:` form's arbitrary id half takes
+       [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs), so a
+       rendered span in it defers with its own divergence test. See the step's own "landed as" note
+       above.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
