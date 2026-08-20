@@ -998,11 +998,10 @@ fn shapes_match_across_combined_constructs() {
     );
 
     // Links and images spliced in by attribute references — the last two
-    // families to make that lift. What the link family still defers (an
-    // attribute-list-bearing display text, and a wholly expanded `link:`
-    // macro) is deliberately absent here: the recorder recognizes those, so a
-    // fixture carrying one would compare a node against literal text rather
-    // than two constructions of the same node.
+    // families to make that lift. What the link family still defers (a wholly
+    // expanded `link:` macro) is deliberately absent here: the recorder
+    // recognizes it, so a fixture carrying one would compare a node against
+    // literal text rather than two constructions of the same node.
     let with_link_attributes = || {
         Parser::default()
             .with_intrinsic_attribute("url", "index.html", ModificationContext::Anywhere)
@@ -1029,6 +1028,20 @@ fn shapes_match_across_combined_constructs() {
     // constructions carry the same attributes and can be compared.
     assert_shapes_with(
         "See image:{logo}[{label},200] and image:x.png[a < b,role=hl] here.",
+        with_link_attributes,
+    );
+
+    // The two link-family display-text attribute lists, likewise with no
+    // `'src` slice of their own. Both constructions now read the same bytes
+    // (the builder its match string, the recorder the string replacer's own
+    // `link_text_for_attrlist`), so the two are comparable here for the first
+    // time. The fixture crosses an *expansion* only: a display text crossing
+    // an escaped special is a leaf-boundary artifact rather than a shape
+    // difference — the recorder recovers a `CharRef` by splitting the rendered
+    // text where the builder's parsed value is one run — which is the same
+    // one-sided richness the sweep documents elsewhere.
+    assert_shapes_with(
+        "Read link:{url}[{label},role=hl] or https://{host}[{label},window=_blank] here.",
         with_link_attributes,
     );
 

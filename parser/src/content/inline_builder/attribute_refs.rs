@@ -1398,25 +1398,23 @@ mod tests {
     }
 
     #[test]
-    fn an_attrlist_bearing_display_text_inside_an_expanded_value_is_a_documented_divergence() {
+    fn an_attrlist_bearing_display_text_inside_an_expanded_value_is_recognized() {
         // Every macro family is now recognized inside a spliced value (see
-        // this module's own doc comment, and each family's own parity corpus)
-        // — an image macro's own attribute list included, since a bracket with
-        // no `'src` slice is parsed from the match string and owned off it
-        // (`macros/image.rs`). What still defers is a **display text** that
-        // carries its own attribute list, which the link families must split
-        // apart before they can build their node.
+        // this module's own doc comment, and each family's own parity corpus),
+        // and so is every attribute list one of them carries: a capture with no
+        // `'src` slice is parsed from the level's match string — the same bytes
+        // the string replacer parses — and owned off it, for an image's own
+        // bracket (`macros/image.rs`) and for a link's display text
+        // (`macros/links.rs`) alike.
         let parser = parser_with_attribute("label", "Docs");
         let source = "see link:index.html[{label},role=hl] now";
         let nodes = build(Span::new(source), &parser, None);
 
         assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an attrlist-bearing display text inside a spliced value must not yet be \
-             recognized: {nodes:?}"
+            nodes.iter().any(|n| matches!(n, InlineNode::Ref(_))),
+            "an attrlist-bearing display text inside a spliced value should be recognized: \
+             {nodes:?}"
         );
-
-        assert!(golden_attributes_with(source, &parser).contains("<a href"));
     }
 
     #[test]

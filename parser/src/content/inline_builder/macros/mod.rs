@@ -14,8 +14,13 @@ use links::{email_level, inline_link_level, link_macro_level};
 use ui::{kbd_btn_macros_level, menu_macros_level};
 use xref::xref_macros_level;
 
-use super::quotes::{Piece, emit_range, source_slice, text_slice};
-use crate::{Parser, Span, inlines::InlineNode, strings::CowStr};
+use super::quotes::{Piece, emit_range, source_slice, special_entity, text_slice};
+use crate::{
+    Parser, Span,
+    content::restored_entity_pattern,
+    inlines::{CharRef, InlineNode},
+    strings::CowStr,
+};
 
 /// The macros substitution, as a node transducer.
 ///
@@ -400,7 +405,7 @@ pub(super) fn rebuild_macro_level<'src>(
 /// **restored entity** (`xref:sec[a &copy; b]`) — or, degenerately, one
 /// [`text_slice`] declines to recover — instead becomes
 /// **structured children**, recovered with [`emit_range`]: the
-/// leaf is its own [`CharRef`](crate::inlines::CharRef) child that folds
+/// leaf is its own [`CharRef`] child that folds
 /// back to the same bytes the string replacer's text carries, where one `Text`
 /// child holding the match string's `&lt;` (or `&copy;`) would be escaped a
 /// second time by
@@ -480,6 +485,124 @@ pub(super) fn macro_text_children<'src>(
     }
 }
 
+/// Rebuilds an **already-escaped computed value** — a value a family read off
+/// the level's own match string rather than out of the tree, here a reference-
+/// or link-family attribute list's positional value — as the nodes that fold
+/// back to exactly those bytes, all sharing `location` (the value has no `'src`
+/// slice of its own, so design §4.4's coarse fallback is the only honest span
+/// for any part of it).
+///
+/// The rebuild is design §3.4's trichotomy applied to a string:
+/// [`build_match_string`](super::quotes::build_match_string) gives an escaped
+/// special its canonical entity and a *restored* entity its own bytes, while a
+/// [`Text`](InlineNode::Text) node holds **logical** text the fold escapes. So
+/// the two classes come apart here — the special becomes the character it
+/// stands for (inside a `Text` the fold escapes back), and the restored entity
+/// becomes its own [`CharRef`](InlineNode::CharRef)`::Entity` leaf (which the
+/// fold emits verbatim) — where one `Text` holding both would escape the
+/// entity's `&` a second time.
+///
+/// The scan is left to right, one `&` at a time, precisely because the two
+/// classes can nest: `&amp;copy;` is a literal `&` followed by the letters
+/// `copy;`, **not** a `&copy;` entity, and only consuming the `&amp;` first
+/// tells them apart. That is the same one-level unwind the fold performs in
+/// reverse.
+///
+/// Splitting on the three specials is exact rather than heuristic: inside such
+/// a value an `&` can only ever open one of these two classes or stand alone —
+/// a verbatim run holds no special at all (the `SpecialCharacters` step split
+/// every one into its own leaf) and a synthesized run's own specials are
+/// [`Raw`](InlineNode::Raw) leaves, which are opaque and so rejected by the
+/// caller's gate. Under an effective order that never escapes (§3.4.1) a
+/// literal `&` *does* survive into a verbatim run, and is left exactly as it
+/// is here, since neither class matches it.
+///
+/// That last case is also this helper's one documented divergence, shared by
+/// every family that computes an attribute-list value: an attribute list is
+/// parsed under any order that runs `Macros`, but a value read off the match
+/// string is *assumed* escaped, so under an order that never escapes an
+/// author's own literal `&lt;` in a **non**-verbatim text is unwound one level
+/// too far. Deciding it the way §3.4.1 decides every other classification — by
+/// where the escaping step actually sits — needs the effective order threaded
+/// down to each family, which none has today. See
+/// `an_escaped_computed_value_under_an_order_that_never_escapes_is_a_documented_divergence`.
+pub(super) fn escaped_value_children<'src>(
+    text: &str,
+    location: Span<'src>,
+) -> Vec<InlineNode<'src>> {
+    let mut children: Vec<InlineNode<'src>> = Vec::new();
+    let mut pending = String::new();
+    let mut rest = text;
+
+    while let Some(at) = rest.find('&') {
+        let (before, from_amp) = rest.split_at(at);
+
+        // Everything before this `&` is ordinary logical text.
+        pending.push_str(before);
+
+        let consumed = if let Some((ch, len)) = special_of(from_amp) {
+            // An escaped special: the character it stands for, which the fold
+            // escapes back to these very bytes.
+            pending.push(ch);
+            len
+        } else if let Some(entity) = restored_entity_pattern().find(from_amp) {
+            // A restored entity: its own leaf, emitted verbatim by the fold.
+            if !pending.is_empty() {
+                children.push(InlineNode::Text {
+                    value: CowStr::from(std::mem::take(&mut pending)),
+                    location,
+                });
+            }
+
+            children.push(InlineNode::CharRef {
+                value: CharRef::Entity(CowStr::from(entity.as_str().to_string())),
+                location,
+            });
+
+            // The pattern is `^`-anchored, so the match ends where the entity
+            // does.
+            entity.end()
+        } else {
+            // A bare `&` that opens neither class (an effective order that
+            // never escaped, §3.4.1): ordinary logical text like any other
+            // byte.
+            pending.push('&');
+            '&'.len_utf8()
+        };
+
+        rest = from_amp.get(consumed..).unwrap_or_default();
+    }
+
+    pending.push_str(rest);
+
+    if !pending.is_empty() {
+        children.push(InlineNode::Text {
+            value: CowStr::from(pending),
+            location,
+        });
+    }
+
+    children
+}
+
+/// The character an escaped special's canonical entity at the start of `rest`
+/// stands for, with the entity's own length, or `None` when `rest` does not
+/// open one.
+fn special_of(rest: &str) -> Option<(char, usize)> {
+    // The same three characters `SpecialCharacters` splits into their own
+    // leaves, read through `build_match_string`'s own mapping rather than a
+    // second copy of it.
+    for ch in ['<', '>', '&'] {
+        let entity = special_entity(ch);
+
+        if rest.starts_with(entity) {
+            return Some((ch, entity.len()));
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing)]
@@ -490,7 +613,7 @@ mod tests {
     use crate::{
         Parser, Span,
         content::{
-            Content, SubstitutionGroup,
+            Content, SubstitutionGroup, SubstitutionStep,
             inline_builder::{build, build_for_group, fold_html},
         },
         inlines::{InlineNode, Ref, RefVariant},
@@ -539,6 +662,69 @@ mod tests {
 
             assert_eq!(folded, content.rendered_html());
             assert!(!folded.contains('\\'));
+        }
+    }
+
+    #[test]
+    fn an_escaped_computed_value_under_an_order_that_never_escapes_is_a_documented_divergence() {
+        // [`escaped_value_children`] reads its input as the *escaped* text a
+        // family took off the level's match string, so it unwinds one level of
+        // §3.4's trichotomy: `&lt;` becomes the logical `<` a `Text` node
+        // holds, which the fold escapes back. That is exact under every
+        // effective order that runs `SpecialCharacters` — which is every order
+        // that can produce an escaped special in the first place — but the
+        // value it rebuilds is an attribute list's positional value, and an
+        // attribute list is parsed under any order that runs `Macros`.
+        //
+        // So under an order that never escapes, a display text whose range is
+        // *not* verbatim (here because an attribute expansion splices into it)
+        // and that carries an author's own literal `&lt;` is unwound one level
+        // too far: the tree folds it as `<` where the string pipeline, which
+        // escaped nothing, emits `&lt;`. Deciding this the way §3.4.1 decides
+        // every other classification — by where the escaping step actually
+        // sits in the group's effective order — needs that order threaded down
+        // to each macro family, which no family has today; until then all
+        // three families that compute an attribute-list value share the
+        // divergence.
+        //
+        // If that thread is ever added, fold these fixtures into the
+        // group-parity corpus in this module's `mod.rs`.
+        let parser = Parser::default().with_intrinsic_attribute(
+            "product",
+            "Widget",
+            ModificationContext::Anywhere,
+        );
+
+        for source in [
+            "xref:sec[{product} &lt; y,role=hl] here",
+            "link:index.html[{product} &lt; y,role=hl] here",
+            "https://example.org[{product} &lt; y,role=hl] here",
+        ] {
+            let mut content = Content::from(Span::new(source));
+            let group = SubstitutionGroup::Custom(vec![
+                SubstitutionStep::AttributeReferences,
+                SubstitutionStep::Macros,
+            ]);
+
+            group.apply(&mut content, &parser, None);
+
+            let nodes = build_for_group(
+                &group,
+                CowStr::from(source),
+                Span::new(source),
+                &parser,
+                None,
+            );
+
+            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser);
+
+            assert_ne!(
+                folded,
+                content.rendered_html(),
+                "expected the documented divergence to still reproduce for {source:?}"
+            );
+
+            assert!(folded.contains("Widget < y"), "{folded:?}");
         }
     }
 

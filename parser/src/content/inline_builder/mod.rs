@@ -54,19 +54,16 @@
 //!   an expanded value ((C) → ©, `--`, …) is recognized, a follow-up increment
 //!   having taught [`build_match_string`](quotes::build_match_string) to look
 //!   inside a [`synthesized`](quotes::Piece::synthesized) run instead of
-//!   treating it as opaque; a **macro** needing an honest `'src` slice for a
-//!   value that must ride on its node as one — now only a **link's**
-//!   attribute-list-bearing display text, whose residual text the same slice is
-//!   split out of — still defers when that slice sits inside one, since a
-//!   synthesized run's bytes have no source counterpart to slice for a type
-//!   that requires a real `Span` (see
-//!   [`range_is_verbatim`](macros::image::range_is_verbatim)). An [`Attrlist`]
-//!   that *is* the whole capture — an image's bracket — needs no such slice: it
-//!   is parsed from the level's own match string (the bytes the string replacer
-//!   parses too) and [`into_owned`](Attrlist::into_owned)ed off it. And a macro
+//!   treating it as opaque; and no **macro** family defers there any more. An
+//!   [`Attrlist`] a node carries needs no `'src` slice of its own — an image's
+//!   bracket and both link families' attribute-list-bearing display texts are
+//!   parsed from the level's own match string (the bytes the string replacer
+//!   parses too) and [`into_owned`](Attrlist::into_owned)ed off it — so
+//!   [`range_is_verbatim`](macros::image::range_is_verbatim) survives only
+//!   where a *borrow* is still preferred, not as a boundary. And a macro
 //!   needing only its own *text* (no `Span`-typed field) — an anchor's id, a
 //!   bare e-mail address, a UI macro's keys/label/menu path, an index term's
-//!   shown text, or a cross-reference's target and reference text — can now be
+//!   shown text, or a cross-reference's target and reference text — is
 //!   recovered exactly via [`text_slice`](quotes::text_slice) or straight out
 //!   of the match string instead (see
 //!   [`range_is_verbatim_or_synthesized`](macros::image::range_is_verbatim_or_synthesized),
@@ -1138,12 +1135,12 @@ mod tests {
         // Links and images spliced in by attribute references — the last two
         // families to make that lift, and the two that hold a real
         // `Attrlist<'src>`. Their targets and display texts come from the
-        // match string like every other family's values; what still defers is
-        // a link's attribute-list-bearing display text and a wholly expanded
-        // `link:` macro (each pinned by its own divergence test in
-        // `macros/links.rs`). An image's own attribute list no longer does:
-        // a bracket with no `'src` slice is parsed from the match string —
-        // the same bytes the string replacer parses — and owned off it.
+        // match string like every other family's values, and so now does
+        // every attribute list they carry: a capture with no `'src` slice is
+        // parsed from that same match string — the bytes the string replacer
+        // parses — and owned off it. What still defers is a wholly expanded
+        // `link:` macro (pinned by its own divergence test in
+        // `macros/links.rs`).
         let with_link_attributes = || {
             Parser::default()
                 .with_intrinsic_attribute("url", "index.html", ModificationContext::Anywhere)
@@ -1168,6 +1165,21 @@ mod tests {
         // escaped special, with the other families live around it.
         assert_parity_with(
             "See image:{logo}[{label},200] and image:x.png[a < b,role=hl] about *{product}*.",
+            with_link_attributes,
+        );
+
+        // The same for the two link-family display-text attribute lists —
+        // the `link:`/`mailto:` macro's and the formal URL's — each crossing
+        // an expansion or an escaped special, with the other families live
+        // around them.
+        assert_parity_with(
+            "Read link:{url}[{label},role=hl] or https://{host}[a < b,window=_blank] for \
+             *{product}*.",
+            with_link_attributes,
+        );
+
+        assert_parity_with(
+            "Write mailto:team@{host}[{label},Hello there] about image:{logo}[Logo] and (C).",
             with_link_attributes,
         );
 
@@ -1290,8 +1302,9 @@ mod tests {
             // A cross-reference in a wholly-synthesized seed, in both
             // spellings: nothing on a `Ref{Xref}` node is `Span`-typed, so its
             // target and reference text come from the match string (or
-            // `text_slice`) rather than an `'src` slice. The link and image
-            // families, which hold a real `Attrlist<'src>`, still defer — see
+            // `text_slice`) rather than an `'src` slice. The `link:`/`mailto:`
+            // macro, whose own literal marker must be verbatim, still
+            // defers — see
             // `a_macro_construct_is_deferred_when_the_whole_seed_is_synthesized`
             // below.
             (
@@ -1317,6 +1330,13 @@ mod tests {
             (
                 "  see image:sunset.jpg[Sunset,200] and\n  icon:home[2x,role=gold] here",
                 "see image:sunset.jpg[Sunset,200] and\nicon:home[2x,role=gold] here",
+            ),
+            // A formal URL link whose *display text* carries its own attribute
+            // list, which needs no `'src` slice either now: it is parsed from
+            // the match string and owned onto the seed's coarse span.
+            (
+                "  visit https://example.org[the site,role=hl]\n  now",
+                "visit https://example.org[the site,role=hl]\nnow",
             ),
         ];
 
@@ -1693,6 +1713,13 @@ mod tests {
                 // classification pass runs last, over a tree that already
                 // holds that owned list, and must leave it alone.
                 "image:x.png[{product} < y] here",
+                // The two link-family display-text attribute lists, likewise
+                // parsed from the match string and owned off it: under an
+                // order that never escapes, the value the parse returns holds
+                // the author's own `<` and must survive the classification
+                // pass unchanged.
+                "link:index.html[{product} < y,role=hl] here",
+                "https://example.org[{product} < y,role=hl] here",
                 "a footnote:[note < text] and a < b",
                 // A UI macro whose key crosses a bare `&`, which only an order
                 // *without* `specialcharacters` can present: the family reads
