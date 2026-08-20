@@ -1532,25 +1532,67 @@ mod tests {
     }
 
     #[test]
+    fn a_bibliography_label_crossing_a_character_replacement_is_recognized() {
+        // A label crossing a *typographic replacement* — a `(C)` the
+        // replacements step turned into a copyright sign, a smart apostrophe —
+        // is recognized, because `build_match_string` gives such a leaf the
+        // entity the built-in backend renders it as (`&#169;`, `&#8217;`),
+        // which is the very byte sequence the string pipeline's own haystack
+        // holds there; `text_slice` therefore recovers exactly the
+        // already-substituted label the string replacer registers and shows.
+        // Once a documented divergence (a replacement was one opaque
+        // placeholder, like a rendered span); the "third recoverable piece"
+        // increment lifts it for every family at once.
+        let parser = biblio_parser();
+
+        for (source, id, label) in [
+            ("[[[gof,(C) 1995]]] Gamma.", "gof", "&#169; 1995"),
+            ("[[[oreilly,O'Reilly]]] Hunt.", "oreilly", "O&#8217;Reilly"),
+        ] {
+            let nodes = build_with(Span::new(source), &parser);
+
+            let anchor = assert_anchor(&nodes[0]);
+            assert!(anchor.is_bibliography);
+            assert_eq!(anchor.id.as_ref(), id);
+
+            let folded = crate::content::inline_builder::fold_html(
+                &nodes,
+                &HtmlSubstitutionRenderer {},
+                &parser,
+            );
+
+            assert_eq!(folded, golden_passthroughs_with(source, &parser));
+
+            // The registered reference text is the already-substituted label,
+            // exactly as the string replacer registers it.
+            let side_effect_parser = biblio_parser();
+            apply_biblio_side_effects(&nodes, &side_effect_parser, Span::new(source));
+
+            let catalog = side_effect_parser.catalog();
+            let entry = catalog.get_ref(id).unwrap();
+            assert_eq!(
+                entry.reftext.as_deref(),
+                Some(format!("[{label}]").as_str())
+            );
+        }
+    }
+
+    #[test]
     fn a_bibliography_label_over_an_opaque_piece_is_a_documented_divergence() {
-        // A label crossing an opaque piece — a rendered span, a passthrough, or
-        // a character replacement, each a single placeholder in this level's
-        // match string rather than the markup/entity the string pipeline's
-        // haystack holds there — cannot be reconstructed as the
-        // already-substituted text the string replacer registers and shows, so
-        // the anchor is left unrecognized. The entry then keeps the shape it had
-        // before this increment (the inner `[[…]]` as an ordinary anchor), which
-        // is what diverges. This is exactly the boundary the index-term family's
-        // own visible term documents, and — for the character replacements —
-        // the same one every macro family already has at this point in the
-        // pipeline (a `(C)` or a smart apostrophe is atomic by macro time).
+        // A label crossing an opaque piece — a rendered span or a passthrough,
+        // each a single placeholder in this level's match string rather than
+        // the markup the string pipeline's haystack holds there — cannot be
+        // reconstructed as the already-substituted text the string replacer
+        // registers and shows, so the anchor is left unrecognized. The entry
+        // then keeps the shape it had before this increment (the inner `[[…]]`
+        // as an ordinary anchor), which is what diverges. This is exactly the
+        // boundary the index-term family's own visible term documents, and the
+        // one every macro family still has for a rendered span.
         let parser = biblio_parser();
 
         for source in [
             "[[[gof,*GoF*]]] Gamma.",
             "[[[gof,+++<b>GoF</b>+++]]] Gamma.",
-            "[[[gof,(C) 1995]]] Gamma.",
-            "[[[oreilly,O'Reilly]]] Hunt.",
         ] {
             let nodes = build_with(Span::new(source), &parser);
 

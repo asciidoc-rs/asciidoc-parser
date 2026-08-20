@@ -907,6 +907,12 @@ fn shapes_match_across_combined_constructs() {
     // the recorder reaches by re-reading the rendered anchor text).
     assert_shapes("See image:a&copy;b.png[Chart] and link:x.html[a &copy; b] today.");
 
+    // A *typographic replacement*, the third such piece: a target crossing
+    // one, and a display text crossing one (which the builder keeps as its own
+    // `CharRef::Replacement` child, the shape the recorder reaches by
+    // re-reading the rendered anchor text).
+    assert_shapes("See image:a(C)b.png[Chart] and link:x.html[a (C) b] today.");
+
     assert_shapes_with(
         "{counter:step}. Step one uses *{product}* and stem:[x+1].",
         with_product,

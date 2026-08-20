@@ -83,19 +83,20 @@ fn find_kbd_btn_matches<'src>(
         }
 
         // A match crossing an **opaque** piece — a rendered span, an
-        // earlier-recognized macro node, a masked passthrough, a character
-        // replacement — is left for a later increment: `build_match_string`
-        // stands each in as one placeholder where the string pipeline's own
-        // haystack holds the markup it will fold to, so the keys or label
-        // read out of the match string would not be the replacer's.
+        // earlier-recognized macro node, a masked passthrough — is left for a
+        // later increment: `build_match_string` stands each in as one
+        // placeholder where the string pipeline's own haystack holds the
+        // markup it will fold to, so the keys or label read out of the match
+        // string would not be the replacer's.
         //
         // Every *recoverable* piece is admitted: a
         // [`synthesized`](Piece::synthesized) run (an attribute expansion,
         // or — reached at a tree's root — a filtered multi-line block's own
-        // joined seed), an escaped special (`kbd:[Ctrl&C]`), and a restored
-        // entity (`kbd:[Ctrl&copy;C]`). This family never slices `'src` for a
-        // value at all — its keys and label come straight from the match
-        // string, which carries all three pieces' bytes exactly — so only the
+        // joined seed), an escaped special (`kbd:[Ctrl&C]`), a restored
+        // entity (`kbd:[Ctrl&copy;C]`), and a typographic replacement
+        // (`kbd:[a(C)b]`). This family never slices `'src` for a value at all
+        // — its keys and label come straight from the match string, which
+        // carries every one of those pieces' bytes exactly — so only the
         // node's `location` takes design §4.4's coarse fallback (see
         // [`build_kbd_btn_node`]). Nor can a boundary split such a leaf: the
         // match is delimited by `kbd:`/`btn:`, `[`, and `]`, and its keys by
@@ -183,8 +184,9 @@ fn build_kbd_btn_node<'src>(
 /// verbatim (see [`find_menu_matches`]). What is still deferred is a name or
 /// item text crossing an **opaque** piece — a rendered
 /// [`Styled`](crate::inlines::Styled) span, an earlier-recognized macro node,
-/// a masked passthrough, a character replacement — the one boundary every
-/// macro family keeps.
+/// a masked passthrough — the one boundary every macro family keeps. (A
+/// typographic replacement, `menu:File[Save (C) Exit]`, is admitted too, for
+/// the same reason a restored entity is: it carries its own bytes.)
 pub(super) fn menu_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -692,8 +694,9 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_for_ui_macros_crossing_a_recoverable_piece() {
         // A UI macro whose name, keys, label, or item list crosses an
-        // **escaped special** (`&`, `<`, `>`) or a **restored entity**
-        // (`&copy;`, `&#8942;`) is recognized: both are atomic pieces
+        // **escaped special** (`&`, `<`, `>`), a **restored entity**
+        // (`&copy;`, `&#8942;`), or a **typographic replacement** (`(C)`, a
+        // smart apostrophe) is recognized: all three are atomic pieces
         // `build_match_string` gives *real bytes* to — the very bytes the
         // string replacer's own escaped haystack carries there — and every
         // value a `Ui` node holds is read out of that match string and emitted
@@ -736,9 +739,21 @@ mod tests {
             "menu:F&copy;le[Save]",
             "menu:File[Save &copy; Exit]",
             "menu:File[Save As&#8230;]",
-            // A match crossing *both* kinds of recoverable piece at once.
+            // Typographic replacements, the third recoverable piece: a key,
+            // a label, a menu name, and an item, over both a `(C)`-style
+            // replacement and a smart apostrophe.
+            "kbd:[a(C)b]",
+            "btn:[Save (C) Close]",
+            "menu:File[Save (C) Exit]",
+            "menu:File[Save > A (C) B]",
+            "kbd:[O'Reilly]",
+            "btn:[O'Reilly]",
+            "menu:O'Reilly[Save]",
+            "menu:File[O'Reilly]",
+            // A match crossing every kind of recoverable piece at once.
             "kbd:[a&b&copy;c]",
             "menu:File[A & B &copy; C]",
+            "menu:File[A & B &copy; C (C) D]",
             // In flow, doubled, and beside a sibling macro family.
             "press kbd:[Ctrl&C] to copy",
             "kbd:[a&b] then kbd:[c&d]",
@@ -832,22 +847,17 @@ mod tests {
     fn a_ui_macro_crossing_an_opaque_piece_is_a_documented_divergence() {
         // The one boundary this family keeps, and the same one every other
         // macro family keeps: a match crossing an **opaque** piece — a
-        // rendered span, an already-recognized macro node, a character
-        // replacement — is left unrecognized. `build_match_string` stands each
-        // in as a single placeholder where the string pipeline's own haystack
-        // holds the markup or entity it will fold to, so a value read out of
-        // the match string would not be the replacer's, and reading the markup
-        // would mean folding while building the tree (which this module never
-        // does).
+        // rendered span, an already-recognized macro node — is left
+        // unrecognized. `build_match_string` stands each in as a single
+        // placeholder where the string pipeline's own haystack holds the
+        // markup it will fold to, so a value read out of the match string
+        // would not be the replacer's, and reading the markup would mean
+        // folding while building the tree (which this module never does).
         for source in [
             // A rendered span inside a keyboard, button, and menu macro.
             "kbd:[*a*]",
             "btn:[a `b` c]",
             "menu:File[*S* > As]",
-            // A character replacement — an atomic piece with no bytes of its
-            // own in the match string.
-            "kbd:[a(C)b]",
-            "menu:File[Save (C) Exit]",
         ] {
             let nodes = build_ui(Span::new(source));
 
@@ -994,13 +1004,18 @@ mod tests {
                 "press kbd:[Ctrl+T]\nor menu:View[Zoom > Reset]",
                 "  press kbd:[Ctrl+T]\n  or menu:View[Zoom > Reset]",
             ),
-            // The two recoverable pieces reached through a synthesized seed:
-            // a key crossing an escaped special and a menu name crossing a
-            // restored entity, neither of which has an `'src` slice of its own
-            // here — both values still come from the match string.
+            // The recoverable pieces reached through a synthesized seed: a key
+            // crossing an escaped special, a menu name crossing a restored
+            // entity, and a label crossing a typographic replacement, none of
+            // which has an `'src` slice of its own here — every value still
+            // comes from the match string.
             (
                 "press kbd:[Ctrl&C]\nor menu:&#8942;[Zoom > Reset]",
                 "  press kbd:[Ctrl&C]\n  or menu:&#8942;[Zoom > Reset]",
+            ),
+            (
+                "press kbd:[a(C)b]\nor btn:[O'Reilly]",
+                "  press kbd:[a(C)b]\n  or btn:[O'Reilly]",
             ),
         ] {
             let nodes = build_from_value(

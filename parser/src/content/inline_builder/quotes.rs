@@ -129,10 +129,12 @@ fn match_level<'src>(
 ///
 /// A verbatim [`Text`](InlineNode::Text) run contributes its (special-free)
 /// value; a [`CharRef`](InlineNode::CharRef) contributes its canonical entity
-/// (a [`Special`](CharRef::Special)) or the entity itself (a *restored*
-/// [`Entity`](CharRef::Entity)), so the boundary classes the quote patterns key
-/// off (`&`, `;`) see exactly what the string pipeline's escaped text presents
-/// — and so does a later step reading a value across one; a *synthesized*
+/// (a [`Special`](CharRef::Special)), the entity itself (a *restored*
+/// [`Entity`](CharRef::Entity)), or the entity the built-in backend renders it
+/// as (a typographic [`Replacement`](CharRef::Replacement), via
+/// [`replacement_entity`]), so the boundary classes the quote patterns key off
+/// (`&`, `;`) see exactly what the string pipeline's escaped text presents —
+/// and so does a later step reading a value across one; a *synthesized*
 /// `Text` run (design §3.4.1 — an attribute expansion, a `counter` directive)
 /// contributes its `value` too, so [`apply_character_replacements`]
 /// (design §3.4.1: `replacements` still runs over an expanded value) can
@@ -229,6 +231,40 @@ pub(super) fn build_match_string(nodes: &[InlineNode<'_>]) -> (String, Vec<Piece
                 });
             }
 
+            InlineNode::CharRef {
+                value: CharRef::Replacement(value),
+                location,
+            } if replacement_entity(value).is_some() => {
+                // A *typographic replacement* (`(C)` and `'`, which the
+                // replacements step turned into a copyright sign and a
+                // typographic apostrophe) contributes the entity the built-in
+                // backend renders it as, for the same reason the two other
+                // `CharRef` leaves contribute theirs: those bytes *are* what
+                // the string pipeline's own haystack holds at that position
+                // from the replacements step onward (`&#169;`, `&#8217;`), so
+                // a later step matching across one — or reading a value out of
+                // the match string — sees exactly what the string replacer
+                // sees. It stays `atomic` (the leaf is one indivisible node,
+                // never sliced) but is *recoverable*, which is the distinction
+                // [`range_has_no_opaque_piece`](super::macros::image::range_has_no_opaque_piece)
+                // draws.
+                //
+                // The guard has already established `Some`; the crate forbids
+                // `unwrap`, so the same lookup is spelled `unwrap_or_default`.
+                let entity = replacement_entity(value).unwrap_or_default();
+                s.push_str(entity);
+
+                pieces.push(Piece {
+                    node_index,
+                    s_start,
+                    s_len: entity.len(),
+                    src_offset: location.byte_offset(),
+                    src_len: location.data().len(),
+                    atomic: true,
+                    synthesized: false,
+                });
+            }
+
             other => {
                 // A span from an earlier sub (or any other synthesized-value
                 // node, e.g. a `Raw` leaf) is opaque: a single placeholder
@@ -292,6 +328,41 @@ pub(super) fn special_entity(ch: char) -> &'static str {
         // `&` and any other special the step recognizes.
         _ => "&amp;",
     }
+}
+
+/// The entity a [`CharRef::Replacement`] contributes to the match string: the
+/// bytes the **built-in** HTML backend renders that replacement as, which are
+/// exactly what the string pipeline's own haystack holds from the replacements
+/// step onward. Returns `None` for a value no replacement rule produces (only a
+/// hand-built node can carry one), which [`build_match_string`] then stands in
+/// as one opaque [`SPAN_PLACEHOLDER`], as it did for every replacement before
+/// this.
+///
+/// Like [`special_entity`], this is deliberately the *canonical* rendering
+/// rather than a call into the configured renderer: a custom backend changes
+/// what the fold emits, not the recognition the AsciiDoc patterns were written
+/// against. `replacement_entity_matches_the_built_in_renderer` pins the two
+/// against each other so they cannot drift.
+pub(super) fn replacement_entity(value: &str) -> Option<&'static str> {
+    // Keyed on the value rather than on
+    // [`replacement_type_of`](super::callouts::replacement_type_of)'s type so
+    // the two tables cover exactly the same set of values — this one's `None`
+    // and that one's are the same case, a value no replacement rule produces.
+    Some(match value {
+        "\u{a9}" => "&#169;",
+        "\u{ae}" => "&#174;",
+        "\u{2122}" => "&#8482;",
+        "\u{2009}\u{2014}\u{2009}" => "&#8201;&#8212;&#8201;",
+        "\u{2014}\u{200b}" => "&#8212;&#8203;",
+        "\u{2026}\u{200b}" => "&#8230;&#8203;",
+        "\u{2019}" => "&#8217;",
+        "\u{2190}" => "&#8592;",
+        "\u{21d0}" => "&#8656;",
+        "\u{2192}" => "&#8594;",
+        "\u{21d2}" => "&#8658;",
+
+        _ => return None,
+    })
 }
 
 /// One accepted quote match at a level, in absolute match-string byte offsets.
@@ -861,6 +932,47 @@ mod tests {
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
     };
+
+    #[test]
+    fn replacement_entity_matches_the_built_in_renderer() {
+        // The table `build_match_string` reads is the built-in backend's own
+        // rendering of each replacement — the bytes the string pipeline's
+        // haystack holds from the replacements step onward — so the two cannot
+        // be allowed to drift. Every value the classifier recognizes is
+        // checked against the renderer that produces it, and a value no rule
+        // produces has no entity at all (`build_match_string` stands such a
+        // leaf in as one opaque placeholder, as it did for every replacement
+        // before this).
+        use super::super::callouts::replacement_type_of;
+        use crate::parser::InlineSubstitutionRenderer;
+
+        for value in [
+            "\u{a9}",
+            "\u{ae}",
+            "\u{2122}",
+            "\u{2009}\u{2014}\u{2009}",
+            "\u{2014}\u{200b}",
+            "\u{2026}\u{200b}",
+            "\u{2019}",
+            "\u{2190}",
+            "\u{21d0}",
+            "\u{2192}",
+            "\u{21d2}",
+        ] {
+            let type_ = replacement_type_of(value).unwrap();
+
+            let mut rendered = String::new();
+            HtmlSubstitutionRenderer {}.render_character_replacement(type_, &mut rendered);
+
+            assert_eq!(
+                super::replacement_entity(value),
+                Some(rendered.as_str()),
+                "match-string bytes drifted from the built-in rendering of {value:?}"
+            );
+        }
+
+        assert!(super::replacement_entity("not a replacement").is_none());
+    }
 
     /// The string pipeline's output through the **quotes** step for `source`,
     /// used as the golden oracle: `Content::from` then `SpecialCharacters` then

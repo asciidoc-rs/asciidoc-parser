@@ -1448,6 +1448,27 @@ mod tests {
     }
 
     #[test]
+    fn a_macro_crossing_a_replacement_from_an_expanded_value_is_recognized() {
+        // The two lifts composed: the replacements step recognizes a `(C)`
+        // *inside* a spliced value (above), and the macro families now read
+        // across the `CharRef::Replacement` leaf it produces — so an image's
+        // attribute list and a link's display text, each crossing a
+        // replacement that exists only because an attribute expanded, are
+        // recognized with the string replacer's own bytes.
+        let parser = parser_with_attribute("note", "Pause (C) Resume");
+
+        for source in ["image:x.png[title={note}]", "link:x.html[{note}]"] {
+            let nodes = build(Span::new(source), &parser, None);
+
+            assert_eq!(
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                golden_attributes_with(source, &parser),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_reference_inside_a_span_is_recognized() {
         let parser = parser_with_attribute("greeting", "Hello");
         let nodes = build(Span::new("*{greeting}*"), &parser, None);

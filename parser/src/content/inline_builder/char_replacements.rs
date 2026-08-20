@@ -569,4 +569,76 @@ mod tests {
             other => panic!("expected Ref, got {other:?}"),
         }
     }
+    #[test]
+    fn a_later_rule_never_splits_an_earlier_replacement_leaf() {
+        // Now that a `CharRef::Replacement` leaf contributes its rendered
+        // entity to the match string, a *later* rule in the ordered sweep sees
+        // those bytes — the same ones the string pipeline's own sequential
+        // passes see, which is the point. What such a rule must never do is
+        // match *partially* into one: `rebuild_replacements`' gap would then
+        // clone the whole atomic leaf and emit the new leaf beside it,
+        // duplicating bytes the string pipeline emits once.
+        //
+        // It cannot, and the reason is structural. Every entity this table
+        // produces is `&#…;` — only `&`, `#`, digits and a terminating `;` —
+        // while every rule that could still run needs a character from outside
+        // that set immediately adjacent to its anchor: `(\w)--` needs a word
+        // character *directly* before the dashes (the entity's last byte is
+        // `;`, which is not one), the copyright/registered/trademark rules need
+        // parens, the ellipsis needs dots, the apostrophe rules need `'`, the
+        // arrows need a `-`/`=` beside `&lt;`/`&gt;`, and the entity-restore
+        // rule needs the literal `&amp;`. So a match can abut a replacement
+        // leaf but never begin inside one.
+        //
+        // This pins that as behavior rather than as an argument: every
+        // replacement-producing token is glued to every token that could
+        // extend a match, in both orders and with a word character between, and
+        // each pairing must fold to exactly what the string pipeline emits.
+        let replacements = [
+            "(C)",
+            "(R)",
+            "(TM)",
+            "a--",
+            " -- ",
+            "...",
+            "x'y",
+            "->",
+            "=>",
+            "<-",
+            "<=",
+            "&amp;copy;",
+        ];
+
+        let neighbors = [
+            "--",
+            "a--",
+            " -- ",
+            "...",
+            "'",
+            "x'y",
+            "->",
+            "<-",
+            "&amp;copy;",
+            "9",
+            "a",
+        ];
+
+        for replacement in replacements {
+            for neighbor in neighbors {
+                for source in [
+                    format!("x{replacement}{neighbor}y"),
+                    format!("x{neighbor}{replacement}y"),
+                    format!("x{replacement}z{neighbor}y"),
+                ] {
+                    let nodes = build_src(Span::new(&source));
+
+                    assert_eq!(
+                        fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                        golden_replacements(&source),
+                        "fold diverged from the string pipeline for {source:?}"
+                    );
+                }
+            }
+        }
+    }
 }

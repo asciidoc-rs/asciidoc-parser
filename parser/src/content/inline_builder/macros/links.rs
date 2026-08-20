@@ -2812,9 +2812,10 @@ mod tests {
             "https://example.org[super^script^ and sub~script~]",
             "https://example.org[[.hl]#roled#]",
             // An already-recognized macro node of another family — an image, an
-            // icon, an index term — and a character replacement, which is
-            // opaque here for the same reason (`build_match_string` stands each
-            // in as one placeholder).
+            // icon, an index term — which is opaque here for the same reason
+            // (`build_match_string` stands each in as one placeholder), plus a
+            // character replacement, which is *not* opaque (it carries its own
+            // bytes) but is exercised beside a span all the same.
             "https://example.org[the image:logo.png[Logo] here]",
             "https://example.org[the icon:tags[] here]",
             "https://example.org[a ((index term)) *b*]",
@@ -3204,6 +3205,96 @@ mod tests {
                 "fold diverged from the string pipeline for {fixture:?}"
             );
         }
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_for_a_link_crossing_a_character_replacement() {
+        // A *typographic replacement* (`(C)` and `'`, which the
+        // character-replacements step turns into `CharRef::Replacement`
+        // leaves) is admitted for the same reason the two other `CharRef`
+        // leaves are: its match-string bytes — the entity the built-in backend
+        // renders it as (`&#169;`, `&#8217;`) — are the string pipeline's own
+        // haystack bytes there, and the fold routes the leaf back through the
+        // renderer to those same bytes. A display text carrying one keeps it
+        // as its own child rather than baking the entity into a `Text` the
+        // fold would escape.
+        let fixtures = [
+            // A display text crossing one, in each of the four link spellings.
+            "https://example.org[a (C) b]",
+            "https://example.org[O'Reilly]",
+            "link:index.html[a (C) b]",
+            "mailto:a@b.com[Tom (C) Jerry]",
+            "<https://example.org/a(C)b>",
+            // A *target* crossing one, bare and bracketed.
+            "link:a(C)b.html[]",
+            "link:a(C)b.html[Text]",
+            "https://example.org/?a=(C)b",
+            // A bare e-mail address abutting one — the `;` a replacement's
+            // entity ends in is no mismatch character, so the string pipeline
+            // links the address that follows it, and now so does the tree.
+            "a(C)b@example.com",
+            // A target crossing a replacement, an escaped special, and a
+            // restored entity at once.
+            "link:a(C)b&c&copy;d.html[]",
+            // In flow, doubled, inside a rendered span, and escaped.
+            "see link:a(C)b.html[Docs] now",
+            "link:a(C)b.html[] link:c(R)d.html[]",
+            "*link:a(C)b.html[Docs]*",
+            "\\link:a(C)b.html[Docs]",
+            // A replacement beside the macro rather than inside it.
+            "(C)link:x.html[Docs](R)",
+            // A text carrying an **attribute list** across one, in all three
+            // spellings: the parse reads the match string's own entity, and
+            // the positional value it returns is rebuilt through
+            // `escaped_value_children` so the entity folds back once.
+            "https://example.org[a (C) b,role=hl]",
+            "link:index.html[a (C) b,role=hl]",
+            "mailto:a@b.com[Tom (C) Jerry,Subject here]",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_display_text_crossing_a_character_replacement_keeps_it_as_its_own_child() {
+        // The structural companion: the text is rebuilt through
+        // `macro_text_children`'s `emit_range` path, so the replacement stays
+        // the `CharRef::Replacement` leaf it already is — folding back through
+        // the renderer — with `Text` runs on either side borrowing `'src`.
+        let source = "https://example.org[a (C) b]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = match &nodes[0] {
+            InlineNode::Ref(reference) => reference,
+            other => panic!("expected a Ref, got {other:?}"),
+        };
+
+        assert_eq!(reference.children.len(), 3, "{:?}", reference.children);
+        assert_text(&reference.children[0], "a ", 1, 21);
+
+        assert!(
+            matches!(
+                &reference.children[1],
+                InlineNode::CharRef {
+                    value: CharRef::Replacement(value),
+                    ..
+                } if *value == "\u{a9}"
+            ),
+            "{:?}",
+            reference.children[1]
+        );
+
+        assert_text(&reference.children[2], " b", 1, 26);
     }
 
     #[test]
@@ -3842,18 +3933,6 @@ mod tests {
         // markup without folding the preceding node while building, so all of
         // them defer — see `email_level`'s own scope note.
         use super::super::super::test_support::golden_passthroughs;
-
-        // A character replacement is the same class, reached without a macro
-        // at all: `(C)` renders to `&#169;`, whose trailing `;` is no mismatch
-        // character, so the string pipeline links the address that follows it.
-        let replacement = "a(C)b@example.com";
-        let nodes = build_src(Span::new(replacement));
-
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an address abutting an opaque construct must stay literal: {nodes:?}"
-        );
-        assert!(golden_macros(replacement).contains(r#"href="mailto:b@example.com""#));
 
         let concealed_term = "indexterm:[a]doc@example.com";
         let nodes = build_src(Span::new(concealed_term));

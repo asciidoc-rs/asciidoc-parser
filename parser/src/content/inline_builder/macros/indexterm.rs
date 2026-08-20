@@ -499,6 +499,14 @@ mod tests {
             "\\indexterm:[x]",
             "\\indexterm2:[x]",
             "\\((coffee))",
+            // A visible term crossing a *typographic replacement* — the third
+            // recoverable piece, whose match-string bytes are the entity the
+            // built-in backend renders it as, so the shown text is
+            // reconstructed exactly as the string replacer computes it.
+            "((Coffee (C) Beans))",
+            "((O'Reilly))",
+            "an indexterm2:[Tom (C) Jerry] in the flow",
+            "(((Coffee (C) Beans, robusta)))",
             // Embedded in surrounding flow and next to other constructs.
             "*bold* then ((x)) here",
             "a copyright (C) then ((x))",

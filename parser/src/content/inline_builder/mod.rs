@@ -68,8 +68,8 @@
 //!   of the match string instead (see
 //!   [`range_is_verbatim_or_synthesized`](macros::image::range_is_verbatim_or_synthesized),
 //!   and [`range_has_no_opaque_piece`](macros::image::range_has_no_opaque_piece)
-//!   for the families whose gate also admits an escaped special or a restored
-//!   entity).
+//!   for the families whose gate also admits an escaped special, a restored
+//!   entity, or a typographic replacement).
 //! - [`apply_character_replacements`] recognizes [character replacements] —
 //!   `(C)`, `--`, `...`, arrows, apostrophes, and restored entities — replacing
 //!   each with a [`CharRef::Replacement`](crate::inlines::CharRef::Replacement)
@@ -142,7 +142,14 @@
 //!   sliced or baked `Text` — the special stays the `CharRef` it already is,
 //!   folding back to the same entity instead of being escaped twice — which for
 //!   a *bare* link (a macro's target-derived text, an auto-link's or an angle
-//!   link's URL) covers the text it shows as well. The
+//!   link's URL) covers the text it shows as well. A **restored entity**
+//!   (`&copy;`, `&#8217;`) and a **typographic replacement** (`(C)`, a smart
+//!   apostrophe, an arrow) are admitted on the same terms, for **every**
+//!   family at once, since recoverability is a property of the piece rather
+//!   than of the family reading across it: the match string carries the
+//!   entity's own bytes, and a replacement's built-in rendering
+//!   ([`replacement_entity`](quotes::replacement_entity)), which are the
+//!   string pipeline's own haystack bytes there. The
 //!   one capture still holding that boundary in these families is a display text
 //!   carrying an attribute list, parsed as a real
 //!   [`Attrlist`]`<'src>` from the source's own
@@ -760,6 +767,13 @@ mod tests {
             "an image:a&copy;b.png[Entity] target",
             "link:a&copy;b.html[a &copy; b] and xref:s&copy;c[a &copy; b]",
             "https://example.org/?a=&copy;b and doc&copy;a@example.org",
+            "an image:a(C)b.png[Replacement] target",
+            "image:pause.png[title=Pause (C) Resume] macro",
+            "link:a(C)b.html[a (C) b] and xref:s(C)c[a (C) b]",
+            "https://example.org/?a=(C)b and a(C)b@example.com",
+            "see <<Cub => Tiger>> now",
+            "a ((Coffee (C) Beans)) term and kbd:[a(C)b]",
+            "an O'Reilly link:x.html[O'Reilly] title",
             "<<a>> and <<b>> and <<c,C text>> and <<d,>>",
             "a ((flow term)) and (((c1, c2, c3))) end",
             "indexterm:[primary, secondary]",
@@ -818,6 +832,13 @@ mod tests {
 
         // Inline STEM beside a quoted span and a character replacement.
         assert_parity("Equation stem:[x^2+y^2=z^2] appears in *bold* text with (C) 2024.");
+
+        // A character replacement *inside* several families' captured values
+        // at once — the third recoverable piece, whose match-string bytes are
+        // the entity the built-in backend renders it as.
+        assert_parity(
+            "image:a(C)b.png[Pause (C) Resume] beside link:x(C)y.html[O'Reilly]              and <<s(C)c,Tom (C) Jerry>> and a ((Coffee (C) Beans)) term.",
+        );
 
         // UI macros (kbd/menu, gated on `experimental`) beside a quoted span.
         let with_experimental = || {
@@ -1298,6 +1319,14 @@ mod tests {
             (
                 "  a ((flow term)) here\n  and a (((c1, c2))) one",
                 "a ((flow term)) here\nand a (((c1, c2))) one",
+            ),
+            // A construct crossing a *typographic replacement* at a
+            // synthesized tree's root: the leaf carries the entity the
+            // built-in backend renders it as, so a value read off the match
+            // string is the string replacer's own.
+            (
+                "  a ((Coffee (C) Beans)) term\n  and <<s(C)c,Tom (C) Jerry>>",
+                "a ((Coffee (C) Beans)) term\nand <<s(C)c,Tom (C) Jerry>>",
             ),
             // A cross-reference in a wholly-synthesized seed, in both
             // spellings: nothing on a `Ref{Xref}` node is `Span`-typed, so its
