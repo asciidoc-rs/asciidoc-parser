@@ -1452,7 +1452,7 @@ mod tests {
         use crate::{
             Parser, Span,
             content::{Content, SubstitutionGroup},
-            inlines::InlineNode,
+            inlines::{CharRef, InlineNode},
             parser::{HtmlSubstitutionRenderer, ModificationContext},
             strings::CowStr,
         };
@@ -2089,33 +2089,45 @@ mod tests {
         /// (§3.4). That is what the document genuinely says under such an
         /// order — the content is no longer a strong span, it is text that
         /// reads like a tag.
+        ///
+        /// The whole node list is asserted rather than only the text it folds
+        /// to, so it pins the spans as well: a flattened node's value is the
+        /// fold, which has no `'src` slice of its own, so every fragment the
+        /// escaping step splits it into takes design §4.4's coarse
+        /// enclosing-span fallback — here the `*bold*` the quotes step
+        /// consumed, which is this fixture's whole source.
         #[test]
         fn a_late_escaping_order_leaves_the_flattened_markup_as_text() {
             let (group, invalid) =
                 SubstitutionGroup::from_custom_string(None, "quotes,specialcharacters");
             assert!(invalid.is_empty());
 
+            let source = "*bold*";
             let parser = parser_with_product();
-            let nodes = build_group(&group, "*bold*", &parser);
+            let nodes = build_group(&group, source, &parser);
 
-            assert!(
-                !nodes.iter().any(|n| matches!(n, InlineNode::Styled(_))),
-                "the quotes step's span must not survive a late escaping step: {nodes:?}"
+            let coarse = Span::new(source);
+            let text = |value: &'static str| InlineNode::Text {
+                value: CowStr::from(value),
+                location: coarse,
+            };
+            let special = |ch| InlineNode::CharRef {
+                value: CharRef::Special(ch),
+                location: coarse,
+            };
+
+            assert_eq!(
+                nodes,
+                vec![
+                    special('<'),
+                    text("strong"),
+                    special('>'),
+                    text("bold"),
+                    special('<'),
+                    text("/strong"),
+                    special('>'),
+                ]
             );
-
-            let text: String = nodes
-                .iter()
-                .map(|node| match node {
-                    InlineNode::Text { value, .. } => value.to_string(),
-                    InlineNode::CharRef {
-                        value: crate::inlines::CharRef::Special(ch),
-                        ..
-                    } => ch.to_string(),
-                    other => panic!("unexpected node kind: {other:?}"),
-                })
-                .collect();
-
-            assert_eq!(text, "<strong>bold</strong>");
         }
 
         /// A documented divergence, not a bug: a construct the string
