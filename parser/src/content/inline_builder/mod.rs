@@ -35,7 +35,12 @@
 //!   [`Styled`](crate::inlines::Styled) span, **introducing nesting** — `*a _b_
 //!   c*` becomes a tree, not a flat run. It reuses the *exact* [`quote_subs`]
 //!   the string pipeline matches with (changing the recognition *sink*, not the
-//!   recognition), so its fold is byte-identical to the string step.
+//!   recognition), so its fold is byte-identical to the string step. An
+//!   attributed span's own attribute list (`['a<b']*bold*`) is parsed from the
+//!   level's **match string** — the escaped bytes the string replacer parses
+//!   out of its own haystack, since `specialcharacters` has already run — so
+//!   the entity, not the author's raw `<`, reaches the rendered `class`/`id`
+//!   (see [`quote_attributes`](quotes)).
 //! - [`apply_attribute_references`] recognizes attribute references (`{name}`),
 //!   splicing a set attribute's resolved value into the node stream, classified
 //!   into [`Text`](InlineNode::Text) and [`Raw`](InlineNode::Raw) runs per
@@ -56,9 +61,10 @@
 //!   inside a [`synthesized`](quotes::Piece::synthesized) run instead of
 //!   treating it as opaque; and no **macro** family defers there any more. An
 //!   [`Attrlist`] a node carries needs no `'src` slice of its own — an image's
-//!   bracket and both link families' attribute-list-bearing display texts are
-//!   parsed from the level's own match string (the bytes the string replacer
-//!   parses too) and [`into_owned`](Attrlist::into_owned)ed off it — so
+//!   bracket, both link families' attribute-list-bearing display texts, and an
+//!   attributed span's own list are parsed from the level's own match string
+//!   (the bytes the string replacer parses too) and
+//!   [`into_owned`](Attrlist::into_owned)ed off it — so
 //!   [`range_is_verbatim`](macros::image::range_is_verbatim) survives only
 //!   where a *borrow* is still preferred, not as a boundary. And a macro
 //!   needing only its own *text* (no `Span`-typed field) — an anchor's id, a

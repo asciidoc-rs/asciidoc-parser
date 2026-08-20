@@ -1325,6 +1325,11 @@ mod tests {
             "[[install,Installation]]",
             "anchor:install[Installation]",
             "[#free_the_world]#free the world#",
+            // An id carrying a special character: both pipelines register the
+            // *escaped* id, since both parse the attribute list out of text
+            // the escaping step already ran over (see
+            // [`quote_attributes`](crate::content::inline_builder::quotes)).
+            "[#a&b]#x#",
             "[[a]] [[a]]",
             "[[[id]]]",
             "*see [[x]]* and footnote:[see [[y]]]",

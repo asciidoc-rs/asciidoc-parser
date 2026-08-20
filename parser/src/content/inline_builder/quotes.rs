@@ -1,5 +1,6 @@
 //! The quoted-text substitution step.
 
+use super::macros::image::{range_has_no_opaque_piece, range_is_verbatim};
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
@@ -115,13 +116,49 @@ fn match_level<'src>(
         return nodes;
     }
 
-    let matches = find_matches(sub, &s);
+    let matches: Vec<QuoteMatch> = find_matches(sub, &s)
+        .into_iter()
+        .filter(|m| attrlist_is_readable(&nodes, &pieces, m))
+        .collect();
 
     if matches.is_empty() {
         return nodes;
     }
 
     rebuild_level(&nodes, &pieces, &s, &matches, root, parser)
+}
+
+/// Reports whether a match's attribute list, if it has one, is one this step
+/// can read the same bytes out of that the string pipeline's own quote
+/// replacer reads out of its haystack — i.e. crosses no **opaque** piece (see
+/// [`range_has_no_opaque_piece`]).
+///
+/// A match with no attribute list is always readable, which is the
+/// overwhelmingly common case.
+///
+/// The one shape this rejects is an attribute list crossing a piece whose
+/// bytes exist only at fold time or behind a placeholder — a rendered span
+/// from an earlier sub, or a masked passthrough or STEM expression
+/// (`[.a+++x+++b]#y#`). The string pipeline parses its attribute list with the
+/// passthrough's own placeholder inside it, restoring the passthrough's text
+/// into the rendered `class` afterwards, which a tree that keeps that text as
+/// its own node cannot reproduce (splicing the text back in at parse time
+/// would let a comma inside it split the attribute list, where the string
+/// pipeline's one atomic placeholder never can). Leaving the whole construct
+/// unrecognized — literal text, never a *wrong* node — is the same boundary
+/// every macro family draws, and puts this match back in the same position a
+/// rejected look-ahead leaves one: out of the match list, so the surrounding
+/// gap reproduces its original nodes and a later sub may still match there.
+fn attrlist_is_readable(nodes: &[InlineNode<'_>], pieces: &[Piece], m: &QuoteMatch) -> bool {
+    let QuoteMatchKind::Wrap {
+        attrlist: Some(range),
+        ..
+    } = &m.kind
+    else {
+        return true;
+    };
+
+    range_has_no_opaque_piece(nodes, pieces, range)
 }
 
 /// Reconstructs the escaped match string for a level and the [`Piece`] map back
@@ -298,7 +335,7 @@ pub(super) fn build_match_string(nodes: &[InlineNode<'_>]) -> (String, Vec<Piece
 /// §3.4.1 leaves recognizing a macro *inside* one for a later increment (see
 /// [`apply_attribute_references`](super::attribute_refs::apply_attribute_references)'s
 /// doc comment) — distinct from
-/// [`range_is_verbatim`](super::macros::image::range_is_verbatim),
+/// [`range_is_verbatim`],
 /// which a family needing to *slice* `'src` (a target, an `Attrlist<'src>`)
 /// uses instead and which already rejects a synthesized piece outright.
 pub(in crate::content::inline_builder) fn range_overlaps_synthesized(
@@ -592,7 +629,7 @@ fn rebuild_level<'src>(
                 emit_range(nodes, pieces, body.clone(), &mut children);
 
                 let (id, roles, attrs) = match attrlist {
-                    Some(range) => attributes_of(source_slice(pieces, range.clone(), root), parser),
+                    Some(range) => quote_attributes(s, range.clone(), pieces, root, parser),
 
                     None => (None, Vec::new(), None),
                 };
@@ -620,14 +657,69 @@ fn rebuild_level<'src>(
     out
 }
 
-/// Parses an attributed quote's attribute list, returning the id, roles, and
-/// the full [`Attrlist`] (kept so the fold renders exactly as the string
-/// pipeline).
+/// Parses an **attributed quote's** attribute list out of the level's own
+/// match string, returning the id, roles, and the full [`Attrlist`] (kept so
+/// the fold renders exactly as the string pipeline).
+///
+/// Those match-string bytes are the ones the string pipeline's quote replacer
+/// parses: by the time the quotes step runs, its haystack holds the *escaped*
+/// text (`['a&lt;b&amp;c']*bold*`), so the role it parses — and renders into
+/// the `class` attribute verbatim — carries the entity, not the author's raw
+/// `<`. Parsing the source slice instead would put an unescaped `<`/`&` into
+/// rendered markup, which is both a divergence and, for a `"`-bearing value,
+/// exactly the injection the escaping is there to prevent (pinned by
+/// `quoted_positional_role_class_does_not_double_escape_special_characters` in
+/// the crate's own security tests).
+///
+/// A **verbatim** range's match-string bytes *are* its source bytes, so it
+/// parses straight from `'src` and its attribute names and values borrow
+/// (§4.5) — the shape every ordinary `[.role]#text#` takes. Any other range
+/// (an escaped special, a restored entity or typographic replacement, or a
+/// [`synthesized`](Piece::synthesized) expansion under an order that runs
+/// `attributes` before `quotes`) has no `'src` slice whose bytes are the
+/// attrlist text, so it parses from a [`Span::new`] over the match-string
+/// slice — whose `line`/`col`/`offset` are meaningless and never escape this
+/// function — and [`into_owned`](Attrlist::into_owned)s the result onto the
+/// range's coarse source span (design §4.4), exactly as
+/// [`bracket_attrlist`](super::macros::image) does for an image's bracket and
+/// [`text_attrlist`](super::macros::links) for a link's display text.
+///
+/// A range crossing an *opaque* piece never reaches here: such a match is
+/// dropped by [`attrlist_is_readable`] before the rebuild.
+fn quote_attributes<'src>(
+    s: &str,
+    range: std::ops::Range<usize>,
+    pieces: &[Piece],
+    root: Span<'src>,
+    parser: &Parser,
+) -> (
+    Option<CowStr<'src>>,
+    Vec<CowStr<'src>>,
+    Option<Attrlist<'src>>,
+) {
+    let source = source_slice(pieces, range.clone(), root);
+
+    if range_is_verbatim(pieces, &range) {
+        return attributes_of(source, parser);
+    }
+
+    // `s[range]` is in bounds and on char boundaries: every range here comes
+    // from a capture over `s` itself.
+    let escaped = s.get(range).unwrap_or_default();
+
+    attributes_of_attrlist(parse_attrlist(Span::new(escaped), parser).into_owned(source))
+}
+
+/// Parses an attribute list from `source` and takes it apart, returning the
+/// id, roles, and the full [`Attrlist`].
 ///
 /// Shared with the attribute-list-prefixed passthrough forms
 /// ([`passthrough_step`](super::passthrough_step)), which parse their own
-/// attrlist the same way and fold through the same
-/// [`Styled`] node.
+/// attrlist the same way and fold through the same [`Styled`] node. Unlike an
+/// attributed quote's (see [`quote_attributes`]), a passthrough's attrlist is
+/// read from the source slice, and correctly so: the extraction pass that
+/// recognizes it runs *before* the escaping step, so the string pipeline
+/// parses the author's raw bytes there too.
 pub(super) fn attributes_of<'src>(
     source: Span<'src>,
     parser: &Parser,
@@ -636,10 +728,26 @@ pub(super) fn attributes_of<'src>(
     Vec<CowStr<'src>>,
     Option<Attrlist<'src>>,
 ) {
-    let attrlist = Attrlist::parse(source, parser, AttrlistContext::Inline)
-        .item
-        .item;
+    attributes_of_attrlist(parse_attrlist(source, parser))
+}
 
+/// Parses one inline attribute list, discarding the warnings — the shared
+/// spelling both of [`quote_attributes`]'s paths use.
+fn parse_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
+    Attrlist::parse(source, parser, AttrlistContext::Inline)
+        .item
+        .item
+}
+
+/// Takes an already-parsed attribute list apart into the id, roles, and the
+/// list itself.
+fn attributes_of_attrlist<'src>(
+    attrlist: Attrlist<'src>,
+) -> (
+    Option<CowStr<'src>>,
+    Vec<CowStr<'src>>,
+    Option<Attrlist<'src>>,
+) {
     // Extract owned id/roles before the attrlist is moved into the node, exactly
     // as the string pipeline's quote replacer does.
     //
@@ -923,11 +1031,11 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::super::test_support::{
-        assert_styled, assert_text, build_src, build_through_quotes, fold_html,
+        assert_styled, assert_text, build_src, build_through_quotes, fold_html, golden_passthroughs,
     };
     use crate::{
         HasSpan, Span,
-        content::{Content, SubstitutionStep},
+        content::{Content, SubstitutionGroup, SubstitutionStep},
         inlines::{CharRef, InlineNode, SpanForm, StyleVariant},
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
@@ -1043,6 +1151,32 @@ mod tests {
             "[.a.b]_x_",
             "['quoted role']#x#",
             "[.role1.role2]#x#",
+            // An attribute list carrying a special character. The escaping
+            // step runs *before* this one, so the string pipeline parses the
+            // already-escaped text and renders the entity straight into the
+            // `class`/`id` attribute; `quote_attributes` parses the same
+            // match-string bytes, in every spelling an attribute list has.
+            "[.a<b]*bold*",
+            "[#a&b]#x#",
+            "[a<b]#x#",
+            // The same, on the *unconstrained* branch, whose attribute list is
+            // its own capture group.
+            "[.role]##x##",
+            "[.a<b]##x##",
+            "[role=\"a<b\"]*bold*",
+            "['a<b&c']*bold*",
+            "[.a&b.c<d]_x_",
+            "[#i&d.r<le]*bold*",
+            "[.role]#a < b#",
+            // The `"`-escaping the built-in backend adds on top (a quoted
+            // positional role and a `role=` value alike) composes with it: the
+            // specials stay singly escaped either way.
+            "['x\" onmouseover=\"y']*bold*",
+            "[role='a\"b']#x#",
+            // Escaped-with-attributes: the `[…]` is kept literal (and escaped
+            // as ordinary text by the step before this one) while the body is
+            // still wrapped with no attribute list at all.
+            "\\[a<b]*bold*",
             // Deeper nesting and repeated spans.
             "nested *_`all three`_* here",
             "*a* *b* *c*",
@@ -1804,9 +1938,160 @@ mod tests {
                 assert_eq!(styled.variant, StyleVariant::Unquoted);
                 assert_eq!(styled.roles, vec![CowStr::from("lead")]);
                 assert!(styled.attrs.is_some(), "the attribute list is retained");
+
+                // A wholly verbatim attribute list is parsed from its own
+                // `'src` slice, so the node's list is located exactly there
+                // (its values borrow, per §4.5) rather than falling back to
+                // the coarse span an owned one takes.
+                let attrs = styled.attrs.as_ref().unwrap();
+                assert_eq!(attrs.span().data(), ".lead");
+                assert_eq!(attrs.span().line(), 1);
+                assert_eq!(attrs.span().col(), 2);
             }
 
             other => panic!("expected Styled, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_attributed_spans_attribute_list_is_parsed_from_the_escaped_text() {
+        // The structural counterpart of the corpus fixtures above: the role
+        // and id a special-carrying attribute list yields are the *escaped*
+        // bytes — the ones the string pipeline's quote replacer parses out of
+        // its own (already-escaped) haystack and renders verbatim into the
+        // `class`/`id` attribute — not the author's raw `<`/`&`.
+        let source = "[#a&b.c<d]*bold*";
+        let nodes = build_src(Span::new(source));
+
+        match &nodes[0] {
+            InlineNode::Styled(styled) => {
+                assert_eq!(styled.id, Some(CowStr::from("a&amp;b")));
+                assert_eq!(styled.roles, vec![CowStr::from("c&lt;d")]);
+
+                // Those bytes have no `'src` slice of their own, so the list
+                // is owned and takes the bracket's coarse source span (design
+                // §4.4) as its location tag — the same fallback an image's
+                // bracket and a link's display-text list already take.
+                let attrs = styled.attrs.as_ref().unwrap();
+                assert_eq!(attrs.span().data(), "#a&b.c<d");
+                assert_eq!(attrs.span().line(), 1);
+                assert_eq!(attrs.span().col(), 2);
+
+                // The span itself still covers the whole construct, sliced
+                // from `'src`.
+                assert_eq!(styled.location.data(), source);
+            }
+
+            other => panic!("expected Styled, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_attribute_list_crossing_an_opaque_piece_is_a_documented_divergence() {
+        // An *opaque* piece inside an attribute list — a masked passthrough
+        // (`[.a+++x+++b]#y#`) or a span an earlier sub already rendered
+        // (`[.a**b**c]#y#`) — is the one shape `attrlist_is_readable` rejects.
+        // The string pipeline parses its attribute list out of a haystack that
+        // holds the passthrough's own *placeholder* (one atomic character no
+        // comma can hide behind), or the earlier sub's rendered tags, and
+        // restores the passthrough's text into the rendered `class`
+        // afterwards. A tree cannot reproduce either: splicing a passthrough's
+        // text in at parse time would let a comma inside it split the list
+        // where the placeholder never can, and a span's markup exists at fold
+        // time alone. So the construct is left unrecognized — literal text,
+        // never a *wrong* node (which is what the raw source slice used to
+        // yield here: a `class` of `a**b**c`) — exactly as every macro family
+        // leaves its own opaque-piece boundary.
+        //
+        // If that boundary is ever lifted, fold these fixtures into the
+        // parity corpus above.
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for (source, golden_html) in [
+            ("[.a+++x+++b]#y#", "<span class=\"axb\">y</span>"),
+            ("[.a$$x$$b]#y#", "<span class=\"axb\">y</span>"),
+            (
+                "[.a**b**c]#y#",
+                "<span class=\"a<strong>b</strong>c\">y</span>",
+            ),
+            (
+                "[role=\"a *b* c\"]#y#",
+                "<span class=\"a <strong>b</strong> c\">y</span>",
+            ),
+        ] {
+            let nodes = build_src(Span::new(source));
+            let folded = super::super::fold_html(&nodes, &renderer, &crate::Parser::default());
+            let golden = golden_passthroughs(source);
+
+            assert_eq!(golden, golden_html);
+            assert_ne!(folded, golden, "expected a divergence for {source:?}");
+
+            // The attributed construct itself is gone from the tree: what the
+            // string pipeline renders as an attributed `<span>` is left as
+            // literal text (an earlier sub's own span, or the passthrough's
+            // `Raw` leaf, still sits inside it).
+            assert!(
+                !folded.contains("<span"),
+                "expected no attributed span for {source:?}, got {folded:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_attribute_list_rewritten_by_a_later_step_is_a_documented_divergence() {
+        // The complement of the boundary above, and not one this step can
+        // draw: under the *normal* order the steps that run **after** quotes
+        // (attribute references, character replacements) go on matching over
+        // the string pipeline's whole rendered string — the markup the quotes
+        // step just wrote included — so they rewrite bytes that live only
+        // inside a rendered `class`/`id` attribute. A later *sub* of this same
+        // step does it too (`[.a~b~c]#y#`, whose subscript sub runs after the
+        // unquoted one that consumed the attribute list). A tree's markup
+        // exists at fold time alone, and its later transducers see the nodes,
+        // not the tags, so an attribute list is whatever the sub that
+        // recognized it parsed, and nothing rewrites it afterwards.
+        //
+        // This is the same class as `flatten_prior_markup`'s own (design
+        // §5.2, Phase 4 step 6's late-escaping increment) — a step acting on
+        // another step's emitted markup — seen from the other side, and it
+        // costs four shapes: an attribute reference in a single-quoted role, a
+        // typographic replacement, a *restored* entity (whose escaped
+        // `&amp;amp;` the replacements step unwinds one level in the rendered
+        // markup), and a later sub's own span.
+        let parser = crate::Parser::default().with_intrinsic_attribute(
+            "myrole",
+            "highlight",
+            crate::parser::ModificationContext::Anywhere,
+        );
+
+        for (source, golden_html) in [
+            (
+                "['{myrole}']*bold*",
+                "<strong class=\"'highlight'\">bold</strong>",
+            ),
+            ("[.a(C)c]#x#", "<span class=\"a&#169;c\">x</span>"),
+            (
+                "[.a&amp;b]*bold*",
+                "<strong class=\"a&amp;b\">bold</strong>",
+            ),
+            ("[.a~b~c]#y#", "<span class=\"a<sub>b</sub>c\">y</span>"),
+        ] {
+            let mut content = Content::from(Span::new(source));
+            SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+
+            assert_eq!(content.rendered_str(), golden_html);
+
+            let folded = super::super::fold_html(
+                &super::super::build(Span::new(source), &parser, None),
+                &HtmlSubstitutionRenderer {},
+                &parser,
+            );
+
+            assert_ne!(
+                folded,
+                content.rendered_str(),
+                "expected a divergence for {source:?}"
+            );
         }
     }
 }

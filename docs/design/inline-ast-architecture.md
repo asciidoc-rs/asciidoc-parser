@@ -3667,6 +3667,68 @@ Each phase is a reviewable unit with a clear exit gate.
   is closed. As with every prep piece before it, nothing further is wired in: `rendered_html()`
   remains the string pipeline's own string.
 
+  *Step 6 prep landed as (an **attributed span's** attribute list, read from the escaped text):*
+  with the audit's map closed, re-running the corpus-wide fold-parity sweep turns up one more
+  **blocker** of the kind the map's own items were — not an unclaimed form the tree leaves literal,
+  but a *wrong* answer for content a golden test already exercises, and this one a **security**
+  test: `['a<b&c']*bold*`, whose rendered `class` the string pipeline escapes
+  (`class="'a&lt;b&amp;c'"`) and the fold did not. The cause is the one attribute list this module
+  still parsed from `'src`. Every macro family's list is parsed out of the level's **match
+  string** — an image's bracket, and both link families' display texts, by the two increments
+  directly above — but the *quotes* step's own attributed span kept the source slice, and by the
+  time that step runs `SpecialCharacters` has already escaped the author's `<`/`&`, so the
+  string replacer's haystack (and the `class`/`id` value it renders verbatim) carries the entity
+  where the source carries the character. Parsing the source slice put an **unescaped** `<`, `>`,
+  or `&` into rendered markup — one entity's worth of the escaping the `"`-escaping beside it
+  exists to provide.
+
+  [`quote_attributes`](../../parser/src/content/inline_builder/quotes.rs) is the same one move
+  those two increments made: a **verbatim** range's match-string bytes *are* its source bytes, so
+  it keeps the `'src` parse and its borrow (§4.5) — every ordinary `[.role]#text#` — and every
+  other range parses from a [`Span::new`](../../parser/src/span/primitives.rs) over the match-string
+  slice and [`into_owned`](../../parser/src/attributes/attrlist.rs)s the result onto §4.4's coarse
+  span. No node field changed: a `Styled` span already carried its `id`, `roles`, and own
+  `Attrlist<'src>`; only the bytes they are read from did.
+
+  Landing it closed a latent gap in
+  [`Attrlist::into_owned`](../../parser/src/attributes/attrlist.rs)'s own stated contract — "every
+  parsed field is a `CowStr`, so nothing but the location depends on the original span" — which one
+  accessor falsifies: [`quoted_text_fallback_role`](../../parser/src/attributes/attrlist.rs) reads
+  the list's own *text*, not a parsed attribute, because Asciidoctor's
+  `parse_quoted_text_attributes` takes a quote-delimited first positional (`['role']`) verbatim,
+  quote characters included, straight off the source. A re-tagged list would have read the coarse
+  span's raw bytes — precisely the security fixture's own spelling. `into_owned` now carries an
+  owned copy of the text it was parsed from and that accessor reads it, so the contract holds for
+  every family that owns a list off a temporary, not just this one.
+
+  Two shapes stay divergent, each pinned by its own test. An attribute list crossing an **opaque**
+  piece (`[.a+++x+++b]#y#`) is the boundary every macro family draws, drawn here for the first
+  time: the string pipeline parses its list with the passthrough's own placeholder inside it — one
+  atomic character no comma can hide behind — and restores that passthrough's text into the
+  rendered `class` afterwards, where splicing the text in at parse time would let a comma inside it
+  split the list. Such a match is now dropped from the level's match list rather than built into a
+  wrong node, leaving the construct literal and putting it exactly where a rejected look-ahead
+  leaves one (the surrounding gap reproduces its original nodes, and a later sub may still match
+  there). And an attribute list **rewritten by a later step** of the same order (`['{myrole}']`,
+  `[.a(C)c]`, `[.a&amp;b]`) is `flatten_prior_markup`'s own category seen from the other side: under
+  the *normal* order the steps after `quotes` go on matching over the whole rendered string, the
+  markup that step just wrote included, so they rewrite bytes that live only inside a rendered
+  attribute — which a tree, whose markup exists at fold time alone, has nowhere to hold. That one
+  needs its own policy rather than another parse-source choice.
+
+  The quotes differential corpus gains every attribute-list spelling carrying a special (a
+  shorthand role, an id, a block-style positional, a `role=` value, a quoted positional, several at
+  once, and the same on the unconstrained branch), alongside the `"`-escaping composing with it and
+  the escaped-with-attributes form; the passthrough corpus gains the mirror-image fixtures that
+  pin why *its* attrlist keeps the source parse (its extraction pass runs ahead of the escaping
+  step, so the string pipeline reads the author's raw bytes there too); and the staged
+  `apply_ref_side_effects` corpus gains an id-carrying fixture, since the id it registers is now
+  the escaped one the golden pipeline registers. Re-running the corpus-wide fold-parity audit (tree
+  building forced on for every parse in the suite) confirms the divergence set strictly **shrank**:
+  the security fixture's own source is gone and no pre-existing one appeared (the set's only
+  additions are this increment's own new divergence-pinning fixtures). As with every prep piece
+  before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -4166,6 +4228,21 @@ Each phase is a reviewable unit with a clear exit gate.
        family's own pre-existing verbatim-marker rule), each with its own divergence test. See the
        step's own "landed as" note above. With this every item the corpus-wide audit's map named is
        closed.
+     - ✅ **prep (an attributed span's attribute list).** The last attribute list this module
+       parsed from `'src`, and — like `hardbreaks`, the unescaped-specials classification, and the
+       four blockers before it — a *wrong* answer rather than an unclaimed form, for content a
+       golden **security** test exercises: the quotes step runs after `SpecialCharacters`, so the
+       string replacer parses (and renders verbatim into the `class`/`id`) the **escaped** text,
+       where the source slice carries the author's raw `<`/`&`.
+       [`quote_attributes`](../../parser/src/content/inline_builder/quotes.rs) takes the same
+       match-string parse the image bracket and the two link display texts already took, keeping
+       the `'src` parse and its borrow for a verbatim list; and
+       [`Attrlist::into_owned`](../../parser/src/attributes/attrlist.rs) now keeps the text it was
+       parsed from, so `quoted_text_fallback_role` — the one accessor reading a list's own text
+       rather than a parsed attribute — goes on reading it. A list crossing an opaque piece is
+       dropped rather than built wrong, and one a *later* step of the same order rewrites inside
+       the emitted markup stays divergent, each with its own test; see the step's own "landed as"
+       note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
