@@ -1,8 +1,11 @@
 //! The footnote substitution step.
 
 use super::{
-    macros::{MacroMatch, MacroMatchKind, image::range_has_no_opaque_piece},
-    quotes::{Piece, build_match_string, emit_range, source_slice, text_slice},
+    macros::{
+        MacroMatch, MacroMatchKind, emit_range_unescaping_brackets,
+        image::range_has_no_opaque_piece,
+    },
+    quotes::{Piece, build_match_string, source_slice, text_slice},
 };
 use crate::{
     Parser, Span,
@@ -46,7 +49,7 @@ use crate::{
 /// before the first / after the last) — see [`rebuild_footnote_level`] and
 /// [`emit_range_recursing_footnotes`], which recurse in place of the generic
 /// [`rebuild_macro_level`](super::macros::rebuild_macro_level) /
-/// [`emit_range`]'s verbatim clone.
+/// [`emit_range`](super::quotes::emit_range)'s verbatim clone.
 pub(super) fn apply_footnotes<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -112,7 +115,8 @@ fn subtree_might_have_footnote(nodes: &[InlineNode<'_>]) -> bool {
 
 /// Like [`rebuild_macro_level`](super::macros::rebuild_macro_level), but for
 /// [`apply_footnotes`]: rebuilds a level's node list from its footnote matches,
-/// using [`emit_range_recursing_footnotes`] (not [`emit_range`]) for every gap,
+/// using [`emit_range_recursing_footnotes`] (not
+/// [`emit_range`](super::quotes::emit_range)) for every gap,
 /// so a [`Styled`](crate::inlines::Styled)/[`Ref`](crate::inlines::Ref) child
 /// encountered between two matches is recursed into — in source order — rather
 /// than cloned whole.
@@ -181,7 +185,7 @@ fn rebuild_footnote_level<'src>(
     out
 }
 
-/// Like [`emit_range`], but recurses into a
+/// Like [`emit_range`](super::quotes::emit_range), but recurses into a
 /// [`Styled`](crate::inlines::Styled)/[`Ref`](crate::inlines::Ref) piece's
 /// children with [`apply_footnotes`] instead of cloning the node whole — the
 /// piece that makes [`apply_footnotes`] a true whole-tree, source-order walk
@@ -232,7 +236,7 @@ fn emit_range_recursing_footnotes<'src>(
         }
 
         // A verbatim or synthesized text run: slice it to the overlap (see
-        // [`emit_range`]'s own synthesized branch).
+        // [`emit_range`](super::quotes::emit_range)'s own synthesized branch).
         let lo = range.start.max(p_start) - p_start;
         let hi = range.end.min(p_end) - p_start;
 
@@ -365,16 +369,15 @@ fn find_footnote_matches<'src>(
 /// `Document::catalog().footnotes()` entry is not yet byte-faithful; only the
 /// returned *number*, this pass's one load-bearing side effect, is relied on.
 ///
-/// # Deferred forms
+/// # Content carrying an escaped closing bracket
 ///
-/// - Content containing an escaped closing bracket (`\]`): unescaping it would
-///   mean splicing a literal `]` into the middle of a `Text` piece the content
-///   range slices, which — unlike a single-node substitution such as `xref`'s
-///   escaped text — would require rebuilding part of the content's own node
-///   structure around the splice; deferred, exactly as the anchor and
-///   cross-reference macros defer their own escaped-bracket forms when they
-///   cannot represent them without a similar rebuild (divergence test:
-///   `a_footnote_with_an_escaped_bracket_is_a_documented_divergence`).
+/// A content bracket may carry an escaped closing bracket (`\]`), which the
+/// string replacer unescapes to a literal `]` ([`normalize_footnote_text`]).
+/// The subtree carries it the same way: [`footnote_children`] emits the
+/// content through the reference-bearing families' own
+/// [`emit_range_unescaping_brackets`], which drops each backslash as a *gap*
+/// in the ranges it emits rather than rebuilding the pieces around it — see
+/// that helper for why a per-node `replace` cannot express the same unescape.
 fn build_footnote_node<'src>(
     caps: &regex::Captures<'_>,
     full: &std::ops::Range<usize>,
@@ -416,11 +419,7 @@ fn build_footnote_node<'src>(
         return match content_match {
             Some(content) => {
                 // A defining occurrence that also carries an id.
-                if s[content.range()].contains("\\]") {
-                    return None;
-                }
-
-                let children = footnote_children(content.range(), pieces, nodes);
+                let children = footnote_children(content.range(), s, pieces, nodes);
                 let number = register_footnote_number(
                     parser,
                     Some(id.as_ref()),
@@ -454,11 +453,7 @@ fn build_footnote_node<'src>(
     // An anonymous defining occurrence.
     let content = content_match?;
 
-    if s[content.range()].contains("\\]") {
-        return None;
-    }
-
-    let children = footnote_children(content.range(), pieces, nodes);
+    let children = footnote_children(content.range(), s, pieces, nodes);
     let number = register_footnote_number(parser, None, &s[content.range()], location);
 
     Some(InlineNode::Footnote(Footnote {
@@ -485,9 +480,12 @@ fn build_footnote_node<'src>(
 /// [`build_footnote_node`] does (reuse an already-defined id's number, define
 /// a new id-carrying occurrence, or fall back to an unresolved reference) —
 /// see that function's own doc comment for the shared reasoning (the
-/// required `footnote_index_for_id`/`define_footnote` side effect, and why a
-/// content-side `\]` is deferred, which applies here identically since `raw`
-/// is matched by the very same bracket group).
+/// required `footnote_index_for_id`/`define_footnote` side effect, and how a
+/// content-side `\]` is unescaped, which applies here identically since `raw`
+/// is matched by the very same bracket group). The **id** half is the one
+/// place the two differ: the string replacer splits the *raw* bracket on its
+/// first comma and never normalizes what precedes it, so an id carrying a `\]`
+/// keeps its backslash — as the id [`footnote_id_text`] recovers does.
 ///
 /// The one thing this increment does **not** yet do is the deprecation
 /// warning `InlineFootnoteMacroReplacer` records outside `compat-mode`: like
@@ -505,10 +503,6 @@ fn build_footnoteref_node<'src>(
     parser: &Parser,
 ) -> Option<InlineNode<'src>> {
     let location = source_slice(pieces, full.clone(), root);
-
-    if s[raw.range()].contains("\\]") {
-        return None;
-    }
 
     // Split on the first comma: `id` is everything before it (the whole raw
     // text when there is no comma at all), `content` is everything after it
@@ -549,7 +543,7 @@ fn build_footnoteref_node<'src>(
     match content_range {
         Some(content_range) => {
             // A defining occurrence that also carries an id.
-            let children = footnote_children(content_range.clone(), pieces, nodes);
+            let children = footnote_children(content_range.clone(), s, pieces, nodes);
             let number =
                 register_footnote_number(parser, Some(id.as_ref()), &s[content_range], location);
 
@@ -611,26 +605,45 @@ fn footnote_id_text<'src>(
 }
 
 /// Builds a footnote's `children` from its bracket content's match-string
-/// `range` via [`emit_range`] — *not*
+/// `range` via [`emit_range_unescaping_brackets`] — *not*
 /// [`range_is_verbatim`](super::macros::image::range_is_verbatim) the way every
 /// other macro family's target/text slicing does. A footnote's content
 /// becomes structured children rather than a literal attribute value, so a
 /// range crossing an already-recognized construct is not a boundary to defer
-/// on; it is the whole point — `emit_range` clones that construct's node
+/// on; it is the whole point — the emitter clones that construct's node
 /// whole into the footnote's subtree, exactly mirroring how the string
 /// pipeline's footnote text captures an already-substituted macro verbatim
-/// (see [`apply_footnotes`]'s doc comment on ordering). This uses the plain
-/// [`emit_range`], not the recursing [`emit_range_recursing_footnotes`] —
-/// footnotes do not nest (the string pipeline's own lazy bracket match cannot
-/// recognize one inside another's content either, since it always stops at
-/// the *first* unescaped `]`), so a footnote's own content is captured as-is.
+/// (see [`apply_footnotes`]'s doc comment on ordering). It emits through the
+/// plain [`emit_range`](super::quotes::emit_range), not the recursing
+/// [`emit_range_recursing_footnotes`] — footnotes do not nest (the string
+/// pipeline's own lazy bracket match cannot recognize one inside another's
+/// content either, since it always stops at the *first* unescaped `]`), so a
+/// footnote's own content is captured as-is.
+///
+/// # The `\]` unescape
+///
+/// A bracket's content may carry an **escaped closing bracket** (`\]`), which
+/// [`normalize_footnote_text`] — the string replacer's own normalization, and
+/// the one this pass registers the catalog `text` through — turns back into a
+/// literal `]`. The subtree must carry the same text, so the shared
+/// [`emit_range_unescaping_brackets`] drops each backslash as a *gap* in the
+/// ranges it emits: `footnote:[a \] b]` becomes the two `'src`-borrowing
+/// [`Text`](InlineNode::Text) children `a ` and `] b`, never an owned rebuild.
+/// Sharing the reference-bearing families' own helper is what keeps the two
+/// readings of "which backslashes pair off" from drifting; it is also why this
+/// form is no longer deferred (recognizing it once meant splicing a literal
+/// `]` into the middle of a `Text` piece, which nothing here could then
+/// express).
 fn footnote_children<'src>(
     range: std::ops::Range<usize>,
+    s: &str,
     pieces: &[Piece],
     nodes: &[InlineNode<'src>],
 ) -> Vec<InlineNode<'src>> {
     let mut children = Vec::new();
-    emit_range(nodes, pieces, range, &mut children);
+
+    emit_range_unescaping_brackets(&s[range.clone()], range, nodes, pieces, &mut children);
+
     children
 }
 
@@ -840,6 +853,34 @@ mod tests {
             "footnoteref:[]",
             "\\footnoteref:[disc,a discussion]",
             "footnoteref:[disc,the *strong* evidence]",
+            // An escaped closing bracket (`\\]`) in the content: the bracket
+            // group runs past it and both sides unescape it the same way — in
+            // every position (interior, leading, trailing), doubled, more than
+            // once in one content, in both spellings, and beside a construct
+            // the content captures as a node rather than as text.
+            "footnote:[a note ending in a\\]bracket]",
+            "footnote:disc[a note ending in a\\]bracket]",
+            "footnote:[\\]]",
+            "footnote:[\\]leading]",
+            "footnote:[trailing\\]]",
+            "footnote:[a \\]\\] b]",
+            "footnote:[a \\] b \\] c]",
+            "footnoteref:[disc,a note ending in a\\]bracket]",
+            // No comma at all: the whole (still-escaped) bracket is the id of
+            // an unresolved reference, which the string replacer never
+            // normalizes.
+            "footnoteref:[a note ending in a\\]bracket]",
+            "footnote:[the *strong* \\] evidence]",
+            "footnote:[an escaped \\] beside a < special]",
+            // A defining occurrence carrying one, then a bare reference to it:
+            // the number the first assigns is the one the second reuses.
+            "Named.footnote:disc[a \\] note] then footnote:disc[].",
+            // Two anonymous ones, the first carrying an escaped bracket:
+            // recognizing it is what keeps the second numbered `2`.
+            "one footnote:[a \\] note] two footnote:[b]",
+            // The escape of the *macro itself* still wins over the bracket's
+            // own escape.
+            "\\footnote:[a \\] note]",
         ];
 
         let renderer = HtmlSubstitutionRenderer {};
@@ -1088,45 +1129,95 @@ mod tests {
     }
 
     #[test]
-    fn a_footnoteref_macro_with_an_escaped_bracket_is_a_documented_divergence() {
-        // The same escaped-closing-bracket boundary
-        // `a_footnote_with_an_escaped_bracket_is_a_documented_divergence`
-        // documents for `footnote:`, since `build_footnoteref_node` checks
-        // its own captured `raw` text the same way.
+    fn a_footnoteref_macro_with_an_escaped_bracket_unescapes_its_content() {
+        // The same unescape
+        // `a_footnote_with_an_escaped_bracket_unescapes_it_into_the_subtree`
+        // pins for `footnote:`, through `build_footnoteref_node`'s own
+        // (identical) bracket group.
         let source = "footnoteref:[disc,a note ending in a\\]bracket]";
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+
+        assert_eq!(folded, golden_macros(source));
+
         let nodes = build_src(Span::new(source));
-
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Footnote(_))),
-            "a footnoteref: macro with an escaped bracket must be left unrecognized: {nodes:?}"
-        );
-
-        assert!(golden_macros(source).contains("class=\"footnote\""));
+        let footnote = assert_footnote(&nodes[0]);
+        assert_eq!(footnote.id.as_deref(), Some("disc"));
+        assert_eq!(footnote.children.len(), 2);
+        assert_text(&footnote.children[0], "a note ending in a", 1, 19);
+        assert_text(&footnote.children[1], "]bracket", 1, 38);
     }
 
     #[test]
-    fn a_footnote_with_an_escaped_bracket_is_a_documented_divergence() {
-        // Content carrying an escaped closing bracket (`\]`) needs it unescaped
-        // to a literal `]` in the middle of the content's own node structure —
-        // deferred, exactly as the anchor and cross-reference macros defer
-        // their own escaped-bracket forms when they cannot represent the
-        // unescape without a similar rebuild. Both the anonymous form and the
-        // id-carrying form share the same check (see `build_footnote_node`),
-        // so both are exercised here.
-        for source in [
-            "footnote:[a note ending in a\\]bracket]",
-            "footnote:disc[a note ending in a\\]bracket]",
-        ] {
-            let nodes = build_src(Span::new(source));
+    fn a_footnoteref_id_keeps_its_own_escaped_bracket() {
+        // The id half is the one place the two forms differ: the string
+        // replacer splits the *raw* bracket on its first comma and never
+        // normalizes what precedes it, so an id carrying a `\]` keeps its
+        // backslash — and, with no comma at all, the whole bracket is that id
+        // (an unresolved reference, rendered as written).
+        let source = "footnoteref:[a note ending in a\\]bracket]";
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
 
-            assert!(
-                nodes.iter().all(|n| !matches!(n, InlineNode::Footnote(_))),
-                "a footnote with an escaped bracket must be left unrecognized: {nodes:?}"
+        assert_eq!(folded, golden_macros(source));
+
+        let nodes = build_src(Span::new(source));
+        let footnote = assert_footnote(&nodes[0]);
+        assert_eq!(footnote.id.as_deref(), Some("a note ending in a\\]bracket"));
+        assert!(footnote.is_reference);
+        assert!(footnote.number.is_none());
+    }
+
+    #[test]
+    fn a_footnote_with_an_escaped_bracket_unescapes_it_into_the_subtree() {
+        // Content carrying an escaped closing bracket (`\]`) is recognized:
+        // the string replacer unescapes it to a literal `]`
+        // (`normalize_footnote_text`) and the subtree carries the same text,
+        // `footnote_children` dropping the backslash as a *gap* in the ranges
+        // it emits (see `emit_range_unescaping_brackets`). Both the anonymous
+        // form and the id-carrying form share that path, so both are
+        // exercised here.
+        for (source, text_col) in [
+            ("footnote:[a note ending in a\\]bracket]", 11),
+            ("footnote:disc[a note ending in a\\]bracket]", 15),
+        ] {
+            let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+
+            assert_eq!(
+                folded,
+                golden_macros(source),
+                "fold diverged from the string pipeline for {source:?}"
             );
 
-            // The string pipeline, by contrast, does build a footnote marker here.
-            assert!(golden_macros(source).contains("class=\"footnote\""));
+            let nodes = build_src(Span::new(source));
+            let footnote = assert_footnote(&nodes[0]);
+            assert!(!footnote.is_reference);
+            assert_eq!(footnote.number.as_deref(), Some("1"));
+
+            // The backslash is a gap between two `'src`-borrowing runs, not an
+            // owned rebuild of the whole text.
+            assert_eq!(footnote.children.len(), 2);
+            assert_text(&footnote.children[0], "a note ending in a", 1, text_col);
+            assert_text(&footnote.children[1], "]bracket", 1, text_col + 19);
         }
+    }
+
+    #[test]
+    fn an_escaped_bracket_reaches_the_footnote_catalog_unescaped() {
+        // The catalog `text` this pass registers goes through the string
+        // replacer's own `normalize_footnote_text`, so it carries the literal
+        // `]` the subtree now does — the two readings of the same content
+        // agree.
+        let parser = crate::Parser::default();
+        let _nodes = super::super::build(
+            Span::new("footnote:[a note ending in a\\]bracket]"),
+            &parser,
+            None,
+        );
+
+        let catalog = parser.catalog();
+        let footnotes = catalog.footnotes();
+
+        assert_eq!(footnotes.len(), 1);
+        assert_eq!(footnotes[0].text, "a note ending in a]bracket");
     }
 
     #[test]

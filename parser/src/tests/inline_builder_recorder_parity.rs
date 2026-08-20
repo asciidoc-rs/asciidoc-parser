@@ -758,6 +758,8 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "Named.footnote:disc[a discussion] then footnote:disc[].",
         "A claim.footnote:[the *strong* evidence and a link:https://e.org[source]]",
         "Two notes.footnote:[first] and again.footnote:[second]",
+        r"A claim.footnote:[see \[the appendix\]] here.",
+        r"footnoteref:[disc,a note ending in a\]bracket]",
         "Press kbd:[Ctrl+T] now.",
         "Press kbd:[Ctrl,Shift,N] now.",
         "Click btn:[Save] please.",
