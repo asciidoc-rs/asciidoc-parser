@@ -3555,6 +3555,47 @@ Each phase is a reviewable unit with a clear exit gate.
   boundary: every piece it still rejects is one whose bytes exist only at fold time. As with every
   prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (a footnote's own escaped closing bracket):* with the opaque-piece
+  boundary reduced to fold-time-only markup, the next audit item is not a *piece* class at all but
+  one family's own last deferred **form**: a footnote whose bracket content carries an escaped
+  closing bracket (`footnote:[a note ending in a\]bracket]`). The string replacer unescapes it to a
+  literal `]` ([`normalize_footnote_text`](../../parser/src/content/macros.rs)); the builder left the
+  whole macro unrecognized, its own note reasoning that "unescaping it would mean splicing a literal
+  `]` into the middle of a `Text` piece the content range slices, which … would require rebuilding
+  part of the content's own node structure around the splice". A **blocker**, like the six audit
+  items before it, since four real golden sources exercise the form — including
+  `text footnote:[a [[b]] [[c\]\] d]` and an id-carrying definition whose two later
+  `footnote:id[]` references inherit its number, so failing to recognize the first left every one of
+  them unresolved.
+
+  What closes it is that the rebuild the note calls for was *already written*, for a different
+  family: the reference-bearing families' own
+  [`macro_text_children`](../../parser/src/content/inline_builder/macros/mod.rs) has expressed the
+  identical unescape as a **gap in the emitted ranges** — every byte but the backslash is emitted —
+  since the increment that gave a display text structured children. That loop is lifted out as the
+  shared [`emit_range_unescaping_brackets`](../../parser/src/content/inline_builder/macros/mod.rs)
+  and [`footnote_children`](../../parser/src/content/inline_builder/footnotes.rs) emits through it,
+  so the two families cannot drift on which backslashes pair off (`match_indices` scans
+  non-overlapping and left to right, exactly as the replacer's `replace` does). `footnote:[a \] b]`
+  becomes the two `'src`-borrowing `Text` children `a ` and `] b` — a gap, never an owned rebuild —
+  and the three `\]` gates (both `footnote:` branches and the `footnoteref:` form's whole bracket)
+  are deleted rather than relaxed. The catalog `text` this pass registers already went through
+  `normalize_footnote_text`, so it agreed with the string pipeline all along; a test now pins that
+  the subtree agrees with it. The one asymmetry is the `footnoteref:` form's **id** half, which the
+  string replacer takes from the raw bracket's first-comma split and never normalizes: an id
+  carrying a `\]` keeps its backslash on both sides, pinned by its own parity test.
+
+  Two `…_is_a_documented_divergence` tests shed their fixtures per the "if lifted, fold this into a
+  parity corpus" convention, becoming parity-plus-structure tests for both spellings. The footnote
+  differential corpus gains the escape in every position (interior, leading, trailing), doubled,
+  twice in one content, beside a construct the content captures as a node, beside an escaped
+  special, in a definition whose number a later reference reuses, in a pair whose second footnote's
+  number depends on the first being recognized, and under the macro's *own* escape; fixtures are
+  added to the whole-pipeline broad sweep, the combined-constructs corpus, and the structural
+  recorder cross-check. Re-running the corpus-wide fold-parity audit confirms the divergence set
+  strictly **shrank** — the four real golden sources are gone and no new one appeared. As with every
+  prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -4025,6 +4066,19 @@ Each phase is a reviewable unit with a clear exit gate.
        `<<Cub => Tiger>>`). See the step's own "landed as" note above. With this the
        **opaque-piece** boundary — the only one any macro family draws — rejects nothing but
        pieces whose bytes exist at fold time alone.
+     - ✅ **prep (a footnote's escaped closing bracket).** The footnote family's own last deferred
+       form — a bracket content carrying a `\]`, which four real golden sources exercise — is
+       closed by the rebuild it had said it lacked: the reference-bearing families' own
+       gap-emitting unescape, lifted out of
+       [`macro_text_children`](../../parser/src/content/inline_builder/macros/mod.rs) as the shared
+       [`emit_range_unescaping_brackets`](../../parser/src/content/inline_builder/macros/mod.rs)
+       and emitted through by
+       [`footnote_children`](../../parser/src/content/inline_builder/footnotes.rs), so the
+       backslash is a gap between two `'src`-borrowing children rather than an owned rebuild and
+       the two families cannot drift on which backslashes pair off; see the step's own "landed as"
+       note above. The `footnoteref:` form's **id** half keeps its backslash on both sides (the
+       string replacer never normalizes it), pinned by its own parity test.
+
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

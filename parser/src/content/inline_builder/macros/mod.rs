@@ -454,36 +454,59 @@ pub(super) fn macro_text_children<'src>(
             // callers' gate admits) — or, degenerately, is a range `text_slice`
             // declined to recover. Rebuild it out of the nodes it covers, so each
             // special stays the `CharRef` it already is.
-            //
-            // The macro forms' `\]` unescape is expressed here as a *gap* in the
-            // emitted ranges — every byte but the backslash is emitted — rather
-            // than as a `replace` over each recovered node. Doing it per node would
-            // miss a pair astride two adjacent runs, which two `Text` nodes can be
-            // without an atomic piece between them: an attribute expansion splices
-            // its value as its own node, so a value ending in a backslash followed
-            // by a literal `]` (`:t: b\`, then `xref:foo[a<{t}]x]`) puts the two
-            // characters in different runs. Skipping the backslash by range is
-            // boundary-agnostic, and leaves every surviving fragment borrowing
-            // `'src` (§4.5) where a rebuilt value would have had to own its bytes.
             let mut children = Vec::new();
-            let mut cursor = text_range.start;
 
             if unescape_bracket {
-                // `match_indices` scans non-overlapping and left to right, exactly
-                // as `str::replace` does, so a run of backslashes pairs off
-                // identically.
-                for (offset, _) in raw_text.match_indices("\\]") {
-                    let backslash = text_range.start + offset;
-                    emit_range(nodes, pieces, cursor..backslash, &mut children);
-                    cursor = backslash + 1;
-                }
+                emit_range_unescaping_brackets(raw_text, text_range, nodes, pieces, &mut children);
+            } else {
+                emit_range(nodes, pieces, text_range, &mut children);
             }
-
-            emit_range(nodes, pieces, cursor..text_range.end, &mut children);
 
             children
         }
     }
+}
+
+/// Emits the nodes `range` covers into `out` (as [`emit_range`] does), with
+/// each **escaped closing bracket**'s backslash dropped — the `\]` unescape
+/// every bracket-bearing macro form performs, expressed structurally.
+///
+/// `raw_text` is the level's own match-string slice for `range` (the bytes the
+/// string replacer's `replace("\\]", "]")` runs over), so the two agree on
+/// which backslashes pair off: [`str::match_indices`] scans non-overlapping and
+/// left to right, exactly as [`str::replace`] does, so a run of backslashes
+/// resolves identically on both sides.
+///
+/// The unescape is a *gap* in the emitted ranges — every byte but the backslash
+/// is emitted — rather than a `replace` over each recovered node. Doing it per
+/// node would miss a pair astride two adjacent runs, which two
+/// [`Text`](InlineNode::Text) nodes can be without an atomic piece between
+/// them: an attribute expansion splices its value as its own node, so a value
+/// ending in a backslash followed by a literal `]` (`:t: b\`, then
+/// `xref:foo[a<{t}]x]`) puts the two characters in different runs. Skipping the
+/// backslash by range is boundary-agnostic, and leaves every surviving fragment
+/// borrowing `'src` (§4.5) where a rebuilt value would have had to own its
+/// bytes.
+///
+/// Shared with the footnote family — whose content is *always* structured
+/// children, so it has no one-`Text` fast path to take the unescape through —
+/// so the two cannot drift on it.
+pub(in crate::content::inline_builder) fn emit_range_unescaping_brackets<'src>(
+    raw_text: &str,
+    range: std::ops::Range<usize>,
+    nodes: &[InlineNode<'src>],
+    pieces: &[Piece],
+    out: &mut Vec<InlineNode<'src>>,
+) {
+    let mut cursor = range.start;
+
+    for (offset, _) in raw_text.match_indices("\\]") {
+        let backslash = range.start + offset;
+        emit_range(nodes, pieces, cursor..backslash, out);
+        cursor = backslash + 1;
+    }
+
+    emit_range(nodes, pieces, cursor..range.end, out);
 }
 
 /// Rebuilds an **already-escaped computed value** — a value a family read off

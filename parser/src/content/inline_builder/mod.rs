@@ -218,13 +218,20 @@
 //!   `build_footnote_node`). Its content becomes structured children via
 //!   [`emit_range`](quotes::emit_range) rather than a literal attribute value,
 //!   so — unlike the other families — a content crossing an already-recognized
-//!   construct is not deferred: nesting is the point. The deprecated
-//!   `footnoteref:[id,text]` / `footnoteref:[id]` form
+//!   construct is not deferred: nesting is the point. A content carrying an
+//!   **escaped closing bracket** (`\]`) is recognized too, the backslash
+//!   dropped as a *gap* in the emitted ranges by the reference-bearing
+//!   families' own
+//!   [`emit_range_unescaping_brackets`](macros::emit_range_unescaping_brackets),
+//!   so the subtree carries the literal `]` the string replacer's
+//!   [`normalize_footnote_text`](crate::content::normalize_footnote_text)
+//!   produces. The deprecated `footnoteref:[id,text]` / `footnoteref:[id]` form
 //!   (`build_footnoteref_node`) is recognized too, splitting its one bracket on
-//!   the first comma rather than taking an id from the macro target; only its
-//!   own deprecation warning (a diagnostic, deferred to the cutover like every
-//!   other family's) and a content carrying an escaped closing bracket (`\]`)
-//!   remain deferred. The bibliography-anchor form is a later increment.
+//!   the first comma rather than taking an id from the macro target (an id, the
+//!   one half the string replacer never normalizes, keeps its own `\]`); only
+//!   its own deprecation warning (a diagnostic, deferred to the cutover like
+//!   every other family's) remains deferred. The bibliography-anchor form is a
+//!   later increment.
 //! - [`apply_stem`] recognizes **inline STEM macros** (`stem:[…]`,
 //!   `asciimath:[…]`, `latexmath:[…]`), replacing each with a
 //!   [`Stem`](InlineNode::Stem) leaf. Like [`apply_passthroughs`], it is an
@@ -729,6 +736,8 @@ mod tests {
             "Named.footnote:disc[a discussion] then footnote:disc[].",
             "A claim.footnote:[the *strong* evidence and a link:https://e.org[source]]",
             "Two notes.footnote:[first] and again.footnote:[second]",
+            r"A claim.footnote:[see \[the appendix\]] here.",
+            r"footnoteref:[disc,a note ending in a\]bracket]",
             "Press kbd:[Ctrl+T] now.",
             "Press kbd:[Ctrl,Shift,N] now.",
             "Click btn:[Save] please.",
@@ -826,6 +835,11 @@ mod tests {
             "See <<intro>> for details.footnote:[Also check the {product} docs.]",
             with_product,
         );
+
+        // A footnote whose text carries an escaped closing bracket, beside a
+        // second one that carries none: the bracket group runs past the escape
+        // on both sides, so the two are numbered alike.
+        assert_parity("A claim.footnote:[see \\[the appendix\\]] and one more.footnote:[q.e.d.]");
 
         // A delimited passthrough beside a quoted span and an image macro.
         assert_parity("+++<u>raw</u>+++ combined with *bold* and image:foo.png[Alt Text].");
