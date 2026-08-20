@@ -3596,6 +3596,77 @@ Each phase is a reviewable unit with a clear exit gate.
   strictly **shrank** — the four real golden sources are gone and no new one appeared. As with every
   prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (an order that escapes **after** a markup-producing step — the last
+  category the audit's own map named):* the corpus-wide audit's itemized map ended with one
+  category no recognition or classification increment could close: "an effective order that runs
+  `SpecialCharacters` **after** a step that already produced markup (`subs=quotes,
+  specialcharacters`), where the string pipeline escapes the very tags the earlier step emitted.
+  That last one is structurally different from the rest, and harder: a tree whose markup exists
+  only at fold time has no rendered tags for a later escaping step to act on, so it needs its own
+  policy rather than another recognition increment." That policy is settled here, and it is a
+  short one: **reach fold time for that one node, early.**
+
+  [`flatten_prior_markup`](../../parser/src/content/inline_builder/special_chars.rs) runs
+  immediately ahead of [`apply_special_characters`](../../parser/src/content/inline_builder/special_chars.rs)
+  whenever the escaping step is not the order's first — never for a built-in group, every one of
+  which escapes first, so this is a `subs=` list's question alone. Each node an earlier step of the
+  same order already turned into markup is folded through the configured renderer and the result
+  becomes one [`Text`](../../parser/src/inlines/inline_node.rs) node's value, which the escaping
+  step then splits like any other text. Nothing new is invented for it: a `Text` node is *logical*
+  text the fold escapes (§3.4), so the single escape lands exactly where the string pipeline's does,
+  and "a node's value is already-substituted text" is the same seam a delimited passthrough's and a
+  STEM expression's body already use — the only place this module consults the renderer while
+  building. It is also what the document genuinely says under such an order: the content is no
+  longer a strong span, it is text that reads like a tag, and the tree now holds it as such (pinned
+  by a structural test, not only by the fold's bytes).
+
+  The one subtlety is *which* bytes that early fold must produce. The string pipeline's haystack at
+  that moment holds `<strong>a < b</strong>` — the tags written, the author's own specials **not
+  yet escaped**, both escaped together by the one pass that follows. A finished fold would escape
+  the children on the way out, so `as_pre_escape` rewrites every `Text` run nested *inside* the node
+  as a [`Raw`](../../parser/src/inlines/inline_node.rs) leaf ("emit verbatim") first; every other
+  leaf already carries its own already-substituted bytes (a `CharRef` an earlier `replacements` step
+  built, a `LineBreak` `post_replacements` wrote) and needs no rewrite.
+
+  What must **not** be folded is what the string pipeline is holding as a *placeholder* rather than
+  as markup at that point, since no escaping step acts on those either: a passthrough body or inline
+  STEM expression (extracted ahead of every step, restored after the last one) and a **deferred
+  cross-reference** (recorded by the macros step as an `XrefSegment`, rendered by
+  [`Content::finalize_deferred`](../../parser/src/content/content.rs) once every step has run —
+  which is why `subs=macros,specialcharacters` emits an unescaped `<a href="#sec">` where it escapes
+  a link's). A leaf says which it is by its own node kind; the one *container* the extraction pass
+  builds — an attribute-list-prefixed passthrough's own `Styled` wrapper — is told from a
+  quotes-step span by `masked_locations`, a set of identities collected from the tree extraction
+  produced, before any step ran (sound because extraction recognizes only a wholly verbatim match,
+  so each such node carries an honest `'src` span no later step's node can claim).
+
+  Two shapes stay divergent, each pinned by its own test. A placeholder construct **nested inside**
+  such a node (`*a +++<x>+++ b*`, `*see xref:sec[S] now*`, `link:index.html[a +++<b>+++ c]`) leaves
+  the whole node unflattened: folding it would inline the placeholder's content into the escaped
+  text, where the string pipeline escapes *around* the placeholder and restores it unescaped
+  afterwards — and splitting one node's fold back around its placeholder descendants is the sentinel
+  mechanism itself, which this module deliberately does not have. And a `link:`/`mailto:` **macro**
+  written inside flattened markup (`*a link:index.html[Docs] b*` under
+  `subs=quotes,specialcharacters,macros`) is a boundary this policy *inherits* rather than
+  introduces: the flattened run is synthesized, and that one pass alone requires its own marker to be
+  verbatim so [`link_form`](../../parser/src/content/inline_builder/macros/links.rs) can replay the
+  string pipeline's family-pass registration order — the same boundary a wholly expanded `{m}` macro
+  already has. Every other family reads what it needs from the level's match string and is recognized
+  in flattened text exactly as the string pipeline recognizes it in the escaped tags (an auto-link, an
+  image, an anchor, an index term, and a footnote are each pinned doing so).
+
+  A differential corpus crosses markup-bearing fixtures with the real `subs=` lists that reverse the
+  two steps: each markup-producing step ahead of the escaping one on its own (`quotes`,
+  `replacements`, `macros`, `post_replacements`, `callouts`), several together, an expanding step
+  ahead of both, a multi-line content, and the orders that additionally run a step *after* the
+  escaping one — so the flattened text is what those later steps read, exactly as the string
+  pipeline's later steps read the escaped tags. Re-running the corpus-wide fold-parity audit (tree
+  building forced on for every parse in the suite) confirms the divergence set strictly **shrank**:
+  the category's own source is gone and no pre-existing one appeared (the set's only additions are
+  this increment's own new divergence-pinning fixtures). With it, every item the audit's map named
+  is closed. As with every prep piece before it, nothing further is wired in: `rendered_html()`
+  remains the string pipeline's own string.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -4010,8 +4081,8 @@ Each phase is a reviewable unit with a clear exit gate.
        `SpecialCharacters` step to split — §3.4.1 applied to the step's *position*, not merely its
        presence; see the step's own "landed as" note above. The category's other half — a
        markup-producing step (`subs=quotes,specialcharacters`) whose emitted tags the escaping step
-       acts on — needs a policy of its own rather than another classification, and stays deferred
-       with its own divergence test.
+       acts on — needs a policy of its own rather than another classification, and is closed by the
+       increment directly below.
      - ✅ **prep (a footnote inside an expanded value).** The last family to make that lift, and the
        only one that was not deferring but building a **wrong node**: the footnote family has no
        gate, so it always recognized such a macro and read its id through `source_slice`, whose
@@ -4078,6 +4149,23 @@ Each phase is a reviewable unit with a clear exit gate.
        the two families cannot drift on which backslashes pair off; see the step's own "landed as"
        note above. The `footnoteref:` form's **id** half keeps its backslash on both sides (the
        string replacer never normalizes it), pinned by its own parity test.
+     - ✅ **prep (an order that escapes after a markup-producing step).** The audit map's last
+       item, and the one category no recognition or classification increment could close: under
+       `subs=quotes,specialcharacters` the string pipeline escapes the tags the quotes step already
+       wrote, while a tree's markup exists only at fold time. The policy is to reach fold time for
+       that one node early —
+       [`flatten_prior_markup`](../../parser/src/content/inline_builder/special_chars.rs) folds each
+       node an earlier step of the same order turned into markup and keeps the result as one
+       [`Text`](../../parser/src/inlines/inline_node.rs) node's value, which the escaping step then
+       splits like any other text, so §3.4's single escape lands exactly where the string
+       pipeline's does. Nodes the string pipeline holds as a *placeholder* at that moment — a
+       passthrough or STEM body, and a **deferred cross-reference** — are excluded, told apart by
+       node kind or (for an attribute-list-prefixed passthrough's own `Styled` wrapper) by
+       `masked_locations`, collected before any step ran. What defers is such a construct *nested
+       inside* a flattened node, and a `link:`/`mailto:` macro written inside flattened markup (the
+       family's own pre-existing verbatim-marker rule), each with its own divergence test. See the
+       step's own "landed as" note above. With this every item the corpus-wide audit's map named is
+       closed.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

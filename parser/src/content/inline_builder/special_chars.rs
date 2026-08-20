@@ -1,10 +1,12 @@
-//! The special-characters substitution step, and its §3.4.1 counterpart for an
-//! effective order that never runs it.
+//! The special-characters substitution step, and its §3.4.1 counterparts for an
+//! effective order that never runs it — or that runs it *late*, after a step
+//! that already produced markup.
 
-use super::passthrough_step::is_special;
+use super::{fold_html, passthrough_step::is_special};
 use crate::{
-    Span,
-    inlines::{CharRef, InlineNode},
+    HasSpan, Parser, Span,
+    inlines::{CharRef, InlineNode, RefVariant},
+    parser::InlineSubstitutionRenderer,
     strings::CowStr,
 };
 
@@ -91,8 +93,7 @@ pub(super) fn apply_special_characters<'src>(
 /// [`Styled`](crate::inlines::Styled) span, a [`Ref`](crate::inlines::Ref)'s
 /// own display children, an [`Anchor`](crate::inlines::Anchor)'s reference
 /// text, and a [`Footnote`](crate::inlines::Footnote)'s own children —
-/// mirroring the containers [`fold_html`](super::fold_html) itself descends
-/// into.
+/// mirroring the containers [`fold_html`] itself descends into.
 pub(super) fn classify_unescaped_specials<'src>(
     nodes: Vec<InlineNode<'src>>,
 ) -> Vec<InlineNode<'src>> {
@@ -210,6 +211,195 @@ fn split_verbatim<'src>(location: Span<'src>, leaf: SpecialLeaf, out: &mut Vec<I
             location: rest,
         });
     }
+}
+
+/// Rewrites every node an **earlier step of this same order** already turned
+/// into markup as the logical [`Text`](InlineNode::Text) that markup is, so the
+/// `SpecialCharacters` step that is about to run escapes it exactly as the
+/// string pipeline escapes the tags that earlier step already wrote.
+///
+/// This is design §3.4.1 applied to the escaping step's own *position* rather
+/// than to a spliced value's classification (which
+/// `split_attribute_value` already keys on the same question). Every built-in
+/// group runs `specialcharacters` first, so this is a `subs=` list's question
+/// alone — `subs=quotes,specialcharacters` runs the quotes step first, and the
+/// string pipeline is holding `<strong>bold</strong>` by the time the escaping
+/// step reaches it, emitting `&lt;strong&gt;bold&lt;/strong&gt;`.
+///
+/// A tree has no rendered tags at that point: a
+/// [`Styled`](crate::inlines::Styled) span's markup exists only at fold time.
+/// So the policy is to *reach* fold time for that one node, early: the node is
+/// folded through the configured renderer and the result becomes one `Text`
+/// node's value. That is the same "a node's value is already-substituted text"
+/// seam a delimited passthrough's and a STEM expression's body already use —
+/// the only place this module consults the renderer while building — and it is
+/// what the document genuinely says under such an order: the content is no
+/// longer a strong span, it is text that reads like a tag, which is exactly
+/// what a `Text` node the fold escapes means (§3.4).
+///
+/// The nodes that must **not** be folded are the ones the string pipeline is
+/// holding as a *placeholder* rather than as markup at this point, since no
+/// escaping step acts on those either — see [`covers_masked`] for which they
+/// are and how each is told apart, and [`masked_locations`] for the one that
+/// needs an identity rather than a node kind to say so.
+///
+/// A node whose own subtree *contains* one of those is left alone too, and is
+/// this policy's own documented divergence: folding it whole would inline the
+/// placeholder's content into the escaped text, where the string pipeline
+/// escapes *around* the placeholder and restores it unescaped afterwards.
+/// Splitting one node's fold back around its placeholder descendants is the
+/// sentinel mechanism itself, which this module deliberately does not have.
+pub(super) fn flatten_prior_markup<'src>(
+    nodes: Vec<InlineNode<'src>>,
+    masked: &[(usize, usize)],
+    renderer: &dyn InlineSubstitutionRenderer,
+    parser: &Parser,
+) -> Vec<InlineNode<'src>> {
+    nodes
+        .into_iter()
+        .map(|node| {
+            if matches!(node, InlineNode::Text { .. }) || covers_masked(&node, masked) {
+                return node;
+            }
+
+            let location = node.span();
+            let value = fold_html(std::slice::from_ref(&as_pre_escape(node)), renderer, parser);
+
+            InlineNode::Text {
+                value: CowStr::from(value),
+                location,
+            }
+        })
+        .collect()
+}
+
+/// Rewrites every [`Text`](InlineNode::Text) run *nested inside* `node` as a
+/// [`Raw`](InlineNode::Raw) leaf, so folding `node` reproduces the markup the
+/// string pipeline's haystack holds at this point — **before** its escaping
+/// step runs — rather than the fully-escaped markup a finished fold emits.
+///
+/// A `Text` node is logical text the fold escapes (§3.4), which is what makes
+/// it the right kind for the *result* of this flattening: the escaping step
+/// that is about to run does that escaping, once. But the same rule applied to
+/// the node's own children would escape them a second time, since the string
+/// pipeline has not escaped them either at the moment its markup-producing
+/// step wrote those tags (`*a < b*` is `<strong>a < b</strong>` there, and the
+/// one escaping pass that follows turns both the tags and the `<` into
+/// entities together). `Raw` is exactly "emit this verbatim", so the fold
+/// reproduces that pre-escape haystack.
+///
+/// Every other leaf already carries its own already-substituted bytes — a
+/// [`CharRef`](InlineNode::CharRef) an earlier `replacements` step built folds
+/// to the entity that step wrote, a [`LineBreak`](InlineNode::LineBreak) to
+/// the break `post_replacements` wrote — so only `Text` needs the rewrite.
+fn as_pre_escape<'src>(node: InlineNode<'src>) -> InlineNode<'src> {
+    match node {
+        InlineNode::Text { value, location } => InlineNode::Raw { value, location },
+
+        InlineNode::Styled(mut styled) => {
+            styled.children = styled.children.into_iter().map(as_pre_escape).collect();
+            InlineNode::Styled(styled)
+        }
+
+        InlineNode::Ref(mut reference) => {
+            reference.children = reference.children.into_iter().map(as_pre_escape).collect();
+            InlineNode::Ref(reference)
+        }
+
+        InlineNode::Anchor(mut anchor) => {
+            anchor.reftext = anchor
+                .reftext
+                .map(|reftext| reftext.into_iter().map(as_pre_escape).collect());
+            InlineNode::Anchor(anchor)
+        }
+
+        InlineNode::Footnote(mut footnote) => {
+            footnote.children = footnote.children.into_iter().map(as_pre_escape).collect();
+            InlineNode::Footnote(footnote)
+        }
+
+        other => other,
+    }
+}
+
+/// The `(offset, len)` identity of every [`Styled`](crate::inlines::Styled)
+/// node in `nodes` — the one *container* the passthrough-extraction pass
+/// builds (an attribute-list-prefixed passthrough, `[quotes]++text++`).
+///
+/// A location is a sound identity for these: extraction recognizes only a
+/// wholly *verbatim* match (see
+/// [`range_is_verbatim`](super::macros::image::range_is_verbatim)), so each
+/// carries an honest, precise `'src` span rather than design §4.4's coarse
+/// fallback — and a later step's own node can never claim the identical range,
+/// since a masked node is one opaque piece to
+/// [`build_match_string`](super::quotes::build_match_string) and any match
+/// containing it extends past it on at least one side.
+///
+/// Extraction's *leaf* artifacts need no entry here, because their node kind
+/// already says what they are: under an order that has a `SpecialCharacters`
+/// step at all, a [`Raw`](InlineNode::Raw) leaf can only have come from this
+/// pass (a spliced attribute value classifies as `Text` while that step is
+/// still ahead — see
+/// [`SplicedSpecials`](super::attribute_refs::SplicedSpecials) — and
+/// [`classify_unescaped_specials`] runs only for an order with no such step),
+/// and a [`Stem`](crate::inlines::Stem) node has no other origin at all.
+pub(super) fn masked_locations(nodes: &[InlineNode<'_>]) -> Vec<(usize, usize)> {
+    nodes
+        .iter()
+        .filter(|node| matches!(node, InlineNode::Styled(_)))
+        .map(|node| identity(node))
+        .collect()
+}
+
+/// Reports whether `node` — or anything nested inside it — is hidden from the
+/// escaping step.
+///
+/// Three constructs are: a passthrough body and an inline-STEM expression,
+/// extracted ahead of every step and restored after the last one (told by
+/// their node kind, or — for an attribute-list-prefixed passthrough's own
+/// wrapper — by a `masked` entry), and a **deferred cross-reference**, which
+/// the macros step records as an `XrefSegment` rather than as markup and
+/// [`Content::finalize_deferred`](crate::content::Content) renders once every
+/// step has run. No escaping step ever acts on any of their tags.
+fn covers_masked(node: &InlineNode<'_>, masked: &[(usize, usize)]) -> bool {
+    let hidden = match node {
+        InlineNode::Raw { .. } | InlineNode::Stem(_) => true,
+        InlineNode::Ref(reference) => reference.variant == RefVariant::Xref,
+        _ => masked.contains(&identity(node)),
+    };
+
+    if hidden {
+        return true;
+    }
+
+    // The containers a hidden construct can be nested inside. An
+    // [`Anchor`](crate::inlines::Anchor)'s reference text is not one: it holds
+    // a single verbatim `Text` child or nothing at all, since a reference text
+    // crossing an opaque piece leaves the field `None` (see
+    // `build_anchor_reftext`).
+    match node {
+        InlineNode::Styled(styled) => styled
+            .children
+            .iter()
+            .any(|child| covers_masked(child, masked)),
+
+        InlineNode::Ref(reference) => reference
+            .children
+            .iter()
+            .any(|child| covers_masked(child, masked)),
+
+        InlineNode::Footnote(footnote) => footnote
+            .children
+            .iter()
+            .any(|child| covers_masked(child, masked)),
+
+        _ => false,
+    }
+}
+
+fn identity(node: &InlineNode<'_>) -> (usize, usize) {
+    let location = node.span();
+    (location.byte_offset(), location.data().len())
 }
 
 /// Splits a synthesized `value` — text with no source span of its own — into
