@@ -367,7 +367,9 @@ use macros::apply_macros;
 use passthrough_step::apply_passthroughs;
 use post_replacements::apply_post_replacements;
 use quotes::apply_quotes;
-use special_chars::{apply_special_characters, classify_unescaped_specials};
+use special_chars::{
+    apply_special_characters, classify_unescaped_specials, flatten_prior_markup, masked_locations,
+};
 use stem_step::apply_stem;
 
 use crate::{
@@ -514,9 +516,41 @@ pub(crate) fn build_for_group<'src>(
         nodes = apply_stem(nodes, location, parser);
     }
 
+    // A `subs=` list can put the escaping step *after* a step that already
+    // produced markup, and there the string pipeline escapes the tags that
+    // step wrote. Recording what the extraction pass masked — before any step
+    // runs — is what lets `flatten_prior_markup` tell those tags from a
+    // passthrough body the escaping step never touches; see its own doc
+    // comment. The walk is skipped entirely for the overwhelmingly common
+    // order that escapes first (or never).
+    let escapes_late = steps
+        .iter()
+        .position(|step| step == &SubstitutionStep::SpecialCharacters)
+        .is_some_and(|position| position > 0);
+
+    let masked = if escapes_late {
+        masked_locations(&nodes)
+    } else {
+        vec![]
+    };
+
     for (position, step) in steps.iter().enumerate() {
         nodes = match step {
-            SubstitutionStep::SpecialCharacters => apply_special_characters(nodes),
+            SubstitutionStep::SpecialCharacters => {
+                // Design §3.4.1, applied to this step's own *position*:
+                // anything an earlier step of this order already turned into
+                // markup is logical text by the time the escaping step reaches
+                // it (see `flatten_prior_markup`). A no-op when this step runs
+                // first — every built-in group's order — and equally when the
+                // steps ahead of it produced nothing but text.
+                let nodes = if position == 0 {
+                    nodes
+                } else {
+                    flatten_prior_markup(nodes, &masked, &*parser.renderer, parser)
+                };
+
+                apply_special_characters(nodes)
+            }
 
             SubstitutionStep::Quotes => apply_quotes(nodes, location, parser),
 
@@ -1888,38 +1922,310 @@ mod tests {
             }
         }
 
-        /// The other half of "an order that escapes late", pinned as a
-        /// documented divergence rather than closed: a step that produces
-        /// **markup** ahead of the escaping one.
+        /// The other half of "an order that escapes late", closed by
+        /// [`flatten_prior_markup`](super::super::special_chars::flatten_prior_markup):
+        /// a step that produces **markup** ahead of the escaping one.
         ///
         /// `subs=quotes,specialcharacters` runs the quotes step first, so the
         /// string pipeline holds `<strong>bold</strong>` by the time
         /// `specialcharacters` runs — and escapes those very tags, emitting
         /// `&lt;strong&gt;bold&lt;/strong&gt;`. A tree has no rendered tags at
         /// that point: a [`Styled`](crate::inlines::Styled) span's markup
-        /// exists only at fold time, so there is nothing for the escaping
-        /// transducer to act on and the fold emits a real `<strong>` element.
+        /// exists only at fold time. The policy is to reach fold time for that
+        /// one node early — folding it through the configured renderer and
+        /// keeping the result as one [`Text`](InlineNode::Text) node's value,
+        /// which the escaping step then splits like any other text.
         ///
-        /// That is structurally unlike the spliced-value case the corpus above
-        /// closes, where the fragment *is* text at the moment the step runs and
-        /// §3.4.1 only has to say which leaf kind it becomes. Deciding what a
-        /// tree should even hold here — a `Styled` node whose fold is escaped,
-        /// or pre-rendered text that abandons the structure — is a policy
-        /// question of its own, and the design doc names it as such (§5.2,
-        /// Phase 4 step 6). Both spellings of the order are pinned here,
-        /// including the nested one a `pass:q,c[…]` passthrough reaches.
-        ///
-        /// The author's own specials are already right on both sides, so the
-        /// fixture asserts exactly where the two part company.
+        /// The corpus crosses markup-producing fixtures with the real `subs=`
+        /// lists that can reverse the two: each markup-producing step ahead of
+        /// the escaping one on its own, several of them together, and the
+        /// orders that additionally run a step *after* it (so the flattened
+        /// text is what those later steps see, exactly as the string
+        /// pipeline's own later steps read the escaped tags).
         #[test]
-        fn a_markup_producing_step_before_the_escaping_one_is_a_documented_divergence() {
+        fn a_markup_producing_step_before_the_escaping_one_folds_its_markup_escaped() {
+            let custom = |subs: &str| {
+                let (group, invalid) = SubstitutionGroup::from_custom_string(None, subs);
+                assert!(invalid.is_empty(), "unexpected invalid subs in {subs:?}");
+                group
+            };
+
+            // The fixture that pinned this as a divergence until the policy
+            // landed: the author's own `<b>` was already escaped on both
+            // sides; only the quotes step's own markup differed.
+            let quotes_first = custom("quotes,specialcharacters");
+            assert_eq!(
+                golden_for_group(&quotes_first, "<b> *bold*"),
+                "&lt;b&gt; &lt;strong&gt;bold&lt;/strong&gt;"
+            );
+            assert_group_parity(&quotes_first, "<b> *bold*");
+
+            let cases: [(&str, &[&str]); 9] = [
+                (
+                    "quotes,specialcharacters",
+                    &[
+                        "*bold*",
+                        "plain text with no markup at all",
+                        "*a* and _b_ and `c`",
+                        "*a < b* & _c > d_",
+                        "*a _b_ c*",
+                        "[.role]#roled#",
+                        "[#id]#anchored#",
+                        "\"`smart`\" quotes",
+                        "H~2~O and E = mc^2^",
+                        "a *b* c",
+                    ],
+                ),
+                (
+                    "replacements,specialcharacters",
+                    &[
+                        "(C) 2024",
+                        "a -- b",
+                        "it's",
+                        "a -> b",
+                        "and so on...",
+                        "&copy;",
+                    ],
+                ),
+                (
+                    "macros,specialcharacters",
+                    &[
+                        "image:a.png[Alt]",
+                        "an image:a.png[Alt] inline",
+                        "link:index.html[Docs]",
+                        "https://example.org auto-link",
+                        "a footnote:[the note] here",
+                        "kbd:[Ctrl+T] pressed",
+                        "((coffee)) term",
+                        "[[an-id]]anchored",
+                        "xref:sec[Section] here",
+                    ],
+                ),
+                (
+                    "post_replacements,specialcharacters",
+                    &["first +\nsecond", "no break here"],
+                ),
+                (
+                    "callouts,specialcharacters",
+                    &["a line of code <1>", "no callout here"],
+                ),
+                (
+                    // Several markup-producing steps ahead of the escaping
+                    // one.
+                    "quotes,replacements,specialcharacters",
+                    &["*bold* and (C)", "*a (C) b*", "*a -- b* and it's"],
+                ),
+                (
+                    // A step whose own output is text (an expansion) ahead of
+                    // the markup-producing one, so the flattening runs over a
+                    // level that already holds a synthesized run.
+                    "attributes,quotes,specialcharacters",
+                    &["*{product}*", "{tag} and *bold*", "*a {amp} b*"],
+                ),
+                (
+                    // Multi-line, so a flattened span sits on one line of
+                    // several.
+                    "quotes,specialcharacters",
+                    &["a < b\n*bold*\nc & d", "*spanning\ntwo lines*"],
+                ),
+                (
+                    // Two markup-producing steps ahead of the escaping one, so
+                    // the flattened node is a span whose own *children* are
+                    // already macro nodes — every container the fold descends
+                    // into, reached before the escaping step rather than after
+                    // it.
+                    "quotes,macros,specialcharacters",
+                    &[
+                        "*a https://example.org b*",
+                        "*a link:index.html[Docs] b*",
+                        "*a image:sunset.jpg[Sunset] b*",
+                        "*a footnote:[the note] b*",
+                        "*a [[an-id,the ref text]] b*",
+                        "*a ((coffee)) b*",
+                        "*a kbd:[Ctrl+T] b*",
+                    ],
+                ),
+            ];
+
+            for (subs, fixtures) in cases {
+                let group = custom(subs);
+                for source in fixtures {
+                    assert_group_parity(&group, source);
+                }
+            }
+
+            // Orders that run a step *after* the escaping one, so the
+            // flattened text is what that later step reads — exactly as the
+            // string pipeline's later steps read the escaped tags. The
+            // extraction pass runs for each of these (they name `macros`), so
+            // they also exercise the masked/unmasked split
+            // `flatten_prior_markup` draws.
+            for subs in [
+                "quotes,specialcharacters,macros",
+                "quotes,specialcharacters,macros,post_replacements",
+            ] {
+                let group = custom(subs);
+                for source in [
+                    "*bold* then link:index.html[Docs]",
+                    "*a https://example.org b*",
+                    "*a image:sunset.jpg[Sunset] b*",
+                    "*a footnote:[the note] b*",
+                    "*a ((coffee)) b*",
+                    "*a [[an-id]] b*",
+                    "[quotes]++*not bold*++ and *bold*",
+                    "pass:[<raw>] and *bold*",
+                    "*bold* and stem:[x + y]",
+                ] {
+                    assert_group_parity(&group, source);
+                }
+            }
+        }
+
+        /// The flattened markup is *text*, not a span whose fold happens to be
+        /// escaped: the tree a late-escaping order produces carries no
+        /// [`Styled`](crate::inlines::Styled) node at all, and the tags are
+        /// ordinary [`Text`](InlineNode::Text) runs and
+        /// [`CharRef`](InlineNode::CharRef) leaves the fold escapes once
+        /// (§3.4). That is what the document genuinely says under such an
+        /// order — the content is no longer a strong span, it is text that
+        /// reads like a tag.
+        #[test]
+        fn a_late_escaping_order_leaves_the_flattened_markup_as_text() {
             let (group, invalid) =
                 SubstitutionGroup::from_custom_string(None, "quotes,specialcharacters");
             assert!(invalid.is_empty());
 
-            let source = "<b> *bold*";
+            let parser = parser_with_product();
+            let nodes = build_group(&group, "*bold*", &parser);
+
+            assert!(
+                !nodes.iter().any(|n| matches!(n, InlineNode::Styled(_))),
+                "the quotes step's span must not survive a late escaping step: {nodes:?}"
+            );
+
+            let text: String = nodes
+                .iter()
+                .map(|node| match node {
+                    InlineNode::Text { value, .. } => value.to_string(),
+                    InlineNode::CharRef {
+                        value: crate::inlines::CharRef::Special(ch),
+                        ..
+                    } => ch.to_string(),
+                    other => panic!("unexpected node kind: {other:?}"),
+                })
+                .collect();
+
+            assert_eq!(text, "<strong>bold</strong>");
+        }
+
+        /// A documented divergence, not a bug: a construct the string
+        /// pipeline is holding as a **placeholder** at escaping time, nested
+        /// *inside* a node an earlier step turned into markup.
+        ///
+        /// There are two such constructs, and the fixtures pin one of each: a
+        /// passthrough (or inline-STEM) body, extracted ahead of every step
+        /// and restored after the last one, and a deferred cross-reference,
+        /// recorded by the macros step and rendered by
+        /// [`Content::finalize_deferred`](crate::content::Content) once every
+        /// step has run. The string pipeline's escaping step acts on neither,
+        /// so it escapes *around* the placeholder and the construct comes back
+        /// unescaped: `&lt;strong&gt;a <x> b&lt;/strong&gt;`.
+        ///
+        /// Folding the enclosing span whole would inline the construct into
+        /// the escaped text instead. Splitting one node's fold back around its
+        /// placeholder descendants is the sentinel mechanism itself, which
+        /// this module deliberately does not have — so such a node is left
+        /// alone, exactly as an unrecognized construct is elsewhere here.
+        ///
+        /// Either construct on its *own* — not nested inside a
+        /// markup-producing step's node — is unaffected and stays parity; the
+        /// corpus above pins both.
+        #[test]
+        fn a_placeholder_construct_inside_a_markup_node_is_a_documented_divergence() {
+            let cases = [
+                (
+                    "quotes,specialcharacters,macros",
+                    "*a +++<x>+++ b*",
+                    "&lt;strong&gt;a <x> b&lt;/strong&gt;",
+                    "<strong>a <x> b</strong>",
+                ),
+                (
+                    "quotes,macros,specialcharacters",
+                    "*see xref:sec[S] now*",
+                    "&lt;strong&gt;see <a href=\"#sec\">S</a> now&lt;/strong&gt;",
+                    "<strong>see <a href=\"#sec\">S</a> now</strong>",
+                ),
+                // The same, where the enclosing markup node is a macro rather
+                // than a quoted span — every container the walk descends into.
+                (
+                    "macros,specialcharacters",
+                    "link:index.html[a +++<b>+++ c]",
+                    "&lt;a href=\"index.html\"&gt;a <b> c&lt;/a&gt;",
+                    "<a href=\"index.html\">a <b> c</a>",
+                ),
+                (
+                    "macros,specialcharacters",
+                    "footnote:[a +++<b>+++ c]",
+                    "&lt;sup class=\"footnote\"&gt;[&lt;a id=\"_footnoteref_1\" class=\"footnote\" \
+                     href=\"#_footnotedef_1\" title=\"View footnote.\"&gt;1&lt;/a&gt;]&lt;/sup&gt;",
+                    "<sup class=\"footnote\">[<a id=\"_footnoteref_1\" class=\"footnote\" \
+                     href=\"#_footnotedef_1\" title=\"View footnote.\">1</a>]</sup>",
+                ),
+            ];
+
+            for (subs, source, expected_golden, expected_built) in cases {
+                let (group, invalid) = SubstitutionGroup::from_custom_string(None, subs);
+                assert!(invalid.is_empty());
+
+                let golden = golden_for_group(&group, source);
+                assert_eq!(golden, expected_golden);
+
+                let built_parser = parser_with_product();
+                let nodes = build_group(&group, source, &built_parser);
+                let built = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &built_parser);
+
+                assert_ne!(
+                    built, golden,
+                    "expected the documented divergence to still reproduce for {source:?}; the \
+                     boundary may have been lifted — if so, fold this fixture into the parity \
+                     corpus above"
+                );
+                assert_eq!(built, expected_built);
+            }
+        }
+
+        /// A documented divergence the flattening policy inherits rather than
+        /// introduces: a `link:`/`mailto:` **macro** written inside a node an
+        /// earlier step turned into markup.
+        ///
+        /// The flattened markup is a *synthesized* run — its value is the
+        /// fold, which has no `'src` slice of its own — and that pass alone
+        /// among the macro families requires its own `link:`/`mailto:` marker
+        /// to be verbatim, because
+        /// [`link_form`](macros::links::link_form) tells this pass's nodes
+        /// from the other link passes' by whether the node's `location` starts
+        /// with that literal marker (the "no new node field" signal that
+        /// replays the string pipeline's family-pass registration order). It
+        /// is the same boundary a wholly expanded `{m}` macro already has —
+        /// reached here through a flattened span instead of an attribute
+        /// expansion.
+        ///
+        /// Every other family reads what it needs from the level's match
+        /// string and is recognized in flattened text just as the string
+        /// pipeline recognizes it in the escaped tags; the corpus above pins
+        /// an auto-link, an image macro, and a footnote doing exactly that.
+        #[test]
+        fn a_link_macro_inside_flattened_markup_is_a_documented_divergence() {
+            let (group, invalid) =
+                SubstitutionGroup::from_custom_string(None, "quotes,specialcharacters,macros");
+            assert!(invalid.is_empty());
+
+            let source = "*a link:index.html[Docs] b*";
             let golden = golden_for_group(&group, source);
-            assert_eq!(golden, "&lt;b&gt; &lt;strong&gt;bold&lt;/strong&gt;");
+            assert_eq!(
+                golden,
+                "&lt;strong&gt;a <a href=\"index.html\">Docs</a> b&lt;/strong&gt;"
+            );
 
             let built_parser = parser_with_product();
             let nodes = build_group(&group, source, &built_parser);
@@ -1927,13 +2233,13 @@ mod tests {
 
             assert_ne!(
                 built, golden,
-                "expected the documented divergence to still reproduce; the policy may have \
-                 been settled — if so, fold this fixture into the parity corpus above"
+                "expected the documented divergence to still reproduce; the boundary may have \
+                 been lifted — if so, fold this fixture into the parity corpus above"
             );
-
-            // The author's own `<b>` is escaped on both sides; only the quotes
-            // step's own markup differs.
-            assert_eq!(built, "&lt;b&gt; <strong>bold</strong>");
+            assert_eq!(
+                built,
+                "&lt;strong&gt;a link:index.html[Docs] b&lt;/strong&gt;"
+            );
         }
     }
 
