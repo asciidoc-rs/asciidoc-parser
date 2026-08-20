@@ -3426,6 +3426,73 @@ Each phase is a reviewable unit with a clear exit gate.
   `Attrlist<'src>` captures, the `subs=quotes,specialcharacters` policy item, and the opaque-piece
   boundary itself. As with every prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (the two **link-family display texts**, closing the `Attrlist<'src>`
+  captures — and with them the last boundary drawn around a *capture*):* what the image increment
+  left were the other two of the audit's three attribute-list captures — the `link:`/`mailto:`
+  macro's bracketed display text and the auto-link / formal-URL family's — each of which the two
+  passes had been gating with the same hand-rolled pair of checks (`range_is_verbatim`, then "and
+  no embedded newline"), deferring an attribute-list text that crossed an escaped special, a
+  restored entity, or an expanded value, and one that simply spanned two lines. All four fall to
+  the image family's own move, expressed once as a shared
+  [`text_attrlist`](../../parser/src/content/inline_builder/macros/links.rs) that both passes — and
+  all three of their call sites (a `link:` `=`, a `mailto:` `,`, and a formal URL's `=`) — now go
+  through.
+
+  What that helper parses is the string replacers' own input: `link_text.replace('\n', " ")`, the
+  newline-normalized copy of the *pre*-`\]`-unescape bracketed text. When the text's own `'src`
+  slice **is** those bytes it is parsed from the source and keeps its borrow (§4.5); otherwise the
+  copy itself is parsed and the result is
+  [`into_owned`](../../parser/src/attributes/attrlist.rs)ed onto design §4.4's coarse span, exactly
+  as [`bracket_attrlist`](../../parser/src/content/inline_builder/macros/image.rs) does. Both
+  halves of that test are load bearing, and neither is quite the `range_is_verbatim` check it
+  replaces. The range must be verbatim because bytes can coincide without the text being the
+  source's: [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) gives a
+  *restored* entity leaf its own bytes as written, so `link:x[a &copy; b,role=hl]` reads identically
+  either way while its parsed value is escaped text. And the bytes must be compared even for a
+  verbatim range, because such a range need not be *contiguous* in the source — the
+  attribute-references step drops an escaped reference's backslash as a gap
+  (`link:x[\{name},role=hl]`), so the enclosing slice carries a byte the replacer's text does not.
+  That second half closes a latent gap the verbatim path had carried since the family's
+  attribute-list form first landed.
+
+  The positional value a *match-string* parse returns is already-escaped text, where a node holds
+  logical text — the same mismatch the cross-reference family met when its own attribute-list value
+  stopped being verbatim. So it is rebuilt through that family's
+  [`escaped_value_children`](../../parser/src/content/inline_builder/macros/mod.rs), moved out of
+  `macros/xref.rs` and shared next to
+  [`macro_text_children`](../../parser/src/content/inline_builder/macros/mod.rs) so the three
+  families cannot drift: an escaped special becomes the character it stands for (inside a `Text`
+  the fold escapes back) and a restored entity its own `CharRef::Entity` leaf (which the fold emits
+  verbatim). A value parsed from a *verbatim* slice is logical text already and stays one
+  synthesized `Text`, as before.
+
+  The one shape still deferred is the **opaque-piece** boundary every family keeps, applied here to
+  the text rather than to the match: a display text carrying an attribute list *and* crossing a
+  rendered span stays literal, because a placeholder inside a **parsed** value has no node it can
+  be mapped back to — which is why this capture keeps a gate at all while the same family's
+  attribute-list-free display text (carried structurally, never read as bytes) does not. Sharing
+  `escaped_value_children` also surfaced, and now pins, a narrow divergence it has always carried
+  for *every* family that computes an attribute-list value: under an effective order that never
+  escapes, a non-verbatim text carrying an author's own literal `&lt;` is unwound one level too
+  far, since an attribute list is parsed under any order that runs `Macros` while §3.4.1's own
+  answer needs the effective order threaded down to each family (its own divergence test, for all
+  three spellings).
+
+  Six `…_is_a_documented_divergence` tests become parity corpora per the "if lifted, fold this into
+  a parity corpus" convention — an attribute-list text over an escaped special, over a restored
+  entity, over a multi-line text, and inside an expanded value, in each family's spelling — joined
+  by structural companions pinning the rebuilt entity leaf, the owned values, and the coarse
+  location tag; `attribute_refs.rs`'s own "an attrlist-bearing display text inside a spliced value"
+  divergence, re-pointed at this family by the image increment, becomes a recognition test. Fixtures
+  are added to the whole-pipeline combined-constructs corpus, the synthesized-seed sweep, the
+  group-parity corpus, and the structural recorder cross-check — comparable there for the first
+  time, since both constructions now read the same `link_text_for_attrlist`. Re-running the
+  corpus-wide fold-parity audit confirms the divergence set strictly **shrank**: two real golden
+  sources are gone (`https://example.com[Foo\nBar,role=foobar]` and
+  `https://example.com[What You Need\n= What You Get]`) and no new one appeared. What survives is
+  the `subs=quotes,specialcharacters` policy item and the opaque-piece boundary itself. As with
+  every prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -3870,7 +3937,19 @@ Each phase is a reviewable unit with a clear exit gate.
        onto §4.4's coarse span. `image:sunset.jpg[{caption}]` and
        `image:tiger.svg[A <b> & "c",opts=interactive]` are recognized; the family's last
        `range_is_verbatim` call is gone and `build_image_node` is total. See the step's own "landed
-       as" note above. The two link-family display-text captures are later increments.
+       as" note above. The two link-family display-text captures are the next increment.
+     - ✅ **prep (the two link-family display texts, closing the `Attrlist<'src>` captures).** The
+       remaining two captures — the `link:`/`mailto:` macro's and the auto-link/formal-URL family's
+       attribute-list-bearing display text — take the same move, through one shared
+       [`text_attrlist`](../../parser/src/content/inline_builder/macros/links.rs): a text whose
+       source slice *is* the newline-normalized copy the string replacers parse keeps the `'src`
+       parse and its borrow, and every other text is parsed from the level's **match string** and
+       [`into_owned`](../../parser/src/attributes/attrlist.rs)ed onto §4.4's coarse span. The
+       positional value such a parse returns is already-escaped text, so it is rebuilt through the
+       cross-reference family's own
+       [`escaped_value_children`](../../parser/src/content/inline_builder/macros/mod.rs), now
+       shared by all three families. See the step's own "landed as" note above. With this the only
+       boundary any macro family still draws is the **opaque-piece** one every family shares.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

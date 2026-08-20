@@ -1,7 +1,7 @@
 //! Auto-link, formal-URL-link, and `link:`/`mailto:` macro recognition.
 
 use super::{
-    MacroMatch, MacroMatchKind,
+    MacroMatch, MacroMatchKind, escaped_value_children,
     image::{range_has_no_opaque_piece, range_is_verbatim, range_is_verbatim_or_synthesized},
     macro_text_children, rebuild_macro_level,
 };
@@ -29,8 +29,8 @@ use crate::{
 /// (`https://example.org[text]`, `https://example.org[]`) — and its **ANGLE
 /// branch** — an angle-bracketed URL (`<https://example.org>`) and the
 /// bracketed form that keeps its `&lt;` (`<https://example.org[text]`) — in
-/// their verbatim,
-/// attribute-list-free forms, reproducing the string replacer's boundary-prefix
+/// their verbatim
+/// forms, reproducing the string replacer's boundary-prefix
 /// preservation, bare-URL trailing-punctuation stripping, `^` new-window
 /// suffix, `hide-uri-scheme` display text, and `\` scheme escape. It
 /// deliberately leaves several forms **unrecognized** for a later increment,
@@ -41,13 +41,6 @@ use crate::{
 ///   pattern's LINK-MACRO branch) is left to [`link_macro_level`], which folds
 ///   the identical node; running that pass second mirrors the string step's
 ///   order.
-/// - A **formal text carrying an attribute list** (an `=` selecting roles / id
-///   / title / window) is deferred when the bracketed text is not verbatim
-///   `'src`, exactly as [`link_macro_level`] defers it: the attribute list is
-///   parsed from a newline-normalized *copy* of the text, and only a text with
-///   no embedded newline *and* no [`synthesized`](Piece::synthesized) run in it
-///   has an `'src` slice that copy coincides with — the one thing an
-///   [`Attrlist`]`<'src>` cannot do without.
 /// - A **target** — or, for a bare link, the whole match, whose shown text is a
 ///   slice of that same target — crossing an **opaque** piece: a rendered
 ///   [`Styled`](crate::inlines::Styled) span, or any other construct
@@ -66,12 +59,15 @@ use crate::{
 /// and the bracketed display text — is computed out of the level's match
 /// string, which carries a synthesized run's bytes exactly, so
 /// `https://{host}/path` and `{url}[Docs]` are recognized with only the node's
-/// `location` taking design §4.4's coarse fallback. The one exception is the
-/// attribute-list text above, which is what `Attrlist<'src>` needs a real
-/// slice for.
+/// `location` taking design §4.4's coarse fallback. A **formal text carrying
+/// an attribute list** (an `=` selecting roles / id / title / window) is no
+/// exception any more: [`text_attrlist`] parses that list from the same match
+/// string when the text has no `'src` slice of its own, and owns the result
+/// off it, so `{url}[{label},role=hl]` — and a text spanning two lines, which
+/// the parse joins with a space — is recognized too.
 ///
 /// An **escaped special** ([`CharRef`](InlineNode::CharRef)`::Special`) is
-/// admitted too, anywhere but that same attribute-list text
+/// admitted too, in an attribute-list text as much as anywhere else
 /// (`https://example.org/?a=1&b=2`, `https://example.org[a < b]`,
 /// `<https://example.org/a&b>`) — the third family to take
 /// [`range_has_no_opaque_piece`], after the cross-reference and
@@ -102,11 +98,13 @@ use crate::{
 /// and the fold re-renders exactly the markup the string replacer captured
 /// there. Everything this pass *computes* stays gated: the **target**, and
 /// with it a **bare** link's shown text (a slice of the target's own range)
-/// and the `<url>` form's whole interior (see [`build_angle_link_node`]), as
-/// does an attribute-list text, for the reason above. This is the third family
-/// to take that lift, after the cross-reference one
-/// (`xref::find_xref_matches`) and the `link:`/`mailto:` macro
-/// ([`find_link_macro_matches`]).
+/// and the `<url>` form's whole interior (see [`build_angle_link_node`]). An
+/// **attribute-list text** is computed too — its display text comes back from
+/// an [`Attrlist`] parse rather than from a range — so [`text_attrlist`] keeps
+/// the same gate there: a placeholder inside a *parsed* value has no node it
+/// can be mapped back to. This is the third family to take that lift, after
+/// the cross-reference one (`xref::find_xref_matches`) and the
+/// `link:`/`mailto:` macro ([`find_link_macro_matches`]).
 ///
 /// What the admission cannot do is make the *recognition* agree in every case,
 /// because the string replacer matches over the markup itself where this
@@ -190,8 +188,8 @@ fn find_inline_link_matches<'src>(
 
             // A deferred or invalid form (an escaped scheme is handled inside as
             // an `Unescape`; a match crossing an opaque piece, a quoted bare
-            // URL, a bare scheme, an unterminated angle-bracketed URL, or an
-            // attribute-list text is left as literal source).
+            // URL, a bare scheme, or an unterminated angle-bracketed URL is
+            // left as literal source).
             None => continue,
         }
     }
@@ -302,8 +300,9 @@ fn build_inline_link_node<'src>(
     // admitted — see [`inline_link_level`]'s own rendered-span note. Its
     // closing `]` needs no gate of its own: that byte is literal, and no atomic
     // piece — a placeholder, or an entity delimited by `&` and `;` — can supply
-    // it. (A text carrying an attribute list keeps its own stricter, verbatim
-    // gate below, for `Attrlist<'src>`'s sake.)
+    // it. (A text carrying an attribute list keeps this same gate inside
+    // `text_attrlist`, since its display text comes back from a *parse*
+    // rather than from a range.)
     //
     // An expanded attribute value and an escaped special are admitted
     // throughout, since every value read here comes off the match string —
@@ -411,6 +410,12 @@ fn build_inline_link_node<'src>(
     // `extract_attributes_from_text`.
     let mut computed_text = false;
 
+    // Set when that computed value came back from a parse of the level's
+    // **match string** rather than of the source's own bytes, so it carries
+    // already-escaped text the children must be rebuilt from (see
+    // [`text_attrlist`]).
+    let mut escaped_computed_text = false;
+
     // Set when the `^` new-window suffix was trimmed off the display text, so
     // the children's range stops one (ASCII) byte short of the bracket's end.
     let mut caret_stripped = false;
@@ -418,43 +423,28 @@ fn build_inline_link_node<'src>(
     let link_text = if let Some(mut link_text) = link_text {
         link_text = link_text.replace("\\]", "]");
 
-        // A text carrying an `=` splits into an attribute list. `InlineLink
-        // Replacer` parses it from a newline-normalized *copy* of the text;
-        // when the text has no embedded newline that copy is byte-identical
-        // to the bracketed text's own `'src` slice, so the node can carry the
-        // real, honestly-borrowed `Attrlist<'src>` `render_link` needs
-        // (`Ref::attrs`'s own field docs explain why `roles`/`window` alone
-        // are not enough). A text that *does* embed a newline still needs a
-        // synthesized (owned) copy the node cannot hold yet, so that one form
-        // remains deferred — as does one crossing a
-        // [`synthesized`](Piece::synthesized) run, whose match-string bytes
-        // have no `'src` slice at all (the one sub-range this family's
-        // expanded-value lift cannot cover).
+        // A text carrying an `=` splits into an attribute list, which
+        // `InlineLinkReplacer` parses from a newline-normalized *copy* of the
+        // text — the copy [`text_attrlist`] reproduces, from the source's own
+        // bytes when they are that copy and from the level's match string
+        // otherwise. Only a text crossing an **opaque** piece is deferred
+        // there.
         if link_text.contains('=') {
             #[allow(clippy::unwrap_used)]
             let range = text_location_range.clone().unwrap();
 
-            if !range_is_verbatim(pieces, &range) {
-                return None;
-            }
-
-            let text_span = source_slice(pieces, range, root);
-
-            if text_span.data().contains('\n') {
-                return None;
-            }
-
-            let (lt, parsed) = extract_attributes_from_text(text_span, parser, None);
+            let parsed = text_attrlist(raw_text, range, nodes, pieces, root, parser)?;
 
             // Mirrors `InlineLinkReplacer`'s own guard: only adopt the parsed
             // result when a real named attribute actually split off from the
             // text (otherwise the `=` was incidental and `extract_attributes_
             // from_text` already returned the text unchanged with an empty
             // attrlist, matching this fallthrough).
-            if lt != text_span.data() {
-                link_text = lt.replace("\\\"", "\"");
-                attrs = Some(parsed);
+            if parsed.adopted {
+                link_text = parsed.text.replace("\\\"", "\"");
+                attrs = Some(parsed.attrs);
                 computed_text = true;
+                escaped_computed_text = parsed.escaped;
             }
         }
 
@@ -508,13 +498,23 @@ fn build_inline_link_node<'src>(
         )
     } else if computed_text {
         // A value this builder *computed* rather than sliced: an attribute
-        // list's positional value, so a *synthesized* `Text` whose value need
-        // not coincide with its source. It needs no unescaping — that branch
-        // requires a verbatim `'src` slice, which carries no entity.
-        vec![InlineNode::Text {
-            value: CowStr::from(link_text),
-            location: text_location,
-        }]
+        // list's positional value, so a *synthesized* value whose bytes need
+        // not coincide with its source.
+        if escaped_computed_text {
+            // Parsed out of the level's match string, so it holds an escaped
+            // special's canonical entity (and a restored entity's own bytes)
+            // where a node holds logical text: rebuild design §3.4's
+            // trichotomy from those bytes, exactly as the cross-reference
+            // family's own attribute-list value is rebuilt.
+            escaped_value_children(&link_text, text_location)
+        } else {
+            // Parsed out of the source's own bytes, which are already logical
+            // text carrying no entity to undo: one synthesized `Text`.
+            vec![InlineNode::Text {
+                value: CowStr::from(link_text),
+                location: text_location,
+            }]
+        }
     } else {
         // A text sliced straight out of the bracket. `macro_text_children`
         // borrows it from `'src` in the common verbatim case (§4.5), owns it
@@ -713,25 +713,19 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 ///
 /// # Scope
 ///
-/// This increment covers the **explicit `link:`/`mailto:` macro** in its
-/// attribute-list-free forms: `link:target[text]`, `link:target[]`
+/// This increment covers the **explicit `link:`/`mailto:` macro**:
+/// `link:target[text]`, `link:target[]`
 /// (a bare link), `mailto:addr[text]`, and `mailto:addr[]`, plus the `^`
-/// new-window suffix and the `\` escape. It deliberately leaves several forms
+/// new-window suffix, the `\` escape, and a display text carrying its own
+/// attribute list — a `,` in a `mailto:` text (its `subject`/`body`) or an `=`
+/// in a `link:` text (roles / id / title / window), parsed by
+/// [`text_attrlist`]. It deliberately leaves several forms
 /// **unrecognized** for a later increment, each left as literal source here (so
 /// the differential corpus only pins the forms this increment claims):
 ///
 /// - **Auto-links and formal-URL links** (`https://example.org`, `https://example.org[text]`)
 ///   are matched by a *different* pattern (`INLINE_LINK`, with its bare-URL
 ///   trailing-punctuation handling) and are a separate later increment.
-/// - **A link text that carries an attribute list** — a `,` in a `mailto:` text
-///   (its `subject`/`body`) or an `=` in a `link:` text (roles / id / title /
-///   window) — is deferred unless the bracketed text is verbatim `'src`,
-///   because that attribute list is parsed from a newline-normalized *copy* of
-///   the text and only a text with no embedded newline, no
-///   [`synthesized`](Piece::synthesized) run, and no escaped special in it has
-///   a source slice that copy coincides with — the one thing an
-///   [`Attrlist`]`<'src>` cannot do without. This is the one capture that keeps
-///   the escaped-special boundary the rest of the family lifts below.
 /// - **A macro whose own `link:`/`mailto:` marker is not verbatim** — a
 ///   *wholly* expanded macro (`:m: link:index.html[Docs]`, then `{m}`) — is
 ///   deferred. Its target and bracketed text could be read from the match
@@ -748,8 +742,10 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 /// string, which carries an expanded value's bytes exactly.
 ///
 /// An **escaped special** ([`CharRef`](InlineNode::CharRef)`::Special`) is
-/// admitted too, anywhere but the attribute-list text above (`link:a&b.html[]`,
-/// `link:index.html[a < b]`). The match string carries such a leaf's canonical
+/// admitted too, in an attribute-list text as much as anywhere else
+/// (`link:a&b.html[]`,
+/// `link:index.html[a < b]`, `link:index.html[a < b,role=hl]`). The match
+/// string carries such a leaf's canonical
 /// entity — the very bytes the string replacer's own escaped haystack holds
 /// there — so the target this pass computes off that string (`a&amp;b.html`)
 /// *is* the one the replacer computed, and no value on the node needs the
@@ -773,7 +769,10 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 /// piece's own node whole into them — so the text is carried *structurally*,
 /// and the fold re-renders exactly the markup the string replacer captured
 /// there. The **target** stays gated, since it is a value this pass computes
-/// off the match string; so does an attribute-list text, for the reason above.
+/// off the match string. So does an **attribute-list text**, for the same
+/// reason: its display text comes back from an [`Attrlist`] parse rather than
+/// from a range, and a placeholder inside a *parsed* value has no node it can
+/// be mapped back to (see [`text_attrlist`]).
 /// This is the second family to take that lift, after the cross-reference one
 /// (see `xref::find_xref_matches`).
 ///
@@ -885,7 +884,8 @@ fn find_link_macro_matches<'src>(
         // those bytes are literal, and no atomic piece — a placeholder, or an
         // entity delimited by `&` and `;` — can supply them. (The marker keeps
         // its own stricter, verbatim gate below, for `link_form`'s sake; a text
-        // carrying an attribute list keeps one inside `build_link_node`.)
+        // carrying an attribute list keeps this same gate inside
+        // `text_attrlist`, since its display text comes back from a *parse*.)
         if let Some(target) = caps.get(3)
             && !range_has_no_opaque_piece(nodes, pieces, &(target.start()..target.end()))
         {
@@ -932,7 +932,8 @@ fn find_link_macro_matches<'src>(
 /// roles exactly as the string replacer does so the fold reproduces the same
 /// bytes. Returns `None` for a form this increment defers (see
 /// [`link_macro_level`]): a rejected dangerous `link:` scheme, or a link text
-/// that carries an attribute list this builder cannot parse from `'src`.
+/// that carries an attribute list *and* crosses an opaque piece (see
+/// [`text_attrlist`]).
 ///
 /// The display text becomes the node's children, so the fold recovers
 /// `link_text` by folding them and needs no build-time state
@@ -951,9 +952,13 @@ fn find_link_macro_matches<'src>(
 ///   the same treatment rather than baking the already-escaped target into one
 ///   `Text` the fold would escape a second time (design §3.4);
 /// - an **attribute list's positional value** is the one text this builder
-///   *computes*, out of a parse of the bracket's own verbatim `'src` slice, so
-///   it stays a single synthesized `Text` (that slice carries no entity to
-///   undo).
+///   *computes*, out of an [`Attrlist`] parse (see [`text_attrlist`]). A parse
+///   of the bracket's own verbatim `'src` slice yields logical text, so it
+///   stays a single synthesized `Text` (that slice carries no entity to undo);
+///   a parse of the level's **match string** yields already-escaped text
+///   instead, so it is rebuilt through [`escaped_value_children`] — design
+///   §3.4's trichotomy — exactly as the cross-reference family's own
+///   attribute-list value is.
 ///
 /// As in the additive builder generally, this performs *no* recognition side
 /// effect — notably it does **not** `register_link` the target in the asset
@@ -1001,6 +1006,12 @@ pub(super) fn build_link_node<'src>(
     // the target below.
     let mut computed_text = false;
 
+    // Set when that computed value came back from a parse of the level's
+    // **match string** rather than of the source's own bytes, so it carries
+    // already-escaped text the children must be rebuilt from (see
+    // [`text_attrlist`]).
+    let mut escaped_computed_text = false;
+
     // Set when the `^` new-window suffix was trimmed off the display text, so
     // the children's range stops one (ASCII) byte short of the bracket's end.
     let mut caret_stripped = false;
@@ -1023,29 +1034,21 @@ pub(super) fn build_link_node<'src>(
             if link_text.contains(',') {
                 #[allow(clippy::unwrap_used)]
                 let m = raw_text_m.unwrap();
-                let range = m.start()..m.end();
 
-                if !range_is_verbatim(pieces, &range) {
-                    return None;
-                }
+                let parsed =
+                    text_attrlist(raw_text, m.start()..m.end(), nodes, pieces, root, parser)?;
 
-                let text_span = source_slice(pieces, range, root);
-
-                if text_span.data().contains('\n') {
-                    return None;
-                }
-
-                let (lt, parsed) = extract_attributes_from_text(text_span, parser, None);
-                link_text = lt;
+                link_text = parsed.text;
                 computed_text = true;
+                escaped_computed_text = parsed.escaped;
 
-                if let Some(target_attr) = parsed.nth_attribute(2) {
+                if let Some(target_attr) = parsed.attrs.nth_attribute(2) {
                     target = format!(
                         "{target}?subject={subject}",
                         subject = encode_uri_component(target_attr.value())
                     );
 
-                    if let Some(body) = parsed.nth_attribute(3) {
+                    if let Some(body) = parsed.attrs.nth_attribute(3) {
                         target = format!(
                             "{target}&amp;body={body}",
                             body = encode_uri_component(body.value())
@@ -1053,27 +1056,18 @@ pub(super) fn build_link_node<'src>(
                     }
                 }
 
-                attrs = Some(parsed);
+                attrs = Some(parsed.attrs);
             }
         } else if link_text.contains('=') {
             #[allow(clippy::unwrap_used)]
             let m = raw_text_m.unwrap();
-            let range = m.start()..m.end();
 
-            if !range_is_verbatim(pieces, &range) {
-                return None;
-            }
+            let parsed = text_attrlist(raw_text, m.start()..m.end(), nodes, pieces, root, parser)?;
 
-            let text_span = source_slice(pieces, range, root);
-
-            if text_span.data().contains('\n') {
-                return None;
-            }
-
-            let (lt, parsed) = extract_attributes_from_text(text_span, parser, None);
-            link_text = lt;
+            link_text = parsed.text;
             computed_text = true;
-            attrs = Some(parsed);
+            escaped_computed_text = parsed.escaped;
+            attrs = Some(parsed.attrs);
         }
 
         if link_text.ends_with('^') {
@@ -1143,13 +1137,23 @@ pub(super) fn build_link_node<'src>(
         macro_text_children(&link_text, range, false, nodes, pieces, root)
     } else if computed_text {
         // A value this builder *computed* rather than sliced: an attribute
-        // list's positional value, so a *synthesized* `Text` whose value need
-        // not coincide with its source. It needs no unescaping — that branch
-        // requires a verbatim `'src` slice, which carries no entity.
-        vec![InlineNode::Text {
-            value: CowStr::from(link_text),
-            location: text_location,
-        }]
+        // list's positional value, so a *synthesized* value whose bytes need
+        // not coincide with its source.
+        if escaped_computed_text {
+            // Parsed out of the level's match string, so it holds an escaped
+            // special's canonical entity (and a restored entity's own bytes)
+            // where a node holds logical text: rebuild design §3.4's
+            // trichotomy from those bytes, exactly as the cross-reference
+            // family's own attribute-list value is rebuilt.
+            escaped_value_children(&link_text, text_location)
+        } else {
+            // Parsed out of the source's own bytes, which are already logical
+            // text carrying no entity to undo: one synthesized `Text`.
+            vec![InlineNode::Text {
+                value: CowStr::from(link_text),
+                location: text_location,
+            }]
+        }
     } else {
         // A text sliced straight out of the bracket. `macro_text_children`
         // borrows it from `'src` in the common verbatim case (§4.5), owns it
@@ -1182,6 +1186,108 @@ pub(super) fn build_link_node<'src>(
         xrefstyle: None,
         location,
     }))
+}
+
+/// One link display text read as an attribute list — the result
+/// [`text_attrlist`] returns.
+struct TextAttrlist<'src> {
+    /// The list's first positional value: the display text the node shows.
+    text: String,
+
+    /// The list itself, which rides on the node's own
+    /// [`attrs`](Ref::attrs) so the fold can hand `render_link` the same
+    /// `id`/`title`/`nofollow`/`noopener` the string replacer hands it.
+    attrs: Attrlist<'src>,
+
+    /// Whether [`text`](Self::text) came back from a parse of the level's
+    /// **match string** (already-escaped bytes) rather than of the source's own
+    /// (logical text). The caller rebuilds the former through
+    /// [`escaped_value_children`] so an entity in it is not escaped twice.
+    escaped: bool,
+
+    /// Whether a real named attribute actually split off — the string
+    /// replacers' own `lt != link_text_for_attrlist` guard, which
+    /// [`InlineLinkReplacer`](crate::content::macros) applies and
+    /// `InlineLinkMacroReplacer` does not (see this module's two call sites).
+    /// `false` means the `=` was incidental and the whole text is the sole
+    /// positional value.
+    adopted: bool,
+}
+
+/// Parses a link's bracketed **display text** as the [`Attrlist`]`<'src>` its
+/// node carries, mirroring what the string replacers parse: a
+/// newline-normalized copy of the (pre-`\]`-unescape) bracketed text, joined
+/// with spaces so `link:x[Foo\nBar,role=hl]` reads as `Foo Bar`.
+///
+/// Which bytes that copy is taken from is the whole question. An
+/// [`Attrlist`]`<'src>` reads its own `Span<'src>`'s bytes **as content**, not
+/// merely as a location tag, so this used to require the text to be a
+/// contiguous, single-line `'src` slice and deferred every other shape. It no
+/// longer does, by the same move the image family's own bracket made
+/// ([`bracket_attrlist`](super::image)): the list is parsed from the level's
+/// **match string** — which is exactly what the replacer parses, out of its own
+/// escaped, already-expanded haystack — and
+/// [`into_owned`](Attrlist::into_owned)ed onto the text's coarse source span
+/// (design §4.4, the fallback the node's `location` already takes). So a text
+/// crossing an escaped special (`link:index.html[a < b,role=hl]`), a restored
+/// entity (`mailto:a@b.com[Tom &copy; Jerry,Subject]`), an expanded attribute
+/// value (`link:index.html[{label},role=hl]`), or a line break
+/// (`link:index.html[Docs\nmore,role=hl]`) is now recognized.
+///
+/// A **verbatim** text whose source slice *is* those same bytes keeps the
+/// `'src` parse, and with it the borrow (§4.5) — the shape every ordinary
+/// `link:index.html[Docs,role=hl]` takes. Both halves of that test are load
+/// bearing. The range must be verbatim because bytes can coincide without the
+/// text being the source's: [`build_match_string`] gives a *restored* entity
+/// leaf its own bytes as written, so `link:x[a &copy; b,role=hl]` reads
+/// identically either way while its parsed value is escaped text, not logical
+/// text. And the bytes must be compared because a verbatim range need not be
+/// contiguous in the source: the attribute-references step drops an escaped
+/// reference's backslash as a *gap* (`link:x[\{name},role=hl]`), so the
+/// enclosing slice carries a byte the replacer's own text does not.
+///
+/// Returns `None` — the one shape still deferred — when the text crosses an
+/// **opaque** piece (a rendered span, an earlier-recognized macro node, a
+/// masked passthrough). That is not a bytes problem the match string can
+/// solve: [`build_match_string`] stands such a piece in as one
+/// [`SPAN_PLACEHOLDER`] where the string replacer's haystack holds its markup,
+/// and a placeholder inside a *parsed* value has no node it can be mapped back
+/// to (see [`link_macro_level`]'s own rendered-span note).
+fn text_attrlist<'src>(
+    raw_text: &str,
+    text_range: std::ops::Range<usize>,
+    nodes: &[InlineNode<'src>],
+    pieces: &[Piece],
+    root: Span<'src>,
+    parser: &Parser,
+) -> Option<TextAttrlist<'src>> {
+    if !range_has_no_opaque_piece(nodes, pieces, &text_range) {
+        return None;
+    }
+
+    let normalized = raw_text.replace('\n', " ");
+    let verbatim_range = text_range.clone();
+    let source = source_slice(pieces, text_range, root);
+
+    if range_is_verbatim(pieces, &verbatim_range) && source.data() == normalized {
+        let (text, attrs) = extract_attributes_from_text(source, parser, None);
+
+        return Some(TextAttrlist {
+            adopted: text != normalized,
+            text,
+            attrs,
+            escaped: false,
+        });
+    }
+
+    let (text, attrs) = extract_attributes_from_text(Span::new(&normalized), parser, None);
+
+    Some(TextAttrlist {
+        adopted: text != normalized,
+        text,
+        attrs: attrs.into_owned(source),
+        escaped: true,
+    })
 }
 
 /// The bare e-mail auto-link pass at a level: matches [`INLINE_EMAIL`] over the
@@ -1569,7 +1675,7 @@ mod tests {
         fold_html, golden_macros, golden_macros_with, link_text_of,
     };
     use crate::{
-        Parser, Span,
+        HasSpan, Parser, Span,
         content::inline_builder::build,
         inlines::{CharRef, InlineNode, SpanForm, StyleVariant},
         parser::HtmlSubstitutionRenderer,
@@ -1594,11 +1700,10 @@ mod tests {
         // For each fixture, folding the single-pass tree (all five steps)
         // reproduces the string pipeline's output byte-for-byte. This is the
         // differential corpus (design §5.3) that pins the `link:`/`mailto:`
-        // macro increment. Every fixture is a *verbatim* `link:`/`mailto:`
-        // macro — the boundary this increment claims (a URL target, a
-        // multi-line attribute-list text, a display text crossing a rendered
-        // span, or a special character inside the macro is deferred and lives
-        // in a divergence test below).
+        // macro increment. What is still deferred — a URL target (the
+        // `INLINE_LINK` pass's own territory), a display text crossing a
+        // rendered span, and a *wholly* expanded macro — lives in a divergence
+        // test below.
         let fixtures = [
             // No link macro despite macro-ish characters.
             "plain text with a colon: but no bracket",
@@ -1663,6 +1768,23 @@ mod tests {
             "link:index.html[a < b^]",
             // A special beside the macro, and two specials inside one text.
             "a & b then link:index.html[x < y & z]",
+            // An **attribute-list-bearing** text with no `'src` slice of its
+            // own: one crossing an escaped special, one crossing a restored
+            // entity, and one spanning two lines (which the attrlist parse
+            // joins with a space). Each is parsed from the level's match
+            // string — the same bytes the string replacer parses — and owned
+            // off it, in both the `link:` (`=`) and `mailto:` (`,`) spellings.
+            "link:index.html[a < b,role=hl]",
+            "link:index.html[Tom & Jerry,role=hl^]",
+            "mailto:hello@example.org[Sub & ject,Hello there]",
+            "link:index.html[a &copy; b,role=hl]",
+            "mailto:a@b.com[Tom &copy; Jerry,Subject here]",
+            "link:index.html[Docs\nmore,role=hl]",
+            "mailto:team@example.org[Team,Hello\nthere]",
+            // An incidental `=` in a text with no `'src` slice: the parse
+            // finds no named attribute, so the whole text stays the display
+            // text — the `InlineLinkMacroReplacer` path adopts it either way.
+            "link:index.html[=a < b]",
             // An escaped macro crossing a special or a rendered span: the
             // backslash is dropped and the rest stays literal.
             "\\link:a&b.html[x]",
@@ -2018,33 +2140,6 @@ mod tests {
     }
 
     #[test]
-    fn a_link_text_attribute_list_over_a_special_character_is_a_documented_divergence() {
-        // A text carrying an attribute list is parsed as a real
-        // `Attrlist<'src>`, which reads its own source span's bytes *as
-        // content* — and those bytes are the source's `<`, not the `&lt;` the
-        // string replacer parses from its escaped copy. That one capture keeps
-        // the escaped-special boundary the rest of the family just lifted, for
-        // both the `link:` (`=`) and `mailto:` (`,`) spellings.
-        //
-        // If this boundary is ever lifted, fold these fixtures into the parity
-        // corpus above.
-        for source in [
-            "link:index.html[a < b,role=hl]",
-            "mailto:hello@example.org[Sub & ject,Hello there]",
-        ] {
-            let nodes = build_src(Span::new(source));
-
-            assert!(
-                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-                "an attribute-list text crossing an escaped special must stay literal: {nodes:?}"
-            );
-
-            // The string pipeline, by contrast, *does* build a link here.
-            assert!(golden_macros(source).contains("<a href"));
-        }
-    }
-
-    #[test]
     fn a_link_text_attribute_list_populates_the_nodes_attrs() {
         // A `link:` text carrying an `=` splits into an attribute list (here a
         // role): the first positional attribute becomes the display text, and
@@ -2131,44 +2226,6 @@ mod tests {
     }
 
     #[test]
-    fn a_link_text_attribute_list_over_a_multi_line_text_is_a_documented_divergence() {
-        // A text carrying an `=`/`,` still needs a real `'src` slice with no
-        // embedded newline to carry the parsed `Attrlist<'src>` honestly (see
-        // `build_link_node`'s own doc comment); a multi-line attribute-list
-        // text is deferred, exactly as the crossed-special/rendered-span forms
-        // are.
-        let source = "link:index.html[Docs\nmore,role=hl]";
-        let nodes = build_src(Span::new(source));
-
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "a multi-line attribute-list-in-text link must be left unrecognized: {nodes:?}"
-        );
-
-        // The string pipeline, by contrast, joins the lines with a space and
-        // applies the role.
-        assert!(golden_macros(source).contains(r#"class="hl""#));
-    }
-
-    #[test]
-    fn a_mailto_subject_over_a_multi_line_text_is_a_documented_divergence() {
-        // The same multi-line boundary as
-        // `a_link_text_attribute_list_over_a_multi_line_text_is_a_documented_divergence`,
-        // for a `mailto:` text carrying a subject/body.
-        let source = "mailto:team@example.org[Team,Hello\nthere]";
-        let nodes = build_src(Span::new(source));
-
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "a multi-line mailto subject must be left unrecognized: {nodes:?}"
-        );
-
-        // The string pipeline, by contrast, joins the lines with a space and
-        // encodes the subject.
-        assert!(golden_macros(source).contains("subject="));
-    }
-
-    #[test]
     fn a_link_is_recognized_inside_a_span() {
         // A macro can appear inside a rendered span; the transducer descends into
         // the span body and builds the node there.
@@ -2236,6 +2293,16 @@ mod tests {
             "https://example.org[Example,role=hl^]",
             // An `=` that is not a real attribute list (the incidental case).
             "https://example.org[=text]",
+            // An **attribute-list-bearing** text with no `'src` slice of its
+            // own: one crossing an escaped special and one spanning two lines
+            // (which the attrlist parse joins with a space). Each is parsed
+            // from the level's match string — the same bytes the string
+            // replacer parses — and owned off it. The incidental-`=` fallback
+            // reaches the same path.
+            "https://example.org[a < b,role=hl]",
+            "https://example.org[Tom & Jerry,role=hl^]",
+            "https://example.org[Example\nmore,role=hl]",
+            "https://example.org[=a < b]",
             // A bare scheme with nothing left after trimming is left literal by
             // both (a `://`-only rejection).
             "http://; is not a link",
@@ -3080,25 +3147,6 @@ mod tests {
     }
 
     #[test]
-    fn a_formal_url_attribute_list_text_over_a_special_character_is_a_documented_divergence() {
-        // The one capture in this family that still needs a real `'src` slice:
-        // an attribute-list-bearing display text is parsed as an
-        // `Attrlist<'src>` from the *source's* own bytes, which hold `<` where
-        // the replacer's escaped copy holds `&lt;`. Deferred, exactly as the
-        // `link:`/`mailto:` macro family defers the same capture.
-        let source = "https://example.org/a&b[a<b,role=hl]";
-        let nodes = build_src(Span::new(source));
-
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an attribute-list text crossing a special must stay literal: {nodes:?}"
-        );
-
-        // The string pipeline, by contrast, *does* build a link here.
-        assert!(golden_macros(source).contains(r#"class="hl""#));
-    }
-
-    #[test]
     fn fold_matches_the_string_pipeline_for_a_link_crossing_a_restored_entity() {
         // A *restored entity* (`&amp;copy;` written in the source, which the
         // character-replacements step turns back into a `CharRef::Entity`
@@ -3129,6 +3177,13 @@ mod tests {
             "\\link:a&copy;b.html[Docs]",
             // An entity beside the macro rather than inside it.
             "&copy;link:x.html[Docs]&reg;",
+            // A text carrying an **attribute list** across one, in all three
+            // spellings: the parse reads the match string's own `&copy;`, and
+            // the positional value it returns is rebuilt through
+            // `escaped_value_children` so the entity folds back once.
+            "https://example.org[a &copy; b,role=hl]",
+            "link:index.html[a &copy; b,role=hl]",
+            "mailto:a@b.com[Tom &copy; Jerry,Subject here]",
             // The numeric spellings, as three real-world fixtures elsewhere in
             // this crate's Asciidoctor port write them: a display text
             // carrying an escaped `]`, a target carrying an escaped space, and
@@ -3178,29 +3233,83 @@ mod tests {
     }
 
     #[test]
-    fn an_attribute_list_text_crossing_a_restored_entity_is_a_documented_divergence() {
-        // The one capture in this family that still needs a real `'src` slice
-        // keeps the boundary for a restored entity too: the source holds
-        // `&amp;copy;` where the match string holds `&copy;`, so
-        // `Attrlist::parse` would read the wrong bytes as content.
-        //
-        // If this boundary is ever lifted, fold these fixtures into the parity
-        // corpus above.
-        for source in [
-            "https://example.org[a &copy; b,role=hl]",
-            "link:index.html[a &copy; b,role=hl]",
-            "mailto:a@b.com[Tom &copy; Jerry,Subject here]",
-        ] {
-            let nodes = build_src(Span::new(source));
+    fn an_attribute_list_value_crossing_a_restored_entity_keeps_the_entity_as_its_own_child() {
+        // The same structural guarantee for the one display text this family
+        // *computes* rather than slices. An attribute-list text with no `'src`
+        // slice is parsed from the level's match string, so its positional
+        // value comes back already escaped (`a &copy; b`); rebuilding it
+        // through `escaped_value_children` splits the entity into its own
+        // `CharRef::Entity` leaf — which the fold emits verbatim — where one
+        // `Text` holding the whole value would escape its `&` a second time.
+        // Every part of the value shares the bracketed text's coarse span
+        // (design §4.4): a parsed value has no `'src` slice of its own.
+        let source = "https://example.org[a &copy; b,role=hl]";
+        let nodes = build_src(Span::new(source));
 
-            assert!(
-                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-                "an attribute-list text crossing a restored entity must stay literal: {nodes:?}"
-            );
+        assert_eq!(nodes.len(), 1);
+        let reference = assert_link(&nodes[0]);
 
-            // The string pipeline, by contrast, *does* build a link here.
-            assert!(golden_macros(source).contains("<a href"));
+        assert_eq!(reference.children.len(), 3);
+
+        // Every part shares the bracketed text's span, and the `Text` runs
+        // hold *owned* values (they come from a parse of a temporary, not from
+        // a slice of `'src`) — which is why they are read directly here rather
+        // than through `assert_text`, whose borrow check they cannot satisfy.
+        match &reference.children[0] {
+            InlineNode::Text { value, location } => {
+                assert_eq!(value.as_ref(), "a ");
+                assert_eq!(location.data(), "a &copy; b,role=hl");
+            }
+
+            other => panic!("expected Text, got {other:?}"),
         }
+
+        let entity = assert_entity(&reference.children[1], "&copy;");
+        assert_eq!(entity.data(), "a &copy; b,role=hl");
+
+        match &reference.children[2] {
+            InlineNode::Text { value, location } => {
+                assert_eq!(value.as_ref(), " b");
+                assert_eq!(location.data(), "a &copy; b,role=hl");
+            }
+
+            other => panic!("expected Text, got {other:?}"),
+        }
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
+    }
+
+    #[test]
+    fn an_attribute_list_text_crossing_an_escaped_special_owns_its_parsed_values() {
+        // The escaped-special counterpart: the match string holds the
+        // canonical entity (`a &lt; b`) where the source holds `a < b`, so the
+        // list is parsed from that string and `into_owned`ed onto the
+        // bracketed text's own coarse span. The positional value the parse
+        // returns is escaped text, which `escaped_value_children` turns back
+        // into the logical `<` a `Text` node holds — folded back to `&lt;`
+        // exactly once.
+        let source = "link:index.html[a < b,role=hl]";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(link_text_of(reference), "a < b");
+
+        let attrs = reference.attrs.as_ref().unwrap();
+        assert_eq!(attrs.roles().into_iter().next(), Some("hl"));
+
+        // The parsed positional value is the *escaped* text the string
+        // replacer's own attrlist carries, and the list's location tag is the
+        // bracketed text as written.
+        assert_eq!(attrs.nth_attribute(1).unwrap().value(), "a &lt; b");
+        assert_eq!(attrs.span().data(), "a < b,role=hl");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
+        );
     }
 
     #[test]
@@ -3228,24 +3337,6 @@ mod tests {
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),
             golden_macros(source)
         );
-    }
-
-    #[test]
-    fn a_formal_url_link_attribute_list_over_a_multi_line_text_is_a_documented_divergence() {
-        // The same multi-line boundary `build_link_node` documents: an
-        // honest `'src` slice is available only when the bracketed text has
-        // no embedded newline.
-        let source = "https://example.org[Example\nmore,role=hl]";
-        let nodes = build_src(Span::new(source));
-
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "a multi-line attribute-list-in-text link must be left unrecognized: {nodes:?}"
-        );
-
-        // The string pipeline, by contrast, joins the lines with a space and
-        // applies the role.
-        assert!(golden_macros(source).contains(r#"class="hl""#));
     }
 
     #[test]
@@ -3669,10 +3760,10 @@ mod tests {
         // reference's resolved value) — recovered exactly by `text_slice`,
         // since an e-mail node carries only plain text (design §3.4.1's "a
         // macro inside an expanded value" boundary). The two URL-link passes
-        // now make the same lift for their own targets and display texts; the
-        // one part of this family that still needs an honest `'src` slice is
-        // an attribute-list-bearing display text (see
-        // `a_link_attribute_list_text_inside_an_expanded_value_is_a_documented_divergence`).
+        // now make the same lift for their own targets and display texts —
+        // an attribute-list-bearing one included, since `text_attrlist` parses
+        // a text with no `'src` slice from the level's match string and owns
+        // the result off it.
         // Byte-parity for this shape is pinned by the whole-pipeline corpus in
         // this module's `mod.rs`, which runs the real `AttributeReferences`
         // step.
@@ -4100,6 +4191,7 @@ mod tests {
             .with_intrinsic_attribute("host", "example.org", ModificationContext::Anywhere)
             .with_intrinsic_attribute("addr", "hello@example.org", ModificationContext::Anywhere)
             .with_intrinsic_attribute("label", "Docs", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("attrs", "Docs,role=hl", ModificationContext::Anywhere)
             .with_intrinsic_attribute("site", "https://example.org", ModificationContext::Anywhere)
             .with_intrinsic_attribute(
                 "link-src",
@@ -4125,9 +4217,11 @@ mod tests {
         // attribute expansion) is now recognized: every value these nodes hold
         // is computed out of the level's match string, which carries an
         // expanded value's bytes exactly, so only the node's `location` takes
-        // design §4.4's coarse fallback. The two shapes that still defer — an
-        // attribute-list-bearing display text, and a wholly expanded
-        // `link:`/`mailto:` macro — have their own divergence tests below.
+        // design §4.4's coarse fallback — an attribute-list-bearing display
+        // text included, which `text_attrlist` parses from that same match
+        // string and owns off it. The one shape that still defers, a wholly
+        // expanded `link:`/`mailto:` macro, has its own divergence test
+        // below.
         let parser = expanding_parser();
 
         let fixtures = [
@@ -4161,6 +4255,18 @@ mod tests {
             // The escapes still keep the macro literal.
             "\\link:{url}[Docs]",
             "\\https://{host}",
+            // A display text carrying an **attribute list** over a spliced
+            // value, in all three spellings: the list is parsed from the
+            // level's match string — which carries the expansion's own bytes,
+            // exactly as the string replacer's already-expanded haystack does
+            // — and owned onto design §4.4's coarse span.
+            "link:index.html[{label},role=hl]",
+            "https://example.org[{label},role=hl]",
+            "mailto:hello@example.org[{label},Hi there]",
+            // The whole attribute list from one expansion, and a text that is
+            // partly spliced.
+            "link:index.html[{attrs}]",
+            "https://example.org[Docs for {label},role=hl]",
         ];
 
         for fixture in fixtures {
@@ -4226,35 +4332,32 @@ mod tests {
     }
 
     #[test]
-    fn a_link_attribute_list_text_inside_an_expanded_value_is_a_documented_divergence() {
-        // A display text carrying an attribute list is parsed as a real
-        // `Attrlist<'src>`, which reads its own source span's bytes *as
-        // content* — so, unlike every other value these nodes hold, it cannot
-        // be taken from the match string. Both link-recognizing passes defer
-        // it, as does a `mailto:` text carrying a `,` subject.
-        //
-        // If this boundary is ever lifted, fold these fixtures into the parity
-        // corpus above.
+    fn an_attribute_list_text_inside_an_expanded_value_owns_its_parsed_values() {
+        // The structural companion of the parity fixtures above, and the
+        // counterpart of `a_link_inside_an_expanded_value_keeps_a_coarse_
+        // location`: a display text with no `'src` slice is parsed from the
+        // level's match string, so every value on the resulting `Attrlist`
+        // is **owned** off that temporary, and the list's own location tag
+        // falls back to the bracketed text's coarse span (design §4.4).
         let parser = expanding_parser();
+        let source = "link:index.html[{label},role=hl]";
+        let nodes = build(Span::new(source), &parser, None);
 
-        for source in [
-            "link:index.html[{label},role=hl]",
-            "https://example.org[{label},role=hl]",
-            "mailto:hello@example.org[{label},Hi there]",
-        ] {
-            let nodes = build(Span::new(source), &parser, None);
+        assert_eq!(nodes.len(), 1);
+        let reference = assert_link(&nodes[0]);
 
-            assert!(
-                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-                "a link whose attribute-list text crosses an expansion must stay literal: \
-                 {nodes:?}"
-            );
+        assert_eq!(link_text_of(reference), "Docs");
 
-            assert!(
-                golden_normal(source, &parser).contains("<a href"),
-                "the golden fixture stopped recognizing the link for {source:?}"
-            );
-        }
+        let attrs = reference.attrs.as_ref().unwrap();
+        assert_eq!(attrs.roles().into_iter().next(), Some("hl"));
+
+        // The positional value is the *expansion*, which no `'src` slice
+        // holds — it came back from a parse of the match string.
+        assert_eq!(attrs.nth_attribute(1).unwrap().value(), "Docs");
+
+        // The list's location tag is the bracketed text as *written*, not the
+        // expansion it stands for (design §4.4's coarse fallback).
+        assert_eq!(attrs.span().data(), "{label},role=hl");
     }
 
     #[test]

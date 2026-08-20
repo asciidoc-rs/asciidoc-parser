@@ -1,21 +1,20 @@
 //! Cross-reference recognition (`xref:id[…]`, `<<id>>`).
 
 use super::{
-    MacroMatch, MacroMatchKind, image::range_has_no_opaque_piece, macro_text_children,
-    rebuild_macro_level,
+    MacroMatch, MacroMatchKind, escaped_value_children, image::range_has_no_opaque_piece,
+    macro_text_children, rebuild_macro_level,
 };
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::{
         INLINE_XREF,
-        inline_builder::quotes::{Piece, build_match_string, source_slice, special_entity},
-        restored_entity_pattern,
+        inline_builder::quotes::{Piece, build_match_string, source_slice},
         xref_target::{
             XrefTarget, interpret_xref_target, other_document_reference, this_document_reference,
         },
     },
-    inlines::{CharRef, InlineNode, Ref, RefVariant},
+    inlines::{InlineNode, Ref, RefVariant},
     parser::{DerivedReference, XrefStyle},
     strings::CowStr,
 };
@@ -487,111 +486,6 @@ fn plain_xref_text<'src>(
     let text_range = span.start()..span.end();
 
     macro_text_children(raw_text, text_range, true, nodes, pieces, root)
-}
-
-/// Rebuilds an **already-escaped computed value** — a value a family read off
-/// the level's own match string rather than out of the tree, here this family's
-/// attribute list's positional value — as the nodes that fold back to exactly
-/// those bytes, all sharing `location` (the value has no `'src` slice of its
-/// own, so design §4.4's coarse fallback is the only honest span for any part
-/// of it).
-///
-/// The rebuild is design §3.4's trichotomy applied to a string:
-/// [`build_match_string`] gives an escaped special its canonical entity and a
-/// *restored* entity its own bytes, while a [`Text`](InlineNode::Text) node
-/// holds **logical** text the fold escapes. So the two classes come apart here
-/// — the special becomes the character it stands for (inside a `Text` the fold
-/// escapes back), and the restored entity becomes its own
-/// [`CharRef`](InlineNode::CharRef)`::Entity` leaf (which the fold emits
-/// verbatim) — where one `Text` holding both would escape the entity's `&` a
-/// second time.
-///
-/// The scan is left to right, one `&` at a time, precisely because the two
-/// classes can nest: `&amp;copy;` is a literal `&` followed by the letters
-/// `copy;`, **not** a `&copy;` entity, and only consuming the `&amp;` first
-/// tells them apart. That is the same one-level unwind the fold performs in
-/// reverse.
-///
-/// Splitting on the three specials is exact rather than heuristic: inside such
-/// a value an `&` can only ever open one of these two classes or stand alone —
-/// a verbatim run holds no special at all (the `SpecialCharacters` step split
-/// every one into its own leaf) and a synthesized run's own specials are
-/// [`Raw`](InlineNode::Raw) leaves, which are opaque and so rejected by the
-/// caller's gate. Under an effective order that never escapes (§3.4.1) a
-/// literal `&` *does* survive into a verbatim run, and is left exactly as it
-/// is here, since neither class matches it.
-fn escaped_value_children<'src>(text: &str, location: Span<'src>) -> Vec<InlineNode<'src>> {
-    let mut children: Vec<InlineNode<'src>> = Vec::new();
-    let mut pending = String::new();
-    let mut rest = text;
-
-    while let Some(at) = rest.find('&') {
-        let (before, from_amp) = rest.split_at(at);
-
-        // Everything before this `&` is ordinary logical text.
-        pending.push_str(before);
-
-        let consumed = if let Some((ch, len)) = special_of(from_amp) {
-            // An escaped special: the character it stands for, which the fold
-            // escapes back to these very bytes.
-            pending.push(ch);
-            len
-        } else if let Some(entity) = restored_entity_pattern().find(from_amp) {
-            // A restored entity: its own leaf, emitted verbatim by the fold.
-            if !pending.is_empty() {
-                children.push(InlineNode::Text {
-                    value: CowStr::from(std::mem::take(&mut pending)),
-                    location,
-                });
-            }
-
-            children.push(InlineNode::CharRef {
-                value: CharRef::Entity(CowStr::from(entity.as_str().to_string())),
-                location,
-            });
-
-            // The pattern is `^`-anchored, so the match ends where the entity
-            // does.
-            entity.end()
-        } else {
-            // A bare `&` that opens neither class (an effective order that
-            // never escaped, §3.4.1): ordinary logical text like any other
-            // byte.
-            pending.push('&');
-            '&'.len_utf8()
-        };
-
-        rest = from_amp.get(consumed..).unwrap_or_default();
-    }
-
-    pending.push_str(rest);
-
-    if !pending.is_empty() {
-        children.push(InlineNode::Text {
-            value: CowStr::from(pending),
-            location,
-        });
-    }
-
-    children
-}
-
-/// The character an escaped special's canonical entity at the start of `rest`
-/// stands for, with the entity's own length, or `None` when `rest` does not
-/// open one.
-fn special_of(rest: &str) -> Option<(char, usize)> {
-    // The same three characters `SpecialCharacters` splits into their own
-    // leaves, read through `build_match_string`'s own mapping rather than a
-    // second copy of it.
-    for ch in ['<', '>', '&'] {
-        let entity = special_entity(ch);
-
-        if rest.starts_with(entity) {
-            return Some((ch, entity.len()));
-        }
-    }
-
-    None
 }
 
 /// Builds one [`Ref`](InlineNode::Ref)`{Xref}` node from a `<<id>>` shorthand
