@@ -23,11 +23,11 @@ pub(crate) fn strict_encode(input: &[u8]) -> String {
     // Every 3 input bytes become 4 output characters, rounding up.
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
 
-    let mut chunks = input.chunks_exact(3);
+    // `as_chunks::<3>()` splits the input into fixed-size arrays of three bytes
+    // plus whatever doesn't fill a final group.
+    let (chunks, remainder) = input.as_chunks::<3>();
 
-    for chunk in chunks.by_ref() {
-        // `chunks_exact(3)` yields exactly three bytes per chunk.
-        let &[a, b, c] = chunk else { continue };
+    for &[a, b, c] in chunks {
         let n = (u32::from(a) << 16) | (u32::from(b) << 8) | u32::from(c);
         out.push(sextet(n >> 18));
         out.push(sextet(n >> 12));
@@ -37,7 +37,7 @@ pub(crate) fn strict_encode(input: &[u8]) -> String {
 
     // The final 1 or 2 bytes are padded out to a full 4-character group with
     // `=`.
-    match chunks.remainder() {
+    match remainder {
         [a] => {
             let n = u32::from(*a) << 16;
             out.push(sextet(n >> 18));
