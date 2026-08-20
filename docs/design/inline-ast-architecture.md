@@ -3493,6 +3493,68 @@ Each phase is a reviewable unit with a clear exit gate.
   the `subs=quotes,specialcharacters` policy item and the opaque-piece boundary itself. As with
   every prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (a **typographic replacement** as the third — and last — recoverable
+  piece):* the two increments that named the recoverable classes
+  — an escaped special, then a restored entity — both stopped short of the third leaf
+  [`CharacterReplacements`](../../parser/src/content/inline_builder/char_replacements.rs) produces:
+  a [`CharRef`](../../parser/src/inlines/char_ref.rs)`::Replacement` (`(C)` → ©, `'` → ’, `--`,
+  `...`, the arrows). Until now
+  [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) stood one in as a single
+  opaque `SPAN_PLACEHOLDER`, so every macro family read across it as if it were a rendered span —
+  and a fresh corpus-wide audit showed exactly what that cost, in three *real* golden fixtures
+  rather than constructed ones: `image:pause.png[title=Pause (C) Resume]`,
+  `image:tiger-roar.png[A tiger's "roar" is < a bear's "growl"]` (an apostrophe *and* an escaped
+  special in one bracket), and `<<Cub => Tiger>>`, whose `=>` is an arrow by macro time.
+
+  It is closed the way the restored-entity increment was — once, for **every** family, since
+  recoverability is a property of the piece rather than of the family reading across it. A
+  `CharRef::Replacement` leaf now contributes the entity the **built-in** backend renders it as
+  ([`replacement_entity`](../../parser/src/content/inline_builder/quotes.rs): `&#169;` for `(C)`,
+  `&#8217;` for `'`), which is precisely what the string pipeline's own haystack holds at that
+  position from the replacements step onward; the leaf stays `atomic` (one indivisible node, never
+  sliced) but becomes *recoverable*, and
+  [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs) admits it,
+  its recoverability test mirroring the new arm's own guard so a hand-built node carrying a value no
+  rule produces stays opaque on both sides. Nothing else changed: no builder, no family gate, no
+  node kind, and no side-effect pass — a target or computed value simply reads the replacement's
+  bytes off the match string, and a display text keeps the leaf as its own child through
+  `macro_text_children`'s `emit_range` path, folding back through the renderer to the same bytes.
+
+  One thing does separate this class from a restored entity, and it is the reason the increment is
+  its own step rather than a line in the last one: the fold routes a replacement **through the
+  renderer** (`render_character_replacement`), where an entity leaf is emitted verbatim. Using the
+  canonical rendering here is therefore the same deliberate compromise
+  [`special_entity`](../../parser/src/content/inline_builder/quotes.rs) has always made for an
+  escaped special — a custom backend changes what the fold *emits*, not the recognition the AsciiDoc
+  patterns were written against — and `replacement_entity_matches_the_built_in_renderer` pins the
+  table against `HtmlSubstitutionRenderer` so the two cannot drift. The replacements step's own rule
+  loop gains the same fidelity as a side effect: a later rule now matches over an earlier one's
+  emitted bytes exactly as the string pipeline's sequential passes do, instead of over a placeholder.
+
+  Three `…_is_a_documented_divergence` tests shed fixtures per the "if lifted, fold this into a
+  parity corpus" convention — the bibliography label over `(C)`/`'` (now its own parity test,
+  asserting the *registered* reference text as well as the fold), the UI family's opaque-piece test,
+  and the e-mail family's abutting test, where an address after a replacement (`a(C)b@example.com`,
+  whose `;` is no mismatch character) now links exactly as the string pipeline links it. The
+  footnote-mirror skip test, which had reached for a replacement as its deferred form, is re-pointed
+  at a masked passthrough. Differential corpora gain, per family, a target/id and a display or
+  reference text crossing a replacement, an image's and a link's **attribute list** crossing one,
+  a match crossing every recoverable class at once, doubled, in flow, inside a rendered span, beside
+  a sibling family, escaped, and beside — rather than crossing — a replacement; plus structural
+  companions pinning the recovered `CharRef::Replacement` child and the owned, coarsely-located
+  attribute list a match-string parse yields. Fixtures are added to the whole-pipeline broad sweep
+  and combined-constructs corpus, the synthesized-seed sweep, the attribute-reference corpus (a
+  replacement that exists only because an attribute expanded, read across by a macro), and the
+  structural recorder cross-check.
+
+  Re-running the corpus-wide fold-parity audit confirms the divergence set strictly **shrank**: the
+  three real golden sources above are gone (its unique set falls from 45 to 42) and no new one
+  appeared. The categories that survive are unchanged from the last increment — the
+  `subs=quotes,specialcharacters` policy item, the forms individual families already document as
+  deferred, and the opaque-piece boundary itself, which is now purely a **rendered-markup**
+  boundary: every piece it still rejects is one whose bytes exist only at fold time. As with every
+  prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -3950,6 +4012,19 @@ Each phase is a reviewable unit with a clear exit gate.
        [`escaped_value_children`](../../parser/src/content/inline_builder/macros/mod.rs), now
        shared by all three families. See the step's own "landed as" note above. With this the only
        boundary any macro family still draws is the **opaque-piece** one every family shares.
+     - ✅ **prep (a typographic replacement, the third recoverable piece).** The last leaf
+       `build_match_string` stood in as an opaque placeholder — a
+       [`CharRef`](../../parser/src/inlines/char_ref.rs)`::Replacement` (`(C)` → ©, `'` → ’, the
+       arrows) — now contributes the entity the built-in backend renders it as
+       ([`replacement_entity`](../../parser/src/content/inline_builder/quotes.rs)), the string
+       pipeline's own haystack bytes there, and
+       [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs) admits
+       it. Lifted once for every family, as the restored-entity increment was; no builder, gate, or
+       node kind changed. Three real golden fixtures stop diverging
+       (`image:pause.png[title=Pause (C) Resume]`, `image:tiger-roar.png[A tiger's "roar" …]`,
+       `<<Cub => Tiger>>`). See the step's own "landed as" note above. With this the
+       **opaque-piece** boundary — the only one any macro family draws — rejects nothing but
+       pieces whose bytes exist at fold time alone.
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 

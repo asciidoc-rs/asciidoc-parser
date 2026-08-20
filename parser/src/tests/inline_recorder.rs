@@ -1239,11 +1239,12 @@ fn footnote_xref_mirror_is_skipped_when_the_subtree_defers_a_reference_form() {
     // and the footnote mirror must skip rather than misassign. The block-side
     // mirror is unaffected and still resolves the block-level reference.
     // (The deferred form here is a shorthand whose *id* crosses an opaque
-    // piece — a character replacement — since a footnote's own bracketed text
+    // piece — a masked passthrough — since a footnote's own bracketed text
     // ends at the first `]`, which rules out the bracket-carrying spellings.)
     let mut parser = Parser::default().with_inline_tree(true);
-    let doc = parser
-        .parse("[[a]]A target.\n\n[[c]]Another.\n\nSee <<c>>.footnote:[see <<a -- b>> and <<c>>]");
+    let doc = parser.parse(
+        "[[a]]A target.\n\n[[c]]Another.\n\nSee <<c>>.footnote:[see <<a +++b+++ c>> and <<c>>]",
+    );
 
     let refs = collect_refs(&doc);
 

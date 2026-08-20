@@ -402,7 +402,8 @@ pub(super) fn rebuild_macro_level<'src>(
 /// does for the structured path below, cannot reintroduce it.
 ///
 /// A text crossing an **escaped special** (`xref:sec[a<b]`, `link:x[a<b]`) or a
-/// **restored entity** (`xref:sec[a &copy; b]`) — or, degenerately, one
+/// **restored entity** (`xref:sec[a &copy; b]`), or a **typographic
+/// replacement** (`xref:sec[a (C) b]`) — or, degenerately, one
 /// [`text_slice`] declines to recover — instead becomes
 /// **structured children**, recovered with [`emit_range`]: the
 /// leaf is its own [`CharRef`] child that folds

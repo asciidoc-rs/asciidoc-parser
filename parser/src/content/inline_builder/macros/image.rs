@@ -6,7 +6,9 @@ use crate::{
     attributes::{Attrlist, AttrlistContext},
     content::{
         INLINE_IMAGE_MACRO, basename,
-        inline_builder::quotes::{Piece, build_match_string, source_slice, text_slice},
+        inline_builder::quotes::{
+            Piece, build_match_string, replacement_entity, source_slice, text_slice,
+        },
         normalize_text_lf_escaped_bracket,
     },
     inlines::{CharRef, Image, InlineNode},
@@ -175,26 +177,28 @@ pub(in crate::content::inline_builder) fn range_is_verbatim_or_synthesized(
 /// The most relaxed of the three gates: accepts a range whose overlapping
 /// pieces are all ones the tree can reproduce **exactly** — a
 /// [`Text`](InlineNode::Text) run (verbatim or
-/// [`synthesized`](Piece::synthesized)) or either
-/// [`CharRef`](InlineNode::CharRef) leaf, an *escaped special*
-/// ([`Special`](CharRef::Special)) or a *restored entity*
-/// ([`Entity`](CharRef::Entity)) — rejecting only an **opaque** piece: a
-/// rendered [`Styled`](crate::inlines::Styled) span, an earlier-recognized
-/// macro node, a masked passthrough or STEM expression, or a character
-/// replacement, each of which
-/// [`build_match_string`] stands in as one
+/// [`synthesized`](Piece::synthesized)) or any of the three
+/// [`CharRef`](InlineNode::CharRef) leaves, an *escaped special*
+/// ([`Special`](CharRef::Special)), a *restored entity*
+/// ([`Entity`](CharRef::Entity)), or a *typographic replacement*
+/// ([`Replacement`](CharRef::Replacement)) — rejecting only an **opaque**
+/// piece: a rendered [`Styled`](crate::inlines::Styled) span, an
+/// earlier-recognized macro node, or a masked passthrough or STEM expression,
+/// each of which [`build_match_string`] stands in as one
 /// `SPAN_PLACEHOLDER` rather than the markup or entity the string pipeline's
 /// own haystack holds there.
 ///
-/// Both `CharRef` leaves are admissible for the same reason: their
+/// All three `CharRef` leaves are admissible for the same reason: their
 /// match-string bytes — a special's canonical entity (`&lt;`, `&gt;`,
-/// `&amp;`), a restored entity's own text (`&copy;`, `&#8217;`) — are the very
-/// byte sequence the string pipeline's own haystack carries at that position,
-/// so a family that reads its values out of the match string sees exactly what
-/// the string replacer sees. What such a family cannot do is *slice* those
-/// bytes from `'src` (the source holds one character where the match string
-/// holds an entity, and `&amp;copy;` where it holds `&copy;`), so a value that
-/// must ride on the node as an `'src` slice — an [`Attrlist`]`<'src>`, an
+/// `&amp;`), a restored entity's own text (`&copy;`, `&#8217;`), a
+/// replacement's built-in rendering (`&#169;` for `(C)`, `&#8217;` for `'`,
+/// via [`replacement_entity`]) — are the very byte sequence the string
+/// pipeline's own haystack carries at that position, so a family that reads its
+/// values out of the match string sees exactly what the string replacer sees.
+/// What such a family cannot do is *slice* those bytes from `'src` (the source
+/// holds one character, or `(C)`, where the match string holds an entity, and
+/// `&amp;copy;` where it holds `&copy;`), so a value that must ride on the node
+/// as an `'src` slice — an [`Attrlist`]`<'src>`, an
 /// [`Image`](InlineNode::Image)'s bracket — keeps [`range_is_verbatim`], and a
 /// *display text* recovered under this gate is rebuilt as structured children
 /// with [`emit_range`](super::super::quotes::emit_range) (the leaf staying its
@@ -219,15 +223,25 @@ pub(in crate::content::inline_builder) fn range_has_no_opaque_piece(
         }
 
         // The atomic pieces `build_match_string` gives real bytes to are the
-        // two `CharRef` leaves — an escaped special and a restored entity;
-        // everything else it stands in as one placeholder.
-        let recoverable = matches!(
-            nodes.get(piece.node_index),
+        // three `CharRef` leaves — an escaped special, a restored entity, and
+        // a typographic replacement the built-in backend has a rendering for;
+        // everything else it stands in as one placeholder. The
+        // `replacement_entity` test mirrors that arm's own guard, so a
+        // hand-built node carrying a value no rule produces stays opaque here
+        // exactly as it does there.
+        let recoverable = match nodes.get(piece.node_index) {
             Some(InlineNode::CharRef {
                 value: CharRef::Special(_) | CharRef::Entity(_),
                 ..
-            })
-        );
+            }) => true,
+
+            Some(InlineNode::CharRef {
+                value: CharRef::Replacement(value),
+                ..
+            }) => replacement_entity(value).is_some(),
+
+            _ => false,
+        };
 
         if !recoverable {
             return false;
@@ -994,6 +1008,79 @@ mod tests {
                 "fold diverged from the string pipeline for {fixture:?}"
             );
         }
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_for_a_macro_crossing_a_character_replacement() {
+        // A typographic replacement (`(C)`, `(R)`, `'`, `...`) is the third
+        // recoverable piece, admitted for the same reason the two `CharRef`
+        // entity leaves are: `build_match_string` gives it the entity the
+        // built-in backend renders it as, which is what the string pipeline's
+        // own haystack carries from the replacements step onward — so both the
+        // target read off that string and the bracket parsed from it are the
+        // string replacer's own bytes.
+        let fixtures = [
+            // A target crossing one, alone and beside an attribute list.
+            "image:a(C)b.png[]",
+            "image:a(C)b.png[Alt]",
+            "icon:a(C)b[]",
+            // An **attribute list** crossing one — the shape three real
+            // fixtures in this crate's own corpora write.
+            "image:pause.png[title=Pause (C) Resume]",
+            "image:x.png[A tiger's roar]",
+            "image:x.png[alt=a (C) b]",
+            "image:x.png[Wait...]",
+            "image:x.png[Tom (C) Jerry,200,100]",
+            "icon:home[Tom (C) Jerry]",
+            // A replacement in the bracket *and* in the target, and one
+            // beside an escaped special and a restored entity.
+            "image:a(C)b.png[Tom (C) Jerry]",
+            "image:x.png[a (C) b < c &copy; d]",
+            // In surrounding flow, inside a rendered span, doubled, and beside
+            // a sibling family that takes the same lift.
+            "before image:x.png[Tom (C) Jerry] after",
+            "*image:x.png[Tom (C) Jerry]*",
+            "image:a(C)b.png[] image:c(R)d.png[]",
+            "image:x.png[Tom (C) Jerry] and link:x(R)y.html[]",
+            // The escape still keeps the macro literal, backslash dropped.
+            "\\image:x.png[Tom (C) Jerry]",
+            // A replacement *beside* the macro rather than inside it.
+            "(C)image:sunset.jpg[](R)",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_attribute_list_crossing_a_character_replacement_reads_the_rendered_entity() {
+        // The structural companion: the bracket has no `'src` slice (the
+        // source holds `(C)` where the match string holds `&#169;`), so it is
+        // parsed from the match string and owned onto design §4.4's coarse
+        // span — carrying the already-substituted value the string replacer
+        // parses, entity and all.
+        let source = "image:x.png[title=Pause (C) Resume]";
+        let nodes = build_src(Span::new(source));
+
+        assert_eq!(nodes.len(), 1);
+        let image = assert_image(&nodes[0]);
+
+        let attrlist = image.attrs.as_ref().unwrap();
+        assert_eq!(
+            attrlist.named_attribute("title").unwrap().value(),
+            "Pause &#169; Resume"
+        );
+
+        assert_eq!(image.location.data(), source);
     }
 
     #[test]

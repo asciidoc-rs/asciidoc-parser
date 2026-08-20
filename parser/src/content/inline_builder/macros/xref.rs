@@ -1375,6 +1375,52 @@ mod tests {
     }
 
     #[test]
+    fn fold_matches_the_string_pipeline_for_a_cross_reference_crossing_a_character_replacement() {
+        // A typographic replacement is the third recoverable piece, admitted
+        // for the same reason the two entity leaves are: the level's match
+        // string carries the entity the built-in backend renders it as — the
+        // string pipeline's own haystack bytes from the replacements step
+        // onward — and the fold routes the leaf back through the renderer to
+        // those same bytes.
+        let fixtures = [
+            // A reference text crossing one, in both spellings.
+            "xref:sec[Tom (C) Jerry]",
+            "<<sec,Tom (C) Jerry>>",
+            "xref:sec[O'Reilly]",
+            "xref:sec[Wait...]",
+            // A *target* crossing one, in both spellings — the second the
+            // shape a real fixture in this crate's own corpora writes.
+            "xref:s(C)c[Text]",
+            "<<s(C)c>>",
+            "<<Cub => Tiger>>",
+            // An attribute-list text crossing one.
+            "xref:sec[Tom (C) Jerry,role=hl]",
+            "xref:sec[O'Reilly,role=hl,window=_blank]",
+            // A text crossing a replacement, an escaped special, and a
+            // restored entity at once.
+            "xref:sec[a (C) b < c &copy; d]",
+            "xref:sec[a (C) b < c &copy; d,role=hl]",
+            // In flow, inside a rendered span, doubled, and escaped.
+            "see xref:sec[Tom (C) Jerry] now",
+            "*xref:sec[Tom (C) Jerry]*",
+            "xref:a[(C)] and xref:b[(R)]",
+            "\\xref:sec[Tom (C) Jerry]",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_xref(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_reference_text_crossing_a_restored_entity_keeps_the_entity_as_its_own_child() {
         // The plain-text path rebuilds the text through `emit_range`, so the
         // entity stays the leaf it already is rather than being baked into a
