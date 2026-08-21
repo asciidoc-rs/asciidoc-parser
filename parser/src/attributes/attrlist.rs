@@ -26,6 +26,19 @@ pub struct Attrlist<'src> {
     attributes: Vec<ElementAttribute<'src>>,
     anchor: Option<CowStr<'src>>,
     source: Span<'src>,
+
+    /// The attrlist text this list was parsed from, kept only when `source`'s
+    /// own bytes are *not* that text — which happens exactly when
+    /// [`into_owned`](Self::into_owned) rebuilt the list from a temporary and
+    /// re-tagged it with a coarser source span. `None` for every list parsed
+    /// straight from the source it describes, where `source.data()` already is
+    /// that text.
+    ///
+    /// Only [`source_text`](Self::source_text) reads it, for
+    /// [`quoted_text_fallback_role`](Self::quoted_text_fallback_role) — the one
+    /// accessor that reads the attrlist's own text rather than a parsed
+    /// attribute.
+    source_text: Option<CowStr<'src>>,
 }
 
 impl<'src> Attrlist<'src> {
@@ -41,7 +54,14 @@ impl<'src> Attrlist<'src> {
     /// from a [`Span::new`] over that temporary and calls this to keep the
     /// result, passing the coarser source span the text corresponds to as the
     /// list's own location tag. Every parsed field is a [`CowStr`], so nothing
-    /// but the location depends on the original span.
+    /// but the location depends on the original span — with one exception this
+    /// method itself handles:
+    /// [`quoted_text_fallback_role`](Self::quoted_text_fallback_role) reads the
+    /// attrlist's own *text*, which after the re-tag is no longer what `source`
+    /// holds (the temporary's escaped or expanded bytes are precisely what no
+    /// `'src` slice reproduces). An owned copy of the text this list was parsed
+    /// from therefore rides along in
+    /// [`source_text`](Self::source_text), so that accessor goes on reading it.
     pub(crate) fn into_owned<'dst>(self, source: Span<'dst>) -> Attrlist<'dst> {
         Attrlist {
             attributes: self
@@ -51,6 +71,7 @@ impl<'src> Attrlist<'src> {
                 .collect(),
             anchor: self.anchor.map(CowStr::into_owned),
             source,
+            source_text: Some(CowStr::from(self.source.data().to_string())),
         }
     }
 
@@ -85,6 +106,7 @@ impl<'src> Attrlist<'src> {
                         attributes,
                         anchor: Some(CowStr::from(anchor)),
                         source,
+                        source_text: None,
                     },
                     after: source.discard_all(),
                 },
@@ -200,6 +222,7 @@ impl<'src> Attrlist<'src> {
                     attributes,
                     anchor: None,
                     source,
+                    source_text: None,
                 },
                 after: source.discard_all(),
             },
@@ -229,6 +252,7 @@ impl<'src> Attrlist<'src> {
             ],
             anchor: None,
             source: language,
+            source_text: None,
         }
     }
 
@@ -305,6 +329,7 @@ impl<'src> Attrlist<'src> {
             attributes: later_attributes,
             anchor: later_anchor,
             source: _,
+            source_text: _,
         } = later;
 
         if later_anchor.is_some() {
@@ -564,6 +589,20 @@ impl<'src> Attrlist<'src> {
         roles
     }
 
+    /// The attrlist text this list was parsed from.
+    ///
+    /// For every list parsed straight from the source it describes, that is
+    /// its [`source`](Self::span) span's own bytes. For one rebuilt by
+    /// [`into_owned`](Self::into_owned) from a temporary — whose `source` is a
+    /// coarser *location tag* rather than the text (design §4.4) — it is the
+    /// owned copy that method kept.
+    fn source_text(&'src self) -> &'src str {
+        match &self.source_text {
+            Some(text) => text.as_ref(),
+            None => self.source.data(),
+        }
+    }
+
     /// Recovers the role from a quote-delimited first positional attribute (for
     /// example `['role']`) in a quoted-text attribute list.
     ///
@@ -592,7 +631,7 @@ impl<'src> Attrlist<'src> {
         // `['a,b']` yields the role `'a`) rather than being treated as quoted
         // content. A quote-delimited first positional always leaves at least its
         // opening quote here, so the slice is never empty.
-        let raw = self.source.data();
+        let raw = self.source_text();
         Some(raw.split_once(',').map_or(raw, |(first, _)| first).trim())
     }
 
@@ -2495,6 +2534,35 @@ mod tests {
             .unwrap_if_no_warnings();
 
             assert!(mi.item.quoted_text_fallback_role().is_none());
+        }
+
+        #[test]
+        fn an_owned_list_keeps_the_text_it_was_parsed_from() {
+            let p = Parser::default();
+
+            // `into_owned` re-tags a list parsed from a temporary with a
+            // *coarser* source span — the inline AST builder's case, where the
+            // attrlist text is the escaped or attribute-expanded bytes of a
+            // match string and the span is only a location tag (design §4.4).
+            // This is the one accessor that reads the list's own text rather
+            // than a parsed attribute, so it reads the kept copy: recovering
+            // the raw span's `'a<b'` here would drop the escaping the string
+            // pipeline's own rendered `class` carries.
+            let escaped = "'a&lt;b'";
+
+            let owned = crate::attributes::Attrlist::parse(
+                crate::Span::new(escaped),
+                &p,
+                AttrlistContext::Inline,
+            )
+            .unwrap_if_no_warnings()
+            .item
+            .into_owned(crate::Span::new("'a<b'"));
+
+            assert_eq!(owned.quoted_text_fallback_role().unwrap(), escaped);
+
+            // The location tag is the span it was re-tagged with, unchanged.
+            assert_eq!(owned.span().data(), "'a<b'");
         }
     }
 

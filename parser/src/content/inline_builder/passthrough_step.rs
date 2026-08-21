@@ -1065,6 +1065,17 @@ mod tests {
             "[#anchor]++text++",
             "['quoted role']++text++",
             "[.a.b#id]++text++",
+            // An attribute list carrying a special character. Unlike an
+            // attributed *quote's* — parsed from the escaped text, since the
+            // escaping step runs before the quotes step (see
+            // [`quote_attributes`](super::quotes)) — this extraction pass runs
+            // *ahead* of every step, so the string pipeline parses the
+            // author's raw bytes here and `attributes_of` matches it by
+            // parsing the source slice.
+            "[.a<b]++text++",
+            "[#a&b]++text++",
+            "['a<b&c']++text++",
+            "[.a<b]+text+",
             // `<`/`>`/`&` and quote-ish content inside the body: `+++`/`pass:`
             // stay raw, `++`/`$$` escape specials only, and quotes never run
             // over the body either way.
