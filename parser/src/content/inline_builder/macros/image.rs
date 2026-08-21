@@ -639,13 +639,30 @@ fn masked_default_alt(
             .unwrap_or_default(),
     );
 
-    let mut derived = basename(&tokened.replace(['_', '-'], " "));
+    let derived = basename(&tokened.replace(['_', '-'], " "));
+
+    // One left-to-right pass, like `Passthroughs::restore_to`'s own
+    // `replace_all`: each token is sought only in the bytes after the
+    // previous splice, so a restored body that itself carries
+    // sentinel-shaped bytes can never be matched as a later token. Surviving
+    // tokens appear in index order (they were emitted in piece order and the
+    // arithmetic never reorders), and a dropped token is simply not found —
+    // the ones after it still restore, keyed by their own index.
+    let mut out = String::new();
+    let mut rest = derived.as_str();
 
     for (n, value) in values.iter().enumerate() {
-        derived = derived.replacen(&format!("\u{96}{n}\u{97}"), value, 1);
+        let token = format!("\u{96}{n}\u{97}");
+
+        if let Some(pos) = rest.find(&token) {
+            out.push_str(rest.get(..pos).unwrap_or_default());
+            out.push_str(value);
+            rest = rest.get(pos + token.len()..).unwrap_or_default();
+        }
     }
 
-    derived
+    out.push_str(rest);
+    out
 }
 
 /// Parses the macro's bracket into the [`Attrlist`]`<'src>` its node carries.
@@ -1482,6 +1499,21 @@ mod tests {
         let image = assert_image(&nodes[0]);
         assert_eq!(image.target.as_ref(), "dir_1/file_2.png");
         assert_eq!(image.alt.as_deref(), Some("file_2"));
+    }
+
+    #[test]
+    fn a_restored_body_carrying_sentinel_shaped_bytes_is_not_re_matched() {
+        // The default-alt restore is one left-to-right pass, like
+        // `Passthroughs::restore_to`'s own `replace_all`: a passthrough body
+        // that itself contains the bytes of a *later* token
+        // (`\u{96}1\u{97}` here) must not have that later token spliced into
+        // it — each token is sought only after the previous splice.
+        let source = "image:++x\u{96}1\u{97}y++_++c_d++[]";
+        let nodes = build_src(Span::new(source));
+
+        let image = assert_image(&nodes[0]);
+        assert_eq!(image.target.as_ref(), "x\u{96}1\u{97}y_c_d");
+        assert_eq!(image.alt.as_deref(), Some("x\u{96}1\u{97}y c_d"));
     }
 
     #[test]
