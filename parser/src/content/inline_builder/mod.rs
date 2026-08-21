@@ -876,6 +876,17 @@ mod tests {
             "*https://example.org*",
             "*https://example.org[Docs]*",
             r#""`https://example.org[Docs]`""#,
+            // A **transparent** span between the construct and its enclosing
+            // one: rendering to its body and nothing else, it presents no
+            // markup, so what a construct inside it reads is whatever stands
+            // beside the *span*.
+            "*x [width=10]#doc@example.org#*",
+            "x [width=10]#doc@example.org#",
+            "*[width=10]#doc@example.org#*",
+            "*x [width=10]#https://example.org#*",
+            "x[width=10]###c# d##",
+            "x [width=10]###c# d##",
+            "*x[width=10]###c# d##*",
             "   ",
             "a\nb\nc",
         ];
@@ -1369,6 +1380,14 @@ mod tests {
         assert_parity("*write to doc@example.org now* and doc@example.org here.");
         assert_parity("*https://example.org* and _https://example.org[Docs]_.");
         assert_parity(r#"He said "`https://example.org[Docs]`" today."#);
+
+        // The same seam through a **transparent** span, which renders to its
+        // body and nothing else: a construct inside one reads what stands
+        // beside the span, not the enclosing construct's own markup.
+        assert_parity(
+            "Mail *write to [width=10]#doc@example.org# now* or x [width=10]#doc@example.org# here.",
+        );
+        assert_parity("Beside x[width=10]###c# d## and x [width=10]###c# d## in one line.");
     }
 
     /// [`build_from_value`] against the real pipeline, seeded from a
@@ -1891,6 +1910,12 @@ mod tests {
                 // span's rendering rather than from the order.
                 "*doc@example.org* and a < b",
                 "*https://example.org* and a < b",
+                // And through a **transparent** span, whose children read
+                // what stands beside the span: what a sibling renders comes
+                // from its own rendering, which no effective order changes
+                // either.
+                "*x [width=10]#doc@example.org#* and a < b",
+                "x[width=10]###c# d## and a < b",
                 // Multi-line, so a run spanning a newline is split the same
                 // way as a single-line one.
                 "first < line\nsecond & line\nthird > line",

@@ -4115,6 +4115,30 @@ mod tests {
             // renders), which is no mismatch character in either pipeline.
             "*(C)doc@example.org*",
             "*&copy;doc@example.org*",
+            // A **transparent** span between the two — one rendering to its
+            // body and nothing else — presents no markup of its own, so what
+            // the address reads is whatever stands beside the *span*
+            // ([`LevelContext::child_contexts`](super::super::quotes::LevelContext)):
+            // the space a preceding sibling ends with, not the enclosing
+            // `<strong>`'s own `>`.
+            "*x [width=10]#doc@example.org#*",
+            "x [width=10]#doc@example.org#",
+            "*a > b [width=10]#doc@example.org#*",
+            "*(C)[width=10]#doc@example.org#*",
+            "*[width=10]#x# [width=10]#doc@example.org#*",
+            // With nothing before the span, the enclosing context is still
+            // the right answer — `>` inside a tag-rendered span, `^` at the
+            // content's own top level.
+            "*[width=10]#doc@example.org#*",
+            "[width=10]#doc@example.org#",
+            // The auto-link family reads the same character through its own
+            // boundary-prefix group.
+            "*x [width=10]#https://example.org#*",
+            // A **tag-rendered** span beside the transparent one says nothing
+            // this module can act on, so the span goes on inheriting: `^` here,
+            // which the auto-link's prefix group accepts exactly as it accepts
+            // the `>` the string pipeline reads there.
+            "*x*[width=10]#https://example.org#",
             // And the same addresses at the content's own top level, where a
             // level's start is exactly what the string pipeline presents.
             "doc@example.org",
@@ -4143,24 +4167,53 @@ mod tests {
     }
 
     #[test]
-    fn an_address_after_a_transparent_spans_sibling_is_a_documented_divergence() {
-        // An unquoted span whose attribute list resolves to neither a role nor
-        // an id renders to its body and nothing else, so its children inherit
-        // the context the span itself sits in
-        // ([`LevelContext::inside_styled`](super::super::quotes::LevelContext)).
-        // That is right whenever the span is all its parent's level holds and
-        // wrong when a *sibling* precedes it: the string pipeline's haystack
-        // shows what that sibling ends with (a space here) where the inherited
-        // context still shows the enclosing `<strong>`'s own `>`, so the
-        // address stays literal here and links there.
+    fn an_address_after_a_transparent_spans_sibling_builds_a_link() {
+        // The parity above, read structurally, for the shape that named this
+        // increment: an unquoted span whose attribute list resolves to neither
+        // a role nor an id renders to its body and nothing else, so its
+        // children read what stands beside the *span* rather than the
+        // enclosing `<strong>`'s own `>` — a space here, which is no mismatch
+        // character, so the address links exactly as the string pipeline links
+        // it.
+        let nodes = build_src(Span::new("*x [width=10]#doc@example.org#*"));
+        let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
+
+        let span = children.iter().find_map(|node| match node {
+            InlineNode::Styled(styled) if styled.variant == StyleVariant::Unquoted => {
+                Some(&styled.children)
+            }
+
+            _ => None,
+        });
+
+        match span {
+            Some(children) => assert_eq!(
+                assert_link(&children[0]).target.as_ref(),
+                "mailto:doc@example.org"
+            ),
+
+            None => panic!("expected the transparent span to survive: {children:?}"),
+        }
+    }
+
+    #[test]
+    fn an_address_after_a_transparent_spans_tag_rendered_sibling_is_a_documented_divergence() {
+        // The half a transparent span's own siblings cannot answer. What
+        // precedes the span here is a **tag-rendered** span, which
+        // [`build_match_string`](super::super::quotes::build_match_string)
+        // stands in as a bare [`SPAN_PLACEHOLDER`] belonging to no boundary
+        // class — so
+        // [`LevelContext::child_contexts`](super::super::quotes::LevelContext)
+        // reports nothing and the transparent span inherits `^`, where the
+        // string pipeline reads the `>` that ends `<strong>` — one of the bare
+        // e-mail pattern's three mismatch characters.
         //
-        // This is the transparent-span half of the same class the quotes and
-        // character-replacements steps already document
-        // (`a_replacement_beside_a_transparent_span_is_a_documented_divergence`);
-        // closing it means deriving a level's context from its *siblings*
-        // rather than from its enclosing construct alone. If that lands, fold
-        // this fixture into the parity corpus above.
-        let source = "*x [width=10]#doc@example.org#*";
+        // This is the same tag-rendered half `styled_sibling_boundaries`
+        // already defers one level out, for the same reason: telling a
+        // genuinely rendered span from the passthrough-extraction pass's own
+        // wrapper needs `masked_locations`' identity, which neither has. If
+        // that lands, fold this fixture into the parity corpus above.
+        let source = "*x*[width=10]#doc@example.org#";
         let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
 
         assert_ne!(
@@ -4169,8 +4222,8 @@ mod tests {
             "expected the documented divergence to still reproduce"
         );
 
-        assert!(!folded.contains("mailto:"), "{folded:?}");
-        assert!(golden_macros(source).contains("mailto:doc@example.org"));
+        assert_eq!(golden_macros(source), "<strong>x</strong>doc@example.org");
+        assert!(folded.contains("mailto:doc@example.org"), "{folded:?}");
     }
 
     #[test]
@@ -4189,6 +4242,8 @@ mod tests {
             "Mail *doc@example.org* or _doc@example.org writes_ here.\n",
             "\n",
             "He said \"`doc@example.org`\" and *https://example.org* too.\n",
+            "\n",
+            "Then *write to [width=10]#doc@example.org# now* and x [width=10]#doc@example.org# here.\n",
         ));
 
         let mut folded_blocks = 0;
@@ -4212,9 +4267,9 @@ mod tests {
             folded_blocks += 1;
         }
 
-        // The two paragraphs; the section that contains them holds no inline
+        // The three paragraphs; the section that contains them holds no inline
         // content of its own and is skipped.
-        assert_eq!(folded_blocks, 2, "expected both paragraphs to be checked");
+        assert_eq!(folded_blocks, 3, "expected every paragraph to be checked");
     }
 
     #[test]

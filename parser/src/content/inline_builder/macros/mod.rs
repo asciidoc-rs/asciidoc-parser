@@ -177,6 +177,11 @@ pub(super) fn apply_macros<'src>(
 /// `anchor:`, `&lt;&lt;`, `xref:`, `link:`, `mailto:`) that no context
 /// character can begin — so for them the wrap is inert, and they take it for
 /// uniformity rather than for effect.
+///
+/// A span that renders **no markup of its own** encloses nothing, so its
+/// children read what stands beside the *span* instead; that is
+/// [`LevelContext::child_contexts`]'s own job, and this function takes the
+/// answer it gives without caring which of the two it is.
 fn apply_macro_families<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -187,25 +192,21 @@ fn apply_macro_families<'src>(
     // whole-string pass. Each nested level is matched in the context its own
     // enclosing construct's rendering presents (see this function's own doc
     // comment); a span the built-in backend renders with no markup of its own
-    // is transparent, so `inside_styled` hands its children whatever the span
-    // itself sees.
+    // is transparent, so `child_contexts` hands its children the character its
+    // own *siblings* present instead.
+    let contexts = LevelContext::child_contexts(&nodes, ctx);
+
     let nodes: Vec<InlineNode<'src>> = nodes
         .into_iter()
-        .map(|node| match node {
+        .zip(contexts)
+        .map(|(node, inner)| match node {
             InlineNode::Styled(mut styled) => {
-                let inner = LevelContext::inside_styled(&styled, ctx);
-
                 styled.children = apply_macro_families(styled.children, root, parser, inner);
                 InlineNode::Styled(styled)
             }
 
             InlineNode::Ref(mut reference) => {
-                reference.children = apply_macro_families(
-                    reference.children,
-                    root,
-                    parser,
-                    LevelContext::INSIDE_REF,
-                );
+                reference.children = apply_macro_families(reference.children, root, parser, inner);
                 InlineNode::Ref(reference)
             }
 

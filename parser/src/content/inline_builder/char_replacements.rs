@@ -433,11 +433,17 @@ mod tests {
         // dash's own trailing class) where the tree shows the parent's closing
         // markup.
         //
-        // Modelling that means deriving a level's context from its *siblings*
-        // rather than from its enclosing construct alone — a strictly larger
-        // walk, for the one span shape that renders nothing of its own.
+        // [`LevelContext::child_contexts`] derives exactly that character from
+        // a level's siblings for the two steps that can take it, and this step
+        // is deliberately not one of them: its one boundary-reading rule is
+        // the spaced em dash, whose replacement **consumes** the spaces it
+        // matches rather than writing them back. A character a sibling owns
+        // lives in another level's node, which this level's rebuild cannot
+        // delete — so supplying it would emit the space here *and* leave it
+        // there, a differently wrong answer rather than the right one.
         //
-        // If it lands, fold this fixture into the corpus above.
+        // Closing it means letting one level's rebuild consume a node another
+        // level owns. If that lands, fold this fixture into the corpus above.
         let source = "*[width=10]#x --# --*";
 
         let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
