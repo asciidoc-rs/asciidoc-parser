@@ -856,6 +856,15 @@ mod tests {
             "[.r]#x --#",
             r#""`x --`""#,
             "*a -- b*",
+            // The same seam one level *out*: a construct written **beside** an
+            // entity-rendered span, where the string pipeline's haystack holds
+            // that span's own closing `&#8221;` and the tree holds one
+            // placeholder.
+            r#""`a`"`code`"#,
+            r#"'`a`'`code`"#,
+            r##""`a`"#mark#"##,
+            r#""`a`"'`b`'"#,
+            r#""`a`" `code`"#,
             // The macros step's own boundary-reading families at the same
             // seam: the bare e-mail's mismatch prefix and the auto-link's
             // boundary prefix.
@@ -1341,6 +1350,13 @@ mod tests {
             with_product,
         );
         assert_parity("A [.r]#roled -- span# and a `code -- span` here.");
+
+        // The same seam one level out, where the construct sits **beside** the
+        // span rather than inside it: the monospace and mark subs read the
+        // `;` ending that span's own `&#8221;`, so both pipelines leave them
+        // literal, and the surrounding constructs still resolve normally.
+        assert_parity(r##"He said "`hello`"`code` and then "`bye`"#mark# alone."##);
+        assert_parity(r#"Quoting "`one`"'`two`' back to back, plus a *bold* run."#);
 
         // The same seam for the **macros** step, whose bare e-mail and
         // auto-link families read a boundary character of their own: a
@@ -1866,6 +1882,10 @@ mod tests {
                 // decision holds for a group that never escapes.
                 r#""``end points``" and a < b"#,
                 "*x --* and a < b",
+                // The same, one level out: what a span presents to a
+                // **sibling** likewise comes from its rendering, not from the
+                // order.
+                r#""`a`"`code` and a < b"#,
                 // The same for the macros step's own boundary-reading
                 // families, whose decision likewise comes from the enclosing
                 // span's rendering rather than from the order.
