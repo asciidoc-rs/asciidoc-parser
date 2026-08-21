@@ -4060,6 +4060,19 @@ Each phase is a reviewable unit with a clear exit gate.
   taken only for the order that escapes late, `flatten_prior_markup`'s own consumer), since a
   wrapper's identity has to be recorded before any step runs whatever the order is.
 
+  The identity answers for **one content's own** constructs, and one path puts constructs somewhere
+  else: the `x-` compatibility form (`[x-]++text++`) substitutes its body through a *separate,
+  nested* `Normal` build, so a wrapper **that** build extracts is invisible to this content's list.
+  Consulting the list there would find no entry and call the wrapper a rendered span — the one wrong
+  answer the type exists to prevent. Nothing consults it, because the macros step no longer descends
+  into a wrapper at all: a wrapper's body is not this content's to substitute (the string pipeline
+  holds it as a sentinel for every step from here on) and the nested build already substituted it
+  once, so descending had been applying the step's families a *second* time. That was inert while a
+  bare placeholder stopped every boundary class; it stops being inert the moment a span presents a
+  character, which is how `[x-]++**b**https://example.org++` had been growing an `<a>` inside the
+  `<a>` the nested build already made. Skipping the descent is the faithful reading, and it closes
+  that shape rather than deferring it: the fold now matches the string pipeline's bytes exactly.
+
   With it,
   [`styled_sibling_boundaries`](../../parser/src/content/inline_builder/quotes.rs) stops being a
   two-variant special case and becomes what its mirror image
@@ -4703,7 +4716,10 @@ Each phase is a reviewable unit with a clear exit gate.
        variant from its own rendering, closing `**bold**https://example.org` (and its reverse, and
        `*x*[width=10]#doc@example.org#` one level in) while `[quotes]++x++https://example.org`
        — the new divergence a rendering-only classification would have introduced — stays literal in
-       both. See the step's own "landed as" note above. What still defers is the closing character,
+       both, and — because the macros step no longer descends into a wrapper, whose body a *nested*
+       build has already substituted — `[x-]++**b**https://example.org++` folds to the string
+       pipeline's own bytes rather than to an `<a>` nested inside an `<a>`. See the step's own
+       "landed as" note above. What still defers is the closing character,
        the character-replacements step's consume-across-levels case, and a transparent span read *as*
        a sibling, which this unblocks but does not take.
 

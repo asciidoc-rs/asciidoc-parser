@@ -222,6 +222,21 @@ fn apply_macro_families<'src>(
         .into_iter()
         .zip(contexts)
         .map(|(node, inner)| match node {
+            // An extraction wrapper's body is **not** this content's to
+            // substitute. The string pipeline holds it as a sentinel for every
+            // step from here on, and the body was already substituted once —
+            // by the separate, nested `Normal` build the `x-` compatibility
+            // form (`[x-]++text++`) runs it through — so descending here would
+            // apply this step's families to it a *second* time
+            // (`[x-]++**b**https://example.org++` grows an `<a>` inside the
+            // `<a>` that build already made). It is also the one place this
+            // level's `masked` could not answer even if it did descend, since
+            // the list is collected from one content's own top level and knows
+            // nothing of a nested build's nodes.
+            InlineNode::Styled(styled) if masked.covers(styled.location) => {
+                InlineNode::Styled(styled)
+            }
+
             InlineNode::Styled(mut styled) => {
                 styled.children =
                     apply_macro_families(styled.children, root, parser, inner, masked);

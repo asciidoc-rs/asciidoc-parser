@@ -385,12 +385,19 @@ impl<'a> Masked<'a> {
         Self(Some(locations))
     }
 
+    /// Reports whether the node at `location` is one of the wrappers this
+    /// list names — false whenever the identity is not in hand, since an
+    /// unknown identity names nothing.
+    pub(super) fn covers(self, location: Span<'_>) -> bool {
+        self.0
+            .is_some_and(|masked| masked.contains(&span_identity(location)))
+    }
+
     /// Reports whether what a sibling reads beside the node at `location` is
     /// that node's own rendering — true only when the identity is in hand
     /// *and* the node is not one of the wrappers it names.
     pub(super) fn renders_to_its_siblings(self, location: Span<'_>) -> bool {
-        self.0
-            .is_some_and(|masked| !masked.contains(&span_identity(location)))
+        self.0.is_some() && !self.covers(location)
     }
 }
 

@@ -4152,6 +4152,61 @@ mod tests {
     }
 
     #[test]
+    fn a_url_beside_a_wrapper_in_a_nested_builds_body_stays_literal() {
+        // The shape that keeps the identity honest about its own scope.
+        // `masked_locations` answers for one content's **own** top level, and
+        // the `x-` compatibility form substitutes its body through a separate,
+        // nested `Normal` build — so a wrapper *that* build extracts is
+        // invisible to this content's list. Consulting the list there would
+        // find no entry and call the wrapper a rendered span, handing the URL
+        // beside it a `>` the string pipeline never presents (it is holding
+        // the wrapper as its own `\u{96}…\u{97}` sentinel, exactly as at the
+        // top level).
+        //
+        // Nothing consults it, because no family descends into a wrapper at
+        // all: its body is not this content's to substitute, and the nested
+        // build already substituted it once. Both fixtures leave the URL
+        // literal in both pipelines. (The bare **e-mail** family's own
+        // version of this shape, `[x-]++[quotes]$$y$$doc@example.org++`, is
+        // the deferral
+        // `an_email_abutting_a_construct_that_hides_its_boundary_is_a_documented_divergence`
+        // already records, and is unchanged either way.)
+        use super::super::super::test_support::golden_passthroughs;
+
+        for source in [
+            "[x-]++[quotes]$$y$$https://example.org++",
+            "[x-]++[.r]$$y$$https://example.org++",
+            "*[x-]++[quotes]$$y$$https://example.org++*",
+        ] {
+            assert_eq!(
+                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                golden_passthroughs(source),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_url_in_a_nested_builds_body_is_linked_once() {
+        // The same body, one step on: what the nested build *does* recognize
+        // it recognizes with its own identity in hand, so a URL written
+        // against a tag-rendered span there links exactly as the string
+        // pipeline links it — and links **once**, since the outer step does
+        // not descend to match over the result a second time.
+        use super::super::super::test_support::golden_passthroughs;
+
+        let source = "[x-]++**b**https://example.org++";
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+
+        assert_eq!(folded, golden_passthroughs(source));
+
+        assert_eq!(
+            folded,
+            "<code><strong>b</strong><a href=\"https://example.org\" class=\"bare\">https://example.org</a></code>"
+        );
+    }
+
+    #[test]
     fn an_address_at_a_spans_own_edge_reads_that_spans_boundary_characters() {
         // The mismatch-prefix group reads the character immediately before the
         // address, and inside a span the string pipeline reads that span's own
