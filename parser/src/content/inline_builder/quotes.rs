@@ -222,10 +222,84 @@ fn styled_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
     }
 }
 
+/// The two characters a [`Styled`] span's own rendering presents to its
+/// **siblings** — the first character of its opening markup and the last of
+/// its closing markup — or `None` when this module cannot say what a sibling
+/// reads there.
+///
+/// This is [`styled_boundaries`]'s mirror image, one level out. That function
+/// answers what a span presents to the level *inside* it (the last character
+/// of its opening markup and the first of its closing one, carried by a
+/// [`LevelContext`]); this one answers what the same span presents to the
+/// nodes *beside* it at its own level, where
+/// [`build_match_string`] otherwise stands the whole span in as one opaque
+/// [`SPAN_PLACEHOLDER`] belonging to no boundary class at all. The string
+/// pipeline, having no levels, holds that span's rendered markup there — so a
+/// following construct reads `>` where the span rendered a tag and `;` where
+/// it rendered a smart quote's `&#8221;`, and a preceding one reads `<` or
+/// `&`.
+///
+/// # Only the entity-rendered variants
+///
+/// The two smart quotes are answered; every other variant keeps the bare
+/// placeholder, and the asymmetry is not about what a variant renders but
+/// about what this function can *tell*.
+///
+/// A [`Styled`] node reaching [`build_match_string`] is not necessarily a span
+/// the string pipeline has rendered at all: the passthrough-extraction pass
+/// builds one of its own for an attribute-list-prefixed passthrough
+/// (`[quotes]++text++`, `` [x-]`text` ``), which the string pipeline is
+/// holding as a **placeholder** — its own `\u{96}…\u{97}` sentinel pair —
+/// rather than as markup, for every step this module runs. A sibling reads
+/// that sentinel, which is exactly what the bare [`SPAN_PLACEHOLDER`] already
+/// reads as to every class in play (both are non-word, in none of `&;:}`,
+/// `[>\(\)\[\];"']`, or `[\\>:/]`), so leaving such a wrapper unclassified
+/// is not an approximation — it is the right answer.
+///
+/// Telling one apart from a genuinely rendered span needs the *identity* that
+/// [`masked_locations`](super::special_chars::masked_locations) collects
+/// before any step runs, which this function does not have — and both wrappers
+/// the extraction pass builds are tag-rendered
+/// ([`Unquoted`](StyleVariant::Unquoted) or [`Code`](StyleVariant::Code)), so
+/// classifying a tag-rendered span here would sometimes give a sibling a `>`
+/// the string pipeline does not present. An **entity**-rendered span carries
+/// no such ambiguity: the extraction pass builds neither smart-quote variant,
+/// so a [`DoubleQuote`](StyleVariant::DoubleQuote) or
+/// [`SingleQuote`](StyleVariant::SingleQuote) node can only have come from the
+/// quotes step, where the string pipeline really does hold `&#8220;…&#8221;`.
+/// The tag-rendered half waits on a way to carry that identity here.
+fn styled_sibling_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
+    match styled.variant {
+        // `&#8220;…&#8221;` / `&#8216;…&#8217;`.
+        StyleVariant::DoubleQuote | StyleVariant::SingleQuote => Some(('&', ';')),
+
+        // Every other variant wraps its body in a tag — the same shape the
+        // passthrough-extraction pass's own wrapper takes, which the string
+        // pipeline is still holding as a placeholder. See this function's own
+        // scope note.
+        _ => None,
+    }
+}
+
 /// [`styled_boundaries`] for a span whose rendering shape is not decided by
 /// its variant alone: renders it through the built-in backend around a probe
 /// body and reads the characters that land beside it.
 fn probe_styled_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
+    let (before, after) = probe_styled_boundaries_markup(styled);
+
+    before.chars().next_back().zip(after.chars().next())
+}
+
+/// The **opening** and **closing** markup the built-in backend places around a
+/// [`Styled`] span's body, recovered by rendering the span around a probe body
+/// and splitting on it.
+///
+/// Both boundary functions read this one pair from opposite ends:
+/// [`styled_boundaries`] takes the last character of the opening run and the
+/// first of the closing one (what the level *inside* the span sees), and
+/// [`styled_sibling_boundaries`] takes the first character of the opening run
+/// and the last of the closing one (what a *sibling* sees).
+fn probe_styled_boundaries_markup(styled: &Styled<'_>) -> (String, String) {
     // A NUL never appears in a rendered attribute value, so the probe is
     // unambiguous.
     const PROBE: &str = "\u{0}";
@@ -252,7 +326,7 @@ fn probe_styled_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
     // answer a span that wraps its body in nothing already gives.
     let (before, after) = rendered.split_once(PROBE).unwrap_or_default();
 
-    before.chars().next_back().zip(after.chars().next())
+    (before.to_string(), after.to_string())
 }
 
 /// The quoted-text substitution, as a node transducer: each shared
@@ -558,7 +632,32 @@ pub(super) fn build_match_string(nodes: &[InlineNode<'_>]) -> (String, Vec<Piece
             other => {
                 // A span from an earlier sub (or any other synthesized-value
                 // node, e.g. a `Raw` leaf) is opaque: a single placeholder
-                // that a quote pattern sees as one boundary character.
+                // that a quote pattern sees as one boundary character —
+                // wrapped, when this module can say what the string
+                // pipeline's own haystack holds *beside* the construct, in
+                // the two characters its rendering presents to a sibling (see
+                // [`styled_sibling_boundaries`]).
+                //
+                // Those two characters belong to no piece — they are the
+                // opaque node's own markup, and the node is already
+                // represented by the placeholder's piece — so a range
+                // reaching one contributes nothing, exactly as a
+                // [`LevelContext`]'s do: [`emit_range`] finds no piece
+                // overlapping it (which is right, since a boundary character
+                // a pattern keeps is markup the span itself carries), and
+                // every gate skips it as non-overlapping.
+                let boundaries = match other {
+                    InlineNode::Styled(styled) => styled_sibling_boundaries(styled),
+                    _ => None,
+                };
+
+                if let Some((before, _)) = boundaries {
+                    s.push(before);
+                }
+
+                // Re-taken after the opening character: the piece covers the
+                // placeholder alone.
+                let s_start = s.len();
                 s.push(SPAN_PLACEHOLDER);
 
                 let location = other.span();
@@ -572,6 +671,10 @@ pub(super) fn build_match_string(nodes: &[InlineNode<'_>]) -> (String, Vec<Piece
                     atomic: true,
                     synthesized: false,
                 });
+
+                if let Some((_, after)) = boundaries {
+                    s.push(after);
+                }
             }
         }
     }
@@ -1222,8 +1325,15 @@ fn s_to_src(pieces: &[Piece], x: usize, bias: Bias) -> usize {
         let p_start = piece.s_start;
         let p_end = piece.s_start + piece.s_len;
 
+        // Before this piece begins: only a **boundary character** an opaque
+        // node contributes (see [`build_match_string`]) lies outside every
+        // piece, and only a leading one can be reached here — an offset
+        // inside a trailing one still falls at or before its own placeholder
+        // piece's end, and one between two pieces is resolved by the earlier
+        // piece below. Such an offset belongs to this piece's own node, whose
+        // source starts here.
         if x < p_start {
-            break;
+            return piece.src_offset;
         }
 
         // A boundary exactly at the *end* of a synthesized piece belongs to
@@ -1387,6 +1497,56 @@ mod tests {
     }
 
     #[test]
+    fn styled_sibling_boundaries_match_the_built_in_renderer() {
+        // [`styled_sibling_boundaries`] is the mirror image of
+        // [`styled_boundaries`], reading the *outer* end of the same two runs
+        // of markup — the first character of the opening one and the last of
+        // the closing one — so it is pinned against the same probe.
+        use super::{probe_styled_boundaries_markup, styled_sibling_boundaries};
+        use crate::inlines::Styled;
+
+        let span = |variant| Styled {
+            variant,
+            form: SpanForm::Constrained,
+            id: None,
+            roles: vec![],
+            attrs: None,
+            children: vec![],
+            location: Span::new("x"),
+        };
+
+        for variant in [StyleVariant::DoubleQuote, StyleVariant::SingleQuote] {
+            let styled = span(variant);
+
+            let (opening, closing) = probe_styled_boundaries_markup(&styled);
+
+            assert_eq!(
+                styled_sibling_boundaries(&styled),
+                opening.chars().next().zip(closing.chars().next_back()),
+                "sibling boundary characters drifted from the built-in rendering of {variant:?}"
+            );
+        }
+
+        // Every tag-rendered variant keeps the bare placeholder — not because
+        // its rendering has no outer characters (it has `<` and `>`), but
+        // because a `Styled` node reaching `build_match_string` may be the
+        // passthrough-extraction pass's own wrapper, which the string pipeline
+        // is still holding as a placeholder. See
+        // [`styled_sibling_boundaries`]'s own scope note.
+        for variant in [
+            StyleVariant::Strong,
+            StyleVariant::Emphasis,
+            StyleVariant::Code,
+            StyleVariant::Mark,
+            StyleVariant::Superscript,
+            StyleVariant::Subscript,
+            StyleVariant::Unquoted,
+        ] {
+            assert_eq!(styled_sibling_boundaries(&span(variant)), None);
+        }
+    }
+
+    #[test]
     fn level_context_wraps_and_unshifts() {
         use super::LevelContext;
 
@@ -1493,39 +1653,95 @@ mod tests {
     }
 
     #[test]
-    fn a_sub_after_a_span_at_its_own_level_is_a_documented_divergence() {
+    fn a_sub_beside_a_span_reads_that_spans_own_sibling_boundary_characters() {
         // The mirror image of the fixtures above, one level out: a construct
         // written *beside* an entity-rendered span reads the last character of
         // that span's own closing markup in the string pipeline's haystack
         // (`&#8221;`, whose `;` the monospace sub's boundary class excludes),
-        // where [`build_match_string`] stands the whole span in as one
+        // where [`build_match_string`] used to stand the whole span in as one
         // [`SPAN_PLACEHOLDER`] — a private-use codepoint that belongs to no
-        // boundary class at all.
-        //
-        // That is the same boundary class the bare e-mail family already
-        // documents from the other direction (`**bold**doc@example.org`, whose
-        // `</strong>` ends in one of that pattern's own mismatch characters):
-        // a placeholder standing in for markup hides what the markup's own
-        // characters would say. A `LevelContext` answers it for a level's
-        // *interior*, where the enclosing construct is known; answering it at a
-        // level's own siblings means classifying the placeholder itself, which
-        // every family reading one would then see — a later increment.
-        //
-        // If that lands, fold these fixtures into the corpus above.
-        for source in [r#""`a`"`code`"#, r#"'`a`'`code`"#] {
-            let folded = fold_html(
-                &build_through_quotes(Span::new(source)),
-                &HtmlSubstitutionRenderer {},
-            );
-
-            assert_ne!(
-                folded,
+        // boundary class at all. It now wraps that placeholder in the two
+        // characters the span's rendering presents to a sibling (see
+        // [`styled_sibling_boundaries`]), so both pipelines read the same
+        // character there.
+        for source in [
+            // The shapes that named this increment: a construct directly
+            // after a smart-quote span, which both pipelines now leave
+            // literal.
+            r#""`a`"`code`"#,
+            r#"'`a`'`code`"#,
+            r##""`a`"#mark#"##,
+            r#""`a`"_em_"#,
+            // The same, one character further out: a space intervenes, so
+            // both pipelines match.
+            r#""`a`" `code`"#,
+            r#"'`a`' _em_"#,
+            // A construct directly *before* a smart-quote span reads that
+            // span's opening `&`, which is non-word exactly as the
+            // placeholder it replaces is — so both pipelines match, as they
+            // did before.
+            r#"`code`"`a`""#,
+            r#"_em_'`a`'"#,
+            // Two smart-quote spans side by side: the second sub reads the
+            // first span's own closing `;`.
+            r#""`a`"'`b`'"#,
+            // A tag-rendered span keeps the bare placeholder, which reads as
+            // `>` does to every quote boundary class (both are non-word and
+            // in none of `&;:}`), so these are unchanged either way.
+            "*a*`code`",
+            "`code`*a*",
+            "[.r]#a#`code`",
+            // The same constructs at the content's own top level, where no
+            // span is involved at all.
+            "`code`",
+            "#mark#",
+        ] {
+            assert_eq!(
                 golden_quotes(source),
-                "expected the documented divergence to still reproduce for {source:?}"
+                fold_html(
+                    &build_through_quotes(Span::new(source)),
+                    &HtmlSubstitutionRenderer {}
+                ),
+                "fold diverged from the string pipeline for {source:?}"
             );
-
-            assert!(folded.contains("<code>code</code>"), "{folded:?}");
         }
+    }
+
+    #[test]
+    fn a_sub_beside_a_masked_passthrough_wrapper_keeps_the_bare_placeholder() {
+        // The half [`styled_sibling_boundaries`] deliberately does not
+        // answer. The passthrough-extraction pass builds a [`Styled`] wrapper
+        // of its own for an attribute-list-prefixed passthrough, which the
+        // string pipeline is holding as its `\u{96}…\u{97}` sentinel rather
+        // than as markup for every step this module runs — so a sibling reads
+        // that sentinel, which is exactly what the bare placeholder reads as.
+        // Both wrappers the pass builds are tag-rendered, and telling one from
+        // a genuinely rendered span needs an identity this function does not
+        // have, so no tag-rendered span is classified.
+        //
+        // Asserted directly on the match string rather than through a fold,
+        // since a quote boundary class cannot tell the two apart in the first
+        // place (which is the very reason the deferral is safe).
+        use super::{SPAN_PLACEHOLDER, build_match_string, styled_sibling_boundaries};
+        use crate::inlines::Styled;
+
+        let styled = Styled {
+            variant: StyleVariant::Unquoted,
+            form: SpanForm::Unconstrained,
+            id: None,
+            roles: vec![CowStr::from("x")],
+            attrs: None,
+            children: Vec::new(),
+            location: Span::new("[.x]##y##"),
+        };
+
+        assert_eq!(styled_sibling_boundaries(&styled), None);
+
+        let (s, pieces) = build_match_string(&[InlineNode::Styled(styled)]);
+
+        assert_eq!(s, SPAN_PLACEHOLDER.to_string());
+        assert_eq!(pieces.len(), 1);
+        assert_eq!(pieces[0].s_start, 0);
     }
 
     #[test]
@@ -1547,6 +1763,47 @@ mod tests {
             "That only gives you \"``end points``\".\n",
             "\n",
             "A *span ending in --* here.\n",
+        ));
+
+        let mut folded_blocks = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                super::super::fold_html(inlines, &HtmlSubstitutionRenderer {}, &Parser::default()),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded_blocks += 1;
+        }
+
+        // The two paragraphs; the section that contains them holds no inline
+        // content of its own and is skipped.
+        assert_eq!(folded_blocks, 2, "expected both paragraphs to be checked");
+    }
+
+    #[test]
+    fn a_real_documents_sibling_span_tree_folds_to_its_rendered_string() {
+        // End-to-end, through the real parse path, on the shape one level out
+        // from the test above: a construct written *beside* an entity-rendered
+        // span, whose `&#8221;` the string pipeline reads a `;` from where the
+        // tree holds one placeholder.
+        use crate::{
+            Parser,
+            blocks::{FindBlocks, IsBlock},
+        };
+
+        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+            "== A heading\n",
+            "\n",
+            "She said \"`hello`\"`code` and meant it.\n",
+            "\n",
+            "Then '`this`'`that` and \"`one`\"'`two`' in a row.\n",
         ));
 
         let mut folded_blocks = 0;
@@ -1745,9 +2002,10 @@ mod tests {
         use super::{Bias, Piece, s_to_src};
 
         // In practice every boundary `s_to_src` maps falls on a literal
-        // delimiter (a text position), so the atomic-snap, before-first, and
-        // past-last branches are defensive. Exercise them directly to document
-        // the intended fallback. Bias is irrelevant to an atomic piece, so
+        // delimiter (a text position) or on a **boundary character** an opaque
+        // node contributes, so the atomic-snap, before-first, and past-last
+        // branches are defensive. Exercise them directly to document the
+        // intended fallback. Bias is irrelevant to an atomic piece, so
         // `Bias::Start` is used throughout.
         let atomic = Piece {
             node_index: 0,
@@ -1766,14 +2024,15 @@ mod tests {
         // A boundary past the last piece falls back to the source end.
         assert_eq!(s_to_src(std::slice::from_ref(&atomic), 9, Bias::Start), 11);
 
-        // A boundary before the first piece begins breaks out to the same
-        // fallback.
+        // A boundary before the first piece begins — the leading boundary
+        // character an opaque node contributes, the one position no piece
+        // covers — resolves to that piece's own source start.
         let offset = Piece {
             s_start: 2,
             ..atomic
         };
 
-        assert_eq!(s_to_src(std::slice::from_ref(&offset), 0, Bias::Start), 11);
+        assert_eq!(s_to_src(std::slice::from_ref(&offset), 0, Bias::Start), 10);
 
         // No pieces (an empty level) anchors at the source start.
         assert_eq!(s_to_src(&[], 0, Bias::Start), 0);
