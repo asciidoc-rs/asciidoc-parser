@@ -67,7 +67,17 @@ existing string pipeline's output (`golden_*` test helpers). When picking up the
   of them and every "read the design doc" instruction dead-ends:
 
   ```
-  git fetch origin inline-ast && git checkout -B <work-branch> origin/inline-ast
+  git fetch origin inline-ast
+  git checkout -b <work-branch> origin/inline-ast
+  ```
+
+  Use `-b`, not `-B`, so a name collision fails loudly instead of silently resetting a branch that
+  had commits on it. The one exception is a work branch the session harness **already created** — it
+  cuts it from `main`, which is the case this bullet exists for — where re-pointing is exactly what
+  you want and the only thing discarded is the `main` tip it was mistakenly cut from:
+
+  ```
+  git checkout -B <work-branch> origin/inline-ast   # only to re-point a harness-created branch
   ```
 
 - **Don't read the whole design doc — it is ~4,500 lines.** Read §5.2 ("Phased plan") for the phase
@@ -123,24 +133,31 @@ In `parser/src/content/substitution_group.rs`, inside `SubstitutionGroup::apply`
 
 1. Force the seed on: `let tree_seed = if parser.build_inline_tree {` → `let tree_seed = if true {`.
 2. Just before `content.set_inlines(tree)`, fold the tree with `HtmlSubstitutionRenderer` and, when
-   the result differs from `content.rendered`, append `src` / `rendered` / `folded` to a log file.
+   the result differs from `content.rendered`, append `src` / `rendered` / `folded` to a log file —
+   one `writeln!` per divergence, formatting all three with `{:?}` (see the third gotcha below).
 
 Then:
 
 ```
-cargo test --workspace -- --test-threads=1     # see both gotchas below
+cargo test --workspace -- --test-threads=1     # see the gotchas below
 sort -u <logfile> > after.txt                  # repeat on origin/inline-ast for before.txt
 comm -13 before.txt after.txt                  # must be empty: these are NEW divergences
 comm -23 before.txt after.txt                  # divergences this increment closed
 ```
 
-Two gotchas that will silently waste a run:
+Three gotchas that will silently waste a run — each produces a plausible-looking but wrong answer
+rather than an error:
 
 - **Log to a file, not `eprintln!`.** `cargo test` captures a passing test's output, so `eprintln!`
   divergences vanish unless every run also passes `--nocapture` (which then interleaves them with the
   harness's own progress lines).
 - **`--test-threads=1`.** Tests append to the log concurrently otherwise, and the interleaved lines
   make the two sets impossible to `comm`.
+- **Format the three values with `{:?}`, not `{}`.** `sort -u` and `comm` are line-based, so the
+  whole comparison rests on one record being one physical line. Debug-escaping is what guarantees
+  that: a multi-line block's content comes out as `\n` rather than as real newlines. Under `{}` such
+  a record spills across lines that then get deduplicated against unrelated records' lines, and a
+  genuinely new divergence can drop out of `comm -13` — the one output the audit exists to read.
 
 Revert the patch before committing.
 
