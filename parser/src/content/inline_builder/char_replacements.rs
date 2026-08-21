@@ -1,6 +1,6 @@
 //! The character-replacements substitution step.
 
-use super::quotes::{Piece, build_match_string, emit_range, source_slice};
+use super::quotes::{LevelContext, Piece, build_match_string, emit_range, source_slice};
 use crate::{
     Span,
     content::{CharacterReplacement, character_replacements, maybe_has_replacements},
@@ -37,7 +37,7 @@ pub(super) fn apply_character_replacements<'src>(
     let mut nodes = nodes;
 
     for repl in character_replacements() {
-        nodes = apply_one_replacement(repl, nodes, root);
+        nodes = apply_one_replacement(repl, nodes, root, LevelContext::ROOT);
     }
 
     nodes
@@ -48,21 +48,32 @@ pub(super) fn apply_character_replacements<'src>(
 /// earlier steps created (a replacement inside a span is recognized just as the
 /// string pipeline recognizes one inside a rendered tag), then matching and
 /// replacing at this level.
+///
+/// `ctx` is the boundary context this level sits in
+/// ([`LevelContext`]): "just as the string pipeline recognizes one inside a
+/// rendered tag" is true of the tag's *inside* only once the tag's own
+/// characters are there to be read, which is what decides an em dash written
+/// against either edge of a span (`*x --*` renders `<strong>x --</strong>`,
+/// the `--` staying literal because `<` follows it in that haystack, not the
+/// end of a line).
 fn apply_one_replacement<'src>(
     repl: &CharacterReplacement,
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
+    ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     let nodes: Vec<InlineNode<'src>> = nodes
         .into_iter()
         .map(|node| match node {
             InlineNode::Styled(mut styled) => {
-                styled.children = apply_one_replacement(repl, styled.children, root);
+                let inner = LevelContext::inside_styled(&styled, ctx);
+                styled.children = apply_one_replacement(repl, styled.children, root, inner);
                 InlineNode::Styled(styled)
             }
 
             InlineNode::Ref(mut reference) => {
-                reference.children = apply_one_replacement(repl, reference.children, root);
+                reference.children =
+                    apply_one_replacement(repl, reference.children, root, LevelContext::INSIDE_REF);
                 InlineNode::Ref(reference)
             }
 
@@ -70,7 +81,7 @@ fn apply_one_replacement<'src>(
         })
         .collect();
 
-    replace_level(repl, nodes, root)
+    replace_level(repl, nodes, root, ctx)
 }
 
 /// One character-replacement match at a level, in absolute match-string byte
@@ -81,6 +92,32 @@ struct ReplacementMatch {
 
     /// What to emit in place of `full`.
     kind: ReplacementKind,
+}
+
+impl ReplacementMatch {
+    /// Maps every offset in this match out of the
+    /// [`haystack`](LevelContext::haystack) it was found in and back into the
+    /// level's own match string (see [`LevelContext::unshift`]).
+    fn unshift(self, prefix: usize, len: usize) -> Self {
+        let map = |range: std::ops::Range<usize>| LevelContext::unshift(prefix, len, range);
+
+        Self {
+            full: map(self.full),
+
+            kind: match self.kind {
+                ReplacementKind::Unescape { backslash } => ReplacementKind::Unescape {
+                    backslash: map(backslash..backslash).start,
+                },
+
+                ReplacementKind::Replace { consumed, value } => ReplacementKind::Replace {
+                    consumed: map(consumed),
+                    value,
+                },
+
+                ReplacementKind::Entity { name } => ReplacementKind::Entity { name: map(name) },
+            },
+        }
+    }
 }
 
 enum ReplacementKind {
@@ -111,6 +148,7 @@ fn replace_level<'src>(
     repl: &CharacterReplacement,
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
+    ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
@@ -120,7 +158,20 @@ fn replace_level<'src>(
         return nodes;
     }
 
-    let matches = find_replacement_matches(repl, &s);
+    // The rule runs over the level wrapped in its enclosing construct's own
+    // boundary characters, and every offset it reports is mapped back into the
+    // level's own coordinates (see [`LevelContext`]).
+    let (haystack, prefix) = ctx.haystack(&s);
+
+    // A match the clip emptied kept nothing of the level itself, so there is
+    // nothing here to replace. No rule's pattern can produce one — each needs
+    // at least two characters, and a context is one — so this is the clip's own
+    // invariant rather than a case any fixture reaches.
+    let matches: Vec<ReplacementMatch> = find_replacement_matches(repl, &haystack)
+        .into_iter()
+        .map(|m| m.unshift(prefix, s.len()))
+        .filter(|m| !m.full.is_empty())
+        .collect();
 
     if matches.is_empty() {
         return nodes;
@@ -312,6 +363,104 @@ mod tests {
         SubstitutionStep::CharacterReplacements.apply(&mut content, &parser, None);
         SubstitutionStep::PostReplacement.apply(&mut content, &parser, None);
         content.rendered_str().to_string()
+    }
+
+    #[test]
+    fn a_replacement_at_a_spans_own_edge_reads_that_spans_boundary_characters() {
+        // A rule whose pattern reads what surrounds its match — the spaced em
+        // dash's `(^|\n| )--( |\n|$)` is the one in this step — must see the
+        // enclosing span's own markup where the string pipeline's flat
+        // haystack holds it, not the start or end of a level. `*x --*` renders
+        // `<strong>x --</strong>`: the `--` stays literal because `<` follows
+        // it there, and a level matched in isolation would take its own end as
+        // the line end the rule wants.
+        for source in [
+            // Against either edge, in each variant's own rendering shape.
+            "*-- x*",
+            "*x --*",
+            "_x --_",
+            "`x --`",
+            "#x --#",
+            "[.r]#x --#",
+            "^x --^",
+            "~x --~",
+            "**x --**",
+            r#""`-- x`""#,
+            r#""`x --`""#,
+            r#"'`x --`'"#,
+            // Away from either edge, where the rule matches inside the span in
+            // both pipelines.
+            "*a -- b*",
+            "_a -- b_",
+            r#""`a -- b`""#,
+            // The rules that read no boundary of their own are unaffected.
+            "*(C) x*",
+            "*x ...*",
+            "*w'w*",
+            "*a -> b*",
+            "*&copy; x*",
+            // The word-anchored em dash keeps its own leading word character
+            // rather than a boundary one.
+            "*one--two*",
+            // And the same constructs at the content's own top level, where a
+            // pattern's `^`/`$` is exactly what the string pipeline presents.
+            "-- x",
+            "x --",
+            "a -- b",
+            // A span *beside* a replacement, where the placeholder standing in
+            // for it is not the space the rule requires — in either pipeline.
+            "*x*-- y",
+            "*x* -- y",
+        ] {
+            assert_eq!(
+                golden_replacements(source),
+                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_replacement_beside_a_transparent_span_is_a_documented_divergence() {
+        // An unquoted span whose attribute list resolves to neither a role nor
+        // an id renders to its body and nothing else, so its children inherit
+        // the context the span itself sits in
+        // ([`LevelContext::inside_styled`]). That is right whenever the span
+        // is all its parent's level holds — `[width=10]#x --#` at the top
+        // level replaces the dash in both pipelines — and wrong when a sibling
+        // follows it, because the string pipeline's haystack then shows what
+        // that sibling begins with (here a space, which is exactly the em
+        // dash's own trailing class) where the tree shows the parent's closing
+        // markup.
+        //
+        // Modelling that means deriving a level's context from its *siblings*
+        // rather than from its enclosing construct alone — a strictly larger
+        // walk, for the one span shape that renders nothing of its own.
+        //
+        // If it lands, fold this fixture into the corpus above.
+        let source = "*[width=10]#x --# --*";
+
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+
+        assert_ne!(
+            folded,
+            golden_replacements(source),
+            "expected the documented divergence to still reproduce for {source:?}"
+        );
+
+        // The string pipeline replaces the *first* dash (a space follows it,
+        // the transparent span having rendered nothing); the tree leaves both
+        // literal.
+        assert_eq!(folded, "<strong>x -- --</strong>");
+
+        // The same span with nothing after it agrees, since there is no
+        // sibling for the inherited context to be wrong about.
+        let source = "[width=10]#x --#";
+
+        assert_eq!(
+            golden_replacements(source),
+            fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+        );
     }
 
     #[test]
