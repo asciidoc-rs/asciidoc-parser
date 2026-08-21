@@ -4243,6 +4243,62 @@ Each phase is a reviewable unit with a clear exit gate.
   same restore-the-value, decide-over-the-masked-bytes move, where its own goldens call for it.
   Coverage stays diff-neutral. As with every prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (an **image/icon** target crossing a passthrough):* the first of the two
+  families the increment above left named takes the same restore-the-value,
+  decide-over-the-masked-bytes move, and needed two more mechanisms to take it. **Recognition**
+  first: [`INLINE_IMAGE_MACRO`](../../parser/src/content/macros.rs)'s target class is the one in
+  the module that requires *two* characters (`[^:\s\[\n][^\[\n]*?[^\s\[\n]`), so a target written
+  wholly inside a passthrough — one placeholder character — could not even match, where the string
+  replacer's three-byte sentinel does.
+  [`widen_masked_passthroughs`](../../parser/src/content/inline_builder/macros/image.rs) rewrites
+  the family's match string so each masked passthrough's placeholder becomes a sentinel-shaped
+  `\u{96}`*n*`\u{97}` token — the very bytes the string pipeline's own haystack holds there —
+  moving the pieces into the rewritten string's coordinates, so recognition agrees byte-for-byte
+  without touching the shared pattern, and no token byte can begin or end a match or reach an
+  output node. Then the gates move from the family to the values, as the `link:`/`mailto:`
+  increment's did: the **target** — the one value this family computes — takes
+  [`range_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs), finishing into
+  the restored bytes through the shared
+  [`restore_masked_passthroughs`](../../parser/src/content/inline_builder/macros/links.rs), while
+  the **bracket**, which comes back from a *parse* (`Attrlist::parse` would read a placeholder's
+  bytes as content, and the string pipeline's own parse swallows the sentinel into a value that
+  only restores after the split — so a body carrying a `,` or `=` stays one attribute there),
+  keeps the opaque-piece gate, its own restore-inside-each-parsed-value a later increment's call.
+  The second mechanism is the **`default_alt` arithmetic**, the family's one pre-restore
+  computation: the string pipeline derives `basename(target.replace(['_', '-'], " "))` over the
+  sentinel-holding bytes and restores whatever survives into the rendered `alt`, so
+  [`masked_default_alt`](../../parser/src/content/inline_builder/macros/image.rs) reproduces
+  exactly that — the arithmetic over the masked bytes (every cut point a byte no token contains,
+  so a token survives whole or drops whole), then an index-keyed restore, as
+  `Passthroughs::restore_to`'s own numbering is — which is how `image:++a_b-c.jpg++[]` keeps
+  `alt="a_b-c.jpg"` where the verbatim spelling shows `a b c`, and `image:++dir_1++/++file_2++.png`
+  restores the surviving token with its *own* body after the stem cut drops the first.
+
+  What reaches parity is both idioms bare and labeled (`image:++sunset.jpg++[Alt]`,
+  `image:pass:[chart,v2.png][]`), partial masks at either edge and mid-target, a URI target
+  crossing one, the `icon:` form, the triple-plus form, escapes, the macro inside a rendered span,
+  and two in one flow. Two shapes are deliberately **not** faithful, each the tree's well-formed
+  reading pinned by its own test: a dangerous scheme smuggled into a `link=self` target
+  (`image:++javascript:alert(1)++[link=self]` — the string renderer checks the sentinel and the
+  restore completes a live link; the fold's renderer checks the restored target and drops the
+  anchor), and a **space** restored into the target (`image:pass:[My Documents/chart.png][]` — the
+  fold's `web_path` percent-encodes the restored space into the `src`, where the string pipeline
+  normalized its space-free sentinel and spliced the raw space in afterwards). The staged
+  [`apply_image_side_effects`](../../parser/src/content/inline_builder/macros/image.rs) registers
+  the node's honest restored target where the string pipeline registers sentinel bytes verbatim —
+  the same catalog wart the link increment declined to reproduce, pinned the same way. Fixtures
+  join a new in-module differential corpus, structural tests pin the restored target and the
+  masked-derived alt, and a whole-document test drives the shapes end to end through the real
+  parse path. Re-running the corpus-wide audit shows the divergence set **unchanged** — no golden
+  source exercises an image target over a passthrough — and no new divergence appeared. Coverage
+  stays diff-neutral. As with every prep piece before it, nothing further is wired in.
+
+  What still defers is the last family of the class: the **auto-link / formal-URL** family, whose
+  boundary-prefix and trailing-strip arithmetic read the masked bytes — the same
+  restore-the-value move, where its own goldens call for it — plus the bracket half above, and the
+  keeps: the cross-reference family's pre-restore target, and the two well-formed readings this
+  increment pinned.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -4883,6 +4939,23 @@ Each phase is a reviewable unit with a clear exit gate.
        (a deferred target read before restore, whose golden leaks the sentinel), the image family
        (masked `default_alt` arithmetic), and the auto-link family (boundary/strip arithmetic)
        keep the boundary, each pinned. See the step's own "landed as" note above.
+
+     - ✅ **prep (an image/icon target crossing a passthrough).** The first of the two families
+       that note named takes the same restore-the-value, decide-over-the-masked-bytes move:
+       [`widen_masked_passthroughs`](../../parser/src/content/inline_builder/macros/image.rs)
+       widens each masked passthrough's placeholder to the string pipeline's own sentinel shape
+       (the family's target class is the module's one two-character-minimum pattern, which a bare
+       placeholder cannot match), the target takes
+       [`range_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs) while the
+       *parsed* bracket keeps the opaque-piece gate, and
+       [`masked_default_alt`](../../parser/src/content/inline_builder/macros/image.rs) reproduces
+       the `default_alt` derivation over the masked bytes with an index-keyed restore of whatever
+       survives — so `image:++a_b-c.jpg++[]` keeps `alt="a_b-c.jpg"` exactly as the golden does.
+       A `link=self` dangerous target smuggled in a passthrough, and a space the fold-time
+       `web_path` percent-encodes where the golden normalized the space-free sentinel, each defer
+       as the tree's well-formed reading with its own test; the staged side effect registers the
+       honest restored target. See the step's own "landed as" note above. The auto-link /
+       formal-URL family is now the class's last open item.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
