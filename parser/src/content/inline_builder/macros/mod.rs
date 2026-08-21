@@ -14,7 +14,7 @@ use links::{email_level, inline_link_level, link_macro_level};
 use ui::{kbd_btn_macros_level, menu_macros_level};
 use xref::xref_macros_level;
 
-use super::quotes::{Piece, emit_range, source_slice, special_entity, text_slice};
+use super::quotes::{LevelContext, Piece, emit_range, source_slice, special_entity, text_slice};
 use crate::{
     Parser, Span,
     content::restored_entity_pattern,
@@ -137,33 +137,75 @@ pub(super) fn apply_macros<'src>(
     // is `^`-anchored, so it can only ever match the very start of the whole
     // content, never the start of a span's children (see
     // [`biblio_anchor_level`]) — which is why it sits outside
-    // [`apply_macro_families`]'s own recursion.
+    // [`apply_macro_families`]'s own recursion, and why it needs no
+    // [`LevelContext`] of its own: the top level is the one level nothing
+    // encloses.
     let nodes = biblio_anchor_level(nodes, root, parser);
 
-    apply_macro_families(nodes, root, parser)
+    apply_macro_families(nodes, root, parser, LevelContext::ROOT)
 }
 
 /// Applies each macro family at this level — and, first, at every level nested
 /// inside it — in the string step's own family order. See
 /// [`apply_macros`], which wraps this with the once-per-content
 /// bibliography-anchor pass.
+///
+/// # The boundary an enclosing construct presents
+///
+/// `ctx` is the [`LevelContext`] this level sits in — the character an
+/// enclosing construct's own rendering presents immediately before it, which
+/// the string pipeline's flat haystack holds there and a level matched in
+/// isolation does not. Two of this step's families read exactly that
+/// character: `INLINE_LINK`'s boundary-prefix group and `INLINE_EMAIL`'s
+/// "prefix that causes a mismatch" group (see
+/// [`links::inline_link_level`] and [`links::email_level`]). Without it,
+/// `*doc@example.org*` links here while the string pipeline — reading the `>`
+/// that ends `<strong>`, one of that group's own mismatch characters — leaves
+/// the address literal.
+///
+/// Each level's own match string is wrapped in that character before any
+/// family's pattern runs over it, and the level's [`Piece`]s are moved into the
+/// wrapped string's coordinates with [`LevelContext::shift`] — so a family
+/// reads one coordinate system throughout and nothing else in this module
+/// changes signature. Only the **opening** character is applied, for the
+/// reason [`LevelContext::shift`] itself documents: a boundary class reads one
+/// character, while a macro *body* class consumes greedily and would swallow a
+/// half-supplied closing one.
+///
+/// The seven other families read no character before their match — each is
+/// anchored on a literal (`image:`, `kbd:`, `menu:`, `indexterm`, `((`, `[[`,
+/// `anchor:`, `&lt;&lt;`, `xref:`, `link:`, `mailto:`) that no context
+/// character can begin — so for them the wrap is inert, and they take it for
+/// uniformity rather than for effect.
 fn apply_macro_families<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
+    ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     // Recurse into spans/refs first, matching the string pipeline's
-    // whole-string pass.
+    // whole-string pass. Each nested level is matched in the context its own
+    // enclosing construct's rendering presents (see this function's own doc
+    // comment); a span the built-in backend renders with no markup of its own
+    // is transparent, so `inside_styled` hands its children whatever the span
+    // itself sees.
     let nodes: Vec<InlineNode<'src>> = nodes
         .into_iter()
         .map(|node| match node {
             InlineNode::Styled(mut styled) => {
-                styled.children = apply_macro_families(styled.children, root, parser);
+                let inner = LevelContext::inside_styled(&styled, ctx);
+
+                styled.children = apply_macro_families(styled.children, root, parser, inner);
                 InlineNode::Styled(styled)
             }
 
             InlineNode::Ref(mut reference) => {
-                reference.children = apply_macro_families(reference.children, root, parser);
+                reference.children = apply_macro_families(
+                    reference.children,
+                    root,
+                    parser,
+                    LevelContext::INSIDE_REF,
+                );
                 InlineNode::Ref(reference)
             }
 
@@ -174,45 +216,45 @@ fn apply_macro_families<'src>(
     // The UI macros run before image/icon and only under `experimental`,
     // mirroring the string step's order and gate.
     let nodes = if parser.is_attribute_set("experimental") {
-        let nodes = kbd_btn_macros_level(nodes, root);
-        menu_macros_level(nodes, root)
+        let nodes = kbd_btn_macros_level(nodes, root, ctx);
+        menu_macros_level(nodes, root, ctx)
     } else {
         nodes
     };
 
-    let nodes = image_macros_level(nodes, root, parser);
+    let nodes = image_macros_level(nodes, root, parser, ctx);
 
     // Index terms (`((term))`, `(((primary, secondary)))`, `indexterm:[…]`,
     // `indexterm2:[…]`) run after image/icon and before the link families,
     // mirroring the string step's order.
-    let nodes = indexterm_macros_level(nodes, root);
+    let nodes = indexterm_macros_level(nodes, root, ctx);
 
     // Auto-links and formal-URL links (`INLINE_LINK`) run after the index-term
     // pass and before the `link:`/`mailto:` macro, mirroring the string step's
     // order (`INLINE_LINK` precedes `INLINE_LINK_MACRO`).
-    let nodes = inline_link_level(nodes, root, parser);
+    let nodes = inline_link_level(nodes, root, parser, ctx);
 
     // The `link:`/`mailto:` macro runs after the auto-link pass, mirroring the
     // string step's order.
-    let nodes = link_macro_level(nodes, root, parser);
+    let nodes = link_macro_level(nodes, root, parser, ctx);
 
     // A bare e-mail address (`doc@example.org`) runs after both URL-link
     // families and before the anchor pass, exactly where the string step runs
     // `InlineEmailReplacer` — so an address that is really the tail of a URL, or
     // a `mailto:` macro's own target, is already inside an opaque node (there,
     // already-rendered `<a …>` markup) and is not re-recognized.
-    let nodes = email_level(nodes, root);
+    let nodes = email_level(nodes, root, ctx);
 
     // Inline anchors (`[[id]]`, `anchor:id[…]`) run after the link families and
     // before cross-references, mirroring the string step's order. (The
     // bibliography-anchor pass the string step runs *first* — a `^`-anchored
     // `[[[id]]]`, recognized only inside a bibliography list item — runs in
     // [`apply_macros`], outside this recursion.)
-    let nodes = anchor_macros_level(nodes, root);
+    let nodes = anchor_macros_level(nodes, root, ctx);
 
     // Cross-references (`xref:id[…]`) run after the anchor pass, mirroring the
     // string step's order.
-    xref_macros_level(nodes, root, parser)
+    xref_macros_level(nodes, root, parser, ctx)
 
     // Footnotes are **not** handled here. Every other family's recognition is
     // order-independent (no cross-node side effect), so it is safe for them to

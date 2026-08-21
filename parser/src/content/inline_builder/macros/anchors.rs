@@ -10,8 +10,8 @@ use crate::{
     content::{
         INLINE_ANCHOR, INLINE_BIBLIO_ANCHOR,
         inline_builder::quotes::{
-            Piece, SPAN_PLACEHOLDER, build_match_string, emit_range, range_overlaps_synthesized,
-            source_slice, text_slice,
+            LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, emit_range,
+            range_overlaps_synthesized, source_slice, text_slice,
         },
     },
     document::RefType,
@@ -187,6 +187,7 @@ pub(super) fn biblio_anchor_level<'src>(
 pub(super) fn anchor_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
+    ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
@@ -196,6 +197,11 @@ pub(super) fn anchor_macros_level<'src>(
     if !s.contains("[[") && !s.contains("anchor:") {
         return nodes;
     }
+
+    // Matched over the level wrapped in the boundary character its enclosing
+    // construct presents, with the level's own pieces moved into that string's
+    // coordinates — see `apply_macro_families`'s own doc comment.
+    let (s, pieces) = ctx.shift(s, pieces);
 
     let matches = find_anchor_matches(&nodes, &s, &pieces, root);
 

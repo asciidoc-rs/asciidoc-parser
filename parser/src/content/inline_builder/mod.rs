@@ -856,6 +856,17 @@ mod tests {
             "[.r]#x --#",
             r#""`x --`""#,
             "*a -- b*",
+            // The macros step's own boundary-reading families at the same
+            // seam: the bare e-mail's mismatch prefix and the auto-link's
+            // boundary prefix.
+            "*doc@example.org*",
+            "_doc@example.org writes_",
+            "`doc@example.org`",
+            r#""`doc@example.org`""#,
+            "*write to doc@example.org now*",
+            "*https://example.org*",
+            "*https://example.org[Docs]*",
+            r#""`https://example.org[Docs]`""#,
             "   ",
             "a\nb\nc",
         ];
@@ -1330,39 +1341,18 @@ mod tests {
             with_product,
         );
         assert_parity("A [.r]#roled -- span# and a `code -- span` here.");
-    }
 
-    #[test]
-    fn a_macro_at_a_spans_own_edge_is_a_documented_divergence() {
-        // The macros step recurses into a `Styled`/`Ref` child of its own, and
-        // two of its families read the character immediately before a match —
-        // the auto-link's boundary-prefix group and the bare e-mail's
-        // mismatch-prefix one. Against a span's own opening edge the string
-        // pipeline reads that span's rendered markup there (`<strong>` ends in
-        // `>`, one of the e-mail pattern's own mismatch characters, so the
-        // address stays literal) where the level alone shows a start anchor.
-        //
-        // The [`LevelContext`](quotes::LevelContext) the quotes and
-        // character-replacements steps take answers exactly this, and applying
-        // it here is a step-shaped increment of its own: the macros step's
-        // families each find their matches through their own
-        // `find_*_matches`, so the context has to reach every one of them (and
-        // the two that read a prefix must then read the context character
-        // rather than defer on it, which is what the e-mail family's own
-        // placeholder-prefix rule does today).
-        //
-        // If that lands, fold these fixtures into the corpus above.
-        for source in ["*doc@example.org*", "_doc@example.org writes_"] {
-            let folded = built(source, &Parser::default());
-
-            assert_ne!(
-                golden(source, &Parser::default()),
-                folded,
-                "expected the documented divergence to still reproduce for {source:?}"
-            );
-
-            assert!(folded.contains("mailto:doc@example.org"), "{folded:?}");
-        }
+        // The same seam for the **macros** step, whose bare e-mail and
+        // auto-link families read a boundary character of their own: a
+        // tag-rendered span's opening `>` is one of the e-mail pattern's
+        // mismatch characters (so the address stays literal in both
+        // pipelines), while a smart quote's `;` is not (so both link it), and
+        // the auto-link's own prefix class accepts either.
+        assert_parity("*doc@example.org* and _doc@example.org writes_.");
+        assert_parity(r#"He said "`doc@example.org`" and `doc@example.org` too."#);
+        assert_parity("*write to doc@example.org now* and doc@example.org here.");
+        assert_parity("*https://example.org* and _https://example.org[Docs]_.");
+        assert_parity(r#"He said "`https://example.org[Docs]`" today."#);
     }
 
     /// [`build_from_value`] against the real pipeline, seeded from a
@@ -1876,6 +1866,11 @@ mod tests {
                 // decision holds for a group that never escapes.
                 r#""``end points``" and a < b"#,
                 "*x --* and a < b",
+                // The same for the macros step's own boundary-reading
+                // families, whose decision likewise comes from the enclosing
+                // span's rendering rather than from the order.
+                "*doc@example.org* and a < b",
+                "*https://example.org* and a < b",
                 // Multi-line, so a run spanning a newline is split the same
                 // way as a single-line one.
                 "first < line\nsecond & line\nthird > line",

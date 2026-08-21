@@ -122,6 +122,63 @@ impl LevelContext {
         (Cow::Owned(hay), before.len_utf8())
     }
 
+    /// [`haystack`](Self::haystack)'s counterpart for a step that maps no
+    /// offsets back: it moves the level's own **pieces** into the haystack's
+    /// coordinates instead, so every offset a caller goes on to use — a match
+    /// range, a gate, a slice — is already in the one coordinate system the
+    /// haystack itself is in.
+    ///
+    /// This is what the [`macros`](super::macros) step takes, where
+    /// [`unshift`](Self::unshift) would not do: a macro family does not merely
+    /// *report* ranges, it reads the match string's own bytes through
+    /// [`Piece`]s ([`emit_range`], [`source_slice`],
+    /// [`range_has_no_opaque_piece`]), so haystack offsets and level offsets
+    /// cannot be allowed to coexist. Shifting the pieces removes the second
+    /// coordinate system rather than translating between them.
+    ///
+    /// The context character belongs to no piece — it is the *enclosing*
+    /// construct's, not this level's — so a range reaching it contributes
+    /// nothing: [`emit_range`] finds no piece overlapping it (which is exactly
+    /// [`unshift`](Self::unshift)'s own clip: a boundary prefix is text the
+    /// enclosing span already carries), and every gate skips it as
+    /// non-overlapping.
+    ///
+    /// # Only the opening character
+    ///
+    /// Unlike [`haystack`](Self::haystack), this applies the **opening** half
+    /// alone, and the asymmetry is the point. A pattern's *boundary class*
+    /// reads exactly one character, so one is all a level needs to answer it:
+    /// `<strong>` ends in `>` and `&#8220;` in `;`, which is precisely what
+    /// the auto-link's own `( ^ | [\ \t\p{Zs}] | [>\(\)\[\];"'] )` prefix
+    /// group and the bare e-mail's `([\\>:/]?)` mismatch-prefix group inspect
+    /// there.
+    ///
+    /// A macro *body* class, by contrast, consumes greedily rather than
+    /// reading one character: the auto-link's own bare-URL body
+    /// (`[^\s\[\]<]*`) excludes a `<` but not an `&`, so where the string
+    /// pipeline's haystack presents a whole closing `&#8221;` for it to
+    /// swallow, a level carrying one `&` would build a *different* wrong
+    /// target rather than the same one. The closing character is therefore
+    /// dropped rather than half-supplied — leaving that shape exactly as
+    /// divergent as it already is (see
+    /// `a_bare_url_at_an_entity_rendered_spans_closing_edge_is_a_documented_divergence`),
+    /// never newly wrong.
+    pub(super) fn shift(self, mut s: String, mut pieces: Vec<Piece>) -> (String, Vec<Piece>) {
+        let Some(before) = self.before else {
+            return (s, pieces);
+        };
+
+        // Wrapped in place rather than into a second string: the level owns
+        // its match string here, so this reuses that allocation.
+        s.insert(0, before);
+
+        for piece in &mut pieces {
+            piece.s_start += before.len_utf8();
+        }
+
+        (s, pieces)
+    }
+
     /// Maps a range of the [`haystack`](Self::haystack) back into the level's
     /// own match string, clamping it to the level.
     ///
@@ -1353,6 +1410,42 @@ mod tests {
         assert_eq!(LevelContext::unshift(prefix, 3, 0..2), 0..1);
         assert_eq!(LevelContext::unshift(prefix, 3, 3..5), 2..3);
         assert_eq!(LevelContext::unshift(prefix, 3, 4..5), 3..3);
+    }
+
+    #[test]
+    fn level_context_shifts_a_levels_pieces_into_the_haystack() {
+        use super::{LevelContext, Piece};
+
+        fn piece(s_start: usize, s_len: usize) -> Piece {
+            Piece {
+                node_index: 0,
+                s_start,
+                s_len,
+                src_offset: 100,
+                src_len: s_len,
+                atomic: false,
+                synthesized: false,
+            }
+        }
+
+        // The macros step maps no offsets back: it moves the level's own
+        // pieces into the haystack's coordinates instead, so one coordinate
+        // system reaches every gate and slice. Only the opening character is
+        // applied there, since a macro body class would swallow a
+        // half-supplied closing one.
+        let (haystack, pieces) =
+            LevelContext::INSIDE_REF.shift("abc".to_string(), vec![piece(0, 1), piece(1, 2)]);
+
+        assert_eq!(haystack, ">abc");
+        assert_eq!(pieces[0].s_start, 1);
+        assert_eq!(pieces[1].s_start, 2);
+
+        // At the content's own top level the level is its own haystack and no
+        // piece moves.
+        let (haystack, pieces) = LevelContext::ROOT.shift("abc".to_string(), vec![piece(0, 3)]);
+
+        assert_eq!(haystack, "abc");
+        assert_eq!(pieces[0].s_start, 0);
     }
 
     #[test]
