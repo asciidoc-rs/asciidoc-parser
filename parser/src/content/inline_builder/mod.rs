@@ -845,6 +845,17 @@ mod tests {
             "https://example.org[a *bold* label] auto-link",
             "<https://example.org[an _angle_ label] auto-link",
             "https://example.org[the image:logo.png[Logo] one] auto-link",
+            // A construct written against an enclosing span's own edge, where
+            // the string pipeline's haystack holds that span's rendered markup
+            // and the tree holds the level's own start or end.
+            r#""``end points``""#,
+            r#""`_e_`""#,
+            r#""`x `code` y`""#,
+            "*x --*",
+            "*-- x*",
+            "[.r]#x --#",
+            r#""`x --`""#,
+            "*a -- b*",
             "   ",
             "a\nb\nc",
         ];
@@ -1305,6 +1316,53 @@ mod tests {
         // **masked passthrough**.
         assert_parity("Visit https://example.org[a +[literal]+ label] now.");
         assert_parity("Visit https://example.org[a +++<b>x</b>+++ label] today.");
+
+        // A construct written against an enclosing span's own edge, where the
+        // string pipeline's haystack holds that span's rendered markup and a
+        // level matched in isolation holds its own start or end — the quotes
+        // and character-replacements steps' own boundary context, here running
+        // through the whole assembled pipeline (so the *other* steps see the
+        // spans these decisions leave behind).
+        assert_parity(r#"He said "``end points``" and then "`_left it_`" alone."#);
+        assert_parity("A *span ending in a dash --* and a _-- leading one_.");
+        assert_parity_with(
+            r#"The "`{product} -- *now*`" release ships (C) today."#,
+            with_product,
+        );
+        assert_parity("A [.r]#roled -- span# and a `code -- span` here.");
+    }
+
+    #[test]
+    fn a_macro_at_a_spans_own_edge_is_a_documented_divergence() {
+        // The macros step recurses into a `Styled`/`Ref` child of its own, and
+        // two of its families read the character immediately before a match —
+        // the auto-link's boundary-prefix group and the bare e-mail's
+        // mismatch-prefix one. Against a span's own opening edge the string
+        // pipeline reads that span's rendered markup there (`<strong>` ends in
+        // `>`, one of the e-mail pattern's own mismatch characters, so the
+        // address stays literal) where the level alone shows a start anchor.
+        //
+        // The [`LevelContext`](quotes::LevelContext) the quotes and
+        // character-replacements steps take answers exactly this, and applying
+        // it here is a step-shaped increment of its own: the macros step's
+        // families each find their matches through their own
+        // `find_*_matches`, so the context has to reach every one of them (and
+        // the two that read a prefix must then read the context character
+        // rather than defer on it, which is what the e-mail family's own
+        // placeholder-prefix rule does today).
+        //
+        // If that lands, fold these fixtures into the corpus above.
+        for source in ["*doc@example.org*", "_doc@example.org writes_"] {
+            let folded = built(source, &Parser::default());
+
+            assert_ne!(
+                golden(source, &Parser::default()),
+                folded,
+                "expected the documented divergence to still reproduce for {source:?}"
+            );
+
+            assert!(folded.contains("mailto:doc@example.org"), "{folded:?}");
+        }
     }
 
     /// [`build_from_value`] against the real pipeline, seeded from a
@@ -1812,6 +1870,12 @@ mod tests {
                 // `parser_with_product` sets for both sides.)
                 "kbd:[Ctrl&C] and a < b",
                 "line one < +\nline two > end",
+                // A construct written against an enclosing span's own edge:
+                // the boundary characters that span presents come from its
+                // rendering, which no effective order changes, so the same
+                // decision holds for a group that never escapes.
+                r#""``end points``" and a < b"#,
+                "*x --* and a < b",
                 // Multi-line, so a run spanning a newline is split the same
                 // way as a single-line one.
                 "first < line\nsecond & line\nthird > line",

@@ -1,12 +1,14 @@
 //! The quoted-text substitution step.
 
+use std::{borrow::Cow, ops::Range};
+
 use super::macros::image::{range_has_no_opaque_piece, range_is_verbatim};
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::{QuoteSub, maybe_has_quotes, quote_subs},
     inlines::{CharRef, InlineNode, SpanForm, StyleVariant, Styled},
-    parser::{QuoteScope, QuoteType},
+    parser::{HtmlSubstitutionRenderer, InlineSubstitutionRenderer, QuoteScope, QuoteType},
     strings::CowStr,
 };
 
@@ -16,6 +18,185 @@ use crate::{
 /// the string pipeline — it is a single non-word, non-space boundary character
 /// that a quote pattern treats as opaque content.
 pub(super) const SPAN_PLACEHOLDER: char = '\u{E0F0}';
+
+/// The characters an enclosing construct's own rendering presents to the level
+/// nested inside it — the bytes the string pipeline's haystack holds
+/// immediately before and after that level's own text.
+///
+/// The string pipeline has no levels: a step matches over one flat string in
+/// which an earlier step's construct is already *rendered markup*, so a
+/// pattern's boundary classes read that markup's own characters. A transducer
+/// matches one level at a time, where the same position is the start (or end)
+/// of the haystack — which is what `^`, `$`, and a `(^|[^\w&;:}])`-style
+/// boundary group see instead. The two agree for a construct written at the
+/// content's own top level and diverge for one written *inside* a span, where
+/// the string pipeline reads the span's opening `<strong>` (or `&#8220;`)
+/// rather than a start anchor: ``` `"``end points``"` ``` renders
+/// ``` `&#8220;`end points`&#8221;` ``` there — the inner backticks stay
+/// literal, because the `;` ending the entity fails the monospace sub's own
+/// boundary class — where a level matched in isolation sees `^` and wraps them
+/// in a `<code>` span.
+///
+/// A `LevelContext` restores those two characters: the level's match string is
+/// wrapped in them before a pattern is run over it, and every resulting offset
+/// is mapped back with [`LevelContext::unshift`], so only *recognition*
+/// changes and every range a caller goes on to slice stays in the level's own
+/// coordinates.
+///
+/// [`post_replacements`](super::post_replacements) already reasoned this way
+/// for its own `$` — a nested level "is always followed by its own closing
+/// markup … so a ` +` ending a span is not at a line end there" — with a
+/// boolean; this generalizes that one step's flag into the pair of characters
+/// every step's patterns can read.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct LevelContext {
+    /// The last character of the enclosing construct's *opening* markup, or
+    /// `None` at the content's own top level (where a pattern's `^` is
+    /// exactly what the string pipeline's haystack presents).
+    before: Option<char>,
+
+    /// The first character of the enclosing construct's *closing* markup, or
+    /// `None` at the content's own top level.
+    after: Option<char>,
+}
+
+impl LevelContext {
+    /// The context a [`Ref`](InlineNode::Ref) node presents to its own display
+    /// children: every reference the fold renders — a link, and a
+    /// cross-reference in each of its resolved and unresolved forms — wraps
+    /// them in an `<a …>…</a>` element.
+    ///
+    /// Only an order that runs `macros` *before* a step that descends into a
+    /// reference's children reaches this at all (the built-in orders run it
+    /// last but one, ahead of `post_replacements` alone). A cross-reference
+    /// the string pipeline is still holding as a deferred placeholder at that
+    /// moment presents that placeholder's own characters rather than the
+    /// element's, which read the same to every boundary class in play: both
+    /// are non-word, and neither is one of the `&;:}` a constrained quote
+    /// excludes nor the space or line end a spaced em dash requires.
+    pub(super) const INSIDE_REF: Self = Self {
+        before: Some('>'),
+        after: Some('<'),
+    };
+    /// The content's own top level: nothing encloses it, so a pattern's `^`
+    /// and `$` anchor exactly where the string pipeline's do.
+    pub(super) const ROOT: Self = Self {
+        before: None,
+        after: None,
+    };
+
+    /// The context a [`Styled`] span presents to its own children, given the
+    /// context that span itself sits in.
+    ///
+    /// A span the built-in backend renders with **no markup of its own** — an
+    /// unquoted span that ends up carrying neither a role nor an id, whose
+    /// rendering is its body and nothing else — is transparent, so its
+    /// children see whatever the span itself sees.
+    pub(super) fn inside_styled(styled: &Styled<'_>, enclosing: Self) -> Self {
+        match styled_boundaries(styled) {
+            Some((before, after)) => Self {
+                before: Some(before),
+                after: Some(after),
+            },
+
+            None => enclosing,
+        }
+    }
+
+    /// The haystack a pattern should be matched against for a level whose own
+    /// match string is `s`, together with the byte length of the prefix
+    /// [`unshift`](Self::unshift) removes again.
+    ///
+    /// At the top level this borrows `s` untouched, so the overwhelmingly
+    /// common case allocates nothing.
+    pub(super) fn haystack<'a>(&self, s: &'a str) -> (Cow<'a, str>, usize) {
+        let (Some(before), Some(after)) = (self.before, self.after) else {
+            return (Cow::Borrowed(s), 0);
+        };
+
+        let mut hay = String::with_capacity(s.len() + before.len_utf8() + after.len_utf8());
+        hay.push(before);
+        hay.push_str(s);
+        hay.push(after);
+
+        (Cow::Owned(hay), before.len_utf8())
+    }
+
+    /// Maps a range of the [`haystack`](Self::haystack) back into the level's
+    /// own match string, clamping it to the level.
+    ///
+    /// A pattern may legitimately *consume* a context character — a
+    /// constrained sub's boundary group is exactly that — but the character is
+    /// not part of the level and has no node behind it, so it is clipped away
+    /// rather than emitted: the boundary group is text the sub keeps anyway,
+    /// and here the enclosing span already carries it.
+    pub(super) fn unshift(prefix: usize, len: usize, range: Range<usize>) -> Range<usize> {
+        let start = range.start.saturating_sub(prefix).min(len);
+        let end = range.end.saturating_sub(prefix).min(len);
+
+        start..end
+    }
+}
+
+/// The two characters the **built-in** HTML backend places immediately around
+/// a [`Styled`] span's body, or `None` when it wraps the body in nothing at
+/// all.
+///
+/// Reading the *built-in* backend here is the same deliberate compromise
+/// [`special_entity`] and [`replacement_entity`] already make: a custom
+/// backend changes what the fold *emits*, not the recognition the AsciiDoc
+/// patterns were written against, so recognition stays backend-independent.
+/// Every variant but the unquoted one is decided by its own rendering shape —
+/// a tag (`<strong>…</strong>`) or an entity pair (`&#8220;…&#8221;`) — rather
+/// than by rendering it, which `styled_boundaries_match_the_built_in_renderer`
+/// pins against the renderer itself; an unquoted span is the one whose shape
+/// depends on what its attribute list resolves to, so it is rendered.
+fn styled_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
+    match styled.variant {
+        // `&#8220;…&#8221;` / `&#8216;…&#8217;`.
+        StyleVariant::DoubleQuote | StyleVariant::SingleQuote => Some((';', '&')),
+
+        // A `<span …>` when the attribute list resolves to a role or an id,
+        // and the body alone when it does not.
+        StyleVariant::Unquoted => probe_styled_boundaries(styled),
+
+        // Every other variant wraps the body in an HTML tag.
+        _ => Some(('>', '<')),
+    }
+}
+
+/// [`styled_boundaries`] for a span whose rendering shape is not decided by
+/// its variant alone: renders it through the built-in backend around a probe
+/// body and reads the characters that land beside it.
+fn probe_styled_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
+    // A NUL never appears in a rendered attribute value, so the probe is
+    // unambiguous.
+    const PROBE: &str = "\u{0}";
+
+    let scope = match styled.form {
+        SpanForm::Constrained => QuoteScope::Constrained,
+        SpanForm::Unconstrained => QuoteScope::Unconstrained,
+    };
+
+    let mut rendered = String::new();
+
+    HtmlSubstitutionRenderer {}.render_quoted_substitution(
+        quote_type_of(styled.variant),
+        scope,
+        styled.attrs.clone(),
+        styled.id.as_ref().map(|id| id.to_string()),
+        PROBE,
+        &mut rendered,
+    );
+
+    // The renderer always emits the body, so the probe is always there; the
+    // `unwrap_or_default` spells that lookup without a branch no input reaches,
+    // and an absent probe would read as "no markup of its own" — the same
+    // answer a span that wraps its body in nothing already gives.
+    let (before, after) = rendered.split_once(PROBE).unwrap_or_default();
+
+    before.chars().next_back().zip(after.chars().next())
+}
 
 /// The quoted-text substitution, as a node transducer: each shared
 /// [`quote_subs`] rule is applied to the tree in order (its order encodes
@@ -31,7 +212,7 @@ pub(super) fn apply_quotes<'src>(
     let mut nodes = nodes;
 
     for sub in quote_subs() {
-        nodes = apply_quote_sub(sub, nodes, root, parser);
+        nodes = apply_quote_sub(sub, nodes, root, parser, LevelContext::ROOT);
     }
 
     nodes
@@ -40,11 +221,18 @@ pub(super) fn apply_quotes<'src>(
 /// Applies one [`QuoteSub`] to `nodes`, first descending into the [`Styled`]
 /// spans earlier subs created (so this sub can match *inside* them — the
 /// nesting case), then matching and wrapping at this level.
+///
+/// `ctx` is the boundary context this level sits in (see [`LevelContext`]);
+/// a span's own children are matched in the context that span's rendering
+/// presents, which is what keeps a sub matching *inside* an earlier sub's span
+/// reading the same characters the string pipeline's flat haystack holds
+/// there.
 fn apply_quote_sub<'src>(
     sub: &QuoteSub,
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
+    ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     // Recurse into the spans produced by earlier subs *before* matching at this
     // level. A span this sub itself creates below is therefore never revisited
@@ -53,7 +241,8 @@ fn apply_quote_sub<'src>(
         .into_iter()
         .map(|node| match node {
             InlineNode::Styled(mut styled) => {
-                styled.children = apply_quote_sub(sub, styled.children, root, parser);
+                let inner = LevelContext::inside_styled(&styled, ctx);
+                styled.children = apply_quote_sub(sub, styled.children, root, parser, inner);
                 InlineNode::Styled(styled)
             }
 
@@ -61,7 +250,7 @@ fn apply_quote_sub<'src>(
         })
         .collect();
 
-    match_level(sub, nodes, root, parser)
+    match_level(sub, nodes, root, parser, ctx)
 }
 
 /// One leaf/opaque node's placement in a level's reconstructed match string.
@@ -107,6 +296,7 @@ fn match_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
+    ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
@@ -116,8 +306,14 @@ fn match_level<'src>(
         return nodes;
     }
 
-    let matches: Vec<QuoteMatch> = find_matches(sub, &s)
+    // The pattern runs over the level wrapped in its enclosing construct's own
+    // boundary characters, and every offset it reports is mapped back into the
+    // level's own coordinates (see [`LevelContext`]).
+    let (haystack, prefix) = ctx.haystack(&s);
+
+    let matches: Vec<QuoteMatch> = find_matches(sub, &haystack)
         .into_iter()
+        .map(|m| m.unshift(prefix, s.len()))
         .filter(|m| attrlist_is_readable(&nodes, &pieces, m))
         .collect();
 
@@ -405,10 +601,43 @@ pub(super) fn replacement_entity(value: &str) -> Option<&'static str> {
 /// One accepted quote match at a level, in absolute match-string byte offsets.
 struct QuoteMatch {
     /// The whole match, `[start, end)`.
-    full: std::ops::Range<usize>,
+    full: Range<usize>,
 
     /// What to emit in place of `full`.
     kind: QuoteMatchKind,
+}
+
+impl QuoteMatch {
+    /// Maps every range in this match out of the
+    /// [`haystack`](LevelContext::haystack) it was found in and back into the
+    /// level's own match string (see [`LevelContext::unshift`]).
+    fn unshift(self, prefix: usize, len: usize) -> Self {
+        let map = |range: Range<usize>| LevelContext::unshift(prefix, len, range);
+
+        Self {
+            full: map(self.full),
+
+            kind: match self.kind {
+                QuoteMatchKind::Unescape => QuoteMatchKind::Unescape,
+
+                QuoteMatchKind::Wrap {
+                    keep_literal,
+                    body,
+                    construct,
+                    attrlist,
+                    variant,
+                    form,
+                } => QuoteMatchKind::Wrap {
+                    keep_literal: keep_literal.map(map),
+                    body: map(body),
+                    construct: map(construct),
+                    attrlist: attrlist.map(map),
+                    variant,
+                    form,
+                },
+            },
+        }
+    }
 }
 
 enum QuoteMatchKind {
@@ -1040,6 +1269,214 @@ mod tests {
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
     };
+
+    #[test]
+    fn styled_boundaries_match_the_built_in_renderer() {
+        // [`styled_boundaries`] decides all but one variant from its rendering
+        // *shape* rather than by rendering it. This pins that shape against the
+        // renderer itself, exactly as
+        // `replacement_entity_matches_the_built_in_renderer` pins the
+        // replacement table, so the two cannot drift.
+        use super::{LevelContext, probe_styled_boundaries, styled_boundaries};
+        use crate::inlines::Styled;
+
+        let span = |variant| Styled {
+            variant,
+            form: SpanForm::Constrained,
+            id: None,
+            roles: vec![],
+            attrs: None,
+            children: vec![],
+            location: Span::new("x"),
+        };
+
+        for variant in [
+            StyleVariant::Strong,
+            StyleVariant::Emphasis,
+            StyleVariant::Code,
+            StyleVariant::Mark,
+            StyleVariant::Superscript,
+            StyleVariant::Subscript,
+            StyleVariant::DoubleQuote,
+            StyleVariant::SingleQuote,
+        ] {
+            let styled = span(variant);
+
+            assert_eq!(
+                styled_boundaries(&styled),
+                probe_styled_boundaries(&styled),
+                "boundary characters drifted from the built-in rendering of {variant:?}"
+            );
+        }
+
+        // An unquoted span carrying neither a role nor an id renders to its
+        // body and nothing else, so it presents no boundary of its own and its
+        // children inherit whatever it sees.
+        let bare = span(StyleVariant::Unquoted);
+        assert_eq!(styled_boundaries(&bare), None);
+        assert_eq!(
+            LevelContext::inside_styled(&bare, LevelContext::INSIDE_REF),
+            LevelContext::INSIDE_REF
+        );
+
+        // One carrying an id renders a `<span …>`, like every other tag. (The
+        // node's own `roles` are not consulted: the fold hands the renderer
+        // the span's `attrs` and `id`, and the renderer derives its roles from
+        // that attribute list — so the probe reads exactly what the fold
+        // will.)
+        let mut identified = span(StyleVariant::Unquoted);
+        identified.id = Some(CowStr::from("anchor"));
+        assert_eq!(styled_boundaries(&identified), Some(('>', '<')));
+    }
+
+    #[test]
+    fn level_context_wraps_and_unshifts() {
+        use super::LevelContext;
+
+        // At the content's own top level the haystack is the level's own match
+        // string, borrowed rather than rebuilt, and every offset is its own.
+        let (haystack, prefix) = LevelContext::ROOT.haystack("abc");
+        assert!(matches!(haystack, std::borrow::Cow::Borrowed("abc")));
+        assert_eq!(prefix, 0);
+        assert_eq!(LevelContext::unshift(0, 3, 1..3), 1..3);
+
+        // Inside a construct the level is wrapped in the two characters that
+        // construct's rendering presents, and the prefix is mapped back off.
+        let (haystack, prefix) = LevelContext::INSIDE_REF.haystack("abc");
+        assert_eq!(haystack, ">abc<");
+        assert_eq!(prefix, 1);
+        assert_eq!(LevelContext::unshift(prefix, 3, 1..4), 0..3);
+
+        // A range reaching into either context character is clipped to the
+        // level: those characters belong to the enclosing construct, which
+        // already carries them.
+        assert_eq!(LevelContext::unshift(prefix, 3, 0..2), 0..1);
+        assert_eq!(LevelContext::unshift(prefix, 3, 3..5), 2..3);
+        assert_eq!(LevelContext::unshift(prefix, 3, 4..5), 3..3);
+    }
+
+    #[test]
+    fn a_sub_inside_a_span_reads_that_spans_own_boundary_characters() {
+        // The nesting cases the enclosing span's rendering decides, each
+        // pinned against the string pipeline's own flat haystack.
+        for source in [
+            // The shape that named this: the double-quote sub runs *before*
+            // the monospace one, so by the time monospace matches, the string
+            // pipeline's haystack holds `&#8220;` — whose `;` its boundary
+            // class excludes — where the level alone would show `^`.
+            r#""``end points``""#,
+            r#""`_e_`""#,
+            r#""`#m#`""#,
+            r#"'`_e_`'"#,
+            // The same span, where the sub *does* match on both sides: a
+            // boundary character of its own precedes the construct.
+            r#""`x `code` y`""#,
+            r#""`a _b_ c`""#,
+            // A sub that runs *before* the smart-quote subs is unaffected: it
+            // matched over the raw source, where no entity had been written
+            // yet.
+            r#""`*b*`""#,
+            // A tag-rendered span presents `>` and `<`, which read exactly as
+            // the start and end anchors they replace for these classes — so
+            // every ordinary nesting fixture is unchanged.
+            "*a `b` c*",
+            "*a _b_ c*",
+            "_`code` in em_",
+            "#a *b* c#",
+            "[.r]#a `b` c#",
+            // An unquoted span that renders to its body alone presents no
+            // boundary of its own.
+            "[width=10]#a `b` c#",
+        ] {
+            assert_eq!(
+                golden_quotes(source),
+                fold_html(
+                    &build_through_quotes(Span::new(source)),
+                    &HtmlSubstitutionRenderer {}
+                ),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sub_after_a_span_at_its_own_level_is_a_documented_divergence() {
+        // The mirror image of the fixtures above, one level out: a construct
+        // written *beside* an entity-rendered span reads the last character of
+        // that span's own closing markup in the string pipeline's haystack
+        // (`&#8221;`, whose `;` the monospace sub's boundary class excludes),
+        // where [`build_match_string`] stands the whole span in as one
+        // [`SPAN_PLACEHOLDER`] — a private-use codepoint that belongs to no
+        // boundary class at all.
+        //
+        // That is the same boundary class the bare e-mail family already
+        // documents from the other direction (`**bold**doc@example.org`, whose
+        // `</strong>` ends in one of that pattern's own mismatch characters):
+        // a placeholder standing in for markup hides what the markup's own
+        // characters would say. A `LevelContext` answers it for a level's
+        // *interior*, where the enclosing construct is known; answering it at a
+        // level's own siblings means classifying the placeholder itself, which
+        // every family reading one would then see — a later increment.
+        //
+        // If that lands, fold these fixtures into the corpus above.
+        for source in [r#""`a`"`code`"#, r#"'`a`'`code`"#] {
+            let folded = fold_html(
+                &build_through_quotes(Span::new(source)),
+                &HtmlSubstitutionRenderer {},
+            );
+
+            assert_ne!(
+                folded,
+                golden_quotes(source),
+                "expected the documented divergence to still reproduce for {source:?}"
+            );
+
+            assert!(folded.contains("<code>code</code>"), "{folded:?}");
+        }
+    }
+
+    #[test]
+    fn a_real_documents_nested_span_tree_folds_to_its_rendered_string() {
+        // End-to-end, through the real parse path, on the shape that named
+        // this increment: `"``end points``"` is a golden fixture of its own
+        // (`tests::asciidoc_lang::text::troubleshoot_unconstrained_formatting`
+        // asserts the inner backticks stay literal), so a tree that recognized
+        // a `<code>` span there would regress it the moment `rendered_html()`
+        // becomes a fold of this tree.
+        use crate::{
+            Parser,
+            blocks::{FindBlocks, IsBlock},
+        };
+
+        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+            "== A heading\n",
+            "\n",
+            "That only gives you \"``end points``\".\n",
+            "\n",
+            "A *span ending in --* here.\n",
+        ));
+
+        let mut folded_blocks = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                super::super::fold_html(inlines, &HtmlSubstitutionRenderer {}, &Parser::default()),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded_blocks += 1;
+        }
+
+        // The two paragraphs; the section that contains them holds no inline
+        // content of its own and is skipped.
+        assert_eq!(folded_blocks, 2, "expected both paragraphs to be checked");
+    }
 
     #[test]
     fn replacement_entity_matches_the_built_in_renderer() {

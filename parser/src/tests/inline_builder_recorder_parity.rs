@@ -812,6 +812,18 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "latexmath:[x < y] inline",
         "an icon:home[] icon",
         "icon:star[2x,role=gold] rated",
+        // A construct written against an enclosing span's own edge, where the
+        // string pipeline's haystack holds that span's rendered markup: the
+        // recorder recovers what actually rendered, so this compares the
+        // builder's boundary-context decision against the string pipeline's
+        // own reading structurally as well as by the bytes it folds to.
+        r#""``end points``""#,
+        r#""`_e_`""#,
+        r#""`x `code` y`""#,
+        "*x --*",
+        "*-- x*",
+        "[.r]#x --#",
+        r#""`x --`""#,
         "   ",
         "a\nb\nc",
     ];

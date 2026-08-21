@@ -3729,6 +3729,85 @@ Each phase is a reviewable unit with a clear exit gate.
   additions are this increment's own new divergence-pinning fixtures). As with every prep piece
   before it, nothing further is wired in.
 
+  *Step 6 prep landed as (the boundary characters an enclosing span presents to a nested
+  level):* re-running the corpus-wide fold-parity sweep after the increment above turns up one
+  more **blocker** of the same kind — a *wrong* answer for content a golden test already
+  exercises, rather than an unclaimed form: ``` `"``end points``"` ```, which the string
+  pipeline renders ``` `&#8220;`end points`&#8221;` ``` (the inner backticks staying literal)
+  where the fold wrapped them in a `<code>` span. Its cause is a category no increment had named,
+  and this closes it.
+
+  The string pipeline has no levels. A step matches over one flat string in which an earlier
+  step's construct is already **rendered markup**, so a pattern's boundary classes read that
+  markup's own characters — and this module's transducers match one *level* at a time, where the
+  same position is the start or end of the haystack. The two agree for a construct written at the
+  content's own top level and diverge for one written **inside** a span: the double-quote sub runs
+  before the monospace one, so by the time monospace matches, the string pipeline's haystack holds
+  `&#8220;` — whose `;` that sub's own `(^|[^\w&;:}])` boundary class excludes — where a level
+  matched in isolation shows `^`. The same fact reaches the character-replacements step through
+  the spaced em dash's `(^|\n| )--( |\n|$)`, at *either* edge of any span (`*x --*` renders
+  `<strong>x --</strong>`, the `--` staying literal because `<` follows it there).
+
+  A new [`LevelContext`](../../parser/src/content/inline_builder/quotes.rs) carries the pair of
+  characters an enclosing construct's rendering presents — the last of its opening markup and the
+  first of its closing markup — and a level is matched inside them: its own match string is
+  wrapped in the two before the pattern runs, and every offset the pattern reports is mapped back
+  with [`LevelContext::unshift`](../../parser/src/content/inline_builder/quotes.rs), clipped to the
+  level. So only *recognition* changes; every range a caller goes on to slice stays in the level's
+  own coordinates, no shared machinery
+  ([`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) and its 24 callers)
+  changes signature, and the root level borrows its haystack untouched. A pattern may legitimately
+  *consume* a context character — a constrained sub's boundary group is exactly that — and the
+  clip drops it rather than emitting it, which is right because that group is text the sub keeps
+  and the enclosing span already carries it.
+
+  Which characters a span presents is decided by its own rendering shape, from the **built-in**
+  backend: `>`/`<` for every variant that wraps its body in a tag, `;`/`&` for the two smart-quote
+  variants (`&#8220;…&#8221;`), and — for the one variant whose shape depends on what its
+  attribute list resolves to — by rendering it around a probe body. Reading the built-in backend
+  here is the same deliberate compromise
+  [`special_entity`](../../parser/src/content/inline_builder/quotes.rs) and
+  [`replacement_entity`](../../parser/src/content/inline_builder/quotes.rs) already make (a custom
+  backend changes what the fold *emits*, not the recognition the AsciiDoc patterns were written
+  against), and `styled_boundaries_match_the_built_in_renderer` pins the shapes against the
+  renderer itself so the two cannot drift. The
+  [`post_replacements`](../../parser/src/content/inline_builder/post_replacements.rs) step had
+  already reasoned this way for its own `$` — "a nested `Styled` or `Ref` level is always followed
+  by its own closing markup … so a ` +` ending a span is not at a line end there" — with a
+  boolean; this generalizes that one step's flag into a pair of characters every step's patterns
+  can read, and the two steps whose patterns read one (`Quotes` and `CharacterReplacements`) now
+  do.
+
+  Three shapes stay divergent, each pinned by its own test. A construct written **beside** an
+  entity-rendered span at its own level (``` `"`a`"`code` ```) reads the last character of that
+  span's *closing* markup in the string pipeline's haystack, where `build_match_string` stands
+  the whole span in as one `SPAN_PLACEHOLDER` belonging to no boundary class at all — the same
+  boundary class the bare-e-mail family already documents from the other direction
+  (`**bold**doc@example.org`); answering it means classifying the placeholder itself, which every
+  family reading one would then see. The **macros** step's own families read a boundary character
+  too (the auto-link's prefix group, the bare e-mail's mismatch-prefix one) and each finds its
+  matches through its own `find_*_matches`, so giving them the context is a step-shaped increment
+  of its own (`*doc@example.org*` links where the string pipeline, reading the `>` that ends
+  `<strong>`, leaves the address literal). And a **transparent** span — an unquoted one whose
+  attribute list resolves to neither a role nor an id, so it renders to its body and nothing else
+  — has its children inherit the context it sits in, which is right whenever the span is all its
+  parent's level holds and wrong when a sibling follows it (`*[width=10]#x --# --*`), since the
+  haystack then shows what that sibling begins with; modelling that means deriving a level's
+  context from its *siblings* rather than from its enclosing construct alone.
+
+  The quotes and character-replacements differential corpora gain each construct written against
+  an enclosing span's own edge in every variant's rendering shape, the same constructs away from
+  either edge (where both pipelines match), the rules that read no boundary of their own, and the
+  same fixtures at the content's own top level; fixtures are added to the whole-pipeline broad
+  sweep and combined-constructs corpus, to the group-parity corpus (the boundary a span presents
+  comes from its rendering, which no effective order changes), and to the structural recorder
+  cross-check — where the recorder, recovering what actually rendered, reads the string pipeline's
+  own answer. A whole-document test drives the golden fixture's own shape end to end through the
+  real parse path. Re-running the corpus-wide fold-parity audit (tree building forced on for every
+  parse in the suite) confirms the divergence set strictly **shrank**: the golden source above is
+  gone and no pre-existing one appeared (the set's only additions are this increment's own new
+  divergence-pinning fixtures). As with every prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -4243,6 +4322,25 @@ Each phase is a reviewable unit with a clear exit gate.
        dropped rather than built wrong, and one a *later* step of the same order rewrites inside
        the emitted markup stays divergent, each with its own test; see the step's own "landed as"
        note above.
+
+     - ✅ **prep (an enclosing span's boundary characters).** The sweep that followed the
+       increment above turned up one more blocker of the same kind — ``` `"``end points``"` ```,
+       a golden fixture whose inner backticks the string pipeline leaves literal and the fold
+       wrapped in a `<code>` span — and with it a category no increment had named: a pattern's
+       boundary classes
+       read the *rendered markup* an earlier step wrote, where a transducer matching one level at
+       a time reads that level's own start or end. A new
+       [`LevelContext`](../../parser/src/content/inline_builder/quotes.rs) wraps a level's match
+       string in the two characters its enclosing construct's rendering presents (`>`/`<` for a
+       tag, `;`/`&` for a smart quote, probed for the one variant whose shape its attribute list
+       decides — pinned against the built-in renderer) and maps every offset back with
+       [`unshift`](../../parser/src/content/inline_builder/quotes.rs), so only recognition changes
+       and no shared machinery changes signature. The two steps whose patterns read a boundary —
+       `Quotes` and `CharacterReplacements` (the spaced em dash, at either edge of any span) —
+       take it; see the step's own "landed as" note above. What still defers is the same class one
+       level out (a construct *beside* a span, where the placeholder belongs to no boundary class),
+       the macros step's own families, and a transparent span's siblings, each with its own
+       divergence test.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
