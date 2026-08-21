@@ -4188,6 +4188,61 @@ Each phase is a reviewable unit with a clear exit gate.
   that: the **closing** character both the macros step and the sibling increments decline to
   half-supply, and the character-replacements step's own consume-across-levels case.
 
+  *Step 6 prep landed as (a `link:`/`mailto:` target crossing a **passthrough**):* with the
+  boundary-character seam settled — its three remaining deferrals all of the keep-forever,
+  markup-perturbed kind — re-running the corpus-wide fold-parity audit and classifying what remains
+  by *source* found the largest golden-exercised class to be something no note had named: a masked
+  passthrough in a `link:`/`mailto:` macro's **target**, the documented idioms
+  `link:++https://example.org/now_this__link_works.html++[]` (formatting characters kept literal)
+  and `link:pass:[My Documents/report.pdf][Get Report]` (a space, which the target class itself
+  rejects) — five real fixtures across the asciidoc-lang corpus. The string replacer swallows the
+  `\u{96}`*n*`\u{97}` sentinel into the target (its `[^\s\[\]]+` class admits it exactly as it
+  admits the tree's placeholder, so the two recognize the same extent), and
+  [`Passthroughs::restore_to`](../../parser/src/content/passthroughs.rs) then splices the extracted
+  body's substituted text over every sentinel in the rendered string. A
+  [`Raw`](../../parser/src/inlines/inline_node.rs) node's `value` **is** that substituted text,
+  known at build time — which is what separates a masked passthrough from a rendered span, whose
+  markup exists only at fold time — so a fourth gate,
+  [`range_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs), admits it for a
+  value the caller *restores*, and
+  [`restore_masked_passthroughs`](../../parser/src/content/inline_builder/macros/links.rs)
+  substitutes the value for the placeholder, finishing the computed target into exactly the
+  restored string's bytes. Every *decision* the replacer makes stays on the bytes as matched — the
+  `URI_SNIFF` strip under `hide-uri-scheme` sniffs the masked target, so a scheme hidden inside the
+  passthrough keeps its scheme in the shown text, as the golden does — and the shown text itself is
+  structural: a bare macro's `emit_range` carries the `Raw` node whole, folding to the restored
+  bytes with no re-escaping.
+
+  One reading is deliberately **not** faithful: the dangerous-scheme check runs over the *restored*
+  target, where the string replacer checks its own masked haystack — through which
+  `link:++javascript:alert(1)++[]` passes, the restore then completing a live `javascript:` link in
+  the golden output. The tree defers it instead, a security divergence test pinning the safe
+  reading over byte parity. The staged
+  [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) similarly
+  registers the node's honest restored target where the string pipeline registers the sentinel
+  bytes verbatim (its restore rewrites only the rendered string, never the catalog) — a wart the
+  cutover deliberately will not reproduce, pinned by its own test rather than by a golden-catalog
+  comparison.
+
+  What reaches parity is the five golden fixtures and the class around them: both idioms bare and
+  labeled, a passthrough covering part of the target (`link:https://++example.org/a++[]`,
+  `link:a++b c++d[T]`), the `mailto:` spellings (with and without a subject/body attrlist), an
+  attribute list on a text beside a restored target, the triple-plus form, escapes, and the macro
+  inside a rendered span. Fixtures join a new differential corpus, a `hide-uri-scheme` pair pins
+  the masked strip in both directions, structural tests pin the restored target and the
+  `Raw`-child text, and a whole-document test drives the shapes end to end through the real parse
+  path. Re-running the corpus-wide audit shows **no new divergence and five closed** — the first
+  increment since the audit map closed to shrink the golden set. The other families keep the
+  boundary, each newly pinned with the reason it cannot make the same move yet: the
+  cross-reference family *must* keep it (a deferred xref's target is read **before** restore can
+  reach it, and the golden output for `xref:++id++[]` leaks the raw sentinel into its own `href` —
+  the tree's literal reading is the well-formed one), the image family computes several
+  masked-arithmetic values off the same bytes (`default_alt`'s basename/`_`/`-` rewrites run over
+  the sentinel, so `image:++a_b-c.jpg++[]` keeps `alt="a_b-c.jpg"`), and the auto-link family
+  reads boundary-prefix and trailing-strip arithmetic off them; each is a later increment by the
+  same restore-the-value, decide-over-the-masked-bytes move, where its own goldens call for it.
+  Coverage stays diff-neutral. As with every prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -4810,6 +4865,24 @@ Each phase is a reviewable unit with a clear exit gate.
        what precedes the span. See the step's own "landed as" note above. What still defers is a
        body class wanting more than one character (`https://example.org[width=10]##x##`), the
        closing character, and the character-replacements step's consume-across-levels case.
+
+     - ✅ **prep (a `link:`/`mailto:` target crossing a passthrough).** The largest
+       golden-exercised class the audit's remainder held — five asciidoc-lang fixtures spelling
+       the two documented idioms, `link:++…++[]` and `link:pass:[…][…]` — is closed by a fourth
+       gate: [`range_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs)
+       admits a masked passthrough's [`Raw`](../../parser/src/inlines/inline_node.rs) piece for a
+       value the caller **restores**, since the node's `value` is the very substituted body
+       `Passthroughs::restore_to` splices over the string pipeline's sentinel, and
+       [`restore_masked_passthroughs`](../../parser/src/content/inline_builder/macros/links.rs)
+       finishes the computed target into the restored string's own bytes — every decision (the
+       `URI_SNIFF` strip) still made over the bytes as matched, and a bare macro's shown text
+       carried structurally as the `Raw` node itself. A smuggled dangerous scheme
+       (`link:++javascript:…++[]`) defers with a security divergence test — the string replacer's
+       masked check misses it and emits a live link — and the staged side effect registers the
+       honest restored target where the string pipeline registers sentinel bytes. The xref family
+       (a deferred target read before restore, whose golden leaks the sentinel), the image family
+       (masked `default_alt` arithmetic), and the auto-link family (boundary/strip arithmetic)
+       keep the boundary, each pinned. See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
