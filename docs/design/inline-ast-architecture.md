@@ -4120,6 +4120,74 @@ Each phase is a reviewable unit with a clear exit gate.
   character both the macros step and the increment above decline to half-supply, and the
   character-replacements step's own consume-across-levels case above.
 
+  *Step 6 prep landed as (a **transparent** span read as a sibling):* the increment above closed the
+  tag-rendered half of what a span presents to its siblings and named what it left: a span rendering
+  to its **body and nothing else** presents no markup for
+  [`styled_sibling_boundaries`](../../parser/src/content/inline_builder/quotes.rs) to take a
+  character from, so [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) went
+  on standing it in as one bare placeholder — where the string pipeline, having no levels, holds
+  that body itself. `[width=10]##x ##https://example.org` links there on the space the body ends
+  with, and the tree read a placeholder belonging to no boundary class.
+
+  A transparent span's two outer characters are its **children's**, so
+  [`transparent_sibling_boundaries`](../../parser/src/content/inline_builder/quotes.rs) reads them
+  out of the children's own match string rather than recomputing them per node kind — the same move
+  [`child_contexts`](../../parser/src/content/inline_builder/quotes.rs) made one increment ago for
+  the same reason: the match string is the one place every node kind's presented bytes are already
+  spelled out (a text run's, a `CharRef`'s entity, a nested span's own placeholder wrapped in
+  whatever this module can say there), so the two cannot drift, and a transparent span nested inside
+  another answers from *its* children with no second mechanism. The pair becomes two independent
+  `Option`s, because a body can begin with something this module cannot describe and still end in
+  something it can; every markup-rendering variant goes on answering both or neither, and a
+  [`SPAN_PLACEHOLDER`](../../parser/src/content/inline_builder/quotes.rs) at either edge reports
+  *nothing* rather than manufacturing a character — the line `preceding_character` already draws.
+
+  The **identity** is what makes this safe, and it is why this increment had to wait for the one
+  above: `[width=10]++x ++` is an extraction wrapper that renders its body and nothing else too, and
+  what the string pipeline holds there is its own `\u{96}…\u{97}` sentinel, not the body — so
+  classifying a transparent span by its rendering alone would have handed the URL beside it a space
+  the pipeline never presents. A transparent span takes exactly the same `masked` guard every
+  tag-rendered one takes, which also keeps the scope the previous increments drew: only the
+  **macros** step holds the real list, so only its two boundary-reading families see any of this and
+  every other step is byte-identical to before. `child_contexts` gains the one adjustment this
+  forces — the character a transparent span presents to its *neighbour* now sits between them, so
+  the lookup steps back over it to reach what the span's own children read, which is what precedes
+  the **span**.
+
+  What reaches parity is that shape and its mirror image: `[width=10]##x ##https://example.org` and
+  `[width=10]##x ##doc@example.org` (and the same one level in, inside a `*strong*` span, and with a
+  sibling of its own before the span), whatever node kind carries the body's last character — a text
+  run after a tag-rendered child, a restored entity, a typographic replacement, an escaped special —
+  together with `https://example.org[width=10]## x##`, where the body's **first** character is what
+  ends a bare URL written against the span's opening edge, and the negative half, where a body
+  ending in a word character or in one of the e-mail pattern's own mismatch characters leaves the
+  construct literal in both. The extraction pass's wrapper keeps its own test, pinning that
+  `[width=10]++x ++https://example.org` stays literal in both pipelines — the new divergence a
+  rendering-only classification would have introduced.
+
+  Fixtures join the whole-pipeline broad sweep and combined-constructs corpus and the group-parity
+  corpus (what a span presents to a sibling comes from its own rendering, which no effective order
+  changes), unit tests pin `styled_sibling_boundaries` against the built-in renderer in all three
+  states of the identity and the match string's own wrap directly, another pins that a transparent
+  span's children still read what precedes the span, and a whole-document test drives both shapes
+  end to end through the real parse path. The **structural recorder cross-check** is again the one
+  corpus these shapes do not join, and for the same reason as the two increments above seen from the
+  other side: a [`RecordingRenderer`](../../parser/src/content/inline_tree.rs) emits its marker
+  *outside* the span it wraps, so it stands between a transparent span's body and the construct
+  beside it and the recorder reads the marker where the real pipeline reads the space. Re-running
+  the corpus-wide fold-parity audit (tree building forced on for every parse in the suite) shows the
+  divergence set **unchanged** — no golden source writes a construct beside a transparent span —
+  and, as every increment requires, no new divergence appeared. Coverage stays diff-neutral. As with
+  every prep piece before it, nothing further is wired in.
+
+  What still defers is the rest of the same class, now one item shorter. A bare URL whose **body
+  class** wants more than one character still cannot swallow a transparent span's whole body the way
+  the string pipeline's flat haystack lets it (`https://example.org[width=10]##x##`, which the
+  pipeline links as `https://example.orgx`): the character the span presents is right, and a match
+  crossing the span is not this level's to build, so that keeps its own divergence test. Beyond
+  that: the **closing** character both the macros step and the sibling increments decline to
+  half-supply, and the character-replacements step's own consume-across-levels case.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -4722,6 +4790,26 @@ Each phase is a reviewable unit with a clear exit gate.
        "landed as" note above. What still defers is the closing character,
        the character-replacements step's consume-across-levels case, and a transparent span read *as*
        a sibling, which this unblocks but does not take.
+
+     - ✅ **prep (the same boundary, for a transparent span read *as* a sibling).** The half the
+       increment above unblocked but did not take: a span rendering to its **body and nothing else**
+       presents no markup, so
+       [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) stood it in as a
+       bare placeholder where the string pipeline holds that body — and
+       `[width=10]##x ##https://example.org` links there on the space the body ends with. A
+       transparent span's outer characters are its children's, so
+       [`transparent_sibling_boundaries`](../../parser/src/content/inline_builder/quotes.rs) reads
+       them out of the children's own **match string**, the same place
+       [`child_contexts`](../../parser/src/content/inline_builder/quotes.rs) reads a level's
+       siblings from, and the pair becomes two independent halves since a body's two ends are
+       described separately. The
+       [`Masked`](../../parser/src/content/inline_builder/special_chars.rs) guard is what makes it
+       safe — `[width=10]++x ++` is an extraction wrapper that renders its body and nothing else too
+       — and keeps the scope at the **macros** step alone; `child_contexts` steps back over the
+       character a transparent span now presents to its neighbour, so its own children go on reading
+       what precedes the span. See the step's own "landed as" note above. What still defers is a
+       body class wanting more than one character (`https://example.org[width=10]##x##`), the
+       closing character, and the character-replacements step's consume-across-levels case.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

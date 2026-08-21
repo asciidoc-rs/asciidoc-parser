@@ -171,10 +171,12 @@ impl LevelContext {
     /// good as what [`build_match_string`] could write there — so `masked` is
     /// passed straight through. A caller holding the extraction pass's
     /// identity gets the `>` a tag-rendered neighbour's own closing markup
-    /// ends with; one that does not gets the bare [`SPAN_PLACEHOLDER`], which
-    /// [`preceding_character`] reports as *nothing* rather than as a
-    /// character. Both are right for what their caller knows, and the second
-    /// is what this function answered before the identity reached it at all.
+    /// ends with, or the last character of a **transparent** neighbour's own
+    /// body ([`transparent_sibling_boundaries`]); one that does not gets the
+    /// bare [`SPAN_PLACEHOLDER`], which [`preceding_character`] reports as
+    /// *nothing* rather than as a character. Both are right for what their
+    /// caller knows, and the second is what this function answered before the
+    /// identity reached it at all.
     pub(super) fn child_contexts(
         nodes: &[InlineNode<'_>],
         enclosing: Self,
@@ -205,9 +207,26 @@ impl LevelContext {
         // `build_match_string` contributes exactly one [`Piece`] per node, in
         // order, so the three sequences line up and no lookup is needed.
         for ((context, piece), node) in contexts.iter_mut().zip(&pieces).zip(nodes) {
-            if matches!(node, InlineNode::Styled(styled) if styled_boundaries(styled).is_none()) {
-                context.before = preceding_character(&s, piece).or(context.before);
+            let InlineNode::Styled(styled) = node else {
+                continue;
+            };
+
+            if styled_boundaries(styled).is_some() {
+                continue;
             }
+
+            // Read from before the span's **own** opening character. A
+            // transparent span presents its body's first character to whatever
+            // precedes it ([`transparent_sibling_boundaries`]), and that
+            // character sits between the neighbour and this piece — so the
+            // lookup steps back over it to reach what the span's *children*
+            // read, which is what precedes the span itself.
+            let own = styled_sibling_boundaries(styled, masked)
+                .0
+                .map_or(0, char::len_utf8);
+
+            context.before =
+                preceding_character(&s, piece.s_start.saturating_sub(own)).or(context.before);
         }
 
         contexts
@@ -392,33 +411,92 @@ fn styled_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
 /// [`SingleQuote`](StyleVariant::SingleQuote) node can only have come from the
 /// quotes step, where the string pipeline really does hold `&#8220;…&#8221;`.
 ///
-/// # A transparent span still says nothing
+/// # A transparent span presents its own body
 ///
 /// A span the built-in backend renders with **no markup of its own** — an
 /// unquoted span whose attribute list resolves to neither a role nor an id —
-/// presents its own *body* to a sibling rather than any markup, which is a
-/// different question from this one and defers with its own divergence note.
-/// It falls out of the probe by itself: there is no opening or closing run to
-/// take a character from.
-fn styled_sibling_boundaries(styled: &Styled<'_>, masked: Masked<'_>) -> Option<(char, char)> {
+/// wraps its body in nothing, so what a sibling reads there is that *body*:
+/// the string pipeline's flat haystack holds `x ` where
+/// `[width=10]##x ##https://example.org` stands one opaque placeholder, and
+/// links on the space the body ends with.
+/// [`transparent_sibling_boundaries`] answers that pair from the span's own
+/// children, and the identity gates it for exactly the reason it gates a tag:
+/// `[width=10]++x ++` is an extraction wrapper that renders its body and
+/// nothing else, and what the string pipeline holds *there* is the sentinel a
+/// bare placeholder already reads as.
+///
+/// # Two halves, answered independently
+///
+/// The pair is two [`Option`]s rather than one option of a pair, because a
+/// transparent span's halves are read from opposite ends of its body and
+/// either can be a character this module cannot describe while the other is
+/// not. Every markup-rendering variant goes on answering both or neither.
+fn styled_sibling_boundaries(
+    styled: &Styled<'_>,
+    masked: Masked<'_>,
+) -> (Option<char>, Option<char>) {
     match styled.variant {
         // `&#8220;…&#8221;` / `&#8216;…&#8217;`, whichever step built them —
         // and only the quotes step can. See this function's own scope note.
-        StyleVariant::DoubleQuote | StyleVariant::SingleQuote => Some(('&', ';')),
+        StyleVariant::DoubleQuote | StyleVariant::SingleQuote => (Some('&'), Some(';')),
 
         // Every other variant wraps its body in a tag, which is also the shape
         // the passthrough-extraction pass's own wrapper takes — so answering
         // one turns on whether this node is such a wrapper, which only the
-        // identity `masked` carries can say.
-        _ if !masked.renders_to_its_siblings(styled.location) => None,
+        // identity `masked` carries can say. A wrapper that renders its body
+        // and nothing else is covered by the same guard, for the same reason.
+        _ if !masked.renders_to_its_siblings(styled.location) => (None, None),
 
         // The one variant whose rendering shape its attribute list decides:
         // a `<span …>` when that resolves to a role or an id, and the body
-        // alone (no markup, so nothing to present) when it does not.
-        StyleVariant::Unquoted => probe_styled_sibling_boundaries(styled),
+        // alone when it does not — which presents the body's own two outer
+        // characters.
+        StyleVariant::Unquoted => match probe_styled_sibling_boundaries(styled) {
+            Some((before, after)) => (Some(before), Some(after)),
 
-        _ => Some(('<', '>')),
+            None => transparent_sibling_boundaries(&styled.children, masked),
+        },
+
+        _ => (Some('<'), Some('>')),
     }
+}
+
+/// [`styled_sibling_boundaries`] for a **transparent** span — one whose
+/// rendering is its body and nothing else — whose two outer characters are its
+/// children's rather than any markup of its own.
+///
+/// Those characters are already spelled out in the children's own **match
+/// string**, which is the one place every node kind's presented bytes are
+/// written down (a text run's, a [`CharRef`]'s entity, and a nested opaque
+/// node's placeholder wrapped in whatever this function's own caller can say)
+/// — the same reason [`LevelContext::child_contexts`] reads a level's siblings
+/// out of it rather than recomputing them per node kind, and the reason the two
+/// cannot drift. The recursion terminates on the tree: a transparent span
+/// nested inside this one answers from *its* children.
+///
+/// A [`SPAN_PLACEHOLDER`] at either edge reports **nothing** rather than a
+/// character, the line [`preceding_character`] draws for the same reason: it is
+/// what [`build_match_string`] writes for a node this module cannot describe,
+/// so reporting it would manufacture an answer rather than sharpen one.
+fn transparent_sibling_boundaries(
+    children: &[InlineNode<'_>],
+    masked: Masked<'_>,
+) -> (Option<char>, Option<char>) {
+    let (s, _) = build_match_string(children, masked);
+
+    let mut chars = s.chars();
+
+    let before = chars.next().filter(|ch| *ch != SPAN_PLACEHOLDER);
+
+    // A one-character body presents that same character on both sides: `next`
+    // has already consumed it, so the closing half falls back to what the
+    // opening one read.
+    let after = chars
+        .next_back()
+        .filter(|ch| *ch != SPAN_PLACEHOLDER)
+        .or(before);
+
+    (before, after)
 }
 
 /// [`styled_sibling_boundaries`] for a span whose rendering shape is not
@@ -431,10 +509,10 @@ fn probe_styled_sibling_boundaries(styled: &Styled<'_>) -> Option<(char, char)> 
     before.chars().next().zip(after.chars().next_back())
 }
 
-/// The character a level's own match string `s` holds immediately before
-/// `piece`, or `None` where this module cannot say what the string pipeline
-/// holds there — because the piece is the first thing the level holds, or
-/// because what precedes it is an unclassified opaque node.
+/// The character a level's own match string `s` holds immediately before byte
+/// offset `at`, or `None` where this module cannot say what the string pipeline
+/// holds there — because nothing precedes that offset, or because what does is
+/// an unclassified opaque node.
 ///
 /// This is how a **transparent** span's children learn what precedes the span
 /// (see [`LevelContext::child_contexts`]): the match string is the one place
@@ -447,8 +525,9 @@ fn probe_styled_sibling_boundaries(styled: &Styled<'_>) -> Option<(char, char)> 
 /// [`SPAN_PLACEHOLDER`] is what [`build_match_string`] writes for a node whose
 /// rendering this module cannot describe — everything
 /// [`styled_sibling_boundaries`] declines to classify, which with the
-/// extraction pass's identity in hand is the pass's own wrapper and, without
-/// it, every tag-rendered span. Reporting it here would *manufacture* a
+/// extraction pass's identity in hand is the pass's own wrapper (tag-rendered
+/// or transparent alike) and, without it, every span but the two
+/// entity-rendered ones. Reporting it here would *manufacture* a
 /// character where the level previously read its own start anchor, which is a
 /// different answer rather than a better one — and for a wrapper it would be
 /// the wrong one, since the string pipeline holds a `\u{97}` sentinel there
@@ -456,12 +535,12 @@ fn probe_styled_sibling_boundaries(styled: &Styled<'_>) -> Option<(char, char)> 
 /// So an unclassified neighbour reports nothing and the span goes on
 /// inheriting, leaving that shape exactly as it already was — the same line
 /// [`styled_sibling_boundaries`] draws, for the same reason.
-fn preceding_character(s: &str, piece: &Piece) -> Option<char> {
-    // A piece's bounds are byte offsets this module itself pushed into `s`, so
-    // the lookup always lands on a character boundary within it; the crate
+fn preceding_character(s: &str, at: usize) -> Option<char> {
+    // Every offset a caller passes is one this module itself pushed into `s`,
+    // so the lookup always lands on a character boundary within it; the crate
     // forbids `unwrap`, so that is spelled `unwrap_or_default` rather than as a
     // branch no input reaches.
-    s.get(..piece.s_start)
+    s.get(..at)
         .unwrap_or_default()
         .chars()
         .next_back()
@@ -697,7 +776,8 @@ fn attrlist_is_readable(nodes: &[InlineNode<'_>], pieces: &[Piece], m: &QuoteMat
 /// `'src` counterpart; every other node contributes a single opaque
 /// [`SPAN_PLACEHOLDER`], wrapped in the two characters its own rendering
 /// presents to a sibling wherever [`styled_sibling_boundaries`] can say what
-/// those are.
+/// those are — which for a span rendering to its body and nothing else is that
+/// **body**'s own two outer characters, since it wraps them in no markup.
 ///
 /// `masked` is what the caller can say about which [`Styled`] nodes are the
 /// passthrough-extraction pass's own wrappers, which is what that last
@@ -845,12 +925,12 @@ pub(super) fn build_match_string(
                 // overlapping it (which is right, since a boundary character
                 // a pattern keeps is markup the span itself carries), and
                 // every gate skips it as non-overlapping.
-                let boundaries = match other {
+                let (before, after) = match other {
                     InlineNode::Styled(styled) => styled_sibling_boundaries(styled, masked),
-                    _ => None,
+                    _ => (None, None),
                 };
 
-                if let Some((before, _)) = boundaries {
+                if let Some(before) = before {
                     s.push(before);
                 }
 
@@ -871,7 +951,7 @@ pub(super) fn build_match_string(
                     synthesized: false,
                 });
 
-                if let Some((_, after)) = boundaries {
+                if let Some(after) = after {
                     s.push(after);
                 }
             }
@@ -1741,17 +1821,56 @@ mod tests {
 
             assert_eq!(
                 styled_sibling_boundaries(&styled, Masked::known(&[])),
-                opening.chars().next().zip(closing.chars().next_back()),
+                (opening.chars().next(), closing.chars().next_back()),
                 "sibling boundary characters drifted from the built-in rendering of {variant:?}"
             );
         }
 
         // An unquoted span carrying neither a role nor an id renders to its
-        // body and nothing else, so there is no markup to take a character
-        // from — a different question, deferred with its own divergence note.
+        // body and nothing else, so what a sibling reads is that body: its
+        // first and last characters, read out of the children's own match
+        // string. With no children there is nothing to read.
         assert_eq!(
             styled_sibling_boundaries(&span(StyleVariant::Unquoted), Masked::known(&[])),
-            None
+            (None, None)
+        );
+
+        let mut transparent = span(StyleVariant::Unquoted);
+        transparent.children = vec![InlineNode::Text {
+            value: CowStr::from("ab "),
+            location: Span::new("ab "),
+        }];
+
+        assert_eq!(
+            styled_sibling_boundaries(&transparent, Masked::known(&[])),
+            (Some('a'), Some(' '))
+        );
+
+        // A one-character body is the same character on both sides, and one
+        // this module cannot describe — a nested span with no identity to
+        // classify it by — is no character at all.
+        transparent.children = vec![InlineNode::Text {
+            value: CowStr::from("a"),
+            location: Span::new("a"),
+        }];
+
+        assert_eq!(
+            styled_sibling_boundaries(&transparent, Masked::known(&[])),
+            (Some('a'), Some('a'))
+        );
+
+        transparent.children = vec![InlineNode::Styled(span(StyleVariant::Strong))];
+
+        assert_eq!(
+            styled_sibling_boundaries(&transparent, Masked::UNKNOWN),
+            (None, None)
+        );
+
+        // The same body, with the identity in hand: the nested span's own
+        // `<strong>…</strong>` is what the string pipeline holds at both edges.
+        assert_eq!(
+            styled_sibling_boundaries(&transparent, Masked::known(&[])),
+            (Some('<'), Some('>'))
         );
 
         // One carrying an id renders a `<span …>`, like every other tag.
@@ -1760,7 +1879,7 @@ mod tests {
 
         assert_eq!(
             styled_sibling_boundaries(&identified, Masked::known(&[])),
-            Some(('<', '>'))
+            (Some('<'), Some('>'))
         );
 
         // The two **entity**-rendered variants are answered whether or not the
@@ -1769,7 +1888,7 @@ mod tests {
         for variant in [StyleVariant::DoubleQuote, StyleVariant::SingleQuote] {
             assert_eq!(
                 styled_sibling_boundaries(&span(variant), Masked::UNKNOWN),
-                Some(('&', ';'))
+                (Some('&'), Some(';'))
             );
         }
 
@@ -1777,8 +1896,9 @@ mod tests {
         // identity is missing — not because its rendering has no outer
         // characters (it has `<` and `>`), but because such a node may be the
         // passthrough-extraction pass's own wrapper, which the string pipeline
-        // is still holding as a placeholder. See
-        // [`styled_sibling_boundaries`]'s own scope note.
+        // is still holding as a placeholder. A **transparent** span takes the
+        // same guard: `[width=10]++x ++` is a wrapper that renders its body and
+        // nothing else. See [`styled_sibling_boundaries`]'s own scope note.
         for variant in [
             StyleVariant::Strong,
             StyleVariant::Emphasis,
@@ -1790,7 +1910,7 @@ mod tests {
         ] {
             assert_eq!(
                 styled_sibling_boundaries(&span(variant), Masked::UNKNOWN),
-                None
+                (None, None)
             );
         }
 
@@ -1806,7 +1926,7 @@ mod tests {
 
         assert_eq!(
             styled_sibling_boundaries(&wrapper, Masked::known(&[identity])),
-            None
+            (None, None)
         );
     }
 
@@ -2019,6 +2139,56 @@ mod tests {
                 Masked::known(&[(0, 1)])
             ),
             vec![TAG, LevelContext::ROOT]
+        );
+
+        // A **transparent** span presents no markup either, but it does
+        // present its own *body*: the second span here reads the space the
+        // first one's body ends with, which is what the string pipeline's flat
+        // haystack holds between the two.
+        fn transparent(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
+            InlineNode::Styled(Styled {
+                variant: StyleVariant::Unquoted,
+                form: SpanForm::Constrained,
+                id: None,
+                roles: Vec::new(),
+                attrs: None,
+                children,
+                location: Span::new("x"),
+            })
+        }
+
+        assert_eq!(
+            LevelContext::child_contexts(
+                &[transparent(vec![text("y ")]), transparent(vec![text("z")])],
+                LevelContext::ROOT,
+                Masked::known(&[])
+            ),
+            vec![
+                LevelContext::ROOT,
+                LevelContext {
+                    before: Some(' '),
+                    after: None,
+                }
+            ]
+        );
+
+        // The character a transparent span presents to its *neighbour* is not
+        // the one its own children read: what they read is whatever precedes
+        // the span, so the lookup steps back over the body's own first
+        // character rather than reporting it.
+        assert_eq!(
+            LevelContext::child_contexts(
+                &[text("a "), transparent(vec![text("bc")])],
+                LevelContext::ROOT,
+                Masked::known(&[])
+            ),
+            vec![
+                LevelContext::ROOT,
+                LevelContext {
+                    before: Some(' '),
+                    after: None,
+                }
+            ]
         );
     }
 
@@ -2245,7 +2415,7 @@ mod tests {
 
         assert_eq!(
             styled_sibling_boundaries(&styled, Masked::known(&[identity])),
-            None
+            (None, None)
         );
 
         let (s, pieces) = build_match_string(
@@ -2265,6 +2435,73 @@ mod tests {
         assert_eq!(s, format!("<{SPAN_PLACEHOLDER}>"));
         assert_eq!(pieces.len(), 1);
         assert_eq!(pieces[0].s_start, 1);
+    }
+
+    #[test]
+    fn a_transparent_spans_placeholder_carries_its_own_body() {
+        // A span that renders to its body and nothing else presents *that
+        // body* to a sibling, where every other variant presents its markup —
+        // so the placeholder standing in for it carries the body's own two
+        // outer characters, read out of the children's own match string.
+        //
+        // Asserted directly on the match string for the reason the wrapper
+        // test above is: the class that reads these characters is the macros
+        // step's, and it is the only step holding the identity that gates
+        // them.
+        use super::{SPAN_PLACEHOLDER, build_match_string};
+        use crate::inlines::Styled;
+
+        let styled = |children| Styled {
+            variant: StyleVariant::Unquoted,
+            form: SpanForm::Unconstrained,
+            id: None,
+            roles: Vec::new(),
+            attrs: None,
+            children,
+            location: Span::new("[width=10]##x ##"),
+        };
+
+        let text = |value: &'static str| InlineNode::Text {
+            value: CowStr::from(value),
+            location: Span::new(value),
+        };
+
+        let body = || vec![text("x ")];
+
+        // With the identity in hand, the body's first and last characters land
+        // on either side of the placeholder — and the piece still covers the
+        // placeholder alone, so the two belong to no node and no range a
+        // caller slices moves.
+        let (s, pieces) =
+            build_match_string(&[InlineNode::Styled(styled(body()))], Masked::known(&[]));
+
+        assert_eq!(s, format!("x{SPAN_PLACEHOLDER} "));
+        assert_eq!(pieces.len(), 1);
+        assert_eq!(pieces[0].s_start, 1);
+
+        // Without it — every step but `macros` — the span this module cannot
+        // rule out being an extraction wrapper keeps the bare placeholder,
+        // byte for byte what it carried before.
+        let (s, pieces) =
+            build_match_string(&[InlineNode::Styled(styled(body()))], Masked::UNKNOWN);
+
+        assert_eq!(s, SPAN_PLACEHOLDER.to_string());
+        assert_eq!(pieces[0].s_start, 0);
+
+        // And a node the identity *names* is such a wrapper — `[width=10]++x ++`
+        // renders its body and nothing else too, and the string pipeline is
+        // holding its `\u{96}…\u{97}` sentinel there, which is exactly what a
+        // bare placeholder reads as.
+        let wrapper = styled(body());
+
+        let identity = (
+            wrapper.location.byte_offset(),
+            wrapper.location.data().len(),
+        );
+
+        let (s, _) = build_match_string(&[InlineNode::Styled(wrapper)], Masked::known(&[identity]));
+
+        assert_eq!(s, SPAN_PLACEHOLDER.to_string());
     }
 
     #[test]

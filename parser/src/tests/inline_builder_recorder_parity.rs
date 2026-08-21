@@ -133,7 +133,12 @@
 //!   later sub matching over the recorded string reads that marker — which
 //!   belongs to no boundary class — where the real pipeline reads the markup's
 //!   own last character. The recorder therefore builds a span the real pipeline
-//!   never rendered. Recognition **inside** a span is unaffected (the marker
+//!   never rendered. A **transparent** span — one rendering to its body and
+//!   nothing else, whose own body is therefore what a sibling reads
+//!   (`[width=10]##x ##https://example.org`) — is the same artifact seen from
+//!   the other side: the marker stands between that body and the construct
+//!   beside it, so the recorder reads the marker where the real pipeline reads
+//!   the space. Recognition **inside** a span is unaffected (the marker
 //!   sits outside the tag or entity pair, so the interior reads the same `>` or
 //!   `;` either way), which is why the sweep's own boundary fixtures one level
 //!   *in* are cross-checked here normally; the sibling shapes are pinned
