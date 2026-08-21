@@ -351,6 +351,56 @@ pub(super) fn masked_locations(nodes: &[InlineNode<'_>]) -> Vec<(usize, usize)> 
         .collect()
 }
 
+/// What a caller can say about which [`Styled`](crate::inlines::Styled) nodes
+/// are the passthrough-extraction pass's own wrappers — carried to the one
+/// place *recognition* needs to tell one from a span the string pipeline has
+/// really rendered.
+///
+/// [`masked_locations`] collects that identity once, before any step runs; this
+/// is how it reaches
+/// [`build_match_string`](super::quotes::build_match_string), which stands
+/// every opaque node in as one placeholder and wraps it in the characters its
+/// own rendering presents to a sibling. A wrapper has no such characters — the
+/// string pipeline is holding it as its own `\u{96}…\u{97}` placeholder for
+/// every step this module runs — so a sibling reads there exactly what the bare
+/// placeholder already reads as, and the wrapper must stay unwrapped.
+///
+/// The third state is the point of the type. A caller that does **not** hold
+/// the identity says so ([`UNKNOWN`](Self::UNKNOWN)) rather than passing an
+/// empty list, which would claim that *nothing* is a wrapper; an unknown
+/// identity leaves every tag-rendered span with the bare placeholder, which is
+/// the answer that module gave before this reached it at all.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct Masked<'a>(Option<&'a [(usize, usize)]>);
+
+impl<'a> Masked<'a> {
+    /// The identity is not in hand here, so no tag-rendered span is
+    /// classified. See the type's own note for why this is not the same as an
+    /// empty list.
+    pub(super) const UNKNOWN: Self = Self(None);
+
+    /// The identity of every extraction-pass wrapper in this content, as
+    /// [`masked_locations`] collected it.
+    pub(super) fn known(locations: &'a [(usize, usize)]) -> Self {
+        Self(Some(locations))
+    }
+
+    /// Reports whether the node at `location` is one of the wrappers this
+    /// list names — false whenever the identity is not in hand, since an
+    /// unknown identity names nothing.
+    pub(super) fn covers(self, location: Span<'_>) -> bool {
+        self.0
+            .is_some_and(|masked| masked.contains(&span_identity(location)))
+    }
+
+    /// Reports whether what a sibling reads beside the node at `location` is
+    /// that node's own rendering — true only when the identity is in hand
+    /// *and* the node is not one of the wrappers it names.
+    pub(super) fn renders_to_its_siblings(self, location: Span<'_>) -> bool {
+        self.0.is_some() && !self.covers(location)
+    }
+}
+
 /// Reports whether `node` — or anything nested inside it — is hidden from the
 /// escaping step.
 ///
@@ -398,7 +448,12 @@ fn covers_masked(node: &InlineNode<'_>, masked: &[(usize, usize)]) -> bool {
 }
 
 fn identity(node: &InlineNode<'_>) -> (usize, usize) {
-    let location = node.span();
+    span_identity(node.span())
+}
+
+/// [`identity`] for a caller that holds the node's own `location` rather than
+/// the node.
+fn span_identity(location: Span<'_>) -> (usize, usize) {
     (location.byte_offset(), location.data().len())
 }
 

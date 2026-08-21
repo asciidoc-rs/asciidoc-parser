@@ -14,7 +14,10 @@ use links::{email_level, inline_link_level, link_macro_level};
 use ui::{kbd_btn_macros_level, menu_macros_level};
 use xref::xref_macros_level;
 
-use super::quotes::{LevelContext, Piece, emit_range, source_slice, special_entity, text_slice};
+use super::{
+    quotes::{LevelContext, Piece, emit_range, source_slice, special_entity, text_slice},
+    special_chars::Masked,
+};
 use crate::{
     Parser, Span,
     content::restored_entity_pattern,
@@ -130,6 +133,7 @@ pub(super) fn apply_macros<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
+    masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
     // The bibliography anchor (`[[[label]]]`) runs before every other family,
     // exactly as the string step runs its own `INLINE_BIBLIO_ANCHOR` pass
@@ -140,9 +144,9 @@ pub(super) fn apply_macros<'src>(
     // [`apply_macro_families`]'s own recursion, and why it needs no
     // [`LevelContext`] of its own: the top level is the one level nothing
     // encloses.
-    let nodes = biblio_anchor_level(nodes, root, parser);
+    let nodes = biblio_anchor_level(nodes, root, parser, masked);
 
-    apply_macro_families(nodes, root, parser, LevelContext::ROOT)
+    apply_macro_families(nodes, root, parser, LevelContext::ROOT, masked)
 }
 
 /// Applies each macro family at this level — and, first, at every level nested
@@ -182,11 +186,29 @@ pub(super) fn apply_macros<'src>(
 /// children read what stands beside the *span* instead; that is
 /// [`LevelContext::child_contexts`]'s own job, and this function takes the
 /// answer it gives without caring which of the two it is.
+///
+/// # The boundary a sibling presents
+///
+/// The same two families read the character a construct written *beside* a
+/// rendered span presents, which
+/// [`build_match_string`](super::quotes::build_match_string) writes around
+/// that span's own placeholder — and which it can write only for a span the
+/// string pipeline has really rendered, not for the passthrough-extraction
+/// pass's own wrapper (see
+/// [`Masked`]). This step is where `masked` is
+/// carried, and only here, because these two prefix groups are the only
+/// classes in the whole module that read a tag's `>` differently from the
+/// bare placeholder: `**bold**https://example.org` links in the string
+/// pipeline, reading the `>` that ends `</strong>`, where a quote sub's own
+/// `(^|[^\w&;:}])` accepts the two alike. Every other step goes on passing
+/// [`Masked::UNKNOWN`](super::special_chars::Masked::UNKNOWN), which is not a
+/// shortcut but the same answer stated once.
 fn apply_macro_families<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
     ctx: LevelContext,
+    masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
     // Recurse into spans/refs first, matching the string pipeline's
     // whole-string pass. Each nested level is matched in the context its own
@@ -194,19 +216,36 @@ fn apply_macro_families<'src>(
     // comment); a span the built-in backend renders with no markup of its own
     // is transparent, so `child_contexts` hands its children the character its
     // own *siblings* present instead.
-    let contexts = LevelContext::child_contexts(&nodes, ctx);
+    let contexts = LevelContext::child_contexts(&nodes, ctx, masked);
 
     let nodes: Vec<InlineNode<'src>> = nodes
         .into_iter()
         .zip(contexts)
         .map(|(node, inner)| match node {
+            // An extraction wrapper's body is **not** this content's to
+            // substitute. The string pipeline holds it as a sentinel for every
+            // step from here on, and the body was already substituted once —
+            // by the separate, nested `Normal` build the `x-` compatibility
+            // form (`[x-]++text++`) runs it through — so descending here would
+            // apply this step's families to it a *second* time
+            // (`[x-]++**b**https://example.org++` grows an `<a>` inside the
+            // `<a>` that build already made). It is also the one place this
+            // level's `masked` could not answer even if it did descend, since
+            // the list is collected from one content's own top level and knows
+            // nothing of a nested build's nodes.
+            InlineNode::Styled(styled) if masked.covers(styled.location) => {
+                InlineNode::Styled(styled)
+            }
+
             InlineNode::Styled(mut styled) => {
-                styled.children = apply_macro_families(styled.children, root, parser, inner);
+                styled.children =
+                    apply_macro_families(styled.children, root, parser, inner, masked);
                 InlineNode::Styled(styled)
             }
 
             InlineNode::Ref(mut reference) => {
-                reference.children = apply_macro_families(reference.children, root, parser, inner);
+                reference.children =
+                    apply_macro_families(reference.children, root, parser, inner, masked);
                 InlineNode::Ref(reference)
             }
 
@@ -217,45 +256,45 @@ fn apply_macro_families<'src>(
     // The UI macros run before image/icon and only under `experimental`,
     // mirroring the string step's order and gate.
     let nodes = if parser.is_attribute_set("experimental") {
-        let nodes = kbd_btn_macros_level(nodes, root, ctx);
-        menu_macros_level(nodes, root, ctx)
+        let nodes = kbd_btn_macros_level(nodes, root, ctx, masked);
+        menu_macros_level(nodes, root, ctx, masked)
     } else {
         nodes
     };
 
-    let nodes = image_macros_level(nodes, root, parser, ctx);
+    let nodes = image_macros_level(nodes, root, parser, ctx, masked);
 
     // Index terms (`((term))`, `(((primary, secondary)))`, `indexterm:[…]`,
     // `indexterm2:[…]`) run after image/icon and before the link families,
     // mirroring the string step's order.
-    let nodes = indexterm_macros_level(nodes, root, ctx);
+    let nodes = indexterm_macros_level(nodes, root, ctx, masked);
 
     // Auto-links and formal-URL links (`INLINE_LINK`) run after the index-term
     // pass and before the `link:`/`mailto:` macro, mirroring the string step's
     // order (`INLINE_LINK` precedes `INLINE_LINK_MACRO`).
-    let nodes = inline_link_level(nodes, root, parser, ctx);
+    let nodes = inline_link_level(nodes, root, parser, ctx, masked);
 
     // The `link:`/`mailto:` macro runs after the auto-link pass, mirroring the
     // string step's order.
-    let nodes = link_macro_level(nodes, root, parser, ctx);
+    let nodes = link_macro_level(nodes, root, parser, ctx, masked);
 
     // A bare e-mail address (`doc@example.org`) runs after both URL-link
     // families and before the anchor pass, exactly where the string step runs
     // `InlineEmailReplacer` — so an address that is really the tail of a URL, or
     // a `mailto:` macro's own target, is already inside an opaque node (there,
     // already-rendered `<a …>` markup) and is not re-recognized.
-    let nodes = email_level(nodes, root, ctx);
+    let nodes = email_level(nodes, root, ctx, masked);
 
     // Inline anchors (`[[id]]`, `anchor:id[…]`) run after the link families and
     // before cross-references, mirroring the string step's order. (The
     // bibliography-anchor pass the string step runs *first* — a `^`-anchored
     // `[[[id]]]`, recognized only inside a bibliography list item — runs in
     // [`apply_macros`], outside this recursion.)
-    let nodes = anchor_macros_level(nodes, root, ctx);
+    let nodes = anchor_macros_level(nodes, root, ctx, masked);
 
     // Cross-references (`xref:id[…]`) run after the anchor pass, mirroring the
     // string step's order.
-    xref_macros_level(nodes, root, parser, ctx)
+    xref_macros_level(nodes, root, parser, ctx, masked)
 
     // Footnotes are **not** handled here. Every other family's recognition is
     // order-independent (no cross-node side effect), so it is safe for them to
@@ -676,7 +715,10 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use super::{super::test_support::golden_macros_with, apply_macro_side_effects, apply_macros};
+    use super::{
+        super::{special_chars::Masked, test_support::golden_macros_with},
+        apply_macro_side_effects, apply_macros,
+    };
     use crate::{
         Parser, Span,
         content::{
@@ -938,7 +980,7 @@ mod tests {
             location: root,
         });
 
-        let out = apply_macros(vec![reference], root, &Parser::default());
+        let out = apply_macros(vec![reference], root, &Parser::default(), Masked::UNKNOWN);
 
         // The reference survives, and its single child is now the recognized
         // image node.

@@ -1,6 +1,9 @@
 //! The post-replacements substitution step (hard line breaks).
 
-use super::quotes::{Piece, build_match_string, emit_range, source_slice};
+use super::{
+    quotes::{Piece, build_match_string, emit_range, source_slice},
+    special_chars::Masked,
+};
 use crate::{
     Parser, Span, attributes::Attrlist, content::hard_line_break_pattern, inlines::InlineNode,
 };
@@ -58,7 +61,7 @@ fn apply_level<'src>(
         return apply_hardbreaks(nodes, root);
     }
 
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // A break needs a `+`, and — off the root level, where an end-of-level
     // match is discarded below — a `\n` for the pattern's `$` to anchor
@@ -115,7 +118,7 @@ fn apply_level<'src>(
 /// there is none) never gets one, matching the string pipeline leaving the
 /// popped last line unbroken.
 fn apply_hardbreaks<'src>(nodes: Vec<InlineNode<'src>>, root: Span<'src>) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     if !s.contains('\n') {
         return nodes;

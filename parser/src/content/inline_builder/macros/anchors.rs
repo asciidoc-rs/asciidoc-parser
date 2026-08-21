@@ -9,9 +9,12 @@ use crate::{
     Parser, Span,
     content::{
         INLINE_ANCHOR, INLINE_BIBLIO_ANCHOR,
-        inline_builder::quotes::{
-            LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, emit_range,
-            range_overlaps_synthesized, source_slice, text_slice,
+        inline_builder::{
+            quotes::{
+                LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, emit_range,
+                range_overlaps_synthesized, source_slice, text_slice,
+            },
+            special_chars::Masked,
         },
     },
     document::RefType,
@@ -96,12 +99,13 @@ pub(super) fn biblio_anchor_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
+    masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
     if !parser.in_bibliography_list_item.get() {
         return nodes;
     }
 
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter, mirroring the string step's own `text.contains("[[[")`
     // guard: the pattern is `^`-anchored, so only content *starting* with the
@@ -188,8 +192,9 @@ pub(super) fn anchor_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     ctx: LevelContext,
+    masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter: an anchor needs either the shorthand `[[` opener or the
     // `anchor:` macro prefix. The `[` characters are not special, so a shorthand
@@ -673,6 +678,7 @@ mod tests {
     };
     use crate::{
         Parser, Span,
+        content::inline_builder::special_chars::Masked,
         inlines::{Anchor, InlineNode, SpanForm, StyleVariant},
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
@@ -1637,7 +1643,7 @@ mod tests {
             location: root,
         }];
 
-        let out = biblio_anchor_level(nodes, root, &biblio_parser());
+        let out = biblio_anchor_level(nodes, root, &biblio_parser(), Masked::UNKNOWN);
         assert_eq!(out.len(), 1);
         assert!(matches!(out[0], InlineNode::Text { .. }));
     }

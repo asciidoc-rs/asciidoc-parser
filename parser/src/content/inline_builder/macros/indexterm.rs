@@ -6,8 +6,9 @@ use crate::{
     Span,
     content::{
         INLINE_INDEXTERM,
-        inline_builder::quotes::{
-            LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, source_slice,
+        inline_builder::{
+            quotes::{LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, source_slice},
+            special_chars::Masked,
         },
         normalize_index_text, strip_see_and_seealso,
     },
@@ -24,8 +25,9 @@ pub(super) fn indexterm_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     ctx: LevelContext,
+    masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter mirroring the string step's guard: a shorthand needs a
     // `((` … `))` pair (its parens are not special, so they reach the macros

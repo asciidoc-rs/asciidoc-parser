@@ -2,7 +2,10 @@
 
 use regex::Regex;
 
-use super::quotes::{Piece, build_match_string, emit_range, source_slice};
+use super::{
+    quotes::{Piece, build_match_string, emit_range, source_slice},
+    special_chars::Masked,
+};
 use crate::{
     Parser, Span,
     attributes::Attrlist,
@@ -55,7 +58,7 @@ pub(super) fn apply_callouts<'src>(
     parser: &Parser,
     attrlist: Option<&Attrlist<'_>>,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // A callout's opening bracket is always rendered as `&lt;` by
     // `apply_special_characters`, so we can cheaply skip content without any

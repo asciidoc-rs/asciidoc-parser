@@ -6,6 +6,7 @@ use super::{
     macros::{MacroMatch, MacroMatchKind, rebuild_macro_level},
     passthrough_step::passthrough_text,
     quotes::{Piece, build_match_string, emit_range, source_slice},
+    special_chars::Masked,
 };
 use crate::{
     Parser, Span,
@@ -119,7 +120,7 @@ pub(super) fn apply_stem<'src>(
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // Cheap pre-filter mirroring `Passthroughs::extract_from`'s own guard.
     if !(s.contains(':') && (s.contains("stem:") || s.contains("math:"))) {

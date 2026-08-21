@@ -4034,6 +4034,92 @@ Each phase is a reviewable unit with a clear exit gate.
   character where the placeholder says nothing; and the character-replacements step's own
   consume-across-levels case above.
 
+  *Step 6 prep landed as (the extraction pass's identity, and with it the tag-rendered half):*
+  the two increments above both stop at the same place and name the same blocker: a
+  [`Styled`](../../parser/src/inlines/styled.rs) node reaching
+  [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) is not necessarily a span
+  the string pipeline has rendered, because the passthrough-extraction pass builds one of its own for
+  an attribute-list-prefixed passthrough (`[quotes]++text++`) that the pipeline is still holding as
+  its `\u{96}…\u{97}` sentinel for every step this module runs. Both wrappers that pass builds are
+  **tag-rendered**, so classifying a tag-rendered span by its rendering alone would sometimes hand a
+  sibling a `>` the string pipeline does not present — and telling the two apart needs the *identity*
+  [`masked_locations`](../../parser/src/content/inline_builder/special_chars.rs) collects before any
+  step runs. This increment carries that identity into recognition, and closes the half it was
+  blocking.
+
+  The identity travels as a
+  [`Masked`](../../parser/src/content/inline_builder/special_chars.rs), whose point is its **third
+  state**: a caller that does not hold the list says `Masked::UNKNOWN` rather than passing an empty
+  one, which would claim that nothing is a wrapper. An unknown identity leaves every tag-rendered
+  span with the bare placeholder — the answer the module already gave — so every step but one goes on
+  passing it and is byte-identical to before. Only the **macros** step is given the real list, and
+  that is not a shortcut but the scope the previous increment's own note had already drawn: the two
+  classes in the whole module that read a tag's `>` differently from the placeholder are
+  `INLINE_LINK`'s boundary-prefix group and `INLINE_EMAIL`'s mismatch-prefix one, and a quote sub's
+  `(^|[^\w&;:}])` accepts the two alike. `masked_locations` itself becomes unconditional (it had been
+  taken only for the order that escapes late, `flatten_prior_markup`'s own consumer), since a
+  wrapper's identity has to be recorded before any step runs whatever the order is.
+
+  The identity answers for **one content's own** constructs, and one path puts constructs somewhere
+  else: the `x-` compatibility form (`[x-]++text++`) substitutes its body through a *separate,
+  nested* `Normal` build, so a wrapper **that** build extracts is invisible to this content's list.
+  Consulting the list there would find no entry and call the wrapper a rendered span — the one wrong
+  answer the type exists to prevent. Nothing consults it, because the macros step no longer descends
+  into a wrapper at all: a wrapper's body is not this content's to substitute (the string pipeline
+  holds it as a sentinel for every step from here on) and the nested build already substituted it
+  once, so descending had been applying the step's families a *second* time. That was inert while a
+  bare placeholder stopped every boundary class; it stops being inert the moment a span presents a
+  character, which is how `[x-]++**b**https://example.org++` had been growing an `<a>` inside the
+  `<a>` the nested build already made. Skipping the descent is the faithful reading, and it closes
+  that shape rather than deferring it: the fold now matches the string pipeline's bytes exactly.
+
+  With it,
+  [`styled_sibling_boundaries`](../../parser/src/content/inline_builder/quotes.rs) stops being a
+  two-variant special case and becomes what its mirror image
+  [`styled_boundaries`](../../parser/src/content/inline_builder/quotes.rs) already was — every
+  variant answered from its own rendering shape, with the one whose shape its attribute list decides
+  probed. The two entity-rendered variants keep their unconditional answer, because the extraction
+  pass builds neither; a **transparent** span falls out by itself, having no markup to take a
+  character from, and defers with its own note. Nothing else changes: the two characters still belong
+  to no piece, so no gate, slice, or rebuild moves.
+
+  What reaches parity is `**bold**https://example.org` and every tag-rendered variant of it — the
+  string pipeline reads the `>` that ends `</strong>` where the tree read a placeholder belonging to
+  no class, so it linked and the tree did not — together with the reverse direction (a span written
+  against a bare URL's tail, where the `<` that opens the tag is what ends the URL body) and the
+  shape one level in: `*x*[width=10]#doc@example.org#`, where a **transparent** span's own sibling is
+  tag-rendered and
+  [`child_contexts`](../../parser/src/content/inline_builder/quotes.rs) now hands it that same `>`
+  — one of the e-mail pattern's mismatch characters — instead of the `^` it had been inheriting. Both
+  of those were divergence tests the two increments above left behind, and both become parity corpora
+  exactly as their own notes asked. The extraction pass's wrapper keeps its own test, asserting that
+  `[quotes]++x++https://example.org` stays literal in both pipelines — the new divergence this
+  increment would have introduced had it classified by rendering alone.
+
+  Fixtures join the whole-pipeline broad sweep and combined-constructs corpus and the group-parity
+  corpus (what a span presents to a sibling comes from its rendering, which no effective order
+  changes), a unit test pins `styled_sibling_boundaries` against the built-in renderer in all three
+  states of the identity, and a whole-document test drives the shapes end to end through the real
+  parse path. The **structural recorder cross-check** is again the one corpus these shapes do not
+  join, for the reason the increment above recorded: a
+  [`RecordingRenderer`](../../parser/src/content/inline_tree.rs) emits its marker *outside* the
+  markup it wraps, so a later sub reads that marker where the real pipeline reads the markup's own
+  outer character. Re-running the corpus-wide fold-parity audit (tree building forced on for every
+  parse in the suite) shows the divergence set **unchanged** — no golden source in the suite writes a
+  bare URL against a rendered span's closing edge — and, as every increment requires, no new
+  divergence appeared. As with every prep piece before it, nothing further is wired in.
+
+  What still defers is the rest of the same class, now one item shorter and one item unblocked. A
+  **transparent** span read *as* a sibling presents its own body's last character where the
+  placeholder says nothing (`[width=10]##x ##https://example.org`, which the string pipeline links on
+  the space the body ends with), and that was gated on this same identity for the same reason —
+  `[width=10]++x ++` is an extraction wrapper that renders its body and nothing else, so classifying
+  by rendering alone would have been wrong for it too. `Masked` tells the two apart, so the next
+  increment can take it; what it still needs is a way to *read* a transparent span's own outer
+  characters, which are its children's rather than any markup of its own. Beyond that: the **closing**
+  character both the macros step and the increment above decline to half-supply, and the
+  character-replacements step's own consume-across-levels case above.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -4614,6 +4700,28 @@ Each phase is a reviewable unit with a clear exit gate.
        character would be written twice. See the step's own "landed as" note above. What still defers
        is the tag-rendered half, the closing character, a transparent span read *as* a sibling, and
        that consume-across-levels case.
+
+     - ✅ **prep (the extraction pass's identity, and the tag-rendered half it was blocking).** The
+       blocker all three increments above name — a tag-rendered [`Styled`] node may be the
+       passthrough-extraction pass's own wrapper, which the string pipeline holds as a sentinel
+       rather than as markup, and telling one from a rendered span needs
+       [`masked_locations`](../../parser/src/content/inline_builder/special_chars.rs)' identity — is
+       closed by carrying that identity into recognition as a
+       [`Masked`](../../parser/src/content/inline_builder/special_chars.rs), whose third state
+       (`UNKNOWN`) lets a caller say it does not hold the list rather than claim nothing is a
+       wrapper. Only the **macros** step is given the real one, which is the scope the increment
+       above had already drawn: `INLINE_LINK`'s and `INLINE_EMAIL`'s prefix groups are the only
+       classes in the module that read a tag's `>` differently from the bare placeholder. With it,
+       [`styled_sibling_boundaries`](../../parser/src/content/inline_builder/quotes.rs) answers every
+       variant from its own rendering, closing `**bold**https://example.org` (and its reverse, and
+       `*x*[width=10]#doc@example.org#` one level in) while `[quotes]++x++https://example.org`
+       — the new divergence a rendering-only classification would have introduced — stays literal in
+       both, and — because the macros step no longer descends into a wrapper, whose body a *nested*
+       build has already substituted — `[x-]++**b**https://example.org++` folds to the string
+       pipeline's own bytes rather than to an `<a>` nested inside an `<a>`. See the step's own
+       "landed as" note above. What still defers is the closing character,
+       the character-replacements step's consume-across-levels case, and a transparent span read *as*
+       a sibling, which this unblocks but does not take.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

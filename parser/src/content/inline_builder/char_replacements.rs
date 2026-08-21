@@ -1,6 +1,9 @@
 //! The character-replacements substitution step.
 
-use super::quotes::{LevelContext, Piece, build_match_string, emit_range, source_slice};
+use super::{
+    quotes::{LevelContext, Piece, build_match_string, emit_range, source_slice},
+    special_chars::Masked,
+};
 use crate::{
     Span,
     content::{CharacterReplacement, character_replacements, maybe_has_replacements},
@@ -150,7 +153,7 @@ fn replace_level<'src>(
     root: Span<'src>,
     ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // Cheap pre-filter: skip the pattern sweep when nothing replaceable is
     // present at this level.

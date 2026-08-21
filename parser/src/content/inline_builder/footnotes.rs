@@ -6,6 +6,7 @@ use super::{
         image::range_has_no_opaque_piece,
     },
     quotes::{Piece, build_match_string, source_slice, text_slice},
+    special_chars::Masked,
 };
 use crate::{
     Parser, Span,
@@ -73,7 +74,7 @@ pub(super) fn apply_footnotes<'src>(
         return nodes;
     }
 
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // Cheap pre-filter mirroring the string step's `found_macroish &&
     // text.contains("tnote")`: both `footnote:` and the deprecated
@@ -100,7 +101,7 @@ pub(super) fn apply_footnotes<'src>(
 /// could) but allocates no [`InlineNode`], letting a subtree with nothing to
 /// find come back from `apply_footnotes` completely unchanged.
 fn subtree_might_have_footnote(nodes: &[InlineNode<'_>]) -> bool {
-    let (s, _) = build_match_string(nodes);
+    let (s, _) = build_match_string(nodes, Masked::UNKNOWN);
 
     if s.contains("tnote") {
         return true;

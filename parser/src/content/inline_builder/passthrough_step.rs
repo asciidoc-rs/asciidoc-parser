@@ -3,6 +3,7 @@
 use super::{
     macros::{MacroMatch, MacroMatchKind, image::range_is_verbatim, rebuild_macro_level},
     quotes::{Piece, attributes_of, build_match_string, source_slice},
+    special_chars::Masked,
 };
 use crate::{
     Parser, Span,
@@ -164,7 +165,7 @@ fn apply_pass_macro_level<'src>(
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // Cheap pre-filter mirroring `Passthroughs::extract_from`'s own guard: a
     // recognized form always contains `++`, `$$`, or (for `pass:`) `ss:`.
@@ -190,7 +191,7 @@ fn apply_bare_attrlisted_pass_level<'src>(
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // Cheap pre-filter mirroring `Passthroughs::extract_from`'s own guard for
     // `INLINE_PASS`.
