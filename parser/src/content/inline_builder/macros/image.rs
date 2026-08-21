@@ -314,7 +314,12 @@ fn atomic_piece_is_recoverable(nodes: &[InlineNode<'_>], piece: &Piece) -> bool 
 /// family's target, whose recognition needs the placeholder widened to the
 /// sentinel's own shape first ([`widen_masked_passthroughs`]) and whose one
 /// pre-restore computation, the `default_alt` derivation, runs over the
-/// masked bytes itself ([`masked_default_alt`]). A family that *matches
+/// masked bytes itself ([`masked_default_alt`]); and the auto-link /
+/// formal-URL family's target, whose three URL classes swallow either
+/// spelling with no widening at all and whose two pre-restore decisions —
+/// rejecting a quoted URL, stripping a bare one's trailing punctuation — read
+/// a placeholder exactly as the string replacer's own sentinel reads
+/// (`links::build_inline_link_node`). A family that *matches
 /// over* the masked bytes with a class the two spellings answer differently,
 /// or reads them into a value the string pipeline uses **before** restore (a
 /// deferred cross-reference's target, captured into its placeholder template

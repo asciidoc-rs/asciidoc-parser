@@ -4293,11 +4293,71 @@ Each phase is a reviewable unit with a clear exit gate.
   source exercises an image target over a passthrough — and no new divergence appeared. Coverage
   stays diff-neutral. As with every prep piece before it, nothing further is wired in.
 
-  What still defers is the last family of the class: the **auto-link / formal-URL** family, whose
-  boundary-prefix and trailing-strip arithmetic read the masked bytes — the same
-  restore-the-value move, where its own goldens call for it — plus the bracket half above, and the
-  keeps: the cross-reference family's pre-restore target, and the two well-formed readings this
-  increment pinned.
+  *Step 6 prep landed as (an **auto-link / formal-URL** target crossing a passthrough):* the last
+  family of the class, and the only one of the three to need no new mechanism at all — the gates
+  moved onto the values and the computed target learned to finish into the restored bytes, and
+  nothing else changed. **Recognition** needed no widening, unlike the image family's:
+  [`INLINE_LINK`](../../parser/src/content/macros.rs)'s three URL classes each admit the
+  `\u{96}`*n*`\u{97}` sentinel and the tree's one-character placeholder alike (`[^\s\[\]]+` for a
+  formal target, `[^\s]+?` between the angle delimiters, and the bare branch's
+  `[^\s\[\]<]*[^\s,.?!\[\]<\)]`, whose trailing-character half admits the last byte of either
+  spelling), so the two pipelines end the match at the same source construct. The gate then
+  becomes [`range_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs) over the
+  whole range this pass *reads* — the boundary prefix, the scheme, and the URL — rather than over
+  the URL alone, because the URL is the only capture in it a placeholder can reach: this family's
+  boundary-prefix class admits none of the characters
+  [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) stands a piece in as,
+  and its scheme is literal ASCII no single-character piece can supply. The angle path
+  ([`build_angle_link_node`](../../parser/src/content/inline_builder/macros/links.rs)) takes the
+  same swap over its own interior, which *is* the target's range.
+
+  The **boundary-prefix and trailing-strip arithmetic** the note above named as this family's
+  blocker turned out to need no masked reading of its own — it already is one. Both decisions are
+  made before the restore, over the bytes as matched, and a placeholder answers each exactly as the
+  string replacer's sentinel answers it: neither spelling is the `"`/`'` an invalid quoted URL is
+  rejected on, and neither is the `;` or `:` the strip keys off — so a `;` *inside* a passthrough
+  stays in the target in both pipelines (`https://example.org/a++;++`) while a literal one after it
+  is stripped in both (`see https://example.org/++a++; now`). The `hide-uri-scheme` strip is the one
+  place this family is *simpler* than the `link:`/`mailto:` one, which must sniff its masked target
+  because a passthrough can hide the whole scheme there: `INLINE_LINK` requires the scheme to be
+  **literal**, so [`URI_SNIFF`](../../parser/src/content/macros.rs)'s `^`-anchored match covers the
+  same bytes in the masked and restored spellings, leaving the offset a valid cut in the match
+  string — where a bare link's shown text is recovered from, carrying the
+  [`Raw`](../../parser/src/inlines/inline_node.rs) node itself and folding to the restored bytes
+  with no re-escaping, as a bare `link:` macro's does.
+
+  What reaches parity is both documented idioms in every spelling this family has —
+  `https://++example.org/now_this__link_works.html++` and `https://example.orgpass:[/a b]` bare,
+  formal, and angle-bracketed — plus partial masks at either edge, mid-target, and two in one
+  target, the strip in both directions, the other schemes the pattern admits, a display text beside
+  a restored target (carrying markup, its own attribute list, a `^` window suffix, or a passthrough
+  of its own), the triple-plus form, escapes, the link inside a rendered span, and two in one flow;
+  a `hide-uri-scheme` pair pins the strip, structural tests pin the restored target and the
+  `Raw`-child text, and a whole-document test drives the shapes end to end through the real parse
+  path. Re-running the corpus-wide audit shows the divergence set **unchanged** — no golden source
+  exercises an auto-link target over a passthrough (the five that named this class all spell the
+  `link:` macro) — and no new divergence appeared. Coverage stays diff-neutral, and as with every
+  prep piece before it, nothing further is wired in.
+
+  Three shapes are deliberately left where they were, each pinned by its own test. A `"` restored
+  into the target is escaped by the fold's `encode_attribute_value` where the string pipeline
+  encoded its quote-free sentinel and spliced the raw `"` into the finished `href` — closing the
+  attribute it lands in — so the tree's is the well-formed reading, and the one both sibling
+  families' restores already take. An **attribute-list display text** crossing a passthrough keeps
+  the opaque-piece gate inside `text_attrlist`, as its rendered-span sibling does: that text comes
+  back from a *parse*, and a placeholder inside a parsed value has no node to map back to. And a
+  **STEM** expression in the target stays literal: the same extraction pass masks it, and its
+  rendered value is known at build time too, but it builds a [`Stem`](../../parser/src/inlines/stem.rs)
+  node rather than a `Raw` one — a lift worth making for all three families at once rather than
+  here alone, exactly as the `link:`/`mailto:` family left it.
+
+  With this the restore-the-value class is closed for every family that computes a target. What
+  still defers is the **bracket half** — restoring inside each *parsed* attribute-list value (an
+  image's bracket, the three families' attribute-list display texts), where the string pipeline's
+  own parse swallows the sentinel into a value that only restores after the split — the **STEM**
+  half just named, and the keeps: the cross-reference family's pre-restore target (whose golden
+  leaks the raw sentinel into its own `href`), and the four well-formed readings these three
+  increments pinned.
 
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
@@ -4956,6 +5016,25 @@ Each phase is a reviewable unit with a clear exit gate.
        as the tree's well-formed reading with its own test; the staged side effect registers the
        honest restored target. See the step's own "landed as" note above. The auto-link /
        formal-URL family is now the class's last open item.
+
+     - ✅ **prep (an auto-link / formal-URL target crossing a passthrough).** The class's last
+       family, and the only one to need no new mechanism: [`INLINE_LINK`](../../parser/src/content/macros.rs)'s
+       three URL classes admit the sentinel and the placeholder alike — the bare branch's trailing
+       character class included — so recognition agrees with no widening, and the gate simply
+       becomes [`range_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs)
+       over the whole range this pass reads (the URL being the only capture in it a placeholder can
+       reach) and over the angle path's own interior. The boundary-prefix and trailing-strip
+       arithmetic this family was said to be blocked on already runs over the bytes as matched,
+       which a placeholder answers as the sentinel does — no quote, and no `;`/`:` for the strip —
+       and the `hide-uri-scheme` sniff needs no masked reading of its own here, since this
+       family's scheme is literal in the pattern and `URI_SNIFF` covers the same bytes either way.
+       A restored `"` (escaped by the fold where the golden splices it raw into a finished
+       `href`), an attribute-list display text over a passthrough (the parse's own gate), and a
+       **STEM** expression in the target (a `Stem` node, not a `Raw` one — a lift for all three
+       families at once) each defer with their own test; the staged side effect registers the
+       honest restored target. See the step's own "landed as" note above. With this the class is
+       closed for every family that computes a target; the bracket half — restoring inside each
+       *parsed* attribute-list value — is what remains of it.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
