@@ -51,7 +51,9 @@ use crate::{
 ///   slice of that same target — crossing an **opaque** piece: a rendered
 ///   [`Styled`](crate::inlines::Styled) span, or any other construct
 ///   [`build_match_string`] stands in as one [`SPAN_PLACEHOLDER`]. A
-///   **bracketed display text** crossing one is admitted (see below).
+///   **bracketed display text** crossing one is admitted (see below), and so is
+///   a masked **passthrough** anywhere in the target, whose own body the
+///   computed value is finished into (see "A passthrough in the target" below).
 /// - A **bare URL whose stripped trailing punctuation is not its own**: the
 ///   strip keys off the target's final character (`;` or `:`, plus an adjacent
 ///   `)`), and a bare URL ending in an escaped special has an entity there
@@ -130,6 +132,47 @@ use crate::{
 ///   (`…example.org[one, [.hl]#two#]`): the replacer's attribute-list probe
 ///   fires on the markup's own `=`, and the parse then keeps only what precedes
 ///   that comma.
+///
+/// # A passthrough in the target
+///
+/// A masked **passthrough** — a [`Raw`](InlineNode::Raw) piece — is admitted
+/// in the target, the third and last family to take
+/// [`range_is_restorable`]: the string replacer swallows the
+/// `\u{96}`*n*`\u{97}` sentinel into its own target (both target classes
+/// admit it exactly as they admit the tree's placeholder, and the bare
+/// branch's trailing-character class admits the last byte of either spelling,
+/// so the two recognize the same extent — this family needs no widening of
+/// its own, unlike the `image:`/`icon:` one), and
+/// [`Passthroughs::restore_to`](crate::content::Passthroughs) then splices
+/// the extracted body's substituted text over every sentinel in the rendered
+/// string. A `Raw` node's `value` **is** that text, known at build time, so
+/// [`restore_masked_passthroughs`] substitutes it for the placeholder and the
+/// computed target finishes into exactly the restored string's bytes —
+/// `https://++example.org/now_this__link_works.html++` and
+/// `https://example.orgpass:[/a b]`, the two documented idioms, and every
+/// partial mask around them.
+///
+/// Every *decision* stays on the bytes as matched, where the string
+/// replacer's own haystack answers identically: neither a placeholder nor a
+/// sentinel is the `"`/`'` an invalid quoted URL is rejected on, and neither
+/// is the `;` or `:` the trailing-punctuation strip keys off — so a `;`
+/// *inside* a passthrough stays in the target in both pipelines while a
+/// literal one after it is stripped in both. The `hide-uri-scheme` strip needs
+/// no such care here (see [`build_inline_link_node`]). A **bare** link's shown
+/// text, a slice of the target's own range, carries the `Raw` node itself
+/// through [`macro_text_children`], folding to the same restored bytes without
+/// re-escaping.
+///
+/// Two readings are deliberately **not** faithful, each pinned by its own
+/// test. A `"` restored into the target is escaped by the fold's
+/// `encode_attribute_value` where the string pipeline encoded its
+/// quote-free sentinel and spliced the raw `"` into the finished `href` — the
+/// well-formed reading, and the one the two sibling families' restores
+/// already take. And the staged [`apply_link_side_effects`] registers the
+/// node's honest restored target where the string pipeline registers the
+/// sentinel bytes verbatim (its restore rewrites only the rendered string,
+/// never the catalog) — the same wart the cutover declines to reproduce
+/// there.
 ///
 /// An invalid quoted bare URL (`"https://example.org`) and a bare scheme with no
 /// body (`http://;`) are left literal by the string step *and* the builder, so
@@ -320,10 +363,20 @@ fn build_inline_link_node<'src>(
     // An expanded attribute value and an escaped special are admitted
     // throughout, since every value read here comes off the match string —
     // whose bytes are, for both, exactly the ones the string replacer's own
-    // haystack carries there.
+    // haystack carries there. So is a masked **passthrough**, whose bytes the
+    // string replacer's own haystack does *not* carry: the target finishes
+    // into the restored ones below (see [`range_is_restorable`] and
+    // [`restore_masked_passthroughs`]), while every decision made here —
+    // the quoted-prefix rejection, the trailing-punctuation strip, the
+    // `hide-uri-scheme` sniff — stays on the bytes as matched. The gate can
+    // cover the whole computed range rather than the URL alone because the
+    // URL is the only capture in it a placeholder can reach: this family's
+    // boundary-prefix class admits none of the characters
+    // [`build_match_string`] stands a piece in as, and its scheme is literal
+    // ASCII no single-character piece can supply.
     let computed_end = n.attrlist().map_or(full.end, |m| m.start());
 
-    if !range_has_no_opaque_piece(nodes, pieces, &(full.start..computed_end)) {
+    if !range_is_restorable(nodes, pieces, &(full.start..computed_end)) {
         return None;
     }
 
@@ -409,6 +462,28 @@ fn build_inline_link_node<'src>(
             return None;
         }
     }
+
+    // A target crossing a masked **passthrough** finishes into the restored
+    // bytes — the `Raw` node's value substituted for its placeholder, the
+    // same rewrite `Passthroughs::restore_to` performs on the emitted `href`
+    // — and only the node's values take them. Every *decision* the string
+    // replacer makes over the bytes as matched is already behind us (the
+    // quoted-prefix rejection and the trailing-punctuation strip above), each
+    // reading a placeholder exactly as the sentinel-holding haystack reads
+    // its own sentinel: neither spelling is a quote, and neither ends in the
+    // `;` or `:` the strip keys off.
+    //
+    // `target` is the match string's own bytes from the scheme through the
+    // URL — one contiguous run, less whatever the strip truncated — so its
+    // length is the range those bytes span.
+    let restored = restore_masked_passthroughs(
+        &target,
+        &(scheme_m.start()..scheme_m.start() + target.len()),
+        nodes,
+        pieces,
+    );
+
+    let target = restored.unwrap_or(target);
 
     // The display text becomes the node's children, located at the bracketed
     // text (a formal link) or the node itself (a bare link).
@@ -498,7 +573,19 @@ fn build_inline_link_node<'src>(
         // [`build_link_node`]): baking the already-escaped target into one
         // `Text` would have the fold escape it a second time (design §3.4).
         // There is no `\]` unescape here — this text comes from the URL groups,
-        // whose own character classes never admit a bracket.
+        // whose own character classes never admit a bracket. A URL crossing a
+        // masked **passthrough** takes that same structured path, carrying the
+        // [`Raw`](InlineNode::Raw) node itself — which folds to the very bytes
+        // the restore splices into the string pipeline's own shown text.
+        //
+        // The scheme-hiding offset indexes the match string even when
+        // `target` is the restored value, because [`URI_SNIFF`] is
+        // `^`-anchored and strips exactly the scheme, which this family's
+        // pattern requires to be *literal*: the same bytes stand at the front
+        // of the masked and restored spellings alike. (The
+        // `link:`/`mailto:` family, whose target may **be** a passthrough,
+        // scheme and all, has to sniff the masked bytes to agree with its own
+        // replacer — see [`build_link_node`].)
         let hidden_scheme = target.len() - link_text.len();
 
         macro_text_children(
@@ -655,15 +742,26 @@ fn build_angle_link_node<'src>(
 
     let interior = scheme_m.start()..angle_url.end();
 
-    if !range_has_no_opaque_piece(nodes, pieces, &interior) {
+    if !range_is_restorable(nodes, pieces, &interior) {
         return None;
     }
 
-    let target = format!(
+    let masked_target = format!(
         "{scheme}{url}",
         scheme = scheme_m.as_str(),
         url = angle_url.as_str()
     );
+
+    // As in the general path: a masked **passthrough** in the interior
+    // finishes into the restored bytes, which are what the string pipeline's
+    // own `href` and shown text carry once `Passthroughs::restore_to` runs.
+    // This form makes no decision off the bytes as matched at all — it has
+    // neither a quoted-prefix rejection nor a trailing-punctuation strip —
+    // and the interior *is* the target's own range, so the restore covers it
+    // whole.
+    let restored = restore_masked_passthroughs(&masked_target, &interior, nodes, pieces);
+
+    let target = restored.unwrap_or(masked_target);
 
     let link_text = hide_uri_scheme_text(&target, parser);
 
@@ -2147,35 +2245,6 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_url_over_a_passthrough_is_a_documented_divergence() {
-        // The auto-link / formal-URL family keeps the opaque-piece gate over
-        // a masked passthrough: its values are read straight off the match
-        // string (a boundary prefix, the scheme, the trailing-punctuation
-        // arithmetic), so admitting the placeholder there would need the
-        // restore-then-recompute treatment the `link:`/`mailto:` family's
-        // single computed target takes — a later increment's own call. The
-        // string pipeline swallows the sentinel into the URL and restores it.
-        use super::super::super::test_support::golden_passthroughs;
-
-        let source = "see https://example.++org++/x now";
-        let nodes = build_src(Span::new(source));
-
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "a bare URL over a passthrough must stay literal: {nodes:?}"
-        );
-
-        let golden = golden_passthroughs(source);
-
-        assert!(
-            golden.contains("<a href=\"https://example.org/x\""),
-            "expected the documented divergence to still reproduce: {golden:?}"
-        );
-
-        assert_ne!(golden, fold_html(&nodes, &HtmlSubstitutionRenderer {}));
-    }
-
-    #[test]
     fn registers_the_restored_target_for_a_link_macro_over_a_passthrough() {
         // The staged side effect registers the node's own target — the
         // *restored* bytes. The string pipeline registers the sentinel it
@@ -2762,6 +2831,298 @@ mod tests {
     }
 
     #[test]
+    fn fold_matches_the_string_pipeline_for_an_auto_link_target_over_a_passthrough() {
+        // The differential corpus for an auto-link / formal-URL target
+        // crossing a masked **passthrough** — the last family of that class.
+        // The string pipeline swallows the `\u{96}`*n*`\u{97}` sentinel into
+        // the URL (both target classes admit it exactly as they admit the
+        // tree's placeholder, and the bare branch's own trailing character
+        // class admits the last byte of either spelling, so the two recognize
+        // the same extent) and the restore pass then splices the extracted
+        // body over every sentinel in the rendered string, so the tree's
+        // computed target substitutes the `Raw` node's value for its
+        // placeholder the same way (see [`restore_masked_passthroughs`]).
+        use super::super::super::test_support::golden_passthroughs;
+
+        let fixtures = [
+            // The documented `++…++` idiom, which keeps a URL's formatting
+            // characters literal — the asciidoc-lang "now_this__link_works"
+            // shape, here without the `link:` macro around it.
+            "https://++example.org/now_this__link_works.html++",
+            "see https://example.++org++/x now",
+            // A `pass:[…]` target, admitting a space the target class itself
+            // would end the match on.
+            "https://example.orgpass:[/a b]",
+            "https://example.org/++a b++",
+            // A passthrough covering part of the target, at either edge and
+            // in the middle, and two in one target.
+            "https://++example.org/a++[]",
+            "https://example.org/++a__b++[the docs]",
+            "https://example.org/++a++#frag",
+            "https://++a++.++b++.org/x",
+            // The trailing-punctuation strip keys off the target's final
+            // character in both pipelines — a placeholder is no more a `;`
+            // than the sentinel is, so a `;` *inside* the passthrough stays
+            // in the target while a literal one after it is stripped.
+            "see https://example.org/++a++; now",
+            "https://example.org/a++;++",
+            "https://example.org/++a);++",
+            "(https://++example.org/a++)",
+            "See https://example.org/++x++, then.",
+            // The other schemes the pattern admits.
+            "ftp://++files.example.org/pub++",
+            "irc://++chat.example.org/room++",
+            // The angle-bracketed spellings: `<url>`, whose delimiters the
+            // node consumes, and the bracketed one that keeps its `&lt;`.
+            "<https://++example.org/a++>",
+            "<https://example.org/++a b++>",
+            "<https://++example.org/a++[Docs]",
+            // A display text beside a restored target: markup carried
+            // structurally, an attribute list parsed from the verbatim
+            // bracket, a `^` window suffix, and a text that is itself a
+            // passthrough.
+            "https://example.org/++a++[Text with *bold*]",
+            "https://example.org/++a++[T,role=hl]",
+            "https://example.org/++a++[T^]",
+            "https://example.org/++a++[++b++]",
+            // A triple-plus passthrough (no substitutions on the body), and a
+            // body carrying characters the escaping step acts on (its own
+            // subs run at build time, in both pipelines).
+            "https://example.org/+++a_b+++",
+            "https://example.org/++a&b++",
+            // Inside a rendered span, escaped, and two in one flow.
+            "*a https://++example.org/x++ b*",
+            "\\https://++example.org/a++",
+            "https://example.org/++a++ and https://example.org/++b++",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_passthroughs(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn hide_uri_scheme_strips_the_literal_scheme_ahead_of_a_passthrough() {
+        // The `URI_SNIFF` strip that shortens a bare link's shown text needs
+        // no masked-bytes reading of its own here, unlike the
+        // `link:`/`mailto:` family's (`hide_uri_scheme_reads_the_target_as_
+        // matched_over_a_passthrough`): [`INLINE_LINK`] requires a **literal**
+        // scheme, so the same bytes stand at the front of the masked and the
+        // restored spellings alike and the `^`-anchored strip covers exactly
+        // them either way — leaving the offset a valid cut in the match
+        // string, where the shown text's own children are recovered from.
+        use super::super::super::test_support::golden_passthroughs_with;
+        use crate::parser::ModificationContext;
+
+        let parser = Parser::default().with_intrinsic_attribute_bool(
+            "hide-uri-scheme",
+            true,
+            ModificationContext::Anywhere,
+        );
+
+        let fixtures = [
+            // The passthrough right after the scheme, further along the URL,
+            // the formal spelling with an empty text, and the angle form.
+            "https://++example.org/a++",
+            "https://example.org/++a++",
+            "https://++example.org/a++[]",
+            "<https://++example.org/a++>",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = crate::content::inline_builder::fold_html(
+                &build(Span::new(fixture), &parser, None),
+                &renderer,
+                &parser,
+            );
+
+            assert_eq!(
+                folded,
+                golden_passthroughs_with(fixture, &parser),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_auto_link_target_over_a_passthrough_is_recognized() {
+        use super::super::super::test_support::assert_raw;
+
+        // Bare: the target is the restored bytes, and the shown text — a
+        // slice of the URL's own range — carries the `Raw` node itself, which
+        // folds to those same bytes without re-escaping.
+        let nodes = build_src(Span::new("https://++example.org/a__b++"));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "https://example.org/a__b");
+        assert_eq!(reference.roles, [CowStr::from("bare")]);
+        assert_eq!(reference.children.len(), 2);
+        assert_text(&reference.children[0], "https://", 1, 1);
+        assert_raw(&reference.children[1], "example.org/a__b");
+
+        // Labeled: the display text is its own slice, untouched by the
+        // restore, and the node takes no `bare` role.
+        let nodes = build_src(Span::new("https://example.org/++a b++[the docs]"));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "https://example.org/a b");
+        assert_eq!(link_text_of(reference), "the docs");
+        assert!(reference.roles.is_empty());
+
+        // The angle form, whose interior *is* the target's range.
+        let nodes = build_src(Span::new("<https://++example.org/a++>"));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "https://example.org/a");
+        assert_eq!(reference.roles, [CowStr::from("bare")]);
+        assert_eq!(reference.location.data(), "<https://++example.org/a++>");
+    }
+
+    #[test]
+    fn a_quote_restored_into_an_auto_link_target_is_a_documented_divergence() {
+        // A `"` inside the passthrough body reaches the `href` through two
+        // different orders. The string pipeline renders its *sentinel* — which
+        // carries no quote for `encode_attribute_value` to escape — and the
+        // restore then splices the raw `"` into the finished attribute, which
+        // it closes; the fold renders the *restored* target, so the quote is
+        // escaped where it belongs. The tree's is the well-formed reading, and
+        // it is the reading the two sibling families' own restores already
+        // take (`link:++a"b++[]`, `image:++a"b.png++[]`), so this is pinned
+        // rather than corrected.
+        use super::super::super::test_support::golden_passthroughs;
+
+        let source = "https://example.org/++a\"b++";
+        let nodes = build_src(Span::new(source));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "https://example.org/a\"b");
+
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        assert!(
+            folded.contains("href=\"https://example.org/a&quot;b\""),
+            "the fold must escape the restored quote: {folded:?}"
+        );
+
+        let golden = golden_passthroughs(source);
+        assert!(
+            golden.contains("href=\"https://example.org/a\"b\""),
+            "expected the documented divergence to still reproduce: {golden:?}"
+        );
+    }
+
+    #[test]
+    fn a_stem_expression_in_an_auto_link_target_is_a_documented_divergence() {
+        // The gate admits a masked **passthrough** and nothing else opaque —
+        // a rendered span keeps its own boundary
+        // (`a_formal_url_target_over_a_rendered_span_is_a_documented_divergence`),
+        // and so does a **STEM** expression, which the same extraction pass
+        // masks but which builds a [`Stem`](InlineNode::Stem) node rather
+        // than a [`Raw`](InlineNode::Raw) one: its rendered value is known at
+        // build time too, so a restore *could* reach it, but that is the STEM
+        // step's own increment to make across all three families at once —
+        // the `link:`/`mailto:` family left the identical shape
+        // (`link:https://example.org/stem:[x + y][]`) literal. The string
+        // pipeline swallows the sentinel into the URL and restores it.
+        use super::super::super::test_support::golden_passthroughs;
+
+        let source = "https://example.org/stem:[x + y]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a target crossing a STEM expression must stay literal: {nodes:?}"
+        );
+
+        let golden = golden_passthroughs(source);
+
+        assert!(
+            golden.contains("<a href="),
+            "expected the documented divergence to still reproduce: {golden:?}"
+        );
+    }
+
+    #[test]
+    fn an_auto_link_attribute_list_text_over_a_passthrough_is_a_documented_divergence() {
+        // The **display text** carries an opaque piece structurally, but one
+        // that also carries an attribute list comes back from a *parse*, so
+        // it keeps the opaque-piece gate inside [`text_attrlist`] — where a
+        // masked passthrough is opaque like any other placeholder, since a
+        // parsed value has no node to map back to. Deferred with the whole
+        // match left literal, as its rendered-span sibling is
+        // (`a_formal_url_attribute_list_text_over_a_rendered_span_is_a_
+        // documented_divergence`), and independent of the target's own
+        // restore beside it.
+        use super::super::super::test_support::golden_passthroughs;
+
+        let source = "https://example.org/x[++a++,role=hl]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an attribute-list text over a passthrough must stay literal: {nodes:?}"
+        );
+
+        let golden = golden_passthroughs(source);
+
+        assert!(
+            golden.contains("class=\"hl\""),
+            "expected the documented divergence to still reproduce: {golden:?}"
+        );
+    }
+
+    #[test]
+    fn a_real_documents_passthrough_auto_link_targets_fold_to_their_rendered_strings() {
+        // End-to-end, through the real parse path, on the shapes that named
+        // this increment: an auto-link or formal-URL target crossing a
+        // passthrough must finish into the restored bytes the rendered string
+        // carries — the `href` and the bare link's shown text alike — so a
+        // tree that kept it literal, or restored it differently, would
+        // regress the moment `rendered_html()` becomes a fold of this tree.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+            "== A heading\n",
+            "\n",
+            "Read https://++example.org/now_this__link_works.html++ today.\n",
+            "\n",
+            "See https://example.orgpass:[/a b][the docs] or <https://++x.example.org/y++>.\n",
+        ));
+
+        let mut folded_blocks = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &Parser::default()
+                ),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded_blocks += 1;
+        }
+
+        assert_eq!(folded_blocks, 2, "expected every paragraph to carry a tree");
+    }
+
+    #[test]
     fn a_bare_auto_link_becomes_a_ref_node() {
         // A bare URL is a link whose display text is the target and which takes
         // the `bare` role, so the fold reproduces `class="bare"`.
@@ -3337,8 +3698,10 @@ mod tests {
     fn a_formal_url_target_over_a_rendered_span_is_a_documented_divergence() {
         // The **target** is a value this pass computes off the match string,
         // where a rendered span is one opaque placeholder standing in for
-        // markup that exists only at fold time — so the target keeps
-        // `range_has_no_opaque_piece` while the display text lifts it.
+        // markup that exists only at fold time — the one piece
+        // `range_is_restorable` still rejects, unlike a masked passthrough,
+        // whose own body it can finish the target into — while the display
+        // text lifts the gate entirely.
         //
         // If this boundary is ever lifted, fold these fixtures into the parity
         // corpus above.
@@ -4999,6 +5362,29 @@ mod tests {
         apply_link_side_effects(&nodes, &parser);
 
         assert_eq!(parser.catalog().links(), ["mailto:hello@example.org"]);
+    }
+
+    #[test]
+    fn registers_the_restored_target_for_an_auto_link_over_a_passthrough() {
+        // The staged side effect registers the node's own target — the
+        // *restored* bytes — exactly as it does for the two sibling families
+        // (`registers_the_restored_target_for_a_link_macro_over_a_passthrough`).
+        // The string pipeline registers the sentinel it matched
+        // (`"\u{96}0\u{97}"` verbatim, since its restore pass rewrites only
+        // the rendered string, never the catalog), which no consumer can read
+        // anything from; the cutover deliberately adopts the tree's honest
+        // answer rather than reproducing that wart, so this pins the policy
+        // with no golden-catalog comparison.
+        let source = "https://++example.org/a__b++ and <https://++x.example.org/y++>";
+        let parser = Parser::default().with_catalog_assets(true);
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_link_side_effects(&nodes, &parser);
+
+        assert_eq!(
+            parser.catalog().links(),
+            ["https://example.org/a__b", "https://x.example.org/y"]
+        );
     }
 
     #[test]
