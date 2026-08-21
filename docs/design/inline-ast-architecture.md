@@ -3879,6 +3879,85 @@ Each phase is a reviewable unit with a clear exit gate.
   parse in the suite) confirms the divergence set strictly **shrank**: the two e-mail entries are
   gone and no new one appeared. As with every prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (the boundary characters a span presents to its siblings):* the two
+  increments above answer what an enclosing construct presents to the level *inside* it, and both
+  name the same remaining half — a construct written **beside** a rendered span at its own level,
+  where `build_match_string` stands the whole span in as one `SPAN_PLACEHOLDER` belonging to no
+  boundary class at all. This is that half, for the class where the answer is unambiguous.
+
+  The mechanism is the mirror image of a [`LevelContext`](../../parser/src/content/inline_builder/quotes.rs):
+  where that wraps a *level* in the two characters its enclosing construct's rendering presents,
+  [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) now wraps an opaque
+  node's *placeholder* in the two its own rendering presents to a sibling — the **first** character
+  of its opening markup and the **last** of its closing one, read from the same probe
+  [`styled_boundaries`](../../parser/src/content/inline_builder/quotes.rs) takes its own pair from
+  (now factored into one
+  [`probe_styled_boundaries_markup`](../../parser/src/content/inline_builder/quotes.rs) the two read
+  from opposite ends, pinned against the built-in renderer by a test of its own). Those two
+  characters belong to **no piece** — they are the opaque node's markup, and the node already has
+  the placeholder's piece — so a range reaching one contributes nothing, exactly as a
+  `LevelContext`'s do: `emit_range` finds no piece overlapping it, and every gate skips it as
+  non-overlapping. Nothing else in the module changes signature, and no gate, slice, or rebuild
+  changes at all; the one adjustment is in
+  [`s_to_src`](../../parser/src/content/inline_builder/quotes.rs), where a **leading** boundary
+  character is the first offset that ever falls before the first piece and now resolves to that
+  piece's own source start rather than dropping through to the past-the-last fallback.
+
+  Only the **entity-rendered** variants are classified — the two smart quotes, `&#8220;…&#8221;`
+  — and the scope is not about what a variant renders but about what
+  [`styled_sibling_boundaries`](../../parser/src/content/inline_builder/quotes.rs) can *tell*. A
+  `Styled` node reaching `build_match_string` is not necessarily a span the string pipeline has
+  rendered: the passthrough-extraction pass builds one of its own for an attribute-list-prefixed
+  passthrough (`[quotes]++text++`), which the string pipeline is holding as its own
+  `\u{96}…\u{97}` sentinel rather than as markup for every step this module runs. A sibling reads
+  that sentinel — which is exactly what the bare placeholder already reads as to every class in
+  play (both are non-word, and in none of `&;:}`, `[>\(\)\[\];"']`, or `[\\>:/]`) — so leaving such
+  a wrapper unclassified is the *right* answer, not an approximation. Telling one apart from a
+  genuinely rendered span needs the identity
+  [`masked_locations`](../../parser/src/content/inline_builder/special_chars.rs) collects before any
+  step runs, which `build_match_string` does not have, and **both** wrappers that pass builds are
+  tag-rendered; a smart-quote span, which it never builds, can only have come from the quotes step.
+
+  Nothing is lost by drawing the line there, because a tag's `<`/`>` read exactly as the placeholder
+  they would replace does to every *quote* boundary class — the classes that separate a `>` from a
+  placeholder are the **macros** step's two prefix groups, and neither can reach an entity-rendered
+  span at all: the sub that builds one requires a non-word character after its closing `` `" ``,
+  while a URL and a bare address each begin with a word character. So this increment's whole effect
+  lands in the quotes step, which is exactly where the divergence was. Four shapes are closed:
+  ``` "`a`"`code` ```, ``` '`a`'`code` ```, `` "`a`"#mark# ``, and ``` "`a`"'`b`' ``` — each one
+  the string pipeline leaves literal (or, for the last, wraps differently), reading the `;` that
+  ends `&#8221;` where a placeholder said nothing.
+
+  The divergence test the first increment left behind becomes a **parity** corpus, exactly as its own
+  note asked, gaining each construct written against a smart-quote span's outer edge in both
+  directions, the same constructs one character further out (where a space intervenes and both
+  pipelines match), the tag-rendered shapes that were and remain at parity either way, and the same
+  constructs at the content's own top level; a companion test pins that a tag-rendered wrapper still
+  contributes the bare placeholder, asserted on the match string itself since no quote boundary class
+  could tell the two apart. Fixtures are added to the whole-pipeline broad sweep and
+  combined-constructs corpus and to the group-parity corpus (what a span presents to a sibling comes
+  from its rendering, which no effective order changes), and a whole-document test drives the shape
+  end to end through the real parse path. The **structural recorder cross-check** is the one corpus
+  these shapes do not join, and the reason is worth recording: a
+  [`RecordingRenderer`](../../parser/src/content/inline_tree.rs) emits its marker *outside* the
+  markup it wraps, so a later sub matching over the recorded string reads that marker where the real
+  pipeline reads the markup's own last character — the recorder builds a `<code>` span the real
+  pipeline never rendered. That is the same perturbation Phase 1 named when it left special
+  characters and replacements unmarked, it is one-sided (recognition *inside* a span is unaffected,
+  since the marker sits outside the tag or entity pair, which is why the two increments above are
+  cross-checked there normally), and it is now documented in that module's own header. Re-running the
+  corpus-wide fold-parity audit (tree building forced on for every parse in the suite) shows the
+  divergence set **unchanged**: no golden source in the suite writes a construct against a
+  smart-quote span's outer edge, so unlike the six blockers before it this is an unclaimed form
+  rather than a wrong answer for content already under test — and, as every increment requires, no
+  new divergence appeared. As with every prep piece before it, nothing further is wired in.
+
+  What still defers is the rest of the same class: the **tag-rendered** half, which waits on a way to
+  carry `masked_locations`' identity into `build_match_string`; a **transparent** span's siblings
+  (the other half of the class the first increment documents, still needing a level's context derived
+  from its siblings rather than from its enclosing construct alone); and the **closing** character
+  the macros step declines to half-supply.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -4429,6 +4508,20 @@ Each phase is a reviewable unit with a clear exit gate.
        half (a bare URL at an entity-rendered span's own closing edge), a transparent span's
        siblings, and the abutting-placeholder class the e-mail family already documents, each with
        its own divergence test.
+
+     - ✅ **prep (the same boundary, for a span's siblings).** The half both increments above name —
+       a construct written *beside* a rendered span, where
+       [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) stood the whole span
+       in as one placeholder — is closed for the class whose answer is unambiguous: that placeholder
+       is now wrapped in the two characters the span's own rendering presents to a sibling (the first
+       of its opening markup and the last of its closing one, the mirror image of the pair a
+       `LevelContext` carries), which belong to no piece and so change recognition alone. Only the two
+       **entity**-rendered variants are classified, because a `Styled` node here may be the
+       passthrough-extraction pass's own wrapper — which the string pipeline holds as a *sentinel*,
+       reading exactly as the bare placeholder does — and both wrappers that pass builds are
+       tag-rendered; see the step's own "landed as" note above. What still defers is the tag-rendered
+       half (which needs `masked_locations`' identity here), a transparent span's siblings, and the
+       macros step's own closing character, each with its own divergence note.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

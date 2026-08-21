@@ -120,6 +120,25 @@
 //!   fold renders just the number, dropping `id` — so the recorder cannot
 //!   recover it, while the builder still carries it as a structural fact (see
 //!   [`assert_node_equivalent`]'s own `Footnote` arm).
+//! - A construct written **beside** a span, where the sub that recognizes it
+//!   reads the character the span's own rendering ends with (``` "`a`"`code`
+//!   ```, whose `` `code` `` both the real pipeline and the builder leave
+//!   literal because `&#8221;` ends in a `;` the monospace sub's boundary class
+//!   excludes). This one is the recorder's own artifact rather than a builder
+//!   deferral, and it is the seam Phase 1 already named when it left special
+//!   characters and replacements unmarked ("their escaped output is re-consumed
+//!   by later steps, so bracketing it would perturb recognition"): a
+//!   [`RecordingRenderer`] emits its marker *outside* the markup it wraps, so a
+//!   later sub matching over the recorded string reads that marker — which
+//!   belongs to no boundary class — where the real pipeline reads the markup's
+//!   own last character. The recorder therefore builds a span the real pipeline
+//!   never rendered. Recognition **inside** a span is unaffected (the marker
+//!   sits outside the tag or entity pair, so the interior reads the same `>` or
+//!   `;` either way), which is why the sweep's own boundary fixtures one level
+//!   *in* are cross-checked here normally; the sibling shapes are pinned
+//!   instead by the parity corpora in
+//!   [`inline_builder`](crate::content::inline_builder), against the real
+//!   pipeline's own bytes.
 //! - A [`Link`](RefVariant::Link)'s `roles`/`window` fields are not populated
 //!   from its own attribute-list display text (`Ref::attrs`'s own doc comment)
 //!   — the fold reads those straight off `attrs` instead — so they are skipped
