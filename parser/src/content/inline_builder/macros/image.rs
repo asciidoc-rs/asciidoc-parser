@@ -233,28 +233,87 @@ pub(in crate::content::inline_builder) fn range_has_no_opaque_piece(
             continue;
         }
 
-        // The atomic pieces `build_match_string` gives real bytes to are the
-        // three `CharRef` leaves — an escaped special, a restored entity, and
-        // a typographic replacement the built-in backend has a rendering for;
-        // everything else it stands in as one placeholder. The
-        // `replacement_entity` test mirrors that arm's own guard, so a
-        // hand-built node carrying a value no rule produces stays opaque here
-        // exactly as it does there.
-        let recoverable = match nodes.get(piece.node_index) {
-            Some(InlineNode::CharRef {
-                value: CharRef::Special(_) | CharRef::Entity(_),
-                ..
-            }) => true,
+        if !atomic_piece_is_recoverable(nodes, piece) {
+            return false;
+        }
+    }
 
-            Some(InlineNode::CharRef {
-                value: CharRef::Replacement(value),
-                ..
-            }) => replacement_entity(value).is_some(),
+    true
+}
 
-            _ => false,
-        };
+/// Tells whether one [`atomic`](Piece::atomic) piece is a leaf
+/// [`build_match_string`] gives real bytes to — the classification
+/// [`range_has_no_opaque_piece`] applies per overlapping piece (see its own
+/// doc comment for why exactly these three [`CharRef`] leaves qualify).
+fn atomic_piece_is_recoverable(nodes: &[InlineNode<'_>], piece: &Piece) -> bool {
+    // The atomic pieces `build_match_string` gives real bytes to are the
+    // three `CharRef` leaves — an escaped special, a restored entity, and
+    // a typographic replacement the built-in backend has a rendering for;
+    // everything else it stands in as one placeholder. The
+    // `replacement_entity` test mirrors that arm's own guard, so a
+    // hand-built node carrying a value no rule produces stays opaque here
+    // exactly as it does there.
+    match nodes.get(piece.node_index) {
+        Some(InlineNode::CharRef {
+            value: CharRef::Special(_) | CharRef::Entity(_),
+            ..
+        }) => true,
 
-        if !recoverable {
+        Some(InlineNode::CharRef {
+            value: CharRef::Replacement(value),
+            ..
+        }) => replacement_entity(value).is_some(),
+
+        _ => false,
+    }
+}
+
+/// [`range_has_no_opaque_piece`], further admitting a masked **passthrough**
+/// — a [`Raw`](InlineNode::Raw) piece — for a value the caller *restores*
+/// rather than reads: the placeholder's bytes are not the string pipeline's
+/// (its haystack holds the `\u{96}`*n*`\u{97}` sentinel there), but the
+/// passthrough's own substituted body **is** known at build time — it is the
+/// `Raw` node's `value`, the very text
+/// [`Passthroughs::restore_to`](crate::content::Passthroughs) splices over
+/// the sentinel after the steps run — so a computed value that substitutes it
+/// for the placeholder (see [`restore_masked_passthroughs`](super::links))
+/// finishes with exactly the restored string's bytes.
+///
+/// That makes this gate right only for a value whose *recognition* treats the
+/// masked span as one swallowed token and whose *use* happens after restore —
+/// today the `link:`/`mailto:` macro family's **target**, whose
+/// `[^\s\[\]]+` body class swallows the sentinel and the placeholder alike,
+/// and whose bytes reach the output (the `href`, and a bare macro's shown
+/// text) only in the restored rendered string. A family that *matches over*
+/// the masked bytes with a class the two spellings answer differently, or
+/// reads them into a value the string pipeline uses **before** restore (a
+/// deferred cross-reference's target, captured into its placeholder template
+/// with the sentinel still in it — see
+/// `a_deferred_xref_target_over_a_passthrough_is_a_documented_divergence`),
+/// keeps [`range_has_no_opaque_piece`].
+pub(in crate::content::inline_builder) fn range_is_restorable(
+    nodes: &[InlineNode<'_>],
+    pieces: &[Piece],
+    range: &std::ops::Range<usize>,
+) -> bool {
+    for piece in pieces {
+        let p_start = piece.s_start;
+        let p_end = piece.s_start + piece.s_len;
+
+        // Skip pieces that do not overlap the range.
+        if p_end <= range.start || p_start >= range.end {
+            continue;
+        }
+
+        if !piece.atomic {
+            continue;
+        }
+
+        if matches!(nodes.get(piece.node_index), Some(InlineNode::Raw { .. })) {
+            continue;
+        }
+
+        if !atomic_piece_is_recoverable(nodes, piece) {
             return false;
         }
     }
@@ -1119,6 +1178,38 @@ mod tests {
 
         // The string pipeline, by contrast, *does* build an image here.
         assert!(golden_macros(source).contains("<img"));
+    }
+
+    #[test]
+    fn an_image_target_over_a_passthrough_is_a_documented_divergence() {
+        // The image family keeps the opaque-piece gate over a masked
+        // passthrough. Its builder computes more than one value off the
+        // masked bytes — the target feeds `src`, the `default_alt`
+        // derivation (whose basename/extension/`_`/`-` rewrites the string
+        // pipeline applies to the sentinel bytes, so `image:++a_b-c.jpg++[]`
+        // keeps `alt="a_b-c.jpg"` where the verbatim spelling shows `a b c`),
+        // and the registered asset — so the lift needs the
+        // masked-arithmetic-then-restore treatment applied per value, an
+        // increment of its own. The string pipeline swallows the sentinel
+        // into the target and restores it in the rendered `src`.
+        use super::super::super::test_support::golden_passthroughs;
+
+        let source = "image:++sunset.jpg++[Alt]";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
+            "an image target over a passthrough must stay literal: {nodes:?}"
+        );
+
+        let golden = golden_passthroughs(source);
+
+        assert!(
+            golden.contains("src=\"sunset.jpg\""),
+            "expected the documented divergence to still reproduce: {golden:?}"
+        );
+
+        assert_ne!(golden, fold_html(&nodes, &HtmlSubstitutionRenderer {}));
     }
 
     #[test]

@@ -1694,6 +1694,55 @@ mod tests {
     }
 
     #[test]
+    fn a_deferred_xref_target_over_a_passthrough_is_a_documented_divergence() {
+        // The cross-reference family keeps the opaque-piece gate over a
+        // masked passthrough — unlike the `link:`/`mailto:` family, which
+        // restores one into its target — because a deferred cross-reference's
+        // target is used *before* the restore pass can reach it: the string
+        // pipeline captures it into the deferred segment while the haystack
+        // still holds the `\u{96}`*n*`\u{97}` sentinel, and the restore pass
+        // rewrites only the rendered string, so the sentinel bytes leak into
+        // the golden output's own `href` and fallback text. The tree defers
+        // instead and folds the restored literal — the well-formed reading
+        // against the string pipeline's leaked one.
+        use crate::content::Passthroughs;
+
+        let source = "xref:++someid++[]";
+
+        let parser = Parser::default();
+        let mut content = Content::from(Span::new(source));
+        let passthroughs = Passthroughs::extract_from(&mut content, &parser);
+
+        SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
+        SubstitutionStep::Quotes.apply(&mut content, &parser, None);
+        SubstitutionStep::CharacterReplacements.apply(&mut content, &parser, None);
+        SubstitutionStep::Macros.apply(&mut content, &parser, None);
+        SubstitutionStep::PostReplacement.apply(&mut content, &parser, None);
+
+        passthroughs.restore_to(&mut content, &parser);
+        content.finalize_deferred(&HtmlSubstitutionRenderer {});
+
+        let golden = content.rendered_str().to_string();
+
+        assert!(
+            golden.contains('\u{96}'),
+            "expected the string pipeline's sentinel leak to still reproduce: {golden:?}"
+        );
+
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an xref target over a passthrough must stay literal: {nodes:?}"
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            "xref:someid[]"
+        );
+    }
+
+    #[test]
     fn an_xref_attribute_list_text_populates_window_role_and_xrefstyle() {
         // An `xref:` text carrying an `=` splits into an attribute list: the
         // first positional attribute becomes the display text, and the

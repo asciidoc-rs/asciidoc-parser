@@ -2,7 +2,10 @@
 
 use super::{
     MacroMatch, MacroMatchKind, escaped_value_children,
-    image::{range_has_no_opaque_piece, range_is_verbatim, range_is_verbatim_or_synthesized},
+    image::{
+        range_has_no_opaque_piece, range_is_restorable, range_is_verbatim,
+        range_is_verbatim_or_synthesized,
+    },
     macro_text_children, rebuild_macro_level,
 };
 use crate::{
@@ -892,19 +895,24 @@ fn find_link_macro_matches<'src>(
         // The gate covers the bytes the node *reads*, not the whole match. The
         // one value this family computes off the match string is its **target**
         // (group 3; group 2 is the empty-target alternative, which has no bytes
-        // to gate), so only that range needs a match string whose bytes are the
-        // string replacer's own. The bracketed **display text** reads nothing:
-        // it becomes structured children through `macro_text_children`, whose
-        // `emit_range` path carries an opaque piece's own node, so it is
-        // admitted — see [`link_macro_level`]'s own rendered-span note. The
-        // `link:`/`mailto:` marker and the brackets need no gate of their own:
-        // those bytes are literal, and no atomic piece — a placeholder, or an
-        // entity delimited by `&` and `;` — can supply them. (The marker keeps
-        // its own stricter, verbatim gate below, for `link_form`'s sake; a text
-        // carrying an attribute list keeps this same gate inside
-        // `text_attrlist`, since its display text comes back from a *parse*.)
+        // to gate), so only that range needs a match string whose bytes the
+        // builder can finish into the string replacer's own — which for this
+        // family includes a masked **passthrough**, restored into the computed
+        // target exactly as `Passthroughs::restore_to` rewrites the emitted
+        // `href` (see [`range_is_restorable`] and
+        // [`restore_masked_passthroughs`]). The bracketed **display text**
+        // reads nothing: it becomes structured children through
+        // `macro_text_children`, whose `emit_range` path carries an opaque
+        // piece's own node, so it is admitted — see [`link_macro_level`]'s own
+        // rendered-span note. The `link:`/`mailto:` marker and the brackets
+        // need no gate of their own: those bytes are literal, and no atomic
+        // piece — a placeholder, or an entity delimited by `&` and `;` — can
+        // supply them. (The marker keeps its own stricter, verbatim gate
+        // below, for `link_form`'s sake; a text carrying an attribute list
+        // keeps the opaque-piece gate inside `text_attrlist`, since its
+        // display text comes back from a *parse*.)
         if let Some(target) = caps.get(3)
-            && !range_has_no_opaque_piece(nodes, pieces, &(target.start()..target.end()))
+            && !range_is_restorable(nodes, pieces, &(target.start()..target.end()))
         {
             continue;
         }
@@ -942,6 +950,73 @@ fn find_link_macro_matches<'src>(
     }
 
     matches
+}
+
+/// Substitutes each masked **passthrough**'s own substituted body for its
+/// placeholder in `masked` — the match-string bytes at `range`, which is the
+/// same span in the level's match-string coordinates — returning `None` when
+/// the range holds no passthrough (so a caller keeps the bytes it already
+/// has).
+///
+/// This is [`Passthroughs::restore_to`](crate::content::Passthroughs)'s own
+/// rewrite, applied to a *computed value* instead of the rendered string: the
+/// string pipeline's replacer reads the `\u{96}`*n*`\u{97}` sentinel into the
+/// value (a `link:` macro's target, and with it the emitted `href` and a bare
+/// macro's shown text), and the restore pass then splices the extracted
+/// body's substituted text over every sentinel in the rendered string. A
+/// [`Raw`](InlineNode::Raw) node's `value` **is** that substituted text
+/// (`build_passthrough_node` runs the body's own subs at build time), so
+/// substituting it for the placeholder here finishes the value into exactly
+/// the restored string's bytes. Every other byte is kept as matched, which is
+/// what restore does too — it rewrites the sentinels and nothing else.
+pub(super) fn restore_masked_passthroughs(
+    masked: &str,
+    range: &std::ops::Range<usize>,
+    nodes: &[InlineNode<'_>],
+    pieces: &[Piece],
+) -> Option<String> {
+    let mut out = String::new();
+
+    // In match-string coordinates; `masked` is indexed relative to
+    // `range.start`.
+    let mut cursor = range.start;
+
+    for piece in pieces {
+        let p_start = piece.s_start;
+        let p_end = piece.s_start + piece.s_len;
+
+        // Skip pieces that do not overlap the range.
+        if p_end <= range.start || p_start >= range.end {
+            continue;
+        }
+
+        let Some(InlineNode::Raw { value, .. }) = nodes.get(piece.node_index) else {
+            continue;
+        };
+
+        // A `Raw` piece is one placeholder character, atomic and never
+        // sliced, so an overlapping one lies wholly inside the range and
+        // `p_start`/`p_end` are safe bounds.
+        out.push_str(
+            masked
+                .get(cursor.saturating_sub(range.start)..p_start.saturating_sub(range.start))
+                .unwrap_or_default(),
+        );
+        out.push_str(value.as_ref());
+        cursor = p_end;
+    }
+
+    if cursor == range.start {
+        return None;
+    }
+
+    out.push_str(
+        masked
+            .get(cursor.saturating_sub(range.start)..)
+            .unwrap_or_default(),
+    );
+
+    Some(out)
 }
 
 /// Builds one [`Ref`](InlineNode::Ref) link node from a recognized
@@ -996,16 +1071,37 @@ pub(super) fn build_link_node<'src>(
     let is_mailto = caps.get(1).is_some();
     let target_str = caps.get(3).map_or("", |m| m.as_str());
 
+    // A target crossing a masked **passthrough** finishes into the restored
+    // bytes — the `Raw` node's value substituted for its placeholder, the same
+    // rewrite `Passthroughs::restore_to` performs on the emitted `href` — and
+    // only the node's computed values take them. Every *decision* the string
+    // replacer makes over the bytes as matched (the `URI_SNIFF` strip below)
+    // stays on `target_str`, whose placeholder the sentinel-holding haystack
+    // answers the same way.
+    let restored = caps.get(3).and_then(|m| {
+        restore_masked_passthroughs(m.as_str(), &(m.start()..m.end()), nodes, pieces)
+    });
+
+    let restored_target_str = restored.as_deref().unwrap_or(target_str);
+
     let mut target = if is_mailto {
-        format!("mailto:{target_str}")
+        format!("mailto:{restored_target_str}")
     } else {
-        target_str.to_string()
+        restored_target_str.to_string()
     };
 
     // A `link:` target whose scheme could execute script is neutralized by the
     // string step (left literal); mirror that by deferring — the node would
     // otherwise render a live, dangerous link. `mailto:` carries its own safe
     // scheme and is exempt.
+    //
+    // The check reads the *restored* target, which for a scheme smuggled
+    // inside a passthrough (`link:++javascript:...++[]`) is deliberately
+    // **stricter** than the string pipeline: its replacer checks the masked
+    // haystack, where the sentinel hides the scheme, so it emits a live
+    // dangerous link the restore then completes. That is the one place this
+    // increment chooses the safe reading over byte parity — see
+    // `a_dangerous_scheme_inside_a_passthrough_is_a_documented_divergence`.
     if !is_mailto && has_dangerous_scheme(&target) {
         return None;
     }
@@ -1121,10 +1217,18 @@ pub(super) fn build_link_node<'src>(
                 // target. A strip that would leave nothing falls back to the
                 // whole target, mirroring the string replacer's own
                 // `if lt.is_empty()` guard.
+                //
+                // Sniffed over the bytes as *matched* (`target_str`, not the
+                // restored `target`): the string replacer sniffs its own
+                // haystack, where a scheme inside a passthrough is hidden
+                // behind the sentinel — so `link:++https://x++[]` shows its
+                // scheme even under `hide-uri-scheme`, and the strip offset,
+                // being a match of literal ASCII the placeholder cannot take
+                // part in, indexes the restored bytes identically.
                 URI_SNIFF
-                    .find(&target)
+                    .find(target_str)
                     .map(|m| m.end())
-                    .filter(|end| *end < target.len())
+                    .filter(|end| *end < target_str.len())
                     .unwrap_or(0)
             } else {
                 0
@@ -1871,6 +1975,226 @@ mod tests {
                 "fold diverged from the string pipeline for {fixture:?}"
             );
         }
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_for_a_link_macro_target_over_a_passthrough() {
+        // The differential corpus for a `link:`/`mailto:` target crossing a
+        // masked **passthrough** — the string pipeline swallows the
+        // `\u{96}`*n*`\u{97}` sentinel into the target (its class admits it as
+        // it admits the placeholder) and the restore pass then splices the
+        // extracted body over every sentinel in the rendered string, so the
+        // tree's computed target substitutes the `Raw` node's value for its
+        // placeholder the same way (see [`restore_masked_passthroughs`]).
+        // These are the documented idioms: `++…++` to keep a target's
+        // formatting characters literal, and `pass:[…]` to admit characters
+        // the target class itself rejects (a space).
+        use super::super::super::test_support::golden_passthroughs;
+
+        let fixtures = [
+            // The double-plus idiom, bare and labeled — the asciidoc-lang
+            // "now_this__link_works" fixture's own shape.
+            "link:++https://example.org/now_this__link_works.html++[]",
+            "link:++https://example.org/a__b__c.html++[the docs]",
+            // A `pass:[…]` target carrying a space — a byte the target class
+            // itself excludes, which only the sentinel lets through.
+            "link:pass:[My Documents/report.pdf][Get Report]",
+            // A `pass:c[…]` target, and an attribute list on the (empty)
+            // display text beside it.
+            "link:pass:c[https://example.org/no such file.adoc][role=include]",
+            // A passthrough covering only part of the target, at either edge.
+            "link:https://++example.org/a++[]",
+            "link:a++b c++d[T]",
+            // `mailto:`, bare and labeled, and with a subject/body attrlist
+            // in the text beside the restored target.
+            "mailto:++a@example.org++[]",
+            "mailto:++a@example.org++[Write us]",
+            "mailto:++a@example.org++[Subject line,Hello]",
+            // A labeled text with markup, and the macro inside a rendered
+            // span.
+            "link:++https://example.org/x++[the *docs*]",
+            "*a link:++https://example.org/x++[] b*",
+            // An attribute list on a labeled text beside a restored target.
+            "link:++x y++[T,role=hl]",
+            // A triple-plus passthrough (no substitutions on the body).
+            "link:+++a_b+++[T]",
+            // Escaped: the backslash drops and the rest stays literal — the
+            // passthrough's own restore still applies, in both pipelines.
+            "\\link:++https://example.org/x++[]",
+            // Two in one flow.
+            "link:++a b++[A] then link:pass:[c d][C]",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_passthroughs(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn hide_uri_scheme_reads_the_target_as_matched_over_a_passthrough() {
+        // The `URI_SNIFF` strip runs over the bytes as *matched*, exactly as
+        // the string replacer sniffs its own sentinel-holding haystack: a
+        // scheme hidden inside the passthrough is invisible to the strip (the
+        // shown text keeps it), while a verbatim scheme prefix ahead of the
+        // passthrough is stripped — and the offset, a match of literal ASCII
+        // the placeholder cannot take part in, indexes the restored bytes
+        // identically.
+        use super::super::super::test_support::golden_passthroughs_with;
+        use crate::parser::ModificationContext;
+
+        let parser = Parser::default().with_intrinsic_attribute_bool(
+            "hide-uri-scheme",
+            true,
+            ModificationContext::Anywhere,
+        );
+
+        let fixtures = [
+            // Scheme inside the passthrough: no strip, full URL shown.
+            "link:++https://example.org/a++[]",
+            // Scheme verbatim ahead of it: stripped, suffix shown.
+            "link:https://++example.org/a++[]",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = crate::content::inline_builder::fold_html(
+                &build(Span::new(fixture), &parser, None),
+                &renderer,
+                &parser,
+            );
+
+            assert_eq!(
+                folded,
+                golden_passthroughs_with(fixture, &parser),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_link_macro_target_over_a_passthrough_is_recognized() {
+        use super::super::super::test_support::assert_raw;
+
+        // Bare: the target is the restored bytes, and the shown text is the
+        // `Raw` node itself, carried structurally (it folds to the same
+        // restored bytes without re-escaping).
+        let nodes = build_src(Span::new("link:++https://example.org/a__b++[]"));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "https://example.org/a__b");
+        assert_eq!(reference.roles, [CowStr::from("bare")]);
+        assert_eq!(reference.children.len(), 1);
+        assert_raw(&reference.children[0], "https://example.org/a__b");
+
+        // Labeled: the display text is its own slice, untouched by the
+        // restore.
+        let nodes = build_src(Span::new("link:pass:[My Documents/report.pdf][Get Report]"));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "My Documents/report.pdf");
+        assert_eq!(link_text_of(reference), "Get Report");
+        assert!(reference.roles.is_empty());
+    }
+
+    #[test]
+    fn a_dangerous_scheme_inside_a_passthrough_is_a_documented_divergence() {
+        // The one place this increment chooses the safe reading over byte
+        // parity. The string replacer's dangerous-scheme check reads its own
+        // masked haystack, where the sentinel hides the scheme — so
+        // `link:++javascript:...++[]` passes its check and the restore then
+        // completes a live `javascript:` link in the golden output. The
+        // builder checks the *restored* target instead and defers, leaving
+        // the text literal (the passthrough's own restore still applies to
+        // it), exactly as both pipelines treat the unmasked
+        // `link:javascript:...[x]` spelling.
+        use super::super::super::test_support::golden_passthroughs;
+
+        for source in [
+            "link:++javascript:alert(1)++[]",
+            "link:++javascript:alert(1)++[Click]",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+                "a dangerous restored scheme must stay literal: {nodes:?}"
+            );
+
+            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+
+            assert!(
+                !folded.contains("<a "),
+                "the fold must not emit a live link: {folded:?}"
+            );
+
+            // The string pipeline, by contrast, emits one.
+            let golden = golden_passthroughs(source);
+
+            assert!(
+                golden.contains("href=\"javascript:"),
+                "expected the documented divergence to still reproduce: {golden:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bare_url_over_a_passthrough_is_a_documented_divergence() {
+        // The auto-link / formal-URL family keeps the opaque-piece gate over
+        // a masked passthrough: its values are read straight off the match
+        // string (a boundary prefix, the scheme, the trailing-punctuation
+        // arithmetic), so admitting the placeholder there would need the
+        // restore-then-recompute treatment the `link:`/`mailto:` family's
+        // single computed target takes — a later increment's own call. The
+        // string pipeline swallows the sentinel into the URL and restores it.
+        use super::super::super::test_support::golden_passthroughs;
+
+        let source = "see https://example.++org++/x now";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a bare URL over a passthrough must stay literal: {nodes:?}"
+        );
+
+        let golden = golden_passthroughs(source);
+
+        assert!(
+            golden.contains("<a href=\"https://example.org/x\""),
+            "expected the documented divergence to still reproduce: {golden:?}"
+        );
+
+        assert_ne!(golden, fold_html(&nodes, &HtmlSubstitutionRenderer {}));
+    }
+
+    #[test]
+    fn registers_the_restored_target_for_a_link_macro_over_a_passthrough() {
+        // The staged side effect registers the node's own target — the
+        // *restored* bytes. The string pipeline registers the sentinel it
+        // matched (`"\u{96}0\u{97}"` verbatim, since its restore pass rewrites
+        // only the rendered string, never the catalog), which no consumer can
+        // read anything from; the cutover deliberately adopts the tree's
+        // honest answer rather than reproducing that wart, so this pins the
+        // policy with no golden-catalog comparison.
+        let source =
+            "link:++https://example.org/a__b++[] and link:pass:[My Documents/report.pdf][R]";
+        let parser = Parser::default().with_catalog_assets(true);
+        let nodes = build_with(Span::new(source), &parser);
+
+        apply_link_side_effects(&nodes, &parser);
+
+        assert_eq!(
+            parser.catalog().links(),
+            ["https://example.org/a__b", "My Documents/report.pdf"]
+        );
     }
 
     #[test]
@@ -4474,6 +4798,50 @@ mod tests {
         );
 
         assert_eq!(folded, "https://example.orgx");
+    }
+
+    #[test]
+    fn a_real_documents_passthrough_link_targets_fold_to_their_rendered_strings() {
+        // End-to-end, through the real parse path, on the shapes that named
+        // this increment: a `link:`/`mailto:` target wrapped in (or crossing)
+        // a passthrough must finish into the restored bytes the rendered
+        // string carries, so a tree that kept it literal — or restored it
+        // differently — would regress the moment `rendered_html()` becomes a
+        // fold of this tree.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+            "== A heading\n",
+            "\n",
+            "This URL has repeating underscores ",
+            "link:++https://example.org/now_this__link_works.html++[].\n",
+            "\n",
+            "See link:pass:[My Documents/report.pdf][Get Report] or ",
+            "mailto:++a@example.org++[] today.\n",
+        ));
+
+        let mut folded_blocks = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &Parser::default()
+                ),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded_blocks += 1;
+        }
+
+        assert_eq!(folded_blocks, 2, "expected every paragraph to carry a tree");
     }
 
     #[test]
