@@ -3808,6 +3808,77 @@ Each phase is a reviewable unit with a clear exit gate.
   gone and no pre-existing one appeared (the set's only additions are this increment's own new
   divergence-pinning fixtures). As with every prep piece before it, nothing further is wired in.
 
+  *Step 6 prep landed as (the same boundary characters, for the macros step's own families):*
+  the increment above closes the boundary question for the two steps whose *rules* read one, and
+  names the third — "the **macros** step's own families read a boundary character too … and each
+  finds its matches through its own `find_*_matches`, so giving them the context is a step-shaped
+  increment of its own" — as its own next piece. This is that piece.
+
+  Two of the step's families read the character immediately before a match: the auto-link's
+  boundary-prefix group (`( ^ | [\ \t\p{Zs}] | [>\(\)\[\];"'] )`) and the bare e-mail's
+  "prefix that causes a mismatch" one (`([\\>:/]?)`). Inside a span the string pipeline reads that
+  span's own rendered markup there, so `*doc@example.org*` keeps the address literal — `<strong>`
+  ends in `>`, one of the e-mail pattern's three mismatch characters — where a level matched in
+  isolation shows a start anchor and links it. That was the divergence the increment above pinned
+  with a test of its own; it is now parity, and its fixtures are folded into the corpora exactly as
+  that test's own note asked.
+
+  [`apply_macro_families`](../../parser/src/content/inline_builder/macros/mod.rs) therefore carries
+  the [`LevelContext`](../../parser/src/content/inline_builder/quotes.rs) down the same recursion
+  the two other steps take (a span's own rendering for its children, `INSIDE_REF` for a reference's,
+  the enclosing context inherited through a transparent span) and hands it to every family. What
+  differs is how a family *uses* it. `Quotes` and `CharacterReplacements` map each reported offset
+  back with [`unshift`](../../parser/src/content/inline_builder/quotes.rs); a macro family cannot,
+  because it does not merely report ranges — it reads the match string's own bytes through the
+  level's [`Piece`](../../parser/src/content/inline_builder/quotes.rs)s (`emit_range`,
+  `source_slice`, each of the three range gates), so haystack offsets and level offsets must not
+  coexist. A new [`LevelContext::shift`](../../parser/src/content/inline_builder/quotes.rs) removes
+  the second coordinate system instead of translating between them: it wraps the level's match
+  string and moves its pieces into the wrapped string's own coordinates, so nothing else in the
+  module changes signature and every gate and slice goes on reading one system. The context
+  characters belong to no piece — they are the *enclosing* construct's — so a range reaching one
+  contributes nothing, which is exactly what `unshift`'s own clip does (a boundary prefix is text
+  the enclosing span already carries).
+
+  Only the **opening** character is applied, and the asymmetry is the point. A *boundary* class
+  reads exactly one character, so one character answers it: `<strong>` ends in `>` and `&#8220;` in
+  `;`, which is precisely what these two groups inspect. A macro
+  *body* class consumes greedily instead — the bare URL's own `[^\s\[\]<]*` excludes a `<` (so a
+  tag-rendered span's closing markup already stops it in both pipelines) but admits an `&`, and at a
+  smart quote's closing `&#8220;…&#8221;` the string pipeline swallows the whole entity into the
+  target and leaves a stray `;` behind. Supplying the level one `&` would build a *third*,
+  differently wrong target, so the closing character is dropped rather than half-supplied and that
+  shape stays exactly as divergent as it already was, with a divergence test of its own. The other
+  spellings read no character before their match at all — each is anchored on a literal (`image:`,
+  `kbd:`, `menu:`, `indexterm`, `((`, `[[`, `anchor:`, `&lt;&lt;`, `xref:`, `link:`, `mailto:`) no
+  context character can begin — so for them the wrap is inert, and they take it for uniformity
+  rather than for effect. The bibliography anchor takes none: its pattern is `^`-anchored to the
+  content's own top level, the one level nothing encloses.
+
+  Two shapes stay divergent besides the closing half, each pinned by its own test. A **transparent**
+  span — one rendering to its body and nothing else — has its children inherit the context it
+  sits in, which is right when the span is all its parent's level holds and wrong when a
+  **sibling**
+  precedes it (`*x [width=10]#doc@example.org#*`, where the string pipeline reads the space that
+  sibling ends with): the transparent-span half of the class the increment above already documents
+  for its own steps, and closing it still means deriving a level's context from its siblings. And an
+  address **abutting** an opaque piece keeps the deferral
+  [`email_level`](../../parser/src/content/inline_builder/macros/links.rs) already documents — a
+  placeholder belongs to no mismatch class, one level out from what a context answers.
+
+  The e-mail and auto-link families each gain a differential corpus of their own construct written
+  against a span's edge in every variant's rendering shape (tag-rendered and entity-rendered), the
+  same constructs away from either edge, the escaped spellings, a replacement or restored entity in
+  the boundary position, and the same fixtures at the content's own top level, alongside a
+  structural assertion that the deferred address builds no node. Fixtures are added to the
+  whole-pipeline broad sweep and combined-constructs corpus, to the group-parity corpus (a span's
+  boundary comes from its rendering, which no effective order changes), and to the structural
+  recorder cross-check, where the recorder — recovering what actually rendered — reads the
+  string pipeline's own answer; a whole-document test drives both decisions end to end through the
+  real parse path. Re-running the corpus-wide fold-parity audit (tree building forced on for every
+  parse in the suite) confirms the divergence set strictly **shrank**: the two e-mail entries are
+  gone and no new one appeared. As with every prep piece before it, nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -4341,6 +4412,23 @@ Each phase is a reviewable unit with a clear exit gate.
        level out (a construct *beside* a span, where the placeholder belongs to no boundary class),
        the macros step's own families, and a transparent span's siblings, each with its own
        divergence test.
+
+     - ✅ **prep (the same boundary, for the macros step).** The third of the categories the
+       increment above names — the **macros** step's own boundary-reading families, the
+       auto-link's prefix group and the bare e-mail's mismatch-prefix one — takes the context too,
+       closing
+       `*doc@example.org*` (which the string pipeline leaves literal, reading the `>` that ends
+       `<strong>`). `apply_macro_families` carries a `LevelContext` down its own recursion to every
+       family, but where the two other steps map each offset back with `unshift`, a macro family
+       reads the match string's *bytes* through the level's `Piece`s — so a new
+       [`LevelContext::shift`](../../parser/src/content/inline_builder/quotes.rs) moves those pieces
+       into the wrapped string's coordinates instead, leaving one coordinate system and no shared
+       signature changed. Only the **opening** character is applied: a boundary class reads one
+       character, while a macro body class consumes greedily and would swallow a half-supplied
+       closing one. See the step's own "landed as" note above. What still defers is that closing
+       half (a bare URL at an entity-rendered span's own closing edge), a transparent span's
+       siblings, and the abutting-placeholder class the e-mail family already documents, each with
+       its own divergence test.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

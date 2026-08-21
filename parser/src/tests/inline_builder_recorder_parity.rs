@@ -824,6 +824,16 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "*-- x*",
         "[.r]#x --#",
         r#""`x --`""#,
+        // The same seam for the macros step's own boundary-reading families —
+        // the bare e-mail's mismatch prefix and the auto-link's boundary
+        // prefix — where the recorder, recovering what actually rendered,
+        // reads the string pipeline's own answer.
+        "*doc@example.org*",
+        "_doc@example.org writes_",
+        r#""`doc@example.org`""#,
+        "*write to doc@example.org now*",
+        "*https://example.org*",
+        r#""`https://example.org[Docs]`""#,
         "   ",
         "a\nb\nc",
     ];

@@ -7,7 +7,7 @@ use crate::{
     content::{
         INLINE_IMAGE_MACRO, basename,
         inline_builder::quotes::{
-            Piece, build_match_string, replacement_entity, source_slice, text_slice,
+            LevelContext, Piece, build_match_string, replacement_entity, source_slice, text_slice,
         },
         normalize_text_lf_escaped_bracket,
     },
@@ -24,6 +24,7 @@ pub(super) fn image_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
+    ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
@@ -32,6 +33,11 @@ pub(super) fn image_macros_level<'src>(
     if !((s.contains("image:") || s.contains("icon:")) && s.contains('[')) {
         return nodes;
     }
+
+    // Matched over the level wrapped in the boundary character its enclosing
+    // construct presents, with the level's own pieces moved into that string's
+    // coordinates — see `apply_macro_families`'s own doc comment.
+    let (s, pieces) = ctx.shift(s, pieces);
 
     let matches = find_image_matches(&s, &pieces, root, parser, &nodes);
 

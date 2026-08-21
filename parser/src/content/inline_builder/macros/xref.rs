@@ -9,7 +9,7 @@ use crate::{
     attributes::{Attrlist, AttrlistContext},
     content::{
         INLINE_XREF,
-        inline_builder::quotes::{Piece, build_match_string, source_slice},
+        inline_builder::quotes::{LevelContext, Piece, build_match_string, source_slice},
         xref_target::{
             XrefTarget, interpret_xref_target, other_document_reference, this_document_reference,
         },
@@ -82,6 +82,7 @@ pub(super) fn xref_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
+    ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
@@ -94,6 +95,11 @@ pub(super) fn xref_macros_level<'src>(
     if !s.contains("xref:") && !s.contains("&lt;&lt;") {
         return nodes;
     }
+
+    // Matched over the level wrapped in the boundary character its enclosing
+    // construct presents, with the level's own pieces moved into that string's
+    // coordinates — see `apply_macro_families`'s own doc comment.
+    let (s, pieces) = ctx.shift(s, pieces);
 
     let matches = find_xref_matches(&nodes, &s, &pieces, root, parser);
 

@@ -5,7 +5,9 @@ use crate::{
     Span,
     content::{
         INLINE_KBD_BTN_MACRO, INLINE_MENU_MACRO,
-        inline_builder::quotes::{Piece, build_match_string, source_slice, text_slice},
+        inline_builder::quotes::{
+            LevelContext, Piece, build_match_string, source_slice, text_slice,
+        },
         normalize_index_text, split_kbd_keys,
     },
     inlines::{InlineNode, Ui, UiKind},
@@ -30,12 +32,18 @@ const SUBMENU_DELIMITER: &str = "&gt;";
 pub(super) fn kbd_btn_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
+    ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
     if !(s.contains(":[") && (s.contains("kbd:") || s.contains("btn:"))) {
         return nodes;
     }
+
+    // Matched over the level wrapped in the boundary character its enclosing
+    // construct presents, with the level's own pieces moved into that string's
+    // coordinates — see `apply_macro_families`'s own doc comment.
+    let (s, pieces) = ctx.shift(s, pieces);
 
     let matches = find_kbd_btn_matches(&nodes, &s, &pieces, root);
 
@@ -190,12 +198,18 @@ fn build_kbd_btn_node<'src>(
 pub(super) fn menu_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
+    ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
     if !(s.contains("menu:") && s.contains('[')) {
         return nodes;
     }
+
+    // Matched over the level wrapped in the boundary character its enclosing
+    // construct presents, with the level's own pieces moved into that string's
+    // coordinates — see `apply_macro_families`'s own doc comment.
+    let (s, pieces) = ctx.shift(s, pieces);
 
     let matches = find_menu_matches(&nodes, &s, &pieces, root);
 

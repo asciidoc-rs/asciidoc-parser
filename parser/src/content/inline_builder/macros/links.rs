@@ -11,7 +11,9 @@ use crate::{
     content::{
         INLINE_EMAIL, INLINE_LINK, INLINE_LINK_MACRO, NormalizedCaps, URI_SNIFF,
         encode_uri_component, extract_attributes_from_text,
-        inline_builder::quotes::{Piece, SPAN_PLACEHOLDER, build_match_string, source_slice},
+        inline_builder::quotes::{
+            LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, source_slice,
+        },
     },
     inlines::{InlineNode, Ref, RefVariant},
     parser::has_dangerous_scheme,
@@ -135,6 +137,7 @@ pub(super) fn inline_link_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
+    ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
@@ -143,6 +146,11 @@ pub(super) fn inline_link_level<'src>(
     if !s.contains("://") {
         return nodes;
     }
+
+    // Matched over the level wrapped in the boundary character its enclosing
+    // construct presents, with the level's own pieces moved into that string's
+    // coordinates — see `apply_macro_families`'s own doc comment.
+    let (s, pieces) = ctx.shift(s, pieces);
 
     let matches = find_inline_link_matches(&nodes, &s, &pieces, root, parser);
 
@@ -807,6 +815,7 @@ pub(super) fn link_macro_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
+    ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
@@ -815,6 +824,11 @@ pub(super) fn link_macro_level<'src>(
     if !((s.contains("link:") || s.contains("mailto:")) && s.contains('[')) {
         return nodes;
     }
+
+    // Matched over the level wrapped in the boundary character its enclosing
+    // construct presents, with the level's own pieces moved into that string's
+    // coordinates — see `apply_macro_families`'s own doc comment.
+    let (s, pieces) = ctx.shift(s, pieces);
 
     let matches = find_link_macro_matches(&nodes, &s, &pieces, root, parser);
 
@@ -1378,6 +1392,7 @@ fn text_attrlist<'src>(
 pub(super) fn email_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
+    ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes);
 
@@ -1386,6 +1401,11 @@ pub(super) fn email_level<'src>(
     if !s.contains('@') {
         return nodes;
     }
+
+    // Matched over the level wrapped in the boundary character its enclosing
+    // construct presents, with the level's own pieces moved into that string's
+    // coordinates — see `apply_macro_families`'s own doc comment.
+    let (s, pieces) = ctx.shift(s, pieces);
 
     let matches = find_email_matches(&nodes, &s, &pieces, root);
 
@@ -2555,6 +2575,76 @@ mod tests {
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),
             golden_macros(source)
         );
+    }
+
+    #[test]
+    fn an_auto_link_at_a_spans_own_edge_reads_that_spans_boundary_characters() {
+        // `INLINE_LINK`'s non-angle branch requires a boundary prefix
+        // (`( ^ | [\ \t\p{Zs}] | [>\(\)\[\];"'] )`), which inside a span the
+        // string pipeline reads out of that span's own rendered markup. Every
+        // shape a [`LevelContext`](super::super::quotes::LevelContext) can
+        // present — the `>` ending a tag and the `;` ending a smart quote's
+        // entity — is in that class, so the URL is recognized on both sides of
+        // the seam; this pins that the context the macros step now takes
+        // leaves that agreement intact rather than turning a start anchor into
+        // a prefix the class rejects.
+        for source in [
+            "*https://example.org*",
+            "_https://example.org_",
+            "`https://example.org`",
+            "[.hl]#https://example.org#",
+            "*https://example.org[Docs]*",
+            r#"He said "`https://example.org[Docs]`" ok."#,
+            r#"He said '`https://example.org[Docs]`' ok."#,
+            // Away from either edge, and with the boundary prefix the level
+            // itself supplies.
+            "*see https://example.org now*",
+            r#""`see https://example.org now`""#,
+            // An escaped scheme at a span's own edge still drops its backslash.
+            "*\\https://example.org*",
+            // The `link:`/`mailto:` macro and the angle-bracketed form read no
+            // boundary of their own, so they are unaffected either way.
+            "*link:index.html[Docs]*",
+            "*mailto:doc@example.org[Write]*",
+            "*<https://example.org>*",
+            // And the same at the content's own top level.
+            "https://example.org",
+            "see https://example.org now",
+        ] {
+            assert_eq!(
+                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                golden_macros(source),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bare_url_at_an_entity_rendered_spans_closing_edge_is_a_documented_divergence() {
+        // The closing half of the same seam, which no single character can
+        // answer — and which the macros step therefore does not take (see
+        // [`LevelContext::shift`](super::super::quotes::LevelContext)).
+        // A boundary class reads exactly one character, but a bare URL's own
+        // body class (`[^\s\[\]<]*`) consumes greedily: it excludes a `<`, so
+        // a tag-rendered span's closing markup stops it in both pipelines, and
+        // it admits an `&`, so at a smart quote's closing `&#8220;…&#8221;` the
+        // string pipeline swallows the whole entity into the target and leaves
+        // a stray `;` behind. Supplying the level one `&` would build a third,
+        // differently wrong target, so the closing character is dropped rather
+        // than half-supplied and the tree keeps the well-formed reading — the
+        // same shape as the quotes step's own crossed-delimiter divergence.
+        let source = r#"He said "`https://example.org`" ok."#;
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+
+        assert_ne!(
+            golden_macros(source),
+            folded,
+            "expected the documented divergence to still reproduce"
+        );
+
+        // The string pipeline's own reading is the markup-perturbed one.
+        assert!(golden_macros(source).contains("https://example.org&#8221"));
+        assert!(folded.contains(r#"href="https://example.org""#));
     }
 
     #[test]
@@ -3983,6 +4073,148 @@ mod tests {
         );
 
         assert!(golden_macros(source).contains(r#"href="https://example.org""#));
+    }
+
+    #[test]
+    fn an_address_at_a_spans_own_edge_reads_that_spans_boundary_characters() {
+        // The mismatch-prefix group reads the character immediately before the
+        // address, and inside a span the string pipeline reads that span's own
+        // *rendered* markup there: `<strong>` ends in `>`, one of the group's
+        // three mismatch characters, so `*doc@example.org*` keeps the address
+        // literal where a level matched in isolation sees a start anchor and
+        // links it. The macros step takes the same
+        // [`LevelContext`](super::super::quotes::LevelContext) the quotes and
+        // character-replacements steps do, so the two pipelines agree again.
+        for source in [
+            // Against a span's opening edge, in each variant's own rendering
+            // shape. Every tag-rendered variant ends its opening markup in `>`
+            // — a mismatch character — so the address stays literal in both.
+            "*doc@example.org*",
+            "_doc@example.org writes_",
+            "`doc@example.org`",
+            "#doc@example.org#",
+            "^doc@example.org^",
+            "~doc@example.org~",
+            "**doc@example.org**",
+            "[.hl]#doc@example.org#",
+            // The two smart-quote variants end theirs in the `;` of an entity,
+            // which is *not* a mismatch character — so both pipelines link the
+            // address there.
+            r#"He said "`doc@example.org`" today."#,
+            r#"He said '`doc@example.org`' today."#,
+            // Away from the opening edge, where the character before the
+            // address is the level's own text in both pipelines.
+            "*write to doc@example.org now*",
+            "*a doc@example.org b*",
+            r#""`write to doc@example.org now`""#,
+            // An escape at a span's own edge still drops its backslash: the
+            // prefix group takes the `\` rather than the context character.
+            "*\\doc@example.org*",
+            // A replacement or a restored entity before the address presents
+            // its own last character (`;` of the entity the built-in backend
+            // renders), which is no mismatch character in either pipeline.
+            "*(C)doc@example.org*",
+            "*&copy;doc@example.org*",
+            // And the same addresses at the content's own top level, where a
+            // level's start is exactly what the string pipeline presents.
+            "doc@example.org",
+            "write to doc@example.org now",
+        ] {
+            assert_eq!(
+                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                golden_macros(source),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_address_at_a_tag_rendered_spans_edge_builds_no_node() {
+        // The parity above, read structurally: the address is left as literal
+        // text rather than recognized into a link the string pipeline does not
+        // build.
+        let nodes = build_src(Span::new("*doc@example.org*"));
+        let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
+
+        assert!(
+            children.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an address at a span's own edge must stay literal: {children:?}"
+        );
+    }
+
+    #[test]
+    fn an_address_after_a_transparent_spans_sibling_is_a_documented_divergence() {
+        // An unquoted span whose attribute list resolves to neither a role nor
+        // an id renders to its body and nothing else, so its children inherit
+        // the context the span itself sits in
+        // ([`LevelContext::inside_styled`](super::super::quotes::LevelContext)).
+        // That is right whenever the span is all its parent's level holds and
+        // wrong when a *sibling* precedes it: the string pipeline's haystack
+        // shows what that sibling ends with (a space here) where the inherited
+        // context still shows the enclosing `<strong>`'s own `>`, so the
+        // address stays literal here and links there.
+        //
+        // This is the transparent-span half of the same class the quotes and
+        // character-replacements steps already document
+        // (`a_replacement_beside_a_transparent_span_is_a_documented_divergence`);
+        // closing it means deriving a level's context from its *siblings*
+        // rather than from its enclosing construct alone. If that lands, fold
+        // this fixture into the parity corpus above.
+        let source = "*x [width=10]#doc@example.org#*";
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+
+        assert_ne!(
+            golden_macros(source),
+            folded,
+            "expected the documented divergence to still reproduce"
+        );
+
+        assert!(!folded.contains("mailto:"), "{folded:?}");
+        assert!(golden_macros(source).contains("mailto:doc@example.org"));
+    }
+
+    #[test]
+    fn a_real_documents_span_edge_addresses_fold_to_their_rendered_strings() {
+        // End-to-end, through the real parse path, on the shapes that named
+        // this increment: an address written against a span's own edge must
+        // stay literal (as the string pipeline leaves it) and one written
+        // against a smart quote's must link, so a tree that decided either the
+        // other way would regress the moment `rendered_html()` becomes a fold
+        // of this tree.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+            "== A heading\n",
+            "\n",
+            "Mail *doc@example.org* or _doc@example.org writes_ here.\n",
+            "\n",
+            "He said \"`doc@example.org`\" and *https://example.org* too.\n",
+        ));
+
+        let mut folded_blocks = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &Parser::default()
+                ),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded_blocks += 1;
+        }
+
+        // The two paragraphs; the section that contains them holds no inline
+        // content of its own and is skipped.
+        assert_eq!(folded_blocks, 2, "expected both paragraphs to be checked");
     }
 
     #[test]
