@@ -9,7 +9,10 @@ use crate::{
     attributes::{Attrlist, AttrlistContext},
     content::{
         INLINE_XREF,
-        inline_builder::quotes::{LevelContext, Piece, build_match_string, source_slice},
+        inline_builder::{
+            quotes::{LevelContext, Piece, build_match_string, source_slice},
+            special_chars::Masked,
+        },
         xref_target::{
             XrefTarget, interpret_xref_target, other_document_reference, this_document_reference,
         },
@@ -83,8 +86,9 @@ pub(super) fn xref_macros_level<'src>(
     root: Span<'src>,
     parser: &Parser,
     ctx: LevelContext,
+    masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter: both the `xref:` macro form and the `<<id>>` shorthand
     // (seen here as `&lt;&lt;id&gt;&gt;`, since specials run before macros) are

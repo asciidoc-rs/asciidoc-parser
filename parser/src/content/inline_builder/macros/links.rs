@@ -11,8 +11,9 @@ use crate::{
     content::{
         INLINE_EMAIL, INLINE_LINK, INLINE_LINK_MACRO, NormalizedCaps, URI_SNIFF,
         encode_uri_component, extract_attributes_from_text,
-        inline_builder::quotes::{
-            LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, source_slice,
+        inline_builder::{
+            quotes::{LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, source_slice},
+            special_chars::Masked,
         },
     },
     inlines::{InlineNode, Ref, RefVariant},
@@ -138,8 +139,9 @@ pub(super) fn inline_link_level<'src>(
     root: Span<'src>,
     parser: &Parser,
     ctx: LevelContext,
+    masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter mirroring the string step's guard: an auto-link needs a
     // `://` scheme separator somewhere in the level.
@@ -816,8 +818,9 @@ pub(super) fn link_macro_level<'src>(
     root: Span<'src>,
     parser: &Parser,
     ctx: LevelContext,
+    masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter mirroring the string step's guard: a link/mailto macro
     // needs its prefix and an opening bracket.
@@ -1393,8 +1396,9 @@ pub(super) fn email_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     ctx: LevelContext,
+    masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter mirroring the string step's own `text.contains('@')`
     // guard.
@@ -4055,24 +4059,96 @@ mod tests {
     }
 
     #[test]
-    fn an_auto_link_abutting_a_rendered_span_is_a_documented_divergence() {
+    fn an_auto_link_abutting_a_rendered_span_reads_that_spans_own_markup() {
         // The mirror image of the boundary above, in the sibling auto-link
         // family, which predates the e-mail pass: `INLINE_LINK`'s own
         // boundary-prefix group *requires* one of `^`, a blank, or
-        // `[>()\[\];"']`. The string pipeline reads `</strong>`'s own `>`
-        // there and builds a link; the placeholder standing in for the span
-        // here belongs to no such class, so the pattern simply fails to match
-        // and the URL is left literal. Pinned here so the two directions of
-        // this one boundary are recorded together.
-        let source = "**bold**https://example.org";
+        // `[>()\[\];"\']`. The string pipeline reads `</strong>`'s own `>`
+        // there and builds a link, where the bare placeholder standing in for
+        // the span belongs to no such class — so this is the one boundary a
+        // `>` and a placeholder read *differently*, and the reason the identity
+        // that tells a rendered span from an extraction-pass wrapper has to
+        // reach recognition at all.
+        for source in [
+            // A bare URL against each tag-rendered variant's closing edge. The
+            // string pipeline reads the `>` that ends the tag and links; so
+            // does the tree, now that the placeholder carries it.
+            "**bold**https://example.org",
+            "__em__https://example.org",
+            "``code``https://example.org",
+            "##mark##https://example.org",
+            "^sup^https://example.org",
+            "~sub~https://example.org",
+            "[.r]##a##https://example.org",
+            "[#a]##b##https://example.org",
+            "**bold**ftp://example.org",
+            // The two entity-rendered variants end their closing markup in the
+            // `;` of an entity, which that group does *not* accept — so both
+            // pipelines leave the URL literal, exactly as before.
+            r#""`q`"https://example.org"#,
+            r#"'`q`'https://example.org"#,
+            // One character further out, where a space intervenes and both
+            // pipelines match on the space itself.
+            "**bold** https://example.org",
+            // And with no span at all, where the level's own start anchor is
+            // what the string pipeline presents too.
+            "https://example.org",
+            "see https://example.org now",
+            // The reverse direction: a span written against a bare URL's own
+            // tail. The `<` that opens the tag is what ends the URL body
+            // (`[^\s\[\]<]*` excludes it) in the string pipeline, and now
+            // here as well.
+            "https://example.org**bold**",
+            "https://example.org\"`q`\"",
+            // A formal-URL link's own boundary-prefix group is the same one.
+            "**bold**https://example.org[Site]",
+        ] {
+            assert_eq!(
+                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                golden_macros(source),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_auto_link_abutting_a_rendered_span_builds_a_link() {
+        // The parity above, read structurally: the tree really recognizes the
+        // URL rather than merely folding to the same bytes some other way.
+        let nodes = build_src(Span::new("**bold**https://example.org"));
+
+        assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Unconstrained);
+
+        assert_eq!(
+            assert_link(&nodes[1]).target.as_ref(),
+            "https://example.org"
+        );
+    }
+
+    #[test]
+    fn an_auto_link_abutting_a_passthrough_wrapper_stays_literal() {
+        // The half the identity exists to protect. An attribute-list-prefixed
+        // passthrough builds a [`Styled`](crate::inlines::Styled) wrapper that
+        // renders `<span class="quotes">…</span>` — but the string pipeline is
+        // holding it as its own `\u{96}…\u{97}` sentinel for every step this
+        // module runs, so the boundary-prefix group sees no `>` and the URL
+        // stays literal. Classifying it by its *rendering* would have made this
+        // the increment's own new divergence.
+        use super::super::super::test_support::golden_passthroughs;
+
+        let source = "[quotes]++x++https://example.org";
         let nodes = build_src(Span::new(source));
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "a URL abutting a rendered span must be left unrecognized: {nodes:?}"
+            "a URL abutting a masked wrapper must stay literal: {nodes:?}"
         );
 
-        assert!(golden_macros(source).contains(r#"href="https://example.org""#));
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs(source),
+            "fold diverged for {source:?}"
+        );
     }
 
     #[test]
@@ -4134,11 +4210,13 @@ mod tests {
             // The auto-link family reads the same character through its own
             // boundary-prefix group.
             "*x [width=10]#https://example.org#*",
-            // A **tag-rendered** span beside the transparent one says nothing
-            // this module can act on, so the span goes on inheriting: `^` here,
-            // which the auto-link's prefix group accepts exactly as it accepts
-            // the `>` the string pipeline reads there.
+            // A **tag-rendered** span beside the transparent one presents the
+            // `>` its own closing markup ends in, which the string pipeline
+            // reads there too — a mismatch character for the e-mail family and
+            // an accepted prefix for the auto-link one.
+            "*x*[width=10]#doc@example.org#",
             "*x*[width=10]#https://example.org#",
+            "``code``[width=10]#doc@example.org#",
             // And the same addresses at the content's own top level, where a
             // level's start is exactly what the string pipeline presents.
             "doc@example.org",
@@ -4197,33 +4275,31 @@ mod tests {
     }
 
     #[test]
-    fn an_address_after_a_transparent_spans_tag_rendered_sibling_is_a_documented_divergence() {
-        // The half a transparent span's own siblings cannot answer. What
-        // precedes the span here is a **tag-rendered** span, which
-        // [`build_match_string`](super::super::quotes::build_match_string)
-        // stands in as a bare [`SPAN_PLACEHOLDER`] belonging to no boundary
-        // class — so
+    fn an_address_after_a_transparent_spans_tag_rendered_sibling_stays_literal() {
+        // The half a transparent span's own siblings could not answer until
+        // the identity reached
+        // [`build_match_string`](super::super::quotes::build_match_string).
+        // What precedes the span here is a **tag-rendered** span, which now
+        // contributes the `>` that ends `</strong>` rather than a bare
+        // placeholder — so
         // [`LevelContext::child_contexts`](super::super::quotes::LevelContext)
-        // reports nothing and the transparent span inherits `^`, where the
-        // string pipeline reads the `>` that ends `<strong>` — one of the bare
-        // e-mail pattern's three mismatch characters.
-        //
-        // This is the same tag-rendered half `styled_sibling_boundaries`
-        // already defers one level out, for the same reason: telling a
-        // genuinely rendered span from the passthrough-extraction pass's own
-        // wrapper needs `masked_locations`' identity, which neither has. If
-        // that lands, fold this fixture into the parity corpus above.
+        // hands the transparent span that `>`, one of the bare e-mail
+        // pattern's three mismatch characters, and the address stays literal
+        // exactly as the string pipeline leaves it.
         let source = "*x*[width=10]#doc@example.org#";
-        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+        let nodes = build_src(Span::new(source));
 
-        assert_ne!(
-            golden_macros(source),
-            folded,
-            "expected the documented divergence to still reproduce"
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_macros(source)
         );
 
         assert_eq!(golden_macros(source), "<strong>x</strong>doc@example.org");
-        assert!(folded.contains("mailto:doc@example.org"), "{folded:?}");
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "an address after a tag-rendered sibling must stay literal: {nodes:?}"
+        );
     }
 
     #[test]

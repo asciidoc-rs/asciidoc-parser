@@ -6,8 +6,12 @@ use crate::{
     attributes::{Attrlist, AttrlistContext},
     content::{
         INLINE_IMAGE_MACRO, basename,
-        inline_builder::quotes::{
-            LevelContext, Piece, build_match_string, replacement_entity, source_slice, text_slice,
+        inline_builder::{
+            quotes::{
+                LevelContext, Piece, build_match_string, replacement_entity, source_slice,
+                text_slice,
+            },
+            special_chars::Masked,
         },
         normalize_text_lf_escaped_bracket,
     },
@@ -25,8 +29,9 @@ pub(super) fn image_macros_level<'src>(
     root: Span<'src>,
     parser: &Parser,
     ctx: LevelContext,
+    masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter mirroring the string step's `found_macroish`: an image
     // or icon macro needs its name prefix and an opening bracket.
@@ -531,6 +536,7 @@ mod tests {
         HasSpan, Parser, Span,
         content::inline_builder::{
             build, char_replacements::apply_character_replacements, macros::apply_macros,
+            special_chars::Masked,
         },
         inlines::{Image, InlineNode, SpanForm, StyleVariant},
         parser::HtmlSubstitutionRenderer,
@@ -1103,6 +1109,7 @@ mod tests {
             build_through_special_and_replacements(Span::new(source)),
             Span::new(source),
             &Parser::default(),
+            Masked::UNKNOWN,
         );
 
         assert!(

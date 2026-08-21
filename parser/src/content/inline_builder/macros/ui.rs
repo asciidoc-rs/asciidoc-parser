@@ -5,8 +5,9 @@ use crate::{
     Span,
     content::{
         INLINE_KBD_BTN_MACRO, INLINE_MENU_MACRO,
-        inline_builder::quotes::{
-            LevelContext, Piece, build_match_string, source_slice, text_slice,
+        inline_builder::{
+            quotes::{LevelContext, Piece, build_match_string, source_slice, text_slice},
+            special_chars::Masked,
         },
         normalize_index_text, split_kbd_keys,
     },
@@ -33,8 +34,9 @@ pub(super) fn kbd_btn_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     ctx: LevelContext,
+    masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, masked);
 
     if !(s.contains(":[") && (s.contains("kbd:") || s.contains("btn:"))) {
         return nodes;
@@ -199,8 +201,9 @@ pub(super) fn menu_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     ctx: LevelContext,
+    masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, masked);
 
     if !(s.contains("menu:") && s.contains('[')) {
         return nodes;

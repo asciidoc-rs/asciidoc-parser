@@ -124,7 +124,8 @@
 //!   reads the character the span's own rendering ends with (``` "`a`"`code`
 //!   ```, whose `` `code` `` both the real pipeline and the builder leave
 //!   literal because `&#8221;` ends in a `;` the monospace sub's boundary class
-//!   excludes). This one is the recorder's own artifact rather than a builder
+//!   excludes; `**bold**https://example.org`, which both link because
+//!   `</strong>` ends in a `>` the auto-link's prefix group accepts). This one is the recorder's own artifact rather than a builder
 //!   deferral, and it is the seam Phase 1 already named when it left special
 //!   characters and replacements unmarked ("their escaped output is re-consumed
 //!   by later steps, so bracketing it would perturb recognition"): a

@@ -374,7 +374,8 @@ use passthrough_step::apply_passthroughs;
 use post_replacements::apply_post_replacements;
 use quotes::apply_quotes;
 use special_chars::{
-    apply_special_characters, classify_unescaped_specials, flatten_prior_markup, masked_locations,
+    Masked, apply_special_characters, classify_unescaped_specials, flatten_prior_markup,
+    masked_locations,
 };
 use stem_step::apply_stem;
 
@@ -522,23 +523,21 @@ pub(crate) fn build_for_group<'src>(
         nodes = apply_stem(nodes, location, parser);
     }
 
-    // A `subs=` list can put the escaping step *after* a step that already
-    // produced markup, and there the string pipeline escapes the tags that
-    // step wrote. Recording what the extraction pass masked — before any step
-    // runs — is what lets `flatten_prior_markup` tell those tags from a
-    // passthrough body the escaping step never touches; see its own doc
-    // comment. The walk is skipped entirely for the overwhelmingly common
-    // order that escapes first (or never).
-    let escapes_late = steps
-        .iter()
-        .position(|step| step == &SubstitutionStep::SpecialCharacters)
-        .is_some_and(|position| position > 0);
-
-    let masked = if escapes_late {
-        masked_locations(&nodes)
-    } else {
-        vec![]
-    };
+    // What the extraction pass masked, recorded — as it must be — *before* any
+    // step runs, since a wrapper is told from an ordinary span by its identity
+    // alone. Two consumers read it, which is why it is taken unconditionally
+    // rather than only for the order that needs the first:
+    //
+    //   - `flatten_prior_markup`, for a `subs=` list that puts the escaping step
+    //     *after* a step that already produced markup: the string pipeline escapes
+    //     the tags that step wrote, and this is what tells those from a passthrough
+    //     body the escaping step never touches.
+    //
+    //   - recognition itself (`build_match_string`, via `Masked`), for every order:
+    //     a sibling reads a rendered span's own markup, and a wrapper — which the
+    //     string pipeline is still holding as a `\u{96}…\u{97}` placeholder —
+    //     presents no markup to read.
+    let masked = masked_locations(&nodes);
 
     for (position, step) in steps.iter().enumerate() {
         nodes = match step {
@@ -595,7 +594,7 @@ pub(crate) fn build_for_group<'src>(
                 // resolved at every level — see `apply_footnotes`'s doc
                 // comment for why this cannot be folded into `apply_macros`
                 // as an ordinary level pass.
-                let nodes = apply_macros(nodes, location, parser);
+                let nodes = apply_macros(nodes, location, parser, Masked::known(&masked));
                 apply_footnotes(nodes, location, parser)
             }
 
@@ -865,6 +864,18 @@ mod tests {
             r##""`a`"#mark#"##,
             r#""`a`"'`b`'"#,
             r#""`a`" `code`"#,
+            // And the **tag**-rendered half of the same seam, told from the
+            // passthrough-extraction pass's own wrapper by the identity the
+            // macros step now carries: the string pipeline reads the `>` that
+            // ends `</strong>` where the tree used to hold a bare placeholder.
+            "**bold**https://example.org",
+            "__em__https://example.org",
+            "``code``https://example.org",
+            "[.r]##a##https://example.org",
+            "**bold** https://example.org",
+            "https://example.org**bold**",
+            "**bold**doc@example.com",
+            "[quotes]++x++https://example.org",
             // The macros step's own boundary-reading families at the same
             // seam: the bare e-mail's mismatch prefix and the auto-link's
             // boundary prefix.
@@ -1368,6 +1379,16 @@ mod tests {
         // literal, and the surrounding constructs still resolve normally.
         assert_parity(r##"He said "`hello`"`code` and then "`bye`"#mark# alone."##);
         assert_parity(r#"Quoting "`one`"'`two`' back to back, plus a *bold* run."#);
+
+        // The **tag**-rendered half of that seam, in the one family that can
+        // tell a `>` from the placeholder: `INLINE_LINK`'s boundary-prefix
+        // group accepts the `>` a closing tag ends with, so both pipelines
+        // link a URL written straight against a span's outer edge — while the
+        // extraction pass's own wrapper, which the string pipeline is still
+        // holding as a sentinel, presents no such character and leaves it
+        // literal in both.
+        assert_parity("A **bold**https://example.org run and __em__https://example.org too.");
+        assert_parity("Then [quotes]++x++https://example.org stays literal.");
 
         // The same seam for the **macros** step, whose bare e-mail and
         // auto-link families read a boundary character of their own: a
@@ -1905,6 +1926,7 @@ mod tests {
                 // **sibling** likewise comes from its rendering, not from the
                 // order.
                 r#""`a`"`code` and a < b"#,
+                "**bold**https://example.org and a < b",
                 // The same for the macros step's own boundary-reading
                 // families, whose decision likewise comes from the enclosing
                 // span's rendering rather than from the order.

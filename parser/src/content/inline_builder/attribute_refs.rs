@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use super::{
     passthrough_step::is_special,
     quotes::{Piece, build_match_string, emit_range, source_slice},
+    special_chars::Masked,
 };
 use crate::{
     Parser, Span,
@@ -331,7 +332,7 @@ fn resolve_counters<'nodes, 'src>(
     parser: &Parser,
     out: &mut HashMap<usize, String>,
 ) {
-    let (s, pieces) = build_match_string(nodes);
+    let (s, pieces) = build_match_string(nodes, Masked::UNKNOWN);
 
     // A counter match's `name`/`seed` borrow from `s`, a local match string
     // that does not outlive this call, so they are owned rather than
@@ -465,7 +466,7 @@ fn attribute_references_level<'src>(
     span_drops: &[usize],
     specials: SplicedSpecials,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // A span that forces a line drop is named by node index; the line decision
     // works in match-string offsets. Translating here (rather than in
@@ -553,7 +554,7 @@ fn styled_drop_indices(nodes: &[InlineNode<'_>], parser: &Parser) -> Vec<usize> 
 /// Recognition is [`find_attribute_matches`]'s own, so the two cannot disagree
 /// about what counts as a missing reference.
 fn subtree_has_missing_reference(nodes: &[InlineNode<'_>], parser: &Parser) -> bool {
-    let (s, _) = build_match_string(nodes);
+    let (s, _) = build_match_string(nodes, Masked::UNKNOWN);
 
     if s.contains('{')
         && find_attribute_matches(&s, parser, MissingHandling::DropLine)

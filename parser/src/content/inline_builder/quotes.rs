@@ -2,7 +2,10 @@
 
 use std::{borrow::Cow, ops::Range};
 
-use super::macros::image::{range_has_no_opaque_piece, range_is_verbatim};
+use super::{
+    macros::image::{range_has_no_opaque_piece, range_is_verbatim},
+    special_chars::Masked,
+};
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
@@ -161,7 +164,22 @@ impl LevelContext {
     /// [`inside_styled`](Self::inside_styled), and
     /// `a_replacement_beside_a_transparent_span_is_a_documented_divergence`
     /// keeps its shape.
-    pub(super) fn child_contexts(nodes: &[InlineNode<'_>], enclosing: Self) -> Vec<Self> {
+    ///
+    /// # What a neighbour can be read as
+    ///
+    /// Because the answer is read out of the match string, it is exactly as
+    /// good as what [`build_match_string`] could write there — so `masked` is
+    /// passed straight through. A caller holding the extraction pass's
+    /// identity gets the `>` a tag-rendered neighbour's own closing markup
+    /// ends with; one that does not gets the bare [`SPAN_PLACEHOLDER`], which
+    /// [`preceding_character`] reports as *nothing* rather than as a
+    /// character. Both are right for what their caller knows, and the second
+    /// is what this function answered before the identity reached it at all.
+    pub(super) fn child_contexts(
+        nodes: &[InlineNode<'_>],
+        enclosing: Self,
+        masked: Masked<'_>,
+    ) -> Vec<Self> {
         let mut has_transparent = false;
 
         let mut contexts: Vec<Self> = nodes
@@ -182,7 +200,7 @@ impl LevelContext {
             return contexts;
         }
 
-        let (s, pieces) = build_match_string(nodes);
+        let (s, pieces) = build_match_string(nodes, masked);
 
         // `build_match_string` contributes exactly one [`Piece`] per node, in
         // order, so the three sequences line up and no lookup is needed.
@@ -348,11 +366,7 @@ fn styled_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
 /// it rendered a smart quote's `&#8221;`, and a preceding one reads `<` or
 /// `&`.
 ///
-/// # Only the entity-rendered variants
-///
-/// The two smart quotes are answered; every other variant keeps the bare
-/// placeholder, and the asymmetry is not about what a variant renders but
-/// about what this function can *tell*.
+/// # An extraction-pass wrapper is not a rendered span
 ///
 /// A [`Styled`] node reaching [`build_match_string`] is not necessarily a span
 /// the string pipeline has rendered at all: the passthrough-extraction pass
@@ -362,32 +376,59 @@ fn styled_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
 /// rather than as markup, for every step this module runs. A sibling reads
 /// that sentinel, which is exactly what the bare [`SPAN_PLACEHOLDER`] already
 /// reads as to every class in play (both are non-word, in none of `&;:}`,
-/// `[>\(\)\[\];"']`, or `[\\>:/]`), so leaving such a wrapper unclassified
-/// is not an approximation — it is the right answer.
+/// `[>\(\)\[\];"']`, or `[\\>:/]`), so such a wrapper keeps the bare
+/// placeholder — not as an approximation, but because that is the right
+/// answer.
 ///
-/// Telling one apart from a genuinely rendered span needs the *identity* that
+/// Telling one apart from a genuinely rendered span needs the *identity*
 /// [`masked_locations`](super::special_chars::masked_locations) collects
-/// before any step runs, which this function does not have — and both wrappers
-/// the extraction pass builds are tag-rendered
-/// ([`Unquoted`](StyleVariant::Unquoted) or [`Code`](StyleVariant::Code)), so
-/// classifying a tag-rendered span here would sometimes give a sibling a `>`
-/// the string pipeline does not present. An **entity**-rendered span carries
-/// no such ambiguity: the extraction pass builds neither smart-quote variant,
-/// so a [`DoubleQuote`](StyleVariant::DoubleQuote) or
+/// before any step runs, which `masked` carries here. Where a caller does not
+/// hold it ([`Masked::UNKNOWN`]), no tag-rendered span is classified — the
+/// answer this function gave before the identity reached it.
+///
+/// The two **entity**-rendered variants need no such check and are answered
+/// either way: the extraction pass builds neither smart-quote variant, so a
+/// [`DoubleQuote`](StyleVariant::DoubleQuote) or
 /// [`SingleQuote`](StyleVariant::SingleQuote) node can only have come from the
 /// quotes step, where the string pipeline really does hold `&#8220;…&#8221;`.
-/// The tag-rendered half waits on a way to carry that identity here.
-fn styled_sibling_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
+///
+/// # A transparent span still says nothing
+///
+/// A span the built-in backend renders with **no markup of its own** — an
+/// unquoted span whose attribute list resolves to neither a role nor an id —
+/// presents its own *body* to a sibling rather than any markup, which is a
+/// different question from this one and defers with its own divergence note.
+/// It falls out of the probe by itself: there is no opening or closing run to
+/// take a character from.
+fn styled_sibling_boundaries(styled: &Styled<'_>, masked: Masked<'_>) -> Option<(char, char)> {
     match styled.variant {
-        // `&#8220;…&#8221;` / `&#8216;…&#8217;`.
+        // `&#8220;…&#8221;` / `&#8216;…&#8217;`, whichever step built them —
+        // and only the quotes step can. See this function's own scope note.
         StyleVariant::DoubleQuote | StyleVariant::SingleQuote => Some(('&', ';')),
 
-        // Every other variant wraps its body in a tag — the same shape the
-        // passthrough-extraction pass's own wrapper takes, which the string
-        // pipeline is still holding as a placeholder. See this function's own
-        // scope note.
-        _ => None,
+        // Every other variant wraps its body in a tag, which is also the shape
+        // the passthrough-extraction pass's own wrapper takes — so answering
+        // one turns on whether this node is such a wrapper, which only the
+        // identity `masked` carries can say.
+        _ if !masked.renders_to_its_siblings(styled.location) => None,
+
+        // The one variant whose rendering shape its attribute list decides:
+        // a `<span …>` when that resolves to a role or an id, and the body
+        // alone (no markup, so nothing to present) when it does not.
+        StyleVariant::Unquoted => probe_styled_sibling_boundaries(styled),
+
+        _ => Some(('<', '>')),
     }
+}
+
+/// [`styled_sibling_boundaries`] for a span whose rendering shape is not
+/// decided by its variant alone: renders it through the built-in backend
+/// around a probe body and reads the characters that land at the two outer
+/// edges. A span that wraps its body in nothing has neither.
+fn probe_styled_sibling_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
+    let (before, after) = probe_styled_boundaries_markup(styled);
+
+    before.chars().next().zip(after.chars().next_back())
 }
 
 /// The character a level's own match string `s` holds immediately before
@@ -405,11 +446,13 @@ fn styled_sibling_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
 ///
 /// [`SPAN_PLACEHOLDER`] is what [`build_match_string`] writes for a node whose
 /// rendering this module cannot describe — everything
-/// [`styled_sibling_boundaries`] declines to classify. Reporting it here would
-/// *manufacture* a character where the level previously read its own start
-/// anchor, which is a different answer rather than a better one: the string
-/// pipeline holds a tag's `>` beside a rendered span, and `>` is a boundary
-/// character the auto-link's own prefix group accepts exactly as `^` does.
+/// [`styled_sibling_boundaries`] declines to classify, which with the
+/// extraction pass's identity in hand is the pass's own wrapper and, without
+/// it, every tag-rendered span. Reporting it here would *manufacture* a
+/// character where the level previously read its own start anchor, which is a
+/// different answer rather than a better one — and for a wrapper it would be
+/// the wrong one, since the string pipeline holds a `\u{97}` sentinel there
+/// that the auto-link's own prefix group rejects exactly as `^` is accepted.
 /// So an unclassified neighbour reports nothing and the span goes on
 /// inheriting, leaving that shape exactly as it already was — the same line
 /// [`styled_sibling_boundaries`] draws, for the same reason.
@@ -513,7 +556,7 @@ fn apply_quote_sub<'src>(
     // Recurse into the spans produced by earlier subs *before* matching at this
     // level. A span this sub itself creates below is therefore never revisited
     // by the same sub, matching the string pipeline (a sub runs once).
-    let contexts = LevelContext::child_contexts(&nodes, ctx);
+    let contexts = LevelContext::child_contexts(&nodes, ctx, Masked::UNKNOWN);
 
     let nodes: Vec<InlineNode<'src>> = nodes
         .into_iter()
@@ -576,7 +619,7 @@ fn match_level<'src>(
     parser: &Parser,
     ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes);
+    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // Cheap pre-filter: if nothing quote-like is present, no sub can match, so
     // skip building the (owned) result vector entirely.
@@ -652,10 +695,19 @@ fn attrlist_is_readable(nodes: &[InlineNode<'_>], pieces: &[Piece], m: &QuoteMat
 /// recognize a construct inside it, but is flagged
 /// [`synthesized`](Piece::synthesized) since those bytes have no honest
 /// `'src` counterpart; every other node contributes a single opaque
-/// [`SPAN_PLACEHOLDER`].
+/// [`SPAN_PLACEHOLDER`], wrapped in the two characters its own rendering
+/// presents to a sibling wherever [`styled_sibling_boundaries`] can say what
+/// those are.
+///
+/// `masked` is what the caller can say about which [`Styled`] nodes are the
+/// passthrough-extraction pass's own wrappers, which is what that last
+/// question turns on for every tag-rendered span; see [`Masked`].
 ///
 /// [`apply_character_replacements`]: super::char_replacements::apply_character_replacements
-pub(super) fn build_match_string(nodes: &[InlineNode<'_>]) -> (String, Vec<Piece>) {
+pub(super) fn build_match_string(
+    nodes: &[InlineNode<'_>],
+    masked: Masked<'_>,
+) -> (String, Vec<Piece>) {
     let mut s = String::new();
     let mut pieces = Vec::with_capacity(nodes.len());
 
@@ -794,7 +846,7 @@ pub(super) fn build_match_string(nodes: &[InlineNode<'_>]) -> (String, Vec<Piece
                 // a pattern keeps is markup the span itself carries), and
                 // every gate skips it as non-overlapping.
                 let boundaries = match other {
-                    InlineNode::Styled(styled) => styled_sibling_boundaries(styled),
+                    InlineNode::Styled(styled) => styled_sibling_boundaries(styled, masked),
                     _ => None,
                 };
 
@@ -1573,8 +1625,12 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use super::super::test_support::{
-        assert_styled, assert_text, build_src, build_through_quotes, fold_html, golden_passthroughs,
+    use super::{
+        super::test_support::{
+            assert_styled, assert_text, build_src, build_through_quotes, fold_html,
+            golden_passthroughs,
+        },
+        Masked,
     };
     use crate::{
         HasSpan, Span,
@@ -1630,7 +1686,11 @@ mod tests {
         let bare = span(StyleVariant::Unquoted);
         assert_eq!(styled_boundaries(&bare), None);
         assert_eq!(
-            LevelContext::child_contexts(&[InlineNode::Styled(bare)], LevelContext::INSIDE_REF),
+            LevelContext::child_contexts(
+                &[InlineNode::Styled(bare)],
+                LevelContext::INSIDE_REF,
+                Masked::UNKNOWN
+            ),
             vec![LevelContext::INSIDE_REF]
         );
 
@@ -1663,21 +1723,59 @@ mod tests {
             location: Span::new("x"),
         };
 
-        for variant in [StyleVariant::DoubleQuote, StyleVariant::SingleQuote] {
+        // With the identity in hand, every variant that renders markup of its
+        // own is answered from that markup's two outer characters.
+        for variant in [
+            StyleVariant::DoubleQuote,
+            StyleVariant::SingleQuote,
+            StyleVariant::Strong,
+            StyleVariant::Emphasis,
+            StyleVariant::Code,
+            StyleVariant::Mark,
+            StyleVariant::Superscript,
+            StyleVariant::Subscript,
+        ] {
             let styled = span(variant);
 
             let (opening, closing) = probe_styled_boundaries_markup(&styled);
 
             assert_eq!(
-                styled_sibling_boundaries(&styled),
+                styled_sibling_boundaries(&styled, Masked::known(&[])),
                 opening.chars().next().zip(closing.chars().next_back()),
                 "sibling boundary characters drifted from the built-in rendering of {variant:?}"
             );
         }
 
-        // Every tag-rendered variant keeps the bare placeholder — not because
-        // its rendering has no outer characters (it has `<` and `>`), but
-        // because a `Styled` node reaching `build_match_string` may be the
+        // An unquoted span carrying neither a role nor an id renders to its
+        // body and nothing else, so there is no markup to take a character
+        // from — a different question, deferred with its own divergence note.
+        assert_eq!(
+            styled_sibling_boundaries(&span(StyleVariant::Unquoted), Masked::known(&[])),
+            None
+        );
+
+        // One carrying an id renders a `<span …>`, like every other tag.
+        let mut identified = span(StyleVariant::Unquoted);
+        identified.id = Some(CowStr::from("anchor"));
+
+        assert_eq!(
+            styled_sibling_boundaries(&identified, Masked::known(&[])),
+            Some(('<', '>'))
+        );
+
+        // The two **entity**-rendered variants are answered whether or not the
+        // caller holds the identity: the extraction pass builds neither, so a
+        // smart-quote span can only have come from the quotes step.
+        for variant in [StyleVariant::DoubleQuote, StyleVariant::SingleQuote] {
+            assert_eq!(
+                styled_sibling_boundaries(&span(variant), Masked::UNKNOWN),
+                Some(('&', ';'))
+            );
+        }
+
+        // Every tag-rendered variant keeps the bare placeholder where the
+        // identity is missing — not because its rendering has no outer
+        // characters (it has `<` and `>`), but because such a node may be the
         // passthrough-extraction pass's own wrapper, which the string pipeline
         // is still holding as a placeholder. See
         // [`styled_sibling_boundaries`]'s own scope note.
@@ -1690,8 +1788,26 @@ mod tests {
             StyleVariant::Subscript,
             StyleVariant::Unquoted,
         ] {
-            assert_eq!(styled_sibling_boundaries(&span(variant)), None);
+            assert_eq!(
+                styled_sibling_boundaries(&span(variant), Masked::UNKNOWN),
+                None
+            );
         }
+
+        // And a node the identity *names* keeps it too, which is the whole
+        // point of carrying the identity: `[quotes]++text++` renders a
+        // `<span class="quotes">`, but the string pipeline is holding it as
+        // its own `\u{96}…\u{97}` sentinel for every step this module runs.
+        let wrapper = span(StyleVariant::Code);
+        let identity = (
+            wrapper.location.byte_offset(),
+            wrapper.location.data().len(),
+        );
+
+        assert_eq!(
+            styled_sibling_boundaries(&wrapper, Masked::known(&[identity])),
+            None
+        );
     }
 
     #[test]
@@ -1789,7 +1905,8 @@ mod tests {
         assert_eq!(
             LevelContext::child_contexts(
                 &[text("a "), styled(StyleVariant::Strong)],
-                LevelContext::ROOT
+                LevelContext::ROOT,
+                Masked::UNKNOWN
             ),
             vec![LevelContext::ROOT, TAG]
         );
@@ -1797,7 +1914,11 @@ mod tests {
         // A transparent span takes the last character of what precedes it,
         // while the closing half stays the enclosing context's.
         assert_eq!(
-            LevelContext::child_contexts(&[text("a "), styled(StyleVariant::Unquoted)], TAG),
+            LevelContext::child_contexts(
+                &[text("a "), styled(StyleVariant::Unquoted)],
+                TAG,
+                Masked::UNKNOWN
+            ),
             vec![
                 TAG,
                 LevelContext {
@@ -1810,7 +1931,11 @@ mod tests {
         // With nothing before it, both halves fall back to the enclosing
         // context — the answer inheriting alone always gave.
         assert_eq!(
-            LevelContext::child_contexts(&[styled(StyleVariant::Unquoted), text(" a")], TAG),
+            LevelContext::child_contexts(
+                &[styled(StyleVariant::Unquoted), text(" a")],
+                TAG,
+                Masked::UNKNOWN
+            ),
             vec![TAG, TAG]
         );
 
@@ -1819,7 +1944,8 @@ mod tests {
         assert_eq!(
             LevelContext::child_contexts(
                 &[text("ab"), styled(StyleVariant::Unquoted)],
-                LevelContext::ROOT
+                LevelContext::ROOT,
+                Masked::UNKNOWN
             ),
             vec![
                 LevelContext::ROOT,
@@ -1838,7 +1964,8 @@ mod tests {
                     styled(StyleVariant::DoubleQuote),
                     styled(StyleVariant::Unquoted)
                 ],
-                LevelContext::ROOT
+                LevelContext::ROOT,
+                Masked::UNKNOWN
             ),
             vec![
                 LevelContext {
@@ -1852,12 +1979,44 @@ mod tests {
             ]
         );
 
-        // A tag-rendered one contributes the bare placeholder, which says
-        // *nothing* rather than a character: the span goes on inheriting.
+        // A tag-rendered one contributes the bare placeholder where the caller
+        // cannot say whether it is an extraction-pass wrapper, and the bare
+        // placeholder says *nothing* rather than a character: the span goes on
+        // inheriting.
         assert_eq!(
             LevelContext::child_contexts(
                 &[styled(StyleVariant::Strong), styled(StyleVariant::Unquoted)],
-                LevelContext::ROOT
+                LevelContext::ROOT,
+                Masked::UNKNOWN
+            ),
+            vec![TAG, LevelContext::ROOT]
+        );
+
+        // With the identity in hand it presents the `>` its own `<strong>`
+        // ends in, exactly as the string pipeline's flat haystack does.
+        assert_eq!(
+            LevelContext::child_contexts(
+                &[styled(StyleVariant::Strong), styled(StyleVariant::Unquoted)],
+                LevelContext::ROOT,
+                Masked::known(&[])
+            ),
+            vec![
+                TAG,
+                LevelContext {
+                    before: Some('>'),
+                    after: None,
+                }
+            ]
+        );
+
+        // And a node that identity *names* is an extraction-pass wrapper the
+        // string pipeline is still holding as a placeholder, so it goes back to
+        // contributing the bare one.
+        assert_eq!(
+            LevelContext::child_contexts(
+                &[styled(StyleVariant::Strong), styled(StyleVariant::Unquoted)],
+                LevelContext::ROOT,
+                Masked::known(&[(0, 1)])
             ),
             vec![TAG, LevelContext::ROOT]
         );
@@ -2053,39 +2212,59 @@ mod tests {
 
     #[test]
     fn a_sub_beside_a_masked_passthrough_wrapper_keeps_the_bare_placeholder() {
-        // The half [`styled_sibling_boundaries`] deliberately does not
-        // answer. The passthrough-extraction pass builds a [`Styled`] wrapper
-        // of its own for an attribute-list-prefixed passthrough, which the
-        // string pipeline is holding as its `\u{96}…\u{97}` sentinel rather
-        // than as markup for every step this module runs — so a sibling reads
-        // that sentinel, which is exactly what the bare placeholder reads as.
-        // Both wrappers the pass builds are tag-rendered, and telling one from
-        // a genuinely rendered span needs an identity this function does not
-        // have, so no tag-rendered span is classified.
+        // The one tag-rendered span that presents *no* markup to a sibling.
+        // The passthrough-extraction pass builds a [`Styled`] wrapper of its
+        // own for an attribute-list-prefixed passthrough, which the string
+        // pipeline is holding as its `\u{96}…\u{97}` sentinel rather than as
+        // markup for every step this module runs — so a sibling reads that
+        // sentinel, which is exactly what the bare placeholder reads as. The
+        // identity `masked` carries is what tells one from a genuinely
+        // rendered span of the identical shape.
         //
-        // Asserted directly on the match string rather than through a fold,
-        // since a quote boundary class cannot tell the two apart in the first
-        // place (which is the very reason the deferral is safe).
+        // Asserted directly on the match string, since a quote boundary class
+        // cannot tell a `>` from the placeholder in the first place (which is
+        // why the quotes step goes on passing `Masked::UNKNOWN`).
         use super::{SPAN_PLACEHOLDER, build_match_string, styled_sibling_boundaries};
         use crate::inlines::Styled;
 
+        // An id rather than a role, so the probe sees a `<span …>`: the fold
+        // hands the renderer the span's `attrs` and `id` and lets it derive
+        // the roles, so a `roles` field with no attribute list behind it
+        // renders nothing (see `styled_boundaries_match_the_built_in_renderer`).
         let styled = Styled {
             variant: StyleVariant::Unquoted,
             form: SpanForm::Unconstrained,
-            id: None,
-            roles: vec![CowStr::from("x")],
+            id: Some(CowStr::from("x")),
+            roles: Vec::new(),
             attrs: None,
             children: Vec::new(),
-            location: Span::new("[.x]##y##"),
+            location: Span::new("[#x]##y##"),
         };
 
-        assert_eq!(styled_sibling_boundaries(&styled), None);
+        let identity = (styled.location.byte_offset(), styled.location.data().len());
 
-        let (s, pieces) = build_match_string(&[InlineNode::Styled(styled)]);
+        assert_eq!(
+            styled_sibling_boundaries(&styled, Masked::known(&[identity])),
+            None
+        );
+
+        let (s, pieces) = build_match_string(
+            &[InlineNode::Styled(styled.clone())],
+            Masked::known(&[identity]),
+        );
 
         assert_eq!(s, SPAN_PLACEHOLDER.to_string());
         assert_eq!(pieces.len(), 1);
         assert_eq!(pieces[0].s_start, 0);
+
+        // The same node, *not* named by the identity, is a span the string
+        // pipeline has really rendered — and presents the two characters its
+        // `<span class="x">…</span>` puts beside its siblings.
+        let (s, pieces) = build_match_string(&[InlineNode::Styled(styled)], Masked::known(&[]));
+
+        assert_eq!(s, format!("<{SPAN_PLACEHOLDER}>"));
+        assert_eq!(pieces.len(), 1);
+        assert_eq!(pieces[0].s_start, 1);
     }
 
     #[test]
@@ -2150,6 +2329,51 @@ mod tests {
             "Then '`this`'`that` and \"`one`\"'`two`' in a row.\n",
             "\n",
             "And x[width=10]###c# d## beside x [width=10]###c# d## here.\n",
+        ));
+
+        let mut folded_blocks = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                super::super::fold_html(inlines, &HtmlSubstitutionRenderer {}, &Parser::default()),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded_blocks += 1;
+        }
+
+        // The three paragraphs; the section that contains them holds no inline
+        // content of its own and is skipped.
+        assert_eq!(folded_blocks, 3, "expected every paragraph to be checked");
+    }
+
+    #[test]
+    fn a_real_documents_tag_rendered_sibling_tree_folds_to_its_rendered_string() {
+        // End-to-end, through the real parse path, on the **tag**-rendered half
+        // of the shape above — the one the extraction pass's identity had to
+        // reach recognition for. A URL written against a closing tag's own `>`
+        // links in both pipelines; one written against the pass's own wrapper,
+        // which the string pipeline is still holding as a sentinel, stays
+        // literal in both.
+        use crate::{
+            Parser,
+            blocks::{FindBlocks, IsBlock},
+        };
+
+        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+            "== A heading\n",
+            "\n",
+            "See **bold**https://example.org and __em__https://example.org here.\n",
+            "\n",
+            "But [quotes]++x++https://example.org stays literal.\n",
+            "\n",
+            "And *x*[width=10]#doc@example.org# beside *x [width=10]#doc@example.org#*.\n",
         ));
 
         let mut folded_blocks = 0;
@@ -2883,7 +3107,7 @@ mod tests {
             },
         ];
 
-        let (s, pieces) = super::build_match_string(&nodes);
+        let (s, pieces) = super::build_match_string(&nodes, Masked::UNKNOWN);
 
         assert_eq!(s, "a&copy;&amp;");
         assert_eq!(pieces.len(), 3);
