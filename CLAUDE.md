@@ -91,6 +91,7 @@ existing string pipeline's output (`golden_*` test helpers). When picking up the
   you need to check for a still-open one.
 - **One increment per branch/PR.** Every prior increment is a single narrow behavior change plus its
   corpora and its design-doc note. Resist bundling two.
+- **Open the PR as a draft**, not ready-to-review — the maintainer flips it when they pick it up.
 - After landing a step, update the design doc's narrative (a new "*Step N landed as (...)*" paragraph)
   and its checklist entry, matching the existing entries' style — this is how every prior increment on
   this branch has recorded its landing.
