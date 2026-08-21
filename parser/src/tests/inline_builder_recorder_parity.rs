@@ -932,6 +932,14 @@ fn shapes_match_across_combined_constructs() {
          or just write to doc@example.org.",
     );
 
+    // The same families reached through a **transparent** span, which renders
+    // to its body and nothing else — so what a construct inside it reads is
+    // whatever stands beside the span.
+    assert_shapes(
+        "Mail *write to [width=10]#doc@example.org# now* or \
+         x [width=10]#doc@example.org# here.",
+    );
+
     // A bare address whose local part carries an escaped special: the builder
     // recovers its shown text as structured children (the `&` staying its own
     // `CharRef`), which is the shape the recorder reaches from the opposite

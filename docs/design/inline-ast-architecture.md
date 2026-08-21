@@ -3958,6 +3958,82 @@ Each phase is a reviewable unit with a clear exit gate.
   from its siblings rather than from its enclosing construct alone); and the **closing** character
   the macros step declines to half-supply.
 
+  *Step 6 prep landed as (the boundary a **transparent** span's own siblings present):* the three
+  increments above answer what an enclosing construct presents to the level inside it, what the
+  macros step's families read there, and what a rendered span presents to a sibling — and all three
+  name the same remaining shape: a span that renders to its **body and nothing else** (an unquoted
+  span whose attribute list resolves to neither a role nor an id), where
+  [`LevelContext::inside_styled`](../../parser/src/content/inline_builder/quotes.rs) hands the
+  children whatever the span itself sees. That is right while the span is all its level holds, and
+  wrong the moment a **sibling** precedes it: the string pipeline, having no levels, shows what that
+  sibling rendered where the inherited context still shows the enclosing construct's markup.
+
+  A new [`LevelContext::child_contexts`](../../parser/src/content/inline_builder/quotes.rs) answers a
+  whole level at once — one context per node, so the three recursions that had each spelled out
+  `inside_styled` and `INSIDE_REF` now zip a vector instead — and derives a transparent span's own
+  half from the level's **match string**. That is the point of the mechanism rather than an
+  implementation detail: the match string is the one place every node kind's presented bytes are
+  already spelled out (a text run's, a `CharRef`'s entity, and the `SPAN_PLACEHOLDER` wrapped in
+  whatever the increment above can say), so the character is *read* rather than recomputed per node
+  kind and the two cannot drift. Each side falls back to the enclosing context where the level ends,
+  which is exactly where the span really is the first thing its level holds. Building that match
+  string is worth it only when such a span is present, so it is built on demand and every other level
+  answers from `styled_boundaries` alone, allocating nothing new.
+
+  Two limits are drawn deliberately, and both are the previous increments' own rules applied again.
+  Only the **opening** character is carried, for the reason
+  [`LevelContext::shift`](../../parser/src/content/inline_builder/quotes.rs) gives one level in and
+  then some: a *boundary* class reads one character and, where it consumes one, the replacer writes
+  it back — which [`unshift`](../../parser/src/content/inline_builder/quotes.rs)'s clip reproduces by
+  leaving the character with the sibling that owns it — while a *delimiter* swallows it instead, and
+  what the replacer swallows it **deletes**, which a level's rebuild cannot do to a node another
+  level owns (`x[width=10]##d #c###`, whose closing `#` is the sibling, keeps its own divergence
+  test). And a **bare placeholder** reports *nothing* rather than a character: it is what
+  `build_match_string` writes for a node this module cannot describe, so reporting it would
+  manufacture an answer where the level previously read its own `^` — and `^` is what the auto-link's
+  prefix group accepts there anyway, so `*x*[width=10]#https://example.org#` would have gone from
+  parity to divergence. An unclassified neighbour leaves the span inheriting, the same line
+  [`styled_sibling_boundaries`](../../parser/src/content/inline_builder/quotes.rs) draws for the same
+  reason, and `haystack` gains the one generalization this needs — the two halves applied
+  independently, since a sibling can supply an opening character to a level whose closing one is
+  still the content's own end.
+
+  The [`character replacements`](../../parser/src/content/inline_builder/char_replacements.rs) step
+  is deliberately **not** given this. Its one boundary-reading rule is the spaced em dash, whose
+  replacement consumes the spaces it matches on both sides rather than writing them back — so even an
+  opening character a sibling owns would be emitted here *and* left there. Supplying it would make
+  `*x [width=10]#-- y#*` differently wrong rather than right, so that step goes on inheriting and
+  `a_replacement_beside_a_transparent_span_is_a_documented_divergence` keeps its shape, its note now
+  carrying the sharper reason (not "a strictly larger walk" but "one level's rebuild would have to
+  consume a node another level owns"). The two steps that *can* take it do: the macros step's bare
+  e-mail and auto-link families (`*x [width=10]#doc@example.org#*`, the shape the first of these
+  increments pinned, whose test is now a parity corpus exactly as its own note asked), and the quotes
+  step's constrained `#mark#` — the only boundary-reading sub that can run after a transparent span
+  exists, since the span it looks across must have been built by the unconstrained `##mark##` one
+  place ahead of it (`x[width=10]###c# d##`).
+
+  Each family's construct gains a differential corpus written against a transparent span's edge with
+  a word character, a space, an entity-rendered span and a tag-rendered one beside it, the same
+  constructs with no sibling at all (where the enclosing context is still the answer), the same at
+  the content's own top level, and a sibling *after* the span (which supplies nothing), alongside a
+  unit test of `child_contexts` itself and a structural assertion that the address builds a real
+  link. Fixtures are added to the whole-pipeline broad sweep and combined-constructs corpus, to the
+  group-parity corpus (what a sibling renders comes from its own rendering, which no effective order
+  changes), and to the structural recorder cross-check, and a whole-document test drives both shapes
+  end to end through the real parse path. Re-running the corpus-wide fold-parity audit (tree building
+  forced on for every parse in the suite) shows the divergence set **unchanged** — no golden source
+  writes a construct inside a transparent span, so like the increment above this is an unclaimed form
+  rather than a wrong answer for content already under test — and, as every increment requires, no
+  new divergence appeared. As with every prep piece before it, nothing further is wired in.
+
+  What still defers is the rest of the same class: the **tag-rendered** half, which waits on a way to
+  carry `masked_locations`' identity into `build_match_string` (and which now shows up in two places
+  — what a rendered span presents to a sibling, and what an unclassified neighbour presents to a
+  transparent span); the **closing** character both the macros step and this increment decline to
+  half-supply; a **transparent** span read *as* a sibling, which presents its own body's last
+  character where the placeholder says nothing; and the character-replacements step's own
+  consume-across-levels case above.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -4522,6 +4598,22 @@ Each phase is a reviewable unit with a clear exit gate.
        tag-rendered; see the step's own "landed as" note above. What still defers is the tag-rendered
        half (which needs `masked_locations`' identity here), a transparent span's siblings, and the
        macros step's own closing character, each with its own divergence note.
+
+     - ✅ **prep (the same boundary, for a transparent span's own siblings).** The shape all three
+       increments above name — a span rendering to its **body and nothing else**, whose children had
+       inherited the enclosing construct's markup rather than reading what stands beside the span —
+       is closed for the two steps that can act on it. A new
+       [`LevelContext::child_contexts`](../../parser/src/content/inline_builder/quotes.rs) answers a
+       whole level at once and derives a transparent span's own context from the level's **match
+       string**, the one place every node kind's presented bytes are already spelled out, so nothing
+       is recomputed per node kind. Only the **opening** character is carried (a delimiter swallows a
+       closing one, and what the replacer swallows it deletes — which a level's rebuild cannot do to
+       a node another level owns), and a bare placeholder reports nothing rather than manufacturing a
+       character the level had not been reading. The `character replacements` step is deliberately
+       excluded: its one boundary-reading rule *consumes* the spaces it matches, so even an opening
+       character would be written twice. See the step's own "landed as" note above. What still defers
+       is the tag-rendered half, the closing character, a transparent span read *as* a sibling, and
+       that consume-across-levels case.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

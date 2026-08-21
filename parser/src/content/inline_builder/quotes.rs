@@ -91,7 +91,10 @@ impl LevelContext {
     /// A span the built-in backend renders with **no markup of its own** — an
     /// unquoted span that ends up carrying neither a role nor an id, whose
     /// rendering is its body and nothing else — is transparent, so its
-    /// children see whatever the span itself sees.
+    /// children see whatever the span itself sees. That is right whenever the
+    /// span is all its level holds; [`child_contexts`](Self::child_contexts)
+    /// is the same answer sharpened by what stands *beside* it, for the two
+    /// steps that can take it.
     pub(super) fn inside_styled(styled: &Styled<'_>, enclosing: Self) -> Self {
         match styled_boundaries(styled) {
             Some((before, after)) => Self {
@@ -103,23 +106,129 @@ impl LevelContext {
         }
     }
 
+    /// The context each node in `nodes` presents to its own children, one
+    /// entry per node, given the context the level itself sits in.
+    ///
+    /// A [`Ref`](InlineNode::Ref) always presents
+    /// [`INSIDE_REF`](Self::INSIDE_REF) and a [`Styled`] span whatever
+    /// [`inside_styled`](Self::inside_styled) says; every other node kind has
+    /// no children to match, and its entry — the enclosing context, unchanged
+    /// — is never read.
+    ///
+    /// # A transparent span reads its siblings
+    ///
+    /// A **transparent** span wraps its children in nothing, so what they read
+    /// is not the enclosing construct's markup but whatever stands *beside the
+    /// span itself* in the string pipeline's own flat haystack. Inheriting the
+    /// enclosing context — what [`inside_styled`](Self::inside_styled) does on
+    /// its own — is right only while the span is all its level holds; the
+    /// moment a sibling precedes it, the haystack shows what that sibling
+    /// rendered (`*x [width=10]#doc@example.org#*` presents the space `x `
+    /// ends with, where the enclosing `<strong>`'s own `>` is one of the bare
+    /// e-mail pattern's mismatch characters).
+    ///
+    /// The level's own **match string** already spells out what every node
+    /// kind presents — a text run's bytes, a [`CharRef`]'s entity, and, for an
+    /// opaque node, the [`SPAN_PLACEHOLDER`] wrapped in whatever
+    /// [`styled_sibling_boundaries`] can say — so the character beside the
+    /// span's own [`Piece`] is read straight out of it rather than recomputed
+    /// per node kind, and the two cannot drift. Building that match string is
+    /// worth it only when such a span is there, so it is built on demand:
+    /// every other level answers from [`styled_boundaries`] alone, exactly as
+    /// before.
+    ///
+    /// # Only the opening character
+    ///
+    /// A sibling supplies the **opening** character alone, for the reason
+    /// [`shift`](Self::shift) gives one level in and then some. A pattern's
+    /// *boundary* class reads one character and — where it consumes one, as a
+    /// constrained quote's `(^|[^\w&;:}])` does — the replacer writes it back,
+    /// which [`unshift`](Self::unshift)'s own clip reproduces by leaving the
+    /// character with the sibling that owns it. A *delimiter* or a greedy body
+    /// class swallows it instead, and what the replacer swallows it **deletes**
+    /// — a character another level's node owns, which this level's rebuild
+    /// cannot delete. So the closing half is dropped rather than
+    /// half-supplied, leaving a construct whose own closing delimiter fell
+    /// beside the span (`x[width=10]##d #c###`) exactly as divergent as it
+    /// already was, never newly wrong.
+    ///
+    /// The same reasoning keeps the
+    /// [`character replacements`](super::char_replacements) step off this
+    /// entirely: its one boundary-reading rule is the spaced em dash, whose
+    /// replacement *consumes* the spaces it matches on both sides, so even an
+    /// opening character a sibling owns would be deleted here and written
+    /// twice there. That step goes on inheriting through
+    /// [`inside_styled`](Self::inside_styled), and
+    /// `a_replacement_beside_a_transparent_span_is_a_documented_divergence`
+    /// keeps its shape.
+    pub(super) fn child_contexts(nodes: &[InlineNode<'_>], enclosing: Self) -> Vec<Self> {
+        let mut has_transparent = false;
+
+        let mut contexts: Vec<Self> = nodes
+            .iter()
+            .map(|node| match node {
+                InlineNode::Styled(styled) => {
+                    has_transparent |= styled_boundaries(styled).is_none();
+                    Self::inside_styled(styled, enclosing)
+                }
+
+                InlineNode::Ref(_) => Self::INSIDE_REF,
+
+                _ => enclosing,
+            })
+            .collect();
+
+        if !has_transparent {
+            return contexts;
+        }
+
+        let (s, pieces) = build_match_string(nodes);
+
+        // `build_match_string` contributes exactly one [`Piece`] per node, in
+        // order, so the three sequences line up and no lookup is needed.
+        for ((context, piece), node) in contexts.iter_mut().zip(&pieces).zip(nodes) {
+            if matches!(node, InlineNode::Styled(styled) if styled_boundaries(styled).is_none()) {
+                context.before = preceding_character(&s, piece).or(context.before);
+            }
+        }
+
+        contexts
+    }
+
     /// The haystack a pattern should be matched against for a level whose own
     /// match string is `s`, together with the byte length of the prefix
     /// [`unshift`](Self::unshift) removes again.
     ///
     /// At the top level this borrows `s` untouched, so the overwhelmingly
     /// common case allocates nothing.
+    ///
+    /// The two halves are applied independently, because a level can have an
+    /// opening character without a closing one: an enclosing construct always
+    /// presents both of its own or neither, but a **transparent** span's
+    /// opening character comes from a *sibling*
+    /// ([`child_contexts`](Self::child_contexts)) while its closing one stays
+    /// the enclosing construct's — so `x[width=10]###c# d##` at the content's
+    /// own top level carries the `x` its sibling ends with and still anchors
+    /// `$` where the content itself ends. The reverse never arises, which is
+    /// what lets the opening character gate the wrap.
     pub(super) fn haystack<'a>(&self, s: &'a str) -> (Cow<'a, str>, usize) {
-        let (Some(before), Some(after)) = (self.before, self.after) else {
+        let Some(before) = self.before else {
             return (Cow::Borrowed(s), 0);
         };
 
-        let mut hay = String::with_capacity(s.len() + before.len_utf8() + after.len_utf8());
+        let prefix = before.len_utf8();
+
+        let mut hay =
+            String::with_capacity(s.len() + prefix + self.after.map_or(0, char::len_utf8));
+
         hay.push(before);
         hay.push_str(s);
-        hay.push(after);
 
-        (Cow::Owned(hay), before.len_utf8())
+        if let Some(after) = self.after {
+            hay.push(after);
+        }
+
+        (Cow::Owned(hay), prefix)
     }
 
     /// [`haystack`](Self::haystack)'s counterpart for a step that maps no
@@ -281,6 +390,41 @@ fn styled_sibling_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
     }
 }
 
+/// The character a level's own match string `s` holds immediately before
+/// `piece`, or `None` where this module cannot say what the string pipeline
+/// holds there — because the piece is the first thing the level holds, or
+/// because what precedes it is an unclassified opaque node.
+///
+/// This is how a **transparent** span's children learn what precedes the span
+/// (see [`LevelContext::child_contexts`]): the match string is the one place
+/// every node kind's presented bytes are already spelled out, so reading the
+/// character out of it cannot drift from what a pattern matching at this level
+/// would read there.
+///
+/// # A bare placeholder is not an answer
+///
+/// [`SPAN_PLACEHOLDER`] is what [`build_match_string`] writes for a node whose
+/// rendering this module cannot describe — everything
+/// [`styled_sibling_boundaries`] declines to classify. Reporting it here would
+/// *manufacture* a character where the level previously read its own start
+/// anchor, which is a different answer rather than a better one: the string
+/// pipeline holds a tag's `>` beside a rendered span, and `>` is a boundary
+/// character the auto-link's own prefix group accepts exactly as `^` does.
+/// So an unclassified neighbour reports nothing and the span goes on
+/// inheriting, leaving that shape exactly as it already was — the same line
+/// [`styled_sibling_boundaries`] draws, for the same reason.
+fn preceding_character(s: &str, piece: &Piece) -> Option<char> {
+    // A piece's bounds are byte offsets this module itself pushed into `s`, so
+    // the lookup always lands on a character boundary within it; the crate
+    // forbids `unwrap`, so that is spelled `unwrap_or_default` rather than as a
+    // branch no input reaches.
+    s.get(..piece.s_start)
+        .unwrap_or_default()
+        .chars()
+        .next_back()
+        .filter(|ch| *ch != SPAN_PLACEHOLDER)
+}
+
 /// [`styled_boundaries`] for a span whose rendering shape is not decided by
 /// its variant alone: renders it through the built-in backend around a probe
 /// body and reads the characters that land beside it.
@@ -355,9 +499,10 @@ pub(super) fn apply_quotes<'src>(
 ///
 /// `ctx` is the boundary context this level sits in (see [`LevelContext`]);
 /// a span's own children are matched in the context that span's rendering
-/// presents, which is what keeps a sub matching *inside* an earlier sub's span
-/// reading the same characters the string pipeline's flat haystack holds
-/// there.
+/// presents — or, for a span that renders no markup of its own, the one its
+/// **siblings** present ([`LevelContext::child_contexts`]) — which is what
+/// keeps a sub matching *inside* an earlier sub's span reading the same
+/// characters the string pipeline's flat haystack holds there.
 fn apply_quote_sub<'src>(
     sub: &QuoteSub,
     nodes: Vec<InlineNode<'src>>,
@@ -368,11 +513,13 @@ fn apply_quote_sub<'src>(
     // Recurse into the spans produced by earlier subs *before* matching at this
     // level. A span this sub itself creates below is therefore never revisited
     // by the same sub, matching the string pipeline (a sub runs once).
+    let contexts = LevelContext::child_contexts(&nodes, ctx);
+
     let nodes: Vec<InlineNode<'src>> = nodes
         .into_iter()
-        .map(|node| match node {
+        .zip(contexts)
+        .map(|(node, inner)| match node {
             InlineNode::Styled(mut styled) => {
-                let inner = LevelContext::inside_styled(&styled, ctx);
                 styled.children = apply_quote_sub(sub, styled.children, root, parser, inner);
                 InlineNode::Styled(styled)
             }
@@ -1477,13 +1624,14 @@ mod tests {
         }
 
         // An unquoted span carrying neither a role nor an id renders to its
-        // body and nothing else, so it presents no boundary of its own and its
-        // children inherit whatever it sees.
+        // body and nothing else, so it presents no boundary of its own — and,
+        // when it is all its level holds, its children fall back to whatever
+        // the span itself sees on both sides.
         let bare = span(StyleVariant::Unquoted);
         assert_eq!(styled_boundaries(&bare), None);
         assert_eq!(
-            LevelContext::inside_styled(&bare, LevelContext::INSIDE_REF),
-            LevelContext::INSIDE_REF
+            LevelContext::child_contexts(&[InlineNode::Styled(bare)], LevelContext::INSIDE_REF),
+            vec![LevelContext::INSIDE_REF]
         );
 
         // One carrying an id renders a `<span …>`, like every other tag. (The
@@ -1609,6 +1757,113 @@ mod tests {
     }
 
     #[test]
+    fn child_contexts_read_a_transparent_spans_siblings() {
+        use super::LevelContext;
+        use crate::inlines::Styled;
+
+        const TAG: LevelContext = LevelContext::INSIDE_REF;
+
+        fn styled(variant: StyleVariant) -> InlineNode<'static> {
+            InlineNode::Styled(Styled {
+                variant,
+                form: SpanForm::Constrained,
+                id: None,
+                roles: Vec::new(),
+                attrs: None,
+                children: Vec::new(),
+                location: Span::new("x"),
+            })
+        }
+
+        fn text(value: &'static str) -> InlineNode<'static> {
+            InlineNode::Text {
+                value: CowStr::from(value),
+                location: Span::new(value),
+            }
+        }
+
+        // A span that renders markup of its own answers from that markup and
+        // never reads a sibling: `>`/`<` are what its children see whatever
+        // precedes the span. A node with no children of its own carries the
+        // enclosing context, which nothing reads.
+        assert_eq!(
+            LevelContext::child_contexts(
+                &[text("a "), styled(StyleVariant::Strong)],
+                LevelContext::ROOT
+            ),
+            vec![LevelContext::ROOT, TAG]
+        );
+
+        // A transparent span takes the last character of what precedes it,
+        // while the closing half stays the enclosing context's.
+        assert_eq!(
+            LevelContext::child_contexts(&[text("a "), styled(StyleVariant::Unquoted)], TAG),
+            vec![
+                TAG,
+                LevelContext {
+                    before: Some(' '),
+                    after: Some('<'),
+                }
+            ]
+        );
+
+        // With nothing before it, both halves fall back to the enclosing
+        // context — the answer inheriting alone always gave.
+        assert_eq!(
+            LevelContext::child_contexts(&[styled(StyleVariant::Unquoted), text(" a")], TAG),
+            vec![TAG, TAG]
+        );
+
+        // At the content's own top level that fallback is `^`, and a sibling
+        // supplies an opening character without a closing one.
+        assert_eq!(
+            LevelContext::child_contexts(
+                &[text("ab"), styled(StyleVariant::Unquoted)],
+                LevelContext::ROOT
+            ),
+            vec![
+                LevelContext::ROOT,
+                LevelContext {
+                    before: Some('b'),
+                    after: None,
+                }
+            ]
+        );
+
+        // An entity-rendered span beside it presents the `;` its own
+        // `&#8221;` ends in.
+        assert_eq!(
+            LevelContext::child_contexts(
+                &[
+                    styled(StyleVariant::DoubleQuote),
+                    styled(StyleVariant::Unquoted)
+                ],
+                LevelContext::ROOT
+            ),
+            vec![
+                LevelContext {
+                    before: Some(';'),
+                    after: Some('&'),
+                },
+                LevelContext {
+                    before: Some(';'),
+                    after: None,
+                }
+            ]
+        );
+
+        // A tag-rendered one contributes the bare placeholder, which says
+        // *nothing* rather than a character: the span goes on inheriting.
+        assert_eq!(
+            LevelContext::child_contexts(
+                &[styled(StyleVariant::Strong), styled(StyleVariant::Unquoted)],
+                LevelContext::ROOT
+            ),
+            vec![TAG, LevelContext::ROOT]
+        );
+    }
+
+    #[test]
     fn a_sub_inside_a_span_reads_that_spans_own_boundary_characters() {
         // The nesting cases the enclosing span's rendering decides, each
         // pinned against the string pipeline's own flat haystack.
@@ -1708,6 +1963,95 @@ mod tests {
     }
 
     #[test]
+    fn a_sub_inside_a_transparent_span_reads_that_spans_own_siblings() {
+        // The half both tests above name: a **transparent** span — an
+        // unquoted span whose attribute list resolves to neither a role nor an
+        // id — renders to its body and nothing else, so what its children read
+        // is not the enclosing construct's markup but whatever stands *beside
+        // the span itself*. Only one sub can reach this at all: the
+        // constrained `#mark#` is the last boundary-reading sub in the list,
+        // so the span it looks across must have been built by the
+        // unconstrained `##mark##` one place ahead of it.
+        //
+        // `x[width=10]###c# d##` is the shape that names it. The string
+        // pipeline's haystack after the unconstrained sub is `x#c# d`, where
+        // the `#` is preceded by a word character and the constrained sub's
+        // own `(^|[^\w&;:}])` rejects it; the level alone showed `^`, and
+        // wrapped it.
+        for source in [
+            // A word character beside the span, which both pipelines now
+            // reject.
+            "x[width=10]###c# d##",
+            "*x[width=10]###c# d##*",
+            // The same sibling one character further out: a space, which both
+            // pipelines accept.
+            "x [width=10]###c# d##",
+            "*x [width=10]###c# d##*",
+            // No sibling at all, where the span really is all its level holds
+            // and the enclosing context is the right answer — `^` at the
+            // content's own top level, and the enclosing `<strong>`'s own `>`
+            // inside one.
+            "[width=10]###c# d##",
+            "*[width=10]###c# d##*",
+            // A tag-rendered span beside it contributes the bare placeholder,
+            // which reads as its `>` does to this boundary class (both are
+            // non-word and in none of `&;:}`).
+            "*x*[width=10]###c# d##",
+            // A construct away from the span's own edge, where the character
+            // before it is the level's own text in both pipelines.
+            "x[width=10]##d #c# e##",
+            // And a sibling *after* the span, which supplies nothing: the
+            // closing half is deliberately not carried (see
+            // [`LevelContext::child_contexts`]).
+            "[width=10]###c# d##x",
+            "[width=10]###c# d## x",
+        ] {
+            assert_eq!(
+                golden_quotes(source),
+                fold_html(
+                    &build_through_quotes(Span::new(source)),
+                    &HtmlSubstitutionRenderer {}
+                ),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sub_closing_on_a_transparent_spans_sibling_is_a_documented_divergence() {
+        // The closing half [`LevelContext::child_contexts`] deliberately does
+        // not carry. A boundary class reads one character and, where it
+        // consumes one, the replacer writes it back — which
+        // [`LevelContext::unshift`]'s clip reproduces by leaving the character
+        // with the sibling that owns it. A *delimiter* swallows it instead,
+        // and what the replacer swallows it deletes: here the constrained
+        // `#mark#` sub's own closing `#` is the sibling, so a level given it
+        // would build a span and still emit the `#` a level out.
+        //
+        // Supplying it would make this shape differently wrong rather than
+        // right; closing it means letting one level's rebuild consume a node
+        // another level owns.
+        let source = "x[width=10]##d #c###";
+
+        let folded = fold_html(
+            &build_through_quotes(Span::new(source)),
+            &HtmlSubstitutionRenderer {},
+        );
+
+        assert_ne!(
+            golden_quotes(source),
+            folded,
+            "expected the documented divergence to still reproduce"
+        );
+
+        // The string pipeline's haystack is `xd #c#`, all of it one flat
+        // string, so the sub wraps `c`; the tree holds `d #c` inside the span
+        // and the closing `#` beside it, and leaves both literal.
+        assert_eq!(golden_quotes(source), "xd <mark>c</mark>");
+        assert_eq!(folded, "xd #c#");
+    }
+
+    #[test]
     fn a_sub_beside_a_masked_passthrough_wrapper_keeps_the_bare_placeholder() {
         // The half [`styled_sibling_boundaries`] deliberately does not
         // answer. The passthrough-extraction pass builds a [`Styled`] wrapper
@@ -1804,6 +2148,8 @@ mod tests {
             "She said \"`hello`\"`code` and meant it.\n",
             "\n",
             "Then '`this`'`that` and \"`one`\"'`two`' in a row.\n",
+            "\n",
+            "And x[width=10]###c# d## beside x [width=10]###c# d## here.\n",
         ));
 
         let mut folded_blocks = 0;
@@ -1823,9 +2169,9 @@ mod tests {
             folded_blocks += 1;
         }
 
-        // The two paragraphs; the section that contains them holds no inline
+        // The three paragraphs; the section that contains them holds no inline
         // content of its own and is skipped.
-        assert_eq!(folded_blocks, 2, "expected both paragraphs to be checked");
+        assert_eq!(folded_blocks, 3, "expected every paragraph to be checked");
     }
 
     #[test]
