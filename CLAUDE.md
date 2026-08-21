@@ -62,11 +62,119 @@ implementing a structured inline AST alongside the existing string-substitution 
 branch lands in small, additive increments, each gated by a byte-for-byte differential corpus against the
 existing string pipeline's output (`golden_*` test helpers). When picking up the next step:
 
-- Read `docs/design/inline-ast-architecture.md` §5.2 ("Phased plan") for the current state and the
-  itemized checklist of landed/remaining sub-steps.
-- Check merged PRs against the `inline-ast` branch (and any still-open ones) to confirm what's actually
-  landed vs. what the design doc's checklist shows — the local `inline-ast` branch ref can be stale;
-  fetch `origin/inline-ast` first.
+- **Branch from `origin/inline-ast`, not `main`.** This file, the design doc, and the whole
+  `inline_builder` module exist only on that branch, so a work branch cut from `main` starts with none
+  of them and every "read the design doc" instruction dead-ends:
+
+  ```
+  git fetch origin inline-ast
+  git checkout -b <work-branch> origin/inline-ast
+  ```
+
+  Use `-b`, not `-B`, so a name collision fails loudly instead of silently resetting a branch that
+  had commits on it. The one exception is a work branch the session harness **already created** — it
+  cuts it from `main`, which is the case this bullet exists for — where re-pointing is exactly what
+  you want and the only thing discarded is the `main` tip it was mistakenly cut from:
+
+  ```
+  git checkout -B <work-branch> origin/inline-ast   # only to re-point a harness-created branch
+  ```
+
+- **Don't read the whole design doc — it is ~4,500 lines.** Read §5.2 ("Phased plan") for the phase
+  status, then the **last two** "*Step N (prep) landed as (…)*" paragraphs and the **tail** of the
+  Phase 4 checklist. The closing paragraph of the most recent increment always names what is left
+  ("what still defers is …"), which is the menu the next increment is picked from.
+- `git log --oneline origin/main..origin/inline-ast` is the fastest authoritative record of what has
+  actually landed — the local `inline-ast` ref can be stale, so fetch first. Every increment's commit
+  subject carries its own step number, so the log doubles as the real checklist when the doc's own
+  lags. Listing merged PRs against the branch tells you the same thing more slowly; do that only when
+  you need to check for a still-open one.
+- **One increment per branch/PR.** Every prior increment is a single narrow behavior change plus its
+  corpora and its design-doc note. Resist bundling two.
 - After landing a step, update the design doc's narrative (a new "*Step N landed as (...)*" paragraph)
   and its checklist entry, matching the existing entries' style — this is how every prior increment on
   this branch has recorded its landing.
+- **Close with a progress estimate.** In your final summary to the user, say how many further sessions
+  the *whole* inline-AST branch looks like — not just the step you landed. See below for how to ground
+  it.
+
+### Estimating what is left
+
+The branch has been running long enough that "how much further?" is a standing question, and a session
+that has just surveyed §5.2 is the cheapest place to answer it. Ground the estimate in four things
+rather than guessing:
+
+1. **The unchecked items in the Phase 4 checklist**, plus step 7 (`render_with`/`render_to`,
+   `Document::to_asg()`, retiring the `attribute-missing` hack), Phase 5, and Landing.
+2. **The "what still defers" sentence** in the newest landed-as note — those are the increments
+   already named and sized.
+3. **The observed rate.** Every increment so far is one branch, one PR, one session, so an increment
+   count *is* a session count. `git log --oneline origin/main..origin/inline-ast` gives you the run
+   rate directly.
+4. **The two things that move the number most:** the step 6 cutover itself is bundled work (the
+   authoritative fold, wiring each staged side effect for real, deleting three sentinel systems,
+   retiring the `with_inline_tree` flag) and is worth several sessions on its own; and the corpus-wide
+   audit has repeatedly *discovered* new preps mid-flight, so the remaining-prep count is a floor, not
+   a ceiling.
+
+Give a **range** with the reasoning attached, and say plainly which parts are firm (an enumerated
+checklist item) and which are open-ended (anything gated on an audit that has not run yet). A single
+confident number would be false precision.
+
+### The corpus-wide fold-parity audit
+
+Several increments were found (or cleared) by an audit the design doc refers to as "tree building
+forced on for every parse in the suite". It is not checked in — rebuild it as a throwaway patch, run
+it on your branch **and** on `origin/inline-ast`, and compare the two sets. The bar every increment
+has to clear is *no **new** divergence*; a set that also shrinks is a bonus, not a requirement (an
+increment closing a form no golden source exercises leaves the set unchanged).
+
+In `parser/src/content/substitution_group.rs`, inside `SubstitutionGroup::apply`:
+
+1. Force the seed on: `let tree_seed = if parser.build_inline_tree {` → `let tree_seed = if true {`.
+2. Just before `content.set_inlines(tree)`, fold the tree with `HtmlSubstitutionRenderer` and, when
+   the result differs from `content.rendered`, append `src` / `rendered` / `folded` to a log file —
+   one `writeln!` per divergence, formatting all three with `{:?}` (see the third gotcha below).
+
+Then:
+
+```
+cargo test --workspace -- --test-threads=1     # see the gotchas below
+sort -u <logfile> > after.txt                  # repeat on origin/inline-ast for before.txt
+comm -13 before.txt after.txt                  # must be empty: these are NEW divergences
+comm -23 before.txt after.txt                  # divergences this increment closed
+```
+
+Three gotchas that will silently waste a run — each produces a plausible-looking but wrong answer
+rather than an error:
+
+- **Log to a file, not `eprintln!`.** `cargo test` captures a passing test's output, so `eprintln!`
+  divergences vanish unless every run also passes `--nocapture` (which then interleaves them with the
+  harness's own progress lines).
+- **`--test-threads=1`.** Tests append to the log concurrently otherwise, and the interleaved lines
+  make the two sets impossible to `comm`.
+- **Format the three values with `{:?}`, not `{}`.** `sort -u` and `comm` are line-based, so the
+  whole comparison rests on one record being one physical line. Debug-escaping is what guarantees
+  that: a multi-line block's content comes out as `\n` rather than as real newlines. Under `{}` such
+  a record spills across lines that then get deduplicated against unrelated records' lines, and a
+  genuinely new divergence can drop out of `comm -13` — the one output the audit exists to read.
+
+Revert the patch before committing.
+
+### Coverage on this branch
+
+Judge coverage on a **diff** basis, not an absolute one: `cargo llvm-cov report -p asciidoc-parser
+--show-missing-lines` on your branch and on `origin/inline-ast` (`git stash` in between), then check
+that the changed file's missed-region and missed-line **counts** are unchanged. The files this branch
+touches already sit at ~99% with a handful of long-documented defensive branches, so the absolute
+number tells you nothing about what you added.
+
+### Two local papercuts
+
+- `cargo-llvm-cov` and the nightly `rustfmt` component are often absent from a fresh session; install
+  both before the first preflight (`cargo install cargo-llvm-cov --locked`,
+  `rustup component add --toolchain nightly rustfmt`) rather than mid-checklist.
+- Test fixtures in this module are full of backticks and quotes. An `r#"…"#` literal whose *contents*
+  contain a `"` immediately followed by a `#` — which a smart-quote-then-mark fixture does — is
+  terminated by that pair, producing a wall of unrelated syntax errors far from the real line. Use
+  `r##"…"##` for those.
