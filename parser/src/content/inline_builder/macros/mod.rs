@@ -192,10 +192,12 @@ pub(super) fn apply_macros<'src>(
 /// The same two families read the character a construct written *beside* a
 /// rendered span presents, which
 /// [`build_match_string`](super::quotes::build_match_string) writes around
-/// that span's own placeholder — and which it can write only for a span the
-/// string pipeline has really rendered, not for the passthrough-extraction
-/// pass's own wrapper (see
-/// [`Masked`]). This step is where `masked` is
+/// that span's own placeholder — the two outer characters of its markup, or,
+/// for a span rendering to its **body** and nothing else, that body's own two
+/// outer characters. Either one it can write only for a span the string
+/// pipeline has really rendered, not for the passthrough-extraction pass's own
+/// wrapper (see [`Masked`]), whose body the pipeline is holding inside its own
+/// sentinel whatever that body renders as. This step is where `masked` is
 /// carried, and only here, because these two prefix groups are the only
 /// classes in the whole module that read a tag's `>` differently from the
 /// bare placeholder: `**bold**https://example.org` links in the string

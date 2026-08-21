@@ -4102,6 +4102,35 @@ mod tests {
             "https://example.org\"`q`\"",
             // A formal-URL link's own boundary-prefix group is the same one.
             "**bold**https://example.org[Site]",
+            // A **transparent** span read *as* a sibling: rendering to its
+            // body and nothing else, what it presents is that body — so the
+            // string pipeline's flat haystack holds the space `x ` ends with
+            // where the tree stood one placeholder, and both link.
+            "[width=10]##x ##https://example.org",
+            "*[width=10]##x ##https://example.org*",
+            "x [width=10]##y ##https://example.org",
+            "[width=10]## ##https://example.org",
+            "[width=10]##x ##https://example.org[Docs]",
+            // The body's own last character, whatever node kind carries it: a
+            // text run after a tag-rendered child, a restored entity, a
+            // typographic replacement, an escaped special.
+            "[width=10]##*b* ##https://example.org",
+            "[width=10]##**b**##https://example.org",
+            "[width=10]##&copy; ##https://example.org",
+            "[width=10]##(C) ##https://example.org",
+            "[width=10]##a&##https://example.org",
+            // A body ending in a word character is no accepted prefix in
+            // either pipeline, so the URL stays literal in both.
+            "[width=10]##x##https://example.org",
+            "[width=10]##x-##https://example.org",
+            // The reverse direction: the body's *first* character is what ends
+            // a bare URL written against the span's own opening edge.
+            "https://example.org[width=10]## x##",
+            "https://example.org [width=10]##x##",
+            // And one transparent span inside another, where the inner span's
+            // own body is what the outer one presents.
+            "[width=10]##[width=10]##y ##z##https://example.org",
+            "[width=10]##[width=10]##y ##https://example.org##",
         ] {
             assert_eq!(
                 fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
@@ -4272,6 +4301,18 @@ mod tests {
             "*x*[width=10]#doc@example.org#",
             "*x*[width=10]#https://example.org#",
             "``code``[width=10]#doc@example.org#",
+            // A transparent span read *as* a sibling presents its own body,
+            // where every other variant presents its markup: the space `x `
+            // ends with is what the string pipeline's flat haystack holds
+            // beside the address, and neither pipeline reads a mismatch
+            // character there.
+            "[width=10]##x ##doc@example.org",
+            "*x [width=10]##y ##doc@example.org*",
+            "[width=10]##x>##doc@example.org",
+            // A body ending in one of the pattern's own three mismatch
+            // characters suppresses the address in both.
+            "[width=10]##x/##doc@example.org",
+            "[width=10]##x:##doc@example.org",
             // And the same addresses at the content's own top level, where a
             // level's start is exactly what the string pipeline presents.
             "doc@example.org",
@@ -4355,6 +4396,126 @@ mod tests {
             nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
             "an address after a tag-rendered sibling must stay literal: {nodes:?}"
         );
+    }
+
+    #[test]
+    fn a_url_after_a_transparent_span_builds_a_link() {
+        // The parity above, read structurally, for the shape that named this
+        // increment: a span rendering to its body and nothing else presents
+        // that **body** to a sibling — the space `x ` ends with, which is one
+        // of the boundary-prefix group's own accepted characters — where
+        // [`build_match_string`](super::super::quotes::build_match_string)
+        // used to stand the whole span in as one placeholder belonging to no
+        // class at all.
+        let source = "[width=10]##x ##https://example.org";
+        let nodes = build_src(Span::new(source));
+
+        assert_eq!(
+            golden_macros(source),
+            fold_html(&nodes, &HtmlSubstitutionRenderer {})
+        );
+
+        assert_eq!(
+            assert_link(&nodes[1]).target.as_ref(),
+            "https://example.org"
+        );
+    }
+
+    #[test]
+    fn a_url_after_a_transparent_passthrough_wrapper_stays_literal() {
+        // The half the identity protects here, exactly as it protects the
+        // tag-rendered one. `[width=10]++x ++` renders its body and nothing
+        // else too — but it is the passthrough-extraction pass's own wrapper,
+        // and the string pipeline is holding it as its `\u{96}…\u{97}`
+        // sentinel for every step this module runs, so the space inside it is
+        // not what the boundary-prefix group reads there and the URL stays
+        // literal. Classifying a transparent span by its *body* alone would
+        // have made this the increment's own new divergence.
+        use super::super::super::test_support::golden_passthroughs;
+
+        let source = "[width=10]++x ++https://example.org";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+            "a URL beside a transparent wrapper must stay literal: {nodes:?}"
+        );
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs(source),
+            "fold diverged for {source:?}"
+        );
+    }
+
+    #[test]
+    fn a_bare_url_swallowing_a_transparent_spans_body_is_a_documented_divergence() {
+        // What the *opening* half cannot reach. A bare URL's body class
+        // (`[^\s\[\]<]*`) consumes greedily rather than reading one
+        // character, so where the string pipeline's flat haystack lets it
+        // swallow the whole body of the span beside it — building a target out
+        // of both — a level holding that span as one opaque piece can only
+        // reject the match: a URL crossing a span is not this level's to
+        // build. The character the span presents is right; what defers is a
+        // class that wants more than one of them.
+        let source = "https://example.org[width=10]##x##";
+
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+
+        assert_ne!(
+            golden_macros(source),
+            folded,
+            "expected the documented divergence to still reproduce"
+        );
+
+        assert_eq!(
+            golden_macros(source),
+            "<a href=\"https://example.orgx\" class=\"bare\">https://example.orgx</a>"
+        );
+
+        assert_eq!(folded, "https://example.orgx");
+    }
+
+    #[test]
+    fn a_real_documents_transparent_span_siblings_fold_to_their_rendered_strings() {
+        // End-to-end, through the real parse path, on the shapes that named
+        // this increment: a URL or an address written beside a transparent
+        // span must read that span's own body — linking where it ends in a
+        // space and staying literal where it ends in a word character — so a
+        // tree that decided either the other way would regress the moment
+        // `rendered_html()` becomes a fold of this tree.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+            "== A heading\n",
+            "\n",
+            "See [width=10]##x ##https://example.org and [width=10]##y##https://example.org here.\n",
+            "\n",
+            "Mail [width=10]##x ##doc@example.org or *a [width=10]##b ##doc@example.org* today.\n",
+        ));
+
+        let mut folded_blocks = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &Parser::default()
+                ),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded_blocks += 1;
+        }
+
+        assert_eq!(folded_blocks, 2, "expected every paragraph to carry a tree");
     }
 
     #[test]
