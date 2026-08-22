@@ -4725,6 +4725,50 @@ Each phase is a reviewable unit with a clear exit gate.
   presented character, the closing character, and the character-replacements step's
   consume-across-levels case — and the keeps.
 
+  *Step 6 prep landed as (a trailing-punctuation strip that cuts an escaped special in half):*
+  the auto-link family's own last-named gap — "the one form this family's escaped-special lift
+  does not reach", pinned since the lift landed as
+  `a_bare_url_whose_trailing_strip_would_split_a_special_is_a_documented_divergence` and reproduced
+  by two of the language description's own auto-link fixtures. A bare URL ending in a literal `&`,
+  `<`, or `>` reaches the macros step as that special's own entity, whose final `;` satisfies the
+  trailing-punctuation strip: the string replacer splits the entity happily (`href` ending `&amp`,
+  a literal `;` left after the link), while the tree's boundary fell *inside* a
+  [`CharRef`](../../parser/src/inlines/inline_node.rs) leaf and left the whole match literal.
+
+  Closing it needed one distinction rather than a new mechanism: a match boundary is answerable
+  exactly where a piece's **match-string bytes are the bytes its own fold emits**, which is true of
+  the three `CharRef` leaves and of nothing else the module stands in as a placeholder. There
+  either half *is* those bytes, so
+  [`emit_range`](../../parser/src/content/inline_builder/quotes.rs) now cuts such a piece into two
+  [`Raw`](../../parser/src/inlines/inline_node.rs) leaves — each folding verbatim, so every
+  partition of the entity folds to the entity — while every other atomic piece, standing in for
+  markup that exists only at fold time, still clones whole. Neither half has an honest `'src` slice
+  of its own (the source holds one character, or `(C)`, where the match string holds an entity), so
+  both keep the leaf's whole `location`, design §4.4's coarse fallback. The classification is one
+  new [`charref_entity`](../../parser/src/content/inline_builder/quotes.rs), which
+  [`atomic_piece_is_recoverable`](../../parser/src/content/inline_builder/macros/image.rs) — the
+  `range_has_no_opaque_piece` predicate that used to spell the same three arms out a second time —
+  now delegates to, so the gate and the bytes it admits cannot disagree;
+  `charref_entity_matches_the_match_strings_own_bytes` pins both against
+  [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs)' own arms.
+
+  The family's gate is then **deleted rather than relaxed**: the bytes the strip cuts off are a
+  literal `;`, `:`, or `)`, which no opaque piece can supply (the module stands one in as a single
+  non-ASCII placeholder), so the only piece the boundary can fall inside is a `Text` run or a
+  `CharRef` leaf and both are now cut. What reaches parity is all three escaped specials at a bare
+  URL's end, a restored entity (`&copy;`) and a typographic replacement (`(C)`) — the class's
+  other two leaves, split by the same cut — the two golden fixtures this closes, the strip's
+  two-byte `);` form over a leaf the link keeps whole, in flow, doubled, inside a rendered span,
+  escaped, under `hide-uri-scheme` (whose scheme count reaches past a split leaf as it does past
+  a whole one), the bracketed and angle spellings that apply no strip at all, and end to end
+  through the real parse path. Re-running the corpus-wide fold-parity audit shows those two
+  fixtures **gone** from the divergence set and no new divergence; coverage is diff-neutral, and
+  as with every prep piece before it, nothing further is wired in.
+
+  What still defers is unchanged: the boundary-class halves the sibling increments named — a macro
+  body class wanting more than one presented character, the closing character, and the
+  character-replacements step's consume-across-levels case — and the keeps.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -5504,6 +5548,19 @@ Each phase is a reviewable unit with a clear exit gate.
        not its presence, so an order that escapes **after** `Macros` takes the second half too —
        which brings the cross-reference family to parity there in both spellings. See the step's
        own "landed as" note above.
+
+     - ✅ **prep (a trailing strip that cuts an escaped special).** The auto-link family's own
+       last-named gap: a bare URL ending in a literal `&`, `<`, or `>` satisfies the
+       trailing-punctuation strip on that special's *entity*, which the string replacer splits and
+       the tree could not. A match boundary is answerable wherever a piece's match-string bytes are
+       the bytes its own fold emits — the three
+       [`CharRef`](../../parser/src/inlines/inline_node.rs) leaves and nothing else — so
+       [`emit_range`](../../parser/src/content/inline_builder/quotes.rs) cuts one into two
+       [`Raw`](../../parser/src/inlines/inline_node.rs) halves, each folding verbatim, and one new
+       [`charref_entity`](../../parser/src/content/inline_builder/quotes.rs) answers both that
+       classification and the bytes. The family's gate is deleted rather than relaxed (the stripped
+       bytes are a literal `;`, `:`, or `)`, which no opaque piece can supply), and the formerly
+       pinned divergence becomes a parity test. See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

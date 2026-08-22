@@ -1037,6 +1037,44 @@ pub(super) fn replacement_entity(value: &str) -> Option<&'static str> {
     })
 }
 
+/// The match-string bytes a [`CharRef`] leaf contributes — a
+/// [`Special`](CharRef::Special)'s canonical entity, a restored
+/// [`Entity`](CharRef::Entity)'s own text, or a typographic
+/// [`Replacement`](CharRef::Replacement)'s built-in rendering — or `None` for
+/// every other node, whose output bytes exist only at fold time and which
+/// [`build_match_string`] therefore stands in as one [`SPAN_PLACEHOLDER`].
+///
+/// These are the leaves whose match-string bytes are *exactly* the bytes their
+/// own fold emits, which is what lets a caller read them as bytes:
+/// [`range_has_no_opaque_piece`] admits a range crossing one, and
+/// [`emit_range`] slices one a range only partly covers. That equality is the
+/// whole content of this function, so it reads the same three arms
+/// [`build_match_string`] writes them with;
+/// `charref_entity_matches_the_match_strings_own_bytes` pins the two against
+/// each other so they cannot drift.
+///
+/// [`range_has_no_opaque_piece`]: super::macros::image::range_has_no_opaque_piece
+pub(super) fn charref_entity<'a>(node: &'a InlineNode<'_>) -> Option<&'a str> {
+    match node {
+        InlineNode::CharRef {
+            value: CharRef::Special(ch),
+            ..
+        } => Some(special_entity(*ch)),
+
+        InlineNode::CharRef {
+            value: CharRef::Entity(entity),
+            ..
+        } => Some(entity.as_ref()),
+
+        InlineNode::CharRef {
+            value: CharRef::Replacement(value),
+            ..
+        } => replacement_entity(value),
+
+        _ => None,
+    }
+}
+
 /// One accepted quote match at a level, in absolute match-string byte offsets.
 struct QuoteMatch {
     /// The whole match, `[start, end)`.
@@ -1439,6 +1477,13 @@ fn attributes_of_attrlist<'src>(
 /// Emits the original nodes covering the match-string range `[range.start,
 /// range.end)` into `out`, slicing a verbatim [`Text`](InlineNode::Text) run at
 /// the boundaries and cloning any atomic piece that falls inside.
+///
+/// An atomic piece a boundary *splits* is sliced too, but only for the leaves
+/// [`charref_entity`] names — the three [`CharRef`](InlineNode::CharRef)
+/// leaves, whose match-string bytes are exactly the bytes their own fold emits
+/// — each half emitted as a [`Raw`](InlineNode::Raw) leaf carrying those bytes
+/// verbatim. Every other atomic piece stands in for markup that exists only at
+/// fold time, so a boundary splitting one still clones it whole.
 pub(super) fn emit_range<'src>(
     nodes: &[InlineNode<'src>],
     pieces: &[Piece],
@@ -1466,11 +1511,51 @@ pub(super) fn emit_range<'src>(
         };
 
         if piece.atomic {
-            // An atomic piece should fall wholly inside the range; a boundary
-            // that splits one is a recognition edge this increment does not
-            // claim, so clone the whole piece and let the differential corpus
-            // catch any real divergence.
-            out.push(node.clone());
+            // An atomic piece falling wholly inside the range is emitted as
+            // its own node, which is the overwhelmingly common case.
+            if p_start >= range.start && p_end <= range.end {
+                out.push(node.clone());
+                continue;
+            }
+
+            // A boundary that *splits* one is answerable for exactly the
+            // leaves [`charref_entity`] names — the three
+            // [`CharRef`](InlineNode::CharRef) leaves, whose match-string
+            // bytes are the very bytes their own fold emits — because there
+            // either half **is** those bytes: a [`Raw`](InlineNode::Raw) leaf
+            // carrying them folds verbatim, so every partition of the entity
+            // folds to the entity, and a caller cutting one (a bare URL whose
+            // trailing-punctuation strip lands on an entity's own `;` — see
+            // `build_inline_link_node`) reproduces the string replacer's own
+            // split rather than deferring to it. Neither half has an honest
+            // `'src` slice of its own (the source holds one character, or
+            // `(C)`, where the match string holds an entity), so both keep the
+            // leaf's whole `location` — design §4.4's coarse fallback, the
+            // same one a synthesized run's slices already take.
+            //
+            // Every other atomic piece stands in for markup that exists only
+            // at fold time, one `SPAN_PLACEHOLDER` character with no bytes to
+            // slice, so a partial overlap there stays what it was: clone the
+            // whole piece and let the differential corpus catch any real
+            // divergence.
+            let Some(entity) = charref_entity(node) else {
+                out.push(node.clone());
+                continue;
+            };
+
+            let lo = range.start.max(p_start) - p_start;
+            let hi = range.end.min(p_end) - p_start;
+
+            // Every entity is ASCII, so both offsets are character boundaries
+            // within it; the crate forbids `unwrap`, so that lookup is spelled
+            // `unwrap_or_default` rather than as a branch no input reaches.
+            let sliced = entity.get(lo..hi).unwrap_or_default();
+
+            out.push(InlineNode::Raw {
+                value: CowStr::from(sliced.to_string()),
+                location: node.span(),
+            });
+
             continue;
         }
 
@@ -1707,8 +1792,8 @@ mod tests {
 
     use super::{
         super::test_support::{
-            assert_styled, assert_text, build_src, build_through_quotes, fold_html,
-            golden_passthroughs,
+            assert_raw, assert_special_char, assert_styled, assert_text, build_src,
+            build_through_quotes, fold_html, golden_passthroughs,
         },
         Masked,
     };
@@ -2937,6 +3022,164 @@ mod tests {
         assert_eq!(s_to_src(&pieces, 14, Bias::Start), 110);
         assert_eq!(s_to_src(&pieces, 14, Bias::End), 110);
         assert_eq!(s_to_src(&pieces, 16, Bias::Start), 112);
+    }
+
+    #[test]
+    fn emit_range_cuts_a_charref_leaf_into_raw_halves() {
+        use super::{build_match_string, emit_range};
+
+        // A boundary inside a `CharRef` leaf cuts it, because either half of
+        // its match-string bytes is what that half's own fold emits. The three
+        // leaves are cut alike; each half keeps the leaf's whole location
+        // (design §4.4), and the two concatenate back to the entity.
+        let source = Span::new("&(C)\u{a9}");
+
+        let nodes = vec![
+            InlineNode::CharRef {
+                value: CharRef::Special('&'),
+                location: source.slice(0..1),
+            },
+            InlineNode::CharRef {
+                value: CharRef::Replacement("\u{a9}"),
+                location: source.slice(1..4),
+            },
+            InlineNode::CharRef {
+                value: CharRef::Entity(CowStr::from("&copy;")),
+                location: source.slice(4..6),
+            },
+        ];
+
+        let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
+        assert_eq!(s, "&amp;&#169;&copy;");
+
+        // One cut in each leaf, at its own final `;` — the boundary a bare
+        // auto-link's trailing-punctuation strip lands on.
+        for (range, head, tail, location) in [
+            (0..4, "&amp", ";", "&"),
+            (5..10, "&#169", ";", "(C)"),
+            (11..16, "&copy", ";", "\u{a9}"),
+        ] {
+            let mut out = Vec::new();
+            emit_range(&nodes, &pieces, range.clone(), &mut out);
+            assert_eq!(out.len(), 1, "{out:?}");
+            assert_eq!(assert_raw(&out[0], head).data(), location);
+
+            let mut out = Vec::new();
+            emit_range(&nodes, &pieces, range.end..range.end + 1, &mut out);
+            assert_eq!(out.len(), 1, "{out:?}");
+            assert_eq!(assert_raw(&out[0], tail).data(), location);
+        }
+
+        // A range covering a leaf whole still emits the leaf itself, which is
+        // what every caller before this one gets.
+        let mut out = Vec::new();
+        emit_range(&nodes, &pieces, 0..5, &mut out);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_special_char(&out[0], '&');
+    }
+
+    #[test]
+    fn emit_range_keeps_an_opaque_piece_whole_at_a_cut() {
+        use super::{build_match_string, emit_range};
+        use crate::inlines::Styled;
+
+        // The other half of the rule: a piece standing in for markup that
+        // exists only at fold time has no bytes to cut, so a boundary
+        // splitting one clones it whole, exactly as before.
+        let source = Span::new("*x*");
+
+        let nodes = vec![InlineNode::Styled(Styled {
+            variant: StyleVariant::Strong,
+            form: SpanForm::Constrained,
+            id: None,
+            roles: vec![],
+            attrs: None,
+            children: vec![],
+            location: source,
+        })];
+
+        let (_, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
+
+        // The placeholder is one three-byte character; a range covering its
+        // first byte alone still emits the span itself.
+        let mut out = Vec::new();
+        emit_range(&nodes, &pieces, 0..1, &mut out);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_styled(&out[0], StyleVariant::Strong, SpanForm::Constrained);
+    }
+
+    #[test]
+    fn charref_entity_matches_the_match_strings_own_bytes() {
+        use super::{build_match_string, charref_entity};
+
+        // [`charref_entity`] answers the bytes [`build_match_string`] writes
+        // for the same node — the equality every caller reading a leaf as
+        // bytes rests on, and the one thing that could drift between the two
+        // lists of `CharRef` arms.
+        let source = Span::new("<>&(C)'\u{a9}x");
+
+        let nodes = vec![
+            InlineNode::CharRef {
+                value: CharRef::Special('<'),
+                location: source.slice(0..1),
+            },
+            InlineNode::CharRef {
+                value: CharRef::Special('>'),
+                location: source.slice(1..2),
+            },
+            InlineNode::CharRef {
+                value: CharRef::Special('&'),
+                location: source.slice(2..3),
+            },
+            InlineNode::CharRef {
+                value: CharRef::Replacement("\u{a9}"),
+                location: source.slice(3..6),
+            },
+            InlineNode::CharRef {
+                value: CharRef::Replacement("\u{2019}"),
+                location: source.slice(6..7),
+            },
+            InlineNode::CharRef {
+                value: CharRef::Entity(CowStr::from("&copy;")),
+                location: source.slice(7..9),
+            },
+            InlineNode::Text {
+                value: CowStr::from("x"),
+                location: source.slice(9..10),
+            },
+        ];
+
+        let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
+
+        for piece in &pieces {
+            let node = &nodes[piece.node_index];
+            let bytes = &s[piece.s_start..piece.s_start + piece.s_len];
+
+            match charref_entity(node) {
+                // A leaf: its entity is exactly the piece's own bytes, and the
+                // piece is atomic (it is one indivisible node, cut only where
+                // both halves are its own bytes).
+                Some(entity) => {
+                    assert_eq!(entity, bytes, "{node:?}");
+                    assert!(piece.atomic, "{node:?}");
+                }
+
+                // Everything else is not a leaf — here the `Text` run, which
+                // is not atomic either.
+                None => assert!(!piece.atomic, "{node:?}"),
+            }
+        }
+
+        // A replacement carrying a value no rule produces is not a leaf: the
+        // one shape whose two answers agree by *exclusion*, since
+        // `build_match_string` stands it in as a placeholder.
+        assert!(
+            charref_entity(&InlineNode::CharRef {
+                value: CharRef::Replacement("\u{2603}"),
+                location: source,
+            })
+            .is_none()
+        );
     }
 
     #[test]

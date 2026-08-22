@@ -11,14 +11,13 @@ use crate::{
         inline_builder::{
             fold::fold_stem,
             quotes::{
-                LevelContext, Piece, build_match_string, replacement_entity, source_slice,
-                text_slice,
+                LevelContext, Piece, build_match_string, charref_entity, source_slice, text_slice,
             },
             special_chars::Masked,
         },
         normalize_text_lf_escaped_bracket,
     },
-    inlines::{CharRef, Image, InlineNode},
+    inlines::{Image, InlineNode},
     parser::{
         InlineSubstitutionRenderer, has_dangerous_scheme, has_dangerous_self_href, is_uri_ish,
     },
@@ -225,10 +224,11 @@ pub(in crate::content::inline_builder) fn range_is_verbatim_or_synthesized(
 /// [`Text`](InlineNode::Text) run (verbatim or
 /// [`synthesized`](Piece::synthesized)) or any of the three
 /// [`CharRef`](InlineNode::CharRef) leaves, an *escaped special*
-/// ([`Special`](CharRef::Special)), a *restored entity*
-/// ([`Entity`](CharRef::Entity)), or a *typographic replacement*
-/// ([`Replacement`](CharRef::Replacement)) — rejecting only an **opaque**
-/// piece: a rendered [`Styled`](crate::inlines::Styled) span, an
+/// ([`Special`](crate::inlines::CharRef::Special)), a *restored entity*
+/// ([`Entity`](crate::inlines::CharRef::Entity)), or a *typographic
+/// replacement* ([`Replacement`](crate::inlines::CharRef::Replacement)) —
+/// rejecting only an **opaque** piece: a rendered
+/// [`Styled`](crate::inlines::Styled) span, an
 /// earlier-recognized macro node, or a masked passthrough or STEM expression,
 /// each of which [`build_match_string`] stands in as one
 /// `SPAN_PLACEHOLDER` rather than the markup or entity the string pipeline's
@@ -238,9 +238,10 @@ pub(in crate::content::inline_builder) fn range_is_verbatim_or_synthesized(
 /// match-string bytes — a special's canonical entity (`&lt;`, `&gt;`,
 /// `&amp;`), a restored entity's own text (`&copy;`, `&#8217;`), a
 /// replacement's built-in rendering (`&#169;` for `(C)`, `&#8217;` for `'`,
-/// via [`replacement_entity`]) — are the very byte sequence the string
-/// pipeline's own haystack carries at that position, so a family that reads its
-/// values out of the match string sees exactly what the string replacer sees.
+/// via [`replacement_entity`](super::super::quotes::replacement_entity)) — are
+/// the very byte sequence the string pipeline's own haystack carries at that
+/// position, so a family that reads its values out of the match string sees
+/// exactly what the string replacer sees.
 /// What such a family cannot do is *slice* those bytes from `'src` (the source
 /// holds one character, or `(C)`, where the match string holds an entity, and
 /// `&amp;copy;` where it holds `&copy;`), so a value that must ride on the node
@@ -279,28 +280,21 @@ pub(in crate::content::inline_builder) fn range_has_no_opaque_piece(
 /// Tells whether one [`atomic`](Piece::atomic) piece is a leaf
 /// [`build_match_string`] gives real bytes to — the classification
 /// [`range_has_no_opaque_piece`] applies per overlapping piece (see its own
-/// doc comment for why exactly these three [`CharRef`] leaves qualify).
+/// doc comment for why exactly these three [`CharRef`](crate::inlines::CharRef)
+/// leaves qualify).
 fn atomic_piece_is_recoverable(nodes: &[InlineNode<'_>], piece: &Piece) -> bool {
     // The atomic pieces `build_match_string` gives real bytes to are the
     // three `CharRef` leaves — an escaped special, a restored entity, and
     // a typographic replacement the built-in backend has a rendering for;
-    // everything else it stands in as one placeholder. The
-    // `replacement_entity` test mirrors that arm's own guard, so a
-    // hand-built node carrying a value no rule produces stays opaque here
-    // exactly as it does there.
-    match nodes.get(piece.node_index) {
-        Some(InlineNode::CharRef {
-            value: CharRef::Special(_) | CharRef::Entity(_),
-            ..
-        }) => true,
-
-        Some(InlineNode::CharRef {
-            value: CharRef::Replacement(value),
-            ..
-        }) => replacement_entity(value).is_some(),
-
-        _ => false,
-    }
+    // everything else it stands in as one placeholder. Asking
+    // [`charref_entity`](super::super::quotes::charref_entity) for those very
+    // bytes is what makes the classification and the match string agree by
+    // construction — including on a hand-built replacement carrying a value no
+    // rule produces, which stays opaque here exactly as it does there.
+    nodes
+        .get(piece.node_index)
+        .and_then(charref_entity)
+        .is_some()
 }
 
 /// [`range_has_no_opaque_piece`], further admitting a **masked** piece — a
