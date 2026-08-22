@@ -2,10 +2,7 @@
 
 use super::{
     ComputedSpecials, MacroMatch, MacroMatchKind, computed_value_children,
-    image::{
-        range_is_restorable, range_is_verbatim, range_is_verbatim_or_synthesized, restorable_body,
-        tokened_bracket,
-    },
+    image::{range_is_restorable, range_is_verbatim, restorable_body, tokened_bracket},
     macro_text_children, rebuild_macro_level,
 };
 use crate::{
@@ -463,19 +460,22 @@ fn build_inline_link_node<'src>(
         url_end = consumed_end;
 
         // The strip's arithmetic runs over the *match string*, exactly as the
-        // replacer's runs over its own escaped haystack — but the boundary it
-        // lands on must still be one a node list can be cut at, and an escaped
-        // special is one piece, not five bytes. A bare URL ending in a literal
-        // `&` reaches this pass as `…&amp;`, whose own final `;` satisfies the
-        // strip: the replacer happily splits the entity (target `…&amp`, suffix
-        // `;`), while here `consumed_end` would land *inside* a
-        // [`CharRef`](InlineNode::CharRef) leaf that
-        // [`emit_range`](super::super::quotes::emit_range) can only emit whole.
-        // Left literal, the one form this family's escaped-special lift does
-        // not reach.
-        if stripped > 0 && !range_is_verbatim_or_synthesized(pieces, &(consumed_end..full.end)) {
-            return None;
-        }
+        // replacer's runs over its own escaped haystack, and the boundary it
+        // lands on needs no gate of its own. The bytes it cuts off are a
+        // literal `;`, `:`, or `)` — which an **opaque** piece can never
+        // supply, since [`build_match_string`] stands one in as a single
+        // non-ASCII placeholder — so the only piece the boundary can fall
+        // inside is a [`Text`](InlineNode::Text) run or a
+        // [`CharRef`](InlineNode::CharRef) leaf, and
+        // [`emit_range`](super::super::quotes::emit_range) cuts both.
+        //
+        // A bare URL ending in a literal `&` is the shape that makes the
+        // second case reachable: it arrives here as `…&amp;`, whose own final
+        // `;` satisfies the strip, so the replacer splits the entity (target
+        // `…&amp`, a literal `;` after the link). Splitting the leaf
+        // reproduces that exactly — either half folds to its own bytes, so the
+        // two together fold to the entity the whole leaf would — where this
+        // family used to leave the whole match literal.
     }
 
     // A target crossing a **masked** construct finishes into the restored
@@ -2123,8 +2123,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::super::super::test_support::{
-        assert_entity, assert_link, assert_special_char, assert_styled, assert_text, build_src,
-        fold_html, golden_macros, golden_macros_with, link_text_of,
+        assert_entity, assert_link, assert_raw, assert_special_char, assert_styled, assert_text,
+        build_src, fold_html, golden_macros, golden_macros_with, link_text_of,
     };
     use crate::{
         HasSpan, Parser, Span,
@@ -3208,6 +3208,10 @@ mod tests {
             "https://example.org/a&b[]",
             "<https://example.org/a&b>",
             "https://example.org/?a=1&b=2",
+            // And with the trailing strip splitting that special, whose two
+            // halves the scheme count reaches past exactly as it reaches past
+            // a whole one.
+            "https://example.org/a&",
         ];
 
         let renderer = HtmlSubstitutionRenderer {};
@@ -4657,25 +4661,82 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_url_whose_trailing_strip_would_split_a_special_is_a_documented_divergence() {
+    fn fold_matches_the_string_pipeline_when_a_bare_urls_trailing_strip_splits_a_special() {
         // The trailing-punctuation strip keys off the target's *final
-        // character*, over the escaped text — so a bare URL ending in a literal
-        // `&` (whose match-string tail is `&amp;`) satisfies it on that
-        // entity's own `;`. The string replacer happily splits the entity
-        // (target `…/a&amp`, a literal `;` after the link); here the boundary
-        // would fall *inside* a `CharRef` leaf, which `emit_range` can only
-        // emit whole, so the link is left literal instead — the one form this
-        // family's escaped-special lift does not reach.
-        let source = "https://example.org/a&";
-        let nodes = build_src(Span::new(source));
+        // character*, over the escaped text — so a bare URL ending in a
+        // literal `&` (whose match-string tail is `&amp;`) satisfies it on
+        // that entity's own `;`. The string replacer splits the entity there
+        // (target `…/a&amp`, a literal `;` after the link), and the tree now
+        // reproduces that split rather than deferring to it: the boundary
+        // falls inside a `CharRef` leaf, which
+        // [`emit_range`](super::super::quotes::emit_range) cuts into two
+        // [`Raw`](InlineNode::Raw) halves — each folding to its own bytes, so
+        // the pair folds to exactly what the whole leaf would.
+        let fixtures = [
+            // The three escaped specials, each ending a bare URL.
+            "https://example.org/a&",
+            "https://example.org/a<",
+            "https://example.org/a>",
+            // The two shapes from the language description's own auto-link
+            // page that this closes: a `>` written after a URL, alone and
+            // doubled.
+            "See https://example.org> for details.",
+            "a https://example.org> b https://example.com> c",
+            // The other two leaves whose match-string bytes are their own — a
+            // *restored entity* and a *typographic replacement* — split the
+            // same way, for the same reason.
+            "https://example.org/?x=&copy;",
+            "https://example.org/a(C)",
+            // The strip's two-byte form (a `)` before the `;`), over a literal
+            // pair following a leaf the link keeps whole.
+            "https://example.org/(a&b);",
+            // In flow, doubled, inside a rendered span, and escaped.
+            "see https://example.org/a& now",
+            "https://example.org/a& https://example.org/b&",
+            "*https://example.org/a&*",
+            "\\https://example.org/a&",
+            // The bracketed and angle spellings apply no strip at all, so the
+            // leaf stays whole in both pipelines.
+            "https://example.org/a&[Docs]",
+            "https://example.org/a&[]",
+            "<https://example.org/a&>",
+            // An entity away from the boundary is untouched, as before.
+            "https://example.org/?a=1&b=2",
+        ];
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "a bare URL whose strip splits a special must stay literal: {nodes:?}"
-        );
+        for fixture in fixtures {
+            assert_eq!(
+                fold_html(&build_src(Span::new(fixture)), &HtmlSubstitutionRenderer {}),
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
 
-        // The string pipeline, by contrast, builds a link on the split entity.
-        assert!(golden_macros(source).contains(r#"href="https://example.org/a&amp""#));
+    #[test]
+    fn a_bare_urls_trailing_strip_cuts_a_special_into_two_raw_halves() {
+        // The parity above, read structurally: the target keeps the entity's
+        // leading bytes as the string replacer's own `href` does, the shown
+        // text carries them as a `Raw` leaf (a `Text` would have the fold
+        // escape the `&` a second time — design §3.4), and the `;` the strip
+        // left behind is the leaf's own remaining byte, emitted beside the
+        // link rather than duplicating the whole entity there.
+        let nodes = build_src(Span::new("https://example.org/a&"));
+
+        let reference = assert_link(&nodes[0]);
+        assert_eq!(reference.target.as_ref(), "https://example.org/a&amp");
+
+        assert_text(&reference.children[0], "https://example.org/a", 1, 1);
+
+        // Neither half has an honest `'src` slice of its own — the source
+        // holds one `&` where the match string holds five bytes — so both keep
+        // the leaf's whole location (design §4.4's coarse fallback).
+        let head = assert_raw(&reference.children[1], "&amp");
+        assert_eq!(head.data(), "&");
+
+        let tail = assert_raw(&nodes[1], ";");
+        assert_eq!(tail.data(), "&");
+        assert_eq!(tail.byte_offset(), head.byte_offset());
     }
 
     #[test]
@@ -5911,6 +5972,48 @@ mod tests {
         );
 
         assert_eq!(folded, "https://example.orgx");
+    }
+
+    #[test]
+    fn a_real_documents_split_special_auto_links_fold_to_their_rendered_strings() {
+        // End-to-end, through the real parse path, on the shape that named
+        // this increment: a bare URL whose trailing-punctuation strip lands on
+        // an escaped special's own `;` must build the same split link the
+        // rendered string carries, so a tree that left it literal — or
+        // emitted the whole entity on either side of the cut — would regress
+        // the moment `rendered_html()` becomes a fold of this tree.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+            "== A heading\n",
+            "\n",
+            "See https://example.org> for details.\n",
+            "\n",
+            "Visit https://example.org/a& or https://example.org/b(C) today.\n",
+        ));
+
+        let mut folded_blocks = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &Parser::default()
+                ),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded_blocks += 1;
+        }
+
+        assert_eq!(folded_blocks, 2, "expected every paragraph to carry a tree");
     }
 
     #[test]
