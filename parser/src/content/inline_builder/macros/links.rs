@@ -1,7 +1,7 @@
 //! Auto-link, formal-URL-link, and `link:`/`mailto:` macro recognition.
 
 use super::{
-    MacroMatch, MacroMatchKind, escaped_value_children,
+    ComputedSpecials, MacroMatch, MacroMatchKind, computed_value_children,
     image::{
         range_is_restorable, range_is_verbatim, range_is_verbatim_or_synthesized, restorable_body,
         tokened_bracket,
@@ -196,6 +196,7 @@ pub(super) fn inline_link_level<'src>(
     parser: &Parser,
     ctx: LevelContext,
     masked: Masked<'_>,
+    specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes, masked);
 
@@ -210,7 +211,7 @@ pub(super) fn inline_link_level<'src>(
     // coordinates — see `apply_macro_families`'s own doc comment.
     let (s, pieces) = ctx.shift(s, pieces);
 
-    let matches = find_inline_link_matches(&nodes, &s, &pieces, root, parser);
+    let matches = find_inline_link_matches(&nodes, &s, &pieces, root, parser, specials);
 
     if matches.is_empty() {
         return nodes;
@@ -231,6 +232,7 @@ fn find_inline_link_matches<'src>(
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
+    specials: ComputedSpecials,
 ) -> Vec<MacroMatch<'src>> {
     let mut matches = Vec::new();
 
@@ -249,7 +251,7 @@ fn find_inline_link_matches<'src>(
             continue;
         }
 
-        match build_inline_link_node(&n, &full, nodes, pieces, root, parser) {
+        match build_inline_link_node(&n, &full, nodes, pieces, root, parser, specials) {
             Some(m) => matches.push(m),
 
             // A deferred or invalid form (an escaped scheme is handled inside as
@@ -322,6 +324,7 @@ fn build_inline_link_node<'src>(
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
+    specials: ComputedSpecials,
 ) -> Option<MacroMatch<'src>> {
     // `scheme_match` is always present (no branch can match without it); fall
     // through defensively if it is somehow absent.
@@ -627,7 +630,7 @@ fn build_inline_link_node<'src>(
             // family's own attribute-list value is rebuilt — and each masked
             // construct the value still holds a token for as the node itself,
             // whose fold emits the bytes `restore_to` splices there.
-            restored_value_children(&link_text, &restores, text_location)
+            restored_value_children(&link_text, &restores, text_location, specials)
         } else {
             // Parsed out of the source's own bytes, which are already logical
             // text carrying no entity to undo: one synthesized `Text`.
@@ -949,6 +952,7 @@ pub(super) fn link_macro_level<'src>(
     parser: &Parser,
     ctx: LevelContext,
     masked: Masked<'_>,
+    specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes, masked);
 
@@ -963,7 +967,7 @@ pub(super) fn link_macro_level<'src>(
     // coordinates — see `apply_macro_families`'s own doc comment.
     let (s, pieces) = ctx.shift(s, pieces);
 
-    let matches = find_link_macro_matches(&nodes, &s, &pieces, root, parser);
+    let matches = find_link_macro_matches(&nodes, &s, &pieces, root, parser, specials);
 
     if matches.is_empty() {
         return nodes;
@@ -988,6 +992,7 @@ fn find_link_macro_matches<'src>(
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
+    specials: ComputedSpecials,
 ) -> Vec<MacroMatch<'src>> {
     let mut matches = Vec::new();
 
@@ -1062,7 +1067,7 @@ fn find_link_macro_matches<'src>(
             continue;
         }
 
-        match build_link_node(&caps, &full, nodes, pieces, root, parser) {
+        match build_link_node(&caps, &full, nodes, pieces, root, parser, specials) {
             Some(node) => matches.push(MacroMatch {
                 kind: MacroMatchKind::Node {
                     consumed: full.clone(),
@@ -1197,12 +1202,13 @@ pub(super) fn restore_masked_passthroughs(
 ///   *computes*, out of an [`Attrlist`] parse (see [`text_attrlist`]). A parse
 ///   of the bracket's own verbatim `'src` slice yields logical text, so it
 ///   stays a single synthesized `Text` (that slice carries no entity to undo);
-///   a parse of the level's **match string** yields already-escaped text
-///   instead, so it is rebuilt through [`escaped_value_children`] — design
-///   §3.4's trichotomy — exactly as the cross-reference family's own
-///   attribute-list value is, with each **masked** construct that value still
-///   holds a token for spliced back in as its own node
-///   ([`restored_value_children`]).
+///   a parse of the level's **match string** yields the bytes the string
+///   replacer parsed instead, so it is rebuilt through
+///   [`computed_value_children`] — design §3.4's trichotomy under an order that
+///   has already escaped, and §3.4.1's literal reading under one that has not —
+///   exactly as the cross-reference family's own attribute-list value is, with
+///   each **masked** construct that value still holds a token for spliced back
+///   in as its own node ([`restored_value_children`]).
 ///
 /// As in the additive builder generally, this performs *no* recognition side
 /// effect — notably it does **not** `register_link` the target in the asset
@@ -1215,6 +1221,7 @@ pub(super) fn build_link_node<'src>(
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
+    specials: ComputedSpecials,
 ) -> Option<InlineNode<'src>> {
     let location = source_slice(pieces, full.clone(), root);
 
@@ -1454,7 +1461,7 @@ pub(super) fn build_link_node<'src>(
             // family's own attribute-list value is rebuilt — and each masked
             // construct the value still holds a token for as the node itself,
             // whose fold emits the bytes `restore_to` splices there.
-            restored_value_children(&link_text, &restores, text_location)
+            restored_value_children(&link_text, &restores, text_location, specials)
         } else {
             // Parsed out of the source's own bytes, which are already logical
             // text carrying no entity to undo: one synthesized `Text`.
@@ -1509,9 +1516,9 @@ struct TextAttrlist<'src> {
     attrs: Attrlist<'src>,
 
     /// Whether [`text`](Self::text) came back from a parse of the level's
-    /// **match string** (already-escaped bytes) rather than of the source's own
-    /// (logical text). The caller rebuilds the former through
-    /// [`escaped_value_children`] so an entity in it is not escaped twice.
+    /// **match string** (the string replacer's own bytes) rather than of the
+    /// source's own (logical text). The caller rebuilds the former through
+    /// [`computed_value_children`] so an entity in it is not escaped twice.
     escaped: bool,
 
     /// Whether a real named attribute actually split off — the string
@@ -1681,8 +1688,8 @@ fn text_attrlist<'src>(
 
 /// Rebuilds a computed display text that still holds
 /// [`tokened_bracket`] tokens as the node's children: each token becomes the
-/// masked node itself, and the escaped bytes around it take
-/// [`escaped_value_children`]'s own trichotomy rebuild.
+/// masked node itself, and the bytes around it take
+/// [`computed_value_children`]'s own rebuild.
 ///
 /// Splicing the node rather than its bytes is what keeps the fold honest. A
 /// [`Raw`](InlineNode::Raw) leaf's body is emitted verbatim and a
@@ -1702,6 +1709,7 @@ fn restored_value_children<'src>(
     text: &str,
     restores: &[InlineNode<'src>],
     location: Span<'src>,
+    specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
     let mut children: Vec<InlineNode<'src>> = Vec::new();
     let mut rest = text;
@@ -1710,9 +1718,10 @@ fn restored_value_children<'src>(
         let token = format!("\u{96}{n}\u{97}");
 
         if let Some(pos) = rest.find(&token) {
-            children.append(&mut escaped_value_children(
+            children.append(&mut computed_value_children(
                 rest.get(..pos).unwrap_or_default(),
                 location,
+                specials,
             ));
 
             children.push(node.clone());
@@ -1720,7 +1729,7 @@ fn restored_value_children<'src>(
         }
     }
 
-    children.append(&mut escaped_value_children(rest, location));
+    children.append(&mut computed_value_children(rest, location, specials));
 
     children
 }

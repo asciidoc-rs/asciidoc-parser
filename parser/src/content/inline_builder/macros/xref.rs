@@ -1,8 +1,8 @@
 //! Cross-reference recognition (`xref:id[…]`, `<<id>>`).
 
 use super::{
-    MacroMatch, MacroMatchKind, escaped_value_children, image::range_has_no_opaque_piece,
-    macro_text_children, rebuild_macro_level,
+    ComputedSpecials, MacroMatch, MacroMatchKind, computed_value_children,
+    image::range_has_no_opaque_piece, macro_text_children, rebuild_macro_level,
 };
 use crate::{
     Parser, Span,
@@ -87,6 +87,7 @@ pub(super) fn xref_macros_level<'src>(
     parser: &Parser,
     ctx: LevelContext,
     masked: Masked<'_>,
+    specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes, masked);
 
@@ -105,7 +106,7 @@ pub(super) fn xref_macros_level<'src>(
     // coordinates — see `apply_macro_families`'s own doc comment.
     let (s, pieces) = ctx.shift(s, pieces);
 
-    let matches = find_xref_matches(&nodes, &s, &pieces, root, parser);
+    let matches = find_xref_matches(&nodes, &s, &pieces, root, parser, specials);
 
     if matches.is_empty() {
         return nodes;
@@ -157,7 +158,7 @@ pub(super) fn xref_macros_level<'src>(
 /// the leaf folds back to its own bytes instead of being escaped
 /// twice — and the attribute-list branch, whose value comes back from a parse
 /// rather than from a range, re-derives the same split with
-/// [`escaped_value_children`].
+/// [`computed_value_children`].
 ///
 /// # A rendered span inside the reference text
 ///
@@ -208,6 +209,7 @@ fn find_xref_matches<'src>(
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
+    specials: ComputedSpecials,
 ) -> Vec<MacroMatch<'src>> {
     let mut matches = Vec::new();
 
@@ -291,7 +293,7 @@ fn find_xref_matches<'src>(
             Some(inner) => {
                 build_xref_shorthand_node(inner.clone(), &full, nodes, s, pieces, root, parser)
             }
-            None => build_xref_node(&caps, &full, nodes, pieces, root, parser),
+            None => build_xref_node(&caps, &full, nodes, pieces, root, parser, specials),
         };
 
         matches.push(MacroMatch {
@@ -356,6 +358,7 @@ fn build_xref_node<'src>(
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
+    specials: ComputedSpecials,
 ) -> InlineNode<'src> {
     // Group 3 is the `xref:` macro target. It always participates here: the
     // pattern's two branches are mutually exclusive, and the caller routes a
@@ -368,7 +371,7 @@ fn build_xref_node<'src>(
 
     let raw_text = caps.get(4).map_or("", |m| m.as_str());
     let (children, window, roles, xrefstyle) =
-        xref_macro_text(raw_text, caps.get(4), nodes, pieces, root, parser);
+        xref_macro_text(raw_text, caps.get(4), nodes, pieces, root, parser, specials);
 
     let location = source_slice(pieces, full.clone(), root);
 
@@ -411,6 +414,7 @@ fn xref_macro_text<'src>(
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
+    specials: ComputedSpecials,
 ) -> (
     Vec<InlineNode<'src>>,
     Option<CowStr<'src>>,
@@ -462,7 +466,7 @@ fn xref_macro_text<'src>(
                     // establishes.
                     let location = source_slice(pieces, span.start()..span.end(), root);
 
-                    escaped_value_children(&text, location)
+                    computed_value_children(&text, location, specials)
                 }
             };
 

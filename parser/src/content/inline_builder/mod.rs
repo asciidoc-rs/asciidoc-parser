@@ -369,7 +369,7 @@ use footnotes::apply_footnotes;
 // and future external callers today.
 #[allow(unused_imports)]
 pub(crate) use macros::apply_macro_side_effects;
-use macros::apply_macros;
+use macros::{ComputedSpecials, apply_macros};
 use passthrough_step::apply_passthroughs;
 use post_replacements::apply_post_replacements;
 use quotes::apply_quotes;
@@ -589,12 +589,31 @@ pub(crate) fn build_for_group<'src>(
             }
 
             SubstitutionStep::Macros => {
+                // The one thing this step reads as *bytes* rather than
+                // carrying structurally is an attribute list's positional
+                // value: it comes back from a parse, so there is no range of
+                // nodes to rebuild it from and its classification has to be
+                // re-derived from the bytes. Whether those bytes are already
+                // escaped is decided by where the escaping step sits in this
+                // order — design §3.4.1 applied to the step's *position*,
+                // exactly as `SplicedSpecials` decides it for the step above —
+                // so it is decided here, where the order is in hand, and
+                // carried down as `ComputedSpecials`.
+                let specials = if steps
+                    .get(..position)
+                    .is_some_and(|behind| behind.contains(&SubstitutionStep::SpecialCharacters))
+                {
+                    ComputedSpecials::Escaped
+                } else {
+                    ComputedSpecials::Verbatim
+                };
+
                 // Footnotes are their own transducer, run once over the
                 // *whole* tree after every other macro family has been
                 // resolved at every level — see `apply_footnotes`'s doc
                 // comment for why this cannot be folded into `apply_macros`
                 // as an ordinary level pass.
-                let nodes = apply_macros(nodes, location, parser, Masked::known(&masked));
+                let nodes = apply_macros(nodes, location, parser, Masked::known(&masked), specials);
                 apply_footnotes(nodes, location, parser)
             }
 
@@ -1905,10 +1924,32 @@ mod tests {
                 "a &copy; b and image:x&copy;y.png[]",
                 // A cross-reference attribute-list text carrying a bare `&`,
                 // which only an order *without* `specialcharacters` can
-                // present: the value's own bytes open neither recoverable
-                // class, so `escaped_value_children` keeps the `&` as
-                // ordinary logical text.
+                // present: the parse hands back the author's own bytes, so
+                // `unescaped_value_children` classifies the `&` as the `Raw`
+                // leaf the classification pass would have made of it anyway.
                 "xref:sec[a & b,role=hl]",
+                // The same value written as the *entity spelling* of a
+                // special, for each of the three families that compute an
+                // attribute-list value. Under these orders nothing escaped it,
+                // so the six bytes are the author's own and the string
+                // replacer splices them in untouched — where reading them as
+                // an escaped special would unwind one level too far and fold
+                // `&lt;` back as a bare `<`. This is what `ComputedSpecials`
+                // decides (see
+                // `a_computed_value_is_classified_by_where_the_escaping_step_sits`,
+                // which pins the same fixtures from both sides).
+                "xref:sec[{product} &lt; y,role=hl] here",
+                "link:index.html[{product} &lt; y,role=hl] here",
+                "https://example.org[{product} &lt; y,role=hl] here",
+                // The same, with a *restored* entity beside it, so the one
+                // class this half still recognizes on its own — an entity the
+                // replacements step un-escaped, which folds verbatim either
+                // way — is exercised in the same value.
+                "link:index.html[{product} &copy; y,role=hl] here",
+                // And with a masked passthrough in the same text, so the
+                // token-splitting rebuild (`restored_value_children`) reaches
+                // this half too rather than only the escaped one.
+                "link:index.html[{product} &lt; ++<b>x</b>++,role=hl] here",
                 // A cross-reference reference text crossing a *rendered span*,
                 // carried as structured children: under these orders the span
                 // is opaque exactly as it is under the normal one, and the
