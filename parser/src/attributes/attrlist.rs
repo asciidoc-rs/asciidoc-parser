@@ -1,6 +1,9 @@
 use crate::{
     HasSpan, Parser, Span,
-    attributes::{ElementAttribute, element_attribute::ParseShorthand},
+    attributes::{
+        ElementAttribute,
+        element_attribute::{ParseShorthand, restore_into},
+    },
     content::{Content, SubstitutionStep},
     internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     span::MatchedItem,
@@ -72,6 +75,44 @@ impl<'src> Attrlist<'src> {
             anchor: self.anchor.map(CowStr::into_owned),
             source,
             source_text: Some(CowStr::from(self.source.data().to_string())),
+        }
+    }
+
+    /// [`into_owned`](Self::into_owned), first substituting each
+    /// `\u{96}`*n*`\u{97}` **token** in every parsed value — and in the
+    /// anchor and the retained
+    /// [`source_text`](Self::source_text) — with `bodies[n]`.
+    ///
+    /// This is how a caller restores a masked construct that its attribute
+    /// list text still holds. The restore has to happen **after** the parse,
+    /// not before it: the string pipeline parses its own haystack with the
+    /// passthrough sentinel still in place, so the body's own bytes never
+    /// reach the split that divides the list into entries, names, and values.
+    /// See [`ElementAttribute::into_owned_restoring`] for the per-attribute
+    /// half, including what it does to the shorthand offsets.
+    pub(crate) fn into_owned_restoring<'dst>(
+        self,
+        source: Span<'dst>,
+        bodies: &[&str],
+    ) -> Attrlist<'dst> {
+        Attrlist {
+            attributes: self
+                .attributes
+                .into_iter()
+                .map(|attribute| attribute.into_owned_restoring(bodies))
+                .collect(),
+            // The anchor takes the plain conversion rather than a restoring
+            // one. An anchor is only ever set for the `[…]`-delimited whole
+            // -bracket form, and no restoring caller can present one: each
+            // parses a macro's bracket capture, whose own pattern ends the
+            // match at the first `]`, so `[x]` never arrives here intact.
+            anchor: self.anchor.map(CowStr::into_owned),
+            source,
+            source_text: Some(restore_into(
+                CowStr::from(self.source.data()),
+                bodies,
+                &mut [],
+            )),
         }
     }
 

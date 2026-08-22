@@ -1369,6 +1369,16 @@ mod tests {
         assert_parity("Visit https://example.org[a +[literal]+ label] now.");
         assert_parity("Visit https://example.org[a +++<b>x</b>+++ label] today.");
 
+        // The image family's **bracket** over a masked passthrough — the
+        // restore that happens *inside* a parsed attribute-list value, run
+        // here through the whole assembled pipeline. The two fixtures that
+        // matter are a body carrying the split's own delimiters (which must
+        // stay one value, as it does where the string pipeline's parse reads
+        // its sentinel) and one sitting ahead of a shorthand item (whose
+        // offsets shift with the restore).
+        assert_parity("See image:chart.png[++a, b = c++] and image:x.png[++A & B++].");
+        assert_parity("An image:y.png[++abc++.myrole] beside *bold* text.");
+
         // A construct written against an enclosing span's own edge, where the
         // string pipeline's haystack holds that span's rendered markup and a
         // level matched in isolation holds its own start or end — the quotes

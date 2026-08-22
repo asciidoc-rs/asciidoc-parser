@@ -126,7 +126,7 @@ fn find_image_matches<'src>(
             .get(2)
             .map_or(full.end..full.end, |m| m.start()..m.end());
 
-        if !range_has_no_opaque_piece(nodes, pieces, &bracket) {
+        if !range_is_restorable(nodes, pieces, &bracket, Restorable::Passthrough) {
             continue;
         }
 
@@ -561,7 +561,7 @@ fn build_image_node<'src>(
         (m.as_str(), m.start()..m.end())
     });
 
-    let attrlist = bracket_attrlist(bracket_text, bracket_range, pieces, root, parser);
+    let attrlist = bracket_attrlist(bracket_text, bracket_range, nodes, pieces, root, parser);
 
     // The default alt text derives from the target's basename, with `_`/`-`
     // read as spaces — exactly the string replacer's `default_alt`, which
@@ -818,6 +818,7 @@ fn masked_default_alt(
 fn bracket_attrlist<'src>(
     bracket_text: &str,
     bracket_range: std::ops::Range<usize>,
+    nodes: &[InlineNode<'_>],
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
@@ -834,7 +835,108 @@ fn bracket_attrlist<'src>(
         return parse_attrlist(bracket, parser);
     }
 
-    parse_attrlist(Span::new(bracket_text), parser).into_owned(bracket)
+    let (tokened, bodies) = tokened_bracket(
+        bracket_text,
+        &bracket_range,
+        nodes,
+        pieces,
+        parser.renderer.as_ref(),
+    );
+
+    let bodies: Vec<&str> = bodies.iter().map(Cow::as_ref).collect();
+
+    parse_attrlist(Span::new(&tokened), parser).into_owned_restoring(bracket, &bodies)
+}
+
+/// Rewrites the bracket's own match-string bytes so each masked
+/// **passthrough** in it becomes an index-keyed `\u{96}`*n*`\u{97}` token,
+/// returning that text alongside the bodies those tokens restore to.
+///
+/// This is the *before the split* half of the bracket restore, and it exists
+/// so the text handed to [`Attrlist::parse`] is the same **shape** the string
+/// pipeline's own haystack has there. Two spellings have to be normalized into
+/// one: [`widen_masked_passthroughs`] has already rewritten a
+/// [`Raw`](InlineNode::Raw) piece to a sentinel-shaped token for this family's
+/// *recognition*, but its numbering is per level, and any other masked piece
+/// is still the bare one-character [`SPAN_PLACEHOLDER`](super::super::quotes).
+/// Renumbering every restorable piece from zero, per bracket, is what lets the
+/// restore be **index-keyed** on the way back out
+/// ([`Attrlist::into_owned_restoring`]) — the parse can drop a token
+/// (a blank slot, a value the split discards) without shifting the ones that
+/// survive, exactly as
+/// [`Passthroughs::restore_to`](crate::content::Passthroughs) is unshifted by
+/// a sentinel that never reached the rendered string.
+///
+/// Only the kinds [`Restorable::Passthrough`] names are tokened, which is the
+/// same set this family's own gate admits: a masked **STEM** expression is
+/// deferred here as it is in the target, and for the same reason — see
+/// [`Restorable`], and
+/// `an_image_bracket_over_a_stem_expression_is_a_documented_divergence`.
+fn tokened_bracket<'a>(
+    bracket_text: &str,
+    range: &std::ops::Range<usize>,
+    nodes: &'a [InlineNode<'_>],
+    pieces: &[Piece],
+    renderer: &dyn InlineSubstitutionRenderer,
+) -> (String, Vec<Cow<'a, str>>) {
+    let mut tokened = String::new();
+    let mut bodies: Vec<Cow<'a, str>> = Vec::new();
+
+    // In match-string coordinates; `bracket_text` is indexed relative to
+    // `range.start`.
+    let mut cursor = range.start;
+
+    for piece in pieces {
+        let p_start = piece.s_start;
+        let p_end = piece.s_start + piece.s_len;
+
+        // Skip pieces that do not overlap the range.
+        if p_end <= range.start || p_start >= range.end {
+            continue;
+        }
+
+        if !piece.atomic {
+            continue;
+        }
+
+        // The kinds gate and the body are one step: `restorable_body`
+        // answers `Some` for exactly the nodes `node_is_restorable` admits
+        // (pinned by `restorable_body_agrees_with_node_is_restorable`), so
+        // splitting them would leave a branch no input can take. A piece this
+        // skips is an atomic one the *gate* admitted for another reason — a
+        // `CharRef` leaf the match string gives real bytes to.
+        let Some(body) = nodes
+            .get(piece.node_index)
+            .filter(|node| node_is_restorable(node, Restorable::Passthrough))
+            .and_then(|node| restorable_body(node, renderer))
+        else {
+            continue;
+        };
+
+        // A masked piece is atomic and never sliced, so an overlapping one
+        // lies wholly inside the range and `p_start`/`p_end` are safe bounds.
+        tokened.push_str(
+            bracket_text
+                .get(cursor.saturating_sub(range.start)..p_start.saturating_sub(range.start))
+                .unwrap_or_default(),
+        );
+
+        tokened.push_str(&format!("\u{96}{n}\u{97}", n = bodies.len()));
+        bodies.push(body);
+        cursor = p_end;
+    }
+
+    if bodies.is_empty() {
+        return (bracket_text.to_string(), bodies);
+    }
+
+    tokened.push_str(
+        bracket_text
+            .get(cursor.saturating_sub(range.start)..)
+            .unwrap_or_default(),
+    );
+
+    (tokened, bodies)
 }
 
 /// Parses one inline attribute list, discarding the warnings — the shared
@@ -1715,32 +1817,260 @@ mod tests {
     }
 
     #[test]
-    fn an_image_bracket_over_a_passthrough_is_a_documented_divergence() {
-        // The **bracket** keeps the opaque-piece gate: it comes back from a
-        // *parse* (`bracket_attrlist` reads its bytes as content), and the
-        // string pipeline's own parse swallows the sentinel into a value
-        // that only restores after the split — a body carrying a `,` or `=`
-        // therefore stays one attribute there, which a restore-then-parse
-        // could not reproduce. Restoring inside each parsed value is a later
-        // increment's own call.
+    fn fold_matches_the_string_pipeline_for_an_image_bracket_over_a_passthrough() {
+        // The differential corpus for an `image:`/`icon:` **bracket**
+        // crossing a masked passthrough. The bracket comes back from a
+        // *parse*, so the restore is the one the string pipeline performs:
+        // `Attrlist::parse` reads the `\u{96}`*n*`\u{97}` sentinel as one
+        // opaque run — carrying none of the `,`/`=`/`"` bytes the split
+        // reads — and the restore pass splices each body over whatever
+        // sentinel reached the rendered string. `tokened_bracket` puts the
+        // match string into that same shape and
+        // `Attrlist::into_owned_restoring` performs the after-the-split
+        // half.
         use super::super::super::test_support::golden_passthroughs;
 
-        let source = "image:sunset.jpg[++Alt text++]";
+        let fixtures = [
+            // The plain alt, whole and partial, and a body whose own
+            // formatting characters stay literal inside the passthrough.
+            "image:sunset.jpg[++Alt text++]",
+            "image:x.png[a ++b_c__d++ e]",
+            "image:x.png[++a++ and ++b++]",
+            // The split invariant: a `,` or an `=` inside the body must not
+            // divide the list, because the string pipeline's own parse never
+            // sees it. These are the fixtures a restore-*then*-parse fails.
+            "image:x.png[++a,b++]",
+            "image:x.png[++a=b++]",
+            r#"image:x.png["++q,r++"]"#,
+            // Named values, and the positional width/height slots.
+            "image:x.png[title=++t_t__t++]",
+            "image:x.png[Sunset,role=++hl++]",
+            "image:x.png[alt,++100++,50]",
+            "image:x.png[++a++,++200++]",
+            // Shorthand: the `#id`/`.role` the scan finds sit *after* a
+            // token, so their offsets have to shift with the restore while
+            // the items themselves stay the ones the string pipeline found.
+            "image:x.png[++abc++#myid]",
+            "image:x.png[++abc++.myrole]",
+            "image:x.png[++a b++.myrole#myid]",
+            // A restored `&` passes through `encode_attribute_value`
+            // untouched in both pipelines (only `"` is encoded — see the
+            // quote divergence below).
+            "image:x.png[++A & B++]",
+            // A non-restorable atomic piece — a restored entity, which the
+            // match string gives real bytes to — beside a masked one in the
+            // same bracket: the gate admits both, and only the masked piece
+            // is tokened.
+            "image:x.png[Tom &amp; Jerry ++and co++]",
+            // The other passthrough spellings.
+            "image:x.png[pass:[a,b]]",
+            "image:x.png[+++a_b+++]",
+            // An attribute reference hidden inside the body: neither
+            // pipeline expands it, since both parse the masked text.
+            "image:x.png[++{name}++]",
+            // Target and bracket both over passthroughs.
+            "image:++s.png++[++alt++]",
+            // The icon form, whose alt comes from the same bracket.
+            "icon:home[++Home++]",
+            // Inside a rendered span, two in one flow, and escaped.
+            "*a image:x.png[++alt++] b*",
+            "image:x.png[++A++] then image:y.png[++B,C++]",
+            "\\image:x.png[++alt++]",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_passthroughs(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_image_bracket_over_a_passthrough_is_recognized() {
+        // The parsed values carry the *restored* bytes, owned off the
+        // temporary the parse read and tagged with the bracket's own coarse
+        // span (design §4.4), exactly as every other non-verbatim bracket is.
+        let source = "image:x.png[++Alt text++,++100++,50]";
         let nodes = build_src(Span::new(source));
 
+        let image = assert_image(&nodes[0]);
+        assert_eq!(image.target.as_ref(), "x.png");
+        assert_eq!(image.alt.as_deref(), Some("Alt text"));
+        assert_eq!(image.width.as_deref(), Some("100"));
+        assert_eq!(image.height.as_deref(), Some("50"));
+
+        // A body carrying the split's own delimiters stays inside one value.
+        let nodes = build_src(Span::new("image:x.png[++a,b=c++]"));
+        let image = assert_image(&nodes[0]);
+        assert_eq!(image.alt.as_deref(), Some("a,b=c"));
+
+        // The shorthand items keep pointing at the same characters after the
+        // restore lengthens the value ahead of them.
+        let nodes = build_src(Span::new("image:x.png[++abc++.myrole#myid]"));
+        let image = assert_image(&nodes[0]);
+        assert_eq!(image.alt.as_deref(), Some("abc.myrole#myid"));
+
+        let attrlist = image.attrs.as_ref().unwrap();
+
+        assert_eq!(attrlist.id(), Some("myid"));
+        assert_eq!(attrlist.roles(), vec!["myrole"]);
+    }
+
+    #[test]
+    fn a_bracket_body_carrying_sentinel_shaped_bytes_is_not_re_matched() {
+        // The bracket restore is one left-to-right pass, like
+        // `Passthroughs::restore_to`'s own: a body that itself contains the
+        // bytes of a *later* token must not have that token spliced into it,
+        // and a token index the bracket never issued is left as written
+        // rather than renumbering the ones after it.
+        let source = "image:x.png[++x\u{96}1\u{97}y++ ++b++]";
+        let nodes = build_src(Span::new(source));
+
+        let image = assert_image(&nodes[0]);
+        assert_eq!(image.alt.as_deref(), Some("x\u{96}1\u{97}y b"));
+
+        // The leniency the index-keyed restore rests on, in both spellings a
+        // bracket can present: a run that is not a well-formed token (no
+        // digits) and one whose index the bracket never issued are each left
+        // exactly as the author wrote them, rather than renumbering — or
+        // consuming — the real tokens around them.
+        let nodes = build_src(Span::new(
+            "image:x.png[++a++ \u{96}x\u{97} \u{96}9\u{97} ++b++]",
+        ));
+        let image = assert_image(&nodes[0]);
+
+        assert_eq!(
+            image.alt.as_deref(),
+            Some("a \u{96}x\u{97} \u{96}9\u{97} b")
+        );
+
+        // The string pipeline reads this one differently, and the difference
+        // is its own wart rather than something to reproduce: `restore_to`
+        // is a `replace_all` over the *finished* rendered string, so it also
+        // rewrites the sentinel-shaped bytes the author wrote — splicing
+        // passthrough 1's body into the middle of passthrough 0's. The tree
+        // restores per token, into the value each token actually stands in,
+        // so an author's own bytes survive. Its sibling
+        // `a_restored_body_carrying_sentinel_shaped_bytes_is_not_re_matched`
+        // pins the same reading for a target.
+        use super::super::super::test_support::golden_passthroughs;
+
         assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
-            "an image bracket over a passthrough must stay literal: {nodes:?}"
+            golden_passthroughs(source).contains(r#"alt="xby b""#),
+            "expected the documented divergence to still reproduce"
+        );
+    }
+
+    #[test]
+    fn a_dangerous_link_inside_a_bracket_passthrough_is_a_documented_divergence() {
+        // The bracket's own version of
+        // `a_dangerous_target_inside_a_passthrough_is_a_documented_divergence`,
+        // and the same safe reading. The renderer's dangerous-scheme check
+        // reads the `link=` attribute, which now carries the *restored*
+        // bytes; the string pipeline's renderer checks the sentinel its own
+        // parse put there, so a smuggled `javascript:` passes and its restore
+        // pass then completes a live anchor around the image.
+        use super::super::super::test_support::golden_passthroughs;
+
+        let source = "image:x.png[Alt,link=++javascript:alert(1)++]";
+        let nodes = build_src(Span::new(source));
+
+        let image = assert_image(&nodes[0]);
+
+        assert_eq!(
+            image
+                .attrs
+                .as_ref()
+                .unwrap()
+                .named_attribute("link")
+                .unwrap()
+                .value(),
+            "javascript:alert(1)"
         );
 
         let golden = golden_passthroughs(source);
 
         assert!(
-            golden.contains("alt=\"Alt text\""),
+            golden.contains("href=\"javascript:"),
             "expected the documented divergence to still reproduce: {golden:?}"
         );
 
-        assert_ne!(golden, fold_html(&nodes, &HtmlSubstitutionRenderer {}));
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+
+        assert!(
+            !folded.contains("href="),
+            "the fold must not emit the live link: {folded:?}"
+        );
+    }
+
+    #[test]
+    fn a_quote_restored_into_an_image_bracket_is_a_documented_divergence() {
+        // The one shape the bracket restore does not reach byte-for-byte,
+        // and the same well-formed reading the two link families' own
+        // restores take for a `"` in a target. The string pipeline encodes
+        // its quote-free *sentinel* into `alt="…"` and the restore pass then
+        // splices the raw `"` into the finished attribute, closing it; the
+        // tree holds the restored bytes as the node's own `alt`, so the
+        // fold's `encode_attribute_value` escapes the quote and the
+        // attribute stays well formed.
+        use super::super::super::test_support::golden_passthroughs;
+
+        let source = r#"image:x.png[++a"b++]"#;
+        let nodes = build_src(Span::new(source));
+
+        let image = assert_image(&nodes[0]);
+        assert_eq!(image.alt.as_deref(), Some(r#"a"b"#));
+
+        let golden = golden_passthroughs(source);
+
+        assert!(
+            golden.contains(r#"alt="a"b""#),
+            "expected the documented divergence to still reproduce: {golden:?}"
+        );
+
+        assert!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}).contains(r#"alt="a&quot;b""#),
+            "the fold must emit the encoded quote"
+        );
+    }
+
+    #[test]
+    fn an_image_bracket_over_a_stem_expression_is_a_documented_divergence() {
+        // The bracket admits exactly the kinds the *target* does
+        // ([`Restorable::Passthrough`]), and defers a masked STEM expression
+        // for the same reason the target does — see
+        // `an_image_target_over_a_stem_expression_is_a_documented_divergence`.
+        // The bracket has a `web_path`-bound value of its own: an
+        // interactive SVG's `fallback=` is run through `image_src`, so a
+        // restored body carrying a backslash — which *every* rendered STEM
+        // body does — would posixify on a Windows-separator resolver where
+        // the string pipeline's own `web_path` saw only the backslash-free
+        // sentinel.
+        use super::super::super::test_support::golden_passthroughs;
+
+        for source in ["image:x.png[stem:[y]]", "icon:home[stem:[y]]"] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
+                "an image bracket over a STEM expression must stay literal: {nodes:?}"
+            );
+        }
+
+        // The string pipeline builds one, restoring the rendered expression
+        // into the `alt` after its own parse split the list.
+        let golden = golden_passthroughs("image:x.png[stem:[y]]");
+
+        assert!(
+            golden.contains(r#"alt="\$y\$""#),
+            "expected the documented divergence to still reproduce: {golden:?}"
+        );
     }
 
     #[test]
