@@ -4527,6 +4527,91 @@ Each phase is a reviewable unit with a clear exit gate.
   family's STEM target and bracket, and the keeps: the cross-reference family's pre-restore target,
   and the well-formed readings these five increments pinned.
 
+  *Step 6 prep landed as (a masked construct inside a link's **display-text attribute list** — the
+  bracket half's other three captures):* the increment above took the bracket half's first family
+  and named the rest of it in one phrase — "the `link:`/`mailto:` and auto-link families'
+  attribute-list display texts". Those three captures are three call sites of a *single* function,
+  [`text_attrlist`](../../parser/src/content/inline_builder/macros/links.rs), so one gate closes
+  all three: the `link:` macro's `=` list (roles / id / title / window), a `mailto:`'s `,` list
+  (its subject and body), and the auto-link / formal-URL family's own `=` list.
+
+  The *order* is the same one the image bracket found, and the machinery is now literally shared.
+  [`tokened_bracket`](../../parser/src/content/inline_builder/macros/image.rs) becomes
+  `pub(in inline_builder)` and takes the
+  [`Restorable`](../../parser/src/content/inline_builder/macros/image.rs) kinds its caller admits,
+  so the two families cannot disagree about what a token may stand for: the image bracket keeps
+  `Passthrough` (its `web_path`-bound `fallback=`), while a display-text list passes
+  `PassthroughOrStem`, having no re-processing of its own — a `Stem` is admitted here on its first
+  bracket-half increment rather than waiting for one of its own. It returns
+  [`MaskedPiece`](../../parser/src/content/inline_builder/macros/image.rs) — the node *and* its
+  body, produced by the one `node_is_restorable`/`restorable_body` chain — because the two callers
+  need different halves of it, which is the whole novelty of this increment.
+
+  What is new is the **sink**. The image bracket's restore ends in a string: each body is spliced
+  into the parsed attribute *values*, which the fold then emits into `alt="…"`. A link's display
+  text ends in the node's **children**, and there the honest restore is the node itself.
+  [`restored_value_children`](../../parser/src/content/inline_builder/macros/links.rs) re-splits
+  the parsed positional on the very tokens
+  [`tokened_bracket`](../../parser/src/content/inline_builder/macros/image.rs) placed —
+  index-keyed and left to right, as `Passthroughs::restore_to` is, so a token the split discarded
+  is simply not found and the ones after it splice by their own index — handing each run to
+  [`escaped_value_children`](../../parser/src/content/inline_builder/macros/mod.rs) and each token
+  to the masked node, cloned whole. That is exactly what a *sliced* display text has always done
+  with an opaque piece (`emit_range` clones the node), so the two paths now agree; splicing the
+  restored **bytes** instead would have the fold escape them a second time, turning
+  `link:x[++<b>a</b>++,role=hl]`'s golden `&lt;b&gt;` into `&amp;lt;b&amp;gt;`. The list's own
+  values still take the byte restore
+  ([`Attrlist::into_owned_restoring`](../../parser/src/attributes/attrlist.rs)), so `role=`,
+  `title=`, and `id=` reach the fold as the string pipeline's restore leaves them.
+
+  One shape defers, and it is the family's own analogue of the image bracket's `web_path`: a
+  `mailto:`'s **subject or body**. Those two positionals are read *before* the restore —
+  `encode_uri_component` folds them into the `href` — and the string pipeline percent-encodes its
+  own sentinel there (`?subject=%C2%960%C2%97`), which `Passthroughs::restore_to` then cannot find
+  in the finished attribute. Its golden *leaks* the encoded sentinel, so there is nothing to
+  reproduce: this is the cross-reference family's pre-restore boundary, kept for the same reason.
+  What is new is that it is drawn per **slot** rather than per family — `text_attrlist` takes the
+  positional numbers its caller reads early, and only a token that lands in one of them defers the
+  match — so `mailto:x@y.com[++Tom, Jr++ R,Subject]`, whose masked piece is in the display text
+  beside a plain subject, still reaches parity.
+
+  What reaches parity is the whole display-text vocabulary over both masked kinds: the text as one
+  piece of the list at either edge, several in one text, and the whole text; the split invariant in
+  both spellings (a body carrying the `,` or the `=` the split reads); a body inside a named value,
+  a quoted value, and both halves of one list at once; a token the split discards; the shorthand
+  items after a token (`link:x[++abc++#myid.myrole,role=hl]` keeps its `myid` and `myrole`); the
+  `^` window suffix and the `\]` unescape past a token; all three STEM notations and an explicit
+  substitution list; a body that is live markup, an attribute reference neither pipeline expands,
+  and the escaped and restored bytes the value already admitted around it; the `mailto:` and
+  auto-link spellings, the angle form that keeps its `&lt;`, a restored target beside a restored
+  text; and the whole set inside a rendered span, twice in one flow, in a footnote's extracted
+  text, and end to end through the real parse path. Re-running the corpus-wide fold-parity audit
+  shows the divergence set **unchanged** — no golden source writes an attribute list *and* a
+  masked construct in one display text — and no new divergence appeared. Coverage stays
+  diff-neutral, and
+  as with every prep piece before it, nothing further is wired in.
+
+  Three shapes are left where they were, each pinned, and one of them again runs the **safe** way
+  rather than the byte-parity way. A restored `"` in a `title=` is escaped by the fold's
+  `encode_attribute_value` where the string pipeline encoded its quote-free sentinel and spliced
+  the raw quote into the finished `title="…"` — the same well-formed reading the image bracket's
+  `alt` takes (the `id=` slot, emitted unescaped in both, stays byte-identical). A `window=` or
+  `opts=` is a value the renderer *decides* on rather than emits, and it now reads the restored
+  bytes where the string pipeline tested its own sentinel and found neither `_blank` nor
+  `nofollow`: `link:x[T,window=++_blank++]` gains the `rel="noopener"` hardening its golden
+  omits — the same class as the image family's `link=` dangerous-scheme check, and the same
+  direction. And
+  an author's own sentinel-shaped bytes survive this restore where the string pipeline's
+  `replace_all` over the *finished* string rewrites them too, the wart the image bracket's own
+  sibling test already pins.
+
+  With this the **bracket half is closed for the two link families**, and the restore-the-value
+  class as a whole is down to one family: the `image:`/`icon:` STEM target and its bracket's
+  `fallback=`, both blocked on the same fold-time `web_path` (closing them means keeping the
+  restore out of `web_path`'s way, not widening a gate). Beyond that only the keeps remain: the
+  cross-reference family's pre-restore target, a `mailto:`'s subject and body for the same
+  pre-restore reason, and the well-formed readings these six increments pinned.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -5247,6 +5332,30 @@ Each phase is a reviewable unit with a clear exit gate.
        own test. See the step's own "landed as" note above. The bracket half's other three
        captures — the three families' attribute-list display texts — and the image family's STEM
        are what remain of the class.
+
+     - ✅ **prep (a masked construct inside a link's display-text attribute list).** The bracket
+       half's other three captures at once — the `link:` macro's `=` list, a `mailto:`'s `,` list,
+       and the auto-link / formal-URL family's `=` list — which are three call sites of one
+       function, [`text_attrlist`](../../parser/src/content/inline_builder/macros/links.rs), so
+       one gate closes them all. It takes the image bracket's own order (token before the parse,
+       restore after it) through a
+       [`tokened_bracket`](../../parser/src/content/inline_builder/macros/image.rs) now shared by
+       the two families, each passing the
+       [`Restorable`](../../parser/src/content/inline_builder/macros/image.rs) kinds its own gate
+       admits — `PassthroughOrStem` here, this family having no `web_path` of its own. What is new
+       is the **sink**: a display text becomes the node's *children*, so the restore is
+       structural — [`restored_value_children`](../../parser/src/content/inline_builder/macros/links.rs)
+       re-splits the parsed value on its own tokens and splices the masked **node** back in, where
+       splicing its bytes into a `Text` would have the fold escape live markup a second time. The
+       one shape that defers is a `mailto:`'s **subject or body**, whose `encode_uri_component`
+       runs before the restore and percent-encodes the string pipeline's own sentinel into an
+       `href` nothing then restores — the cross-reference family's pre-restore boundary, drawn per
+       *slot* so a masked display text beside a plain subject still lands. A restored `"` in the
+       fold-escaped `title`, a `window=`/`opts=` the renderer *decides* on rather than emits (the
+       safe reading, as the image family's own `link=` check is), and an author's own
+       sentinel-shaped bytes each keep their divergence with their own test. See the step's own
+       "landed as" note above. What remains of the class is the image family's STEM target and
+       bracket, and the keeps.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

@@ -3,8 +3,8 @@
 use super::{
     MacroMatch, MacroMatchKind, escaped_value_children,
     image::{
-        Restorable, range_has_no_opaque_piece, range_is_restorable, range_is_verbatim,
-        range_is_verbatim_or_synthesized, restorable_body,
+        Restorable, range_is_restorable, range_is_verbatim, range_is_verbatim_or_synthesized,
+        restorable_body, tokened_bracket,
     },
     macro_text_children, rebuild_macro_level,
 };
@@ -79,8 +79,9 @@ use crate::{
 /// admitted too, in an attribute-list text as much as anywhere else
 /// (`https://example.org/?a=1&b=2`, `https://example.org[a < b]`,
 /// `<https://example.org/a&b>`) — the third family to take
-/// [`range_has_no_opaque_piece`], after the cross-reference and
-/// `link:`/`mailto:` macro families. The match string carries such a leaf's
+/// [`range_has_no_opaque_piece`](super::image::range_has_no_opaque_piece),
+/// after the cross-reference and `link:`/`mailto:` macro families. The match
+/// string carries such a leaf's
 /// canonical entity — the very bytes the string replacer's own escaped haystack
 /// holds there — so the target this pass computes off that string
 /// (`https://example.org/?a=1&amp;b=2`) *is* the one the replacer computed, and
@@ -92,13 +93,13 @@ use crate::{
 ///
 /// # A rendered span inside the display text
 ///
-/// A **rendered span** — a [`Styled`](crate::inlines::Styled) span, an
-/// already-recognized macro node of another family, a masked passthrough — is
-/// *not* recoverable: [`build_match_string`] stands it in as one
+/// A **rendered span** — a [`Styled`](crate::inlines::Styled) span, or an
+/// already-recognized macro node of another family — is *not* recoverable:
+/// [`build_match_string`] stands it in as one
 /// [`SPAN_PLACEHOLDER`] where the string pipeline's haystack holds its markup
-/// (or its own passthrough mask) inline, and that markup exists only at fold
-/// time. It is nonetheless admitted **inside the bracketed display text** of a
-/// formal URL link (`https://example.org[a *b* c]`, and the angle spelling
+/// inline, and that markup exists only at fold time. It is nonetheless admitted
+/// **inside the bracketed display text** of a formal URL link
+/// (`https://example.org[a *b* c]`, and the angle spelling
 /// `<https://example.org[a *b* c]` that keeps its `&lt;`), because that text is
 /// the one capture this family never reads as bytes: it becomes the node's
 /// children through [`macro_text_children`], whose
@@ -110,9 +111,13 @@ use crate::{
 /// and the `<url>` form's whole interior (see [`build_angle_link_node`]). An
 /// **attribute-list text** is computed too — its display text comes back from
 /// an [`Attrlist`] parse rather than from a range — so [`text_attrlist`] keeps
-/// the same gate there: a placeholder inside a *parsed* value has no node it
-/// can be mapped back to. This is the third family to take that lift, after
-/// the cross-reference one (`xref::find_xref_matches`) and the
+/// the same gate there for a *rendered* span, whose bytes exist only at fold
+/// time: a placeholder inside a parsed value has no node it can be mapped back
+/// to. A **masked** construct is the one such piece that does, its body being
+/// known at build time: [`text_attrlist`] tokens it through the parse and
+/// splices the node back into the children afterwards
+/// ([`restored_value_children`]). This is the third family to take that lift,
+/// after the cross-reference one (`xref::find_xref_matches`) and the
 /// `link:`/`mailto:` macro ([`find_link_macro_matches`]).
 ///
 /// What the admission cannot do is make the *recognition* agree in every case,
@@ -217,9 +222,9 @@ pub(super) fn inline_link_level<'src>(
 /// Finds every recognized auto-link / formal-URL / angle-bracketed link at this
 /// level, skipping a `link:` macro match and any form
 /// [`build_inline_link_node`] defers — including one whose *computed* bytes
-/// cross an opaque piece, whose gate lives inside that function (it needs the
-/// branch's own capture groups to know which sub-range the gate covers, and
-/// must run after the escape checks; see [`inline_link_level`]).
+/// cross a piece it cannot reproduce, whose gate lives inside that function (it
+/// needs the branch's own capture groups to know which sub-range the gate
+/// covers, and must run after the escape checks; see [`inline_link_level`]).
 fn find_inline_link_matches<'src>(
     nodes: &[InlineNode<'src>],
     s: &str,
@@ -361,9 +366,10 @@ fn build_inline_link_node<'src>(
     // admitted — see [`inline_link_level`]'s own rendered-span note. Its
     // closing `]` needs no gate of its own: that byte is literal, and no atomic
     // piece — a placeholder, or an entity delimited by `&` and `;` — can supply
-    // it. (A text carrying an attribute list keeps this same gate inside
+    // it. (A text carrying an attribute list has its own gate inside
     // `text_attrlist`, since its display text comes back from a *parse*
-    // rather than from a range.)
+    // rather than from a range: a masked construct is tokened through that
+    // parse and restored after it, a rendered span still deferred.)
     //
     // An expanded attribute value and an escaped special are admitted
     // throughout, since every value read here comes off the match string —
@@ -520,6 +526,10 @@ fn build_inline_link_node<'src>(
     // the children's range stops one (ASCII) byte short of the bracket's end.
     let mut caret_stripped = false;
 
+    // The masked nodes that computed value still holds a token for, if any —
+    // spliced back into the children below (see [`restored_value_children`]).
+    let mut restores: Vec<InlineNode<'src>> = vec![];
+
     let link_text = if let Some(mut link_text) = link_text {
         link_text = link_text.replace("\\]", "]");
 
@@ -533,7 +543,7 @@ fn build_inline_link_node<'src>(
             #[allow(clippy::unwrap_used)]
             let range = text_location_range.clone().unwrap();
 
-            let parsed = text_attrlist(raw_text, range, nodes, pieces, root, parser)?;
+            let parsed = text_attrlist(raw_text, range, nodes, pieces, root, parser, &[])?;
 
             // Mirrors `InlineLinkReplacer`'s own guard: only adopt the parsed
             // result when a real named attribute actually split off from the
@@ -545,6 +555,7 @@ fn build_inline_link_node<'src>(
                 attrs = Some(parsed.attrs);
                 computed_text = true;
                 escaped_computed_text = parsed.escaped;
+                restores = parsed.restores;
             }
         }
 
@@ -618,8 +629,10 @@ fn build_inline_link_node<'src>(
             // special's canonical entity (and a restored entity's own bytes)
             // where a node holds logical text: rebuild design §3.4's
             // trichotomy from those bytes, exactly as the cross-reference
-            // family's own attribute-list value is rebuilt.
-            escaped_value_children(&link_text, text_location)
+            // family's own attribute-list value is rebuilt — and each masked
+            // construct the value still holds a token for as the node itself,
+            // whose fold emits the bytes `restore_to` splices there.
+            restored_value_children(&link_text, &restores, text_location)
         } else {
             // Parsed out of the source's own bytes, which are already logical
             // text carrying no entity to undo: one synthesized `Text`.
@@ -887,14 +900,14 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 ///
 /// # A rendered span inside the display text
 ///
-/// A **rendered span** — a [`Styled`](crate::inlines::Styled) span, an
-/// already-recognized macro node of another family, a masked passthrough — is
-/// *not* recoverable: [`build_match_string`] stands it in as one
+/// A **rendered span** — a [`Styled`](crate::inlines::Styled) span, or an
+/// already-recognized macro node of another family — is *not* recoverable:
+/// [`build_match_string`] stands it in as one
 /// [`SPAN_PLACEHOLDER`] where the string pipeline's haystack holds its markup
-/// (or its own passthrough mask) inline, and that markup exists only at fold
-/// time. It is nonetheless admitted **inside the bracketed display text**,
-/// because that text is the one capture this family never reads as bytes: it
-/// becomes the node's children through [`macro_text_children`], whose
+/// inline, and that markup exists only at fold time. It is nonetheless admitted
+/// **inside the bracketed display text**, because that text is the one capture
+/// this family never reads as bytes: it becomes the node's children through
+/// [`macro_text_children`], whose
 /// [`emit_range`](super::super::quotes::emit_range) path clones the opaque
 /// piece's own node whole into them — so the text is carried *structurally*,
 /// and the fold re-renders exactly the markup the string replacer captured
@@ -902,7 +915,9 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 /// off the match string. So does an **attribute-list text**, for the same
 /// reason: its display text comes back from an [`Attrlist`] parse rather than
 /// from a range, and a placeholder inside a *parsed* value has no node it can
-/// be mapped back to (see [`text_attrlist`]).
+/// be mapped back to — unless it stands for a **masked** construct, whose body
+/// is known at build time, which [`text_attrlist`] tokens through the parse and
+/// splices back into the children afterwards ([`restored_value_children`]).
 /// This is the second family to take that lift, after the cross-reference one
 /// (see `xref::find_xref_matches`).
 ///
@@ -964,8 +979,9 @@ pub(super) fn link_macro_level<'src>(
 
 /// Finds every recognized `link:`/`mailto:` macro at this level, skipping any
 /// match whose **target** crosses an **opaque** piece (see
-/// [`range_has_no_opaque_piece`]), whose own marker is not verbatim source, or
-/// that [`build_link_node`] defers (see [`link_macro_level`]).
+/// [`range_has_no_opaque_piece`](super::image::range_has_no_opaque_piece)),
+/// whose own marker is not verbatim source, or that [`build_link_node`] defers
+/// (see [`link_macro_level`]).
 ///
 /// The gate covers the bytes the node *reads*, not the whole match: the target
 /// is computed off the level's match string, while the bracketed display text
@@ -1027,8 +1043,9 @@ fn find_link_macro_matches<'src>(
         // piece — a placeholder, or an entity delimited by `&` and `;` — can
         // supply them. (The marker keeps its own stricter, verbatim gate
         // below, for `link_form`'s sake; a text carrying an attribute list
-        // keeps the opaque-piece gate inside `text_attrlist`, since its
-        // display text comes back from a *parse*.)
+        // has its own gate inside `text_attrlist`, since its display text
+        // comes back from a *parse*: a masked construct is tokened through
+        // that parse and restored after it, a rendered span still deferred.)
         if let Some(target) = caps.get(3)
             && !range_is_restorable(
                 nodes,
@@ -1155,8 +1172,9 @@ pub(super) fn restore_masked_passthroughs(
 /// `link:`/`mailto:` match, computing the target, display text, window, and
 /// roles exactly as the string replacer does so the fold reproduces the same
 /// bytes. Returns `None` for a form this increment defers (see
-/// [`link_macro_level`]): a rejected dangerous `link:` scheme, or a link text
-/// that carries an attribute list *and* crosses an opaque piece (see
+/// [`link_macro_level`]): a rejected dangerous `link:` scheme, a link text
+/// that carries an attribute list *and* crosses an opaque piece, or a
+/// `mailto:` whose subject or body carries a masked construct (see
 /// [`text_attrlist`]).
 ///
 /// The display text becomes the node's children, so the fold recovers
@@ -1182,7 +1200,9 @@ pub(super) fn restore_masked_passthroughs(
 ///   a parse of the level's **match string** yields already-escaped text
 ///   instead, so it is rebuilt through [`escaped_value_children`] — design
 ///   §3.4's trichotomy — exactly as the cross-reference family's own
-///   attribute-list value is.
+///   attribute-list value is, with each **masked** construct that value still
+///   holds a token for spliced back in as its own node
+///   ([`restored_value_children`]).
 ///
 /// As in the additive builder generally, this performs *no* recognition side
 /// effect — notably it does **not** `register_link` the target in the asset
@@ -1268,6 +1288,10 @@ pub(super) fn build_link_node<'src>(
     // the children's range stops one (ASCII) byte short of the bracket's end.
     let mut caret_stripped = false;
 
+    // The masked nodes that computed value still holds a token for, if any —
+    // spliced back into the children below (see [`restored_value_children`]).
+    let mut restores: Vec<InlineNode<'src>> = vec![];
+
     if !link_text.is_empty() {
         link_text = link_text.replace("\\]", "]");
 
@@ -1287,12 +1311,24 @@ pub(super) fn build_link_node<'src>(
                 #[allow(clippy::unwrap_used)]
                 let m = raw_text_m.unwrap();
 
-                let parsed =
-                    text_attrlist(raw_text, m.start()..m.end(), nodes, pieces, root, parser)?;
+                // A `mailto:`'s second and third positionals are read
+                // *before* the restore — `encode_uri_component` folds them
+                // into the `href` below — so a masked construct landing in
+                // one of them defers the whole match (see `text_attrlist`).
+                let parsed = text_attrlist(
+                    raw_text,
+                    m.start()..m.end(),
+                    nodes,
+                    pieces,
+                    root,
+                    parser,
+                    &[2, 3],
+                )?;
 
                 link_text = parsed.text;
                 computed_text = true;
                 escaped_computed_text = parsed.escaped;
+                restores = parsed.restores;
 
                 if let Some(target_attr) = parsed.attrs.nth_attribute(2) {
                     target = format!(
@@ -1314,11 +1350,20 @@ pub(super) fn build_link_node<'src>(
             #[allow(clippy::unwrap_used)]
             let m = raw_text_m.unwrap();
 
-            let parsed = text_attrlist(raw_text, m.start()..m.end(), nodes, pieces, root, parser)?;
+            let parsed = text_attrlist(
+                raw_text,
+                m.start()..m.end(),
+                nodes,
+                pieces,
+                root,
+                parser,
+                &[],
+            )?;
 
             link_text = parsed.text;
             computed_text = true;
             escaped_computed_text = parsed.escaped;
+            restores = parsed.restores;
             attrs = Some(parsed.attrs);
         }
 
@@ -1404,8 +1449,10 @@ pub(super) fn build_link_node<'src>(
             // special's canonical entity (and a restored entity's own bytes)
             // where a node holds logical text: rebuild design §3.4's
             // trichotomy from those bytes, exactly as the cross-reference
-            // family's own attribute-list value is rebuilt.
-            escaped_value_children(&link_text, text_location)
+            // family's own attribute-list value is rebuilt — and each masked
+            // construct the value still holds a token for as the node itself,
+            // whose fold emits the bytes `restore_to` splices there.
+            restored_value_children(&link_text, &restores, text_location)
         } else {
             // Parsed out of the source's own bytes, which are already logical
             // text carrying no entity to undo: one synthesized `Text`.
@@ -1472,6 +1519,21 @@ struct TextAttrlist<'src> {
     /// `false` means the `=` was incidental and the whole text is the sole
     /// positional value.
     adopted: bool,
+
+    /// The masked nodes [`text`](Self::text) still holds a
+    /// `\u{96}`*n*`\u{97}` token for, in token-index order — empty for a list
+    /// that crossed none.
+    ///
+    /// The list's *values* are restored on the way out of the parse
+    /// ([`Attrlist::into_owned_restoring`]), but the display text becomes the
+    /// node's **children**, where the honest reading is the node itself: a
+    /// [`Raw`](InlineNode::Raw) or [`Stem`](InlineNode::Stem) child folds to
+    /// the very bytes `Passthroughs::restore_to` splices into the string
+    /// pipeline's own display text, where the same bytes spliced into a
+    /// [`Text`](InlineNode::Text) would be escaped a second time (design
+    /// §3.4). The caller re-splits [`text`](Self::text) on these tokens in
+    /// [`restored_value_children`].
+    restores: Vec<InlineNode<'src>>,
 }
 
 /// Parses a link's bracketed **display text** as the [`Attrlist`]`<'src>` its
@@ -1506,13 +1568,40 @@ struct TextAttrlist<'src> {
 /// reference's backslash as a *gap* (`link:x[\{name},role=hl]`), so the
 /// enclosing slice carries a byte the replacer's own text does not.
 ///
-/// Returns `None` — the one shape still deferred — when the text crosses an
-/// **opaque** piece (a rendered span, an earlier-recognized macro node, a
-/// masked passthrough). That is not a bytes problem the match string can
-/// solve: [`build_match_string`] stands such a piece in as one
-/// [`SPAN_PLACEHOLDER`] where the string replacer's haystack holds its markup,
-/// and a placeholder inside a *parsed* value has no node it can be mapped back
-/// to (see [`link_macro_level`]'s own rendered-span note).
+/// A **masked** construct — a passthrough or a STEM expression — is admitted
+/// too, and restored the way the image family's own bracket is: the text is
+/// put into the string pipeline's own *shape* before the parse
+/// ([`tokened_bracket`], each masked piece rewritten to the
+/// `\u{96}`*n*`\u{97}` token whose shape the sentinel has), so the split sees
+/// one opaque run carrying none of the `,`/`=`/`"` bytes it reads, and each
+/// body is spliced into the parsed values after it
+/// ([`Attrlist::into_owned_restoring`]). What the *display text* keeps is the
+/// tokens themselves, so the caller can rebuild it as **children** that carry
+/// each masked node structurally (see [`TextAttrlist::restores`] and
+/// [`restored_value_children`]) rather than as bytes the fold would escape a
+/// second time.
+///
+/// `pre_restore` names the positional slots whose value the caller reads
+/// **before** that restore, and a token reaching one of them defers the whole
+/// match. There is exactly one such caller: a `mailto:`'s comma list, whose
+/// second and third positionals become the `?subject=`/`&amp;body=` query
+/// through [`encode_uri_component`]. The string pipeline percent-encodes its
+/// own sentinel there (`%C2%960%C2%97`), which
+/// [`Passthroughs::restore_to`](crate::content::Passthroughs) then cannot find
+/// in the finished `href` — so its golden *leaks* the encoded sentinel, and no
+/// restore here can reproduce that. This is the same boundary the
+/// cross-reference family's own pre-restore target keeps, drawn per slot
+/// rather than per family so that a masked piece in the display text beside a
+/// plain subject still restores.
+///
+/// Returns `None` — the one shape still deferred outright — when the text
+/// crosses an **opaque** piece (a rendered span, an earlier-recognized macro
+/// node). That is not a bytes problem the match string can solve:
+/// [`build_match_string`] stands such a piece in as one [`SPAN_PLACEHOLDER`]
+/// where the string replacer's haystack holds its markup, and — unlike a
+/// masked construct, whose body is known at build time — its bytes exist only
+/// at fold time, so there is nothing to token (see [`link_macro_level`]'s own
+/// rendered-span note).
 fn text_attrlist<'src>(
     raw_text: &str,
     text_range: std::ops::Range<usize>,
@@ -1520,14 +1609,15 @@ fn text_attrlist<'src>(
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
+    pre_restore: &[usize],
 ) -> Option<TextAttrlist<'src>> {
-    if !range_has_no_opaque_piece(nodes, pieces, &text_range) {
+    if !range_is_restorable(nodes, pieces, &text_range, Restorable::PassthroughOrStem) {
         return None;
     }
 
     let normalized = raw_text.replace('\n', " ");
     let verbatim_range = text_range.clone();
-    let source = source_slice(pieces, text_range, root);
+    let source = source_slice(pieces, text_range.clone(), root);
 
     if range_is_verbatim(pieces, &verbatim_range) && source.data() == normalized {
         let (text, attrs) = extract_attributes_from_text(source, parser, None);
@@ -1537,17 +1627,101 @@ fn text_attrlist<'src>(
             text,
             attrs,
             escaped: false,
+            restores: vec![],
         });
     }
 
-    let (text, attrs) = extract_attributes_from_text(Span::new(&normalized), parser, None);
+    // A masked piece is atomic, so a range holding one never took the
+    // verbatim path above. Tokening leaves a range holding none byte-identical
+    // to `normalized`, so both paths below read the same string.
+    let (tokened, masked) = tokened_bracket(
+        &normalized,
+        &text_range,
+        nodes,
+        pieces,
+        parser.renderer.as_ref(),
+        Restorable::PassthroughOrStem,
+    );
+
+    let (text, attrs) = extract_attributes_from_text(Span::new(&tokened), parser, None);
+
+    if masked.is_empty() {
+        return Some(TextAttrlist {
+            adopted: text != tokened,
+            text,
+            attrs: attrs.into_owned(source),
+            escaped: true,
+            restores: vec![],
+        });
+    }
+
+    // A value this caller reads before the restore cannot be reproduced from
+    // the restored bytes — see this function's own `pre_restore` note.
+    if pre_restore.iter().any(|n| {
+        attrs
+            .nth_attribute(*n)
+            .is_some_and(|attribute| attribute.value().contains('\u{96}'))
+    }) {
+        return None;
+    }
+
+    let bodies: Vec<&str> = masked.iter().map(|piece| piece.body.as_ref()).collect();
+
+    let restores = masked.iter().map(|piece| piece.node.clone()).collect();
 
     Some(TextAttrlist {
-        adopted: text != normalized,
+        adopted: text != tokened,
         text,
-        attrs: attrs.into_owned(source),
+        attrs: attrs.into_owned_restoring(source, &bodies),
         escaped: true,
+        restores,
     })
+}
+
+/// Rebuilds a computed display text that still holds
+/// [`tokened_bracket`] tokens as the node's children: each token becomes the
+/// masked node itself, and the escaped bytes around it take
+/// [`escaped_value_children`]'s own trichotomy rebuild.
+///
+/// Splicing the node rather than its bytes is what keeps the fold honest. A
+/// [`Raw`](InlineNode::Raw) leaf's body is emitted verbatim and a
+/// [`Stem`](InlineNode::Stem) leaf's is rendered at fold time — which is
+/// exactly what `Passthroughs::restore_to` splices into the string pipeline's
+/// own display text — where those same bytes spliced into a
+/// [`Text`](InlineNode::Text) would be escaped a second time (design §3.4):
+/// `link:x[++<b>a</b>++,role=hl]` would show `&amp;lt;b&amp;gt;` against the
+/// golden's `&lt;b&gt;`.
+///
+/// The walk is index-keyed and left to right, like
+/// [`Passthroughs::restore_to`](crate::content::Passthroughs)'s own: each
+/// token is sought only in the bytes after the previous one, and a token the
+/// parse dropped (a value the split discarded) is simply not found, leaving
+/// the ones after it to splice by their own index.
+fn restored_value_children<'src>(
+    text: &str,
+    restores: &[InlineNode<'src>],
+    location: Span<'src>,
+) -> Vec<InlineNode<'src>> {
+    let mut children: Vec<InlineNode<'src>> = Vec::new();
+    let mut rest = text;
+
+    for (n, node) in restores.iter().enumerate() {
+        let token = format!("\u{96}{n}\u{97}");
+
+        if let Some(pos) = rest.find(&token) {
+            children.append(&mut escaped_value_children(
+                rest.get(..pos).unwrap_or_default(),
+                location,
+            ));
+
+            children.push(node.clone());
+            rest = rest.get(pos + token.len()..).unwrap_or_default();
+        }
+    }
+
+    children.append(&mut escaped_value_children(rest, location));
+
+    children
 }
 
 /// The bare e-mail auto-link pass at a level: matches [`INLINE_EMAIL`] over the
@@ -1621,7 +1795,8 @@ fn text_attrlist<'src>(
 /// the special folds back to its own entity instead of being escaped twice.
 ///
 /// Unlike its three predecessors, this family needs no
-/// [`range_has_no_opaque_piece`] gate to express that lift: an address
+/// [`range_has_no_opaque_piece`](super::image::range_has_no_opaque_piece)
+/// gate to express that lift: an address
 /// **cannot** cross an opaque piece in the first place. Every such piece is
 /// exactly one [`SPAN_PLACEHOLDER`] (U+E0F0, Unicode category `Co`), which
 /// none of the pattern's character classes admit — not the local part's
@@ -3329,58 +3504,319 @@ mod tests {
     }
 
     #[test]
-    fn an_auto_link_attribute_list_text_over_a_stem_expression_is_a_documented_divergence() {
-        // A display text that also carries an attribute list comes back from
-        // a *parse*, so it keeps the opaque-piece gate inside [`text_attrlist`]
-        // for a STEM expression exactly as it does for a passthrough
-        // (`an_auto_link_attribute_list_text_over_a_passthrough_is_a_documented_divergence`):
-        // a placeholder inside a parsed value has no node to map back to.
-        // This is the "bracket half" the restore class still defers.
+    fn an_attribute_list_display_text_over_a_masked_construct_is_recognized() {
+        // The display text is rebuilt as children that carry the masked node
+        // *itself* — a [`Raw`](InlineNode::Raw) for a passthrough, a
+        // [`Stem`](InlineNode::Stem) for an expression — rather than as bytes
+        // the fold would escape a second time, exactly as a *sliced* display
+        // text already carries an opaque piece's own node. The list's own
+        // values take the restored bytes instead
+        // ([`Attrlist::into_owned_restoring`]), which is what the fold reads
+        // for the `class`.
+        for (source, is_stem) in [
+            ("https://example.org/x[T ++a++,role=hl]", false),
+            ("https://example.org/x[T stem:[a],role=hl]", true),
+            ("link:https://example.org[T ++a++,role=hl]", false),
+            ("link:https://example.org[T stem:[a],role=hl]", true),
+        ] {
+            let nodes = build_src(Span::new(source));
+            let reference = assert_link(&nodes[0]);
+
+            let carried = reference.children.iter().any(|child| {
+                if is_stem {
+                    matches!(child, InlineNode::Stem(_))
+                } else {
+                    matches!(child, InlineNode::Raw { .. })
+                }
+            });
+
+            assert!(
+                carried,
+                "the display text should carry the masked node itself for {source:?}: {:?}",
+                reference.children
+            );
+
+            assert_eq!(
+                reference.attrs.as_ref().map(|attrs| attrs.roles().clone()),
+                Some(vec!["hl"]),
+                "the parsed list should still split its named attribute for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_for_a_display_text_attribute_list_over_a_masked_construct()
+    {
+        // The differential corpus for the **bracket half**'s remaining three
+        // captures: the display-text attribute lists of the `link:` macro
+        // (an `=`), of a `mailto:` (a `,`), and of the auto-link /
+        // formal-URL family (an `=`) — all three of which come back from the
+        // one [`text_attrlist`] parse.
+        //
+        // Reproducing the string pipeline means reproducing its *order*, as
+        // the image family's own bracket increment found: its
+        // [`Attrlist::parse`] reads the `\u{96}`n`\u{97}` sentinel as one
+        // opaque run carrying none of the `,`/`=`/`"` bytes the split reads,
+        // so the text is put into that same shape before the parse
+        // ([`tokened_bracket`]) and restored after it — into the parsed
+        // *values* as bytes, and into the display *text* as the masked node
+        // itself ([`restored_value_children`]).
         use super::super::super::test_support::golden_passthroughs;
 
-        let source = "https://example.org/x[stem:[a],role=hl]";
-        let nodes = build_src(Span::new(source));
+        let fixtures = [
+            // The text as one piece of the list, at either edge and in the
+            // middle, several in one text, and the whole text.
+            "link:https://example.org[++a b++,role=hl]",
+            "link:https://example.org[Text ++<b>x</b>++,role=hl]",
+            "link:https://example.org[++a++ and ++b++,role=hl]",
+            "link:https://example.org[++a++ ++b++ ++c++,role=hl]",
+            "link:https://example.org[++++,role=hl]",
+            // The split invariant: a body carrying the `,` or the `=` the
+            // split reads is one opaque run in both pipelines, so it never
+            // divides the list.
+            "link:https://example.org[++a,b++,role=hl]",
+            "link:https://example.org[++a=b++,role=hl]",
+            "link:https://example.org[++a,b++]",
+            // An `=` inside the body, with no real named attribute to split
+            // off: `extract_attributes_from_text` hands the whole tokened text
+            // back unparsed, exactly as it hands the string replacer its own
+            // sentinel-bearing one.
+            "link:https://example.org[++a=b++]",
+            // A body inside a *named* value, a quoted one, and both halves of
+            // one list at once.
+            "link:https://example.org[T,title=++a b++]",
+            "link:https://example.org[T,role=++hl++]",
+            "link:https://example.org[T,role=++a b++]",
+            "link:https://example.org[T,id=++x++]",
+            "link:https://example.org[T,title=\"a ++b++ c\"]",
+            "link:https://example.org[T ++a++,role=++hl++]",
+            "link:https://example.org[T,title=++a++,role=++b++]",
+            // A token the split discards — a value no positional or named
+            // slot keeps — leaves the ones that survive on their own indices.
+            "link:https://example.org[T,role=hl,++a++]",
+            "link:https://example.org[++a++,,role=hl]",
+            // The shorthand items after a token: their offsets are shifted
+            // past the restore rather than re-derived, so the `#`/`.`/`%` the
+            // string pipeline found over its own sentinel are the same ones.
+            "link:https://example.org[++abc++#myid.myrole,role=hl]",
+            "link:https://example.org[++a++%myopt,role=hl]",
+            // The `^` window suffix past a token, and the `\]` unescape.
+            "link:https://example.org[++a++^,role=hl]",
+            "link:https://example.org[++a++^]",
+            "link:https://example.org[T\\]x ++a++,role=hl]",
+            // A masked **STEM** expression, in all three notations and beside
+            // a passthrough: the display text carries the `Stem` node, whose
+            // fold emits the very bytes `restore_to` splices there.
+            "link:https://example.org[stem:[x],role=hl]",
+            "link:https://example.org[latexmath:[\\sqrt{2}],role=hl]",
+            "link:https://example.org[asciimath:[a/b],role=hl]",
+            "link:https://example.org[stem:c,q[x*y*z],role=hl]",
+            "link:https://example.org[T,title=stem:[x]]",
+            "link:https://example.org[stem:[a] and ++b++,role=hl]",
+            // The other passthrough spelling, an attribute reference hidden
+            // inside a body (which neither pipeline expands), and a body that
+            // is live markup — carried structurally so the fold does not
+            // escape it a second time.
+            "link:https://example.org[pass:[<i>x</i>],role=hl]",
+            "link:https://example.org[++{name}++,role=hl]",
+            "link:https://example.org[a ++<b>++ c,id=x,title=T]",
+            // Beside the escaped and restored bytes the same value already
+            // admitted, so the trichotomy rebuild still comes apart correctly
+            // around a token.
+            "link:https://example.org[a ++&++ b,role=hl]",
+            "link:https://example.org[a &amp; ++b++,role=hl]",
+            "link:https://example.org[a < b ++c++,role=hl]",
+            // A `mailto:`'s comma list, whose first positional restores while
+            // its subject stays plain (a masked subject defers — see
+            // `a_mailto_subject_over_a_masked_construct_is_deferred`).
+            "mailto:x@y.com[++Tom++ R,Subject]",
+            "mailto:x@y.com[++Tom, Jr++ R,Subject]",
+            "mailto:x@y.com[++T++]",
+            // The auto-link / formal-URL family's own list, the angle
+            // spelling that keeps its `&lt;`, and a restored target beside a
+            // restored text.
+            "https://example.org/x[++a++,role=hl]",
+            "https://example.org[++a++,role=hl]",
+            "https://example.org/x[stem:[a],role=hl]",
+            "https://example.org/x[++a++^,role=hl]",
+            "<https://example.org/x[++a++,role=hl]",
+            "https://example.org/++t++[++a++,role=hl]",
+            // Inside a rendered span, twice in one flow, and in a footnote's
+            // own extracted text.
+            "*a link:https://example.org[++x++,role=hl] b*",
+            "link:https://example.org[++a++,role=hl] and link:https://example.org[++b++,role=hl]",
+            "footnote:[link:https://example.org[++a++,role=hl]]",
+        ];
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an attribute-list text over a STEM expression must stay literal: {nodes:?}"
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_passthroughs(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_mailto_subject_over_a_masked_construct_is_deferred() {
+        // A `mailto:`'s second and third positionals are read **before** the
+        // restore: [`encode_uri_component`] folds them into the `href`, and
+        // the string pipeline encodes its own sentinel there
+        // (`%C2%960%C2%97`), which `Passthroughs::restore_to` then cannot
+        // find in the finished attribute — so its golden *leaks* the encoded
+        // sentinel and no restore here can reproduce it. Deferred with the
+        // whole match left literal, the same boundary the cross-reference
+        // family's own pre-restore target keeps, and drawn per *slot* so that
+        // the sibling fixtures above (a masked display text beside a plain
+        // subject) still restore.
+        use super::super::super::test_support::golden_passthroughs;
+
+        for source in [
+            "mailto:x@y.com[Text,++Sub++]",
+            "mailto:x@y.com[Tom,++Sub++ject]",
+            "mailto:x@y.com[Tom,Sub,Body ++b++]",
+            "mailto:x@y.com[Tom,stem:[a]]",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+                "a masked subject or body must stay literal for {source:?}: {nodes:?}"
+            );
+
+            let golden = golden_passthroughs(source);
+
+            assert!(
+                golden.contains("%C2%96"),
+                "expected the documented divergence to still reproduce: {golden:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_restored_quote_in_a_link_title_is_a_documented_divergence() {
+        // The tree's is the **well-formed** reading, and the same one the
+        // image family's own bracket already takes for its `alt`: the fold
+        // escapes the restored `"` through `encode_attribute_value`, where
+        // the string pipeline encoded its quote-free *sentinel* and then
+        // spliced the raw quote into the finished `title="…"`, closing the
+        // attribute early. (The `id` slot is emitted unescaped in both, so it
+        // stays byte-identical; only the encoded slots come apart.)
+        use super::super::super::test_support::golden_passthroughs;
+
+        let source = "link:https://example.org[T,title=++a\"b++]";
+        let renderer = HtmlSubstitutionRenderer {};
+
+        assert_eq!(
+            fold_html(&build_src(Span::new(source)), &renderer),
+            r#"<a href="https://example.org" title="a&quot;b">T</a>"#
         );
 
-        let golden = golden_passthroughs(source);
-
-        assert!(
-            golden.contains("class=\"hl\""),
-            "expected the documented divergence to still reproduce: {golden:?}"
+        assert_eq!(
+            golden_passthroughs(source),
+            r#"<a href="https://example.org" title="a"b">T</a>"#
         );
     }
 
     #[test]
-    fn an_auto_link_attribute_list_text_over_a_passthrough_is_a_documented_divergence() {
-        // The **display text** carries an opaque piece structurally, but one
-        // that also carries an attribute list comes back from a *parse*, so
-        // it keeps the opaque-piece gate inside [`text_attrlist`] — where a
-        // masked passthrough is opaque like any other placeholder, since a
-        // parsed value has no node to map back to. Deferred with the whole
-        // match left literal, as its rendered-span sibling is
-        // (`a_formal_url_attribute_list_text_over_a_rendered_span_is_a_
-        // documented_divergence`), and independent of the target's own
-        // restore beside it.
+    fn a_restored_link_constraint_value_is_a_documented_divergence() {
+        // The other half of the same class the image family's `link=` check
+        // named, and it runs the **safe** way here too: `window=` and
+        // `opts=` are values the renderer makes a *decision* on rather than
+        // emits, and it now reads the restored bytes, where the string
+        // pipeline tested its own sentinel and found neither `_blank` nor
+        // `nofollow`. So the tree emits the `rel` hardening the golden omits.
         use super::super::super::test_support::golden_passthroughs;
 
-        let source = "https://example.org/x[++a++,role=hl]";
-        let nodes = build_src(Span::new(source));
+        let renderer = HtmlSubstitutionRenderer {};
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an attribute-list text over a passthrough must stay literal: {nodes:?}"
+        for (source, folded, golden) in [
+            (
+                "link:https://example.org[T,window=++_blank++]",
+                r#"<a href="https://example.org" target="_blank" rel="noopener">T</a>"#,
+                r#"<a href="https://example.org" target="_blank">T</a>"#,
+            ),
+            (
+                "link:https://example.org[T,opts=++nofollow++]",
+                r#"<a href="https://example.org" rel="nofollow">T</a>"#,
+                r#"<a href="https://example.org">T</a>"#,
+            ),
+        ] {
+            assert_eq!(fold_html(&build_src(Span::new(source)), &renderer), folded);
+            assert_eq!(golden_passthroughs(source), golden);
+        }
+    }
+
+    #[test]
+    fn an_authors_own_sentinel_shaped_bytes_in_a_display_text_are_a_documented_divergence() {
+        // The wart the image family's own bracket already pins, reached from
+        // this side: the string pipeline restores by `replace_all` over the
+        // *finished* string, so an author's own `\u{96}`n`\u{97}` bytes are
+        // rewritten too (both copies become the body), while this restore
+        // splices at the token it placed. Neither reading is reachable by
+        // ordinary authoring — these are C1 control characters.
+        use super::super::super::test_support::golden_passthroughs;
+
+        let source = "link:https://example.org[\u{96}0\u{97}++a++,role=hl]";
+        let renderer = HtmlSubstitutionRenderer {};
+
+        assert_eq!(
+            fold_html(&build_src(Span::new(source)), &renderer),
+            "<a href=\"https://example.org\" class=\"hl\">a\u{96}0\u{97}</a>"
         );
 
-        let golden = golden_passthroughs(source);
-
-        assert!(
-            golden.contains("class=\"hl\""),
-            "expected the documented divergence to still reproduce: {golden:?}"
+        assert_eq!(
+            golden_passthroughs(source),
+            "<a href=\"https://example.org\" class=\"hl\">aa</a>"
         );
+    }
+
+    #[test]
+    fn a_real_documents_display_text_attribute_lists_fold_to_their_rendered_strings() {
+        // End-to-end, through the real parse path, on the shapes that named
+        // this increment: a display text that carries both an attribute list
+        // and a masked construct must finish into the same bytes the rendered
+        // string carries, so a tree that kept it literal — or restored it
+        // into text the fold escapes again — would regress the moment
+        // `rendered_html()` becomes a fold of this tree.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+            "== A heading\n",
+            "\n",
+            "See link:https://example.org[++the <docs>++,role=hl] today.\n",
+            "\n",
+            "Or https://example.org/x[stem:[a + b],role=hl] instead.\n",
+            "\n",
+            "Write mailto:team@example.org[++Team, Inc++,Hello] now.\n",
+        ));
+
+        let mut folded_blocks = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &Parser::default()
+                ),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded_blocks += 1;
+        }
+
+        assert_eq!(folded_blocks, 3, "expected every paragraph to carry a tree");
     }
 
     #[test]
