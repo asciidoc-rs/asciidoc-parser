@@ -328,7 +328,11 @@ fn atomic_piece_is_recoverable(nodes: &[InlineNode<'_>], piece: &Piece) -> bool 
 /// spelling with no widening at all and whose two pre-restore decisions —
 /// rejecting a quoted URL, stripping a bare one's trailing punctuation — read
 /// a placeholder exactly as the string replacer's own sentinel reads
-/// (`links::build_inline_link_node`). A family that *matches
+/// (`links::build_inline_link_node`). It is right for a value that comes back
+/// from a **parse** too, once that parse is given the sentinel's own shape
+/// first — the `image:`/`icon:` bracket and the link families' display-text
+/// attribute list, each tokened by [`tokened_bracket`] and restored after the
+/// split. A family that *matches
 /// over* the masked bytes with a class the two spellings answer differently,
 /// or reads them into a value the string pipeline uses **before** restore (a
 /// deferred cross-reference's target, captured into its placeholder template
@@ -835,52 +839,81 @@ fn bracket_attrlist<'src>(
         return parse_attrlist(bracket, parser);
     }
 
-    let (tokened, bodies) = tokened_bracket(
+    let (tokened, masked) = tokened_bracket(
         bracket_text,
         &bracket_range,
         nodes,
         pieces,
         parser.renderer.as_ref(),
+        Restorable::Passthrough,
     );
 
-    let bodies: Vec<&str> = bodies.iter().map(Cow::as_ref).collect();
+    let bodies: Vec<&str> = masked.iter().map(|piece| piece.body.as_ref()).collect();
 
     parse_attrlist(Span::new(&tokened), parser).into_owned_restoring(bracket, &bodies)
 }
 
-/// Rewrites the bracket's own match-string bytes so each masked
-/// **passthrough** in it becomes an index-keyed `\u{96}`*n*`\u{97}` token,
-/// returning that text alongside the bodies those tokens restore to.
+/// One masked piece a [`tokened_bracket`] token stands for: the node itself,
+/// and the bytes it restores to.
 ///
-/// This is the *before the split* half of the bracket restore, and it exists
+/// The two are produced together, by the one
+/// [`node_is_restorable`]/[`restorable_body`] chain, because a caller may need
+/// either: the `image:`/`icon:` family splices the **body** into the parsed
+/// attribute values ([`Attrlist::into_owned_restoring`]), while the link
+/// families' display text — which becomes a node's *children* rather than a
+/// string — splices the **node**, so the fold emits those same bytes without
+/// re-escaping them (design §3.4). Pairing them here rather than re-deriving
+/// one from the other is what keeps the two spellings of "what this token
+/// restores to" from drifting.
+pub(in crate::content::inline_builder) struct MaskedPiece<'a, 'src> {
+    /// The masked node — a [`Raw`](InlineNode::Raw) passthrough or a
+    /// [`Stem`](InlineNode::Stem) expression — the token stands for.
+    pub(in crate::content::inline_builder) node: &'a InlineNode<'src>,
+
+    /// What the token restores to: exactly what the fold of
+    /// [`node`](Self::node) emits (see [`restorable_body`]).
+    pub(in crate::content::inline_builder) body: Cow<'a, str>,
+}
+
+/// Rewrites a macro **bracket**'s own match-string bytes so each masked piece
+/// in it becomes an index-keyed `\u{96}`*n*`\u{97}` token, returning that text
+/// alongside the [`MaskedPiece`]s those tokens stand for.
+///
+/// This is the *before the split* half of every bracket restore, and it exists
 /// so the text handed to [`Attrlist::parse`] is the same **shape** the string
 /// pipeline's own haystack has there. Two spellings have to be normalized into
 /// one: [`widen_masked_passthroughs`] has already rewritten a
-/// [`Raw`](InlineNode::Raw) piece to a sentinel-shaped token for this family's
-/// *recognition*, but its numbering is per level, and any other masked piece
-/// is still the bare one-character [`SPAN_PLACEHOLDER`](super::super::quotes).
-/// Renumbering every restorable piece from zero, per bracket, is what lets the
-/// restore be **index-keyed** on the way back out
-/// ([`Attrlist::into_owned_restoring`]) — the parse can drop a token
-/// (a blank slot, a value the split discards) without shifting the ones that
-/// survive, exactly as
+/// [`Raw`](InlineNode::Raw) piece to a sentinel-shaped token for the image
+/// family's *recognition*, but its numbering is per level, and any other
+/// masked piece is still the bare one-character
+/// [`SPAN_PLACEHOLDER`](super::super::quotes). Renumbering every restorable
+/// piece from zero, per bracket, is what lets the restore be **index-keyed**
+/// on the way back out ([`Attrlist::into_owned_restoring`]) — the parse can
+/// drop a token (a blank slot, a value the split discards) without shifting
+/// the ones that survive, exactly as
 /// [`Passthroughs::restore_to`](crate::content::Passthroughs) is unshifted by
 /// a sentinel that never reached the rendered string.
 ///
-/// Only the kinds [`Restorable::Passthrough`] names are tokened, which is the
-/// same set this family's own gate admits: a masked **STEM** expression is
-/// deferred here as it is in the target, and for the same reason — see
+/// Shared by the two families whose bracket comes back from a parse, each
+/// passing the `kinds` its own gate admits so the two cannot disagree about
+/// what a token may stand for: the `image:`/`icon:` bracket passes
+/// [`Restorable::Passthrough`] (a masked **STEM** is deferred there as it is
+/// in that family's target, and for the same `web_path` reason — see
 /// [`Restorable`], and
-/// `an_image_bracket_over_a_stem_expression_is_a_documented_divergence`.
-fn tokened_bracket<'a>(
+/// `an_image_bracket_over_a_stem_expression_is_a_documented_divergence`),
+/// while the link families' display-text list
+/// ([`text_attrlist`](super::links)) passes
+/// [`Restorable::PassthroughOrStem`], having no such re-processing of its own.
+pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
     bracket_text: &str,
     range: &std::ops::Range<usize>,
-    nodes: &'a [InlineNode<'_>],
+    nodes: &'a [InlineNode<'src>],
     pieces: &[Piece],
     renderer: &dyn InlineSubstitutionRenderer,
-) -> (String, Vec<Cow<'a, str>>) {
+    kinds: Restorable,
+) -> (String, Vec<MaskedPiece<'a, 'src>>) {
     let mut tokened = String::new();
-    let mut bodies: Vec<Cow<'a, str>> = Vec::new();
+    let mut masked_pieces: Vec<MaskedPiece<'a, 'src>> = Vec::new();
 
     // In match-string coordinates; `bracket_text` is indexed relative to
     // `range.start`.
@@ -905,10 +938,12 @@ fn tokened_bracket<'a>(
         // splitting them would leave a branch no input can take. A piece this
         // skips is an atomic one the *gate* admitted for another reason — a
         // `CharRef` leaf the match string gives real bytes to.
-        let Some(body) = nodes
+        let Some(masked) = nodes
             .get(piece.node_index)
-            .filter(|node| node_is_restorable(node, Restorable::Passthrough))
-            .and_then(|node| restorable_body(node, renderer))
+            .filter(|node| node_is_restorable(node, kinds))
+            .and_then(|node| {
+                restorable_body(node, renderer).map(|body| MaskedPiece { node, body })
+            })
         else {
             continue;
         };
@@ -921,13 +956,13 @@ fn tokened_bracket<'a>(
                 .unwrap_or_default(),
         );
 
-        tokened.push_str(&format!("\u{96}{n}\u{97}", n = bodies.len()));
-        bodies.push(body);
+        tokened.push_str(&format!("\u{96}{n}\u{97}", n = masked_pieces.len()));
+        masked_pieces.push(masked);
         cursor = p_end;
     }
 
-    if bodies.is_empty() {
-        return (bracket_text.to_string(), bodies);
+    if masked_pieces.is_empty() {
+        return (bracket_text.to_string(), masked_pieces);
     }
 
     tokened.push_str(
@@ -936,7 +971,7 @@ fn tokened_bracket<'a>(
             .unwrap_or_default(),
     );
 
-    (tokened, bodies)
+    (tokened, masked_pieces)
 }
 
 /// Parses one inline attribute list, discarding the warnings — the shared
