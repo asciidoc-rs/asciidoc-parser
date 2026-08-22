@@ -385,6 +385,18 @@ pub struct ImageRenderParams<'a> {
     /// Target (the reference to the image).
     pub target: &'a str,
 
+    /// Byte ranges of [`target`](Self::target) restored from a masked
+    /// passthrough or STEM expression, in ascending order; empty otherwise
+    /// (the string substitution pipeline always passes an empty list — its
+    /// target still carries the sentinel here, and its restore pass runs over
+    /// the rendered string afterwards). The built-in renderer resolves the
+    /// image's `src` with these ranges masked and splices them back in
+    /// afterwards, so path resolution treats each as one opaque run — the
+    /// same order the string pipeline itself applies (`web_path` over the
+    /// sentinel, the restore after). See
+    /// [`Image::restored_target_ranges`](crate::inlines::Image).
+    pub restored_target_ranges: &'a [std::ops::Range<usize>],
+
     /// Alt text (either explicitly set or defaulted).
     pub alt: String,
 
@@ -407,6 +419,13 @@ pub struct ImageRenderParams<'a> {
 pub struct IconRenderParams<'a> {
     /// Target (the reference to the image).
     pub target: &'a str,
+
+    /// Byte ranges of [`target`](Self::target) restored from a masked
+    /// passthrough or STEM expression, in ascending order; empty otherwise.
+    /// See [`ImageRenderParams::restored_target_ranges`] — the built-in
+    /// renderer resolves the icon URI with these ranges masked and splices
+    /// them back in afterwards.
+    pub restored_target_ranges: &'a [std::ops::Range<usize>],
 
     /// Alt text (either explicitly set or defaulted).
     pub alt: String,
@@ -605,13 +624,131 @@ impl HtmlSubstitutionRenderer {
     /// `imagesdir`. As with the document attribute, an absolute-URL target
     /// ignores the base entirely.
     ///
+    /// `restored_target_ranges` names the byte ranges of `target` restored
+    /// from a masked passthrough or STEM expression (see
+    /// [`ImageRenderParams::restored_target_ranges`]). Resolution runs with
+    /// each of them — and each restored range of the macro-level `imagesdir`
+    /// value — replaced by an index-keyed `\u{96}`*n*`\u{97}` token, the
+    /// bodies spliced back into the resolved path afterwards. This is the
+    /// string substitution pipeline's own order: its `web_path` only ever
+    /// sees the sentinel (no space to percent-encode, no backslash to
+    /// posixify, no `/` or `.` for the segment arithmetic to read), and
+    /// [`Passthroughs::restore_to`](crate::content::Passthroughs) splices the
+    /// body into the finished `src` — so a fold over restored values
+    /// reproduces the same bytes, identically on every platform.
+    ///
     /// [`image_uri`]: InlineSubstitutionRenderer::image_uri
-    fn image_src(&self, target: &str, attrlist: &Attrlist, parser: &Parser) -> String {
+    fn image_src(
+        &self,
+        target: &str,
+        restored_target_ranges: &[std::ops::Range<usize>],
+        attrlist: &Attrlist,
+        parser: &Parser,
+    ) -> String {
         match attrlist.named_attribute("imagesdir") {
-            Some(imagesdir) => normalize_web_path(target, parser, Some(imagesdir.value()), true),
-            None => self.image_uri(target, parser, None),
+            Some(imagesdir) => {
+                let dir_ranges = imagesdir.restored_value_ranges();
+
+                if restored_target_ranges.is_empty() && dir_ranges.is_empty() {
+                    return normalize_web_path(target, parser, Some(imagesdir.value()), true);
+                }
+
+                // The two masked values flow into one joined path, so their
+                // tokens share one numbering — the directory's first, since
+                // `web_path` prepends the start path and the splice is one
+                // left-to-right pass.
+                let (masked_dir, mut bodies) =
+                    mask_restored_ranges(imagesdir.value(), dir_ranges, 0);
+
+                let (masked_target, target_bodies) =
+                    mask_restored_ranges(target, restored_target_ranges, bodies.len());
+
+                bodies.extend(target_bodies);
+
+                splice_restored_bodies(
+                    &normalize_web_path(&masked_target, parser, Some(&masked_dir), true),
+                    &bodies,
+                )
+            }
+
+            None => {
+                if restored_target_ranges.is_empty() {
+                    return self.image_uri(target, parser, None);
+                }
+
+                let (masked_target, bodies) =
+                    mask_restored_ranges(target, restored_target_ranges, 0);
+
+                splice_restored_bodies(&self.image_uri(&masked_target, parser, None), &bodies)
+            }
         }
     }
+}
+
+/// Replaces each of `ranges` — ascending, non-overlapping byte ranges of
+/// `value` — with an index-keyed `\u{96}`*n*`\u{97}` token, numbered from
+/// `first_index`, returning the masked text alongside the bodies the tokens
+/// stand for.
+///
+/// The token spelling is the substitution pipeline's own passthrough sentinel,
+/// which is the point: handed to `web_path`, the masked text has the very
+/// shape the string pipeline's own resolver sees — an opaque run carrying no
+/// space, separator, or dot — so both resolve identically, and
+/// [`splice_restored_bodies`] then restores each body exactly where
+/// `Passthroughs::restore_to` splices its own. A range that does not fall on
+/// `value`'s character boundaries (no caller produces one) is skipped rather
+/// than split.
+fn mask_restored_ranges<'v>(
+    value: &'v str,
+    ranges: &[std::ops::Range<usize>],
+    first_index: usize,
+) -> (String, Vec<&'v str>) {
+    let mut masked = String::with_capacity(value.len());
+    let mut bodies: Vec<&'v str> = Vec::with_capacity(ranges.len());
+    let mut cursor = 0usize;
+
+    for range in ranges {
+        let Some(body) = value.get(range.start..range.end) else {
+            continue;
+        };
+
+        masked.push_str(value.get(cursor..range.start).unwrap_or_default());
+        masked.push_str(&format!("\u{96}{n}\u{97}", n = first_index + bodies.len()));
+        bodies.push(body);
+        cursor = range.end;
+    }
+
+    masked.push_str(value.get(cursor..).unwrap_or_default());
+
+    (masked, bodies)
+}
+
+/// Splices each of `bodies` over its own index-keyed `\u{96}`*n*`\u{97}`
+/// token in `resolved`, one left-to-right pass, and returns the result.
+///
+/// Index-keyed exactly as
+/// [`Passthroughs::restore_to`](crate::content::Passthroughs) is: each token
+/// is sought only in the bytes after the previous splice, so a body that
+/// itself carries sentinel-shaped bytes is never re-matched as a later token,
+/// and a token the resolution dropped (a segment its `..` arithmetic
+/// consumed) is simply not found — the ones after it still restore, keyed by
+/// their own index.
+fn splice_restored_bodies(resolved: &str, bodies: &[&str]) -> String {
+    let mut out = String::with_capacity(resolved.len());
+    let mut rest = resolved;
+
+    for (n, body) in bodies.iter().enumerate() {
+        let token = format!("\u{96}{n}\u{97}");
+
+        if let Some(pos) = rest.find(&token) {
+            out.push_str(rest.get(..pos).unwrap_or_default());
+            out.push_str(body);
+            rest = rest.get(pos + token.len()..).unwrap_or_default();
+        }
+    }
+
+    out.push_str(rest);
+    out
 }
 
 impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
@@ -791,7 +928,12 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
     }
 
     fn render_image(&self, params: &ImageRenderParams, dest: &mut String) {
-        let src = self.image_src(params.target, params.attrlist, params.parser);
+        let src = self.image_src(
+            params.target,
+            params.restored_target_ranges,
+            params.attrlist,
+            params.parser,
+        );
         let alt_encoded = encode_attribute_value(params.alt.clone());
 
         // The dimension attributes (width, height, and title) are shared by the
@@ -851,7 +993,16 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             // that, the alt text) is nested inside for user agents that can't
             // display the object.
             let fallback = if let Some(fallback) = params.attrlist.named_attribute("fallback") {
-                let fallback_src = self.image_src(fallback.value(), params.attrlist, params.parser);
+                // A `fallback=` value restored from a masked construct
+                // resolves over its restored ranges masked, exactly as the
+                // target does — the one other value this renderer runs
+                // through `web_path`.
+                let fallback_src = self.image_src(
+                    fallback.value(),
+                    fallback.restored_value_ranges(),
+                    params.attrlist,
+                    params.parser,
+                );
                 format!(
                     r#"<img src="{fallback_src}" alt="{alt_encoded}"{dimension_attrs}>"#,
                     fallback_src = encode_attribute_value(fallback_src)
@@ -932,7 +1083,22 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
     }
 
     fn render_icon(&self, params: &IconRenderParams, dest: &mut String) {
-        let src = self.icon_uri(params.target, params.attrlist, params.parser);
+        // As in `render_image`, a target restored from a masked construct
+        // resolves with its restored ranges masked — the whole `icon_uri`
+        // computation included, since its extension probe (`has_extname`)
+        // must read the sentinel-shaped bytes the string pipeline's own
+        // probe reads — and the bodies splice back in afterwards.
+        let src = if params.restored_target_ranges.is_empty() {
+            self.icon_uri(params.target, params.attrlist, params.parser)
+        } else {
+            let (masked_target, bodies) =
+                mask_restored_ranges(params.target, params.restored_target_ranges, 0);
+
+            splice_restored_bodies(
+                &self.icon_uri(&masked_target, params.attrlist, params.parser),
+                &bodies,
+            )
+        };
 
         let img = if params.parser.is_attribute_set("icons") {
             let icons = params.parser.attribute_value("icons");

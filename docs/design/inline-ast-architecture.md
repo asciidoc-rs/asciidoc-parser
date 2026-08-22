@@ -4612,6 +4612,66 @@ Each phase is a reviewable unit with a clear exit gate.
   cross-reference family's pre-restore target, a `mailto:`'s subject and body for the same
   pre-restore reason, and the well-formed readings these six increments pinned.
 
+  *Step 6 prep landed as (a masked STEM expression in the `image:`/`icon:` family — the
+  restore-the-value class closed):* the class's last family, and the increment every note above
+  deferred in the same words — "the STEM target and its bracket's `fallback=`, both blocked on the
+  same fold-time `web_path`". Closing it meant exactly what those words prescribed: **keeping the
+  restore out of `web_path`'s way**, not widening a gate. The string pipeline's resolver never
+  sees a restored byte — its `web_path` runs while the masked construct is still the
+  `\u{96}`*n*`\u{97}` sentinel, an opaque run carrying no space to percent-encode, no backslash to
+  posixify (the platform-dependence that made this family defer), and no `/` or `.` for the
+  segment arithmetic to read — and `Passthroughs::restore_to` splices the body into the finished
+  `src` afterwards. The fold now reproduces that order at the same seam: an
+  [`Image`](../../parser/src/inlines/image.rs) node records which byte ranges of its restored
+  target came from a masked body (`restored_target_ranges` — the record
+  [`restore_masked_passthroughs`](../../parser/src/content/inline_builder/macros/links.rs) already
+  produces in the course of splicing, now kept), and the built-in renderer re-masks exactly those
+  ranges into index-keyed sentinel-shaped tokens, resolves, and splices the bodies back
+  ([`mask_restored_ranges`](../../parser/src/parser/inline_substitution_renderer.rs) /
+  [`splice_restored_bodies`](../../parser/src/parser/inline_substitution_renderer.rs) — index-keyed
+  as `restore_to` is, so a token the resolver's `..` arithmetic consumes is simply dropped, in
+  both pipelines). The bracket's own two `web_path`-bound values ride the same mechanism through
+  the attribute list:
+  [`ElementAttribute::into_owned_restoring`](../../parser/src/attributes/element_attribute.rs)
+  records each splice's range on the attribute, and an interactive SVG's `fallback=` and a
+  macro-level `imagesdir=` resolve over them masked — the directory's and the target's mask sets
+  sharing one token numbering where the resolver joins the two into one path.
+
+  With `web_path` out of the way, the gate split `Restorable` named is **deleted rather than
+  relaxed**: every restoring site admits both masked kinds
+  ([`node_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs), now total over
+  the pair), `widen_masked_passthroughs` becomes
+  [`widen_masked_pieces`](../../parser/src/content/inline_builder/macros/image.rs) (the image
+  target's two-character class needs a STEM widened exactly as it needed a passthrough), and
+  [`masked_default_alt`](../../parser/src/content/inline_builder/macros/image.rs) takes a `Stem`
+  piece's body from [`restorable_body`](../../parser/src/content/inline_builder/macros/image.rs) —
+  the fold's own bytes, so the two directions cannot drift.
+
+  What reaches parity is the family's whole masked vocabulary: the wholly- and partially-masked
+  target in both macro forms and all three notations, the default-alt arithmetic over the masked
+  bytes, both masked kinds in one target and in one bracket, the split invariant (a `,` or `=`
+  inside a rendered body), named values, the positional slots, a role, target and bracket both
+  masked, a macro-level `imagesdir=` (masked directory, masked target, and both at once), an
+  interactive SVG's `fallback=` in all three masked spellings, a token dropped whole by the `..`
+  arithmetic, the shapes inside a rendered span, two in one flow, escapes, and end to end through
+  the real parse path; the staged side effect registers the honest restored target. The move also
+  closes a divergence this class had already pinned: the restored **space** the fold used to
+  percent-encode into the `src` (`image:pass:[My Documents/chart.png][]`) now stays out of
+  `web_path`'s way exactly as the sentinel did, so that test is a parity test now. A platform
+  pair pins the reason the family deferred this for so long: the fold is byte-identical under
+  either separator, and equal to the golden, whose own resolver only ever saw the sentinel.
+  Re-running the corpus-wide fold-parity audit shows the divergence set **unchanged** — no golden
+  source writes an image over a STEM expression — and no new divergence appeared. Coverage stays
+  diff-neutral, and as with every prep piece before it, nothing further is wired in.
+
+  With this the **restore-the-value class is closed**: every value any family computes, or parses
+  out of a bracket, admits both masked kinds. What remains are only the keeps: the
+  cross-reference family's pre-restore target and a `mailto:`'s subject and body (each golden
+  leaking the pipeline's own sentinel into an `href` no restore then reaches), and the
+  well-formed/safe readings the class's increments pinned — a restored `"` escaped by the fold, a
+  `window=`/`opts=`/`link=` the renderer *decides* on reading restored bytes, and an author's own
+  sentinel-shaped bytes surviving the tree's per-token restore.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -5356,6 +5416,21 @@ Each phase is a reviewable unit with a clear exit gate.
        sentinel-shaped bytes each keep their divergence with their own test. See the step's own
        "landed as" note above. What remains of the class is the image family's STEM target and
        bracket, and the keeps.
+
+     - ✅ **prep (a masked STEM expression in the `image:`/`icon:` family — the
+       restore-the-value class closed).** The class's last family: target and bracket admit both
+       masked kinds, and the fold-time `web_path` this family alone sits behind runs with each
+       restored range **masked** back to the sentinel shape and spliced afterwards — the string
+       pipeline's own resolve-then-restore order, reproduced at the same seam.
+       [`Image::restored_target_ranges`](../../parser/src/inlines/image.rs) carries the record on
+       the node (`ImageRenderParams`/`IconRenderParams` hand it to the renderer), and
+       [`ElementAttribute::into_owned_restoring`](../../parser/src/attributes/element_attribute.rs)
+       records each splice for the bracket's two `web_path`-bound values (an interactive SVG's
+       `fallback=`, a macro-level `imagesdir=`). The `Restorable` gate split is deleted rather
+       than relaxed, and the formerly-pinned restored-space `src` divergence reaches parity by
+       the same move. See the step's own "landed as" note above. Only the keeps remain: the
+       cross-reference family's and a `mailto:` subject/body's pre-restore boundaries, and the
+       well-formed readings.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

@@ -112,6 +112,7 @@ impl<'src> Attrlist<'src> {
                 CowStr::from(self.source.data()),
                 bodies,
                 &mut [],
+                &mut Vec::new(),
             )),
         }
     }

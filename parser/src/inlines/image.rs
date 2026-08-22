@@ -17,6 +17,25 @@ pub struct Image<'src> {
     /// The image target (the reference to the image), as written.
     pub target: CowStr<'src>,
 
+    /// Byte ranges of [`target`](Self::target) whose content was restored from
+    /// a masked passthrough or STEM expression (`image:++a b++[]`,
+    /// `image:stem:[x].png[]`), in ascending order; empty when the target
+    /// crossed none.
+    ///
+    /// Path resolution must treat each such range as one opaque run rather
+    /// than as path syntax: the substitution pipeline resolves the `src` while
+    /// each masked construct is still its `\u{96}`*n*`\u{97}` sentinel and
+    /// splices the body in afterwards, so none of its bytes — a space
+    /// `web_path` would percent-encode, a backslash it would posixify, a `/`
+    /// or `.` its segment arithmetic would read — ever reaches the resolver.
+    /// The built-in renderer reproduces that order by masking these ranges
+    /// around its own `web_path` call (see
+    /// [`ImageRenderParams::restored_target_ranges`]).
+    ///
+    /// [`ImageRenderParams::restored_target_ranges`]:
+    ///     crate::parser::ImageRenderParams::restored_target_ranges
+    pub restored_target_ranges: Vec<std::ops::Range<usize>>,
+
     /// The alt text, explicit or defaulted.
     pub alt: Option<CowStr<'src>>,
 

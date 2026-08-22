@@ -3,8 +3,8 @@
 use super::{
     MacroMatch, MacroMatchKind, escaped_value_children,
     image::{
-        Restorable, range_is_restorable, range_is_verbatim, range_is_verbatim_or_synthesized,
-        restorable_body, tokened_bracket,
+        range_is_restorable, range_is_verbatim, range_is_verbatim_or_synthesized, restorable_body,
+        tokened_bracket,
     },
     macro_text_children, rebuild_macro_level,
 };
@@ -144,10 +144,10 @@ use crate::{
 /// A **masked** construct — a passthrough's [`Raw`](InlineNode::Raw) piece or
 /// a STEM expression's [`Stem`](InlineNode::Stem) one, the pair
 /// [`restorable_body`] names — is admitted in the target, this being the
-/// third and last family to take [`range_is_restorable`]. (Both kinds, unlike
-/// the `image:`/`icon:` family, which admits only the passthrough: this
-/// family's target reaches the `href` as computed, where that one's is
-/// re-processed by `web_path` at fold time — see [`Restorable`].) the string
+/// third and last family to take [`range_is_restorable`]. (This family's
+/// target reaches the `href` as computed; the `image:`/`icon:` family's is
+/// re-processed by `web_path` at fold time, over its restored ranges masked —
+/// see [`Image::restored_target_ranges`](crate::inlines::Image).) the string
 /// replacer swallows the `\u{96}`*n*`\u{97}` sentinel into its own target (both
 /// target classes admit it exactly as they admit the tree's placeholder, and
 /// the bare branch's trailing-character class admits the last byte of either
@@ -388,12 +388,7 @@ fn build_inline_link_node<'src>(
     // ASCII no single-character piece can supply.
     let computed_end = n.attrlist().map_or(full.end, |m| m.start());
 
-    if !range_is_restorable(
-        nodes,
-        pieces,
-        &(full.start..computed_end),
-        Restorable::PassthroughOrStem,
-    ) {
+    if !range_is_restorable(nodes, pieces, &(full.start..computed_end)) {
         return None;
     }
 
@@ -501,7 +496,7 @@ fn build_inline_link_node<'src>(
         parser.renderer.as_ref(),
     );
 
-    let target = restored.unwrap_or(target);
+    let target = restored.map_or(target, |(restored, _)| restored);
 
     // The display text becomes the node's children, located at the bracketed
     // text (a formal link) or the node itself (a bare link).
@@ -768,7 +763,7 @@ fn build_angle_link_node<'src>(
 
     let interior = scheme_m.start()..angle_url.end();
 
-    if !range_is_restorable(nodes, pieces, &interior, Restorable::PassthroughOrStem) {
+    if !range_is_restorable(nodes, pieces, &interior) {
         return None;
     }
 
@@ -793,7 +788,7 @@ fn build_angle_link_node<'src>(
         parser.renderer.as_ref(),
     );
 
-    let target = restored.unwrap_or(masked_target);
+    let target = restored.map_or(masked_target, |(restored, _)| restored);
 
     let link_text = hide_uri_scheme_text(&target, parser);
 
@@ -1047,12 +1042,7 @@ fn find_link_macro_matches<'src>(
         // comes back from a *parse*: a masked construct is tokened through
         // that parse and restored after it, a rendered span still deferred.)
         if let Some(target) = caps.get(3)
-            && !range_is_restorable(
-                nodes,
-                pieces,
-                &(target.start()..target.end()),
-                Restorable::PassthroughOrStem,
-            )
+            && !range_is_restorable(nodes, pieces, &(target.start()..target.end()))
         {
             continue;
         }
@@ -1094,8 +1084,9 @@ fn find_link_macro_matches<'src>(
 
 /// Substitutes each **masked** construct's own rendered body for its
 /// placeholder in `masked` — the match-string bytes at `range`, which is the
-/// same span in the level's match-string coordinates — returning `None` when
-/// the range holds no masked construct (so a caller keeps the bytes it
+/// same span in the level's match-string coordinates — returning the restored
+/// text together with each splice's byte range in it, or `None` when the
+/// range holds no masked construct (so a caller keeps the bytes it
 /// already has).
 ///
 /// This is [`Passthroughs::restore_to`](crate::content::Passthroughs)'s own
@@ -1120,8 +1111,16 @@ pub(super) fn restore_masked_passthroughs(
     nodes: &[InlineNode<'_>],
     pieces: &[Piece],
     renderer: &dyn InlineSubstitutionRenderer,
-) -> Option<String> {
+) -> Option<(String, Vec<std::ops::Range<usize>>)> {
     let mut out = String::new();
+
+    // Each splice's byte range in `out`, in ascending order — the record the
+    // `image:`/`icon:` family stores on its node so the fold-time `web_path`
+    // can keep the restored bytes out of its own way (see
+    // [`Image::restored_target_ranges`](crate::inlines::Image)); the link
+    // families, whose targets reach the `href` with no re-processing,
+    // discard it.
+    let mut restored_ranges = Vec::new();
 
     // In match-string coordinates; `masked` is indexed relative to
     // `range.start`.
@@ -1151,6 +1150,7 @@ pub(super) fn restore_masked_passthroughs(
                 .get(cursor.saturating_sub(range.start)..p_start.saturating_sub(range.start))
                 .unwrap_or_default(),
         );
+        restored_ranges.push(out.len()..out.len() + value.len());
         out.push_str(value.as_ref());
         cursor = p_end;
     }
@@ -1165,7 +1165,7 @@ pub(super) fn restore_masked_passthroughs(
             .unwrap_or_default(),
     );
 
-    Some(out)
+    Some((out, restored_ranges))
 }
 
 /// Builds one [`Ref`](InlineNode::Ref) link node from a recognized
@@ -1241,7 +1241,9 @@ pub(super) fn build_link_node<'src>(
         )
     });
 
-    let restored_target_str = restored.as_deref().unwrap_or(target_str);
+    let restored_target_str = restored
+        .as_ref()
+        .map_or(target_str, |(restored, _)| restored.as_str());
 
     let mut target = if is_mailto {
         format!("mailto:{restored_target_str}")
@@ -1611,7 +1613,7 @@ fn text_attrlist<'src>(
     parser: &Parser,
     pre_restore: &[usize],
 ) -> Option<TextAttrlist<'src>> {
-    if !range_is_restorable(nodes, pieces, &text_range, Restorable::PassthroughOrStem) {
+    if !range_is_restorable(nodes, pieces, &text_range) {
         return None;
     }
 
@@ -1640,7 +1642,6 @@ fn text_attrlist<'src>(
         nodes,
         pieces,
         parser.renderer.as_ref(),
-        Restorable::PassthroughOrStem,
     );
 
     let (text, attrs) = extract_attributes_from_text(Span::new(&tokened), parser, None);
@@ -2524,9 +2525,10 @@ mod tests {
 
     #[test]
     fn a_stem_target_folds_identically_under_either_path_separator() {
-        // The regression guard for the seam that made the `image:`/`icon:`
-        // family defer STEM entirely (see
-        // `an_image_target_over_a_stem_expression_is_a_documented_divergence`):
+        // The regression guard for the seam that long made the
+        // `image:`/`icon:` family defer STEM entirely (now closed by the
+        // masked resolve — see
+        // `an_image_target_over_a_stem_expression_is_platform_independent`):
         // a rendered STEM body always carries a backslash, and
         // [`web_path`](crate::parser::PathResolver::web_path) posixifies the
         // platform separator. These two families never route a target through
