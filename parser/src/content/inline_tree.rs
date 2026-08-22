@@ -905,8 +905,12 @@ fn leaf_node_of<'src>(node: &LeafNode, span: Span<'src>) -> InlineNode<'src> {
             // The Strategy-A recorder does not distinguish `icon:` from
             // `image:` (both fold through its own recorded markers), so it
             // leaves this `false`; the single-pass builder sets it honestly.
+            // Likewise the restored ranges: the recorder's target is the
+            // rendered string's own (already-restored) bytes, with no record
+            // of which came from a masked construct.
             is_icon: false,
             target: CowStr::from(target.clone()),
+            restored_target_ranges: vec![],
             alt: alt.clone().map(CowStr::from),
             width: width.clone().map(CowStr::from),
             height: height.clone().map(CowStr::from),

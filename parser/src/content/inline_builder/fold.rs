@@ -244,6 +244,7 @@ fn fold_image(
     if image.is_icon {
         let params = IconRenderParams {
             target: image.target.as_ref(),
+            restored_target_ranges: &image.restored_target_ranges,
             alt,
             size: attrlist
                 .named_or_positional_attribute("size", 1)
@@ -256,6 +257,7 @@ fn fold_image(
     } else {
         let params = ImageRenderParams {
             target: image.target.as_ref(),
+            restored_target_ranges: &image.restored_target_ranges,
             alt,
             width: image.width.as_deref(),
             height: image.height.as_deref(),
@@ -664,6 +666,7 @@ mod tests {
         let hand_built = InlineNode::Image(Image {
             is_icon: false,
             target: CowStr::from("sunset.jpg"),
+            restored_target_ranges: vec![],
             alt: Some(CowStr::from("Sunset")),
             width: None,
             height: None,
@@ -677,6 +680,34 @@ mod tests {
         let macro_built = fold_html(&build_src(location), &renderer);
 
         assert_eq!(fold_html(&[hand_built], &renderer), macro_built);
+    }
+
+    #[test]
+    fn fold_skips_a_hand_built_restored_range_off_the_target() {
+        // The node types are public, so a consumer may hand-build an
+        // [`Image`](InlineNode::Image) whose `restored_target_ranges` do not
+        // fall on the target's own bytes (the builder never produces one).
+        // The renderer's masking skips such a range rather than splitting the
+        // target, so the fold still resolves and renders the plain path.
+        let location = Span::new("image:sunset.jpg[Sunset]");
+
+        let hand_built = InlineNode::Image(Image {
+            is_icon: false,
+            target: CowStr::from("sunset.jpg"),
+            restored_target_ranges: vec![3..99, 100..200],
+            alt: Some(CowStr::from("Sunset")),
+            width: None,
+            height: None,
+            attrs: None,
+            location,
+        });
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        assert!(
+            fold_html(&[hand_built], &renderer).contains(r#"src="sunset.jpg""#),
+            "a range off the target's bytes must not disturb the src"
+        );
     }
 
     /// A resolved cross-reference to a target that carries a signifier (a

@@ -171,6 +171,7 @@ mod tests {
             InlineNode::Image(Image {
                 is_icon: false,
                 target: CowStr::from("photo.png"),
+                restored_target_ranges: vec![],
                 alt: None,
                 width: None,
                 height: None,

@@ -354,6 +354,10 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
 
             let params = ImageRenderParams {
                 target,
+                // The string pipeline's target still carries the passthrough
+                // sentinel here; its restore pass runs over the rendered
+                // string afterwards, so there are no restored ranges to mask.
+                restored_target_ranges: &[],
                 alt: attrlist
                     .named_or_positional_attribute("alt", 1)
                     .map_or(default_alt, |a| {
@@ -373,6 +377,8 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
         } else {
             let params = IconRenderParams {
                 target,
+                // As above: the sentinel restore happens after rendering.
+                restored_target_ranges: &[],
                 alt: attrlist.named_attribute("alt").map_or(default_alt, |a| {
                     normalize_text_lf_escaped_bracket(a.value())
                 }),

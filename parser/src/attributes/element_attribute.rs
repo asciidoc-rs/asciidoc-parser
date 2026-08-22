@@ -47,6 +47,16 @@ pub struct ElementAttribute<'src> {
     /// avoid substituting it a second time (which would, e.g., double-escape
     /// special characters).
     value_is_substituted: bool,
+
+    /// Byte ranges of `value` whose content
+    /// [`into_owned_restoring`](Self::into_owned_restoring) spliced in from a
+    /// masked passthrough or STEM expression, in ascending order; empty for
+    /// every other attribute. A consumer that re-processes the value as a
+    /// *path* — the built-in renderer's `web_path` resolution of a `fallback=`
+    /// or macro-level `imagesdir=` — masks these ranges around that resolution
+    /// and splices them back afterwards, reproducing the string pipeline's own
+    /// restore-after-resolve order (its resolver only ever sees the sentinel).
+    restored_value_ranges: Vec<std::ops::Range<usize>>,
 }
 
 impl std::fmt::Debug for ElementAttribute<'_> {
@@ -79,6 +89,7 @@ impl<'src> ElementAttribute<'src> {
             positional_index: self.positional_index,
             value_is_quoted: self.value_is_quoted,
             value_is_substituted: self.value_is_substituted,
+            restored_value_ranges: self.restored_value_ranges,
         }
     }
 
@@ -112,16 +123,30 @@ impl<'src> ElementAttribute<'src> {
     /// Substitution is **index-keyed**, as `restore_to` is, so a token whose
     /// index the caller did not supply is left as written rather than
     /// renumbering the ones that follow.
+    ///
+    /// Each splice's resulting byte range in the restored value is recorded
+    /// in [`restored_value_ranges`](Self::restored_value_ranges), so a
+    /// consumer that re-processes the value as a path can keep the restored
+    /// bytes out of that resolution's way (see the field's own doc comment).
     pub(crate) fn into_owned_restoring<'dst>(self, bodies: &[&str]) -> ElementAttribute<'dst> {
         let mut shorthand_item_indices = self.shorthand_item_indices;
+        let mut restored_value_ranges = Vec::new();
 
         ElementAttribute {
-            name: self.name.map(|name| restore_into(name, bodies, &mut [])),
-            value: restore_into(self.value, bodies, &mut shorthand_item_indices),
+            name: self
+                .name
+                .map(|name| restore_into(name, bodies, &mut [], &mut Vec::new())),
+            value: restore_into(
+                self.value,
+                bodies,
+                &mut shorthand_item_indices,
+                &mut restored_value_ranges,
+            ),
             shorthand_item_indices,
             positional_index: self.positional_index,
             value_is_quoted: self.value_is_quoted,
             value_is_substituted: self.value_is_substituted,
+            restored_value_ranges,
         }
     }
 
@@ -243,6 +268,7 @@ impl<'src> ElementAttribute<'src> {
                 positional_index: None,
                 value_is_quoted,
                 value_is_substituted,
+                restored_value_ranges: vec![],
             },
             offset,
             warnings,
@@ -273,6 +299,7 @@ impl<'src> ElementAttribute<'src> {
             positional_index: Some(1),
             value_is_quoted: false,
             value_is_substituted: false,
+            restored_value_ranges: vec![],
         }
     }
 
@@ -288,6 +315,7 @@ impl<'src> ElementAttribute<'src> {
             positional_index: Some(2),
             value_is_quoted: false,
             value_is_substituted: false,
+            restored_value_ranges: vec![],
         }
     }
 
@@ -583,6 +611,7 @@ impl<'src> ElementAttribute<'src> {
             positional_index: earlier.positional_index,
             value_is_quoted: false,
             value_is_substituted: false,
+            restored_value_ranges: vec![],
         }
     }
 
@@ -633,6 +662,7 @@ impl<'src> ElementAttribute<'src> {
             positional_index: self.positional_index,
             value_is_quoted: false,
             value_is_substituted: false,
+            restored_value_ranges: vec![],
         }
     }
 
@@ -648,6 +678,7 @@ impl<'src> ElementAttribute<'src> {
             positional_index: None,
             value_is_quoted: false,
             value_is_substituted: false,
+            restored_value_ranges: vec![],
         }
     }
 
@@ -671,6 +702,13 @@ impl<'src> ElementAttribute<'src> {
     /// [`value_is_quoted`](Self::value_is_quoted) field.
     pub(crate) fn value_is_quoted(&self) -> bool {
         self.value_is_quoted
+    }
+
+    /// Byte ranges of [`value`](Self::value) restored from a masked
+    /// passthrough or STEM expression. See the
+    /// [`restored_value_ranges`](Self::restored_value_ranges) field.
+    pub(crate) fn restored_value_ranges(&self) -> &[std::ops::Range<usize>] {
+        &self.restored_value_ranges
     }
 
     /// Return the attribute's value.
@@ -761,7 +799,9 @@ fn is_shorthand_delimiter(c: char) -> bool {
 /// A run that is not a well-formed token, or whose index `bodies` does not
 /// supply, is copied through verbatim — the same index-keyed leniency
 /// `restore_to` has, so an unsupplied index never renumbers the tokens after
-/// it. See [`ElementAttribute::into_owned_restoring`] for why the shift is
+/// it. Each splice's byte range in the restored text is appended to
+/// `restored_ranges`, in ascending order. See
+/// [`ElementAttribute::into_owned_restoring`] for why the shift is
 /// right where a re-derivation would not be.
 /// [`restore_tokens`] over a [`CowStr`], keeping the plain
 /// [`into_owned`](CowStr::into_owned) conversion — and with it the inline
@@ -771,15 +811,26 @@ pub(super) fn restore_into<'dst>(
     text: CowStr<'_>,
     bodies: &[&str],
     indices: &mut [usize],
+    restored_ranges: &mut Vec<std::ops::Range<usize>>,
 ) -> CowStr<'dst> {
     if bodies.is_empty() || !text.contains('\u{96}') {
         return text.into_owned();
     }
 
-    CowStr::from(restore_tokens(text.as_ref(), bodies, indices))
+    CowStr::from(restore_tokens(
+        text.as_ref(),
+        bodies,
+        indices,
+        restored_ranges,
+    ))
 }
 
-fn restore_tokens(text: &str, bodies: &[&str], indices: &mut [usize]) -> String {
+fn restore_tokens(
+    text: &str,
+    bodies: &[&str],
+    indices: &mut [usize],
+    restored_ranges: &mut Vec<std::ops::Range<usize>>,
+) -> String {
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0usize;
 
@@ -823,6 +874,7 @@ fn restore_tokens(text: &str, bodies: &[&str], indices: &mut [usize]) -> String 
         };
 
         out.push_str(text.get(cursor..start).unwrap_or_default());
+        restored_ranges.push(out.len()..out.len() + body.len());
         out.push_str(body);
 
         delta = delta
