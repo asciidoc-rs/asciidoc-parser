@@ -132,6 +132,51 @@ pub(super) fn classify_unescaped_specials<'src>(
     out
 }
 
+/// Rebuilds a value the macros step **computed** off the level's match string
+/// under an effective order whose escaping step has not run by the time
+/// `Macros` reaches it — the
+/// [`Verbatim`](super::macros::ComputedSpecials::Verbatim) half of the decision
+/// [`ComputedSpecials`](super::macros::ComputedSpecials) carries, and the
+/// counterpart of
+/// [`escaped_value_children`](super::macros::escaped_value_children).
+///
+/// There is no entity to unwind here: the value's bytes are the author's own,
+/// which the string replacer splices into its output exactly as they stand. So
+/// this is the same classification [`classify_unescaped_specials`] performs
+/// over the finished tree — a literal `<`/`>`/`&` is a
+/// [`Raw`](InlineNode::Raw) leaf the fold emits verbatim, everything else a
+/// [`Text`](InlineNode::Text) run — reached through the very same
+/// [`split_text`], so the two cannot drift on what a literal special is worth.
+///
+/// Running it *here*, rather than leaving the value as one `Text` run for
+/// `classify_unescaped_specials` to split later, is what covers the second of
+/// the two orders this half serves: an order that escapes **after** `Macros`
+/// (`subs=macros,specialcharacters`) never reaches that final pass, and
+/// [`flatten_prior_markup`] folds this node's markup — including this value —
+/// before the escaping step splits the result.
+///
+/// An **empty** value yields no children at all, matching
+/// `escaped_value_children`'s own answer for one: unlike the empty `Text` a
+/// `<<id,>>` reference text is built with directly, an empty *computed* value
+/// is a value the caller has already filtered out.
+pub(super) fn unescaped_value_children<'src>(
+    text: &str,
+    location: Span<'src>,
+) -> Vec<InlineNode<'src>> {
+    if text.is_empty() {
+        return vec![];
+    }
+
+    let mut out = Vec::new();
+    split_text(
+        CowStr::from(text.to_string()),
+        location,
+        SpecialLeaf::Raw,
+        &mut out,
+    );
+    out
+}
+
 /// Splits a [`Text`](InlineNode::Text) node's logical `value` into alternating
 /// text runs and `<`/`>`/`&` leaves of the kind `leaf` names.
 ///

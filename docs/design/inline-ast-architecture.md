@@ -4672,6 +4672,59 @@ Each phase is a reviewable unit with a clear exit gate.
   `window=`/`opts=`/`link=` the renderer *decides* on reading restored bytes, and an author's own
   sentinel-shaped bytes surviving the tree's per-token restore.
 
+  *Step 6 prep landed as (a computed value classified by where the escaping step sits):* the one
+  divergence the class above left behind that was not a *keep* — an author's own `&lt;` in a
+  **computed** value under an effective order that never escaped, which
+  [`escaped_value_children`](../../parser/src/content/inline_builder/macros/mod.rs) unwound one
+  level too far — closed exactly as its own note prescribed: "by where the escaping step actually
+  sits", which needed the effective order threaded down to each family. A computed value is the one
+  thing the macros step reads as *bytes* rather than carrying structurally (it comes back from an
+  [`Attrlist`](../../parser/src/attributes/attrlist.rs) parse, so there is no range of nodes to
+  rebuild it from), and an attribute list is parsed under *any* order that runs `Macros` — so both
+  readings of `&lt;` are reachable, and picking one by assumption was the bug.
+
+  A new [`ComputedSpecials`](../../parser/src/content/inline_builder/macros/mod.rs) carries the
+  decision, made in [`build_for_group`](../../parser/src/content/inline_builder/mod.rs) where the
+  order is in hand — the same seam, and the same shape, as
+  [`SplicedSpecials`](../../parser/src/content/inline_builder/attribute_refs.rs) already uses for
+  the attribute-references step — and
+  [`computed_value_children`](../../parser/src/content/inline_builder/macros/mod.rs) dispatches to
+  one of two halves: the existing trichotomy unwind when the escaping step has already run, and a
+  new [`unescaped_value_children`](../../parser/src/content/inline_builder/special_chars.rs) when
+  it has not, which reaches for
+  [`split_text`](../../parser/src/content/inline_builder/special_chars.rs) — the very splitter
+  [`classify_unescaped_specials`](../../parser/src/content/inline_builder/special_chars.rs) uses
+  over the finished tree — so the two cannot drift on what a literal special is worth. The
+  condition is the step's **position**, not its presence, which is what makes the second half cover
+  an order that escapes *after* `Macros` too: there the final classification pass never runs, and
+  `flatten_prior_markup` folds the node's markup before the escaping step splits the result, so the
+  value has to be classified here or not at all. That is a real gain rather than a hypothetical
+  one — under `subs=attributes,macros,specialcharacters` the cross-reference family (the one
+  family the string pipeline is still holding as a deferred placeholder when the escaping step
+  runs, so `flatten_prior_markup` leaves it alone) now reaches parity in **both** spellings, where
+  a bare `<` had diverged.
+
+  What reaches parity is the four-cell truth table — a `<` and a `&lt;` in a computed value,
+  against an order that escapes first and one that never escapes — over all three families that
+  compute one (the `link:`/`mailto:` macro's `=` list, the auto-link / formal-URL family's, and the
+  cross-reference macro's), plus the same three fixtures folded into the never-escapes group-parity
+  corpus beside a restored entity and a masked passthrough in the same value. Threading changed
+  fourteen signatures and no node kind, gate, or builder body. Re-running the corpus-wide
+  fold-parity audit shows the three fixtures **gone** from the divergence set and no new
+  divergence; coverage is diff-neutral, with one consequence worth recording: the escaped half's
+  bare-`&` arm, which the never-escapes corpus used to be the only thing exercising, is now
+  unreachable through any order — every `&` in a
+  level's match string belongs to a `CharRef` leaf that opens a class, and a *literal* one is a
+  `Raw` leaf the match string stands in as an opaque placeholder — so it is kept as the scan's
+  totality arm and pinned by a direct unit test instead. As with every prep piece before it,
+  nothing further is wired in.
+
+  With this, every §3.4.1 classification the builder makes is decided by where the steps actually
+  sit rather than by where a fragment came from. What remains of the audit's own remainder are the
+  boundary-class halves the sibling increments named — a macro body class wanting more than one
+  presented character, the closing character, and the character-replacements step's
+  consume-across-levels case — and the keeps.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -5431,6 +5484,26 @@ Each phase is a reviewable unit with a clear exit gate.
        the same move. See the step's own "landed as" note above. Only the keeps remain: the
        cross-reference family's and a `mailto:` subject/body's pre-restore boundaries, and the
        well-formed readings.
+
+     - ✅ **prep (a computed value classified by where the escaping step sits).** The last
+       divergence the restore-the-value class left that was not a *keep*, and the last §3.4.1
+       classification the builder still made by assumption: a value the macros step **computes**
+       off the level's match string — the one thing it reads as bytes rather than carrying
+       structurally, since it comes back from an
+       [`Attrlist`](../../parser/src/attributes/attrlist.rs) parse — was always read as
+       already-escaped, so under an order that never escaped an author's own `&lt;` was unwound one
+       level too far. A new
+       [`ComputedSpecials`](../../parser/src/content/inline_builder/macros/mod.rs), decided in
+       [`build_for_group`](../../parser/src/content/inline_builder/mod.rs) exactly as
+       [`SplicedSpecials`](../../parser/src/content/inline_builder/attribute_refs.rs) is and
+       threaded down to the three families that compute such a value, carries the decision, and
+       [`computed_value_children`](../../parser/src/content/inline_builder/macros/mod.rs)
+       dispatches to the existing unwind or to a new
+       [`unescaped_value_children`](../../parser/src/content/inline_builder/special_chars.rs) that
+       reuses `classify_unescaped_specials`' own splitter. The condition is the step's *position*,
+       not its presence, so an order that escapes **after** `Macros` takes the second half too —
+       which brings the cross-reference family to parity there in both spellings. See the step's
+       own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

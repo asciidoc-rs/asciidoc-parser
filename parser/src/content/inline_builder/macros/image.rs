@@ -1067,9 +1067,12 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::{
-        super::super::test_support::{
-            assert_styled, assert_text, build_src, build_through_quotes, fold_html, golden_macros,
-            golden_macros_with,
+        super::{
+            super::test_support::{
+                assert_styled, assert_text, build_src, build_through_quotes, fold_html,
+                golden_macros, golden_macros_with,
+            },
+            ComputedSpecials,
         },
         node_is_restorable, restorable_body,
     };
@@ -1658,6 +1661,7 @@ mod tests {
                 Span::new(source),
                 &Parser::default(),
                 Masked::UNKNOWN,
+                ComputedSpecials::Escaped,
             );
 
             assert!(

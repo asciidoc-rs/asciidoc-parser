@@ -16,7 +16,7 @@ use xref::xref_macros_level;
 
 use super::{
     quotes::{LevelContext, Piece, emit_range, source_slice, special_entity, text_slice},
-    special_chars::Masked,
+    special_chars::{Masked, unescaped_value_children},
 };
 use crate::{
     Parser, Span,
@@ -24,6 +24,41 @@ use crate::{
     inlines::{CharRef, InlineNode},
     strings::CowStr,
 };
+
+/// Whether the escaping step has already run by the time the macros step reads
+/// a value off the level's match string.
+///
+/// Design §3.4.1 decides what a fragment is worth by *where the steps sit* in
+/// the group's effective order, not by where the fragment came from. The
+/// attribute-references step already makes that decision for the value it
+/// splices in
+/// ([`SplicedSpecials`](super::attribute_refs::SplicedSpecials)); this is the
+/// same decision for the one thing the macros step reads as bytes rather than
+/// carries structurally — an attribute list's positional value, which comes
+/// back from a *parse* and so has no range of nodes to rebuild from.
+///
+/// Both halves are decided in
+/// [`build_for_group`](super::build_for_group), where the effective order is
+/// in hand, and carried down to the families that compute such a value (the
+/// `link:`/`mailto:` macro, the auto-link / formal-URL family, and the
+/// cross-reference macro).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ComputedSpecials {
+    /// `SpecialCharacters` sits **before** `Macros` in this order, so a
+    /// computed value holds the already-escaped bytes the string replacer
+    /// parsed out of its own escaped haystack: `&lt;` is an escaped special
+    /// standing for a logical `<`, which [`escaped_value_children`] unwinds one
+    /// level so the fold escapes it back exactly once (§3.4).
+    Escaped,
+
+    /// No `SpecialCharacters` step has run yet — either the order has none at
+    /// all (`subs=attributes,macros`) or it runs *after* `Macros`
+    /// (`subs=macros,specialcharacters`) — so a computed value holds the
+    /// author's own bytes, which the string replacer splices in verbatim:
+    /// `&lt;` is six literal characters, not an escaped `<`, and
+    /// [`unescaped_value_children`] classifies it as such.
+    Verbatim,
+}
 
 /// The macros substitution, as a node transducer.
 ///
@@ -134,6 +169,7 @@ pub(super) fn apply_macros<'src>(
     root: Span<'src>,
     parser: &Parser,
     masked: Masked<'_>,
+    specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
     // The bibliography anchor (`[[[label]]]`) runs before every other family,
     // exactly as the string step runs its own `INLINE_BIBLIO_ANCHOR` pass
@@ -146,7 +182,7 @@ pub(super) fn apply_macros<'src>(
     // encloses.
     let nodes = biblio_anchor_level(nodes, root, parser, masked);
 
-    apply_macro_families(nodes, root, parser, LevelContext::ROOT, masked)
+    apply_macro_families(nodes, root, parser, LevelContext::ROOT, masked, specials)
 }
 
 /// Applies each macro family at this level — and, first, at every level nested
@@ -211,6 +247,7 @@ fn apply_macro_families<'src>(
     parser: &Parser,
     ctx: LevelContext,
     masked: Masked<'_>,
+    specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
     // Recurse into spans/refs first, matching the string pipeline's
     // whole-string pass. Each nested level is matched in the context its own
@@ -241,13 +278,13 @@ fn apply_macro_families<'src>(
 
             InlineNode::Styled(mut styled) => {
                 styled.children =
-                    apply_macro_families(styled.children, root, parser, inner, masked);
+                    apply_macro_families(styled.children, root, parser, inner, masked, specials);
                 InlineNode::Styled(styled)
             }
 
             InlineNode::Ref(mut reference) => {
                 reference.children =
-                    apply_macro_families(reference.children, root, parser, inner, masked);
+                    apply_macro_families(reference.children, root, parser, inner, masked, specials);
                 InlineNode::Ref(reference)
             }
 
@@ -274,11 +311,11 @@ fn apply_macro_families<'src>(
     // Auto-links and formal-URL links (`INLINE_LINK`) run after the index-term
     // pass and before the `link:`/`mailto:` macro, mirroring the string step's
     // order (`INLINE_LINK` precedes `INLINE_LINK_MACRO`).
-    let nodes = inline_link_level(nodes, root, parser, ctx, masked);
+    let nodes = inline_link_level(nodes, root, parser, ctx, masked, specials);
 
     // The `link:`/`mailto:` macro runs after the auto-link pass, mirroring the
     // string step's order.
-    let nodes = link_macro_level(nodes, root, parser, ctx, masked);
+    let nodes = link_macro_level(nodes, root, parser, ctx, masked, specials);
 
     // A bare e-mail address (`doc@example.org`) runs after both URL-link
     // families and before the anchor pass, exactly where the string step runs
@@ -296,7 +333,7 @@ fn apply_macro_families<'src>(
 
     // Cross-references (`xref:id[…]`) run after the anchor pass, mirroring the
     // string step's order.
-    xref_macros_level(nodes, root, parser, ctx, masked)
+    xref_macros_level(nodes, root, parser, ctx, masked, specials)
 
     // Footnotes are **not** handled here. Every other family's recognition is
     // order-independent (no cross-node side effect), so it is safe for them to
@@ -593,6 +630,28 @@ pub(in crate::content::inline_builder) fn emit_range_unescaping_brackets<'src>(
     emit_range(nodes, pieces, cursor..range.end, out);
 }
 
+/// Rebuilds a value the macros step **computed** off the level's match string
+/// as the children a node shows, taking whichever half of design §3.4.1
+/// `specials` names.
+///
+/// A computed value is the one thing this step reads as *bytes* rather than
+/// carrying structurally: it comes back from an
+/// [`Attrlist`](crate::attributes::Attrlist) parse, so there is no range of
+/// nodes to rebuild it from and its classification has to be re-derived from
+/// the bytes themselves. What those bytes are worth is exactly what
+/// [`ComputedSpecials`] answers — see its two halves,
+/// [`escaped_value_children`] and [`unescaped_value_children`].
+pub(super) fn computed_value_children<'src>(
+    text: &str,
+    location: Span<'src>,
+    specials: ComputedSpecials,
+) -> Vec<InlineNode<'src>> {
+    match specials {
+        ComputedSpecials::Escaped => escaped_value_children(text, location),
+        ComputedSpecials::Verbatim => unescaped_value_children(text, location),
+    }
+}
+
 /// Rebuilds an **already-escaped computed value** — a value a family read off
 /// the level's own match string rather than out of the tree, here a reference-
 /// or link-family attribute list's positional value — as the nodes that fold
@@ -625,15 +684,24 @@ pub(in crate::content::inline_builder) fn emit_range_unescaping_brackets<'src>(
 /// literal `&` *does* survive into a verbatim run, and is left exactly as it
 /// is here, since neither class matches it.
 ///
-/// That last case is also this helper's one documented divergence, shared by
-/// every family that computes an attribute-list value: an attribute list is
-/// parsed under any order that runs `Macros`, but a value read off the match
-/// string is *assumed* escaped, so under an order that never escapes an
-/// author's own literal `&lt;` in a **non**-verbatim text is unwound one level
-/// too far. Deciding it the way §3.4.1 decides every other classification — by
-/// where the escaping step actually sits — needs the effective order threaded
-/// down to each family, which none has today. See
-/// `an_escaped_computed_value_under_an_order_that_never_escapes_is_a_documented_divergence`.
+/// That last branch — a bare `&` opening neither class — is what makes the scan
+/// total over arbitrary bytes, and no effective order reaches it: this half is
+/// called only for an order that has already escaped
+/// ([`ComputedSpecials::Escaped`], dispatched by
+/// [`computed_value_children`]), and under one of those every `&` in the
+/// level's match string belongs to a leaf that opens a class — a
+/// [`Special`](CharRef::Special)'s canonical entity, a restored
+/// [`Entity`](CharRef::Entity)'s own bytes, or a typographic
+/// [`Replacement`](CharRef::Replacement)'s numeric one. A *literal* `&` (an
+/// attribute expansion splicing one in after the escaping step) is a
+/// [`Raw`](InlineNode::Raw) leaf, which
+/// [`build_match_string`](super::quotes::build_match_string) stands in as an
+/// opaque placeholder carrying no `&` at all — so it never reaches a computed
+/// value as bytes. The branch is pinned by a direct unit test rather than by
+/// the corpus.
+///
+/// Visible past this module for [`unescaped_value_children`]'s own doc link
+/// alone; [`computed_value_children`] is the entry point every caller takes.
 pub(super) fn escaped_value_children<'src>(
     text: &str,
     location: Span<'src>,
@@ -671,9 +739,12 @@ pub(super) fn escaped_value_children<'src>(
             // does.
             entity.end()
         } else {
-            // A bare `&` that opens neither class (an effective order that
-            // never escaped, §3.4.1): ordinary logical text like any other
-            // byte.
+            // A bare `&` that opens neither class: ordinary logical text like
+            // any other byte. This is what makes the scan total over arbitrary
+            // bytes; no effective order presents one here (see this function's
+            // own doc comment), so it is pinned by
+            // [`a_bare_ampersand_in_a_computed_value_stays_logical_text`]
+            // rather than by the corpus.
             pending.push('&');
             '&'.len_utf8()
         };
@@ -719,7 +790,7 @@ mod tests {
 
     use super::{
         super::{special_chars::Masked, test_support::golden_macros_with},
-        apply_macro_side_effects, apply_macros,
+        ComputedSpecials, apply_macro_side_effects, apply_macros, escaped_value_children,
     };
     use crate::{
         Parser, Span,
@@ -727,7 +798,7 @@ mod tests {
             Content, SubstitutionGroup, SubstitutionStep,
             inline_builder::{build, build_for_group, fold_html},
         },
-        inlines::{InlineNode, Ref, RefVariant},
+        inlines::{CharRef, InlineNode, Ref, RefVariant},
         parser::{HtmlSubstitutionRenderer, ModificationContext},
         strings::CowStr,
         warnings::WarningType,
@@ -777,50 +848,131 @@ mod tests {
     }
 
     #[test]
-    fn an_escaped_computed_value_under_an_order_that_never_escapes_is_a_documented_divergence() {
+    fn a_computed_value_is_classified_by_where_the_escaping_step_sits() {
         // [`escaped_value_children`] reads its input as the *escaped* text a
         // family took off the level's match string, so it unwinds one level of
         // §3.4's trichotomy: `&lt;` becomes the logical `<` a `Text` node
-        // holds, which the fold escapes back. That is exact under every
-        // effective order that runs `SpecialCharacters` — which is every order
-        // that can produce an escaped special in the first place — but the
-        // value it rebuilds is an attribute list's positional value, and an
-        // attribute list is parsed under any order that runs `Macros`.
+        // holds, which the fold escapes back. That is exact under an order
+        // that runs `SpecialCharacters` **before** `Macros` — every built-in
+        // group — and exactly wrong under one that does not, where the same
+        // six bytes are the author's own and the string replacer splices them
+        // in untouched.
         //
-        // So under an order that never escapes, a display text whose range is
-        // *not* verbatim (here because an attribute expansion splices into it)
-        // and that carries an author's own literal `&lt;` is unwound one level
-        // too far: the tree folds it as `<` where the string pipeline, which
-        // escaped nothing, emits `&lt;`. Deciding this the way §3.4.1 decides
-        // every other classification — by where the escaping step actually
-        // sits in the group's effective order — needs that order threaded down
-        // to each macro family, which no family has today; until then all
-        // three families that compute an attribute-list value share the
-        // divergence.
-        //
-        // If that thread is ever added, fold these fixtures into the
-        // group-parity corpus in this module's `mod.rs`.
+        // An attribute list is parsed under *any* order that runs `Macros`, so
+        // both readings are reachable, and which one a value takes is decided
+        // the way §3.4.1 decides every other classification: by where the
+        // escaping step actually sits in the group's effective order. This
+        // pins that decision from both sides over one fixture per family — the
+        // three that compute an attribute-list value — so neither half can
+        // drift into the other's order.
         let parser = Parser::default().with_intrinsic_attribute(
             "product",
             "Widget",
             ModificationContext::Anywhere,
         );
 
-        for source in [
-            "xref:sec[{product} &lt; y,role=hl] here",
-            "link:index.html[{product} &lt; y,role=hl] here",
-            "https://example.org[{product} &lt; y,role=hl] here",
+        // Escapes before `Macros`, as every built-in group does.
+        let escaping = SubstitutionGroup::Custom(vec![
+            SubstitutionStep::SpecialCharacters,
+            SubstitutionStep::AttributeReferences,
+            SubstitutionStep::Macros,
+        ]);
+
+        // Never escapes at all — `subs=attributes,macros`.
+        let verbatim = SubstitutionGroup::Custom(vec![
+            SubstitutionStep::AttributeReferences,
+            SubstitutionStep::Macros,
+        ]);
+
+        // The value is non-verbatim in every fixture (an attribute expansion
+        // splices into it), which is what routes it through the computed-value
+        // rebuild rather than through `macro_text_children`'s own ranges.
+        for text in ["{product} < y", "{product} &lt; y"] {
+            for shape in [
+                "xref:sec[TEXT,role=hl] here",
+                "link:index.html[TEXT,role=hl] here",
+                "https://example.org[TEXT,role=hl] here",
+            ] {
+                let source = shape.replace("TEXT", text);
+
+                // The truth table this increment closes, in the order the two
+                // groups are declared above:
+                //
+                //   `<`     escaping → `&lt;`     (the escaping step ran, so
+                //                                  the value holds `&lt;`,
+                //                                  which unwinds to a logical
+                //                                  `<` the fold escapes back)
+                //   `<`     verbatim → `<`        (nothing escaped it, in
+                //                                  either pipeline)
+                //   `&lt;`  escaping → `&amp;lt;` (the escaping step escaped
+                //                                  the author's own `&`)
+                //   `&lt;`  verbatim → `&lt;`     (the author's six bytes,
+                //                                  spliced in untouched — the
+                //                                  cell that used to unwind
+                //                                  one level too far)
+                for (group, expected) in [
+                    (
+                        &escaping,
+                        if text.contains('&') {
+                            "Widget &amp;lt; y"
+                        } else {
+                            "Widget &lt; y"
+                        },
+                    ),
+                    (
+                        &verbatim,
+                        if text.contains('&') {
+                            "Widget &lt; y"
+                        } else {
+                            "Widget < y"
+                        },
+                    ),
+                ] {
+                    let mut content = Content::from(Span::new(&source));
+                    group.apply(&mut content, &parser, None);
+
+                    let nodes = build_for_group(
+                        group,
+                        CowStr::from(source.clone()),
+                        Span::new(&source),
+                        &parser,
+                        None,
+                    );
+
+                    let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser);
+
+                    assert_eq!(folded, content.rendered_html(), "{source:?}");
+                    assert!(folded.contains(expected), "{source:?}: {folded:?}");
+                }
+            }
+        }
+
+        // The `Verbatim` half is *not* "the order has no escaping step" but
+        // "none has run yet", so it covers an order that escapes **after**
+        // `Macros` too. Only the cross-reference family can be pinned to
+        // parity there, because it is the one family whose node the string
+        // pipeline is still holding as a deferred placeholder when the
+        // escaping step runs — so `flatten_prior_markup` leaves it alone,
+        // where a link's already-emitted `<a …>` markup is escaped by the
+        // string pipeline and is the separate divergence
+        // `a_markup_producing_step_before_the_escaping_one_is_a_documented_divergence`
+        // pins. Both spellings reach parity; the bare `<` did not before the
+        // decision became position-aware.
+        let escaping_last = SubstitutionGroup::Custom(vec![
+            SubstitutionStep::AttributeReferences,
+            SubstitutionStep::Macros,
+            SubstitutionStep::SpecialCharacters,
+        ]);
+
+        for (source, expected) in [
+            ("xref:sec[{product} < y,role=hl] here", "Widget < y"),
+            ("xref:sec[{product} &lt; y,role=hl] here", "Widget &lt; y"),
         ] {
             let mut content = Content::from(Span::new(source));
-            let group = SubstitutionGroup::Custom(vec![
-                SubstitutionStep::AttributeReferences,
-                SubstitutionStep::Macros,
-            ]);
-
-            group.apply(&mut content, &parser, None);
+            escaping_last.apply(&mut content, &parser, None);
 
             let nodes = build_for_group(
-                &group,
+                &escaping_last,
                 CowStr::from(source),
                 Span::new(source),
                 &parser,
@@ -829,14 +981,50 @@ mod tests {
 
             let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser);
 
-            assert_ne!(
-                folded,
-                content.rendered_html(),
-                "expected the documented divergence to still reproduce for {source:?}"
-            );
-
-            assert!(folded.contains("Widget < y"), "{folded:?}");
+            assert_eq!(folded, content.rendered_html(), "{source:?}");
+            assert!(folded.contains(expected), "{source:?}: {folded:?}");
         }
+    }
+
+    #[test]
+    fn a_bare_ampersand_in_a_computed_value_stays_logical_text() {
+        // The third arm of `escaped_value_children`'s scan — an `&` opening
+        // neither of the two recoverable classes — is what makes it total over
+        // arbitrary bytes, and no effective order presents one: the half runs
+        // only for an order that has already escaped, and there every `&` in
+        // the level's match string is a `CharRef` leaf's own entity, while a
+        // literal one is a `Raw` leaf the match string stands in as an opaque
+        // placeholder. So it is pinned directly, on the classification it
+        // makes: one logical `Text` run, which the fold escapes back to the
+        // `&amp;` the string pipeline would have emitted.
+        let src = Span::new("x");
+        let children = escaped_value_children("a & b &copy; c &lt; d", src);
+
+        assert_eq!(
+            children
+                .iter()
+                .filter(|n| matches!(n, InlineNode::Text { .. }))
+                .count(),
+            2,
+            "{children:?}"
+        );
+
+        // The bare `&` stays inside its own run as logical text; only the
+        // entity comes out as its own leaf, and only the escaped special is
+        // unwound.
+        assert!(
+            matches!(&children[0], InlineNode::Text { value, .. } if value.as_ref() == "a & b "),
+            "{children:?}"
+        );
+        assert!(
+            matches!(&children[1], InlineNode::CharRef { value: CharRef::Entity(e), .. }
+                if e.as_ref() == "&copy;"),
+            "{children:?}"
+        );
+        assert!(
+            matches!(&children[2], InlineNode::Text { value, .. } if value.as_ref() == " c < d"),
+            "{children:?}"
+        );
     }
 
     #[test]
@@ -982,7 +1170,13 @@ mod tests {
             location: root,
         });
 
-        let out = apply_macros(vec![reference], root, &Parser::default(), Masked::UNKNOWN);
+        let out = apply_macros(
+            vec![reference],
+            root,
+            &Parser::default(),
+            Masked::UNKNOWN,
+            ComputedSpecials::Escaped,
+        );
 
         // The reference survives, and its single child is now the recognized
         // image node.
