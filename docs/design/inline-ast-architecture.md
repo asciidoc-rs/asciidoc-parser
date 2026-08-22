@@ -4359,6 +4359,74 @@ Each phase is a reviewable unit with a clear exit gate.
   leaks the raw sentinel into its own `href`), and the four well-formed readings these three
   increments pinned.
 
+  *Step 6 prep landed as (a masked **STEM** expression in a computed target):* the lift the three
+  restore-the-value increments above each deferred to "the STEM step's own increment, across all
+  three families at once", made in one place rather than three. A STEM expression is an *implicit*
+  passthrough — [`Passthroughs::extract_from`](../../parser/src/content/passthroughs.rs) masks it in
+  the very same pass, before any substitution step runs — so it stands in the string pipeline's
+  haystack as the same `\u{96}`*n*`\u{97}` sentinel and in this module's match string as the same
+  one-character placeholder. What kept it out was only that the restore machinery reached into a
+  [`Raw`](../../parser/src/inlines/inline_node.rs) node's `value` by name, and a masked STEM builds a
+  [`Stem`](../../parser/src/inlines/stem.rs) node instead.
+
+  The fix is a **pair of shared helpers** rather than a widened `matches!` at each site:
+  [`node_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs) is the cheap
+  discriminant the two gates use (so a range about to be *rejected* costs no rendering), and
+  [`restorable_body`](../../parser/src/content/inline_builder/macros/image.rs) produces the bytes the
+  two restores splice. The invariant they rest on is that a restored body is **exactly what the fold
+  of that node emits**: a `Raw` leaf's is its `value`, which the fold emits verbatim (so it is
+  borrowed, not rendered); a `Stem` leaf's is
+  [`fold_stem`](../../parser/src/content/inline_builder/fold.rs)'s own output — the same
+  `render_quoted_substitution` call, over the already-substituted `value` with no attribute list or
+  id, that `PassthroughRestoreReplacer` makes for a STEM entry. Reusing that one function is what
+  keeps the restore and the fold from drifting, and a unit test pins the two helpers to the same set.
+  With the pair in place, all four sites the passthrough increments built —
+  [`range_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs),
+  [`restore_masked_passthroughs`](../../parser/src/content/inline_builder/macros/links.rs),
+  and the image family's [`widen_masked_passthroughs`](../../parser/src/content/inline_builder/macros/image.rs)
+  and [`masked_default_alt`](../../parser/src/content/inline_builder/macros/image.rs) — extend to
+  both masked kinds at once, and all three families follow. Recognition needed no new widening beyond
+  the one the image family already had (its two-character-minimum target class cannot match a bare
+  placeholder), and every pre-restore decision keeps reading the bytes as matched, which a
+  placeholder answers as the sentinel does.
+
+  One difference from the passthrough class is worth recording, because it runs the *safe* way: a
+  STEM body cannot smuggle a dangerous scheme. `link:++javascript:…++[]` defers with a security
+  divergence test because a passthrough's body is restored **bare**, so the string replacer's masked
+  check misses a live scheme; a STEM body is restored **wrapped** in its notation's delimiters
+  (`\$javascript:alert(1)\$`), which is not a scheme in either pipeline — so
+  `link:stem:[javascript:alert(1)][]` and an image `link=self` over a STEM target both reach plain
+  parity, with no divergence to pin. The `renderer` these restores use is the **parser's**, mirroring
+  `restore_to`'s own: a computed target freezes its STEM bytes at build time exactly as the string
+  pipeline freezes them into its `href`, where a `Stem` node standing in the flow is rendered at fold
+  time instead — the two agree whenever the fold uses the parser's renderer, which is the seam §3.3.1
+  defines and the only one `Content` uses.
+
+  What reaches parity is every spelling all three families have: the `link:`/`mailto:` macro (bare
+  and labeled, the expression at either edge, in the middle, and twice in one target), auto-links,
+  formal-URL links and the two angle-bracketed forms, and `image:`/`icon:` — including a target that
+  *is* the expression (`image:stem:[x][]`), the `default_alt` arithmetic around one
+  (`image:a_bstem:[x]c_d.png[]`, where an `_` inside the expression hides from the replace and one
+  outside it does not), all three notations, an explicit substitution list (`stem:c,q[…]`), the
+  `hide-uri-scheme` strip, the trailing-punctuation strip in both directions, a display text beside a
+  restored target, a STEM beside a passthrough in either order, and the whole set inside a rendered
+  span, escaped, and end to end through the real parse path. Re-running the corpus-wide audit shows
+  the divergence set **unchanged** — no golden source writes a STEM expression inside a computed
+  target — and no new divergence appeared. Coverage stays diff-neutral, and as with every prep piece
+  before it, nothing further is wired in.
+
+  Two shapes are deliberately left where they were, each pinned by its own test, and they are the
+  same two the passthrough increments left: an **image's bracket** and an **attribute-list display
+  text** over a STEM expression each keep the opaque-piece gate, because both come back from a
+  *parse* and a placeholder inside a parsed value has no node to map back to.
+
+  With this the restore-the-value class is closed for **both** masked kinds in every family that
+  computes a target. What still defers is the **bracket half** — restoring inside each *parsed*
+  attribute-list value (an image's bracket, the three families' attribute-list display texts), where
+  the string pipeline's own parse swallows the sentinel into a value that only restores after the
+  split — and the keeps: the cross-reference family's pre-restore target (whose golden leaks the raw
+  sentinel into its own `href`), and the well-formed readings these four increments pinned.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -5035,6 +5103,25 @@ Each phase is a reviewable unit with a clear exit gate.
        honest restored target. See the step's own "landed as" note above. With this the class is
        closed for every family that computes a target; the bracket half — restoring inside each
        *parsed* attribute-list value — is what remains of it.
+
+     - ✅ **prep (a masked STEM expression in a computed target).** The lift the three increments
+       above each deferred to "the STEM step's own increment, across all three families at once".
+       A masked STEM is the *other* node kind the one extraction pass produces — an implicit
+       passthrough, standing in both haystacks as the same sentinel and the same placeholder — so
+       the whole class extends to it through a pair of shared helpers,
+       [`node_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs) (the cheap
+       gate discriminant) and
+       [`restorable_body`](../../parser/src/content/inline_builder/macros/image.rs) (the bytes),
+       which together carry all four sites the passthrough increments built. The invariant is that
+       a restored body is exactly what the *fold* of that node emits, so a `Stem`'s comes from
+       [`fold_stem`](../../parser/src/content/inline_builder/fold.rs) itself — the same
+       `render_quoted_substitution` call `PassthroughRestoreReplacer` makes — and the two
+       directions cannot drift. Unlike its passthrough sibling this one needs no security
+       divergence: a STEM body is restored *wrapped* in its notation's delimiters, so it cannot
+       smuggle a live scheme. The image bracket and the attribute-list display texts keep the
+       opaque-piece gate, each with its own test. See the step's own "landed as" note above. With
+       this the restore-the-value class is closed for both masked kinds; the bracket half is what
+       remains of it.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
