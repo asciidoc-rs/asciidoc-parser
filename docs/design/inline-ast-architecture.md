@@ -4829,6 +4829,69 @@ Each phase is a reviewable unit with a clear exit gate.
   closing character, and the character-replacements step's consume-across-levels case — and the
   keeps.
 
+  *Step 6 prep landed as (the passthrough pass's prohibited-prefix retry, the last of its own two
+  named deferrals):* the sibling increment's closing sentence, taken in order. `INLINE_PASS`'
+  two attribute-list-prefixed options open with `\b{start-half}`, which does not by itself exclude
+  the `\`/`:`/`;` prefix Asciidoctor's own pattern rejects with a lookbehind Rust's regex engine
+  does not have, so
+  [`InlinePassReplacer`](../../parser/src/content/passthroughs.rs) answers it at *run* time: it
+  writes the rejected match's first character back verbatim and runs `INLINE_PASS.replace_all`
+  again over the rest of that same match. The tree had only the first half of that — it dropped
+  such a match — and the increment's finding is that the second half is the load-bearing one. The
+  retry is not a formality that re-confirms a rejection: it routinely recognizes a *different,
+  shorter* construct the leading `[` was hiding, most often the bare unconstrained form over the
+  very same body (`index:[attrs]+text+` → a literal `[attrs]` and an **ordinary** passthrough over
+  `text`, so no `Styled` span and no `x-` monospace), which is content the tree was leaving
+  entirely literal.
+
+  Reproducing it needed no new mechanism either, only a shape change to the scan:
+  `find_bare_attrlisted_matches`' capture loop moves into a
+  [`collect_bare_pass_matches`](../../parser/src/content/inline_builder/passthrough_step.rs) that
+  scans a *sub-range* of the level's match string and appends to a shared match list, and the
+  prohibited case calls it again over the same match minus its leading `[` instead of skipping.
+  Because both options open with `\[` (nothing in either alternative precedes the bracket), the
+  character split off is always that one ASCII byte, and the `[` no match now covers is emitted by
+  [`rebuild_macro_level`](../../parser/src/content/inline_builder/macros/mod.rs) as an ordinary
+  gap — the same composition the escaped-bracket increment leaned on, reached from the other
+  direction. Recursion terminates because each retry region is strictly shorter than the match
+  that produced it. Scanning a slice is what the string replacer does too (its retry sees `rem`,
+  not the level), so word boundaries and `^` are computed against the same text in both; the one
+  cost is that a capture's offsets are then relative to the slice, so an `offset` is threaded into
+  the two node builders that read them and rebased there — pinned by a test that asserts the built
+  leaf's `location` is the body's own source bytes rather than a range shifted left by the retry's
+  start. The prefix test itself keeps reading the level string's own preceding byte where the
+  replacer reads its *output* so far, the one-byte approximation this scan has always made; at the
+  start of a retry region it is exact by construction, since the byte before is the `[` the retry
+  just split off.
+
+  What reaches parity is all three prohibited prefixes, both options (the backtick one finds
+  nothing to retry — `` x-]`text` `` matches neither an attribute-list option, whose bracket the
+  retry just consumed, nor the bare form, which needs a `+` — so the construct falls to the later
+  quotes step, exactly as the replacer's own empty retry leaves it), the `x-` marker the retry's
+  ordinary form drops, a body carrying specials and quote syntax, an attribute list carrying a
+  special, in flow, spanning a newline, twice in one flow, beside an unprefixed twin that still
+  builds its `Styled` span, the delimiter escapes the retry's own second scan honors
+  (`index:[attrs]\+text+`, and the two-backslash form it declines), and — the shape the sibling
+  increment named — writing **both** of this pass's escapes at once (`\[attrs]\++text++`), where
+  the delimiter escape wins the first pass's branch and the literal `++text++` it leaves behind
+  sits behind exactly the `\` this second pass declines, so only the retry reaches the `+text+`
+  inside it. Fixtures join the whole-pipeline broad sweep and combined-constructs corpus, the
+  group-parity corpus, and the structural recorder cross-check; a whole-document test drives both
+  shapes end to end through the real parse path. Re-running the corpus-wide fold-parity audit
+  shows two of the `asciidoctor` port's own golden fixtures **gone** from the divergence set —
+  `should_support_constrained_passthrough_in_monospace_span_preceded_by_escaped_boxed_attrlist_with_transitional_role`
+  and its `*foo*` twin, where the retry reaches a `+bar+` nested inside an escaped `` [x-]`…` ``
+  — and no new divergence; coverage is diff-neutral, and as with every prep piece before it,
+  nothing further is wired in.
+
+  What still defers is no longer anything this pass named for itself: with both its deferrals
+  closed, the remainder is the boundary-class halves the sibling increments named — a macro body
+  class wanting more than one presented character, the closing character, and the
+  character-replacements step's consume-across-levels case — plus the keeps, and the
+  bare-attrlisted body whose content the *first* pass already recognizes
+  (`[method x-]+pass:[<b>]+`), which is the module's own `range_is_verbatim` boundary rather than
+  a gap in this pass's recognition.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -5637,6 +5700,28 @@ Each phase is a reviewable unit with a clear exit gate.
        reached with the delimited sub-range, so the discarded list is discarded by construction.
        The formerly pinned divergence becomes a parity test. See the step's own "landed as" note
        above. What this pass still defers is its **prohibited-prefix** retry.
+
+     - ✅ **prep (the prohibited-prefix retry).** The passthrough-extraction pass's last named
+       deferral, and its own last: `INLINE_PASS`' two attribute-list-prefixed options open with
+       `\b{start-half}`, which does not exclude the `\`/`:`/`;` prefix Asciidoctor rejects with a
+       lookbehind Rust's regex engine lacks, so
+       [`InlinePassReplacer`](../../parser/src/content/passthroughs.rs) writes the rejected
+       match's first character back and re-scans the rest of that same match. That retry is
+       load-bearing rather than a re-confirmed rejection — it routinely finds a *shorter*
+       construct the leading `[` was hiding (`index:[attrs]+text+` → a literal `[attrs]` and an
+       **ordinary** passthrough over `text`) — so dropping the match, as the tree did, left real
+       content literal. The capture loop moves into a
+       [`collect_bare_pass_matches`](../../parser/src/content/inline_builder/passthrough_step.rs)
+       that scans a sub-range of the level's match string, and the prohibited case calls it again
+       over the match minus its leading `[` (always one ASCII byte, since both options open with
+       `\[`); the bracket no match covers is an ordinary
+       [`rebuild_macro_level`](../../parser/src/content/inline_builder/macros/mod.rs) gap, so no
+       variant or shape moves — only an `offset` threaded into the two node builders that read
+       capture offsets, since a retry's captures are relative to the slice it scanned. Writing
+       **both** of this pass's escapes at once (`\[attrs]\++text++`) lands here too, and the
+       formerly pinned divergence becomes a parity test. See the step's own "landed as" note
+       above. What this pass still defers is nothing it named for itself; what remains is the
+       sibling increments' boundary-class halves and the keeps.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

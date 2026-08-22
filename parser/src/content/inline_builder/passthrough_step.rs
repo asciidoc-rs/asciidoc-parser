@@ -81,16 +81,31 @@ use crate::{
 /// double-dollar forms, an absent attrlist means no stored `type_`, so
 /// `PassthroughRestoreReplacer` never wraps the restored text in a rendered
 /// span. Unlike the two attribute-list-prefixed bare forms above (matched via
-/// `\b{start-half}`, which does not by itself exclude a `\`/`:`/`;` prefix),
-/// this form's own pattern already excludes that "prohibited prefix" — and the
-/// word-boundary rule the doc comment on [`find_bare_attrlisted_matches`]
-/// explains — directly in its *consuming* boundary group (`[^\w;:\\]`), so no
-/// runtime retry is needed: a match simply cannot start where the pattern's
-/// own character class would reject it. The boundary character it does
-/// consume (present unless the match sits at the very start of the level) is
-/// not part of the construct — it is kept as literal text before the node,
-/// reusing the same kept-prefix [`MacroMatch`] sub-range the auto-link
-/// increment introduced.
+/// `\b{start-half}`, which does not by itself exclude a `\`/`:`/`;` prefix and
+/// so needs the retry below), this form's own pattern already excludes that
+/// "prohibited prefix" — and the word-boundary rule the doc comment on
+/// [`collect_bare_pass_matches`] explains — directly in its *consuming*
+/// boundary group (`[^\w;:\\]`), so no retry is needed for it: a match simply
+/// cannot start where the pattern's own character class would reject it. The
+/// boundary character it does consume (present unless the match sits at the
+/// very start of the level) is not part of the construct — it is kept as
+/// literal text before the node, reusing the same kept-prefix [`MacroMatch`]
+/// sub-range the auto-link increment introduced.
+///
+/// A **prohibited prefix** ahead of either attribute-list-prefixed bare form
+/// (`index:[attrs]+text+`, `` \[x-]`text` ``) is answered the way the string
+/// replacer answers it, for want of a lookbehind: the match's first character
+/// — always its `[` — is written back verbatim and the *rest of that same
+/// match* is scanned again ([`collect_bare_pass_matches`], recursively). The
+/// second scan routinely recognizes a different, shorter construct the
+/// bracket was hiding — for the plus form, the bare unconstrained form over
+/// the same body, so the attribute list ends up a literal prefix and the body
+/// an *ordinary* passthrough rather than a `Styled` span — and for the
+/// backtick form it finds nothing, leaving the construct to the later quotes
+/// step. Writing both of this pass's escapes at once
+/// (`\[attrs]\++text++`) lands here as well: the delimiter escape wins the
+/// first pass's branch, and the literal `++text++` it leaves behind sits
+/// behind exactly the `\` this second pass declines.
 ///
 /// A **`pass:` macro carrying an explicit substitution list**
 /// (`pass:c,q[…]`) folds through [`build_pass_macro_subs_value`], the same
@@ -369,13 +384,9 @@ fn find_passthrough_matches<'src>(
 /// and the bare unconstrained form with no attribute list (`+text+`, built by
 /// [`build_bare_unconstrained_match`]).
 ///
-/// The two attribute-list-prefixed options also need a lookbehind the string
-/// replacer works around with a retry loop (`InlinePassReplacer`'s
-/// "prohibited prefix" check): a match immediately preceded by `\`, `:`, or
-/// `;` is not really a passthrough. This increment does not reproduce that
-/// retry for *them*; instead it simply leaves such a match unrecognized, a
-/// documented divergence pinned by a test. The bare unconstrained form needs
-/// no such handling — see [`build_bare_unconstrained_match`].
+/// The scan is [`collect_bare_pass_matches`], which is recursive so that the
+/// two attribute-list-prefixed options can reproduce the string replacer's
+/// own **prohibited-prefix retry**; see its doc comment.
 fn find_bare_attrlisted_matches<'src>(
     s: &str,
     pieces: &[Piece],
@@ -384,26 +395,81 @@ fn find_bare_attrlisted_matches<'src>(
 ) -> Vec<MacroMatch<'src>> {
     let mut matches = Vec::new();
 
-    for caps in INLINE_PASS.captures_iter(s) {
+    collect_bare_pass_matches(s, 0..s.len(), pieces, root, parser, &mut matches);
+
+    matches
+}
+
+/// Scans `s[region]` for [`INLINE_PASS`] matches, appending each to `matches`
+/// in increasing order of `full.start` (what [`rebuild_macro_level`] wants).
+/// Every offset a capture reports is relative to the scanned slice, so
+/// `region.start` is added back to reach the level-wide offsets a
+/// [`MacroMatch`] carries.
+///
+/// The two attribute-list-prefixed options need a lookbehind the string
+/// replacer works around with a **retry** (`InlinePassReplacer`'s "prohibited
+/// prefix" check, whose comment names the missing lookaround as its reason): a
+/// match immediately preceded by `\`, `:`, or `;` is not really a passthrough,
+/// so the replacer writes the match's *first character* back verbatim and runs
+/// `INLINE_PASS.replace_all` again over the rest of that same match. That
+/// second scan is not a no-op — it routinely recognizes a *different*,
+/// shorter construct inside the rejected match, most often the bare
+/// unconstrained form the leading `[` was hiding (`index:[attrs]+text+` →
+/// a literal `[attrs]` and a bare passthrough over `text`) — which is why the
+/// retry is reproduced here rather than approximated by leaving the whole
+/// match literal.
+///
+/// This function *is* that retry: the prohibited case recurses over the same
+/// match minus its first character, and the `[` it leaves behind is emitted
+/// by [`rebuild_macro_level`] as an ordinary gap, since no match covers it.
+/// Both options begin with `\[` (nothing in either alternative precedes the
+/// bracket), so the character split off is always that one ASCII byte.
+/// Recursion terminates because each retry region is strictly shorter than
+/// the match that produced it.
+///
+/// The prefix test reads the level string's own preceding byte where the
+/// replacer tests its *output* so far — the same one-byte approximation this
+/// scan has always made, and exact wherever the two agree. At the start of a
+/// retry region it is exact by construction: the byte before is the `[` the
+/// retry just split off, which is not a prohibited character (the replacer's
+/// freshly-empty `dest` likewise rejects nothing there).
+///
+/// The bare unconstrained form needs no retry at all — see
+/// [`build_bare_unconstrained_match`].
+fn collect_bare_pass_matches<'src>(
+    s: &str,
+    region: std::ops::Range<usize>,
+    pieces: &[Piece],
+    root: Span<'src>,
+    parser: &Parser,
+    matches: &mut Vec<MacroMatch<'src>>,
+) {
+    // `region` is always a byte range this function itself derived from a
+    // match on `s`, so it is in bounds and on character boundaries and `get`
+    // always succeeds. The fallback is not a case to handle: an empty
+    // haystack yields no captures, which is exactly what a region naming no
+    // text should contribute.
+    let haystack = s.get(region.clone()).unwrap_or_default();
+    let offset = region.start;
+
+    for caps in INLINE_PASS.captures_iter(haystack) {
         // `unwrap` on group 0 is safe: a capture always has an overall match.
         #[allow(clippy::unwrap_used)]
         let whole = caps.get(0).unwrap();
 
-        let full = whole.start()..whole.end();
+        let full = (offset + whole.start())..(offset + whole.end());
 
         let is_backtick = caps.get(1).is_some();
         let is_plus_attrlisted = caps.get(3).is_some();
 
         if !is_backtick && !is_plus_attrlisted {
             // Option 3: the bare unconstrained form (no attribute list).
-            if let Some(m) = build_bare_unconstrained_match(&caps, &full, pieces, root, parser) {
+            if let Some(m) =
+                build_bare_unconstrained_match(&caps, &full, offset, pieces, root, parser)
+            {
                 matches.push(m);
             }
 
-            continue;
-        }
-
-        if !range_is_verbatim(pieces, &full) {
             continue;
         }
 
@@ -413,6 +479,23 @@ fn find_bare_attrlisted_matches<'src>(
             .and_then(|i| s.as_bytes().get(i))
             .is_some_and(|b| matches!(b, b'\\' | b':' | b';'))
         {
+            // Honor the prohibited prefix by retrying over this match minus
+            // its leading `[`, exactly as `InlinePassReplacer` does.
+            //
+            // This sits *ahead* of the `range_is_verbatim` gate below, which
+            // it used to follow: what the retry recognizes is a sub-range of
+            // this match, and that sub-range can be verbatim where the whole
+            // match is not (an opaque piece inside the attribute list the
+            // retry is about to leave literal, say). Nothing is admitted
+            // unchecked by the move — every match the retry does produce
+            // passes this same gate, or `build_bare_unconstrained_match`'s
+            // own copy of it, on its own range.
+            collect_bare_pass_matches(s, (full.start + 1)..full.end, pieces, root, parser, matches);
+
+            continue;
+        }
+
+        if !range_is_verbatim(pieces, &full) {
             continue;
         }
 
@@ -430,7 +513,7 @@ fn find_bare_attrlisted_matches<'src>(
 
                 matches.push(MacroMatch {
                     kind: MacroMatchKind::Unescape {
-                        backslash: group4.start(),
+                        backslash: offset + group4.start(),
                     },
                     full,
                 });
@@ -439,8 +522,15 @@ fn find_bare_attrlisted_matches<'src>(
             }
         }
 
-        let node =
-            build_bare_attrlisted_passthrough_node(&caps, &full, is_backtick, pieces, root, parser);
+        let node = build_bare_attrlisted_passthrough_node(
+            &caps,
+            &full,
+            offset,
+            is_backtick,
+            pieces,
+            root,
+            parser,
+        );
 
         matches.push(MacroMatch {
             kind: MacroMatchKind::Node {
@@ -450,8 +540,6 @@ fn find_bare_attrlisted_matches<'src>(
             full,
         });
     }
-
-    matches
 }
 
 /// Builds one [`MacroMatch`] for a bare unconstrained [`INLINE_PASS`] match
@@ -480,9 +568,14 @@ fn find_bare_attrlisted_matches<'src>(
 /// Returns `None` for a non-verbatim match (crossing an escaped special or a
 /// rendered span), left unrecognized exactly as every other macro family in
 /// this module defers one.
+///
+/// `offset` is where the scanned slice starts in the level's match string —
+/// non-zero inside a [`collect_bare_pass_matches`] retry — and is added back
+/// to every capture offset this reads.
 fn build_bare_unconstrained_match<'src>(
     caps: &regex::Captures<'_>,
     full: &std::ops::Range<usize>,
+    offset: usize,
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
@@ -495,12 +588,13 @@ fn build_bare_unconstrained_match<'src>(
     // matches) is always preceded immediately by the construct's opening `+`.
     #[allow(clippy::unwrap_used)]
     let body_m = caps.get(8).unwrap();
-    let delim_start = body_m.start() - 1;
+    let body = (offset + body_m.start())..(offset + body_m.end());
+    let delim_start = body.start - 1;
 
     if let Some(escape) = caps.get(7) {
         return Some(MacroMatch {
             kind: MacroMatchKind::Unescape {
-                backslash: escape.start(),
+                backslash: offset + escape.start(),
             },
             full: full.clone(),
         });
@@ -508,7 +602,7 @@ fn build_bare_unconstrained_match<'src>(
 
     let consumed = delim_start..full.end;
     let location = source_slice(pieces, consumed.clone(), root);
-    let body_span = source_slice(pieces, body_m.start()..body_m.end(), root);
+    let body_span = source_slice(pieces, body, root);
     let value = passthrough_text(body_span.data(), &SubstitutionGroup::Verbatim, parser);
 
     Some(MacroMatch {
@@ -735,9 +829,14 @@ fn build_attrlisted_passthrough_node<'src>(
 /// `[… x-]`) — but its format mark (`` ` ``) keeps `subs` at `Verbatim`
 /// regardless, mirroring `InlinePassReplacer`'s `format_mark != '`'` guard:
 /// only the plus form's `old_behavior` switches to the `Normal` group.
+///
+/// `offset` is where the scanned slice starts in the level's match string —
+/// non-zero inside a [`collect_bare_pass_matches`] retry — and is added back
+/// to every capture offset this reads.
 fn build_bare_attrlisted_passthrough_node<'src>(
     caps: &regex::Captures<'_>,
     full: &std::ops::Range<usize>,
+    offset: usize,
     is_backtick: bool,
     pieces: &[Piece],
     root: Span<'src>,
@@ -753,14 +852,22 @@ fn build_bare_attrlisted_passthrough_node<'src>(
 
     #[allow(clippy::unwrap_used)]
     let attrlist_m = attrlist.unwrap();
-    let attrlist_span = source_slice(pieces, attrlist_m.start()..attrlist_m.end(), root);
+    let attrlist_span = source_slice(
+        pieces,
+        (offset + attrlist_m.start())..(offset + attrlist_m.end()),
+        root,
+    );
 
     // Both the backtick body (group 2, requiring at least one non-space
     // character) and the plus body (group 5) are mandatory captures of
     // whichever alternative matched — never a genuinely absent one.
     #[allow(clippy::unwrap_used)]
     let body_m = body.unwrap();
-    let body_span = source_slice(pieces, body_m.start()..body_m.end(), root);
+    let body_span = source_slice(
+        pieces,
+        (offset + body_m.start())..(offset + body_m.end()),
+        root,
+    );
 
     let (attrlist_span, old_behavior) = split_old_behavior_attrlist(attrlist_span);
 
@@ -1220,6 +1327,42 @@ mod tests {
             // Beside ordinary flow and next to other constructs.
             "*bold* +text+ _em_",
             "a copyright (C) then +text+",
+            // The two *attribute-list-prefixed* options behind that same
+            // prohibited prefix, which their own pattern does not exclude
+            // and which the string replacer answers with a retry over the
+            // match minus its leading `[`. For the plus option that retry
+            // routinely finds the bare unconstrained form the bracket was
+            // hiding — a literal `[attrs]` prefix and an *ordinary*
+            // passthrough over the body, so no `Styled` span and no `x-`
+            // monospace — while the backtick option finds nothing there and
+            // leaves the whole construct to the later quotes step. All three
+            // prefixes, the `x-` marker the retry's ordinary form drops, a
+            // body carrying specials and quote syntax, an attribute list
+            // carrying a special, in flow, spanning a newline, twice in one
+            // flow, beside an unprefixed twin, and the delimiter escapes the
+            // retry's own second scan honors.
+            "index:[attrs]+text+",
+            r"a\[attrs]+text+",
+            "a;[attrs]+text+",
+            "see index:[foo]+bar+ end",
+            "index:[x-]+text+",
+            "index:[method x-]+save()+",
+            "index:[attrs]+<b>*x*</b>+",
+            "index:[a<b]+text+",
+            "index:[attrs]+multi\nline+",
+            "index:[attrs]+text+ and [attrs]+text+",
+            "a:[b]+x+ c:[d]+y+",
+            r"index:[attrs]\+text+",
+            r"index:[attrs]\\+text+",
+            "x:[x-]`text`",
+            r"a\[x-]`text`",
+            "x;[method x-]`text`",
+            // Writing *both* escapes at once: the delimiter escape wins the
+            // first pass's branch, and the literal `++text++` it leaves
+            // behind then sits behind exactly the `\` this second pass
+            // declines — so it is the retry, not the ordinary scan, that
+            // recognizes the shorter `+text+` inside it.
+            r"\[attrs]\++text++",
         ];
 
         for source in fixtures {
@@ -1531,24 +1674,151 @@ mod tests {
     }
 
     #[test]
-    fn a_prohibited_prefix_before_a_bare_attrlisted_form_is_a_documented_divergence() {
+    fn a_prohibited_prefix_before_a_bare_attrlisted_form_retries_over_the_rest() {
         // The string pipeline's own `InlinePassReplacer` retries around a
         // match immediately preceded by `\`, `:`, or `;` (no lookbehind in
-        // Rust's regex engine) — this increment does not reproduce the
-        // retry, so such a match is simply left unrecognized.
+        // Rust's regex engine): it writes the match's first character back
+        // verbatim and re-scans the rest. That retry is not a no-op — here it
+        // finds the bare unconstrained form the leading `[` was hiding — so
+        // the attribute list stays a literal prefix and the body becomes an
+        // *ordinary* passthrough: a plain `Raw` leaf, never the `Styled` span
+        // the same source without the prefix builds.
         let source = "index:[attrs]+text+";
         let nodes = build_src(Span::new(source));
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::Styled(_))),
-            "a prohibited-prefix match must be left unrecognized: {nodes:?}"
+            "a prohibited-prefix match must not build a Styled span: {nodes:?}"
         );
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
-        let golden = golden_passthroughs(source);
+        let raws: Vec<_> = nodes
+            .iter()
+            .filter(|n| matches!(n, InlineNode::Raw { .. }))
+            .collect();
 
-        assert_ne!(folded, golden);
-        assert_eq!(folded, source);
+        assert_eq!(raws.len(), 1, "expected exactly one Raw leaf: {nodes:?}");
+        assert_raw(raws[0], "text");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs(source)
+        );
+    }
+
+    #[test]
+    fn a_prohibited_prefix_before_a_bare_backtick_form_finds_nothing_to_retry() {
+        // The retry's other half. Splitting `` [x-]`text` `` after its `[`
+        // leaves `` x-]`text` ``, which neither `INLINE_PASS` option can
+        // match (both attribute-list options need the bracket the retry just
+        // consumed, and there is no `+` for the bare unconstrained one), so
+        // the second scan contributes nothing and the whole construct is left
+        // for the later quotes step — which is exactly what the string
+        // replacer's own empty retry leaves behind, hence parity.
+        for source in ["x:[x-]`text`", r"a\[x-]`text`", "x;[method x-]`text`"] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Raw { .. })),
+                "the retry must find no passthrough for {source:?}: {nodes:?}"
+            );
+
+            assert_eq!(
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                golden_passthroughs(source),
+                "for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn both_escapes_at_once_leave_the_retry_to_recognize_the_remainder() {
+        // `\[attrs]\++text++` writes both of the attribute-list-prefixed
+        // escapes at once. The *delimiter* escape wins the first pass's
+        // branch (`handle_quoted_text`'s own `escape_count > 0` arm, which
+        // never builds a passthrough), so what reaches the bare-form second
+        // pass is a literal `\[attrs]++text++` — whose `[attrs]+…+` match
+        // sits behind exactly the `\` that pass declines. Only the retry
+        // reaches the `+text+` inside it, so this shape is the one that
+        // fails outright without one.
+        let source = r"\[attrs]\++text++";
+        let nodes = build_src(Span::new(source));
+
+        let raws: Vec<_> = nodes
+            .iter()
+            .filter(|n| matches!(n, InlineNode::Raw { .. }))
+            .collect();
+
+        assert_eq!(raws.len(), 1, "expected exactly one Raw leaf: {nodes:?}");
+        assert_raw(raws[0], "+text");
+
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+
+        assert_eq!(folded, r"\[attrs]+text+");
+        assert_eq!(folded, golden_passthroughs(source));
+    }
+
+    #[test]
+    fn a_prohibited_prefix_before_a_bare_attrlisted_form_keeps_its_source_offsets() {
+        // The retry scans a *slice* of the level's match string, so every
+        // offset its captures report is relative to that slice and has to be
+        // rebased before it can name a source span. Pin that arithmetic where
+        // it is observable: the `Raw` leaf's location must be the body's own
+        // source bytes, not a range shifted left by the retry's start.
+        let source = Span::new("see index:[foo]+bar+ end");
+        let nodes = build_src(source);
+
+        let raws: Vec<_> = nodes
+            .iter()
+            .filter(|n| matches!(n, InlineNode::Raw { .. }))
+            .collect();
+
+        assert_eq!(raws.len(), 1, "expected exactly one Raw leaf: {nodes:?}");
+        assert_raw(raws[0], "bar");
+
+        // `+bar+`, the construct the retry recognized — the boundary `]`
+        // ahead of it stays literal, exactly as it does without a prefix.
+        assert_eq!(raws[0].span(), source.slice(15..20));
+    }
+
+    #[test]
+    fn a_real_documents_prohibited_prefix_passthroughs_fold_to_their_rendered_strings() {
+        // End-to-end, through the real parse path, on the shape that named
+        // this increment: a tree that skipped the retry would leave
+        // `index:[attrs]+text+` entirely literal and regress the moment
+        // `rendered_html()` becomes a fold of this tree.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+            "== A heading\n",
+            "\n",
+            "The index:[attrs]+text+ form keeps its bracket, unlike [attrs]+text+.",
+            "\n\n",
+            r"Writing both escapes at once, \[attrs]\++text++, lands there too.",
+            "\n",
+        ));
+
+        let mut folded_blocks = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &Parser::default()
+                ),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded_blocks += 1;
+        }
+
+        assert_eq!(folded_blocks, 2, "expected every paragraph to carry a tree");
     }
 
     #[test]
@@ -1861,7 +2131,7 @@ mod tests {
     fn a_prohibited_prefix_before_a_bare_unconstrained_form_needs_no_retry() {
         // Unlike the two attribute-list-prefixed bare forms (which need a
         // documented divergence for this — see
-        // `a_prohibited_prefix_before_a_bare_attrlisted_form_is_a_documented_divergence`),
+        // `a_prohibited_prefix_before_a_bare_attrlisted_form_retries_over_the_rest`),
         // the bare unconstrained form's own pattern already excludes a `\`,
         // `:`, or `;` prefix in its consuming boundary group, so this is
         // parity, not a divergence: the passthrough is correctly left

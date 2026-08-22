@@ -827,6 +827,8 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "a +++<b>raw</b>+++ passthrough",
         r"an escaped \[attrs]++<b>*x*</b>++ bracket",
         r"an escaped \[x-]++*bold*++ bracket",
+        "a prohibited index:[attrs]+text+ prefix",
+        r"a prohibited \[x-]`text` prefix",
         "inline pass:[<i>x</i>] macro",
         "math $$a < b$$ here",
         "a +literal *stars*+ b",
@@ -898,6 +900,10 @@ fn shapes_match_across_combined_constructs() {
 
     assert_shapes(
         r"An escaped \[.role *x*]++<b>raw</b>++ beside [.role]++<b>raw</b>++ and *bold*.",
+    );
+
+    assert_shapes(
+        "An index:[.role]+<b>raw</b>+ beside [.role]+<b>raw</b>+ and *bold* and image:foo.png[Alt].",
     );
 
     assert_shapes("Equation stem:[x^2+y^2=z^2] appears in *bold* text with (C) 2024.");

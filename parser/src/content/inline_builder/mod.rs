@@ -850,6 +850,8 @@ mod tests {
             "a +++<b>raw</b>+++ passthrough",
             r"an escaped \[attrs]++<b>*x*</b>++ bracket",
             r"an escaped \[x-]++*bold*++ bracket",
+            "a prohibited index:[attrs]+text+ prefix",
+            r"a prohibited \[x-]`text` prefix",
             "inline pass:[<i>x</i>] macro",
             "math $$a < b$$ here",
             "a +literal *stars*+ b",
@@ -974,6 +976,14 @@ mod tests {
         // while the unescaped one still builds its `Styled` span.
         assert_parity(
             r"An escaped \[.role *x*]++<b>raw</b>++ beside [.role]++<b>raw</b>++ and *bold*.",
+        );
+
+        // A prohibited prefix ahead of an attribute-list-prefixed bare form:
+        // the retry keeps `[.role]` literal — substituted by the later steps
+        // like any other flow — and recognizes the bare `+…+` inside it,
+        // beside the unprefixed twin that still builds its `Styled` span.
+        assert_parity(
+            "An index:[.role]+<b>raw</b>+ beside [.role]+<b>raw</b>+ and *bold* and image:foo.png[Alt].",
         );
 
         // Inline STEM beside a quoted span and a character replacement.
@@ -2030,6 +2040,11 @@ mod tests {
                 // text around it, while the delimited remainder the pair's
                 // second match builds is opaque to every step either way.
                 r"\[a<b]++x < y++ and a < b",
+                // A prohibited prefix ahead of that same bracket: the retry's
+                // kept `[a<b]` prefix is ordinary flow here too, so whether
+                // its `<` is escaped is again the *order's* decision, while
+                // the `+…+` the retry recognizes stays opaque either way.
+                "index:[a<b]+x < y+ and a < b",
                 // Multi-line, so a run spanning a newline is split the same
                 // way as a single-line one.
                 "first < line\nsecond & line\nthird > line",
