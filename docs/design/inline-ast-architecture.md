@@ -4369,6 +4369,21 @@ Each phase is a reviewable unit with a clear exit gate.
   [`Raw`](../../parser/src/inlines/inline_node.rs) node's `value` by name, and a masked STEM builds a
   [`Stem`](../../parser/src/inlines/stem.rs) node instead.
 
+  One family is deliberately **left out**: `image:`/`icon:`. Its target is the only one re-processed
+  by [`web_path`](../../parser/src/parser/path_resolver.rs) at fold time, and `web_path`
+  *posixifies the platform separator* — so a restored body carrying a backslash comes out rewritten
+  on a Windows-separator resolver. The string pipeline never meets this, because its `web_path` runs
+  over the backslash-free **sentinel** and the restore splices the body into the finished `src`
+  afterwards. For a passthrough that is an exotic body — the increment above pinned exactly one such
+  case, a restored *space* the fold percent-encodes. For STEM it is **every** body: a rendered
+  expression always carries a backslash (`\$…\$`, `\(…\)`), so `image:stem:[x].png[]` would render
+  `src="/$x/$.png"` on Windows against the golden's `src="\$x\$.png"`. Deferring keeps this family's
+  `src` identical on every platform, where restoring would make it differ by one; the two link
+  families, whose targets reach the `href` as computed, take the restore. That split is what
+  [`Restorable`](../../parser/src/content/inline_builder/macros/image.rs) names at the gate, and two
+  tests pin it — one that the image family stays literal, one that its fold is byte-identical under
+  either separator, so the difference is visible on a Posix runner instead of only on Windows CI.
+
   The fix is a **pair of shared helpers** rather than a widened `matches!` at each site:
   [`node_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs) is the cheap
   discriminant the two gates use (so a range about to be *rejected* costs no rendering), and
@@ -4380,15 +4395,17 @@ Each phase is a reviewable unit with a clear exit gate.
   `render_quoted_substitution` call, over the already-substituted `value` with no attribute list or
   id, that `PassthroughRestoreReplacer` makes for a STEM entry. Reusing that one function is what
   keeps the restore and the fold from drifting, and a unit test pins the two helpers to the same set.
-  With the pair in place, all four sites the passthrough increments built —
-  [`range_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs),
-  [`restore_masked_passthroughs`](../../parser/src/content/inline_builder/macros/links.rs),
-  and the image family's [`widen_masked_passthroughs`](../../parser/src/content/inline_builder/macros/image.rs)
-  and [`masked_default_alt`](../../parser/src/content/inline_builder/macros/image.rs) — extend to
-  both masked kinds at once, and all three families follow. Recognition needed no new widening beyond
-  the one the image family already had (its two-character-minimum target class cannot match a bare
-  placeholder), and every pre-restore decision keeps reading the bytes as matched, which a
-  placeholder answers as the sentinel does.
+  With the pair in place, the two sites the link families use —
+  [`range_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs) (which now takes
+  the kinds its caller admits) and
+  [`restore_masked_passthroughs`](../../parser/src/content/inline_builder/macros/links.rs) — extend
+  to both masked kinds at once, and both link families follow. The image family's own two pieces,
+  [`widen_masked_passthroughs`](../../parser/src/content/inline_builder/macros/image.rs) and
+  [`masked_default_alt`](../../parser/src/content/inline_builder/macros/image.rs), are untouched:
+  that family is unchanged by this increment. Recognition needed no widening at all here — both link
+  families' target classes swallow the one-character placeholder as they swallow the sentinel — and
+  every pre-restore decision keeps reading the bytes as matched, which a placeholder answers as the
+  sentinel does.
 
   One difference from the passthrough class is worth recording, because it runs the *safe* way: a
   STEM body cannot smuggle a dangerous scheme. `link:++javascript:…++[]` defers with a security
@@ -4402,30 +4419,31 @@ Each phase is a reviewable unit with a clear exit gate.
   time instead — the two agree whenever the fold uses the parser's renderer, which is the seam §3.3.1
   defines and the only one `Content` uses.
 
-  What reaches parity is every spelling all three families have: the `link:`/`mailto:` macro (bare
+  What reaches parity is every spelling the two link families have: the `link:`/`mailto:` macro (bare
   and labeled, the expression at either edge, in the middle, and twice in one target), auto-links,
-  formal-URL links and the two angle-bracketed forms, and `image:`/`icon:` — including a target that
-  *is* the expression (`image:stem:[x][]`), the `default_alt` arithmetic around one
-  (`image:a_bstem:[x]c_d.png[]`, where an `_` inside the expression hides from the replace and one
-  outside it does not), all three notations, an explicit substitution list (`stem:c,q[…]`), the
-  `hide-uri-scheme` strip, the trailing-punctuation strip in both directions, a display text beside a
-  restored target, a STEM beside a passthrough in either order, and the whole set inside a rendered
-  span, escaped, and end to end through the real parse path. Re-running the corpus-wide audit shows
-  the divergence set **unchanged** — no golden source writes a STEM expression inside a computed
-  target — and no new divergence appeared. Coverage stays diff-neutral, and as with every prep piece
-  before it, nothing further is wired in.
+  formal-URL links and the two angle-bracketed forms — with all three notations, an explicit
+  substitution list (`stem:c,q[…]`), the `hide-uri-scheme` strip, the trailing-punctuation strip in
+  both directions, a display text beside a restored target, a STEM beside a passthrough in either
+  order, both path separators, and the whole set inside a rendered span, escaped, and end to end
+  through the real parse path. Re-running the corpus-wide audit shows the divergence set
+  **unchanged** — no golden source writes a STEM expression inside a computed target — and no new
+  divergence appeared. Coverage stays diff-neutral, and as with every prep piece before it, nothing
+  further is wired in.
 
-  Two shapes are deliberately left where they were, each pinned by its own test, and they are the
-  same two the passthrough increments left: an **image's bracket** and an **attribute-list display
-  text** over a STEM expression each keep the opaque-piece gate, because both come back from a
-  *parse* and a placeholder inside a parsed value has no node to map back to.
+  Beyond the image family just described, one more shape is left where it was: an **attribute-list
+  display text** over a STEM expression keeps the opaque-piece gate, as its passthrough sibling does,
+  because it comes back from a *parse* and a placeholder inside a parsed value has no node to map
+  back to.
 
-  With this the restore-the-value class is closed for **both** masked kinds in every family that
-  computes a target. What still defers is the **bracket half** — restoring inside each *parsed*
-  attribute-list value (an image's bracket, the three families' attribute-list display texts), where
-  the string pipeline's own parse swallows the sentinel into a value that only restores after the
-  split — and the keeps: the cross-reference family's pre-restore target (whose golden leaks the raw
-  sentinel into its own `href`), and the well-formed readings these four increments pinned.
+  With this the restore-the-value class is closed for both masked kinds in the two families whose
+  computed target reaches the output as computed. What still defers is the **bracket half** —
+  restoring inside each *parsed* attribute-list value (an image's bracket, the three families'
+  attribute-list display texts), where the string pipeline's own parse swallows the sentinel into a
+  value that only restores after the split — the **image family's STEM target**, whose fold-time
+  `web_path` is the blocker just described (closing it means keeping this family's restore out of
+  `web_path`'s way, not widening a gate), and the keeps: the cross-reference family's pre-restore
+  target (whose golden leaks the raw sentinel into its own `href`), and the well-formed readings
+  these four increments pinned.
 
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
@@ -5112,16 +5130,20 @@ Each phase is a reviewable unit with a clear exit gate.
        [`node_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs) (the cheap
        gate discriminant) and
        [`restorable_body`](../../parser/src/content/inline_builder/macros/image.rs) (the bytes),
-       which together carry all four sites the passthrough increments built. The invariant is that
-       a restored body is exactly what the *fold* of that node emits, so a `Stem`'s comes from
+       which together carry the two sites the link families use. The invariant is that a restored
+       body is exactly what the *fold* of that node emits, so a `Stem`'s comes from
        [`fold_stem`](../../parser/src/content/inline_builder/fold.rs) itself — the same
        `render_quoted_substitution` call `PassthroughRestoreReplacer` makes — and the two
        directions cannot drift. Unlike its passthrough sibling this one needs no security
        divergence: a STEM body is restored *wrapped* in its notation's delimiters, so it cannot
-       smuggle a live scheme. The image bracket and the attribute-list display texts keep the
-       opaque-piece gate, each with its own test. See the step's own "landed as" note above. With
-       this the restore-the-value class is closed for both masked kinds; the bracket half is what
-       remains of it.
+       smuggle a live scheme. The **`image:`/`icon:` family is deliberately left out** and its
+       family code untouched: its target alone is re-processed by `web_path` at fold time, which
+       posixifies the platform separator, and *every* rendered STEM body carries a backslash — so
+       restoring there would make the `src` differ by platform. That split is what
+       [`Restorable`](../../parser/src/content/inline_builder/macros/image.rs) names at the gate,
+       pinned by a literal-stays test and a both-separators fold test. The attribute-list display
+       texts keep the opaque-piece gate. See the step's own "landed as" note above. The bracket
+       half and the image family's own STEM target are what remain of the class.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

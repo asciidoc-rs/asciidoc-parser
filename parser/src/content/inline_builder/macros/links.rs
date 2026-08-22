@@ -3,7 +3,7 @@
 use super::{
     MacroMatch, MacroMatchKind, escaped_value_children,
     image::{
-        range_has_no_opaque_piece, range_is_restorable, range_is_verbatim,
+        Restorable, range_has_no_opaque_piece, range_is_restorable, range_is_verbatim,
         range_is_verbatim_or_synthesized, restorable_body,
     },
     macro_text_children, rebuild_macro_level,
@@ -139,12 +139,15 @@ use crate::{
 /// A **masked** construct — a passthrough's [`Raw`](InlineNode::Raw) piece or
 /// a STEM expression's [`Stem`](InlineNode::Stem) one, the pair
 /// [`restorable_body`] names — is admitted in the target, this being the
-/// third and last family to take [`range_is_restorable`]: the string replacer
-/// swallows the `\u{96}`*n*`\u{97}` sentinel into its own target (both target
-/// classes admit it exactly as they admit the tree's placeholder, and the bare
-/// branch's trailing-character class admits the last byte of either spelling,
-/// so the two recognize the same extent — this family needs no widening of
-/// its own, unlike the `image:`/`icon:` one), and
+/// third and last family to take [`range_is_restorable`]. (Both kinds, unlike
+/// the `image:`/`icon:` family, which admits only the passthrough: this
+/// family's target reaches the `href` as computed, where that one's is
+/// re-processed by `web_path` at fold time — see [`Restorable`].) the string
+/// replacer swallows the `\u{96}`*n*`\u{97}` sentinel into its own target (both
+/// target classes admit it exactly as they admit the tree's placeholder, and
+/// the bare branch's trailing-character class admits the last byte of either
+/// spelling, so the two recognize the same extent — this family needs no
+/// widening of its own, unlike the `image:`/`icon:` one), and
 /// [`Passthroughs::restore_to`](crate::content::Passthroughs) then splices
 /// the extracted body's substituted text over every sentinel in the rendered
 /// string. A `Raw` node's `value` **is** that text, known at build time, so
@@ -379,7 +382,12 @@ fn build_inline_link_node<'src>(
     // ASCII no single-character piece can supply.
     let computed_end = n.attrlist().map_or(full.end, |m| m.start());
 
-    if !range_is_restorable(nodes, pieces, &(full.start..computed_end)) {
+    if !range_is_restorable(
+        nodes,
+        pieces,
+        &(full.start..computed_end),
+        Restorable::PassthroughOrStem,
+    ) {
         return None;
     }
 
@@ -747,7 +755,7 @@ fn build_angle_link_node<'src>(
 
     let interior = scheme_m.start()..angle_url.end();
 
-    if !range_is_restorable(nodes, pieces, &interior) {
+    if !range_is_restorable(nodes, pieces, &interior, Restorable::PassthroughOrStem) {
         return None;
     }
 
@@ -1022,7 +1030,12 @@ fn find_link_macro_matches<'src>(
         // keeps the opaque-piece gate inside `text_attrlist`, since its
         // display text comes back from a *parse*.)
         if let Some(target) = caps.get(3)
-            && !range_is_restorable(nodes, pieces, &(target.start()..target.end()))
+            && !range_is_restorable(
+                nodes,
+                pieces,
+                &(target.start()..target.end()),
+                Restorable::PassthroughOrStem,
+            )
         {
             continue;
         }
@@ -1932,7 +1945,7 @@ mod tests {
         HasSpan, Parser, Span,
         content::inline_builder::build,
         inlines::{CharRef, InlineNode, SpanForm, StyleVariant},
-        parser::HtmlSubstitutionRenderer,
+        parser::{DefaultPathResolver, HtmlSubstitutionRenderer},
         strings::CowStr,
     };
 
@@ -2331,6 +2344,53 @@ mod tests {
                 golden_passthroughs(fixture),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
+        }
+    }
+
+    #[test]
+    fn a_stem_target_folds_identically_under_either_path_separator() {
+        // The regression guard for the seam that made the `image:`/`icon:`
+        // family defer STEM entirely (see
+        // `an_image_target_over_a_stem_expression_is_a_documented_divergence`):
+        // a rendered STEM body always carries a backslash, and
+        // [`web_path`](crate::parser::PathResolver::web_path) posixifies the
+        // platform separator. These two families never route a target through
+        // `web_path` — it reaches the `href` as computed — so a restored STEM
+        // target must be byte-identical under either separator, and must
+        // match the string pipeline under both.
+        //
+        // Without this, the difference is invisible on a Posix runner and
+        // only surfaces on Windows CI.
+        use super::super::super::test_support::golden_passthroughs_with;
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        let fixtures = [
+            "link:https://example.org/stem:[x][]",
+            "link:https://example.org/latexmath:[\\alpha][docs]",
+            "https://example.org/stem:[x]",
+            "<https://example.org/stem:[x]>",
+            "mailto:stem:[x]@example.org[Mail]",
+        ];
+
+        for separator in ['/', '\\'] {
+            let parser = Parser::default().with_path_resolver(DefaultPathResolver {
+                file_separator: separator,
+            });
+
+            for fixture in fixtures {
+                let folded = crate::content::inline_builder::fold_html(
+                    &build_with(Span::new(fixture), &parser),
+                    &renderer,
+                    &parser,
+                );
+
+                assert_eq!(
+                    folded,
+                    golden_passthroughs_with(fixture, &parser),
+                    "fold diverged for {fixture:?} with separator {separator:?}"
+                );
+            }
         }
     }
 
