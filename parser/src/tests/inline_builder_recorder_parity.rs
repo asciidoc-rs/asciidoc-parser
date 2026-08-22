@@ -822,6 +822,7 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "a ((flow term)) and (((c1, c2, c3))) end",
         "indexterm:[primary, secondary]",
         "indexterm2:[shown]",
+        "indexterm2:[Flash,see=HTML 5] then indexterm2:[see-also=\"CSS 3\"]",
         "[[mid-anchor]] after the anchor",
         "text before anchor:named[Ref Text] and after",
         "a +++<b>raw</b>+++ passthrough",

@@ -199,8 +199,10 @@
 //!   without deferring the whole anchor.
 //!   Likewise a *concealed* index term (`indexterm:[…]`, `(((…)))`) renders
 //!   nothing, so it too is always recognized; a *visible* term (`indexterm2:[…]`,
-//!   `((term))`) is deferred only when its shown text crosses a rendered span or
-//!   carries an attribute list. The **UI**, **index-term**, and
+//!   `((term))`) is deferred only when its shown text crosses a rendered span —
+//!   an argument that is an **attribute list** (an `=`) is not deferred, since
+//!   the list only decides which of that argument's own bytes are shown and is
+//!   consumed rather than carried. The **UI**, **index-term**, and
 //!   **cross-reference** families share the anchor's synthesized-run lift, and
 //!   for the same reason — none of those nodes carries a `Span`-typed field, so
 //!   a `kbd:`/`btn:`/`menu:` macro, an index term, or a cross-reference inside
@@ -845,6 +847,7 @@ mod tests {
             "a ((flow term)) and (((c1, c2, c3))) end",
             "indexterm:[primary, secondary]",
             "indexterm2:[shown]",
+            "indexterm2:[Flash,see=HTML 5] then indexterm2:[see-also=\"CSS 3\"]",
             "[[mid-anchor]] after the anchor",
             "text before anchor:named[Ref Text] and after",
             "a +++<b>raw</b>+++ passthrough",
@@ -994,6 +997,15 @@ mod tests {
         // the entity the built-in backend renders it as.
         assert_parity(
             "image:a(C)b.png[Pause (C) Resume] beside link:x(C)y.html[O'Reilly]              and <<s(C)c,Tom (C) Jerry>> and a ((Coffee (C) Beans)) term.",
+        );
+
+        // An `indexterm2:[…]` attribute list beside the other families that
+        // parse one, and beside the shorthand spelling that has no such list:
+        // the shown term is the list's first positional attribute, while its
+        // `see` / `region` names an index entry that reaches the flow through
+        // nothing.
+        assert_parity(
+            "An indexterm2:[Coffee (C) Beans,see=Tea] term beside a ((Coffee (C) Beans)) one and link:x.html[O'Reilly,role=hl] and *bold*.",
         );
 
         // UI macros (kbd/menu, gated on `experimental`) beside a quoted span.
@@ -1948,6 +1960,14 @@ mod tests {
                 // `unescaped_value_children` classifies the `&` as the `Raw`
                 // leaf the classification pass would have made of it anyway.
                 "xref:sec[a & b,role=hl]",
+                // An `indexterm2:[…]` attribute list carrying the same bare
+                // special. Unlike the three families above, this one *shows*
+                // its computed value as flow text rather than splicing it into
+                // a target or a label, so what the order decides is only which
+                // bytes the list is parsed from — the shown term is those same
+                // bytes either way.
+                "an indexterm2:[a & b,region=Kona] term",
+                "an indexterm2:[Coffee,region=a < b] term",
                 // The same value written as the *entity spelling* of a
                 // special, for each of the three families that compute an
                 // attribute-list value. Under these orders nothing escaped it,

@@ -1177,8 +1177,10 @@ Each phase is a reviewable unit with a clear exit gate.
   deferred, each documented and pinned by a divergence test: a **visible term crossing a rendered
   span** (unreconstructable from the escaped string, the same verbatim boundary the other macro
   families document) and an **`indexterm2:[…]` carrying an attribute list** (an `=`, deferred until
-  the node can hold an `Attrlist<'src>`, as the link/xref macros defer the same); the one escaped
-  paren-wrapped shorthand the string replacer re-renders (`\(((x)))` → `(x)`) is likewise left literal.
+  the node can hold an `Attrlist<'src>`, as the link/xref macros defer the same — deferred at the
+  time, closed by a step 6 prep below, which finds the node needs no such list at all); the one
+  escaped paren-wrapped shorthand the string replacer re-renders (`\(((x)))` → `(x)`) is likewise
+  left literal.
   As throughout the additive builder, this performs *no* recognition side effect (the HTML backend
   builds no index, so the string replacer has none to skip either). This step is **additive**: nothing
   is wired into the parse path. Inline `Stem` is handled at passthrough time (step 5), not in the
@@ -4892,6 +4894,70 @@ Each phase is a reviewable unit with a clear exit gate.
   (`[method x-]+pass:[<b>]+`), which is the module's own `range_is_verbatim` boundary rather than
   a gap in this pass's recognition.
 
+  *Step 6 prep landed as (an `indexterm2:[…]` attribute list, and the deferral that was waiting
+  on nothing):* with the passthrough-extraction pass's own two deferrals closed, re-running the
+  corpus-wide fold-parity audit and classifying what remains by *source* leaves the **index-term**
+  family holding the largest golden-exercised share of it — and the one piece of that share whose
+  own note named a blocker: an `indexterm2:[…]` whose argument carries an `=`, deferred at step
+  4b(ii) part 4b "until the node can hold an `Attrlist<'src>`, as the link/xref macros defer the
+  same", and pinned since by `an_indexterm2_attribute_list_is_a_documented_divergence`. Two of the
+  `asciidoctor` port's own golden fixtures spell it —
+  `indexterm2:[Flash,see=HTML 5] and indexterm2:[HTML 5,see-also="CSS 3, SVG"] done.` and
+  `Only named indexterm2:[see=HTML 5] here.` — where the tree was leaving the whole macro literal.
+
+  The increment's finding is that the blocker had lapsed: the node needs no attribute list. An
+  `=` in the argument makes it an **attribute list whose first positional attribute is the shown
+  term** (`indexterm2:[Coffee, region=Kona]` shows `Coffee`), and everything else the list holds —
+  a `see`, a `see-also`, a `region` — names an entry in an index this crate's HTML backend does
+  not build, so it reaches the flow through nothing. The link and cross-reference families capture
+  their own [`Attrlist<'src>`](../../parser/src/attributes/attrlist.rs) because a role, an id, or a
+  `window=` there changes what the fold emits; an index term's whole render surface is
+  [`IndexTermRenderParams`](../../parser/src/parser/inline_substitution_renderer.rs), which carries
+  the shown term and nothing else. So a new
+  [`shown_macro_term`](../../parser/src/content/inline_builder/macros/indexterm.rs) *consumes* the
+  list where [`InlineIndextermReplacer`](../../parser/src/content/macros.rs) consumes it — the
+  same `Attrlist::parse` over the same normalized copy, the same `nth_attribute(1)`, the same
+  fall back to the whole argument when the list has no positional attribute at all — and the
+  [`IndexTerm`](../../parser/src/inlines/index_term.rs) node goes on holding the one
+  already-substituted shown text every other visible spelling gives it. No node field, variant, or
+  gate moves; only the level's `parser` is threaded down to the family, which every sibling family
+  already takes.
+
+  The argument is read from this level's escaped match string, which holds exactly what the string
+  pipeline's flat haystack holds at that position, so the two parse the same bytes — and the
+  family's *other* deferral is untouched and still decides first: a shown term crossing an opaque
+  span is unreconstructable from that string, so `indexterm2:[*bold* term,region=Kona]` stays
+  literal and keeps a divergence test, now written against the attribute-list spelling too. The
+  shorthand spelling has no attribute list to parse (the string replacer strips its ` >> ` /
+  ` &> ` clause instead, which the tree already mirrored), so it is unchanged.
+
+  What reaches parity is both golden spellings, a list with no positional attribute (shown
+  verbatim, `=` included), a quoted positional attribute whose own comma is not a separator, an
+  empty first positional attribute, a special character in either half (an entity in both pipelines
+  by macro time, so the list is parsed from the same escaped bytes), a typographic replacement and
+  a restored entity in the shown half, the macro in flow, twice in one flow, inside a rendered
+  span, spanning a newline that `normalize_index_text` collapses before either side parses, the
+  escaped form that still drops its backslash, the concealed spelling that ignores its argument
+  entirely, an attribute list arriving from an **expanded value** in either half, and the
+  never-escapes group-parity orders, where what the order decides is only which bytes the list is
+  parsed from. The formerly pinned divergence becomes a parity test that also asserts the shape:
+  one `IndexTerm` carrying `Coffee` and the whole macro's location, never an attribute list.
+  Fixtures join the whole-pipeline broad sweep and combined-constructs corpus, the group-parity
+  corpus, and the structural recorder cross-check; a whole-document test drives the shape end to
+  end through the real parse path, in a paragraph and in a section heading's own title. Re-running
+  the corpus-wide fold-parity audit shows both golden fixtures **gone** from the divergence set and
+  no new divergence; coverage is diff-neutral, and as with every prep piece before it, nothing
+  further is wired in.
+
+  What still defers in this family is what its own note named beside this one: a **visible term
+  crossing a rendered span** (both spellings), which is the module-wide `range_is_verbatim`
+  boundary rather than anything this family owns, and the one escaped paren-wrapped shorthand the
+  string replacer re-renders (`\(((x)))` → `(x)`). Beyond the family the remainder is unchanged:
+  the boundary-class halves the sibling increments named — a macro body class wanting more than
+  one presented character, the closing character, and the character-replacements step's
+  consume-across-levels case — plus the keeps, and the bare-attrlisted body whose content the
+  passthrough pass's first scan already recognizes (`[method x-]+pass:[<b>]+`).
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -5722,6 +5788,26 @@ Each phase is a reviewable unit with a clear exit gate.
        formerly pinned divergence becomes a parity test. See the step's own "landed as" note
        above. What this pass still defers is nothing it named for itself; what remains is the
        sibling increments' boundary-class halves and the keeps.
+
+     - ✅ **prep (an `indexterm2:[…]` attribute list).** The largest golden-exercised class the
+       audit's remainder held after the passthrough pass closed its own two deferrals, and the one
+       piece of it whose note named a blocker: an `indexterm2:[…]` argument carrying an `=`,
+       deferred at part 4b "until the node can hold an `Attrlist<'src>`". The blocker had lapsed —
+       an index term's whole render surface is
+       [`IndexTermRenderParams`](../../parser/src/parser/inline_substitution_renderer.rs), which
+       carries the shown term and nothing else, so the list decides only *which* of the argument's
+       own bytes are shown and is **consumed** rather than carried. A new
+       [`shown_macro_term`](../../parser/src/content/inline_builder/macros/indexterm.rs) does that
+       where [`InlineIndextermReplacer`](../../parser/src/content/macros.rs) does — the same
+       `Attrlist::parse` over the same normalized copy, the same `nth_attribute(1)`, the same fall
+       back to the whole argument where the list has no positional attribute
+       (`indexterm2:[see=HTML 5]`) — and no node field, variant, or gate moves. Two of the
+       `asciidoctor` port's golden fixtures reach parity; the family's *other* deferral still
+       decides first, so a shown term crossing an opaque span stays literal and keeps its
+       divergence test, now written against the attribute-list spelling too. See the step's own
+       "landed as" note above. What still defers in this family is that span-crossing term (the
+       module-wide `range_is_verbatim` boundary) and the escaped paren-wrapped shorthand
+       `\(((x)))`; beyond it the remainder is unchanged.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
