@@ -4769,6 +4769,66 @@ Each phase is a reviewable unit with a clear exit gate.
   body class wanting more than one presented character, the closing character, and the
   character-replacements step's consume-across-levels case — and the keeps.
 
+  *Step 6 prep landed as (an escaped attribute-list bracket, one match's source doing two
+  things):* with the boundary and restore-the-value classes closed down to their keeps, re-running
+  the corpus-wide fold-parity audit and classifying what remains by *source* leaves the
+  passthrough-extraction pass's own last named deferral — an **escaped bracket** ahead of a
+  delimited passthrough (`\[attrs]++text++`), pinned since step 5d part 2 landed as
+  `an_escaped_attrlist_bracket_is_a_documented_divergence` and exercised by
+  [`Passthroughs`](../../parser/src/content/passthroughs.rs)' own golden fixture. The string
+  replacer's [`handle_quoted_text`](../../parser/src/content/passthroughs.rs) does *two* things
+  there — writes the bracket back as a literal `[attrs]` prefix with its backslash dropped, then
+  stores the delimited text as an **ordinary** passthrough, its attribute list discarded rather
+  than carried — where
+  [`find_passthrough_matches`](../../parser/src/content/inline_builder/passthrough_step.rs) could
+  express one or the other and so left the whole construct literal.
+
+  Closing it needed no new mechanism at all, which is the increment's own finding: the shape its
+  divergence note called "a kept-literal-prefix-with-one-dropped-char, plus a node for the
+  remainder, a shape neither
+  [`MacroMatchKind`](../../parser/src/content/inline_builder/macros/mod.rs) variant expresses" is
+  not one match wanting a third variant but **two adjacent matches** —
+  an [`Unescape`](../../parser/src/content/inline_builder/macros/mod.rs) over the bracket, then a
+  [`Node`](../../parser/src/content/inline_builder/macros/mod.rs) over the delimited remainder —
+  and [`rebuild_macro_level`](../../parser/src/content/inline_builder/macros/mod.rs) already
+  composes any two adjacent matches, gap by gap, without knowing they came from one regex capture.
+  The node the second match carries is
+  [`build_passthrough_node`](../../parser/src/content/inline_builder/passthrough_step.rs)' — the
+  unattrlisted builder every bare `+++`/`++`/`$$` form already uses — reached with the *delimited*
+  sub-range rather than the whole match, so the discarded attribute list is discarded by
+  construction: there is no `Styled` wrapper to suppress and no `x-` marker to not honor, because
+  the branch that reads them is never entered. Nothing else in the module changes, and no variant,
+  gate, or signature moves.
+
+  What reaches parity is every boundary an escaped bracket can precede (`+++`, `++`, `$$`), the
+  `x-` marker whose monospace-and-`Normal`-subs treatment the escape *removes*, a body carrying
+  markup and specials (escaped for `++`/`$$`, raw for `+++`, with quotes never running over either),
+  the escaped form beside its unescaped twin in one flow, a kept prefix carrying a special
+  character and one carrying quote syntax — both substituted by the later steps exactly as the
+  string pipeline substitutes its own literal `[attrs]` — the construct in flow and spanning a
+  newline, and the same under the never-escapes group-parity orders, where whether the prefix's
+  `<` is escaped is the *order's* decision while the remainder stays opaque either way. The
+  formerly pinned divergence becomes a parity test that also asserts the shape: a `Text` prefix and
+  a plain [`Raw`](../../parser/src/inlines/inline_node.rs) leaf, never the `Styled` span the
+  unescaped spelling builds. Fixtures join the whole-pipeline broad sweep and combined-constructs
+  corpus, the group-parity corpus, and — unlike the boundary-class increments, whose shapes a
+  [`RecordingRenderer`](../../parser/src/content/inline_tree.rs)'s marker perturbs — the
+  **structural recorder cross-check**, which reads them normally (the marker sits outside the
+  markup it wraps, and nothing here reads a neighbour's boundary character); a whole-document test
+  drives both shapes end to end through the real parse path. Re-running the corpus-wide fold-parity
+  audit shows the `Passthroughs` fixture **gone** from the divergence set and no new divergence;
+  coverage is diff-neutral, and as with every prep piece before it, nothing further is wired in.
+
+  What still defers in this pass is its other named deferral, the **prohibited-prefix** retry the
+  string replacer works around by hand for the two bare attribute-list-prefixed forms
+  (`index:[attrs]+text+`, ``\[x-]`text` ``), which keeps its own divergence test — and which is
+  where writing *both* escapes at once (`\[attrs]\++text++`) lands, the delimiter escape winning
+  the branch and the literal `++text++` it leaves behind sitting behind exactly the `\` that
+  second pass declines. Beyond that the remainder is unchanged: the boundary-class halves the
+  sibling increments named — a macro body class wanting more than one presented character, the
+  closing character, and the character-replacements step's consume-across-levels case — and the
+  keeps.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -5561,6 +5621,22 @@ Each phase is a reviewable unit with a clear exit gate.
        classification and the bytes. The family's gate is deleted rather than relaxed (the stripped
        bytes are a literal `;`, `:`, or `)`, which no opaque piece can supply), and the formerly
        pinned divergence becomes a parity test. See the step's own "landed as" note above.
+
+     - ✅ **prep (an escaped attribute-list bracket).** The passthrough-extraction pass's own last
+       named deferral: `\[attrs]++text++`, where the string replacer writes the bracket back as a
+       literal `[attrs]` prefix *and* stores the delimited text as an **ordinary** passthrough
+       (its attribute list discarded), while
+       [`find_passthrough_matches`](../../parser/src/content/inline_builder/passthrough_step.rs)
+       could express one or the other. The shape its divergence note called one neither
+       [`MacroMatchKind`](../../parser/src/content/inline_builder/macros/mod.rs) variant expresses
+       turns out to be **two adjacent matches** — an `Unescape` over the bracket, then a `Node`
+       over the delimited remainder — which
+       [`rebuild_macro_level`](../../parser/src/content/inline_builder/macros/mod.rs) already
+       composes, so no variant, gate, or signature moves. The node is the unattrlisted
+       [`build_passthrough_node`](../../parser/src/content/inline_builder/passthrough_step.rs)
+       reached with the delimited sub-range, so the discarded list is discarded by construction.
+       The formerly pinned divergence becomes a parity test. See the step's own "landed as" note
+       above. What this pass still defers is its **prohibited-prefix** retry.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

@@ -115,13 +115,15 @@ use crate::{
 /// last, after both passthrough passes). This step is **additive**: nothing
 /// is wired into the parse path.
 ///
-/// One more attribute-list-prefixed corner case is deferred: an **escaped
-/// bracket** (`\[attrs]++text++`) unescapes to a literal `[attrs]` prefix
-/// *and* still recognizes the delimited text as an ordinary (non-attrlisted)
-/// passthrough — a kept-literal-prefix-with-one-dropped-char, plus a node for
-/// the remainder, a shape neither [`MacroMatchKind`] variant expresses. Left
-/// unrecognized (a documented divergence); see
-/// `an_escaped_attrlist_bracket_is_a_documented_divergence`.
+/// An **escaped bracket** (`\[attrs]++text++`) unescapes to a literal
+/// `[attrs]` prefix *and* still recognizes the delimited text after it — as an
+/// *ordinary* (non-attrlisted) passthrough, since `handle_quoted_text` drops
+/// the attribute list on that branch rather than storing it. One match's
+/// source doing two things is expressed as a **pair** of matches — an
+/// [`Unescape`](MacroMatchKind::Unescape) over the bracket, then a
+/// [`Node`](MacroMatchKind::Node) over the delimited remainder — which
+/// [`rebuild_macro_level`] composes exactly as it composes any two adjacent
+/// matches, so neither [`MacroMatchKind`] variant grows a new shape.
 ///
 /// An **escaped triple- or double-plus** (`\+++text+++`, `\++text++`) drops
 /// its backslash and keeps the delimited text literal at the pass-macro
@@ -208,12 +210,17 @@ fn apply_bare_attrlisted_pass_level<'src>(
     rebuild_macro_level(&nodes, &pieces, &s, matches)
 }
 
-/// Finds every passthrough at this level, skipping the one form
-/// [`apply_passthroughs`] still documents as deferred: an attribute-list-
-/// prefixed match whose *bracket* is escaped (`\[attrs]++text++`). A
-/// *delimiter* escape (`[attrs]\++text++`) is not deferred: it becomes an
-/// [`Unescape`](MacroMatchKind::Unescape) that drops one backslash and leaves
-/// the rest literal, exactly like an unattrlisted delimiter escape.
+/// Finds every passthrough at this level.
+///
+/// The two attribute-list-prefixed escapes take different shapes, mirroring
+/// `handle_quoted_text`'s own two branches. A *delimiter* escape
+/// (`[attrs]\++text++`) becomes one
+/// [`Unescape`](MacroMatchKind::Unescape) that drops a backslash and leaves
+/// the rest — the attrlist brackets included — literal, exactly like an
+/// unattrlisted delimiter escape. A *bracket* escape (`\[attrs]++text++`)
+/// becomes a **pair**: an [`Unescape`](MacroMatchKind::Unescape) over the
+/// bracket, then a [`Node`](MacroMatchKind::Node) over the delimited
+/// remainder, which the string replacer stores without its attribute list.
 fn find_passthrough_matches<'src>(
     s: &str,
     pieces: &[Piece],
@@ -268,11 +275,53 @@ fn find_passthrough_matches<'src>(
 
             if &caps[1] == "\\" {
                 // `\[attrs]++text++`: the bracket unescapes to a literal
-                // `[attrs]`, but the delimited text is still recognized as
-                // an *ordinary* (non-attrlisted) passthrough — a
-                // kept-literal-prefix-plus-node shape neither
-                // `MacroMatchKind` variant expresses. Deferred; see
-                // `an_escaped_attrlist_bracket_is_a_documented_divergence`.
+                // `[attrs]` prefix, and the delimited text after it is still
+                // recognized — as an *ordinary* (non-attrlisted)
+                // passthrough, since `handle_quoted_text` drops the
+                // attribute list on this branch rather than storing it. That
+                // is one match's worth of source doing two things, which is
+                // exactly what a **pair** of matches expresses: an
+                // `Unescape` over the bracket alone, then a `Node` over the
+                // delimited remainder. `rebuild_macro_level` composes them
+                // as it composes any two adjacent matches, so neither
+                // `MacroMatchKind` variant needs to grow a new shape.
+                //
+                // Group 1 is the whole match's first byte whenever the
+                // attrlist alternative participates (nothing in the pattern
+                // precedes it), so the backslash offset is the match start;
+                // `unwrap` is safe for the same reason `caps[1]` above is.
+                #[allow(clippy::unwrap_used)]
+                let escape = caps.get(1).unwrap();
+
+                // The opening delimiter begins the recognized remainder.
+                // Exactly one of groups 4/7/10 participates whenever a
+                // delimited alternative matches at all.
+                #[allow(clippy::unwrap_used)]
+                let boundary = caps
+                    .get(4)
+                    .or_else(|| caps.get(7))
+                    .or_else(|| caps.get(10))
+                    .unwrap();
+
+                let delimited = boundary.start()..full.end;
+
+                matches.push(MacroMatch {
+                    kind: MacroMatchKind::Unescape {
+                        backslash: escape.start(),
+                    },
+                    full: full.start..delimited.start,
+                });
+
+                let node = build_passthrough_node(&caps, &delimited, pieces, root, parser);
+
+                matches.push(MacroMatch {
+                    kind: MacroMatchKind::Node {
+                        consumed: delimited.clone(),
+                        node: Box::new(node),
+                    },
+                    full: delimited,
+                });
+
                 continue;
             }
 
@@ -1121,6 +1170,26 @@ mod tests {
             // The bare-plus form's own delimiter escape: dropped backslash,
             // literal remainder, no further pass to re-scan a residue.
             r"[attrs]\+text+",
+            // A *bracket* escape is the other branch: the bracket unescapes
+            // to a literal prefix and the delimited remainder is still a
+            // passthrough — an ordinary one, so no `Styled` span and, for
+            // `++`, no `x-` monospace either. Every boundary, in flow,
+            // beside its unescaped twin, with a special character and with
+            // quote syntax in the kept prefix (both substituted normally
+            // there, exactly as the string pipeline substitutes its own
+            // literal `[attrs]`), and spanning a newline.
+            r"\[attrs]++text++",
+            r"abc \[attrs]++text++",
+            r"\[.role]+++*bold*+++",
+            r"\[.role]$$<b>*x*</b>$$",
+            r"\[x-]++*bold* and _em_++",
+            r"\[attrs]++<b>*x*</b>++",
+            r"a \[.role]++text++ b",
+            r"\[attrs]++one++ and [attrs]++two++",
+            r"\[a<b]++text++",
+            r"\[.a*b*c]++text++",
+            r"*bold* \[attrs]++text++ _em_",
+            "multi\nline \\[x-]++text\nmore++ end",
             // The `x-` marker's `Normal`-order body extracts a nested
             // passthrough/STEM/footnote/macro rather than walking over it as
             // plain text (`SubstitutionGroup::Normal`'s `run_pipeline`
@@ -1388,27 +1457,77 @@ mod tests {
     }
 
     #[test]
-    fn an_escaped_attrlist_bracket_is_a_documented_divergence() {
-        // `\[attrs]++text++` unescapes to a literal `[attrs]` prefix *and*
-        // still recognizes the delimited text as an ordinary (non-attrlisted)
-        // passthrough — a kept-literal-prefix-with-one-dropped-char, plus a
-        // node for the remainder, a shape neither `MacroMatchKind` variant
-        // expresses. Left fully unrecognized here.
+    fn an_escaped_attrlist_bracket_keeps_its_prefix_and_builds_a_plain_raw_leaf() {
+        // `\[attrs]++text++` is one match's source doing two things: the
+        // bracket unescapes to a literal `[attrs]` prefix, and the delimited
+        // text after it is still recognized — as an *ordinary*
+        // (non-attrlisted) passthrough, since `handle_quoted_text` drops the
+        // attribute list on this branch. The pair of matches that expresses
+        // it yields a `Text` prefix and a plain `Raw` leaf, *not* the
+        // `Styled` span an unescaped `[attrs]++text++` builds.
         let source = r"\[attrs]++text++";
         let nodes = build_src(Span::new(source));
 
         assert!(
-            nodes
-                .iter()
-                .all(|n| !matches!(n, InlineNode::Raw { .. } | InlineNode::Styled(_))),
-            "an escaped attrlist bracket must be left unrecognized: {nodes:?}"
+            nodes.iter().all(|n| !matches!(n, InlineNode::Styled(_))),
+            "an escaped attrlist bracket must not build a Styled span: {nodes:?}"
         );
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
-        let golden = golden_passthroughs(source);
+        let raws: Vec<_> = nodes
+            .iter()
+            .filter(|n| matches!(n, InlineNode::Raw { .. }))
+            .collect();
 
-        assert_eq!(folded, source);
-        assert_ne!(folded, golden);
+        assert_eq!(raws.len(), 1, "expected exactly one Raw leaf: {nodes:?}");
+        assert_raw(raws[0], "text");
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            golden_passthroughs(source)
+        );
+    }
+
+    #[test]
+    fn a_real_documents_escaped_attrlist_brackets_fold_to_their_rendered_strings() {
+        // End-to-end, through the real parse path, on the shape that named
+        // this increment: an escaped attribute-list bracket must keep its
+        // literal prefix *and* build the delimited remainder, so a tree that
+        // left the whole construct literal — or that wrapped the remainder in
+        // the `Styled` span its unescaped twin gets — would regress the moment
+        // `rendered_html()` becomes a fold of this tree.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+            "== A heading\n",
+            "\n",
+            r"An escaped \[attrs]++<b>*x*</b>++ bracket.",
+            "\n\n",
+            r"The \[x-]++*bold*++ marker does not survive the escape, unlike [x-]++*bold*++.",
+            "\n",
+        ));
+
+        let mut folded_blocks = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &Parser::default()
+                ),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded_blocks += 1;
+        }
+
+        assert_eq!(folded_blocks, 2, "expected every paragraph to carry a tree");
     }
 
     #[test]
