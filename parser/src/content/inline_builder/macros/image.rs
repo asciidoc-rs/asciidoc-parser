@@ -1,5 +1,7 @@
 //! Image and icon macro recognition (`image:target[…]`, `icon:target[…]`).
 
+use std::borrow::Cow;
+
 use super::{MacroMatch, MacroMatchKind, links::restore_masked_passthroughs, rebuild_macro_level};
 use crate::{
     Parser, Span,
@@ -7,6 +9,7 @@ use crate::{
     content::{
         INLINE_IMAGE_MACRO, basename,
         inline_builder::{
+            fold::fold_stem,
             quotes::{
                 LevelContext, Piece, build_match_string, replacement_entity, source_slice,
                 text_slice,
@@ -16,7 +19,9 @@ use crate::{
         normalize_text_lf_escaped_bracket,
     },
     inlines::{CharRef, Image, InlineNode},
-    parser::{has_dangerous_scheme, has_dangerous_self_href, is_uri_ish},
+    parser::{
+        InlineSubstitutionRenderer, has_dangerous_scheme, has_dangerous_self_href, is_uri_ish,
+    },
     strings::CowStr,
     warnings::WarningType,
 };
@@ -126,7 +131,12 @@ fn find_image_matches<'src>(
         }
 
         if let Some(target) = caps.get(1)
-            && !range_is_restorable(nodes, pieces, &(target.start()..target.end()))
+            && !range_is_restorable(
+                nodes,
+                pieces,
+                &(target.start()..target.end()),
+                Restorable::Passthrough,
+            )
         {
             continue;
         }
@@ -294,12 +304,11 @@ fn atomic_piece_is_recoverable(nodes: &[InlineNode<'_>], piece: &Piece) -> bool 
     }
 }
 
-/// [`range_has_no_opaque_piece`], further admitting a masked **passthrough**
-/// — a [`Raw`](InlineNode::Raw) piece — for a value the caller *restores*
-/// rather than reads: the placeholder's bytes are not the string pipeline's
-/// (its haystack holds the `\u{96}`*n*`\u{97}` sentinel there), but the
-/// passthrough's own substituted body **is** known at build time — it is the
-/// `Raw` node's `value`, the very text
+/// [`range_has_no_opaque_piece`], further admitting a **masked** piece — one
+/// of the kinds `kinds` names — for a value the caller *restores* rather than
+/// reads: the placeholder's bytes are not the string pipeline's (its haystack
+/// holds the `\u{96}`*n*`\u{97}` sentinel there), but the masked construct's
+/// own rendered body **is** known at build time — it is what
 /// [`Passthroughs::restore_to`](crate::content::Passthroughs) splices over
 /// the sentinel after the steps run — so a computed value that substitutes it
 /// for the placeholder (see [`restore_masked_passthroughs`](super::links))
@@ -330,6 +339,7 @@ pub(in crate::content::inline_builder) fn range_is_restorable(
     nodes: &[InlineNode<'_>],
     pieces: &[Piece],
     range: &std::ops::Range<usize>,
+    kinds: Restorable,
 ) -> bool {
     for piece in pieces {
         let p_start = piece.s_start;
@@ -344,7 +354,10 @@ pub(in crate::content::inline_builder) fn range_is_restorable(
             continue;
         }
 
-        if matches!(nodes.get(piece.node_index), Some(InlineNode::Raw { .. })) {
+        if nodes
+            .get(piece.node_index)
+            .is_some_and(|node| node_is_restorable(node, kinds))
+        {
             continue;
         }
 
@@ -354,6 +367,104 @@ pub(in crate::content::inline_builder) fn range_is_restorable(
     }
 
     true
+}
+
+/// Which masked kinds a caller is able to **restore**, and so which ones
+/// [`range_is_restorable`] admits for it.
+///
+/// The two kinds differ in one way that matters to a caller whose value the
+/// **fold** re-processes: a STEM expression's rendered body always carries a
+/// backslash (`\$…\$`, `\(…\)`), and the `image:`/`icon:` family's target
+/// is run through
+/// [`PathResolver::web_path`](crate::parser::PathResolver::web_path) at fold
+/// time — which *posixifies* the platform separator, rewriting `\` to `/` on
+/// a Windows-separator resolver. The string pipeline never has that problem:
+/// its `web_path` sees the backslash-free **sentinel**, and the restore pass
+/// splices the STEM bytes into the finished `src` afterwards. So the image
+/// family defers a masked STEM entirely rather than produce a `src` that
+/// differs by platform; the link families, whose targets reach the `href`
+/// with no such re-processing, take both kinds. See
+/// `an_image_target_over_a_stem_expression_is_a_documented_divergence`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::content::inline_builder) enum Restorable {
+    /// A masked passthrough's [`Raw`](InlineNode::Raw) body only — for the
+    /// `image:`/`icon:` family, whose target the fold re-processes.
+    Passthrough,
+
+    /// Either masked kind — for the two link families.
+    PassthroughOrStem,
+}
+
+/// Reports whether `node` is one a computed value can **restore**, given the
+/// kinds its caller admits: a masked passthrough ([`Raw`](InlineNode::Raw))
+/// always, and a masked STEM expression ([`Stem`](InlineNode::Stem)) when
+/// `kinds` is [`Restorable::PassthroughOrStem`].
+///
+/// These are exactly the two node kinds the *same* extraction pass
+/// ([`Passthroughs::extract_from`](crate::content::Passthroughs)) masks before
+/// any substitution step runs — STEM being an implicit passthrough, as
+/// [`Stem::value`](crate::inlines::Stem) documents — so each stands in the
+/// string pipeline's haystack as one `\u{96}`*n*`\u{97}` sentinel and in this
+/// module's match string as one [`SPAN_PLACEHOLDER`](super::super::quotes)
+/// character, and each has a body known at build time that
+/// `Passthroughs::restore_to` splices over that sentinel once the steps have
+/// run.
+///
+/// This is the cheap discriminant half of [`restorable_body`], which produces
+/// those bytes: under [`Restorable::PassthroughOrStem`] the two return
+/// `true`/`Some` for the same set, pinned by
+/// `restorable_body_agrees_with_node_is_restorable`. A gate uses this one so
+/// a range it is about to *reject* costs no rendering.
+pub(in crate::content::inline_builder) fn node_is_restorable(
+    node: &InlineNode<'_>,
+    kinds: Restorable,
+) -> bool {
+    match node {
+        InlineNode::Raw { .. } => true,
+        InlineNode::Stem(_) => kinds == Restorable::PassthroughOrStem,
+        _ => false,
+    }
+}
+
+/// The bytes a [`node_is_restorable`] node restores to — the very text
+/// [`Passthroughs::restore_to`](crate::content::Passthroughs) splices over
+/// the string pipeline's own sentinel — or `None` for any other node.
+///
+/// The invariant both callers rest on is that this returns **exactly what the
+/// fold of that node emits**, so a value finished with these bytes reads the
+/// same as the surrounding tree:
+///
+/// - a [`Raw`](InlineNode::Raw) leaf's body is its `value`, which the fold also
+///   emits verbatim, so it is borrowed rather than rendered;
+/// - a [`Stem`](InlineNode::Stem) leaf's body is [`fold_stem`]'s own output —
+///   `render_quoted_substitution` over the already-substituted `value`, with no
+///   attribute list or id — which is the same call `PassthroughRestoreReplacer`
+///   makes for a STEM entry. Sharing that one function is what keeps the
+///   restore and the fold from drifting.
+///
+/// `renderer` is the **parser's** renderer, mirroring `restore_to`'s own
+/// (`Passthroughs::restore_to` renders a STEM entry through `parser.renderer`
+/// before splicing it into the rendered string). A computed target therefore
+/// freezes its STEM bytes at build time, exactly as the string pipeline
+/// freezes them into its `href`, where a `Stem` node standing in the flow is
+/// rendered at fold time instead; the two agree whenever the fold uses the
+/// parser's renderer, which is the seam design §3.3.1 defines and the only
+/// one `Content` uses.
+pub(in crate::content::inline_builder) fn restorable_body<'a>(
+    node: &'a InlineNode<'_>,
+    renderer: &dyn InlineSubstitutionRenderer,
+) -> Option<Cow<'a, str>> {
+    match node {
+        InlineNode::Raw { value, .. } => Some(Cow::Borrowed(value.as_ref())),
+
+        InlineNode::Stem(stem) => {
+            let mut out = String::new();
+            fold_stem(stem, renderer, &mut out);
+            Some(Cow::Owned(out))
+        }
+
+        _ => None,
+    }
 }
 
 /// Builds one [`Image`](InlineNode::Image) node from a recognized image/icon
@@ -424,9 +535,17 @@ fn build_image_node<'src>(
         // placeholder, the same rewrite `Passthroughs::restore_to` performs
         // on the rendered `src` — while the `default_alt` *arithmetic* below
         // stays on the bytes as matched, where the string replacer's own
-        // runs (see [`masked_default_alt`]).
+        // runs (see [`masked_default_alt`]). A masked **STEM** expression is
+        // deferred by this family's gate before it reaches here (see
+        // [`Restorable`]).
         Some(m) => {
-            match restore_masked_passthroughs(m.as_str(), &(m.start()..m.end()), nodes, pieces) {
+            match restore_masked_passthroughs(
+                m.as_str(),
+                &(m.start()..m.end()),
+                nodes,
+                pieces,
+                parser.renderer.as_ref(),
+            ) {
                 Some(restored) => CowStr::from(restored),
                 None => text_slice(nodes, pieces, m.start()..m.end())
                     .unwrap_or_else(|| CowStr::from(m.as_str().to_string())),
@@ -509,6 +628,11 @@ fn build_image_node<'src>(
 /// without touching the shared pattern. (The `link:`/`mailto:` family's
 /// one-or-more target class never faced this, so its increment left the
 /// placeholder bare.)
+///
+/// A masked **STEM** expression is deliberately *not* widened here: this
+/// family defers it entirely (see [`range_is_restorable`]'s `kinds`
+/// parameter and [`Restorable::Passthrough`]), so widening it would only
+/// grow a match this level's gate then rejects.
 ///
 /// The token's bytes never reach an output node: an unmatched token sits in
 /// a gap [`rebuild_macro_level`] re-emits from the piece's own *node*, a
@@ -822,9 +946,12 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use super::super::super::test_support::{
-        assert_styled, assert_text, build_src, build_through_quotes, fold_html, golden_macros,
-        golden_macros_with,
+    use super::{
+        super::super::test_support::{
+            assert_styled, assert_text, build_src, build_through_quotes, fold_html, golden_macros,
+            golden_macros_with,
+        },
+        Restorable, node_is_restorable, restorable_body,
     };
     use crate::{
         HasSpan, Parser, Span,
@@ -832,8 +959,8 @@ mod tests {
             build, char_replacements::apply_character_replacements, macros::apply_macros,
             special_chars::Masked,
         },
-        inlines::{Image, InlineNode, SpanForm, StyleVariant},
-        parser::HtmlSubstitutionRenderer,
+        inlines::{CharRef, Image, InlineNode, SpanForm, StyleVariant},
+        parser::{DefaultPathResolver, HtmlSubstitutionRenderer},
         strings::CowStr,
     };
 
@@ -1682,6 +1809,144 @@ mod tests {
         }
 
         assert_eq!(folded_blocks, 2, "expected every paragraph to carry a tree");
+    }
+
+    #[test]
+    fn an_image_target_over_a_stem_expression_is_a_documented_divergence() {
+        // This family defers a masked **STEM** expression in the target,
+        // where the two link families restore it (see
+        // [`Restorable`]). The reason is the fold-time
+        // [`web_path`](crate::parser::PathResolver::web_path) seam this
+        // family alone sits behind, and it is the same one the passthrough
+        // increment already pinned for a restored *space*: the string
+        // pipeline runs `web_path` over its own **sentinel** and splices the
+        // extracted body into the finished `src` afterwards, so bytes
+        // `web_path` would rewrite never reach it — while a tree that
+        // restores at build time hands those bytes straight to `web_path`.
+        //
+        // For a passthrough that is an exotic body. For STEM it is *every*
+        // body: a rendered expression always carries a backslash (`\$…\$`,
+        // `\(…\)`), and `web_path` posixifies the platform separator — so on
+        // a Windows-separator resolver `image:stem:[x].png[]` would render
+        // `src="/$x/$.png"` against the golden's `src="\$x\$.png"`. Deferring
+        // keeps this family's `src` identical on every platform; restoring
+        // would make it differ by one.
+        use super::super::super::test_support::golden_passthroughs;
+
+        for source in [
+            "image:stem:[x][]",
+            "image:stem:[x].png[]",
+            "icon:stem:[x][]",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
+                "an image target over a STEM expression must stay literal: {nodes:?}"
+            );
+        }
+
+        // The string pipeline does build one, restoring the rendered
+        // expression into the `src` after its own `web_path` ran.
+        let golden = golden_passthroughs("image:stem:[x].png[]");
+
+        assert!(
+            golden.contains("src=\"\\$x\\$.png\""),
+            "expected the documented divergence to still reproduce: {golden:?}"
+        );
+    }
+
+    #[test]
+    fn an_image_target_over_a_stem_expression_is_platform_independent() {
+        // The reason the divergence above is a *deferral* rather than an
+        // accepted difference: with a Windows-separator path resolver, a
+        // restored STEM body would have its backslashes posixified into the
+        // `src`. Left literal, this family's output is identical under either
+        // separator — which is what this pins, since CI runs all three
+        // platforms and a restored target would only fail on one.
+        let source = "image:stem:[x].png[]";
+
+        let posix = Parser::default().with_path_resolver(DefaultPathResolver {
+            file_separator: '/',
+        });
+
+        let windows = Parser::default().with_path_resolver(DefaultPathResolver {
+            file_separator: '\\',
+        });
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        let fold_with = |parser: &Parser| {
+            crate::content::inline_builder::fold_html(
+                &build_with(Span::new(source), parser),
+                &renderer,
+                parser,
+            )
+        };
+
+        assert_eq!(fold_with(&posix), fold_with(&windows));
+    }
+
+    #[test]
+    fn restorable_body_agrees_with_node_is_restorable() {
+        // The cheap discriminant and the body producer must name the same set
+        // — a gate that admits a piece whose body cannot be produced would
+        // leave the placeholder in a computed value, and one that rejects a
+        // piece whose body *can* be would keep a construct needlessly
+        // literal. Pinned over one node of every kind the two decide between.
+        let renderer = HtmlSubstitutionRenderer {};
+        let root = Span::new("x");
+
+        let restorable = [
+            InlineNode::Raw {
+                value: CowStr::from("raw"),
+                location: root,
+            },
+            InlineNode::Stem(crate::inlines::Stem {
+                notation: crate::inlines::StemNotation::AsciiMath,
+                value: CowStr::from("x"),
+                location: root,
+            }),
+        ];
+
+        for node in &restorable {
+            assert!(
+                node_is_restorable(node, Restorable::PassthroughOrStem),
+                "expected restorable: {node:?}"
+            );
+            assert!(
+                restorable_body(node, &renderer).is_some(),
+                "expected a body: {node:?}"
+            );
+        }
+
+        // Under `Passthrough` the STEM half is withheld, which is the image
+        // family's deferral — the `Raw` half is admitted either way.
+        assert!(node_is_restorable(&restorable[0], Restorable::Passthrough));
+        assert!(!node_is_restorable(&restorable[1], Restorable::Passthrough));
+
+        let opaque = [
+            InlineNode::Text {
+                value: CowStr::from("t"),
+                location: root,
+            },
+            InlineNode::CharRef {
+                value: CharRef::Special('<'),
+                location: root,
+            },
+            InlineNode::LineBreak { location: root },
+        ];
+
+        for node in &opaque {
+            assert!(
+                !node_is_restorable(node, Restorable::PassthroughOrStem),
+                "expected opaque: {node:?}"
+            );
+            assert!(
+                restorable_body(node, &renderer).is_none(),
+                "expected no body: {node:?}"
+            );
+        }
     }
 
     #[test]

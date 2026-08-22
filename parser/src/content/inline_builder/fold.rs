@@ -571,7 +571,17 @@ fn fold_callout(
 /// the body — no further processing is needed, mirroring how a STEM
 /// passthrough is restored with no attribute list or id (`INLINE_STEM_MACRO`
 /// captures neither).
-fn fold_stem(stem: &Stem<'_>, renderer: &dyn InlineSubstitutionRenderer, out: &mut String) {
+///
+/// Shared with the macro families, whose *restore* of a masked STEM
+/// expression into a computed target must emit exactly the bytes this fold
+/// does — see
+/// [`restorable_body`](super::macros::image::restorable_body) — so the two
+/// directions cannot drift.
+pub(in crate::content::inline_builder) fn fold_stem(
+    stem: &Stem<'_>,
+    renderer: &dyn InlineSubstitutionRenderer,
+    out: &mut String,
+) {
     let type_ = match stem.notation {
         StemNotation::AsciiMath => QuoteType::AsciiMath,
         StemNotation::LatexMath => QuoteType::LatexMath,
