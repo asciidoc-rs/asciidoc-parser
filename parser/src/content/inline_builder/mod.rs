@@ -848,6 +848,8 @@ mod tests {
             "[[mid-anchor]] after the anchor",
             "text before anchor:named[Ref Text] and after",
             "a +++<b>raw</b>+++ passthrough",
+            r"an escaped \[attrs]++<b>*x*</b>++ bracket",
+            r"an escaped \[x-]++*bold*++ bracket",
             "inline pass:[<i>x</i>] macro",
             "math $$a < b$$ here",
             "a +literal *stars*+ b",
@@ -965,6 +967,14 @@ mod tests {
 
         // A delimited passthrough beside a quoted span and an image macro.
         assert_parity("+++<u>raw</u>+++ combined with *bold* and image:foo.png[Alt Text].");
+
+        // An *escaped* attribute-list bracket beside its unescaped twin: the
+        // escaped one keeps a literal `[.role]` prefix — itself substituted
+        // by the later steps, quotes included — and an ordinary passthrough,
+        // while the unescaped one still builds its `Styled` span.
+        assert_parity(
+            r"An escaped \[.role *x*]++<b>raw</b>++ beside [.role]++<b>raw</b>++ and *bold*.",
+        );
 
         // Inline STEM beside a quoted span and a character replacement.
         assert_parity("Equation stem:[x^2+y^2=z^2] appears in *bold* text with (C) 2024.");
@@ -2014,6 +2024,12 @@ mod tests {
                 // what it presents — again its rendering, not the order.
                 "[width=10]##x ##https://example.org and a < b",
                 "[width=10]##x ##doc@example.org and a < b",
+                // An escaped attribute-list bracket, whose kept literal
+                // prefix is ordinary flow from here on: whether its `<` is
+                // escaped is the *order's* decision, exactly as it is for the
+                // text around it, while the delimited remainder the pair's
+                // second match builds is opaque to every step either way.
+                r"\[a<b]++x < y++ and a < b",
                 // Multi-line, so a run spanning a newline is split the same
                 // way as a single-line one.
                 "first < line\nsecond & line\nthird > line",
