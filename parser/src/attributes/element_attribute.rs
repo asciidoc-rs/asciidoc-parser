@@ -82,6 +82,49 @@ impl<'src> ElementAttribute<'src> {
         }
     }
 
+    /// [`into_owned`](Self::into_owned), first substituting each
+    /// `\u{96}`*n*`\u{97}` **token** in this attribute's name and value with
+    /// `bodies[n]`.
+    ///
+    /// This is the *after the split* half of restoring a masked construct
+    /// inside a parsed attribute list. A caller that parses an attribute list
+    /// whose text still holds a masked passthrough cannot restore the body
+    /// first: the string pipeline's own
+    /// [`Attrlist::parse`](crate::attributes::Attrlist::parse) reads the
+    /// sentinel — an opaque token carrying none of the `,`/`=`/`"` bytes the
+    /// split reads — so a body holding one of those characters must not
+    /// influence how the list divides (`image:x.png[++a,b++]` is one
+    /// positional whose value is `a,b`, not two). Restoring per *parsed value*
+    /// reproduces that, exactly as
+    /// [`Passthroughs::restore_to`](crate::content::Passthroughs) splices each
+    /// body over whatever sentinel reached the rendered string.
+    ///
+    /// [`shorthand_item_indices`](Self::shorthand_item_indices) are byte
+    /// offsets into `value`, so each is **shifted** past every substitution
+    /// that ends at or before it — a token is one opaque run holding none of
+    /// the `#`/`.`/`%` delimiters the shorthand scan keys off, so the items it
+    /// found stay the same items, only further along
+    /// (`image:x.png[++abc++.myrole]` keeps the `myrole` role while its value
+    /// becomes `abc.myrole`). Re-deriving them over the restored text would
+    /// instead find a delimiter *inside* a body, which the string pipeline
+    /// never sees.
+    ///
+    /// Substitution is **index-keyed**, as `restore_to` is, so a token whose
+    /// index the caller did not supply is left as written rather than
+    /// renumbering the ones that follow.
+    pub(crate) fn into_owned_restoring<'dst>(self, bodies: &[&str]) -> ElementAttribute<'dst> {
+        let mut shorthand_item_indices = self.shorthand_item_indices;
+
+        ElementAttribute {
+            name: self.name.map(|name| restore_into(name, bodies, &mut [])),
+            value: restore_into(self.value, bodies, &mut shorthand_item_indices),
+            shorthand_item_indices,
+            positional_index: self.positional_index,
+            value_is_quoted: self.value_is_quoted,
+            value_is_substituted: self.value_is_substituted,
+        }
+    }
+
     pub(crate) fn parse(
         source_text: &CowStr<'src>,
         start_index: usize,
@@ -703,6 +746,106 @@ fn parse_shorthand_items(source: &str, warnings: &mut Vec<WarningType>) -> Vec<u
 
 fn is_shorthand_delimiter(c: char) -> bool {
     c == '#' || c == '%' || c == '.'
+}
+
+/// Substitutes each `\u{96}`*n*`\u{97}` token in `text` with `bodies[n]`,
+/// shifting every offset in `indices` past the substitutions that end at or
+/// before it.
+///
+/// The token spelling is the string pipeline's own passthrough sentinel (see
+/// [`Passthroughs`](crate::content::Passthroughs)), which is what makes this
+/// the faithful restore: a caller hands over the very text
+/// `Attrlist::parse` would have seen there, and each body lands where
+/// [`Passthroughs::restore_to`](crate::content::Passthroughs) splices it.
+///
+/// A run that is not a well-formed token, or whose index `bodies` does not
+/// supply, is copied through verbatim — the same index-keyed leniency
+/// `restore_to` has, so an unsupplied index never renumbers the tokens after
+/// it. See [`ElementAttribute::into_owned_restoring`] for why the shift is
+/// right where a re-derivation would not be.
+/// [`restore_tokens`] over a [`CowStr`], keeping the plain
+/// [`into_owned`](CowStr::into_owned) conversion — and with it the inline
+/// representation a short string prefers — for the overwhelmingly common text
+/// that holds no token at all.
+pub(super) fn restore_into<'dst>(
+    text: CowStr<'_>,
+    bodies: &[&str],
+    indices: &mut [usize],
+) -> CowStr<'dst> {
+    if bodies.is_empty() || !text.contains('\u{96}') {
+        return text.into_owned();
+    }
+
+    CowStr::from(restore_tokens(text.as_ref(), bodies, indices))
+}
+
+fn restore_tokens(text: &str, bodies: &[&str], indices: &mut [usize]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0usize;
+
+    // `(offset just past a substituted token, cumulative delta)`, in the
+    // *original* text's coordinates and in increasing order.
+    let mut shifts: Vec<(usize, isize)> = vec![];
+    let mut delta: isize = 0;
+
+    while let Some(rel) = text.get(cursor..).and_then(|rest| rest.find('\u{96}')) {
+        let start = cursor.saturating_add(rel);
+        let digits_start = start.saturating_add('\u{96}'.len_utf8());
+
+        let digits = text
+            .get(digits_start..)
+            .map(|rest| {
+                let len = rest
+                    .find(|c: char| !c.is_ascii_digit())
+                    .unwrap_or(rest.len());
+
+                rest.get(..len).unwrap_or_default()
+            })
+            .unwrap_or_default();
+
+        let digits_end = digits_start.saturating_add(digits.len());
+        let end = digits_end.saturating_add('\u{97}'.len_utf8());
+
+        let body = if digits.is_empty() || text.get(digits_end..end) != Some("\u{97}") {
+            None
+        } else {
+            digits.parse::<usize>().ok().and_then(|n| bodies.get(n))
+        };
+
+        let Some(body) = body else {
+            // Not a token this caller supplied: copy the `\u{96}` through and
+            // resume scanning after it, so a later token in the same text is
+            // still found.
+            let next = start.saturating_add('\u{96}'.len_utf8());
+            out.push_str(text.get(cursor..next).unwrap_or_default());
+            cursor = next;
+            continue;
+        };
+
+        out.push_str(text.get(cursor..start).unwrap_or_default());
+        out.push_str(body);
+
+        delta = delta
+            .saturating_add(isize::try_from(body.len()).unwrap_or(isize::MAX))
+            .saturating_sub(isize::try_from(end.saturating_sub(start)).unwrap_or(isize::MAX));
+
+        shifts.push((end, delta));
+        cursor = end;
+    }
+
+    out.push_str(text.get(cursor..).unwrap_or_default());
+
+    for index in indices.iter_mut() {
+        // A token holds none of the `#`/`.`/`%` delimiters the shorthand scan
+        // keys off, so no offset ever falls *inside* one: each is either
+        // before every substitution or after some, and takes that one's
+        // cumulative delta.
+        if let Some((_, delta)) = shifts.iter().rev().find(|(end, _)| *end <= *index) {
+            *index = index.saturating_add_signed(*delta);
+        }
+    }
+
+    out
 }
 
 #[derive(Clone, Debug)]

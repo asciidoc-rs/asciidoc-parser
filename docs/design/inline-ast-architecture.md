@@ -4445,6 +4445,88 @@ Each phase is a reviewable unit with a clear exit gate.
   target (whose golden leaks the raw sentinel into its own `href`), and the well-formed readings
   these four increments pinned.
 
+  *Step 6 prep landed as (a masked passthrough inside an image's **parsed bracket** — the bracket
+  half's first family):* the four increments above closed the restore-the-value class for every
+  family that *computes* a target off the match string. What each of them deferred, in the same
+  words, was the **bracket half**: restoring inside a value that comes back from a **parse**, where
+  "the string pipeline's own parse swallows the sentinel into a value that only restores after the
+  split". This takes the first of that half's four captures, the `image:`/`icon:` bracket, by
+  reproducing exactly that order.
+
+  The order is the whole point, and it is what a restore-then-parse cannot reproduce.
+  [`Attrlist::parse`](../../parser/src/attributes/attrlist.rs) reads the `\u{96}`*n*`\u{97}`
+  sentinel as one opaque run carrying none of the `,`/`=`/`"` bytes the split reads, so
+  `image:x.png[++a,b++]` is **one** positional whose value is `a,b` — restoring first would divide
+  it into two. So the bracket is put into that same shape before the parse and restored after it:
+  [`tokened_bracket`](../../parser/src/content/inline_builder/macros/image.rs) rewrites each masked
+  piece in the bracket's match-string bytes to an index-keyed token (normalizing two spellings into
+  one — [`widen_masked_passthroughs`](../../parser/src/content/inline_builder/macros/image.rs) has
+  already widened a `Raw` piece for *recognition*, but numbered per level), and a new
+  [`Attrlist::into_owned_restoring`](../../parser/src/attributes/attrlist.rs) — the restoring
+  sibling of the [`into_owned`](../../parser/src/attributes/attrlist.rs) the first attribute-list
+  increment added — splices each body into the parsed values on the way out. Restoration is
+  index-keyed, as [`Passthroughs::restore_to`](../../parser/src/content/passthroughs.rs) is, so a
+  token the split discarded does not shift the ones that survive.
+
+  One thing had to be *shifted* rather than recomputed. An
+  [`ElementAttribute`](../../parser/src/attributes/element_attribute.rs)'s
+  `shorthand_item_indices` are byte offsets into its own `value`, and a restore that lengthens the
+  value ahead of them would leave them pointing mid-word — so
+  [`into_owned_restoring`](../../parser/src/attributes/element_attribute.rs) moves each offset past
+  every substitution that ends at or before it. Shifting is the faithful move and re-deriving is
+  not: a token holds none of the `#`/`.`/`%` delimiters the shorthand scan keys off, so the items
+  the string pipeline found over its sentinel are the same items, only further along
+  (`image:x.png[++abc++.myrole]` keeps the `myrole` role while its `alt` becomes `abc.myrole`),
+  where a re-derivation would find a delimiter *inside* a restored body that the string pipeline
+  never sees. The no-token path keeps the plain `CowStr::into_owned` conversion, so nothing that
+  does not carry a token pays for this.
+
+  The family's gate simply becomes the one its target already uses —
+  [`range_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs) with
+  [`Restorable::Passthrough`](../../parser/src/content/inline_builder/macros/image.rs) — in place
+  of [`range_has_no_opaque_piece`](../../parser/src/content/inline_builder/macros/image.rs), so
+  target and bracket now admit exactly the same kinds. Recognition needed no widening for the
+  bracket: `INLINE_IMAGE_MACRO`'s bracket class swallows either spelling. `alt`, `width`, and
+  `height` are read off the attribute list, so they follow with no code of their own.
+
+  A masked **STEM** expression is deliberately still deferred here, for the reason the target's own
+  increment gave and one more site: the bracket has a `web_path`-bound value of its own — an
+  interactive SVG's `fallback=`, run through `image_src` — and every rendered STEM body carries a
+  backslash `web_path` would posixify on a Windows-separator resolver. Keeping both halves of this
+  family on `Restorable::Passthrough` keeps its `src` identical on every platform, and leaves the
+  family's STEM story exactly one item rather than two.
+
+  What reaches parity is the whole bracket vocabulary over a passthrough: the plain and partial
+  alt, several tokens in one bracket, the split invariant in all three spellings (a body carrying a
+  `,`, an `=`, or sitting inside a quoted value), named values (`title=`, `role=`), the positional
+  width/height slots, both shorthand items after a token, a restored `&` (which
+  `encode_attribute_value` passes through in both pipelines), the `pass:[…]` and triple-plus
+  spellings, an attribute reference hidden inside the body (which neither pipeline expands, both
+  parsing the masked text), target and bracket both masked, the icon form, and the whole set inside
+  a rendered span, twice in one flow, and escaped. Re-running the corpus-wide fold-parity audit
+  shows the divergence set strictly **shrank** — a real golden source is gone
+  (`image:pause.png[title=Pause pass:p[{abc +\ndef}] Resume]`) and no new divergence appeared.
+  Coverage stays diff-neutral, and as with every prep piece before it, nothing further is wired in.
+
+  Three shapes are left where they were, each pinned. As in the target's own increment, one of them
+  runs the **safe** way rather than the byte-parity way: the renderer's dangerous-scheme check reads
+  the `link=` attribute, which now carries the *restored* bytes, so
+  `image:x.png[Alt,link=++javascript:alert(1)++]` renders without its anchor where the string
+  pipeline checked the sentinel its own parse put there, passed it, and let the restore complete a
+  live link. A restored `"` is escaped by the fold's
+  `encode_attribute_value` where the string pipeline encoded its quote-free sentinel and spliced
+  the raw quote into the finished `alt="…"`, closing the attribute — the tree's is the well-formed
+  reading, and the same one the two link families' restores already take for a target. And an
+  author's own sentinel-shaped bytes survive the tree's restore where the string pipeline's
+  `replace_all` over the *finished* string rewrites them too — its own wart, and the reading the
+  sibling target test already pins.
+
+  What still defers of the bracket half is its other three captures — the `link:`/`mailto:` and
+  auto-link families' attribute-list display texts, which keep the opaque-piece gate inside
+  [`text_attrlist`](../../parser/src/content/inline_builder/macros/links.rs) — plus the image
+  family's STEM target and bracket, and the keeps: the cross-reference family's pre-restore target,
+  and the well-formed readings these five increments pinned.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -5144,6 +5226,27 @@ Each phase is a reviewable unit with a clear exit gate.
        pinned by a literal-stays test and a both-separators fold test. The attribute-list display
        texts keep the opaque-piece gate. See the step's own "landed as" note above. The bracket
        half and the image family's own STEM target are what remain of the class.
+
+     - ✅ **prep (a masked passthrough inside an image's parsed bracket).** The first of the
+       **bracket half**'s four captures — the half every restore-the-value increment above deferred
+       in the same words, where the value comes back from a *parse* rather than being computed off
+       the match string. Reproducing the string pipeline means reproducing its *order*:
+       [`Attrlist::parse`](../../parser/src/attributes/attrlist.rs) reads the sentinel as one
+       opaque run carrying none of the `,`/`=`/`"` bytes the split reads, so
+       [`tokened_bracket`](../../parser/src/content/inline_builder/macros/image.rs) puts the
+       bracket into that shape before the parse and a new
+       [`Attrlist::into_owned_restoring`](../../parser/src/attributes/attrlist.rs) splices each
+       body into the parsed values after it — index-keyed, so a discarded token shifts nothing.
+       An [`ElementAttribute`](../../parser/src/attributes/element_attribute.rs)'s shorthand
+       offsets are *shifted* past each substitution rather than re-derived, since a token holds
+       none of the delimiters the scan keys off. The gate becomes the target's own
+       [`range_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs)/[`Restorable::Passthrough`](../../parser/src/content/inline_builder/macros/image.rs)
+       pair, so both halves of the family admit the same kinds; a masked **STEM** stays deferred
+       here too, the bracket having a `web_path`-bound value of its own (an interactive SVG's
+       `fallback=`). A restored `"` and an author's own sentinel-shaped bytes each defer with their
+       own test. See the step's own "landed as" note above. The bracket half's other three
+       captures — the three families' attribute-list display texts — and the image family's STEM
+       are what remain of the class.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
