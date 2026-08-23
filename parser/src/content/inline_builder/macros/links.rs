@@ -7,8 +7,11 @@
 use super::computed_value_children;
 use super::{
     ComputedSpecials, MacroMatch, MacroMatchKind,
-    image::{range_is_restorable, range_is_verbatim, restorable_body, tokened_bracket},
-    macro_text_children, rebuild_macro_level, restored_value_children,
+    image::{
+        MaskedPiece, Tokened, range_is_restorable, range_is_verbatim, restorable_body,
+        tokened_bracket,
+    },
+    macro_text_children, rebuild_macro_level, restored_value_children, tokened_split_agrees,
 };
 use crate::{
     Parser, Span,
@@ -1541,6 +1544,40 @@ struct TextAttrlist<'src> {
     restores: Vec<InlineNode<'src>>,
 }
 
+/// Whether any [`rendered`](MaskedPiece::rendered) piece's token came back
+/// from the parse in a slot other than the **first positional** attribute —
+/// the one slot [`text_attrlist`]'s caller carries structurally.
+///
+/// Every other slot is a value `render_link` writes out (an `id`, a `title`,
+/// a `role`, a `window`, an option), where a body frozen with the parser's own
+/// renderer would put the built-in backend's markup in a custom backend's
+/// output. A *masked* piece is exempt: its body is what the string pipeline
+/// itself splices, so it is faithful wherever it lands.
+fn rendered_token_escaped_the_display_text(
+    attrs: &Attrlist<'_>,
+    masked: &[MaskedPiece<'_, '_>],
+) -> bool {
+    let rendered: Vec<String> = masked
+        .iter()
+        .enumerate()
+        .filter(|(_, piece)| piece.rendered)
+        .map(|(n, _)| format!("\u{96}{n}\u{97}"))
+        .collect();
+
+    attrs.attributes().enumerate().any(|(index, attribute)| {
+        // `attributes()` yields every attribute in order, so index 0 is the
+        // first positional one whenever the list has any positional attribute
+        // at all; a named attribute there is not a display text and is checked
+        // like the rest.
+        let is_display_text = index == 0 && attribute.name().is_none();
+
+        !is_display_text
+            && rendered
+                .iter()
+                .any(|token| attribute.value().contains(token.as_str()))
+    })
+}
+
 /// Parses a link's bracketed **display text** as the [`Attrlist`]`<'src>` its
 /// node carries, mirroring what the string replacers parse: a
 /// newline-normalized copy of the (pre-`\]`-unescape) bracketed text, joined
@@ -1616,10 +1653,6 @@ fn text_attrlist<'src>(
     parser: &Parser,
     pre_restore: &[usize],
 ) -> Option<TextAttrlist<'src>> {
-    if !range_is_restorable(nodes, pieces, &text_range) {
-        return None;
-    }
-
     let normalized = raw_text.replace('\n', " ");
     let verbatim_range = text_range.clone();
     let source = source_slice(pieces, text_range.clone(), root);
@@ -1636,7 +1669,7 @@ fn text_attrlist<'src>(
         });
     }
 
-    // A masked piece is atomic, so a range holding one never took the
+    // A tokened piece is atomic, so a range holding one never took the
     // verbatim path above. Tokening leaves a range holding none byte-identical
     // to `normalized`, so both paths below read the same string.
     let (tokened, masked) = tokened_bracket(
@@ -1644,10 +1677,35 @@ fn text_attrlist<'src>(
         &text_range,
         nodes,
         pieces,
-        parser.renderer.as_ref(),
+        parser,
+        Tokened::MaskedOrRendered,
     );
 
     let (text, attrs) = extract_attributes_from_text(Span::new(&tokened), parser, None);
+
+    // Two things have to hold before a token may stand for a **rendered**
+    // piece, and they are independent.
+    //
+    // First the *split* must land where the string replacer's own parse of the
+    // markup lands. A token carries none of the `,` / `=` / `"` the split
+    // reads, and the replacer's markup may (`link:x[a *b, c* d,role=hl]`), so
+    // the two are compared parse against parse — see [`tokened_split_agrees`].
+    //
+    // Then the value must be one nothing emits. A rendered piece's body is
+    // frozen with the parser's own renderer (see [`MaskedPiece::rendered`]),
+    // which is faithful for the display text — it becomes the node's children,
+    // carrying each piece's own node — and wrong for every other slot, each of
+    // which `render_link` writes out. This is the same per-**slot** boundary
+    // `pre_restore` below draws.
+    let carried: Vec<InlineNode<'src>> = masked.iter().map(|piece| piece.node.clone()).collect();
+
+    if !tokened_split_agrees(&tokened, &carried, parser) {
+        return None;
+    }
+
+    if rendered_token_escaped_the_display_text(&attrs, &masked) {
+        return None;
+    }
 
     if masked.is_empty() {
         return Some(TextAttrlist {
@@ -4390,33 +4448,6 @@ mod tests {
     }
 
     #[test]
-    fn a_formal_url_attribute_list_text_over_a_rendered_span_is_a_documented_divergence() {
-        // A text carrying an attribute list is parsed as a real
-        // `Attrlist<'src>` from the source's own bytes, and a placeholder
-        // inside a *parsed* value has no node it can be mapped back to — the
-        // same reason the cross-reference and `link:`/`mailto:` macro families
-        // defer their own `Attrlist`-bearing capture. That one text shape keeps
-        // the stricter gate outright.
-        //
-        // If this boundary is ever lifted, fold these fixtures into the parity
-        // corpus above.
-        for source in [
-            "https://example.org[a *b* c,role=hl]",
-            "https://example.org[a *b* c,window=_blank]",
-        ] {
-            let nodes = build_src(Span::new(source));
-
-            assert!(
-                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-                "an attribute-list text crossing a rendered span must stay literal: {nodes:?}"
-            );
-
-            // The string pipeline, by contrast, *does* build a link here.
-            assert!(golden_macros(source).contains("<a href"));
-        }
-    }
-
-    #[test]
     fn a_span_whose_markup_perturbs_the_inline_link_pattern_is_a_documented_divergence() {
         // What the structural recovery cannot do is make the *recognition*
         // agree in every case: the string replacer matches over the span's
@@ -5088,26 +5119,76 @@ mod tests {
     }
 
     #[test]
-    fn a_link_text_attribute_list_over_a_rendered_span_is_a_documented_divergence() {
-        // A text carrying an attribute list is parsed as a real
-        // `Attrlist<'src>` from the source's own bytes, and a placeholder
-        // inside a *parsed* value has no node it can be mapped back to — the
-        // same reason the cross-reference family defers its own
-        // `Attrlist`-bearing capture. That one text shape keeps the stricter
-        // gate outright, for both the `link:` (`=`) and `mailto:` (`,`)
-        // spellings.
-        //
-        // If this boundary is ever lifted, fold these fixtures into the parity
-        // corpus above.
-        for source in [
+    fn fold_matches_the_string_pipeline_for_an_attribute_list_text_enclosing_a_span() {
+        // The last capture of the rendered-span class, for both link families.
+        // A text carrying an attribute list gets its display text back from a
+        // *parse*, so a placeholder inside the parsed value used to have no
+        // node it could be mapped back to. It has one now: the piece is
+        // tokened before the split like a masked construct
+        // ([`Tokened::MaskedOrRendered`]) and spliced back into the node's
+        // **children** as the node itself, so the fold still renders it.
+        for fixture in [
+            // The golden spelling, from the language docs.
+            "Chat with other AsciiDoc users in the \
+             https://chat.asciidoc.org[*project chat*^,role=green].",
+            // Each family, with the span at either edge and in the middle.
+            "link:index.html[*bold*,role=hl]",
             "link:index.html[a *b* c,role=hl]",
+            "link:index.html[a *b*,role=hl]",
+            "https://example.org[*bold*,role=hl]",
+            "https://example.org[a *b* c,window=_blank]",
             "mailto:a@example.org[a *b* c,Subj]",
+            "mailto:a@example.org[*bold*,Subj]",
+            // Each named attribute `render_link` reads, with the span in the
+            // *positional* value beside it.
+            "link:index.html[*bold*,title=T]",
+            "link:index.html[*bold*,id=x]",
+            "link:index.html[*a*,window=_blank]",
+            "link:index.html[*a*,role=hl,title=T]",
+            // Other span kinds, and two spans in one text.
+            "link:index.html[`code`,role=hl]",
+            "link:index.html[[.r]#x# here,role=hl]",
+            "link:index.html[*a* and _b_,role=hl]",
+            // The `^` new-window suffix riding after the span, and a
+            // collapsed newline.
+            "https://example.org[`code`^,role=green]",
+            "link:index.html[*a*\nb,role=hl]",
+        ] {
+            assert_eq!(
+                fold_html(&build_src(Span::new(fixture)), &HtmlSubstitutionRenderer {}),
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_span_in_a_rendered_attribute_defers_the_match() {
+        // The boundary this does *not* move, drawn per **slot**. A rendered
+        // piece's body is frozen with the parser's own renderer, which is
+        // faithful only for a value nothing emits — the display text, which
+        // becomes the node's children and carries each piece's own node. Every
+        // other slot is one `render_link` writes out, where the frozen markup
+        // would be the built-in backend's in a custom backend's output, so a
+        // span there defers the whole match. The split-agreement check is the
+        // other half, and defers for a different reason: see the fixtures
+        // below.
+        for source in [
+            "link:index.html[x,role=*b*]",
+            "link:index.html[x,title=*b*]",
+            "https://example.org[x,role=*b*]",
+            // And the other half of the two checks: a span whose own markup
+            // carries a character the split reads, so the string replacer's
+            // list divides where the token cannot — the match's very extent
+            // differs, and it is deferred rather than recognized.
+            "link:index.html[a *b, c* d,role=hl]",
+            "https://example.org[a *b, c* d,role=hl]",
         ] {
             let nodes = build_src(Span::new(source));
 
             assert!(
                 nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-                "an attribute-list text crossing a rendered span must stay literal: {nodes:?}"
+                "a span in a rendered attribute must stay literal: {nodes:?}"
             );
 
             // The string pipeline, by contrast, *does* build a link here.

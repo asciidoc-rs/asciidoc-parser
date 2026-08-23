@@ -211,7 +211,13 @@
 //!   parser rather than the bytes: it parses the tokened text *and* the
 //!   restored markup and compares them attribute by attribute
 //!   ([`tokened_split_agrees`](macros::tokened_split_agrees)), deferring the
-//!   match whenever the two readings differ about its extent. An
+//!   match whenever the two readings differ about its extent. The two **link**
+//!   families take the same move through
+//!   [`tokened_bracket`](macros::image::tokened_bracket), which under
+//!   [`Tokened::MaskedOrRendered`](macros::image::Tokened) admits a rendered
+//!   piece and pairs it with the build-time fold — faithful for a value
+//!   nothing emits, which is exactly the display text, and refused for every
+//!   other slot `render_link` writes out. An
 //!   image's attribute list — the one capture with no display text to carry —
 //!   still defers it outright. An anchor
 //!   renders from its id alone, so it is recognized whenever that id does not
