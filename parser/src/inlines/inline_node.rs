@@ -48,14 +48,26 @@ pub enum InlineNode<'src> {
         location: Span<'src>,
     },
 
-    /// Verbatim, un-escaped output: passthrough content (`+++…+++`,
-    /// `pass:[…]`, `$$…$$`) and any literal special character of an attribute
-    /// expansion that the effective substitution order left unescaped. This
-    /// node is the model's record of the language's "emit raw HTML by design"
-    /// behavior. ASG: `inlineLiteral` with `name="raw"`.
+    /// Content that later substitution steps must not see inside — passthrough
+    /// content (`+++…+++`, `pass:[…]`, `++…++`, `$$…$$`), a masked STEM body,
+    /// and any literal special character of an attribute expansion that the
+    /// effective substitution order left unescaped. This node is the model's
+    /// record of the language's "this text is off limits" behavior. ASG:
+    /// `inlineLiteral` with `name="raw"`.
+    ///
+    /// [`form`](RawForm) says whether `value` is already output bytes or
+    /// logical text the fold escapes. Both are opaque to the transducer steps —
+    /// that is what makes them one node kind rather than two — but only one is
+    /// "raw HTML by design", and conflating them made a passthrough's escaping
+    /// a function of whichever renderer the *parse* carried rather than of the
+    /// one the fold is given.
     Raw {
-        /// The content to emit verbatim, without HTML-escaping.
+        /// The content this node contributes, in the shape [`form`](Self::Raw)
+        /// names.
         value: CowStr<'src>,
+
+        /// Whether the fold emits [`value`](Self::Raw) as-is or escapes it.
+        form: RawForm,
 
         /// The source location this content derives from.
         location: Span<'src>,
@@ -124,8 +136,9 @@ mod tests {
     use crate::{
         HasSpan, Span,
         inlines::{
-            Anchor, Callout, CalloutGuard, CharRef, Footnote, Image, IndexTerm, InlineNode, Ref,
-            RefVariant, SpanForm, Stem, StemNotation, StyleVariant, Styled, Ui, UiKind,
+            Anchor, Callout, CalloutGuard, CharRef, Footnote, Image, IndexTerm, InlineNode,
+            RawForm, Ref, RefVariant, SpanForm, Stem, StemNotation, StyleVariant, Styled, Ui,
+            UiKind,
         },
         strings::CowStr,
     };
@@ -145,6 +158,7 @@ mod tests {
             },
             InlineNode::Raw {
                 value: CowStr::from("<b>"),
+                form: RawForm::AsIs,
                 location,
             },
             InlineNode::Styled(Styled {
@@ -288,4 +302,34 @@ mod tests {
         assert_eq!(ui_kinds.len(), 3);
         assert_eq!(callout_guards.len(), 2);
     }
+}
+
+/// How a [`Raw`](InlineNode::Raw) node's value reaches the output.
+///
+/// Both forms are **opaque**: no transducer step matches inside a `Raw` node,
+/// whichever form it carries. What differs is only what the fold does with the
+/// bytes — and, because the fold is where a renderer is chosen, that is exactly
+/// the difference between a value that honors the renderer it is folded with
+/// and one frozen against whatever renderer happened to be configured at parse
+/// time.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum RawForm {
+    /// `value` is already the bytes to emit, and the fold emits them unchanged.
+    ///
+    /// This is "raw output by design": a `+++…+++` or bare `pass:[…]` body
+    /// (whose substitution group is [`None`], so nothing was applied), an
+    /// entity's own bytes, or a literal special an effective order never
+    /// escaped.
+    ///
+    /// [`None`]: crate::content::SubstitutionGroup
+    AsIs,
+
+    /// `value` is the author's *logical* text, and the fold escapes it exactly
+    /// as it escapes a [`Text`](InlineNode::Text) node's.
+    ///
+    /// This is a body whose substitution group applies special characters and
+    /// nothing else (`++…++`, `$$…$$`) — literal text that must not be
+    /// *matched into* by a later step, but which is not raw output and must be
+    /// escaped by whichever renderer the fold is given.
+    Escaped,
 }

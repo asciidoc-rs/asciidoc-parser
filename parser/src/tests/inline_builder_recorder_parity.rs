@@ -181,7 +181,7 @@ use crate::{
             classify_entity,
         },
     },
-    inlines::{CharRef, InlineNode, RefVariant},
+    inlines::{CharRef, InlineNode, RawForm, RefVariant},
     parser::{HtmlSubstitutionRenderer, ModificationContext},
     strings::CowStr,
 };
@@ -294,8 +294,8 @@ fn assert_trees_equivalent(recorder: &[InlineNode<'_>], builder: &[InlineNode<'_
             InlineNode::Text { value, .. } => {
                 Some((Cow::Borrowed(value.as_ref()), LeafKinds::TextOnly))
             }
-            InlineNode::Raw { value, .. } => {
-                Some((Cow::Borrowed(value.as_ref()), LeafKinds::Mixed))
+            InlineNode::Raw { value, form, .. } => {
+                Some((raw_rendered(value, *form), LeafKinds::Mixed))
             }
             InlineNode::CharRef { value, .. } => {
                 Some((char_ref_rendered(value), LeafKinds::CharRefOnly))
@@ -390,6 +390,33 @@ fn recorder_entity_table_matches_production_classify_entity() {
 /// the recorder recovers it as several adjacent leaves, one per character;
 /// it is rendered by looking up each character individually and
 /// concatenating, mirroring that recovery exactly.
+/// The bytes a [`Raw`](InlineNode::Raw) leaf contributes to the rendered
+/// output, which is what the recorder recovered its own nodes from.
+///
+/// An [`AsIs`](RawForm::AsIs) value already *is* those bytes. An
+/// [`Escaped`](RawForm::Escaped) one is the author's logical text that the fold
+/// escapes — a `++<b>++` body is `<b>` on the node and `&lt;b&gt;` in the
+/// output — so comparing the field directly would ask the recorder for bytes no
+/// pipeline ever produced. This mirrors [`char_ref_rendered`], which has always
+/// had to render its leaf for the same reason.
+fn raw_rendered<'a>(value: &'a CowStr<'_>, form: RawForm) -> Cow<'a, str> {
+    match form {
+        RawForm::AsIs => Cow::Borrowed(value.as_ref()),
+
+        RawForm::Escaped => Cow::Owned(
+            value
+                .chars()
+                .map(|c| match c {
+                    '<' => "&lt;".to_owned(),
+                    '>' => "&gt;".to_owned(),
+                    '&' => "&amp;".to_owned(),
+                    other => other.to_string(),
+                })
+                .collect(),
+        ),
+    }
+}
+
 fn char_ref_rendered<'a>(value: &'a CharRef<'_>) -> Cow<'a, str> {
     if let Some((entity, _)) = RECORDER_ENTITY_TABLE.iter().find(|(_, cr)| cr == value) {
         return Cow::Borrowed(entity);

@@ -119,20 +119,53 @@ pub(super) fn assert_entity<'src>(node: &InlineNode<'src>, entity: &str) -> Span
     location
 }
 
-/// Asserts that `node` is a [`Raw`](InlineNode::Raw) with the given
+/// Asserts that `node` is a [`Raw`](InlineNode::Raw) leaf whose **fold** is
 /// `value`, returning its `location`.
+///
+/// The assertion is on the folded bytes rather than on the node's `value`
+/// field, because a `Raw` node carries one of two
+/// [`form`](crate::inlines::RawForm)s: `AsIs`, whose value already *is* those
+/// bytes, and `Escaped`, whose value is the author's logical text that the fold
+/// escapes. What every caller here means is "this passthrough contributes these
+/// bytes", and that is the same question for both forms — where reading the
+/// field is only the same question for one of them.
 pub(super) fn assert_raw<'src>(node: &InlineNode<'src>, value: &str) -> Span<'src> {
     match node {
-        InlineNode::Raw {
-            value: got,
-            location,
-        } => {
-            assert_eq!(got.as_ref(), value);
+        InlineNode::Raw { location, .. } => {
+            assert_eq!(
+                fold_html(std::slice::from_ref(node), &HtmlSubstitutionRenderer {}),
+                value
+            );
+
             *location
         }
 
         other => panic!("expected Raw({value:?}), got {other:?}"),
     }
+}
+
+/// Asserts that `node` is a [`Raw`](InlineNode::Raw) leaf of exactly `form`,
+/// carrying exactly `value` — the field-level assertion
+/// [`assert_raw`] deliberately does not make.
+///
+/// Used where the *shape* is the subject: that a `+++…+++` body is `AsIs`
+/// output while a `++…++` body is `Escaped` logical text, which is what keeps
+/// a passthrough's escaping a property of the fold's renderer rather than of
+/// the parse's.
+pub(super) fn assert_raw_form(node: &InlineNode<'_>, form: crate::inlines::RawForm, value: &str) {
+    // Compared as a whole node rather than by matching out the two fields,
+    // which keeps this free of a fallback arm only a failing test could reach.
+    // `location` is taken from `node` itself, so it is deliberately not part of
+    // the assertion — this helper's subject is the form and the value, and
+    // [`assert_raw`] already hands a caller the location to check.
+    assert_eq!(
+        node,
+        &InlineNode::Raw {
+            value: CowStr::from(value),
+            form,
+            location: node.span(),
+        }
+    );
 }
 
 /// Asserts that `node` is a [`Styled`](crate::inlines::Styled) span of
