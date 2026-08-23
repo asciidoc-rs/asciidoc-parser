@@ -5908,6 +5908,61 @@ Each phase is a reviewable unit with a clear exit gate.
   probe happens to perturb them; a gross sabotage breaks so much through the golden assertions
   that it understates the loss, which is the point of having the corpora at all.
 
+  *Step 6 landed as (a passthrough body is literal text, not raw output):* the cutover blocker
+  review found on the always-on increment, and a conflation in §3.4's trichotomy that had been
+  there since the passthrough step landed.
+
+  [`Raw`](../../parser/src/inlines/inline_node.rs) was documented as "verbatim, un-escaped output
+  … `+++…+++`, `pass:[…]`, `$$…$$`". The first two are that. `$$…$$` and `++…++` are **not**:
+  their substitution group applies special characters, so their body is the author's *literal
+  text*, and something has to escape it. The builder did — at build time, through whichever
+  renderer the `Parser` happened to carry — and froze the result into the node. Two things
+  followed, and the review caught the second:
+
+  1. Folding that tree through a *different* renderer emitted the parse-time renderer's escaping
+     instead, which is precisely what `render_with` exists to not do. Measured with a
+     non-HTML backend: the string pipeline produced `a [LT] b` while the fold produced
+     `a &lt; b`.
+  2. Building the tree **invoked** the document's renderer for a value nothing reads. With the
+     tree built for every parse, a renderer carrying state saw extra calls and a *later block's*
+     authoritative output shifted under it — a real regression, and one no test paired a stateful
+     renderer with a passthrough to catch.
+
+  The obvious fix — hand the builder's parser clone a built-in renderer so it cannot touch the
+  document's — is wrong, and measurably so: it makes (2) go away by making (1) worse, silently
+  HTML-escaping a custom backend's passthrough body. What the two failures share is the *freezing*,
+  not the renderer.
+
+  So `Raw` gains a [`form`](../../parser/src/inlines/inline_node.rs): `AsIs`, whose value already
+  is the bytes to emit, and `Escaped`, whose value is logical text the fold escapes exactly as it
+  escapes a [`Text`](../../parser/src/inlines/inline_node.rs) run. Both stay **opaque** — no
+  transducer step matches inside either, which is what keeps them one node kind rather than two —
+  and the escaping moves to the one place a renderer is chosen. The `Escaped` sites also stop
+  allocating, since they now borrow the author's bytes instead of owning an escaped copy.
+
+  Opacity is why the obvious alternative does not work: a `++…++` body is *semantically* a `Text`
+  run, and folds identically to one, but
+  [`build_match_string`](../../parser/src/content/inline_builder/quotes.rs) decides atomicity by
+  node **kind** — a `Text` piece is splittable, so later steps would match into a passthrough body.
+  The node has to stay `Raw`; only its escaping moves.
+
+  The whole suite passes with **no expectation changed**. That is the claim worth making: the
+  observable bytes are identical, which a change to *where* escaping happens should be, and the
+  corpus-wide fold-parity audit agrees — the divergence set is byte-identical, 235 rows before and
+  after, none added and none closed. `assert_raw` now asserts a node's **fold** rather than its
+  `value` field, because "this passthrough contributes these bytes" is the same question for both
+  forms where reading the field is only the same question for one; that is what let ~25 existing
+  expectations stand unchanged. The Strategy-A cross-check needed the mirror of that:
+  [`raw_rendered`](../../parser/src/tests/inline_builder_recorder_parity.rs) renders a `Raw` leaf
+  before matching it against the recorder's own bytes, exactly as `char_ref_rendered` has always
+  had to.
+
+  What still freezes a value, each for its own reason: a `pass:c,q[…]` body (its explicit
+  substitution list runs a whole pipeline, the deferral 5d part 3 documents for itself), a bare
+  `+…+` body enclosing an already-extracted passthrough (its value interleaves escaped text with
+  another node's fold bytes, so no single form describes it), and a `Stem` body. Each is a narrow
+  form, and each owes the same debt to `render_with` that every frozen value on this branch does.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -7041,6 +7096,19 @@ Each phase is a reviewable unit with a clear exit gate.
        test edited** and both recordings unchanged. The ~277 golden-HTML assertions keep `apply`
        deliberately — their subject is `rendered_html()` itself. See the step's own "landed as"
        note above.
+
+     - ✅ **prep (a passthrough body is literal text, not raw output).** The blocker review found
+       on the always-on increment, and a conflation in §3.4's trichotomy: `++…++` / `$$…$$` apply
+       special characters, so their body is the author's *literal text*, not raw output — and the
+       builder was escaping it at build time through whichever renderer the parse carried. That
+       both broke a custom backend's fold (measured: `a &lt; b` where the pipeline gives
+       `a [LT] b`) and made building the tree *invoke* the document's renderer, shifting a later
+       block's output for a stateful one. [`Raw`](../../parser/src/inlines/inline_node.rs) gains a
+       [`form`](../../parser/src/inlines/inline_node.rs) (`AsIs` / `Escaped`); both stay opaque —
+       which they must, since `build_match_string` decides atomicity by node *kind* — and the
+       escaping moves to the fold. No expectation changed, and the audit's divergence set is
+       byte-identical. See the step's own "landed as" note above. **This unblocks the always-on
+       increment.**
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

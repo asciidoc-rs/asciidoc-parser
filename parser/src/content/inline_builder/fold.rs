@@ -6,8 +6,8 @@ use crate::{
     attributes::{Attrlist, AttrlistContext},
     content::document_xrefstyle,
     inlines::{
-        Anchor, Callout, CalloutGuard, CharRef, Footnote, Image, IndexTerm, InlineNode, Ref,
-        RefVariant, SpanForm, Stem, StemNotation, Ui, UiKind,
+        Anchor, Callout, CalloutGuard, CharRef, Footnote, Image, IndexTerm, InlineNode, RawForm,
+        Ref, RefVariant, SpanForm, Stem, StemNotation, Ui, UiKind,
     },
     parser::{
         CalloutGuard as ParserCalloutGuard, CalloutRenderParams, FootnoteRenderParams,
@@ -122,8 +122,25 @@ fn fold_into_html(
                 }
             }
 
-            InlineNode::Raw { value, .. } => {
+            InlineNode::Raw {
+                value,
+                form: RawForm::AsIs,
+                ..
+            } => {
                 out.push_str(value);
+            }
+
+            // Literal text that later steps could not see into, but which is
+            // not raw output: the fold escapes it exactly as it escapes a
+            // `Text` run, with whatever renderer *this* fold was given.
+            InlineNode::Raw {
+                value,
+                form: RawForm::Escaped,
+                ..
+            } => {
+                for ch in value.chars() {
+                    render_char(ch, renderer, out);
+                }
             }
 
             InlineNode::CharRef {
@@ -254,7 +271,7 @@ fn fold_into_html(
 /// Appends `ch` to `out`, routing the three special characters through
 /// `renderer` (so a custom renderer's escaping is honored) and pushing any
 /// other character verbatim.
-fn render_char(ch: char, renderer: &dyn InlineSubstitutionRenderer, out: &mut String) {
+pub(super) fn render_char(ch: char, renderer: &dyn InlineSubstitutionRenderer, out: &mut String) {
     let type_ = match ch {
         '<' => SpecialCharacter::Lt,
         '>' => SpecialCharacter::Gt,
@@ -716,7 +733,7 @@ mod tests {
     };
     use crate::{
         Parser, Span,
-        inlines::{CharRef, Image, InlineNode, Ref, RefVariant},
+        inlines::{CharRef, Image, InlineNode, RawForm, Ref, RefVariant},
         parser::{
             HtmlSubstitutionRenderer, ModificationContext, ResolvedReference, XrefSignifier,
             XrefStyle,
@@ -820,6 +837,7 @@ mod tests {
 
         let raw = InlineNode::Raw {
             value: CowStr::from(location.data()),
+            form: RawForm::AsIs,
             location,
         };
 

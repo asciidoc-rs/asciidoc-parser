@@ -12,7 +12,7 @@ use crate::{
     content::{
         INLINE_IMAGE_MACRO, basename,
         inline_builder::{
-            fold::{fold_html, fold_stem},
+            fold::{fold_html, fold_stem, render_char},
             quotes::{
                 LevelContext, Piece, build_match_string, charref_entity, source_slice, text_slice,
             },
@@ -20,7 +20,7 @@ use crate::{
         },
         normalize_text_lf_escaped_bracket,
     },
-    inlines::{Image, InlineNode},
+    inlines::{Image, InlineNode, RawForm},
     parser::{
         InlineSubstitutionRenderer, has_dangerous_scheme, has_dangerous_self_href, is_uri_ish,
     },
@@ -440,7 +440,29 @@ pub(in crate::content::inline_builder) fn restorable_body<'a>(
     renderer: &dyn InlineSubstitutionRenderer,
 ) -> Option<Cow<'a, str>> {
     match node {
-        InlineNode::Raw { value, .. } => Some(Cow::Borrowed(value.as_ref())),
+        InlineNode::Raw {
+            value,
+            form: RawForm::AsIs,
+            ..
+        } => Some(Cow::Borrowed(value.as_ref())),
+
+        // An escaped-form body carries the author's logical text, so the bytes
+        // the string pipeline splices over its own sentinel are that text
+        // *escaped* — the same bytes this node's own fold emits, which is the
+        // invariant this function exists to hold (see `node_is_restorable`).
+        InlineNode::Raw {
+            value,
+            form: RawForm::Escaped,
+            ..
+        } => {
+            let mut out = String::with_capacity(value.len());
+
+            for ch in value.chars() {
+                render_char(ch, renderer, &mut out);
+            }
+
+            Some(Cow::Owned(out))
+        }
 
         InlineNode::Stem(stem) => {
             let mut out = String::new();
@@ -1229,7 +1251,7 @@ mod tests {
             build, char_replacements::apply_character_replacements, macros::apply_macros,
             special_chars::Masked,
         },
-        inlines::{CharRef, Image, InlineNode, SpanForm, StyleVariant},
+        inlines::{CharRef, Image, InlineNode, RawForm, SpanForm, StyleVariant},
         parser::{DefaultPathResolver, HtmlSubstitutionRenderer},
         strings::CowStr,
     };
@@ -2551,6 +2573,7 @@ mod tests {
         let restorable = [
             InlineNode::Raw {
                 value: CowStr::from("raw"),
+                form: RawForm::AsIs,
                 location: root,
             },
             InlineNode::Stem(crate::inlines::Stem {

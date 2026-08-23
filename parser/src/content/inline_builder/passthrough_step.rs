@@ -12,7 +12,7 @@ use super::{
 use crate::{
     Parser, Span,
     content::{Content, INLINE_PASS, INLINE_PASS_MACRO, SubstitutionGroup},
-    inlines::{InlineNode, SpanForm, StyleVariant, Styled},
+    inlines::{InlineNode, RawForm, SpanForm, StyleVariant, Styled},
     strings::CowStr,
 };
 
@@ -661,6 +661,7 @@ fn build_bare_unconstrained_match<'src>(
             consumed,
             node: Box::new(InlineNode::Raw {
                 value: CowStr::from(value),
+                form: RawForm::AsIs,
                 location,
             }),
         },
@@ -763,20 +764,25 @@ fn build_passthrough_node<'src>(
 
         return InlineNode::Raw {
             value: CowStr::from(content.data()),
+            form: RawForm::AsIs,
             location,
         };
     }
 
     if let Some(m) = caps.get(8).or_else(|| caps.get(11)) {
         // `++text++` / `$$text$$`: `SubstitutionGroup::Verbatim` applies only
-        // special characters. Computed through the real substitution
-        // pipeline (rather than hand-escaping `<`/`>`/`&`) so a custom
-        // `InlineSubstitutionRenderer`'s escaping is honored.
+        // special characters — so the body is the author's *literal text*,
+        // not raw output, and the fold is what escapes it
+        // ([`RawForm::Escaped`]). Rendering it here instead would freeze it
+        // against whichever renderer the parse carried, which is a different
+        // renderer from the one a later `render_with` fold is handed, and
+        // (while the string pipeline still runs) invokes that renderer a
+        // second time for a value nothing reads.
         let content = source_slice(pieces, m.start()..m.end(), root);
-        let value = passthrough_text(content.data(), &SubstitutionGroup::Verbatim, parser);
 
         return InlineNode::Raw {
-            value: CowStr::from(value),
+            value: CowStr::from(content.data()),
+            form: RawForm::Escaped,
             location,
         };
     }
@@ -810,7 +816,15 @@ fn build_passthrough_node<'src>(
         CowStr::from(raw)
     };
 
-    InlineNode::Raw { value, location }
+    // Either the body under `SubstitutionGroup::None` (nothing applied, so the
+    // author's bytes are the output bytes) or a value already rendered through
+    // an explicit substitution list — which stays a frozen value, the deferral
+    // `build_pass_macro_subs_value` documents for itself. Both are `AsIs`.
+    InlineNode::Raw {
+        value,
+        form: RawForm::AsIs,
+        location,
+    }
 }
 
 /// Computes the rendered `value` for a `pass:` macro carrying an **explicit
@@ -920,16 +934,18 @@ fn build_attrlisted_passthrough_node<'src>(
     let children = if old_behavior {
         apply_normal_subs(body_span, parser)
     } else {
-        let subs = if boundary == "+++" {
-            SubstitutionGroup::None
+        // `+++` applies nothing, so its body is raw output; `++`/`$$` apply
+        // special characters, so theirs is literal text the fold escapes. Both
+        // carry the author's bytes unchanged — only the form differs.
+        let form = if boundary == "+++" {
+            RawForm::AsIs
         } else {
-            SubstitutionGroup::Verbatim
+            RawForm::Escaped
         };
 
-        let value = passthrough_text(body_span.data(), &subs, parser);
-
         vec![InlineNode::Raw {
-            value: CowStr::from(value),
+            value: CowStr::from(body_span.data()),
+            form,
             location: body_span,
         }]
     };
@@ -1007,10 +1023,11 @@ fn build_bare_attrlisted_passthrough_node<'src>(
     let children = if old_behavior && !is_backtick {
         apply_normal_subs(body_span, parser)
     } else {
-        let value = passthrough_text(body_span.data(), &SubstitutionGroup::Verbatim, parser);
-
+        // Always `SubstitutionGroup::Verbatim` here (see this function's own
+        // doc comment), so the body is literal text the fold escapes.
         vec![InlineNode::Raw {
-            value: CowStr::from(value),
+            value: CowStr::from(body_span.data()),
+            form: RawForm::Escaped,
             location: body_span,
         }]
     };
@@ -1287,6 +1304,144 @@ mod tests {
         );
 
         assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "pass:[x]");
+    }
+
+    #[test]
+    fn a_specialcharacters_body_is_literal_text_the_fold_escapes() {
+        use super::super::test_support::assert_raw_form;
+        use crate::inlines::RawForm;
+
+        // The shape this increment exists for. `SubstitutionGroup` decides
+        // which form a passthrough body takes, and the two are not the same
+        // thing wearing different labels:
+        //
+        //   - `+++…+++` and bare `pass:[…]` apply *nothing*, so the author's bytes are
+        //     the output bytes — raw output by design.
+        //   - `++…++` and `$$…$$` apply special characters and nothing else, so the
+        //     body is the author's *literal text*. Escaping it is the fold's job, with
+        //     whatever renderer the fold is given.
+        //
+        // Both stay opaque to every later step — that is what keeps them one
+        // node kind — so this pins the distinction the kind alone cannot.
+        let nodes = build_src(Span::new("+++<b>+++"));
+        assert_raw_form(&nodes[0], RawForm::AsIs, "<b>");
+
+        let nodes = build_src(Span::new("pass:[<b>]"));
+        assert_raw_form(&nodes[0], RawForm::AsIs, "<b>");
+
+        let nodes = build_src(Span::new("++<b>++"));
+        assert_raw_form(&nodes[0], RawForm::Escaped, "<b>");
+
+        let nodes = build_src(Span::new("$$<b>$$"));
+        assert_raw_form(&nodes[0], RawForm::Escaped, "<b>");
+
+        // The attribute-listed forms carry theirs as the `Styled` wrapper's
+        // one child, and split the same way.
+        let nodes = build_src(Span::new("[.role]+++<b>+++"));
+        let children = assert_styled(&nodes[0], StyleVariant::Unquoted, SpanForm::Unconstrained);
+        assert_raw_form(&children[0], RawForm::AsIs, "<b>");
+
+        let nodes = build_src(Span::new("[.role]++<b>++"));
+        let children = assert_styled(&nodes[0], StyleVariant::Unquoted, SpanForm::Unconstrained);
+        assert_raw_form(&children[0], RawForm::Escaped, "<b>");
+    }
+
+    #[test]
+    fn a_passthrough_body_honors_the_renderer_the_fold_is_given() {
+        // The defect this closes. A `++…++` body used to be escaped at *build*
+        // time, through whichever renderer the `Parser` carried, and frozen
+        // into the node. Two things followed, and both are wrong:
+        //
+        //   1. folding the tree with a *different* renderer — which is the whole point
+        //      of `render_with` — silently emitted the parse-time renderer's escaping
+        //      instead;
+        //   2. building the tree *invoked* the document's renderer for a value nothing
+        //      reads, so a renderer with state saw extra calls and a later block's
+        //      authoritative output shifted under it.
+        //
+        // Folding the same tree through two different backends is the sharpest
+        // statement of the fix: one tree, two renderings, neither frozen.
+        #[derive(Debug)]
+        struct BracketRenderer;
+
+        impl crate::parser::InlineSubstitutionRenderer for BracketRenderer {
+            fn render_special_character(
+                &self,
+                type_: crate::parser::SpecialCharacter,
+                dest: &mut String,
+            ) {
+                dest.push_str(match type_ {
+                    crate::parser::SpecialCharacter::Lt => "[LT]",
+                    crate::parser::SpecialCharacter::Gt => "[GT]",
+                    crate::parser::SpecialCharacter::Ampersand => "[AMP]",
+                });
+            }
+        }
+
+        let parser = Parser::default();
+        let nodes = build_src(Span::new("++a < b > c & d++"));
+
+        assert_eq!(
+            super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
+            "a &lt; b &gt; c &amp; d"
+        );
+
+        assert_eq!(
+            super::super::fold_html(&nodes, &BracketRenderer, &parser),
+            "a [LT] b [GT] c [AMP] d"
+        );
+
+        // A genuinely raw body is not escaped by either backend — the other
+        // half of the distinction, which a single-renderer test cannot show.
+        let raw = build_src(Span::new("+++a < b+++"));
+
+        assert_eq!(
+            super::super::fold_html(&raw, &BracketRenderer, &parser),
+            "a < b"
+        );
+    }
+
+    #[test]
+    fn building_a_passthrough_does_not_invoke_the_documents_renderer() {
+        // The second half of the defect above, pinned directly: a renderer with
+        // state must not advance while the *tree* is built, because the tree is
+        // derived and its build must not be observable. Before the fix,
+        // `passthrough_text` ran the real substitution pipeline here and this
+        // counter reached 1.
+        // The counter has to be *observable in the output*, since a renderer
+        // behind an `Rc<dyn …>` cannot be downcast to read a field: each call
+        // emits its own ordinal, so probing afterwards reports how many calls
+        // came before it.
+        #[derive(Debug, Default)]
+        struct OrdinalRenderer {
+            calls: std::cell::Cell<usize>,
+        }
+
+        impl crate::parser::InlineSubstitutionRenderer for OrdinalRenderer {
+            fn render_special_character(
+                &self,
+                _type_: crate::parser::SpecialCharacter,
+                dest: &mut String,
+            ) {
+                self.calls.set(self.calls.get() + 1);
+                dest.push_str(&format!("[{}]", self.calls.get()));
+            }
+        }
+
+        let parser =
+            Parser::default().with_inline_substitution_renderer(OrdinalRenderer::default());
+
+        let _ = super::super::build(Span::new("++a < b++"), &parser, None);
+
+        let mut probe = String::new();
+        parser
+            .renderer
+            .render_special_character(crate::parser::SpecialCharacter::Lt, &mut probe);
+
+        assert_eq!(
+            probe, "[1]",
+            "building the tree must not invoke the document's renderer; the probe is call one"
+        );
     }
 
     #[test]
@@ -2275,7 +2430,9 @@ mod tests {
         assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "a text b");
 
         match &nodes[1] {
-            InlineNode::Raw { value, location } => {
+            InlineNode::Raw {
+                value, location, ..
+            } => {
                 assert_eq!(value.as_ref(), "text");
                 assert_eq!(location.data(), "+text+");
             }

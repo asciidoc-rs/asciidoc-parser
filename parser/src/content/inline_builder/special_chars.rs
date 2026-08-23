@@ -5,7 +5,7 @@
 use super::{fold_html, passthrough_step::is_special};
 use crate::{
     HasSpan, Parser, Span,
-    inlines::{CharRef, InlineNode, RefVariant},
+    inlines::{CharRef, InlineNode, RawForm, RefVariant},
     parser::InlineSubstitutionRenderer,
     strings::CowStr,
 };
@@ -248,6 +248,7 @@ fn split_verbatim<'src>(location: Span<'src>, leaf: SpecialLeaf, out: &mut Vec<I
 
             SpecialLeaf::Raw => InlineNode::Raw {
                 value: CowStr::from(ch_span.data()),
+                form: RawForm::AsIs,
                 location: ch_span,
             },
         });
@@ -344,7 +345,11 @@ pub(super) fn flatten_prior_markup<'src>(
 /// the break `post_replacements` wrote — so only `Text` needs the rewrite.
 fn as_pre_escape<'src>(node: InlineNode<'src>) -> InlineNode<'src> {
     match node {
-        InlineNode::Text { value, location } => InlineNode::Raw { value, location },
+        InlineNode::Text { value, location } => InlineNode::Raw {
+            value,
+            form: RawForm::AsIs,
+            location,
+        },
 
         InlineNode::Styled(mut styled) => {
             styled.children = styled.children.into_iter().map(as_pre_escape).collect();
@@ -538,6 +543,7 @@ fn split_synthesized<'src>(
 
             SpecialLeaf::Raw => InlineNode::Raw {
                 value: CowStr::from(ch.to_string()),
+                form: RawForm::AsIs,
                 location,
             },
         });
@@ -568,7 +574,8 @@ mod tests {
         Span,
         content::{Content, SubstitutionStep},
         inlines::{
-            Anchor, CharRef, Footnote, InlineNode, Ref, RefVariant, SpanForm, StyleVariant, Styled,
+            Anchor, CharRef, Footnote, InlineNode, RawForm, Ref, RefVariant, SpanForm,
+            StyleVariant, Styled,
         },
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
@@ -815,7 +822,9 @@ mod tests {
     /// located at `col` on line 1 with `offset`.
     fn assert_raw_special(node: &InlineNode<'_>, ch: char, col: usize, offset: usize) {
         match node {
-            InlineNode::Raw { value, location } => {
+            InlineNode::Raw {
+                value, location, ..
+            } => {
                 assert_eq!(value.as_ref(), ch.to_string());
                 assert_eq!(location.data(), ch.to_string());
                 assert_eq!(location.col(), col, "col for {ch:?}");
@@ -889,6 +898,7 @@ mod tests {
                 InlineNode::Raw {
                     value: special,
                     location: special_loc,
+                    ..
                 },
                 InlineNode::Text {
                     value: trailing,
@@ -1002,6 +1012,7 @@ mod tests {
             InlineNode::LineBreak { location },
             InlineNode::Raw {
                 value: CowStr::from(location.data()),
+                form: RawForm::AsIs,
                 location,
             },
         ]);
