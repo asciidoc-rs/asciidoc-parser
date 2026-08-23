@@ -892,6 +892,7 @@ mod tests {
             "[[mid-anchor]] after the anchor",
             "text before anchor:named[Ref Text] and after",
             "a +++<b>raw</b>+++ passthrough",
+            "+a bare form over a $$nested$$ pass:q[`one`]+",
             r"an escaped \[attrs]++<b>*x*</b>++ bracket",
             r"an escaped \[x-]++*bold*++ bracket",
             "a prohibited index:[attrs]+text+ prefix",
@@ -1029,6 +1030,12 @@ mod tests {
         assert_parity(
             "An index:[.role]+<b>raw</b>+ beside [.role]+<b>raw</b>+ and *bold* and image:foo.png[Alt].",
         );
+
+        // The bare unconstrained form whose body encloses a construct this
+        // step's *first* pass already extracted: the verbatim substitution
+        // runs over the placeholder and the inner body is spliced after, the
+        // string pipeline's own restore-last order.
+        assert_parity("+Sometimes you feel pass:q[`mono`].+ Sometimes you +$$don't$$+ and *bold*.");
 
         // Inline STEM beside a quoted span and a character replacement.
         assert_parity("Equation stem:[x^2+y^2=z^2] appears in *bold* text with (C) 2024.");

@@ -856,6 +856,17 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "[[mid-anchor]] after the anchor",
         "text before anchor:named[Ref Text] and after",
         "a +++<b>raw</b>+++ passthrough",
+        // A bare `+…+` form whose body encloses a construct the first
+        // extraction pass already replaced is deliberately *not* in this
+        // sweep. The builder makes one `Raw` leaf whose value already carries
+        // the inner passthrough's restored body — what the string pipeline's
+        // own entry holds by restore time — while the recorder, recovering
+        // structure from the finished string, sees the inner construct's own
+        // markers and splits the same text into several leaves. That is the
+        // leaf-boundary asymmetry this module's doc comment describes, not a
+        // divergence: the two fold to the same bytes, which the whole-pipeline
+        // sweeps pin
+        // (`fold_matches_the_string_pipeline_for_a_bare_form_over_an_extracted_passthrough`).
         r"an escaped \[attrs]++<b>*x*</b>++ bracket",
         r"an escaped \[x-]++*bold*++ bracket",
         "a prohibited index:[attrs]+text+ prefix",
