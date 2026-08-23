@@ -191,7 +191,13 @@
 //!   itself ([`restored_value_children`](macros::restored_value_children)).
 //!   The boundary is then drawn per **slot** rather than per family — a piece
 //!   reaching the `window=` / `role=` / `xrefstyle=` this family reads as a
-//!   *string* has no bytes to be read as, and that shape alone defers. An
+//!   *string* has no bytes to be read as, and that shape alone defers. The
+//!   recognition-agreement gap above extends here too, and the token is what
+//!   makes it visible: an attribute-list delimiter *inside* the span
+//!   (`xref:sec[a *b, c* d,role=hl]`) ends the replacer's positional value
+//!   inside a tag — improperly nested markup no tree can represent — where the
+//!   token carries none of the `,`/`=`/`"` the split reads and the span stays
+//!   whole. An
 //!   image's attribute list — the one capture with no display text to carry —
 //!   still defers it outright. An anchor
 //!   renders from its id alone, so it is recognized whenever that id does not

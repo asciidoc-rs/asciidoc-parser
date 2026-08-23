@@ -5122,7 +5122,14 @@ Each phase is a reviewable unit with a clear exit gate.
   [`text_attrlist`](../../parser/src/content/inline_builder/macros/links.rs)'s own `pre_restore`
   draws it: a token reaching the `window=`, `role=`, or `xrefstyle=` this family reads as a
   *string* names markup that exists only at fold time where a string is needed, so that shape
-  defers with its own divergence test. Deciding it means making the same tokened parse the builder
+  defers with its own divergence test. The family's **recognition-agreement** gap reaches the
+  attribute-list spelling too, and the token is what makes it visible: an attribute-list
+  delimiter *inside* the span (`xref:sec[a *b, c* d,role=hl]`) ends the replacer's positional
+  value inside a tag — `a <strong>b</a>`, improperly nested markup no tree can represent — where
+  the token carries none of the `,` / `=` / `"` the split reads and the span stays whole. That is
+  the quotes step's crossed delimiters again, and it is pinned by its own test rather than
+  deferred: the same comma without a named attribute beside it has no attribute list to split at
+  all, and is at parity through the plain-text path. Deciding it means making the same tokened parse the builder
   makes, in the gate — which is where this family's contract puts every deferral ("both builders
   claim every shape they are handed"), and where it already re-derives the shorthand's own comma
   split for the same reason.
@@ -6068,7 +6075,9 @@ Each phase is a reviewable unit with a clear exit gate.
        a `Ref{Xref}` carries `attrs: None`, so nothing rides on the list itself. The boundary is
        redrawn per **slot**: a piece reaching the `window=` / `role=` / `xrefstyle=` this family
        reads as a string still defers, decided in the gate where every cross-reference deferral is
-       decided. A masked passthrough or STEM in such a text comes along for free. See the step's
+       decided; and the family's recognition-agreement gap reaches this spelling, an attribute-list
+       delimiter inside the span splitting the replacer's own value inside a tag, pinned by its own
+       test. A masked passthrough or STEM in such a text comes along for free. See the step's
        own "landed as" note above. The **image** family's bracket — the one capture with no
        display text to carry — is what remains of the class.
 

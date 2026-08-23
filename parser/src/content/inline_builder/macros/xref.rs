@@ -779,35 +779,6 @@ mod tests {
     }
 
     #[test]
-    fn scratch_probe2() {
-        for fixture in [
-            "See xref:sec[*bold*,role=hl].",
-            "xref:sec[*bold*,role=hl]",
-            "xref:sec[*a* b,window=_blank]",
-            "xref:sec[*a*,xrefstyle=full]",
-            "xref:sec[a *b* c,role=hl]",
-            "xref:sec[`code`,role=hl]",
-            "xref:sec[*a*]",
-            "xref:sec[*a*,role=*b*]",
-            "xref:sec[*a*,window=*b*]",
-            "xref:sec[++<b>x</b>++,role=hl]",
-            "xref:sec[*a*,role=hl,window=_blank]",
-            "xref:sec[a &copy; *b*,role=hl]",
-            "xref:sec[a < *b*,role=hl]",
-            "xref:sec[*a*\nb,role=hl]",
-            "xref:sec[image:x.png[]]",
-            "<<sec,*bold*>>",
-        ] {
-            let folded = fold_html(&build_src(Span::new(fixture)), &HtmlSubstitutionRenderer {});
-            let gold = golden_xref(fixture);
-            println!(
-                "{fixture:?}\n  tree = {folded:?}\n  gold = {gold:?}\n  {}",
-                if folded == gold { "OK" } else { "DIVERGE" }
-            );
-        }
-    }
-
-    #[test]
     fn fold_matches_the_string_pipeline_through_xrefs() {
         // For each fixture, folding the single-pass tree (all five steps)
         // reproduces the string pipeline's output byte-for-byte. This is the
@@ -1844,6 +1815,51 @@ mod tests {
 
             other => panic!("expected a span and a text run, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn an_attribute_list_delimiter_inside_a_span_is_a_documented_divergence() {
+        // The recognition-agreement gap this spelling inherits, and the same
+        // one the plain reference text already documents: the string replacer
+        // splits its attribute list over the span's **markup**, where this
+        // splits over one token that carries none of the `,` / `=` / `"` the
+        // split reads. A comma inside a span therefore ends the replacer's
+        // positional value *inside* a tag — it renders `a <strong>b</a>`,
+        // improperly nested markup no tree can represent — where the builder
+        // keeps the span whole. It is the quotes step's crossed delimiters
+        // again: the markup-perturbed reading against the tree's well-formed
+        // one, and this is the shape that pins it.
+        for source in [
+            "xref:sec[a *b, c* d,role=hl]",
+            "xref:sec[a `b, c` d,role=hl]",
+        ] {
+            let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+            let golden = golden_xref(source);
+
+            assert_ne!(
+                folded, golden,
+                "expected the documented divergence to still reproduce; the boundary may have \
+                 been lifted — if so, fold this fixture into the parity corpus above"
+            );
+
+            // The builder keeps the span whole and the named attribute it
+            // split off; the string pipeline cuts the anchor short inside the
+            // span's own opening tag.
+            assert!(folded.contains(r#"class="hl""#), "{folded:?}");
+            assert!(
+                golden.contains("</a>") && !golden.contains(" d</a>"),
+                "{golden:?}"
+            );
+        }
+
+        // Without a *named* attribute to split off, there is no attribute list
+        // at all — the `=`/`,` probe finds the whole text is one positional
+        // value — so the same comma is at parity through the plain-text path.
+        let source = "xref:sec[a *b, c* d]";
+        assert_eq!(
+            fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
     }
 
     #[test]
