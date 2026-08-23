@@ -1732,8 +1732,15 @@ fn inline_tree_build_tolerates_a_stateful_renderer() {
     };
 
     // The authoritative rendered string reflects the stateful renderer's
-    // (first-invocation) output …
-    assert_eq!(content.rendered_html(), "a [first] b");
+    // output — the *second* invocation's, for now. `rendered_html()` is the
+    // fold of the tree, and the string pipeline still runs ahead of it (it
+    // produces the deferred cross-reference segments and fills the catalogs),
+    // so this renderer is invoked twice per parse and the fold sees the later
+    // state. That is the interim double render, not a property of the fold: it
+    // becomes `[first]` again once the string pipeline stops being run for
+    // output. Pinned exactly rather than loosely so that change shows up here
+    // as a signal.
+    assert_eq!(content.rendered_html(), "a [second] b");
 
     // … while the tree carries the logical special character, unpolluted by
     // the renderer's state.

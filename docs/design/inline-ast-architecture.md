@@ -6077,6 +6077,62 @@ Each phase is a reviewable unit with a clear exit gate.
   `MARK_OPEN`/`MARK_CLOSE` fixture, which had appeared in both a with- and a without-sentinel
   form and now appears once. Coverage is diff-neutral.
 
+  *Step 6 landed as (`rendered_html()` as an authoritative fold):* the cutover's third piece, and
+  the one the whole branch has been building toward. `SubstitutionGroup::apply` now sets
+  `content.rendered` from [`fold_html`](../../parser/src/content/inline_builder/fold.rs), so what
+  `rendered_html()` returns *is* the tree — the string pipeline still runs (it produces the
+  deferred cross-reference segments and fills the catalogs), but its output is no longer what a
+  caller reads.
+
+  Content carrying a **deferred cross-reference** is the one exception, and it is temporary. Such
+  a content's rendered string is rebuilt from a placeholder template every time resolution runs,
+  so making the fold authoritative there means teaching resolution to *re-fold* instead — which
+  is the deferred-cross-reference sentinel system's own retirement (§4.2's second), and its own
+  increment. Rather than interleave the two mechanisms, such a content keeps the template path end
+  to end and the fold takes everything else. The predicate is one line
+  (`content.deferred_parts().is_none()`) and the increment below deletes it.
+
+  The interesting work here was not the fold. It was that **every differential corpus on this
+  branch was about to become tautological.** A parity test takes its golden by running
+  `SubstitutionGroup::apply` and reading `rendered` — which is now the fold, so the test would
+  have been comparing the fold against itself and passing for that reason. Twenty-one call sites
+  across twelve files were in that shape, and nothing about a green suite would have said so. A
+  new test-only [`apply_string_pipeline`](../../parser/src/content/substitution_group.rs) exposes
+  `run_pipeline` on its own — the §5.3 oracle as a callable — and every golden-producing site now
+  goes through it. The sites that drive individual `SubstitutionStep`s by hand were already
+  building no tree and are untouched, as are the ~277 golden assertions, which read
+  `rendered_html()` as the *subject* rather than as a differential golden and are precisely what
+  the fold now has to satisfy.
+
+  Four of the six tests the cutover experiment predicted would fail were that shape and are fixed
+  by the rewiring alone. Of the two that remain, one is
+  `inline_tree_build_tolerates_a_stateful_renderer`, whose renderer emits different bytes on each
+  call: it is now invoked twice per parse (once by the string pipeline, once by the fold), so the
+  rendered string shows the *second* invocation. That is the interim double render, not a property
+  of the fold, and it is pinned exactly — `[second]` rather than loosely — so that it shows up as
+  a signal when the string pipeline stops being run for output.
+
+  The other is the **one golden output the cutover changes**, and it changes for the better.
+  `#`CB###2`#` — an `asciidoc-lang` fixture whose own prose calls the result "a scrambled mess" —
+  rendered a `<mark>` opened inside a `<code>` and closed outside it, because the string
+  pipeline's highlight sub matched across the markup its monospace sub had already written. A
+  tree has no tags to match through, so the extra `#`s stay literal and the nesting is
+  well-formed. This is the same class as the keep the cross-product sweep documents for the macro
+  families, reached one step out; the golden is updated with that reasoning written beside it.
+
+  Re-running the corpus-wide fold-parity audit needs its own adjustment for the same reason the
+  corpora did — the probe has to log *before* the fold overwrites `rendered`, or it compares the
+  fold against itself. So adjusted, the production divergence set goes 18 → 9 with **no new
+  divergence**. The nine that remain are fully accounted for: one is the changed golden above,
+  four are custom-renderer tests (the audit's probe folds with the built-in renderer by
+  construction, so it disagrees with a `[LT]`/`[first]`/`<figure>` backend — pre-existing, and
+  not a divergence), and four are deferred-cross-reference content, which the increment below
+  closes. The nine that *left* the log are the documented keeps, and they left because their
+  tests now drive the string pipeline directly rather than because anything was fixed — worth
+  saying plainly, since the audit can no longer see a fixture whose test bypasses `apply`.
+
+  Coverage is diff-neutral (`substitution_group.rs` stays at 100%).
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -7257,6 +7313,19 @@ Each phase is a reviewable unit with a clear exit gate.
        corpus-wide before the swap — both answers computed for every section title in the suite,
        **zero** disagreements — rather than on the staged fixture corpus alone; the audit's
        divergence set shrinks by 16. See the step's own "landed as" note above.
+
+     - ✅ **`rendered_html()` as an authoritative fold.** `SubstitutionGroup::apply` sets
+       `content.rendered` from [`fold_html`](../../parser/src/content/inline_builder/fold.rs), so
+       what a caller reads *is* the tree. Content carrying a deferred cross-reference keeps the
+       template path for now (its rendered string is rebuilt on every resolution, so the fold
+       there is the second sentinel system's own retirement) — one predicate, deleted by the next
+       increment. The substantive work was that every differential corpus was about to become
+       **tautological**, taking its golden from `apply` + `rendered`; a test-only
+       [`apply_string_pipeline`](../../parser/src/content/substitution_group.rs) exposes
+       `run_pipeline` alone and 21 sites across 12 files now use it. One golden changes, for the
+       better (`#`CB###2`#`, whose mis-nested `<mark>`/`<code>` was an artifact of substituting
+       over rendered markup). Audit: production divergences 18 → 9, none new, all nine accounted
+       for. See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
