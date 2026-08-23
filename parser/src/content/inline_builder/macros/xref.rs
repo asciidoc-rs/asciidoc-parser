@@ -1244,9 +1244,7 @@ mod tests {
         // destinations.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = Parser::default()
-            .with_inline_tree(true)
-            .parse("<<tigers,>>\n\n[#tigers]\n== Tigers");
+        let doc = Parser::default().parse("<<tigers,>>\n\n[#tigers]\n== Tigers");
 
         let blocks: Vec<_> = doc.descendant_blocks().collect();
         let rendered = blocks[0].rendered_html_content().unwrap();
@@ -2348,7 +2346,6 @@ mod tests {
         use crate::blocks::{FindBlocks, IsBlock};
 
         let doc = Parser::default()
-            .with_inline_tree(true)
             .parse(":id: install\n\n[#install]\n== Install\n\nSee xref:{id}[the install steps].");
 
         let block = doc
@@ -2382,7 +2379,6 @@ mod tests {
         use crate::blocks::{FindBlocks, IsBlock};
 
         let doc = Parser::default()
-            .with_inline_tree(true)
             .parse("[#install]\n== Install\n\nSee xref:install[Tom & Jerry] for details.");
 
         let block = doc
@@ -2416,7 +2412,7 @@ mod tests {
         // runs the same macros step.
         use crate::blocks::{Block, FindBlocks, IsBlock};
 
-        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+        let doc = Parser::default().parse(concat!(
             "[#install]\n",
             "== See xref:install[the *bold* steps,role=hl]\n",
             "\n",

@@ -2064,7 +2064,7 @@ mod tests {
         // `rendered_html()` becomes a fold of this tree.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+        let doc = Parser::default().parse(concat!(
             "== A heading\n",
             "\n",
             r"An escaped \[attrs]++<b>*x*</b>++ bracket.",
@@ -2212,7 +2212,7 @@ mod tests {
         // `rendered_html()` becomes a fold of this tree.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+        let doc = Parser::default().parse(concat!(
             "== A heading\n",
             "\n",
             "The index:[attrs]+text+ form keeps its bracket, unlike [attrs]+text+.",

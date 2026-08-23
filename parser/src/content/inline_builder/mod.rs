@@ -338,8 +338,7 @@
 //! [character replacements]:
 //!     https://docs.asciidoctor.org/asciidoc/latest/subs/replacements/
 //!
-//! This module is now **the production tree source**: when inline-tree
-//! building is enabled ([`Parser::with_inline_tree`](crate::Parser)),
+//! This module is now **the production tree source**, for every parse:
 //! `SubstitutionGroup::apply` calls [`build_for_group`] — the group-aware
 //! entry point mirroring its own `run_pipeline` step selection — over the
 //! pre-substitution content value, against a counter-safe clone of the

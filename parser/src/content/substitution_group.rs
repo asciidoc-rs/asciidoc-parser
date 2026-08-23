@@ -227,12 +227,16 @@ impl SubstitutionGroup {
         attrlist: Option<&Attrlist<'src>>,
     ) {
         // Snapshot the pre-substitution value and the parser *before* the
-        // authoritative pass runs, when inline-tree building is enabled. The
-        // parser clone captures every document counter (footnote/callout
-        // numbers, `{counter:…}` values) at its pre-substitution value, so the
-        // single-pass builder below numbers constructs exactly as the
-        // authoritative pass does; the clone's mutations are then discarded,
-        // leaving the real parser advanced once.
+        // authoritative pass runs. The parser clone captures every document
+        // counter (footnote/callout numbers, `{counter:…}` values) at its
+        // pre-substitution value, so the single-pass builder below numbers
+        // constructs exactly as the authoritative pass does; the clone's
+        // mutations are then discarded, leaving the real parser advanced once.
+        //
+        // `build_inline_tree` is no longer an opt-in switch — every parse
+        // builds the tree — but it is still the recursion guard the clone
+        // clears below, so a nested `apply` for a passthrough body skips the
+        // snapshot entirely rather than seeding a tree nothing reads.
         let tree_seed = if parser.build_inline_tree {
             Some((content.rendered.clone(), parser.clone()))
         } else {

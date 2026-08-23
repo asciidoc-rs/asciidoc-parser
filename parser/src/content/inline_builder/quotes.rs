@@ -2603,7 +2603,7 @@ mod tests {
             blocks::{FindBlocks, IsBlock},
         };
 
-        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+        let doc = Parser::default().parse(concat!(
             "== A heading\n",
             "\n",
             "That only gives you \"``end points``\".\n",
@@ -2644,7 +2644,7 @@ mod tests {
             blocks::{FindBlocks, IsBlock},
         };
 
-        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+        let doc = Parser::default().parse(concat!(
             "== A heading\n",
             "\n",
             "She said \"`hello`\"`code` and meant it.\n",
@@ -2689,7 +2689,7 @@ mod tests {
             blocks::{FindBlocks, IsBlock},
         };
 
-        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+        let doc = Parser::default().parse(concat!(
             "== A heading\n",
             "\n",
             "See **bold**https://example.org and __em__https://example.org here.\n",

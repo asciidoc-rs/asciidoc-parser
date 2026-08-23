@@ -2602,7 +2602,7 @@ mod tests {
         // carries — the `href` and a bare link's shown text alike.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+        let doc = Parser::default().parse(concat!(
             "== A heading\n",
             "\n",
             "Read link:https://example.org/stem:[x_i][the paper] today.\n",
@@ -3793,7 +3793,7 @@ mod tests {
         // `rendered_html()` becomes a fold of this tree.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+        let doc = Parser::default().parse(concat!(
             "== A heading\n",
             "\n",
             "See link:https://example.org[++the <docs>++,role=hl] today.\n",
@@ -3837,7 +3837,7 @@ mod tests {
         // regress the moment `rendered_html()` becomes a fold of this tree.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+        let doc = Parser::default().parse(concat!(
             "== A heading\n",
             "\n",
             "Read https://++example.org/now_this__link_works.html++ today.\n",
@@ -6000,7 +6000,7 @@ mod tests {
         // the moment `rendered_html()` becomes a fold of this tree.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+        let doc = Parser::default().parse(concat!(
             "== A heading\n",
             "\n",
             "See https://example.org> for details.\n",
@@ -6042,7 +6042,7 @@ mod tests {
         // fold of this tree.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+        let doc = Parser::default().parse(concat!(
             "== A heading\n",
             "\n",
             "This URL has repeating underscores ",
@@ -6086,7 +6086,7 @@ mod tests {
         // `rendered_html()` becomes a fold of this tree.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+        let doc = Parser::default().parse(concat!(
             "== A heading\n",
             "\n",
             "See [width=10]##x ##https://example.org and [width=10]##y##https://example.org here.\n",
@@ -6128,7 +6128,7 @@ mod tests {
         // of this tree.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+        let doc = Parser::default().parse(concat!(
             "== A heading\n",
             "\n",
             "Mail *doc@example.org* or _doc@example.org writes_ here.\n",

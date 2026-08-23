@@ -1670,7 +1670,7 @@ and another.footnote:[note two]",
             blocks::{FindBlocks, IsBlock},
         };
 
-        let doc = Parser::default().with_inline_tree(true).parse(
+        let doc = Parser::default().parse(
             ":fn-disclaimer: footnote:disclaimer[Opinions are my own.]\n\n\
              A bold statement!{fn-disclaimer}\n\n\
              Another outrageous statement.{fn-disclaimer}",

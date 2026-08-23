@@ -477,16 +477,18 @@ pub struct Parser {
     /// with only a shared reference).
     datetime_context: RefCell<Option<DatetimeContext>>,
 
-    /// When `true`, each [`Content`](crate::content::Content) also builds its
-    /// inline AST (an additional, counter-safe single-pass recognition over
-    /// the same source; see `content::inline_builder`) and stores it for
-    /// [`Content::inlines`](crate::content::Content::inlines).
+    /// Whether each [`Content`](crate::content::Content) built with this parser
+    /// also builds its inline AST (see `content::inline_builder`) and stores it
+    /// for [`Content::inlines`](crate::content::Content::inlines).
     ///
-    /// `false` by default, in which case the parse path is byte- and
-    /// performance-identical to before the inline AST existed. Enable it with
-    /// [`with_inline_tree`](Self::with_inline_tree). This is an opt-in switch
-    /// while the inline AST is being brought up (design Phase 4); it will
-    /// eventually become the canonical representation and the flag will retire.
+    /// `true` for every parser a caller can construct — the opt-in
+    /// `with_inline_tree` switch this used to carry is retired, and every parse
+    /// now builds the tree. What survives is the **recursion guard** that
+    /// switch's plumbing also served: `SubstitutionGroup::apply` clears it on
+    /// the clone it hands the builder, because building a tree re-enters
+    /// `apply` for a passthrough body whose own substitution list must run
+    /// (`passthrough_step::passthrough_text`), and that nested content needs no
+    /// tree of its own. Nothing else sets it, and no public API exposes it.
     pub(crate) build_inline_tree: bool,
 }
 
@@ -603,7 +605,7 @@ impl Default for Parser {
             reference_time: None,
             input_mtime: None,
             datetime_context: RefCell::new(None),
-            build_inline_tree: false,
+            build_inline_tree: true,
         }
     }
 }
@@ -2308,39 +2310,6 @@ impl Parser {
         renderer: ISR,
     ) -> Self {
         self.renderer = Rc::new(renderer);
-        self
-    }
-
-    /// Enables (or disables) building the **inline AST** for every
-    /// [`Content`](crate::content::Content) this parser produces.
-    ///
-    /// When enabled, each block's inline content is additionally parsed into a
-    /// tree of [`InlineNode`](crate::inlines::InlineNode)s, retrievable from
-    /// its [`Content`](crate::content::Content) via
-    /// [`Content::inlines`](crate::content::Content::inlines) (or, at the block
-    /// level, [`IsBlock::inlines`](crate::blocks::IsBlock::inlines)). The tree
-    /// is built by the single-pass builder
-    /// (`content::inline_builder`) directly from the pre-substitution source,
-    /// so its nodes carry precise source spans and their own parsed attribute
-    /// lists; see
-    /// [`Content::inlines`](crate::content::Content::inlines) for the tree's
-    /// guarantees (including the small set of documented deferred forms).
-    ///
-    /// This is **off by default**. Building the tree costs an additional,
-    /// counter-safe recognition pass per block over the same source, so the
-    /// default parse path is unchanged in both output and performance. The
-    /// switch is expected to retire once the inline AST becomes the canonical
-    /// representation (with `rendered_html()` a fold of it — the remaining
-    /// half of the design's step 6 cutover).
-    ///
-    /// A custom [`InlineSubstitutionRenderer`] is consulted while the tree is
-    /// built only where a node's *value* is defined as already-substituted
-    /// text (a delimited passthrough's or STEM expression's body, whose
-    /// special characters it escapes); it is not otherwise re-run over the
-    /// content, and the registered asset handlers are not re-invoked.
-    #[must_use]
-    pub fn with_inline_tree(mut self, enabled: bool) -> Self {
-        self.build_inline_tree = enabled;
         self
     }
 

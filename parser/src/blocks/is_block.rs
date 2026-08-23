@@ -45,11 +45,9 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
     /// carry each — so a block with no directly-contained content returns
     /// `None` here too.
     ///
-    /// The tree is populated only when inline-tree building is enabled on the
-    /// [`Parser`](crate::Parser) (see
-    /// [`with_inline_tree`](crate::Parser::with_inline_tree)); a
-    /// content-bearing block parsed without it returns `Some(&[])` (an
-    /// empty tree), not `None`.
+    /// Every parse builds the tree, so `Some(&[])` here means a
+    /// content-bearing block whose content is *empty* — still distinct from the
+    /// `None` a block with no directly-contained content returns.
     /// See [`Content::inlines`](crate::content::Content::inlines) for the
     /// tree's guarantees.
     fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {

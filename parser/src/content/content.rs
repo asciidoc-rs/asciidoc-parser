@@ -94,13 +94,11 @@ pub struct Content<'src> {
     /// This is a **derived artifact** — built alongside the rendered content,
     /// which remains the source of truth (making the tree canonical, with
     /// `rendered_html()` a fold of it, is the remaining half of the [inline
-    /// AST architecture] design's step 6). It is populated only when
-    /// inline-tree building is enabled on the [`Parser`](crate::Parser)
-    /// ([`with_inline_tree`](crate::Parser::with_inline_tree)); otherwise it is
-    /// empty and the default parse path is byte- and performance-identical to
-    /// before. Because it is derived, it is deliberately excluded from
-    /// [`PartialEq`]/[`Eq`]/[`Hash`]: two `Content`s with equal rendered text
-    /// compare equal regardless of whether the tree was built.
+    /// AST architecture] design's step 6). Every parse builds it: the
+    /// `with_inline_tree` opt-in that used to gate it is retired. Because it is
+    /// derived, it is deliberately excluded from [`PartialEq`]/[`Eq`]/[`Hash`]:
+    /// two `Content`s with equal rendered text compare equal regardless of
+    /// their trees.
     ///
     /// [inline AST architecture]: https://github.com/scouten/asciidoc-parser/blob/main/docs/design/inline-ast-architecture.md
     inlines: Vec<InlineNode<'src>>,
@@ -454,10 +452,10 @@ impl<'src> Content<'src> {
     /// Returns the inline AST for this content: the structured, read-only
     /// representation of its inline nodes.
     ///
-    /// This is populated only when inline-tree building is enabled on the
-    /// [`Parser`](crate::Parser) (see
-    /// [`with_inline_tree`](crate::Parser::with_inline_tree)); it is an empty
-    /// slice otherwise. The tree is built by the single-pass builder
+    /// Every parse builds this — the `with_inline_tree` opt-in that used to
+    /// gate it is retired — so it is an empty slice only for content whose tree
+    /// is genuinely empty (empty content). The tree is built by the single-pass
+    /// builder
     /// (the crate-internal `inline_builder` module) directly from the
     /// pre-substitution source, so each node carries its own precise source
     /// [`Span`] (a node born from a transformation, such as an attribute
@@ -677,9 +675,8 @@ impl<'src> Content<'src> {
     /// [`resolved`](crate::inlines::Ref::resolved) destination the rendered
     /// string reflects.
     ///
-    /// This runs only when an inline tree was built (see
-    /// [`Parser::with_inline_tree`](crate::Parser::with_inline_tree)); it is a
-    /// no-op otherwise. It reuses the results of the deferred-reference
+    /// It is a no-op for a content whose tree holds no cross-reference node.
+    /// It reuses the results of the deferred-reference
     /// resolution above rather than re-invoking the resolver, correlating each
     /// tree node with its *own* segment **positionally**: the tree's
     /// cross-reference nodes, visited in document order, line up one-to-one
@@ -732,8 +729,7 @@ impl<'src> Content<'src> {
     /// tree's footnote subtrees. The two lists partition the deferred segments,
     /// so each is correlated against exactly the nodes it belongs to.
     ///
-    /// It is a no-op when no inline tree was built (see
-    /// [`Parser::with_inline_tree`](crate::Parser::with_inline_tree)),
+    /// It is a no-op for a tree holding no cross-reference node,
     /// non-destructive, and re-resolvable: each call overwrites the tree's
     /// resolved state from `block_ordered` and `footnote_ordered`.
     pub(crate) fn mirror_tree_xref_resolution(

@@ -1070,7 +1070,6 @@ mod tests {
         use crate::blocks::{FindBlocks, IsBlock};
 
         let doc = Parser::default()
-            .with_inline_tree(true)
             .parse(":experimental:\n:view: View\n\nChoose menu:{view}[Zoom > Reset].");
 
         let blocks: Vec<_> = doc.descendant_blocks().collect();
@@ -1108,7 +1107,7 @@ mod tests {
         // to.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = Parser::default().with_inline_tree(true).parse(
+        let doc = Parser::default().parse(
             ":experimental:\n\nPress kbd:[Ctrl&C] then menu:&#8942;[More Tools, Extensions].",
         );
 

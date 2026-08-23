@@ -217,15 +217,13 @@ mod tests {
         // unrelated reason.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = crate::Parser::default()
-            .with_inline_tree(true)
-            .parse(concat!(
-                "[[tgt]]Target.\n",
-                "\n",
-                "x xref:tgt[pre z +\nw post] y\n",
-                "\n",
-                "x link:l.html[pre z +\nw post] y\n",
-            ));
+        let doc = crate::Parser::default().parse(concat!(
+            "[[tgt]]Target.\n",
+            "\n",
+            "x xref:tgt[pre z +\nw post] y\n",
+            "\n",
+            "x link:l.html[pre z +\nw post] y\n",
+        ));
 
         let folds: Vec<(String, String)> = doc
             .descendant_blocks()

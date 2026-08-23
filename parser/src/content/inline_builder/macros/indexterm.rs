@@ -1357,16 +1357,14 @@ mod tests {
         // becomes a fold of this tree.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = crate::Parser::default()
-            .with_inline_tree(true)
-            .parse(concat!(
-                "== A indexterm2:[Coffee,region=Kona] heading\n",
-                "\n",
-                "indexterm2:[Flash,see=HTML 5] has been supplanted by\n",
-                "indexterm2:[HTML 5,see-also=\"CSS 3, SVG\"].\n",
-                "\n",
-                "Only named indexterm2:[see=HTML 5] here.\n",
-            ));
+        let doc = crate::Parser::default().parse(concat!(
+            "== A indexterm2:[Coffee,region=Kona] heading\n",
+            "\n",
+            "indexterm2:[Flash,see=HTML 5] has been supplanted by\n",
+            "indexterm2:[HTML 5,see-also=\"CSS 3, SVG\"].\n",
+            "\n",
+            "Only named indexterm2:[see=HTML 5] here.\n",
+        ));
 
         let mut folded_blocks = 0;
 
@@ -1502,16 +1500,14 @@ mod tests {
         // title, both of which run this same macros step.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = crate::Parser::default()
-            .with_inline_tree(true)
-            .parse(concat!(
-                "[[target]]\n",
-                "== The Target\n",
-                "\n",
-                "See ((a term with xref:target[the target] inside)) here.\n",
-                "\n",
-                "And ((a term with <<target,the target>> inside)) too.\n",
-            ));
+        let doc = crate::Parser::default().parse(concat!(
+            "[[target]]\n",
+            "== The Target\n",
+            "\n",
+            "See ((a term with xref:target[the target] inside)) here.\n",
+            "\n",
+            "And ((a term with <<target,the target>> inside)) too.\n",
+        ));
 
         let mut folded = 0;
 
@@ -1805,14 +1801,12 @@ mod tests {
         // whose `Title` group runs the same macros step.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = crate::Parser::default()
-            .with_inline_tree(true)
-            .parse(concat!(
-                "== A \\(((Coffee))) heading\n",
-                "\n",
-                "An escaped \\(((Coffee >> Beans))) term keeps its parens,\n",
-                "and \\((()))  shows nothing between them.\n",
-            ));
+        let doc = crate::Parser::default().parse(concat!(
+            "== A \\(((Coffee))) heading\n",
+            "\n",
+            "An escaped \\(((Coffee >> Beans))) term keeps its parens,\n",
+            "and \\((()))  shows nothing between them.\n",
+        ));
 
         let mut folded_blocks = 0;
 
@@ -1874,14 +1868,12 @@ mod tests {
         // same macros step.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = crate::Parser::default()
-            .with_inline_tree(true)
-            .parse(concat!(
-                "== The ((*tiger*)) heading\n",
-                "\n",
-                "The ((*tiger*)) (Panthera tigris) is the largest cat species,\n",
-                "and an indexterm2:[_em_ term] shows its span too.\n",
-            ));
+        let doc = crate::Parser::default().parse(concat!(
+            "== The ((*tiger*)) heading\n",
+            "\n",
+            "The ((*tiger*)) (Panthera tigris) is the largest cat species,\n",
+            "and an indexterm2:[_em_ term] shows its span too.\n",
+        ));
 
         let mut folded_blocks = 0;
 
