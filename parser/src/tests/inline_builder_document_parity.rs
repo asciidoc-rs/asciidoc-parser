@@ -277,6 +277,18 @@ fn fold_matches_the_rendered_string_after_resolution() {
         "[[a]]A.\n\n[[b]]B.\n\nSee <<a>>.footnote:[and also <<b>>] and <<b>>.",
         // A footnote in a heading, beside a reference to that heading.
         "[#sect]\n== Section footnote:[a note]\n\nSee <<sect>>.",
+        // Document-wide `xrefstyle`, which only shows on a reference whose
+        // target carries a signifier (hence `:sectnums:`). The effective style
+        // is a *document-order* fact — a `:xrefstyle:` line rebinds it for
+        // everything after it — so these are what pin that the node carries the
+        // style in effect where the reference was written rather than the fold
+        // asking the document for it. Both spellings, and both the set and the
+        // rebound state.
+        ":sectnums:\n:xrefstyle: full\n\n== Install\n\nSee <<_install>> and xref:_install[].",
+        ":sectnums:\n\n== Install\n\nSee <<_install>>.\n\n:xrefstyle: full\n\nAgain <<_install>>.",
+        ":sectnums:\n:xrefstyle: full\n\n== Install\n\nSee <<_install>>.\n\n:xrefstyle: short\n\nAgain <<_install>>.",
+        // A macro-level `xrefstyle=` beside a document-wide one it overrides.
+        ":sectnums:\n:xrefstyle: full\n\n== Install\n\nSee xref:_install[xrefstyle=short].",
         // A footnote nested in a child that falls between two of its level's
         // own: the catalog's footnote list is in document order, so this
         // fixture fails on the *subtree-to-text* pairing — not only on the
