@@ -9,7 +9,7 @@ use crate::{
     content::{
         INLINE_IMAGE_MACRO, basename,
         inline_builder::{
-            fold::fold_stem,
+            fold::{fold_html, fold_stem},
             quotes::{
                 LevelContext, Piece, build_match_string, charref_entity, source_slice, text_slice,
             },
@@ -823,12 +823,17 @@ fn bracket_attrlist<'src>(
         return parse_attrlist(bracket, parser);
     }
 
+    // The image family stays at [`Tokened::Masked`]: every value its bracket
+    // holds is one `render_image` writes out (an `alt`, a `title`, a
+    // `width`), so a rendered piece frozen into one would put the built-in
+    // backend's markup in a custom backend's output.
     let (tokened, masked) = tokened_bracket(
         bracket_text,
         &bracket_range,
         nodes,
         pieces,
-        parser.renderer.as_ref(),
+        parser,
+        Tokened::Masked,
     );
 
     let bodies: Vec<&str> = masked.iter().map(|piece| piece.body.as_ref()).collect();
@@ -849,13 +854,46 @@ fn bracket_attrlist<'src>(
 /// one from the other is what keeps the two spellings of "what this token
 /// restores to" from drifting.
 pub(in crate::content::inline_builder) struct MaskedPiece<'a, 'src> {
-    /// The masked node — a [`Raw`](InlineNode::Raw) passthrough or a
-    /// [`Stem`](InlineNode::Stem) expression — the token stands for.
+    /// The node the token stands for — a [`Raw`](InlineNode::Raw) passthrough
+    /// or a [`Stem`](InlineNode::Stem) expression, and (under
+    /// [`Tokened::MaskedOrRendered`]) any other opaque piece.
     pub(in crate::content::inline_builder) node: &'a InlineNode<'src>,
 
     /// What the token restores to: exactly what the fold of
     /// [`node`](Self::node) emits (see [`restorable_body`]).
     pub(in crate::content::inline_builder) body: Cow<'a, str>,
+
+    /// Whether this piece is markup the **fold** writes rather than a *masked*
+    /// construct whose body the string pipeline itself splices.
+    ///
+    /// The distinction is what a caller admitting both has to act on. A masked
+    /// construct's body is known at build time in the same sense the string
+    /// pipeline knows it — `Passthroughs::restore_to` splices exactly these
+    /// bytes into its own finished string — so restoring it into a parsed
+    /// value is faithful wherever that value goes. A *rendered* piece's markup
+    /// is a function of the renderer, and [`body`](Self::body) freezes it with
+    /// the parser's own; that is right for a value nothing emits (it is what
+    /// the string replacer's own attribute list holds there) and wrong for one
+    /// a renderer writes out, since a custom backend would then see the
+    /// built-in backend's markup. A caller admitting these must therefore
+    /// carry the value **structurally** and refuse a match whose token reached
+    /// a slot the fold reads — see [`text_attrlist`](super::links).
+    pub(in crate::content::inline_builder) rendered: bool,
+}
+
+/// Which pieces [`tokened_bracket`] gives a token to.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::content::inline_builder) enum Tokened {
+    /// Only a **masked** construct — a passthrough or a STEM expression —
+    /// whose body the string pipeline itself splices over its own sentinel.
+    /// The bracket's parsed values may then be restored wherever they go.
+    Masked,
+
+    /// Also any other **opaque** piece: a rendered span, an
+    /// earlier-recognized macro node. Its body is the build-time fold, which
+    /// only a caller that carries the value structurally and refuses a token
+    /// in a slot the fold reads may use (see [`MaskedPiece::rendered`]).
+    MaskedOrRendered,
 }
 
 /// Rewrites a macro **bracket**'s own match-string bytes so each masked piece
@@ -890,15 +928,21 @@ pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
     range: &std::ops::Range<usize>,
     nodes: &'a [InlineNode<'src>],
     pieces: &[Piece],
-    renderer: &dyn InlineSubstitutionRenderer,
+    parser: &Parser,
+    admits: Tokened,
 ) -> (String, Vec<MaskedPiece<'a, 'src>>) {
+    let renderer = parser.renderer.as_ref();
+
     let mut tokened = String::new();
     let mut masked_pieces: Vec<MaskedPiece<'a, 'src>> = Vec::new();
 
-    // In match-string coordinates; `bracket_text` is indexed relative to
-    // `range.start`.
-    let mut cursor = range.start;
-
+    // Walked **piece by piece** rather than by copying the gaps between the
+    // tokened ones, because a byte of the match string may belong to no piece
+    // at all: `styled_sibling_boundaries` wraps an opaque span's placeholder
+    // in the two characters its own rendering presents to a neighbour (the `<`
+    // and `>` of a tag), which exist for *recognition* and stand for markup
+    // the token already carries whole. Copying them would splice a stray `<`
+    // and `>` into the parsed value beside the piece.
     for piece in pieces {
         let p_start = piece.s_start;
         let p_end = piece.s_start + piece.s_len;
@@ -908,45 +952,57 @@ pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
             continue;
         }
 
-        if !piece.atomic {
-            continue;
-        }
+        let lo = p_start.max(range.start);
+        let hi = p_end.min(range.end);
 
         // The discriminant and the body are one step: `restorable_body`
         // answers `Some` for exactly the nodes `node_is_restorable` admits
         // (pinned by `restorable_body_agrees_with_node_is_restorable`), so
         // gating on one before producing the other would leave a branch no
-        // input can take. A piece this skips is an atomic one the *gate*
-        // admitted for another reason — a `CharRef` leaf the match string
-        // gives real bytes to.
-        let Some(masked) = nodes.get(piece.node_index).and_then(|node| {
-            restorable_body(node, renderer).map(|body| MaskedPiece { node, body })
-        }) else {
-            continue;
-        };
+        // input can take. A piece this leaves untokened contributes its own
+        // bytes: a `Text` run's, or a `CharRef` leaf's canonical entity, which
+        // are the string replacer's own bytes there.
+        let masked = piece
+            .atomic
+            .then(|| nodes.get(piece.node_index))
+            .flatten()
+            .and_then(|node| {
+                if let Some(body) = restorable_body(node, renderer) {
+                    return Some(MaskedPiece {
+                        node,
+                        body,
+                        rendered: false,
+                    });
+                }
 
-        // A masked piece is atomic and never sliced, so an overlapping one
-        // lies wholly inside the range and `p_start`/`p_end` are safe bounds.
-        tokened.push_str(
-            bracket_text
-                .get(cursor.saturating_sub(range.start)..p_start.saturating_sub(range.start))
-                .unwrap_or_default(),
-        );
+                if admits == Tokened::Masked || charref_entity(node).is_some() {
+                    return None;
+                }
 
-        tokened.push_str(&format!("\u{96}{n}\u{97}", n = masked_pieces.len()));
-        masked_pieces.push(masked);
-        cursor = p_end;
+                Some(MaskedPiece {
+                    node,
+                    body: Cow::Owned(fold_html(std::slice::from_ref(node), renderer, parser)),
+                    rendered: true,
+                })
+            });
+
+        match masked {
+            Some(masked) => {
+                tokened.push_str(&format!("\u{96}{n}\u{97}", n = masked_pieces.len()));
+                masked_pieces.push(masked);
+            }
+
+            None => tokened.push_str(
+                bracket_text
+                    .get(lo.saturating_sub(range.start)..hi.saturating_sub(range.start))
+                    .unwrap_or_default(),
+            ),
+        }
     }
 
     if masked_pieces.is_empty() {
         return (bracket_text.to_string(), masked_pieces);
     }
-
-    tokened.push_str(
-        bracket_text
-            .get(cursor.saturating_sub(range.start)..)
-            .unwrap_or_default(),
-    );
 
     (tokened, masked_pieces)
 }

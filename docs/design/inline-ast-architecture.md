@@ -5284,6 +5284,61 @@ Each phase is a reviewable unit with a clear exit gate.
   Re-running the corpus-wide fold-parity audit shows **two** golden fixtures gone from the
   divergence set and no new divergence; coverage is diff-neutral, and nothing further is wired in.
 
+  *Step 6 prep landed as (an attribute-list display text enclosing a rendered span — the two
+  link families):* the same capture the cross-reference family closed, for the two families that
+  hold a real [`Attrlist`](../../parser/src/attributes/attrlist.rs)`<'src>` on the node. Their
+  display text comes back from the same parse, so it needs the same token; what was different is
+  that a token has to *leave* that parse with something in it, since
+  [`Ref::attrs`](../../parser/src/inlines/ref_node.rs) rides on the node and
+  `render_link` reads more out of it than the display text.
+
+  A masked construct always had a body for that —
+  [`Passthroughs::restore_to`](../../parser/src/content/passthroughs.rs) splices exactly those
+  bytes into the string pipeline's own finished string, so restoring one into a parsed value is
+  faithful wherever the value goes. A rendered span has no such body, and the design has said so
+  since the class was opened: its markup exists only at fold time. The finding is that it has one
+  for *this* purpose. [`tokened_bracket`](../../parser/src/content/inline_builder/macros/image.rs)
+  gains a [`Tokened`](../../parser/src/content/inline_builder/macros/image.rs) kind; under
+  `MaskedOrRendered` it admits any opaque piece and pairs it with the **build-time fold**, taken
+  with the parser's own renderer — the same trade
+  [`restorable_body`](../../parser/src/content/inline_builder/macros/image.rs) already makes for a
+  `Stem`, and the very bytes the string replacer's own attribute list holds there.
+
+  What makes that safe is that the frozen bytes never reach output. The display text is carried
+  **structurally** — [`restored_value_children`](../../parser/src/content/inline_builder/macros/mod.rs)
+  splices each piece's own *node* into the children, so the fold renders the span with whatever
+  renderer the fold is using — and the frozen copy only ever lands in the node's `attrs`, which
+  no renderer reads for the display text. Every *other* slot is one `render_link` writes out (an
+  `id`, a `title`, a `role`, a `window`, an option), where a frozen body would put the built-in
+  backend's markup in a custom backend's output, so a token reaching one defers the whole match:
+  [`rendered_token_escaped_the_display_text`](../../parser/src/content/inline_builder/macros/links.rs)
+  draws that per-**slot** boundary, and a *masked* piece is exempt from it for the reason above.
+  The split-agreement check
+  ([`tokened_split_agrees`](../../parser/src/content/inline_builder/macros/mod.rs)) applies here
+  too, and one more thing falls out of writing the walk this way: `tokened_bracket` now walks the
+  level **piece by piece** rather than copying the gaps between the tokened ones, because a byte
+  of the match string may belong to no piece at all — `styled_sibling_boundaries` wraps a
+  placeholder in the two characters its rendering presents to a neighbour, and copying them would
+  splice a stray `<` and `>` into the parsed value.
+
+  What reaches parity is the golden spelling from the language docs
+  (`https://chat.asciidoc.org[*project chat*^,role=green]`), each family with the span at either
+  edge and in the middle, each named attribute `render_link` reads with the span in the positional
+  value beside it, other span kinds and two spans in one text, the `^` new-window suffix riding
+  after the span, and a collapsed newline. Fixtures join the whole-pipeline broad sweep and
+  combined-constructs corpus and the structural recorder cross-check. Re-running the corpus-wide
+  fold-parity audit shows that golden fixture **gone** from the divergence set and no new
+  divergence; coverage is diff-neutral, and nothing further is wired in.
+
+  With this the rendered-span class is closed for every family that has a display text to carry.
+  What remains of it is the **image** family's attribute list, the one capture with none: every
+  value its bracket holds — an `alt`, a `title`, a `width` — is one `render_image` writes out, so
+  the per-slot rule above puts all of them on the wrong side. Closing it needs a value the fold
+  *materializes* rather than one frozen at build time, which is a shape no increment has needed
+  yet; it is left for the maintainer to weigh against the cutover, and the golden it holds
+  (`image:pause.png[title=*Pause* and Resume]`) keeps its divergence test. Beyond it the
+  remainder is unchanged: the boundary-class halves the sibling increments named, plus the keeps.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -6243,6 +6298,24 @@ Each phase is a reviewable unit with a clear exit gate.
        escaped-bracket retry's own re-scan inherits the lift, closing a second golden fixture; the
        two attribute-list-prefixed bare forms keep the verbatim gate, so `[method x-]+pass:[<b>]+`
        stays deferred. See the step's own "landed as" note above.
+
+     - ✅ **prep (an attribute-list display text enclosing a rendered span — the two link
+       families).** The same capture the cross-reference family closed, for the two families that
+       hold a real [`Attrlist`](../../parser/src/attributes/attrlist.rs)`<'src>` on the node. A
+       token has to *leave* their parse with something in it, since
+       [`Ref::attrs`](../../parser/src/inlines/ref_node.rs) rides on the node — and a rendered span
+       turns out to have a body for that purpose after all:
+       [`tokened_bracket`](../../parser/src/content/inline_builder/macros/image.rs) gains a
+       [`Tokened`](../../parser/src/content/inline_builder/macros/image.rs) kind whose
+       `MaskedOrRendered` admits any opaque piece and pairs it with the **build-time fold**, the
+       same trade `restorable_body` already makes for a `Stem`. It is safe because those bytes
+       never reach output: the display text is carried structurally (the fold renders the span
+       itself), and the frozen copy only lands in `attrs`, which no renderer reads for it. Every
+       other slot is one `render_link` writes out, so a token reaching one defers the match. The
+       walk also moves piece by piece, so a placeholder's sibling-boundary characters are not
+       copied into the parsed value. See the step's own "landed as" note above. The **image**
+       family's bracket — the one capture with no display text to carry — is what remains of the
+       class, and needs a fold-*materialized* value rather than a frozen one.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
