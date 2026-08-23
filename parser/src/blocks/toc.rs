@@ -47,6 +47,13 @@ impl<'src> TocBlock<'src> {
         self.title.as_mut()
     }
 
+    /// Returns the block's title as a read-only [`Content`], if the block has
+    /// one. Used by the inline-tree tests to inspect a block title's own tree.
+    #[cfg(test)]
+    pub(crate) fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
+    }
+
     pub(crate) fn parse(
         metadata: &BlockMetadata<'src>,
         parser: &mut Parser,

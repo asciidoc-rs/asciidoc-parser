@@ -987,6 +987,31 @@ impl<'src> Block<'src> {
             _ => None,
         }
     }
+
+    /// Returns this block's *block title* (`.Title`) as a read-only
+    /// [`Content`], when the block has one — the counterpart of
+    /// [`block_title_content_mut`](Self::block_title_content_mut), naming the
+    /// same set of block kinds.
+    ///
+    /// A block title is substituted content in its own right and so carries
+    /// its own inline tree, which is what the whole-document parity sweep
+    /// reads it for. Blocks that never carry a title return `None`.
+    #[cfg(test)]
+    pub(crate) fn block_title_content(&self) -> Option<&Content<'src>> {
+        match self {
+            Self::Simple(b) => b.title_content(),
+            Self::Media(b) => b.title_content(),
+            Self::List(b) => b.title_content(),
+            Self::RawDelimited(b) => b.title_content(),
+            Self::CompoundDelimited(b) => b.title_content(),
+            Self::Admonition(b) => b.title_content(),
+            Self::Quote(b) => b.title_content(),
+            Self::Table(b) => b.title_content(),
+            Self::Break(b) => b.title_content(),
+            Self::Toc(b) => b.title_content(),
+            _ => None,
+        }
+    }
 }
 
 impl<'src> IsBlock<'src> for Block<'src> {

@@ -5394,6 +5394,68 @@ Each phase is a reviewable unit with a clear exit gate.
   effects nor sequences the fold against resolution), so the cutover's own ordering work is not
   measured by it.
 
+  *Step 6 prep landed as (a whole-document parity harness for the builder, after resolution):*
+  the increment above measured what the cutover breaks; this one closes the gap that measurement
+  exposed in what the branch *verifies*.
+
+  Two corpus-wide harnesses meet at this step and neither covers it. The builder's own corpora
+  drive [`SubstitutionGroup::apply`](../../parser/src/content/substitution_group.rs) on a bare
+  [`Content`](../../parser/src/content/content.rs), which has no document catalog and therefore
+  **cannot resolve cross-references** at all. The whole-document sweep that does reach resolution
+  ([`inline_recorder`](../../parser/src/tests/inline_recorder.rs)'s `check_document`) drives the
+  *Strategy-A recorder*, which the first half of this step retired to test-only oracle machinery.
+  So the one property the deferred-cross-reference sentinel system's retirement rests on — **the
+  single-pass builder's tree, folded *after* resolution has run, reproduces the rendered string
+  byte-for-byte** — was asserted only by the handful of hand-written whole-document tests
+  individual increments added for their own shapes.
+
+  [`inline_builder_document_parity`](../../parser/src/tests/inline_builder_document_parity.rs)
+  asserts it over a corpus. It needs only **one** parse, which is what makes it simpler than its
+  recorder counterpart: with [`with_inline_tree`](../../parser/src/parser/parser.rs) on, every
+  content location carries both its rendered string and its tree, so the two are compared
+  directly rather than reconstructed from a second, renderer-perturbed parse.
+
+  The walk reaches every location a tree lives in, and reaches it through the *one pair of
+  accessors that answers for every block kind* —
+  [`IsBlock::rendered_html_content`](../../parser/src/blocks/is_block.rs) and its structured
+  counterpart `inlines` — rather than by matching per variant. That is what keeps a corpus-wide
+  sweep from silently narrowing: a block kind nobody thought to name is covered because it
+  implements the trait. Beyond a paragraph's content it therefore reaches an `admonition` and the
+  whole raw-delimited family (`listing`, `literal`, `pass`, whose verbatim groups run a *different*
+  step selection through `build_for_group`). Two locations are not a block's own content and are
+  named explicitly: a section title (whose own document-order pass in
+  [`title_refs`](../../parser/src/document/title_refs.rs) mutates the title's tree, and whose
+  `SectionBlock` implements neither accessor, a section's content being its children), and a table
+  cell, which is not a block at all — and a **block title** (`.Title`), which is substituted content
+  in its own right, carries its own tree, and belongs to the block without being its content. Every
+  block kind that can carry one is named by a read-only counterpart of the mutable accessor the
+  document-order title pass already uses. A compound delimited block — a quote, an example — needs
+  no entry of its own: it carries no content directly, and the paragraphs inside it are reached by
+  the walk's own recursion. A footnote's own subtree is matched against the catalog's registered texts in
+  document order.
+
+  The corpus is built around resolution, since that is the thing nothing else exercised: both
+  cross-reference spellings resolving in block content, a mix of resolved and unresolved in one
+  document, a reference to a *section* (whose destination text is the heading's own reference
+  text), forward and circular references between headings, a reference inside a rendered span and
+  inside a formatted heading, footnote-embedded references both resolved and unresolved, a
+  footnote in a heading beside a reference to that heading, a named footnote defined once and
+  referenced again, table cells, and nested blocks. Two guards keep it from passing vacuously: a
+  fixture must fold at least one **non-empty** tree, and the sweep must reach both branches of
+  the fold's `resolved` handling — a reference that carries its destination and its text, and one
+  that carries the bracketed fallback. A third pins the *set* of location kinds the sweep reaches,
+  so a walk that stopped visiting one, or a fixture that stopped producing one, shrinks the set and
+  fails rather than passing over a location nobody looked at.
+
+  It passes as written, which is the result worth recording: §4.3's claim that resolution "walks
+  the tree and fills `resolved` in place — non-destructive by construction, re-resolvable, no
+  template" now has a corpus behind it rather than a design argument. A second test pins the
+  property `render_with` will rest on (§3.3.1): the same tree folded twice, and folded through a
+  renderer handed out as a shared `Rc` the way
+  [`Parser::with_inline_substitution_renderer`](../../parser/src/parser/parser.rs) installs one,
+  gives the same bytes. This is test-only: nothing is wired in, and the corpus-wide fold-parity
+  audit is unchanged.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -6385,6 +6447,20 @@ Each phase is a reviewable unit with a clear exit gate.
        test pins the equivalence from both ends over a corpus of titles. See the step's own
        "landed as" note above, which also records what the experiment says about the cutover's
        remaining blast radius.
+
+     - ✅ **prep (a whole-document parity harness for the builder, after resolution).** The gap
+       the measurement above exposed in what the branch *verifies*, rather than in what it
+       recognizes. The builder's own corpora run on a bare `Content`, which cannot resolve
+       cross-references; the whole-document sweep that does reach resolution drives the
+       *Strategy-A recorder*, which this step retired to test-only machinery. So the property the
+       deferred-cross-reference sentinel system's retirement rests on — the builder's tree, folded
+       **after** resolution, reproducing the rendered string — had no corpus behind it.
+       [`inline_builder_document_parity`](../../parser/src/tests/inline_builder_document_parity.rs)
+       gives it one, in a single parse (with the tree flag on, each location carries both its
+       rendered string and its tree), reaching every content-bearing block kind through `IsBlock`
+       rather than by variant — paragraphs, admonitions, and the raw-delimited family — plus
+       section titles, table cells, and footnote subtrees, with guards against vacuity and against
+       the walk narrowing. It passes as written. See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

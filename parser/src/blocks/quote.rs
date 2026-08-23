@@ -133,6 +133,13 @@ impl<'src> QuoteBlock<'src> {
         self.title.as_mut()
     }
 
+    /// Returns the block's title as a read-only [`Content`], if the block has
+    /// one. Used by the inline-tree tests to inspect a block title's own tree.
+    #[cfg(test)]
+    pub(crate) fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
+    }
+
     /// Parse a blockquote, if the given metadata and content describe one.
     ///
     /// Returns `None` (without consuming the block) when the content is not a
