@@ -235,7 +235,7 @@ pub struct Parser {
     ///
     /// [counter]: https://docs.asciidoctor.org/asciidoc/latest/attributes/counters/
     /// [`attribute_value()`]: Self::attribute_value
-    pub(crate) counter_values: RefCell<HashMap<String, String>>,
+    pub(crate) counter_values: RefCell<Arc<HashMap<String, String>>>,
 
     /// Running state for inline `{counter:…}` / `{counter2:…}` counters whose
     /// target attribute is *locked* (API-set or a locked built-in).
@@ -576,7 +576,7 @@ impl Default for Parser {
             in_bibliography_list_item: Cell::new(false),
             mark_footnote_spans: Cell::new(false),
             pending_block_title: None,
-            counter_values: RefCell::new(HashMap::new()),
+            counter_values: RefCell::new(Arc::new(HashMap::new())),
             locked_counter_values: RefCell::new(HashMap::new()),
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
@@ -770,7 +770,7 @@ impl Parser {
         self.pending_block_title = None;
 
         // Reset counter (and captioned-block) numbering for each new document.
-        self.counter_values.borrow_mut().clear();
+        Arc::make_mut(&mut self.counter_values.borrow_mut()).clear();
         self.locked_counter_values.borrow_mut().clear();
 
         // Start each parse at the outermost block-nesting level. The counter is
@@ -1373,7 +1373,7 @@ impl Parser {
         ResolvedAttributes::new(
             Arc::clone(&self.attribute_values),
             Arc::clone(&self.default_attribute_values),
-            self.counter_values.borrow().clone(),
+            Arc::clone(&self.counter_values.borrow()),
             self.safe,
             self.reference_time.clone(),
             self.input_mtime.clone(),
@@ -1510,7 +1510,7 @@ impl Parser {
 
         // Either way the partner supersedes (and resets) any counter of the
         // same name, mirroring a direct assignment.
-        self.counter_values.borrow_mut().remove(partner);
+        Arc::make_mut(&mut self.counter_values.borrow_mut()).remove(partner);
 
         if let InterpretedValue::Unset = value {
             // The toggle is off, so the partner turns on. This mirroring
@@ -2668,7 +2668,7 @@ impl Parser {
 
         // An explicit assignment supersedes (and resets) any counter of the same
         // name.
-        self.counter_values.borrow_mut().remove(&attr_name);
+        Arc::make_mut(&mut self.counter_values.borrow_mut()).remove(&attr_name);
 
         // The derived `backend-html5-doctype-*` attribute tracks `doctype`
         // automatically (it is synthesized on lookup), so no refresh is needed.
@@ -2693,7 +2693,7 @@ impl Parser {
             value: InterpretedValue::Value(value.as_ref().to_owned()),
         };
 
-        self.counter_values.borrow_mut().remove(&attr_name);
+        Arc::make_mut(&mut self.counter_values.borrow_mut()).remove(&attr_name);
         Arc::make_mut(&mut self.attribute_values).insert(attr_name, attribute_value);
     }
 
@@ -2877,7 +2877,7 @@ impl Parser {
 
         // An explicit assignment supersedes (and resets) any counter of the same
         // name. This is what lets `:!name:` reset a counter.
-        self.counter_values.borrow_mut().remove(&attr_name);
+        Arc::make_mut(&mut self.counter_values.borrow_mut()).remove(&attr_name);
 
         // The derived `backend-html5-doctype-*` attribute tracks `doctype`
         // automatically (it is synthesized on lookup), so no refresh is needed.
@@ -3042,8 +3042,7 @@ impl Parser {
                 .borrow_mut()
                 .insert(name.to_string(), next.clone());
         } else {
-            self.counter_values
-                .borrow_mut()
+            Arc::make_mut(&mut self.counter_values.borrow_mut())
                 .insert(name.to_string(), next.clone());
         }
 
