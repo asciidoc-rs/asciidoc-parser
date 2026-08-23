@@ -199,10 +199,16 @@
 //!   without deferring the whole anchor.
 //!   Likewise a *concealed* index term (`indexterm:[…]`, `(((…)))`) renders
 //!   nothing, so it too is always recognized; a *visible* term (`indexterm2:[…]`,
-//!   `((term))`) is deferred only when its shown text crosses a rendered span —
-//!   an argument that is an **attribute list** (an `=`) is not deferred, since
-//!   the list only decides which of that argument's own bytes are shown and is
-//!   consumed rather than carried. An escaped shorthand keeps its match literal
+//!   `((term))`) shows its text in the flow, and where that text **encloses** a
+//!   rendered span it is carried as the node's
+//!   [`children`](crate::inlines::IndexTerm::children) rather than as a computed
+//!   string, so the span's markup is written by the fold (`((*tiger*))`). Only
+//!   an argument that is *both* an **attribute list** (an `=`) and enclosing
+//!   such a span still defers, its shown term coming back from
+//!   [`Attrlist::parse`](crate::attributes::Attrlist) rather than from a range;
+//!   a plain attribute list is not deferred, since the list only decides which
+//!   of that argument's own bytes are shown and is consumed rather than
+//!   carried. An escaped shorthand keeps its match literal
 //!   minus the backslash, *except* the paren-wrapped `\(((x)))`, which the
 //!   string replacer still renders as the flow term nested inside it: that one
 //!   becomes a **pair** of matches (the backslash's own, then the term's,
@@ -853,6 +859,7 @@ mod tests {
             "indexterm2:[shown]",
             "indexterm2:[Flash,see=HTML 5] then indexterm2:[see-also=\"CSS 3\"]",
             r"an escaped \(((Coffee))) shorthand and its \((literal)) twin",
+            "a ((*bold* term)) and an indexterm2:[_em_ term] enclosing a span",
             "[[mid-anchor]] after the anchor",
             "text before anchor:named[Ref Text] and after",
             "a +++<b>raw</b>+++ passthrough",
@@ -1020,6 +1027,14 @@ mod tests {
         // `Cow::Borrowed` no-op, and a character replacement inside the term.
         assert_parity(
             "An escaped \\(((Tom (C) Jerry >> Cartoons))) term beside \\((literal)) and (((concealed))) and *bold*.",
+        );
+
+        // A visible term *enclosing* a rendered span, in all three visible
+        // spellings — carried as the node's `children` and rendered by the
+        // fold — beside a term that still computes its own string, so the two
+        // paths run in one content.
+        assert_parity(
+            "A ((*Tom* (C) Jerry >> Cartoons)) term beside indexterm2:[an _em_ term] and \\(((a `code` term))) and ((plain)) and link:x.html[Docs].",
         );
 
         // UI macros (kbd/menu, gated on `experimental`) beside a quoted span.
@@ -1989,6 +2004,14 @@ mod tests {
                 // pair's first match drops is never a special.
                 r"an escaped \(((a & b))) term",
                 r"an escaped \(((a &lt; b))) term",
+                // A visible term *enclosing* a rendered span, whose shown text
+                // is the node's `children` rather than a computed string. What
+                // an order decides here is only whether the enclosed construct
+                // is recognized at all: under one without `quotes` the `*b*`
+                // is plain text the term shows as itself, and under one with it
+                // the span is a child the fold renders.
+                "a ((*b* term)) here",
+                "an indexterm2:[*b* term] here",
                 // The same value written as the *entity spelling* of a
                 // special, for each of the three families that compute an
                 // attribute-list value. Under these orders nothing escaped it,

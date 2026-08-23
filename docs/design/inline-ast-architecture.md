@@ -5020,6 +5020,78 @@ Each phase is a reviewable unit with a clear exit gate.
   bare-attrlisted body whose content the passthrough pass's first scan already recognizes
   (`[method x-]+pass:[<b>]+`).
 
+  *Step 6 prep landed as (a visible term enclosing a rendered span — the index-term
+  family's last deferral):* the half the increment above named as *never its own*, and the
+  first lift in this family that changes what an [`IndexTerm`](../../parser/src/inlines/index_term.rs)
+  node **holds** rather than which ranges a gate admits. A visible term shows its text in the
+  flow, and the string replacer reads that text straight out of its own already-rendered
+  haystack — where an earlier-recognized construct already stands as its markup — so
+  `((*tiger*))` shows `<strong>tiger</strong>`. The builder's match string stands the same
+  construct in as one opaque
+  [`SPAN_PLACEHOLDER`](../../parser/src/content/inline_builder/quotes.rs), whose markup exists
+  only at fold time, so every spelling of such a term was left literal and pinned by a
+  divergence test — the last of the audit's remainder this family held, and the shape
+  `The ((*tiger*)) (Panthera tigris) …` spells in the `asciidoc-lang` corpus.
+
+  The finding is that the shown text needs no string at all. It is not a value this family
+  *decides* anything from — every decision (`trim`, the ` >> ` / ` &> ` clause, the
+  attribute-list `=`) is made over the bytes as matched — so it can be carried as the nodes it
+  encloses and rendered at fold time, which is exactly the move the reference-bearing families
+  made for their own display texts. [`IndexTerm`](../../parser/src/inlines/index_term.rs) gains
+  a `children` field, the same one [`Ref`](../../parser/src/inlines/ref_node.rs) and
+  [`Footnote`](../../parser/src/inlines/footnote.rs) already carry, and
+  [`fold_index_term`](../../parser/src/content/inline_builder/fold.rs) folds it into the
+  already-substituted string
+  [`IndexTermRenderParams`](../../parser/src/parser/inline_substitution_renderer.rs) takes —
+  the relationship [`fold_html`](../../parser/src/content/inline_builder/fold.rs)'s own
+  `link_text` has to `Ref::children`, reached for the same reason. Because the fold uses the
+  surrounding flow's renderer, the enclosed span is rendered by a *custom* backend too, where
+  a term frozen at build time would have carried the built-in one's markup.
+
+  What made it a range rather than a string is
+  [`shown_term_range`](../../parser/src/content/inline_builder/macros/indexterm.rs), which
+  re-expresses `normalize_index_text` and `strip_see_and_seealso` as a **narrowing**: `trim` is
+  one already; the `\n` → ` ` collapse is length-preserving, so it moves no offset and becomes a
+  one-space [`Text`](../../parser/src/inlines/inline_node.rs) node the emit writes; the `\]`
+  unescape is a *gap* between two emitted ranges, the same structural unescape
+  [`emit_range_unescaping_brackets`](../../parser/src/content/inline_builder/macros/mod.rs)
+  performs for the reference families; and a `see` / `see-also` clause is a suffix, so the
+  primary it leaves is a prefix that maps straight back. The two never combine — the macro form
+  unescapes and does not strip, the shorthand strips and does not unescape — so neither
+  perturbs the other. A shorthand that **absorbed** trailing parentheses is the one case whose
+  `encl_text` is not contiguous in the match string (the matched `))` sits between the enclosed
+  text and the absorbed run), so it is carried as the pair of ranges it really is
+  ([`TermSource`](../../parser/src/content/inline_builder/macros/indexterm.rs)) and every
+  narrowing maps back through it — which is what brings `((*a*)))`, `((*a*))))` and `(((*a*))`
+  along with the plain spelling.
+
+  The computed string stays for every term whose shown range holds no placeholder, so the
+  spellings already at parity are byte-identical and `terms` goes on carrying them; the two
+  fields are never both populated. One spelling still defers, and it is the one the sibling
+  increments' `Attrlist<'src>` captures already drew: an argument that is **both** an attribute
+  list and enclosing such a construct, whose shown term comes back from
+  [`Attrlist::parse`](../../parser/src/attributes/attrlist.rs) rather than from a range, so
+  there is nothing to carry — `indexterm2:[*bold* term,region=Kona]` keeps its divergence test.
+
+  What reaches parity is the three visible spellings alone and in flow, the span at either edge
+  and as the whole term, a monospace / nested / attributed / entity-rendered span, two spans in
+  one term and two terms in one level, each normalization the shown term still performs (a
+  collapsed newline, a trimmed edge, a stripped `see` and `see-also` clause, the macro form's
+  escaped closing bracket), all three absorbed-paren shapes, the concealed and plain-escaped
+  twins beside it, and the term inside a rendered span and beside other constructs. The three
+  formerly pinned divergences become parity tests that also assert the shape: one `IndexTerm`
+  with an empty `terms`, the enclosed span itself in `children`, and the node's whole-match
+  location. Re-running the corpus-wide fold-parity audit shows that golden fixture **gone** from
+  the divergence set and no new divergence; coverage is diff-neutral, and as with every prep
+  piece before it, nothing further is wired in.
+
+  With this the index-term family defers nothing but the `Attrlist` capture above. Beyond the
+  family the remainder is unchanged: the boundary-class halves the sibling increments named — a
+  macro body class wanting more than one presented character, the closing character, and the
+  character-replacements step's consume-across-levels case — plus the keeps, and the
+  bare-attrlisted body whose content the passthrough pass's first scan already recognizes
+  (`[method x-]+pass:[<b>]+`).
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -5894,6 +5966,28 @@ Each phase is a reviewable unit with a clear exit gate.
        the half that was never its own: a visible term crossing a rendered span, in every
        spelling, which is the module-wide `range_is_verbatim` boundary; beyond it the remainder
        is unchanged.
+
+     - ✅ **prep (a visible term enclosing a rendered span).** The index-term family's last
+       deferral, and the half the increment above named as never its own. A visible term shows
+       its text in the flow, and the string replacer reads that text out of its own
+       already-rendered haystack, so `((*tiger*))` shows `<strong>tiger</strong>` where the
+       builder's match string holds one opaque placeholder. The shown text needed no string:
+       nothing this family decides is read from it — `trim`, the ` >> ` / ` &> ` clause and the
+       attribute-list `=` are all decided over the bytes as matched — so
+       [`IndexTerm`](../../parser/src/inlines/index_term.rs) gains the `children`
+       [`Ref`](../../parser/src/inlines/ref_node.rs) and
+       [`Footnote`](../../parser/src/inlines/footnote.rs) already carry, and
+       [`fold_index_term`](../../parser/src/content/inline_builder/fold.rs) folds them into the
+       already-substituted string the seam takes — with the *surrounding flow's* renderer, so a
+       custom backend writes the enclosed span too.
+       [`shown_term_range`](../../parser/src/content/inline_builder/macros/indexterm.rs)
+       re-expresses `normalize_index_text` and `strip_see_and_seealso` as a narrowing (the `\n`
+       collapse becoming a one-space node, the `\]` unescape a gap), and
+       [`TermSource`](../../parser/src/content/inline_builder/macros/indexterm.rs) carries the
+       absorbed-paren spelling's two non-adjacent ranges. The computed string stays wherever the
+       shown range holds no placeholder, so every spelling already at parity is byte-identical.
+       Only the `Attrlist`-bearing argument still defers, its shown term coming back from a parse
+       rather than a range; see the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

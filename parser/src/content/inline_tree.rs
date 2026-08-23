@@ -956,6 +956,10 @@ fn leaf_node_of<'src>(node: &LeafNode, span: Span<'src>) -> InlineNode<'src> {
 
         LeafNode::IndexTerm { terms, visible } => InlineNode::IndexTerm(IndexTerm {
             terms: terms.iter().cloned().map(CowStr::from).collect(),
+            // The recorder recovers a shown term from the *rendered* string, so
+            // it always has one as text; only the single-pass builder reaches
+            // the structural spelling (see `IndexTerm::children`).
+            children: vec![],
             visible: *visible,
             location: span,
         }),

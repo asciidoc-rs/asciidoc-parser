@@ -683,7 +683,23 @@ fn assert_node_equivalent(r: &InlineNode<'_>, b: &InlineNode<'_>, source: &str) 
         }
 
         (InlineNode::IndexTerm(ri), InlineNode::IndexTerm(bi)) => {
-            assert_eq!(ri.terms, bi.terms, "IndexTerm terms differ for {source:?}");
+            // A visible term *enclosing* a rendered span is the builder's
+            // one-sided richness, of exactly the kind this sweep already
+            // records elsewhere: the recorder recovers a shown term out of the
+            // finished string, so it can only ever hold that span's markup as
+            // text, where the builder carries the span itself as `children`
+            // and lets the fold render it (see `IndexTerm::children`). Compare
+            // `terms` only where the builder computed one, and compare the
+            // enclosed structure on its own terms below.
+            if bi.children.is_empty() {
+                assert_eq!(ri.terms, bi.terms, "IndexTerm terms differ for {source:?}");
+            } else {
+                assert!(
+                    bi.terms.is_empty(),
+                    "a structural term carries no computed text for {source:?}"
+                );
+            }
+
             assert_eq!(
                 ri.visible, bi.visible,
                 "IndexTerm visible differs for {source:?}"
@@ -824,6 +840,7 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "indexterm2:[shown]",
         "indexterm2:[Flash,see=HTML 5] then indexterm2:[see-also=\"CSS 3\"]",
         r"an escaped \(((Coffee))) shorthand and its \((literal)) twin",
+        "a ((*bold* term)) and an indexterm2:[_em_ term] enclosing a span",
         "[[mid-anchor]] after the anchor",
         "text before anchor:named[Ref Text] and after",
         "a +++<b>raw</b>+++ passthrough",
