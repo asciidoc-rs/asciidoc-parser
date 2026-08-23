@@ -1,8 +1,14 @@
 //! Cross-reference recognition (`xref:id[…]`, `<<id>>`).
 
+// Referenced by the doc comments below, whose own rebuild is the one this
+// family reaches through `restored_value_children`; the code no longer calls
+// it directly.
+#[allow(unused_imports)]
+use super::computed_value_children;
 use super::{
-    ComputedSpecials, MacroMatch, MacroMatchKind, computed_value_children,
+    ComputedSpecials, MacroMatch, MacroMatchKind, holds_carried_token,
     image::range_has_no_opaque_piece, macro_text_children, rebuild_macro_level,
+    restored_value_children, tokened_text,
 };
 use crate::{
     Parser, Span,
@@ -248,14 +254,28 @@ fn find_xref_matches<'src>(
                 #[allow(clippy::unwrap_used)]
                 let target = caps.get(3).unwrap();
 
-                // A text carrying an `=` is read as an attribute list, whose
-                // parsed positional value no placeholder can be mapped back
-                // out of, so that one text shape keeps the gate too.
+                // A text carrying an `=` is read as an attribute list. Its
+                // *positional* value becomes the node's children, so an opaque
+                // piece there is carried as the node itself
+                // ([`tokened_text`]); a piece reaching one of the three values
+                // this family reads as a **string** — a `window=`, a `role=`,
+                // an `xrefstyle=` — has no bytes to be read as, and that shape
+                // alone keeps the gate. Deciding it means performing the same
+                // tokened parse the builder performs, on the same bytes: this
+                // gate already re-derives the shorthand's own comma split for
+                // the same reason.
                 let attrlist_text = caps.get(4).filter(|text| text.as_str().contains('='));
 
                 range_has_no_opaque_piece(nodes, pieces, &(target.start()..target.end()))
                     && attrlist_text.is_none_or(|text| {
                         range_has_no_opaque_piece(nodes, pieces, &(text.start()..text.end()))
+                            || attrlist_text_carries_its_opaque_pieces(
+                                text.as_str(),
+                                &(text.start()..text.end()),
+                                nodes,
+                                pieces,
+                                parser,
+                            )
                     })
             }
         };
@@ -306,6 +326,69 @@ fn find_xref_matches<'src>(
     }
 
     matches
+}
+
+/// Whether an attribute-list display text enclosing an opaque piece can be
+/// **carried** — the one thing [`find_xref_matches`]'s gate still asks of such
+/// a text.
+///
+/// A [`Ref`]`{Xref}` node holds no [`Attrlist`] of its own: its display text
+/// becomes children, and its `window` / `role` / `xrefstyle` are plain strings
+/// read off the parse. So the boundary is drawn per **slot** rather than per
+/// family, exactly as [`text_attrlist`](super::links)'s own `pre_restore` draws
+/// it — a token in the positional value is a node the caller splices back
+/// ([`restored_value_children`]), while a token in any of the three computed
+/// values names markup that exists only at fold time where a string is needed,
+/// and the whole match is left literal.
+///
+/// The tokened parse this makes is the same one
+/// [`xref_macro_text`] makes to build, over the same bytes. Re-deriving it
+/// here is what keeps the deferral decision in the gate, where this family's
+/// own contract puts it ("both builders claim every shape they are handed").
+///
+/// Reached only for a text the caller's own
+/// [`range_has_no_opaque_piece`] has already refused, so the tokening below
+/// always produces at least one token; a text carrying none would answer
+/// `true` here, which is what that caller already decided for itself.
+fn attrlist_text_carries_its_opaque_pieces(
+    raw_text: &str,
+    text_range: &std::ops::Range<usize>,
+    nodes: &[InlineNode<'_>],
+    pieces: &[Piece],
+    parser: &Parser,
+) -> bool {
+    let (tokened, _carried) = tokened_text(&raw_text.replace('\n', " "), text_range, nodes, pieces);
+
+    let attrlist = Attrlist::parse(Span::new(&tokened), parser, AttrlistContext::Inline)
+        .item
+        .item;
+
+    // An incidental `=` (the parse finds no named attribute) leaves the whole
+    // text as the sole positional value, which the builder then rebuilds as
+    // plain text through [`macro_text_children`] — a path that carries any
+    // node structurally already.
+    let named_attributes_split = attrlist
+        .nth_attribute(1)
+        .is_none_or(|first| first.value() != tokened);
+
+    if !named_attributes_split {
+        return true;
+    }
+
+    let window_is_clean = attrlist
+        .named_attribute("window")
+        .is_none_or(|a| !holds_carried_token(a.value()));
+
+    let xrefstyle_is_clean = attrlist
+        .named_attribute("xrefstyle")
+        .is_none_or(|a| !holds_carried_token(a.value()));
+
+    let roles_are_clean = !attrlist
+        .roles()
+        .iter()
+        .any(|role| holds_carried_token(role));
+
+    window_is_clean && xrefstyle_is_clean && roles_are_clean
 }
 
 /// The match-string range of a `<<…>>` shorthand's **id half**: its inner up to
@@ -426,7 +509,20 @@ fn xref_macro_text<'src>(
     }
 
     if raw_text.contains('=') {
-        let normalized = raw_text.replace('\n', " ");
+        // Tokened before the parse, so an opaque piece the text encloses reads
+        // to the split as the one indivisible run the string replacer's own
+        // markup is there (see [`tokened_text`]). A text enclosing none comes
+        // back byte-identical, which is every list that was already at parity.
+        #[allow(clippy::unwrap_used)]
+        let text_range = text_span.unwrap();
+
+        let (normalized, carried) = tokened_text(
+            &raw_text.replace('\n', " "),
+            &(text_range.start()..text_range.end()),
+            nodes,
+            pieces,
+        );
+
         let attrlist = Attrlist::parse(Span::new(&normalized), parser, AttrlistContext::Inline)
             .item
             .item;
@@ -451,12 +547,6 @@ fn xref_macro_text<'src>(
             let children = match first.filter(|s| !s.is_empty()) {
                 None => vec![],
                 Some(text) => {
-                    // `text_span` is always `Some` here: it is `None` only
-                    // when `raw_text` is empty, which returns above before
-                    // reaching this branch.
-                    #[allow(clippy::unwrap_used)]
-                    let span = text_span.unwrap();
-
                     // The parsed positional attribute is a synthesized value
                     // with no `'src` slice of its own (it comes from the
                     // normalized, attrlist-parsed copy, not the source
@@ -464,9 +554,13 @@ fn xref_macro_text<'src>(
                     // span (design §4.4), mirroring the synthesized-value
                     // location policy `apply_attribute_references` already
                     // establishes.
-                    let location = source_slice(pieces, span.start()..span.end(), root);
+                    let location = source_slice(pieces, text_range.start()..text_range.end(), root);
 
-                    computed_value_children(&text, location, specials)
+                    // Each token this value still holds becomes the node it
+                    // stands for, so an enclosed span is carried as the
+                    // construct itself and rendered at fold time; the bytes
+                    // around it take the same rebuild a token-free value does.
+                    restored_value_children(&text, &carried, location, specials)
                 }
             };
 
@@ -681,6 +775,35 @@ mod tests {
             InlineNode::Ref(reference) if reference.variant == RefVariant::Xref => reference,
 
             other => panic!("expected an xref Ref, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scratch_probe2() {
+        for fixture in [
+            "See xref:sec[*bold*,role=hl].",
+            "xref:sec[*bold*,role=hl]",
+            "xref:sec[*a* b,window=_blank]",
+            "xref:sec[*a*,xrefstyle=full]",
+            "xref:sec[a *b* c,role=hl]",
+            "xref:sec[`code`,role=hl]",
+            "xref:sec[*a*]",
+            "xref:sec[*a*,role=*b*]",
+            "xref:sec[*a*,window=*b*]",
+            "xref:sec[++<b>x</b>++,role=hl]",
+            "xref:sec[*a*,role=hl,window=_blank]",
+            "xref:sec[a &copy; *b*,role=hl]",
+            "xref:sec[a < *b*,role=hl]",
+            "xref:sec[*a*\nb,role=hl]",
+            "xref:sec[image:x.png[]]",
+            "<<sec,*bold*>>",
+        ] {
+            let folded = fold_html(&build_src(Span::new(fixture)), &HtmlSubstitutionRenderer {});
+            let gold = golden_xref(fixture);
+            println!(
+                "{fixture:?}\n  tree = {folded:?}\n  gold = {gold:?}\n  {}",
+                if folded == gold { "OK" } else { "DIVERGE" }
+            );
         }
     }
 
@@ -1643,24 +1766,108 @@ mod tests {
     }
 
     #[test]
-    fn an_attribute_list_text_crossing_a_rendered_span_is_a_documented_divergence() {
-        // The one text shape that keeps the stricter gate. A text carrying an
-        // `=` is read as an attribute list, and its display text comes back
-        // from that *parse* rather than from a range of the match string — so
-        // a placeholder inside the parsed value has no node to map back to,
-        // exactly as the image and link families' own `Attrlist`-bearing
-        // captures cannot be rebuilt from one. The reference is therefore left
-        // unrecognized where the string pipeline builds one over the markup.
-        let source = "xref:sec[*bold*,role=hl]";
-        let nodes = build_src(Span::new(source));
+    fn fold_matches_the_string_pipeline_for_an_attribute_list_text_enclosing_a_span() {
+        // The text shape that used to keep the stricter gate. A text carrying
+        // an `=` is read as an attribute list, and its display text comes back
+        // from that *parse* rather than from a range — but the value that
+        // parse hands back is the node's **children**, so an enclosed
+        // construct needs no bytes: it is tokened before the split
+        // ([`tokened_text`]) and spliced back as the node itself
+        // ([`restored_value_children`]).
+        for fixture in [
+            // The golden spelling, alone and in flow.
+            "xref:sec[*bold*,role=hl]",
+            "See xref:sec[*bold*,role=hl].",
+            // The span at either edge and in the middle of the text.
+            "xref:sec[*a* b,role=hl]",
+            "xref:sec[a *b*,role=hl]",
+            "xref:sec[a *b* c,role=hl]",
+            // Each of the three named attributes this family reads, with the
+            // span in the *positional* value beside it.
+            "xref:sec[*a* b,window=_blank]",
+            "xref:sec[*a* b,xrefstyle=full]",
+            "xref:sec[*a* b,role=hl,window=_blank]",
+            // Other span kinds, and two spans in one text.
+            "xref:sec[`code` here,role=hl]",
+            "xref:sec[[.r]#x# here,role=hl]",
+            "xref:sec[*a* and _b_,role=hl]",
+            // Beside the recoverable pieces the text already carried: an
+            // escaped special, a restored entity, a typographic replacement.
+            "xref:sec[a < *b*,role=hl]",
+            "xref:sec[a &copy; *b*,role=hl]",
+            "xref:sec[a (C) *b*,role=hl]",
+            // A newline the parse's own normalization collapses, on either
+            // side of the span.
+            "xref:sec[*a*\nb,role=hl]",
+            // An `=` the parse finds **incidental** — no attribute name can
+            // hold the spaces before it, so the whole text stays the sole
+            // positional value and the builder falls through to its plain-text
+            // path, which has carried an opaque piece structurally all along.
+            "xref:sec[a *b* c=d]",
+            "xref:sec[*b* c=d]",
+            // The shorthand spelling is unchanged: its reference text never
+            // carried an attribute list at all.
+            "<<sec,*bold*>>",
+        ] {
+            assert_eq!(
+                fold_html(&build_src(Span::new(fixture)), &HtmlSubstitutionRenderer {}),
+                golden_xref(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "an attribute-list text crossing a rendered span must be left unrecognized: {nodes:?}"
-        );
+    #[test]
+    fn an_attribute_list_text_enclosing_a_span_carries_it_as_children() {
+        // The shape behind the parity above: the enclosed span itself is a
+        // child, not the markup it will fold to, and the named attributes the
+        // parse split off still reach the node's own plain fields.
+        let nodes = build_src(Span::new("xref:sec[*bold* here,role=hl]"));
 
-        // The string pipeline, by contrast, does build a reference here.
-        assert!(golden_xref(source).contains("<a href"));
+        assert_eq!(nodes.len(), 1);
+        let reference = assert_xref(&nodes[0]);
+
+        assert_eq!(reference.target.as_ref(), "sec");
+        assert_eq!(reference.roles.len(), 1);
+        assert_eq!(reference.roles[0].as_ref(), "hl");
+
+        match &reference.children[..] {
+            [InlineNode::Styled(styled), InlineNode::Text { value, .. }] => {
+                assert_eq!(styled.location.data(), "*bold*");
+
+                // The bytes around the token take the same rebuild every
+                // attribute-list value takes: an owned run off the parse,
+                // whose location is the bracketed text's own coarse span
+                // (design §4.4).
+                assert_eq!(value.as_ref(), " here");
+            }
+
+            other => panic!("expected a span and a text run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_span_in_a_computed_attribute_is_a_documented_divergence() {
+        // The boundary this increment does *not* move, drawn per **slot**: a
+        // `window=`, a `role=`, or an `xrefstyle=` is read as a **string**,
+        // and an enclosed span has no bytes to be read as — its markup exists
+        // only at fold time. The reference is therefore left unrecognized
+        // where the string pipeline builds one over the markup, with the
+        // span's own tags rendered verbatim into the attribute.
+        for source in [
+            "xref:sec[*a*,role=*b*]",
+            "xref:sec[a,window=*b*]",
+            "xref:sec[a,xrefstyle=*b*]",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
+                "a span in a computed attribute must be left unrecognized: {nodes:?}"
+            );
+
+            assert!(golden_xref(source).contains("<a href"));
+        }
     }
 
     #[test]
@@ -2165,5 +2372,67 @@ mod tests {
             rendered,
             "the block's tree must fold to its own rendered string"
         );
+    }
+
+    #[test]
+    fn a_real_documents_attribute_listed_xref_text_over_a_span_reaches_its_tree() {
+        // End-to-end, through the real parse path, on the shape that named this
+        // increment: an attribute-list reference text enclosing a rendered
+        // span. The block's tree folds to the rendered string byte-for-byte —
+        // the span's markup written once, by the fold — and carries the
+        // reference as a node rather than the literal macro it used to. Driven
+        // in block content and in a heading's own title, whose `Title` group
+        // runs the same macros step.
+        use crate::blocks::{Block, FindBlocks, IsBlock};
+
+        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+            "[#install]\n",
+            "== See xref:install[the *bold* steps,role=hl]\n",
+            "\n",
+            "See xref:install[the *bold* steps,role=hl] for details.\n",
+        ));
+
+        let block = doc
+            .descendant_blocks()
+            .find(|b| {
+                b.rendered_html_content()
+                    .is_some_and(|c| c.contains("for details"))
+            })
+            .unwrap();
+
+        let rendered = block.rendered_html_content().unwrap();
+        let inlines = block.inlines().unwrap();
+
+        assert!(
+            rendered.contains(r#"class="hl""#) && rendered.contains("<strong>bold</strong>"),
+            "rendered: {rendered}"
+        );
+
+        assert_eq!(
+            fold_html(inlines, &HtmlSubstitutionRenderer {}),
+            rendered,
+            "the block's tree must fold to its own rendered string"
+        );
+
+        let mut folded_titles = 0;
+
+        for block in doc.descendant_blocks() {
+            let Block::Section(section) = block else {
+                continue;
+            };
+
+            assert_eq!(
+                fold_html(
+                    section.section_title_inlines(),
+                    &HtmlSubstitutionRenderer {}
+                ),
+                section.section_title(),
+                "fold diverged from the rendered section title"
+            );
+
+            folded_titles += 1;
+        }
+
+        assert_eq!(folded_titles, 1, "expected the heading to carry a tree");
     }
 }

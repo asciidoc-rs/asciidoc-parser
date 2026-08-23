@@ -1,9 +1,14 @@
 //! Auto-link, formal-URL-link, and `link:`/`mailto:` macro recognition.
 
+// Referenced by the doc comments below, whose own rebuild is the one this
+// family reaches through `restored_value_children`; the code no longer calls
+// it directly.
+#[allow(unused_imports)]
+use super::computed_value_children;
 use super::{
-    ComputedSpecials, MacroMatch, MacroMatchKind, computed_value_children,
+    ComputedSpecials, MacroMatch, MacroMatchKind,
     image::{range_is_restorable, range_is_verbatim, restorable_body, tokened_bracket},
-    macro_text_children, rebuild_macro_level,
+    macro_text_children, rebuild_macro_level, restored_value_children,
 };
 use crate::{
     Parser, Span,
@@ -1684,54 +1689,6 @@ fn text_attrlist<'src>(
         escaped: true,
         restores,
     })
-}
-
-/// Rebuilds a computed display text that still holds
-/// [`tokened_bracket`] tokens as the node's children: each token becomes the
-/// masked node itself, and the bytes around it take
-/// [`computed_value_children`]'s own rebuild.
-///
-/// Splicing the node rather than its bytes is what keeps the fold honest. A
-/// [`Raw`](InlineNode::Raw) leaf's body is emitted verbatim and a
-/// [`Stem`](InlineNode::Stem) leaf's is rendered at fold time — which is
-/// exactly what `Passthroughs::restore_to` splices into the string pipeline's
-/// own display text — where those same bytes spliced into a
-/// [`Text`](InlineNode::Text) would be escaped a second time (design §3.4):
-/// `link:x[++<b>a</b>++,role=hl]` would show `&amp;lt;b&amp;gt;` against the
-/// golden's `&lt;b&gt;`.
-///
-/// The walk is index-keyed and left to right, like
-/// [`Passthroughs::restore_to`](crate::content::Passthroughs)'s own: each
-/// token is sought only in the bytes after the previous one, and a token the
-/// parse dropped (a value the split discarded) is simply not found, leaving
-/// the ones after it to splice by their own index.
-fn restored_value_children<'src>(
-    text: &str,
-    restores: &[InlineNode<'src>],
-    location: Span<'src>,
-    specials: ComputedSpecials,
-) -> Vec<InlineNode<'src>> {
-    let mut children: Vec<InlineNode<'src>> = Vec::new();
-    let mut rest = text;
-
-    for (n, node) in restores.iter().enumerate() {
-        let token = format!("\u{96}{n}\u{97}");
-
-        if let Some(pos) = rest.find(&token) {
-            children.append(&mut computed_value_children(
-                rest.get(..pos).unwrap_or_default(),
-                location,
-                specials,
-            ));
-
-            children.push(node.clone());
-            rest = rest.get(pos + token.len()..).unwrap_or_default();
-        }
-    }
-
-    children.append(&mut computed_value_children(rest, location, specials));
-
-    children
 }
 
 /// The bare e-mail auto-link pass at a level: matches [`INLINE_EMAIL`] over the

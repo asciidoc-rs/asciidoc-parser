@@ -15,7 +15,9 @@ use ui::{kbd_btn_macros_level, menu_macros_level};
 use xref::xref_macros_level;
 
 use super::{
-    quotes::{LevelContext, Piece, emit_range, source_slice, special_entity, text_slice},
+    quotes::{
+        LevelContext, Piece, charref_entity, emit_range, source_slice, special_entity, text_slice,
+    },
     special_chars::{Masked, unescaped_value_children},
 };
 use crate::{
@@ -628,6 +630,159 @@ pub(in crate::content::inline_builder) fn emit_range_unescaping_brackets<'src>(
     }
 
     emit_range(nodes, pieces, cursor..range.end, out);
+}
+
+/// Rewrites the **opaque** pieces inside one computed text's own match-string
+/// bytes into index-keyed `\u{96}`*n*`\u{97}` tokens, returning that text
+/// alongside the nodes those tokens stand for.
+///
+/// This is [`tokened_bracket`](image::tokened_bracket)'s counterpart for a
+/// value that is **carried structurally** rather than restored as bytes, and
+/// the two differ in exactly one way. A masked passthrough or STEM expression
+/// has a body known at build time, so `tokened_bracket` pairs each token with
+/// it and the caller can splice those bytes back into a *parsed* value. A
+/// rendered [`Styled`](crate::inlines::Styled) span — or any
+/// earlier-recognized macro node — has no such body: its markup exists only
+/// when the tree is folded. There is still nothing to restore *into bytes*,
+/// but there is something to carry: the **node**. So this tokens every atomic
+/// piece [`build_match_string`](super::quotes::build_match_string) stands in
+/// as one placeholder, whatever kind it is, and the caller splices each node
+/// back through [`restored_value_children`].
+///
+/// Why tokening at all, when the placeholder is already one opaque character:
+/// so the split sees the string pipeline's own **shape** there. The
+/// replacer parses an attribute list over the piece's *markup*, which carries
+/// no `,`/`=`/`"` the split could read differently than it reads a token —
+/// and a bare placeholder, being a single `Co` character, would be
+/// indistinguishable from one *inside* a value once the parse hands that value
+/// back. The token's index is what makes the walk back out
+/// unambiguous, exactly as it is for
+/// [`tokened_bracket`](image::tokened_bracket).
+///
+/// Renumbering is per call, from zero, so a token the parse drops shifts none
+/// of the ones that survive.
+pub(super) fn tokened_text<'src>(
+    text: &str,
+    range: &std::ops::Range<usize>,
+    nodes: &[InlineNode<'src>],
+    pieces: &[Piece],
+) -> (String, Vec<InlineNode<'src>>) {
+    let mut tokened = String::new();
+    let mut carried: Vec<InlineNode<'src>> = Vec::new();
+
+    // Walked **piece by piece** rather than by copying the gaps between the
+    // opaque ones, because a byte of the match string may belong to no piece
+    // at all: `styled_sibling_boundaries` wraps an opaque span's placeholder
+    // in the two characters its own rendering presents to a neighbour (the `<`
+    // and `>` of a tag), which exist for *recognition* and stand for markup
+    // this token already carries whole. Copying them would splice a stray `<`
+    // and `>` into the value beside the node.
+    for piece in pieces {
+        let p_start = piece.s_start;
+        let p_end = piece.s_start + piece.s_len;
+
+        // Skip pieces that do not overlap the range.
+        if p_end <= range.start || p_start >= range.end {
+            continue;
+        }
+
+        let lo = p_start.max(range.start);
+        let hi = p_end.min(range.end);
+
+        // The pieces that become a token are the **opaque** ones — atomic, and
+        // not one of the three [`CharRef`](InlineNode::CharRef) leaves
+        // [`build_match_string`](super::quotes::build_match_string) gives real
+        // bytes to. Every other piece contributes its own bytes as it stands:
+        // those are the string replacer's bytes there, so the split reads them
+        // identically and the caller's own rebuild
+        // ([`computed_value_children`]) already knows how to unwind them.
+        let opaque = piece
+            .atomic
+            .then(|| nodes.get(piece.node_index))
+            .flatten()
+            .filter(|node| charref_entity(node).is_none());
+
+        match opaque {
+            Some(node) => {
+                tokened.push_str(&format!("\u{96}{n}\u{97}", n = carried.len()));
+                carried.push(node.clone());
+            }
+
+            None => tokened.push_str(
+                text.get(lo.saturating_sub(range.start)..hi.saturating_sub(range.start))
+                    .unwrap_or_default(),
+            ),
+        }
+    }
+
+    if carried.is_empty() {
+        return (text.to_string(), carried);
+    }
+
+    (tokened, carried)
+}
+
+/// Rebuilds a computed value that still holds [`tokened_text`] /
+/// [`tokened_bracket`](image::tokened_bracket) tokens as a node's children:
+/// each token becomes the node it stands for, and the bytes around it take
+/// [`computed_value_children`]'s own rebuild.
+///
+/// Splicing the node rather than its bytes is what keeps the fold honest. A
+/// [`Raw`](InlineNode::Raw) leaf's body is emitted verbatim and a
+/// [`Stem`](InlineNode::Stem) leaf's is rendered at fold time — which is
+/// exactly what `Passthroughs::restore_to` splices into the string pipeline's
+/// own display text — where those same bytes spliced into a
+/// [`Text`](InlineNode::Text) would be escaped a second time (design §3.4):
+/// `link:x[++<b>a</b>++,role=hl]` would show `&amp;lt;b&amp;gt;` against the
+/// golden's `&lt;b&gt;`. A rendered
+/// [`Styled`](crate::inlines::Styled) span has no bytes to splice at all —
+/// its markup exists only at fold time — so for it the node *is* the only
+/// honest reading.
+///
+/// The walk is index-keyed and left to right, like
+/// [`Passthroughs::restore_to`](crate::content::Passthroughs)'s own: each
+/// token is sought only in the bytes after the previous one, and a token the
+/// parse dropped (a value the split discarded) is simply not found, leaving
+/// the ones after it to splice by their own index.
+pub(super) fn restored_value_children<'src>(
+    text: &str,
+    restores: &[InlineNode<'src>],
+    location: Span<'src>,
+    specials: ComputedSpecials,
+) -> Vec<InlineNode<'src>> {
+    let mut children: Vec<InlineNode<'src>> = Vec::new();
+    let mut rest = text;
+
+    for (n, node) in restores.iter().enumerate() {
+        let token = format!("\u{96}{n}\u{97}");
+
+        if let Some(pos) = rest.find(&token) {
+            children.append(&mut computed_value_children(
+                rest.get(..pos).unwrap_or_default(),
+                location,
+                specials,
+            ));
+
+            children.push(node.clone());
+            rest = rest.get(pos + token.len()..).unwrap_or_default();
+        }
+    }
+
+    children.append(&mut computed_value_children(rest, location, specials));
+
+    children
+}
+
+/// Whether `value` — one attribute the parse handed back — still holds a
+/// [`tokened_text`] token, which means an opaque piece landed in a value the
+/// caller reads as a **string** rather than carrying structurally.
+///
+/// A node has no bytes there, so such a match is deferred. This is the same
+/// per-*slot* boundary
+/// [`text_attrlist`](links)'s own `pre_restore` draws, reached for the
+/// stronger reason: a masked construct at least has a body to splice.
+pub(super) fn holds_carried_token(value: &str) -> bool {
+    value.contains('\u{96}')
 }
 
 /// Rebuilds a value the macros step **computed** off the level's match string
