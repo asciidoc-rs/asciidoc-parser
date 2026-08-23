@@ -5963,6 +5963,34 @@ Each phase is a reviewable unit with a clear exit gate.
   another node's fold bytes, so no single form describes it), and a `Stem` body. Each is a narrow
   form, and each owes the same debt to `render_with` that every frozen value on this branch does.
 
+  *Step 6 landed as (the bare `+…+` body, which is literal text too):* the increment above closed
+  the passthrough family's build-time escaping for `++…++` and `$$…$$` and named three shapes that
+  still freeze a value. Sweeping *every* construct with a call-counting renderer — rather than
+  taking that list on trust — confirms exactly three, and one of them is not narrow at all: the
+  **bare `+…+` form**, which is `SubstitutionGroup::Verbatim` like its delimited siblings and is
+  ordinary AsciiDoc.
+
+  It could not say so while one shape stood in the way. A bare body *enclosing a construct the
+  first extraction pass already replaced* (`+a $$b$$ c+`) interleaves escaped text with that
+  node's own **fold** bytes, and no single form describes the mixture. The previous increment read
+  that as "the bare form freezes", when what it actually means is "the *mixture* freezes" — and
+  the mixture is rare where the plain body is not. So
+  [`substitute_and_restore`](../../parser/src/content/inline_builder/passthrough_step.rs) now
+  detects it rather than assuming it: with nothing restorable inside the body, the value is the
+  author's bytes and the fold escapes them
+  ([`Escaped`](../../parser/src/inlines/inline_node.rs)); only the genuine mixture keeps `AsIs`.
+
+  What remains is **three** shapes, and the third is this increment's own leftover rather than a
+  new one: a `pass:c,q[…]` body and a `Stem` body each run an arbitrary substitution list, and the
+  mixture above — a bare body enclosing an already-extracted construct — interleaves escaped text
+  with that construct's fold bytes. None of the three is a *specialcharacters* body, so no
+  `RawForm` describes any of them; all three need the fold-time laziness §3.3.1 will bring, and owe
+  `render_with` the same debt every frozen value on this branch does. Every *other* construct makes
+  **zero** renderer calls while its tree is built, which the increment below pins as a sweep.
+
+  Corpus-wide fold-parity audit: divergence set byte-identical, 60 rows either side. Coverage is
+  diff-neutral.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -7096,6 +7124,17 @@ Each phase is a reviewable unit with a clear exit gate.
        test edited** and both recordings unchanged. The ~277 golden-HTML assertions keep `apply`
        deliberately — their subject is `rendered_html()` itself. See the step's own "landed as"
        note above.
+
+     - ✅ **prep (the bare `+…+` body, which is literal text too).** A call-counting sweep over
+       every construct — rather than trusting the previous increment's list — finds exactly three
+       that still invoke the renderer while the tree is built, and the bare `+…+` form is one:
+       ordinary AsciiDoc, and `Verbatim` like its delimited siblings. What actually freezes is the
+       *mixture* a body enclosing an already-extracted construct produces, not the form, so
+       [`substitute_and_restore`](../../parser/src/content/inline_builder/passthrough_step.rs)
+       detects the mixture instead of assuming it. What is left is three shapes — a `pass:c,q[…]`
+       body, a `Stem` body, and the mixture itself — none of them a *specialcharacters* body, all
+       needing fold-time laziness.
+       See the step's own "landed as" note above.
 
      - ✅ **prep (a passthrough body is literal text, not raw output).** The blocker review found
        on the always-on increment, and a conflation in §3.4's trichotomy: `++…++` / `$$…$$` apply
