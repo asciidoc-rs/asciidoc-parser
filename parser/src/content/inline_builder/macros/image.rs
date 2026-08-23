@@ -2,7 +2,10 @@
 
 use std::borrow::Cow;
 
-use super::{MacroMatch, MacroMatchKind, links::restore_masked_passthroughs, rebuild_macro_level};
+use super::{
+    MacroMatch, MacroMatchKind, links::restore_masked_passthroughs, rebuild_macro_level,
+    tokened_split_agrees,
+};
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
@@ -129,7 +132,13 @@ fn find_image_matches<'src>(
             .get(2)
             .map_or(full.end..full.end, |m| m.start()..m.end());
 
-        if !range_is_restorable(nodes, pieces, &bracket) {
+        if !bracket_is_recognizable(
+            caps.get(2).map_or("", |m| m.as_str()),
+            &bracket,
+            nodes,
+            pieces,
+            parser,
+        ) {
             continue;
         }
 
@@ -782,6 +791,75 @@ fn masked_default_alt(
     out
 }
 
+/// Whether this family may recognize a macro whose bracket covers `range`.
+///
+/// A bracket comes back from a **parse** — [`bracket_attrlist`] reads its bytes
+/// as content — so an opaque piece there is read as literal text unless
+/// something puts the piece's own bytes back first. [`range_is_restorable`]
+/// names the pieces that always can: a masked passthrough or STEM expression,
+/// whose body [`Passthroughs::restore_to`](crate::content::Passthroughs)
+/// splices into the string pipeline's own finished string, so restoring one
+/// into a parsed value is faithful wherever that value goes.
+///
+/// A **rendered span** is admitted too, and this is the one family where that
+/// is both necessary and safe.
+///
+/// *Necessary*, because it is the only way an image reaches parity at all.
+/// Every value an image's bracket holds is one `render_image` writes out — an
+/// `alt`, a `title`, a `width` — so the per-slot rule the link families draw
+/// ([`rendered_token_escaped_the_display_text`](super::links)) would defer
+/// *every* such bracket, and `image:pause.png[title=*Pause* and Resume]` (a
+/// fixture from the AsciiDoc language docs) would lose its whole macro. A link
+/// has somewhere else to put a rendered span — its display text becomes the
+/// node's children — and an image has no display text at all.
+///
+/// *Safe*, because the frozen bytes are the bytes. The string replacer reads
+/// its own bracket out of a haystack the quotes step has already rendered
+/// **with this same renderer**, so `title="<strong>Pause</strong> and Resume"`
+/// is what it writes too; freezing the span's build-time fold here reproduces
+/// that exactly rather than approximating it. It is also the same trade this
+/// very function's masked branch already makes for a
+/// [`Stem`](crate::inlines::Stem), whose "body" is likewise a build-time fold
+/// ([`restorable_body`]).
+///
+/// What a frozen value cannot survive is being folded again through a
+/// *different* renderer — [`render_with`](crate::Parser) (design §3.3.1,
+/// step 7), which does not exist yet and which every other frozen value on
+/// this branch owes the same debt to. §4.6 reshapes the renderer seam in Phase
+/// 5 so a `*RenderParams` struct becomes the node type itself, which is where
+/// a fold-**materialized** attribute value belongs; until then this is parity,
+/// and parity is what the cutover needs.
+///
+/// The one thing a rendered piece must still satisfy is the *split*: a token
+/// carries none of the `,` / `=` / `"` an attribute list splits on and a
+/// span's markup may (`image:x.png[a *b, c* d,title=hl]`), so the two parses
+/// are compared attribute by attribute and a disagreement defers the whole
+/// match — the same check the link families make, for the same reason.
+fn bracket_is_recognizable(
+    bracket_text: &str,
+    range: &std::ops::Range<usize>,
+    nodes: &[InlineNode<'_>],
+    pieces: &[Piece],
+    parser: &Parser,
+) -> bool {
+    if range_is_restorable(nodes, pieces, range) {
+        return true;
+    }
+
+    let (tokened, masked) = tokened_bracket(
+        bracket_text,
+        range,
+        nodes,
+        pieces,
+        parser,
+        Tokened::MaskedOrRendered,
+    );
+
+    let carried: Vec<InlineNode<'_>> = masked.iter().map(|piece| piece.node.clone()).collect();
+
+    tokened_split_agrees(&tokened, &carried, parser)
+}
+
 /// Parses the macro's bracket into the [`Attrlist`]`<'src>` its node carries.
 ///
 /// A **verbatim** bracket is parsed straight from its `'src` slice, so its
@@ -823,17 +901,13 @@ fn bracket_attrlist<'src>(
         return parse_attrlist(bracket, parser);
     }
 
-    // The image family stays at [`Tokened::Masked`]: every value its bracket
-    // holds is one `render_image` writes out (an `alt`, a `title`, a
-    // `width`), so a rendered piece frozen into one would put the built-in
-    // backend's markup in a custom backend's output.
     let (tokened, masked) = tokened_bracket(
         bracket_text,
         &bracket_range,
         nodes,
         pieces,
         parser,
-        Tokened::Masked,
+        Tokened::MaskedOrRendered,
     );
 
     let bodies: Vec<&str> = masked.iter().map(|piece| piece.body.as_ref()).collect();
@@ -1713,38 +1787,75 @@ mod tests {
     }
 
     #[test]
-    fn a_macro_over_a_rendered_span_is_a_documented_divergence() {
-        // A rendered span inside the match is the boundary this family keeps:
-        // `build_match_string` stands it in as one `SPAN_PLACEHOLDER`, so
-        // neither the target nor the bracket has bytes to read there.
-        //
-        // If this boundary is ever lifted, fold these fixtures into the parity
-        // corpus above.
-        //
-        // Each capture's own gate keeps it: the bracket's opaque-piece gate
-        // for a span in the attribute list, and the target's
-        // `range_is_restorable` for one in the target (a rendered span is the
-        // opaque piece that gate still rejects — its markup exists only at
-        // fold time, unlike a masked passthrough's known body).
-        let fixtures = ["image:x.png[*bold*]", "image:a**b**c.png[]"];
-
-        for source in fixtures {
-            let nodes = apply_macros(
-                build_through_special_and_replacements(Span::new(source)),
-                Span::new(source),
-                &Parser::default(),
-                Masked::UNKNOWN,
-                ComputedSpecials::Escaped,
+    fn fold_matches_the_string_pipeline_for_a_bracket_over_a_rendered_span() {
+        // The boundary this family used to keep, now lifted for the half that
+        // could not survive it: an image's **bracket** crossing a rendered
+        // span. See [`bracket_is_recognizable`] for why a frozen span is both
+        // necessary and safe here where it is neither for a link's other
+        // slots.
+        for source in [
+            // The fixture from the AsciiDoc language docs that named this.
+            "Click image:pause.png[title=*Pause* and Resume] when you need a break.",
+            // The span in the positional `alt`, alone and beside plain text.
+            "image:x.png[*bold*]",
+            "image:x.png[*Alt* text]",
+            "image:x.png[text *Alt*]",
+            // In a named value, with a plain positional beside it.
+            "image:x.png[alt,title=a `code` b]",
+            "image:x.png[alt,title=*T*,role=hl]",
+            // Other span kinds, and two spans in one bracket.
+            "image:x.png[_em_ and #mark#]",
+            "image:x.png[alt,title=*a* and _b_]",
+            // The icon spelling, which shares this bracket.
+            "icon:home[title=*T*]",
+            // (A masked passthrough beside a rendered span — both token kinds
+            // in one bracket — is driven by the whole-pipeline sweep in the
+            // parent module instead: `golden_macros` runs the six steps
+            // `build` runs and *not* passthrough extraction, so a `$$…$$`
+            // reaches it undelimited on one side and extracted on the other,
+            // for a reason that has nothing to do with this boundary.)
+            // Already at parity, unchanged.
+            "image:x.png[Alt Text]",
+            "image:x.png[alt,200,100]",
+        ] {
+            assert_eq!(
+                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                golden_macros(source),
+                "fold diverged from the string pipeline for {source:?}"
             );
-
-            assert!(
-                nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
-                "a macro crossing a rendered span must be left unrecognized: {nodes:?}"
-            );
-
-            // The string pipeline, by contrast, *does* build an image here.
-            assert!(golden_macros(source).contains("<img"));
         }
+    }
+
+    #[test]
+    fn a_target_over_a_rendered_span_is_a_documented_divergence() {
+        // The half that stays: a rendered span in the **target**.
+        // `build_match_string` stands it in as one `SPAN_PLACEHOLDER`, and the
+        // target's own [`range_is_restorable`] still rejects it — a rendered
+        // span's markup exists only at fold time, unlike a masked
+        // passthrough's known body, and a target is not a value the string
+        // replacer reads back out of its own rendered haystack the way a
+        // bracket is: it is resolved as a *path* (`web_path`), where splicing
+        // markup in has no meaning.
+        //
+        // If this boundary is ever lifted, fold this fixture into the parity
+        // corpus above.
+        let source = "image:a**b**c.png[]";
+
+        let nodes = apply_macros(
+            build_through_special_and_replacements(Span::new(source)),
+            Span::new(source),
+            &Parser::default(),
+            Masked::UNKNOWN,
+            ComputedSpecials::Escaped,
+        );
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::Image(_))),
+            "a target crossing a rendered span must be left unrecognized: {nodes:?}"
+        );
+
+        // The string pipeline, by contrast, *does* build an image here.
+        assert!(golden_macros(source).contains("<img"));
     }
 
     #[test]

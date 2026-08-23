@@ -6801,6 +6801,22 @@ Each phase is a reviewable unit with a clear exit gate.
        cross-reference's text lives in a template (a keep that closes at the cutover, and a third
        piece of evidence for retiring that sentinel). See the step's own "landed as" note above.
 
+     - ✅ **prep (the image family's attribute list).** Re-running the cutover experiment says the
+       cutover leaves **18** of ~5,390 tests failing — 5 divergence tests that compare two paths the
+       cutover leaves one of, 5 footnote-in-a-heading (which `fold_reference_text` closes), 3 flag
+       tests, 2 recorder sweeps, and **3 golden fixtures whose output genuinely changes**. Two of
+       those three the tree gets better or already documents; the third,
+       `image:pause.png[title=*Pause* and Resume]` from the language docs, lost its whole macro —
+       the boundary the link-family increment deferred, coming due. The image bracket now admits a
+       rendered span: the per-slot rule that kept it out defers *every* image bracket (every value
+       an image holds is one `render_image` writes out, and an image has no display text to carry a
+       span structurally the way a link does), while the frozen bytes are exactly the bytes the
+       string replacer reads out of its own already-rendered haystack — the same trade this
+       function's masked branch already makes for a `Stem`. The split-agreement check still applies,
+       and the **target** half of the boundary stays, now on its own reason (a target is resolved as
+       a path). That leaves the cutover **one** golden regression rather than two. See the step's
+       own "landed as" note above.
+
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
 
