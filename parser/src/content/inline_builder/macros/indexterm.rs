@@ -1654,7 +1654,7 @@ mod tests {
             let nodes = build(Span::new(source), &parser, None);
 
             let mut golden = Content::from(Span::new(source));
-            SubstitutionGroup::Normal.apply(&mut golden, &parser, None);
+            SubstitutionGroup::Normal.apply_string_pipeline(&mut golden, &parser, None);
 
             assert_eq!(
                 crate::content::inline_builder::fold_html(

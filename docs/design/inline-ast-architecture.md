@@ -5875,6 +5875,39 @@ Each phase is a reviewable unit with a clear exit gate.
   the cutover must not land until every corpus it would render tautological is either recorded or
   knowingly exempted.
 
+  *Step 6 landed as (the golden-HTML oracle, as a callable):* the other half of the recording
+  increment's finding, and the half that covers the corpora the recordings do not. A corpus takes
+  its golden by running `SubstitutionGroup::apply` and reading `rendered`; the cutover makes
+  `rendered` a fold, so the corpus compares the fold against itself. Recordings answer that
+  durably, but converting twenty-odd corpora — each with its own parser configuration — is a large
+  change to make *inside* the cutover, where a mistake is indistinguishable from a real divergence.
+
+  A new test-only
+  [`apply_string_pipeline`](../../parser/src/content/substitution_group.rs) answers it cheaply
+  instead: `run_pipeline` on its own, with no tree and no fold. **25 golden-producing call sites
+  across 14 files** now take their golden from it, so every one goes on differentiating against a
+  genuinely independent construction for as long as the string pipeline exists — which is exactly
+  the window the cutover needs. The recordings remain the durable answer for when it does not.
+
+  What makes this landable *now*, ahead of the cutover, is that it is byte-identical today: the
+  tree is still additive, so `apply` and `apply_string_pipeline` differ only in work the golden
+  never reads. The whole suite stays green with **no test edited** and both recordings byte-for-byte
+  unchanged — a claim the cutover itself could no longer make, which is the reason to spend a
+  separate increment on it.
+
+  Two categories deliberately keep `apply`. The ~277 **golden-HTML assertions** (§5.3), whose
+  subject is `rendered_html()` itself: they must go on exercising the production entry point, and
+  after the cutover they are precisely what validates the fold. And
+  [`passthrough_text`](../../parser/src/content/inline_builder/passthrough_step.rs)'s own call,
+  which is production code rather than a golden.
+
+  Measured under a simulated cutover with a deliberately sabotaged fold: six corpora flip from
+  passing to failing that would otherwise have passed — `fold_matches_the_string_pipeline_for_xrefs_inside_expanded_values`,
+  the four `build_for_group` order tests, and the cross-reference family's deferral test. The
+  other nineteen sites are tautological by construction under the cutover whether or not a given
+  probe happens to perturb them; a gross sabotage breaks so much through the golden assertions
+  that it understates the loss, which is the point of having the corpora at all.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -6997,6 +7030,17 @@ Each phase is a reviewable unit with a clear exit gate.
        subject is the diverging *set*). The generator is the string pipeline; Asciidoctor was
        measured (202/259) and deferred as spec-conformance work. See the step's own "landed as"
        note above. The remaining ~20 corpora are the **fold increment's prerequisite list**.
+
+     - ✅ **prep (the golden-HTML oracle, as a callable).** That prerequisite list, discharged.
+       A test-only [`apply_string_pipeline`](../../parser/src/content/substitution_group.rs) runs
+       `run_pipeline` alone, and **25 golden-producing call sites across 14 files** take their
+       golden from it rather than from `apply` — so each goes on differentiating against an
+       independent construction for as long as the string pipeline exists, which is the window the
+       cutover needs (the recordings are the durable answer for after). Landable ahead of the
+       cutover precisely because it is byte-identical today: the whole suite stays green with **no
+       test edited** and both recordings unchanged. The ~277 golden-HTML assertions keep `apply`
+       deliberately — their subject is `rendered_html()` itself. See the step's own "landed as"
+       note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

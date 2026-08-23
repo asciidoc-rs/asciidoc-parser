@@ -213,7 +213,7 @@ fn assert_shapes_with(source: &str, configure: impl Fn() -> Parser) {
     let footnote_start = recorder_parser.catalog().footnotes.len();
 
     let mut content = Content::from(Span::new(source));
-    SubstitutionGroup::Normal.apply(&mut content, &recorder_parser, None);
+    SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &recorder_parser, None);
 
     let footnote_texts: Vec<String> = recorder_parser
         .catalog()

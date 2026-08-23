@@ -334,7 +334,7 @@ mod tests {
         let parser = Parser::default();
 
         let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
         let golden = content.rendered_str().to_string();
 
         let nodes = super::super::build(Span::new(source), &parser, None);
@@ -437,7 +437,7 @@ mod tests {
         };
 
         let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply(&mut content, parser, attrlist.as_ref());
+        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, attrlist.as_ref());
         let golden = content.rendered_str().to_string();
 
         let nodes = super::super::build(Span::new(source), parser, attrlist.as_ref());
