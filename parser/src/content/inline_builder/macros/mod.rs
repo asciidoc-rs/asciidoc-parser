@@ -306,7 +306,7 @@ fn apply_macro_families<'src>(
     // Index terms (`((term))`, `(((primary, secondary)))`, `indexterm:[…]`,
     // `indexterm2:[…]`) run after image/icon and before the link families,
     // mirroring the string step's order.
-    let nodes = indexterm_macros_level(nodes, root, ctx, masked);
+    let nodes = indexterm_macros_level(nodes, root, parser, ctx, masked);
 
     // Auto-links and formal-URL links (`INLINE_LINK`) run after the index-term
     // pass and before the `link:`/`mailto:` macro, mirroring the string step's

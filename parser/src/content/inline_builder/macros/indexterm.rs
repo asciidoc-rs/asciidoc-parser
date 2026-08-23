@@ -3,7 +3,8 @@
 
 use super::{MacroMatch, MacroMatchKind, rebuild_macro_level};
 use crate::{
-    Span,
+    Parser, Span,
+    attributes::{Attrlist, AttrlistContext},
     content::{
         INLINE_INDEXTERM,
         inline_builder::{
@@ -24,6 +25,7 @@ use crate::{
 pub(super) fn indexterm_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
+    parser: &Parser,
     ctx: LevelContext,
     masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
@@ -42,7 +44,7 @@ pub(super) fn indexterm_macros_level<'src>(
     // coordinates — see `apply_macro_families`'s own doc comment.
     let (s, pieces) = ctx.shift(s, pieces);
 
-    let matches = find_indexterm_matches(&s, &pieces, root);
+    let matches = find_indexterm_matches(&s, &pieces, root, parser);
 
     if matches.is_empty() {
         return nodes;
@@ -147,10 +149,13 @@ fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
 /// earlier-recognized
 /// [`Styled`](crate::inlines::Styled)/[`Ref`](crate::inlines::Ref), carried
 /// here as a single [`SPAN_PLACEHOLDER`] rather than its rendered markup). A
-/// visible term crossing such a span, or an `indexterm2:[…]` term carrying an
-/// attribute list (an `=`, whose first positional attribute becomes the shown
-/// term), is **deferred** — the match is left as literal source for a later
-/// increment, each pinned by a divergence test.
+/// visible term crossing such a span is **deferred** — the match is left as
+/// literal source for a later increment, pinned by a divergence test. An
+/// `indexterm2:[…]` term carrying an attribute list (an `=`, whose first
+/// positional attribute becomes the shown term) is *not*: the list decides
+/// only which of the argument's own bytes are shown, so
+/// [`shown_macro_term`] consumes it here and the node carries the same
+/// already-substituted text every other visible spelling gives it.
 ///
 /// A term crossing a [`synthesized`](Piece::synthesized) run (an attribute
 /// expansion, or — reached at a tree's root — a filtered multi-line block's
@@ -168,6 +173,7 @@ fn find_indexterm_matches<'src>(
     s: &str,
     pieces: &[Piece],
     root: Span<'src>,
+    parser: &Parser,
 ) -> Vec<RecognizedIndexterm<'src>> {
     let mut matches = Vec::new();
 
@@ -188,7 +194,7 @@ fn find_indexterm_matches<'src>(
             let arg = caps.get(2).unwrap().as_str();
 
             if let Some(m) =
-                build_indexterm_macro_match(is_visible, arg, full, escaped, pieces, root)
+                build_indexterm_macro_match(is_visible, arg, full, escaped, pieces, root, parser)
             {
                 matches.push(m);
             }
@@ -223,13 +229,13 @@ fn find_indexterm_matches<'src>(
 ///
 /// A concealed `indexterm:[…]` is always recognized (it renders nothing, so its
 /// argument is never reconstructed). A visible `indexterm2:[…]` is deferred
-/// when its argument crosses an opaque span (unreconstructable from the escaped
-/// string) or carries an attribute list (an `=` the node cannot hold yet) — see
-/// [`find_indexterm_matches`]. The visible term is normalized exactly as the
-/// string replacer does ([`normalize_index_text`] with bracket-unescaping) and
-/// baked into the node's `terms` in its already-substituted form, which is what
-/// `fold_index_term` feeds back to `render_index_term` for byte-identical
-/// output.
+/// only when its argument crosses an opaque span (unreconstructable from the
+/// escaped string) — see [`find_indexterm_matches`]. The visible term is
+/// normalized exactly as the string replacer does ([`normalize_index_text`]
+/// with bracket-unescaping), reduced through [`shown_macro_term`] when the
+/// argument is an attribute list, and baked into the node's `terms` in its
+/// already-substituted form, which is what `fold_index_term` feeds back to
+/// `render_index_term` for byte-identical output.
 fn build_indexterm_macro_match<'src>(
     is_visible: bool,
     arg: &str,
@@ -237,6 +243,7 @@ fn build_indexterm_macro_match<'src>(
     escaped: bool,
     pieces: &[Piece],
     root: Span<'src>,
+    parser: &Parser,
 ) -> Option<RecognizedIndexterm<'src>> {
     // An escape (`\indexterm:…`) drops the backslash and keeps the rest literal,
     // mirroring the string replacer's `caps[0][1..]`. A macro form always
@@ -267,14 +274,7 @@ fn build_indexterm_macro_match<'src>(
             return None;
         }
 
-        let term = normalize_index_text(arg, true);
-
-        // A term carrying an attribute list (an `=`) is parsed as an `Attrlist`
-        // the node cannot hold yet; deferred exactly as the link/xref macros
-        // defer their attribute-list text.
-        if term.contains('=') {
-            return None;
-        }
+        let term = shown_macro_term(normalize_index_text(arg, true), parser);
 
         let rendered_nonempty = !term.is_empty();
 
@@ -311,6 +311,56 @@ fn build_indexterm_macro_match<'src>(
         // The macro forms always `Continue`; only the shorthand can retry.
         is_skip: false,
     })
+}
+
+/// The text an `indexterm2:[…]` shows in the flow, given its already
+/// [`normalize_index_text`]-ed argument.
+///
+/// An argument carrying an `=` is an **attribute list**, whose first
+/// *positional* attribute is the shown term (`indexterm2:[Coffee,
+/// region=Kona]` shows `Coffee`); everything else it holds — a `see`, a
+/// `see-also`, a `region` — names the entry in an index this crate's HTML
+/// backend does not build, so it reaches the flow through nothing. Where the
+/// list has no positional attribute at all (`indexterm2:[see=HTML 5]`), the
+/// whole argument is shown verbatim, which is also the answer for an `=` that
+/// was never an attribute list to begin with.
+///
+/// This is [`InlineIndextermReplacer`]'s own arithmetic, reached with the same
+/// bytes: the argument is read from this level's escaped match string, which
+/// holds exactly what the string pipeline's flat haystack holds at that
+/// position — and the caller has already refused an argument crossing an
+/// opaque span, the one case where the two differ.
+///
+/// # Why the node needs no `Attrlist`
+///
+/// The link and cross-reference families capture the
+/// [`Attrlist<'src>`](Attrlist) their own bracket parses, because a role, an
+/// id, or a `window=` there changes what the fold emits. An index term's whole
+/// render surface is
+/// [`IndexTermRenderParams`](crate::parser::IndexTermRenderParams), which
+/// carries the shown term and nothing else — so the list is *consumed* here
+/// rather than carried, and the [`IndexTerm`] node goes on holding the same
+/// already-substituted shown text every other visible spelling gives it. That
+/// is what the deferral this closes was waiting on, and the answer is that it
+/// was waiting on nothing.
+///
+/// [`InlineIndextermReplacer`]: crate::content::macros
+fn shown_macro_term(arg: String, parser: &Parser) -> String {
+    if !arg.contains('=') {
+        return arg;
+    }
+
+    // Parsed over the normalized copy, exactly as the string replacer parses
+    // its own (`Attrlist::parse(Span::new(&arg), …)`): the value read back out
+    // is owned, so nothing borrows `'src` and the node keeps the coarse
+    // whole-match location design §4.4 gives a computed value.
+    let attrlist = Attrlist::parse(Span::new(&arg), parser, AttrlistContext::Inline)
+        .item
+        .item;
+
+    let positional = attrlist.nth_attribute(1).map(|a| a.value().to_string());
+
+    positional.unwrap_or(arg)
 }
 
 /// Builds the [`MacroMatch`] for an index-term **shorthand** (`((term))`,
@@ -757,22 +807,185 @@ mod tests {
     }
 
     #[test]
-    fn an_indexterm2_attribute_list_is_a_documented_divergence() {
-        // An `indexterm2:[…]` argument carrying an `=` splits into an attribute
-        // list whose first positional attribute is the shown term. The builder
-        // cannot carry that as an `Attrlist<'src>` yet, so it defers the whole
-        // macro (left literal), exactly as the link/xref macros defer their
-        // attribute-list text.
+    fn fold_matches_the_string_pipeline_through_indexterm2_attribute_lists() {
+        // An `indexterm2:[…]` argument carrying an `=` splits into an
+        // attribute list whose first *positional* attribute is the shown term;
+        // everything else it holds names an entry in an index the HTML backend
+        // does not build, so it reaches the flow through nothing. The builder
+        // reads the argument from this level's escaped match string — the same
+        // bytes the string pipeline's flat haystack holds there — and runs the
+        // replacer's own arithmetic over them ([`shown_macro_term`]).
+        for fixture in [
+            // The shown term is the first positional attribute.
+            "indexterm2:[Coffee, region=Kona]",
+            "a indexterm2:[Coffee, region=Kona] term",
+            // The two golden spellings of the `see` / `see-also` named
+            // attributes, which the macro form carries as attributes rather
+            // than as the shorthand's ` >> ` / ` &> ` clause.
+            "indexterm2:[Flash,see=HTML 5] and indexterm2:[HTML 5,see-also=\"CSS 3, SVG\"] done.",
+            // No positional attribute at all: the whole argument is shown
+            // verbatim, `=` included.
+            "Only named indexterm2:[see=HTML 5] here.",
+            "indexterm2:[region=Kona]",
+            // A quoted positional attribute, whose own comma is not a
+            // separator.
+            "indexterm2:[\"Coffee, Kona\",region=x]",
+            // An empty first positional attribute, which shows nothing.
+            "x indexterm2:[,region=Kona] y",
+            // A special character in either half: by macro time it is an
+            // entity in both pipelines, so the attribute list is parsed from
+            // the same escaped bytes on both sides.
+            "indexterm2:[a < b,region=Kona]",
+            "indexterm2:[Coffee,region=a < b]",
+            "indexterm2:[a &copy; b,region=Kona]",
+            // A typographic replacement inside the shown half — the third
+            // recoverable piece, whose match-string bytes are the entity the
+            // built-in backend renders it as.
+            "indexterm2:[Tom (C) Jerry,region=Kona]",
+            "indexterm2:[O'Reilly,see=Books]",
+            // In flow beside other constructs, twice in one flow, and inside a
+            // rendered span (the macros step descends into one).
+            "*bold* then indexterm2:[Coffee,region=Kona] here",
+            "indexterm2:[a,x=1] and indexterm2:[b,y=2]",
+            "_indexterm2:[Coffee,region=Kona] in em_",
+            // Spanning a newline, which `normalize_index_text` collapses to a
+            // space before either side parses the list.
+            "indexterm2:[Coffee,\nregion=Kona] end",
+            // An escaped attribute-list form still drops its backslash and
+            // stays literal.
+            "\\indexterm2:[Coffee,region=Kona]",
+            // The concealed spelling ignores its argument entirely, `=` or
+            // not.
+            "x indexterm:[Coffee,region=Kona] y",
+        ] {
+            assert_eq!(
+                fold_html(&build_src(Span::new(fixture)), &HtmlSubstitutionRenderer {}),
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_indexterm2_attribute_list_becomes_a_node_carrying_only_its_shown_term() {
+        // The shape the increment asserts: the attribute list is *consumed*
+        // rather than carried. An index term's whole render surface is its
+        // shown term, so the node holds the same already-substituted text
+        // every other visible spelling gives it — and no `Attrlist`, which is
+        // what the deferral this closes had been waiting on.
         let source = "indexterm2:[Coffee, region=Kona]";
+        let nodes = build_src(Span::new(source));
+
+        assert_eq!(nodes.len(), 1);
+        let index_term = assert_index_term(&nodes[0]);
+
+        assert!(index_term.visible);
+        assert_eq!(index_term.terms.len(), 1);
+        assert_eq!(index_term.terms[0].as_ref(), "Coffee");
+
+        // The location covers the whole macro, list included.
+        assert_eq!(index_term.location.data(), source);
+        assert_eq!(index_term.location.line(), 1);
+        assert_eq!(index_term.location.col(), 1);
+
+        // With no positional attribute the whole argument is the shown term.
+        let nodes = build_src(Span::new("indexterm2:[see=HTML 5]"));
+        let index_term = assert_index_term(&nodes[0]);
+
+        assert!(index_term.visible);
+        assert_eq!(index_term.terms[0].as_ref(), "see=HTML 5");
+    }
+
+    #[test]
+    fn a_real_documents_indexterm2_attribute_lists_fold_to_their_rendered_strings() {
+        // End-to-end, through the real parse path, on the shape that named
+        // this increment: an `indexterm2:[…]` whose argument is an attribute
+        // list must show the same term the rendered string carries — in a
+        // heading's own title as well as in block content — so a tree that
+        // left the macro literal would regress the moment `rendered_html()`
+        // becomes a fold of this tree.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = crate::Parser::default()
+            .with_inline_tree(true)
+            .parse(concat!(
+                "== A indexterm2:[Coffee,region=Kona] heading\n",
+                "\n",
+                "indexterm2:[Flash,see=HTML 5] has been supplanted by\n",
+                "indexterm2:[HTML 5,see-also=\"CSS 3, SVG\"].\n",
+                "\n",
+                "Only named indexterm2:[see=HTML 5] here.\n",
+            ));
+
+        let mut folded_blocks = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &crate::Parser::default()
+                ),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded_blocks += 1;
+        }
+
+        assert_eq!(folded_blocks, 2, "expected every paragraph to carry a tree");
+
+        // The heading's own title takes the same seam (its `Title` group runs
+        // the same macros step), so the shown term reaches a section title
+        // too, and that title's own tree folds to the bytes it rendered.
+        let mut folded_titles = 0;
+
+        for block in doc.descendant_blocks() {
+            let crate::blocks::Block::Section(section) = block else {
+                continue;
+            };
+
+            assert_eq!(section.section_title(), "A Coffee heading");
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    section.section_title_inlines(),
+                    &HtmlSubstitutionRenderer {},
+                    &crate::Parser::default()
+                ),
+                section.section_title(),
+                "fold diverged from the rendered section title"
+            );
+
+            folded_titles += 1;
+        }
+
+        assert_eq!(folded_titles, 1, "expected the heading to carry a tree");
+    }
+
+    #[test]
+    fn an_attribute_list_term_over_a_span_is_a_documented_divergence() {
+        // The recognition boundary the attribute list does *not* move: a shown
+        // term crossing a rendered span is unreconstructable from this level's
+        // escaped match string (the span is one placeholder here, not its
+        // markup), so the macro is still deferred — the `=` half is decided
+        // only once the argument's own bytes are in hand.
+        let source = "indexterm2:[*bold* term,region=Kona]";
         let nodes = build_src(Span::new(source));
 
         assert!(
             nodes.iter().all(|n| !matches!(n, InlineNode::IndexTerm(_))),
-            "an attribute-list-in-text index term must be left unrecognized: {nodes:?}"
+            "a term crossing a span must be left unrecognized: {nodes:?}"
         );
 
-        // The string pipeline, by contrast, shows the first positional term.
-        assert_eq!(golden_macros(source), "Coffee");
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        assert!(folded.contains("indexterm2:["));
+        assert_eq!(golden_macros(source), "<strong>bold</strong> term");
     }
 
     #[test]
@@ -802,6 +1015,12 @@ mod tests {
             "x ((hot {term})) y",
             "x indexterm2:[{term}] y",
             "x indexterm2:[hot {term}] y",
+            // The macro spelling's attribute list, whose shown term arrives
+            // from an expanded value — and whose *named* half does too, so the
+            // list is parsed from the synthesized run's own bytes on both
+            // sides.
+            "x indexterm2:[{term},region={second}] y",
+            "x indexterm2:[region={second}] y",
             // The concealed spellings (always recognized, but now over an
             // expanded value too).
             "x ((({term}, {second}))) y",
