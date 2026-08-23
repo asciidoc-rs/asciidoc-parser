@@ -308,6 +308,18 @@
 //!   analogous `pass:c,q[…]` form (see [`apply_passthroughs`]'s doc comment),
 //!   except a `Stem` node already has a single `value` field to hold the
 //!   result, so no richer subtree is needed.
+//! [`fold_html`] folds a finished tree back to output bytes; a section title
+//! also needs the **footnote-free** reading its cross-reference text and its
+//! auto-generated id are derived from, which
+//! [`fold_reference_text`] gives by skipping each
+//! [`Footnote`](InlineNode::Footnote) node wherever it sits. That is the
+//! tree's answer to the first of the three sentinel systems design §4.2 names:
+//! the string pipeline renders the title **once** with the footnote renderer
+//! bracketing each marker in a sentinel pair, cuts the bracketed regions out,
+//! and then removes the spent sentinels — one render yielding two strings,
+//! where a tree simply folds twice. Deleting the sentinels is the cutover's
+//! own job; this is staged and unwired like every other piece of that step.
+//!
 //! - [`apply_post_replacements`] turns a trailing ` +` at the end of a line
 //!   into a [`LineBreak`](InlineNode::LineBreak) leaf. Under the block-wide
 //!   `hardbreaks` option — the enclosing block's own `attrlist`, or the
@@ -407,7 +419,7 @@ use char_replacements::apply_character_replacements;
 // Consumed only by `cfg(test)` callers and future external callers until the
 // authoritative-fold half of the cutover wires it into `Content`.
 #[allow(unused_imports)]
-pub(crate) use fold::fold_html;
+pub(crate) use fold::{fold_html, fold_reference_text};
 use footnotes::apply_footnotes;
 // Staged for the eventual authoritative-fold half of the cutover (see this
 // module's own doc comment); not yet called from any real parse path, so —

@@ -5339,6 +5339,61 @@ Each phase is a reviewable unit with a clear exit gate.
   (`image:pause.png[title=*Pause* and Resume]`) keeps its divergence test. Beyond it the
   remainder is unchanged: the boundary-class halves the sibling increments named, plus the keeps.
 
+  *Step 6 prep landed as (a section title's footnote-free reference text — the first sentinel
+  system to lose its reason to exist):* the increments above were all found by asking the
+  corpus-wide fold-parity audit what still diverges. This one was found by asking a different
+  question — *what breaks if `rendered_html()` becomes the fold today?* — run as a throwaway
+  experiment over the whole suite. The answer is encouragingly small, and its largest single
+  cluster is one root cause: a **footnote in a section heading**.
+
+  A footnote in a heading is a real, document-order footnote — it is numbered, and the heading
+  renders its marker — but that marker must not appear in the text a cross-reference to the
+  heading shows, nor in the id auto-generated from that text (issue #594). The string pipeline
+  needs two strings out of one title and cannot afford two renders (counters and
+  attribute-expanded footnotes would advance twice), so it renders **once** with the footnote
+  renderer bracketing each marker in a sentinel pair
+  ([`FOOTNOTE_MARKER_START`](../../parser/src/content/content.rs) …
+  [`FOOTNOTE_MARKER_END`](../../parser/src/content/content.rs), enabled for that render alone by
+  `Parser::mark_footnote_spans`), cuts the bracketed regions out
+  ([`strip_footnote_marker_spans`](../../parser/src/content/content.rs)), and then removes the
+  spent sentinels from the title's own rendering *and* from its deferred cross-reference template
+  ([`Content::remove_footnote_marker_sentinels`](../../parser/src/content/content.rs)).
+
+  A tree needs none of that. The footnote is a **node**, so the two strings are two folds of the
+  same tree, and "which regions were footnote markers" is a question about node kinds rather than
+  about bytes. [`fold_reference_text`](../../parser/src/content/inline_builder/fold.rs) is
+  [`fold_html`](../../parser/src/content/inline_builder/fold.rs) with each footnote's in-flow
+  marker omitted — the node **skipped** rather than folded to nothing, since `render_footnote` is
+  a backend's to define and one that emitted anything would leak it — and the omission recurses
+  exactly as the byte-level cut does over the whole rendered string, so a footnote inside a
+  rendered span or inside a cross-reference's own display text is omitted there too. Nothing else
+  about the fold changes: a `Footnotes` parameter threads down the recursion with `Marked` at
+  every existing call site.
+
+  A differential test pins the equivalence from **both** ends, over a corpus of titles: for each,
+  `fold_html` reproduces the heading's own rendering (sentinels removed) and `fold_reference_text`
+  reproduces the footnote-free text, each against the string pipeline's own two answers computed
+  the way `Section::parse` computes them. The corpus covers a title with no footnote at all
+  (where the two strings coincide and the strip is a no-op on both sides), one at either edge and
+  in the middle, two in one title, a named footnote, a marker nested inside a rendered span and
+  inside a cross-reference's display text, and a footnote beside each other construct a title can
+  carry.
+
+  This is the **first of the three sentinel systems** §4.2 names to lose its reason to exist.
+  Deleting it — along with `mark_footnote_spans`, `strip_footnote_marker_spans`, and
+  `remove_footnote_marker_sentinels` — is the cutover's own job, so as with every prep piece
+  before it nothing is wired in and the corpus-wide audit is unchanged.
+
+  *What the experiment says about what is left.* Forcing the tree on for every parse and making
+  `rendered` the fold leaves **15** of ~5,370 tests failing, in three clusters: this footnote
+  cluster (5), the documented keeps whose golden output the cutover deliberately changes for the
+  better (~5, each already carrying its own divergence test), and tests of the opt-in flag and of
+  the Strategy-A recorder harness that retire with the flag itself (~5). That is a far smaller
+  blast radius than "several sessions" suggested when this step was written — the prep work has
+  done its job — though the experiment is deliberately crude (it neither calls the staged side
+  effects nor sequences the fold against resolution), so the cutover's own ordering work is not
+  measured by it.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -6316,6 +6371,20 @@ Each phase is a reviewable unit with a clear exit gate.
        copied into the parsed value. See the step's own "landed as" note above. The **image**
        family's bracket — the one capture with no display text to carry — is what remains of the
        class, and needs a fold-*materialized* value rather than a frozen one.
+
+     - ✅ **prep (a section title's footnote-free reference text).** The first of the three
+       sentinel systems §4.2 names to lose its reason to exist, and the first prep found by asking
+       *what breaks if `rendered_html()` becomes the fold today?* rather than by the fold-parity
+       audit. A footnote in a heading must not appear in the text a cross-reference shows nor in
+       the auto-generated id, and the string pipeline gets those two strings out of **one** render
+       by bracketing each marker in a sentinel pair, cutting the bracketed regions out, and then
+       removing the spent sentinels. A tree needs none of it: the footnote is a node, so the two
+       strings are two folds of the same tree.
+       [`fold_reference_text`](../../parser/src/content/inline_builder/fold.rs) skips each
+       [`Footnote`](../../parser/src/inlines/footnote.rs) node wherever it sits, and a differential
+       test pins the equivalence from both ends over a corpus of titles. See the step's own
+       "landed as" note above, which also records what the experiment says about the cutover's
+       remaining blast radius.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
