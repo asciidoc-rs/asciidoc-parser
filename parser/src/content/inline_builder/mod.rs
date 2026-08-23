@@ -1652,6 +1652,12 @@ mod tests {
         assert_parity("See image:chart.png[++a, b = c++] and image:x.png[++A & B++].");
         assert_parity("An image:y.png[++abc++.myrole] beside *bold* text.");
 
+        // Both token kinds in one image bracket: a masked passthrough beside a
+        // rendered span, through the real pipeline (which runs passthrough
+        // extraction, where `golden_macros` does not).
+        assert_parity("image:x.png[title=$$<b>$$ and *c*]");
+        assert_parity("image:x.png[title=pass:[<b>] and *c*]");
+
         // A construct written against an enclosing span's own edge, where the
         // string pipeline's haystack holds that span's rendered markup and a
         // level matched in isolation holds its own start or end — the quotes
