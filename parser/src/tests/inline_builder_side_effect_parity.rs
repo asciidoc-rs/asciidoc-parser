@@ -258,6 +258,20 @@ const CORPUS: &[&str] = &[
     // catalog's reverse index as well as its forward one.
     "[[dup,Reftext]] and anchor:dup[Other Reftext]",
     "[[a,Alpha]] and [[b,Beta]] and a link:c.html[C]",
+    //
+    // An anchor's *reference text* is the fifth nested node list an
+    // `InlineNode` holds — the one not named `children` — and a construct
+    // enclosed by it hides there just as one enclosed by a visible index term
+    // does. Every anchor spelling, and every family whose pass runs before the
+    // anchor pass.
+    "[[a,see image:t.png[T]]] and image:u.png[U]",
+    "[[a,see link:t.html[T]]] and link:u.html[U]",
+    "[[a,see https://t.example]] and https://u.example here",
+    "[[a,see t@example.org]] and u@example.org here",
+    "[[a,see *bold* text]] and image:u.png[U]",
+    "anchor:a[see image:t.png[T]] and image:u.png[U]",
+    "anchor:a[see link:t.html[T]] and link:u.html[U]",
+    "[[[b,see image:t.png[T]]]] and image:u.png[U]",
 ];
 
 /// A bibliography entry is not a plain fixture: the string pipeline recognizes
@@ -447,6 +461,66 @@ fn a_visible_index_terms_shown_text_is_walked_for_every_family() {
                 .collect::<Vec<_>>(),
             refs,
             "ids for {source:?}"
+        );
+    }
+}
+
+#[test]
+fn an_anchors_reference_text_is_walked_and_registered() {
+    // The reference text is the fifth nested node list an `InlineNode` holds,
+    // and the only one not named `children` — so it is the one a walk written
+    // by matching on `children` misses. Two things ride on it: a construct it
+    // encloses must be registered like any other, and the *text itself* is
+    // what the catalog holds for a cross-reference to this anchor to show, so
+    // it must be the same string the string replacer registered.
+    for (source, links, images, reftext) in [
+        (
+            "[[a,see link:t.html[T]]] and link:u.html[U]",
+            vec!["t.html", "u.html"],
+            vec![],
+            r##"see <a href="t.html">T</a>"##,
+        ),
+        (
+            "anchor:a[see link:t.html[T]] and link:u.html[U]",
+            vec!["t.html", "u.html"],
+            vec![],
+            r##"see <a href="t.html">T</a>"##,
+        ),
+        (
+            "[[a,see image:t.png[T]]] and image:u.png[U]",
+            vec![],
+            vec!["t.png", "u.png"],
+            r##"see <span class="image"><img src="t.png" alt="T"></span>"##,
+        ),
+        // A reference text with nothing enclosed, so the common single-`Text`
+        // shape is pinned beside the structural one: its bytes go into the
+        // catalog exactly as they stand, never folded a second time.
+        ("[[a,plain text]] here", vec![], vec![], "plain text"),
+        ("[[a,A & B]] here", vec![], vec![], "A &amp; B"),
+        ("[[a,(C) 1995]] here", vec![], vec![], "&#169; 1995"),
+    ] {
+        let (golden, builder) = side_effects(source);
+
+        assert_eq!(golden, builder, "side effects diverged for {source:?}");
+
+        assert_eq!(builder.links, links, "links for {source:?}");
+        assert_eq!(
+            builder
+                .images
+                .iter()
+                .map(|(target, _)| target.as_str())
+                .collect::<Vec<_>>(),
+            images,
+            "images for {source:?}"
+        );
+        assert_eq!(
+            builder
+                .refs
+                .iter()
+                .map(|(id, text, _)| (id.as_str(), text.as_deref()))
+                .collect::<Vec<_>>(),
+            [("a", Some(reftext))],
+            "registered reference for {source:?}"
         );
     }
 }
