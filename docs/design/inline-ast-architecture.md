@@ -5626,6 +5626,58 @@ Each phase is a reviewable unit with a clear exit gate.
   Re-running the corpus-wide fold-parity audit shows no change to the divergence set; coverage is
   diff-neutral, and nothing further is wired in.
 
+  *Step 6 prep landed as (footnote numbering in true source order):* the increment above was found
+  by asking the side-effect sweep's own claim whether it was true. This one was found the same way,
+  of a different claim — and this claim was **false**.
+
+  [`apply_footnotes`](../../parser/src/content/inline_builder/footnotes.rs) exists for exactly one
+  reason, which its own doc comment states: every other macro family is recognition-order
+  independent, but a footnote's assigned **number** is a side effect of recognition order itself, so
+  this pass "walks `nodes` in true source order … recursing into a `Styled`/`Ref` child at exactly
+  the point that child falls between two such recognitions". It did not. `find_footnote_matches`
+  **built** every node during its regex scan of the level — assigning every number at this level
+  before `rebuild_footnote_level` descended into any child — so a footnote nested in a child that
+  falls between two of its level's own was numbered *after* both:
+
+  ```
+  before footnote:[a] *span footnote:[b]* after footnote:[c]
+      string pipeline → 1, 2, 3
+      tree (before)   → 1, 3, 2
+  ```
+
+  Every existing corpus missed it, for a reason worth recording: a nested footnote *before* every
+  sibling, or *after* every sibling, numbers the same either way. Only the between position
+  disagrees, and no fixture anywhere had one. The fold-parity audit could not have found it either
+  — its corpus is the same fixtures.
+
+  The fix is to defer construction. `find_footnote_matches` becomes a pure scan returning a
+  `FootnoteMatch` per occurrence — an escape (decided during the scan, since the string replacer's
+  own `starts_with('\\')` check runs before its ref-vs-plain branch) or a **candidate** carrying its
+  capture — and `rebuild_footnote_level` builds each candidate's node at the moment its walk reaches
+  it, immediately after the gap before it has been emitted and recursed into. A candidate that turns
+  out to be one of the unrecognized forms advances the cursor no further than its own start, so its
+  text joins the following gap exactly as it did when the scan dropped such a match: the same bytes,
+  emitted by the same range walk.
+
+  The same pass gains the container the increments above named:
+  [`IndexTerm`](../../parser/src/inlines/index_term.rs), whose visible term's shown text reaches the
+  flow and so is scanned by the string replacer's footnote pass like any other text. An
+  [`Anchor`](../../parser/src/inlines/anchor.rs)'s `reftext` is deliberately **not** descended into,
+  and the asymmetry is the point: the anchor replacer *consumes* that text rather than emitting it,
+  so a `footnote:[…]` written there never reaches the string pipeline's footnote pass either — a
+  fixture pins that both sides number nothing.
+
+  The corpus is built entirely around the between position, since that is the only arrangement the
+  two orders disagree about: each container with a plain sibling on either side, nested two deep,
+  two children each carrying one, a child carrying two of its own, a named footnote reused from
+  inside a child (whose number is taken rather than assigned), and a child carrying an unrecognized
+  form beside a real one, so the cursor handling for a candidate that does not build is exercised in
+  a nested walk too. Two fixtures join the whole-document harness, where the catalog's footnote list
+  is in document order — so a slip fails the *subtree-to-text pairing* there, not only the fold.
+
+  Re-running the corpus-wide fold-parity audit shows no change to the divergence set; coverage is
+  diff-neutral, and nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -6676,6 +6728,18 @@ Each phase is a reviewable unit with a clear exit gate.
        construct is folded through the parser's own renderer. An anchor's rendering does not change
        — which is why the fold-parity audit could never have seen this — but what a cross-reference
        to it shows does, pinned end to end. See the step's own "landed as" note above.
+
+     - ✅ **prep (footnote numbering in true source order).** `apply_footnotes` exists to walk the
+       tree in source order, because a footnote's number is a side effect of recognition order —
+       and it did not: `find_footnote_matches` **built** every node during its scan of the level,
+       assigning every number there before the rebuild descended into any child, so a footnote
+       nested in a child falling *between* two of its level's own was numbered after both. Every
+       corpus missed it because a nested footnote before or after every sibling numbers the same
+       either way, and no fixture had one in between. Construction is now deferred: the scan returns
+       a capture per occurrence, and each node — and its number — is made at the moment the rebuild
+       walk reaches it. The same pass gains `IndexTerm` (a visible term's shown text reaches the
+       flow) and deliberately still skips an anchor's `reftext` (which the anchor replacer
+       consumes). See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

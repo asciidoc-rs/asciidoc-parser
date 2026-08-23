@@ -1,10 +1,7 @@
 //! The footnote substitution step.
 
 use super::{
-    macros::{
-        MacroMatch, MacroMatchKind, emit_range_unescaping_brackets,
-        image::range_has_no_opaque_piece,
-    },
+    macros::{emit_range_unescaping_brackets, image::range_has_no_opaque_piece},
     quotes::{Piece, build_match_string, source_slice, text_slice},
     special_chars::Masked,
 };
@@ -83,7 +80,7 @@ pub(super) fn apply_footnotes<'src>(
     // subtree (that is what the pre-check above just confirmed), so the
     // rebuild below runs regardless — it is what performs the recursion.
     let matches = if s.contains("tnote") {
-        find_footnote_matches(&s, &pieces, &nodes, root, parser)
+        find_footnote_matches(&s)
     } else {
         Vec::new()
     };
@@ -110,22 +107,35 @@ fn subtree_might_have_footnote(nodes: &[InlineNode<'_>]) -> bool {
     nodes.iter().any(|node| match node {
         InlineNode::Styled(styled) => subtree_might_have_footnote(&styled.children),
         InlineNode::Ref(reference) => subtree_might_have_footnote(&reference.children),
+        InlineNode::IndexTerm(index_term) => subtree_might_have_footnote(&index_term.children),
         _ => false,
     })
 }
 
 /// Like [`rebuild_macro_level`](super::macros::rebuild_macro_level), but for
-/// [`apply_footnotes`]: rebuilds a level's node list from its footnote matches,
-/// using [`emit_range_recursing_footnotes`] (not
-/// [`emit_range`](super::quotes::emit_range)) for every gap,
-/// so a [`Styled`](crate::inlines::Styled)/[`Ref`](crate::inlines::Ref) child
-/// encountered between two matches is recursed into — in source order — rather
-/// than cloned whole.
+/// [`apply_footnotes`]: rebuilds a level's node list from its footnote
+/// matches, using [`emit_range_recursing_footnotes`] (not
+/// [`emit_range`](super::quotes::emit_range)) for every gap, so a
+/// [`Styled`](crate::inlines::Styled)/[`Ref`](crate::inlines::Ref)/
+/// [`IndexTerm`](crate::inlines::IndexTerm) child encountered between two
+/// matches is recursed into — in source order — rather than cloned whole.
+///
+/// Each candidate's node is **built here**, immediately after the gap that
+/// precedes it, rather than during the scan (see [`FootnoteMatch`]). That is
+/// what puts the numbers in the string pipeline's own order: a footnote nested
+/// in a child that falls between two of this level's is numbered between them,
+/// because the gap carrying that child is emitted — and recursed into — before
+/// this match's own node is made.
+///
+/// A candidate that turns out to be unrecognized advances the cursor no
+/// further than its own start, so its text joins the following gap exactly as
+/// it did when the scan dropped such a match: the same bytes, emitted by the
+/// same range walk.
 fn rebuild_footnote_level<'src>(
     nodes: &[InlineNode<'src>],
     pieces: &[Piece],
     s: &str,
-    matches: Vec<MacroMatch<'src>>,
+    matches: Vec<FootnoteMatch<'_>>,
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
@@ -133,10 +143,8 @@ fn rebuild_footnote_level<'src>(
     let mut cursor = 0usize;
 
     for m in matches {
-        let MacroMatch { full, kind } = m;
-
-        match kind {
-            MacroMatchKind::Unescape { backslash } => {
+        match m {
+            FootnoteMatch::Unescape { full, backslash } => {
                 emit_range_recursing_footnotes(
                     nodes,
                     pieces,
@@ -153,30 +161,30 @@ fn rebuild_footnote_level<'src>(
                     parser,
                     &mut out,
                 );
+
+                cursor = full.end;
             }
 
-            MacroMatchKind::Node { consumed, node } => {
+            FootnoteMatch::Candidate { full, caps } => {
                 emit_range_recursing_footnotes(
                     nodes,
                     pieces,
-                    cursor..consumed.start,
+                    cursor..full.start,
                     root,
                     parser,
                     &mut out,
                 );
-                out.push(*node);
-                emit_range_recursing_footnotes(
-                    nodes,
-                    pieces,
-                    consumed.end..full.end,
-                    root,
-                    parser,
-                    &mut out,
-                );
+
+                cursor = full.start;
+
+                if let Some(node) =
+                    build_candidate_node(&caps, &full, s, pieces, nodes, root, parser)
+                {
+                    out.push(node);
+                    cursor = full.end;
+                }
             }
         }
-
-        cursor = full.end;
     }
 
     if cursor < s.len() {
@@ -187,11 +195,12 @@ fn rebuild_footnote_level<'src>(
 }
 
 /// Like [`emit_range`](super::quotes::emit_range), but recurses into a
-/// [`Styled`](crate::inlines::Styled)/[`Ref`](crate::inlines::Ref) piece's
-/// children with [`apply_footnotes`] instead of cloning the node whole — the
-/// piece that makes [`apply_footnotes`] a true whole-tree, source-order walk
-/// rather than a single level pass. Every other aspect (slicing a verbatim or
-/// synthesized [`Text`](InlineNode::Text) run at the overlap, an empty range
+/// [`Styled`](crate::inlines::Styled)/[`Ref`](crate::inlines::Ref)/
+/// [`IndexTerm`](crate::inlines::IndexTerm) piece's children with
+/// [`apply_footnotes`] instead of cloning the node whole — the piece that makes
+/// [`apply_footnotes`] a true whole-tree, source-order walk rather than a
+/// single level pass. Every other aspect (slicing a verbatim or synthesized
+/// [`Text`](InlineNode::Text) run at the overlap, an empty range
 /// emitting nothing) is identical.
 fn emit_range_recursing_footnotes<'src>(
     nodes: &[InlineNode<'src>],
@@ -230,6 +239,21 @@ fn emit_range_recursing_footnotes<'src>(
                     out.push(InlineNode::Ref(reference));
                 }
 
+                // A **visible** index term's shown text reaches the flow, so
+                // the string replacer's footnote pass scans it like any other
+                // text — the same reason the later macro families are handed
+                // that text (see the index-term family's own note).
+                //
+                // An [`Anchor`](InlineNode::Anchor)'s `reftext` is the
+                // opposite case and is deliberately *not* recursed into: the
+                // anchor replacer consumes that text rather than emitting it,
+                // so a `footnote:[…]` written there never reaches the string
+                // pipeline's footnote pass either.
+                InlineNode::IndexTerm(mut index_term) => {
+                    index_term.children = apply_footnotes(index_term.children, root, parser);
+                    out.push(InlineNode::IndexTerm(index_term));
+                }
+
                 other => out.push(other),
             }
 
@@ -263,16 +287,43 @@ fn emit_range_recursing_footnotes<'src>(
     }
 }
 
-/// Finds every recognized footnote occurrence at this level as a
-/// [`MacroMatch`], skipping the forms this increment defers (see
-/// [`build_footnote_node`] and [`build_footnoteref_node`]).
-fn find_footnote_matches<'src>(
-    s: &str,
-    pieces: &[Piece],
-    nodes: &[InlineNode<'src>],
-    root: Span<'src>,
-    parser: &Parser,
-) -> Vec<MacroMatch<'src>> {
+/// One `INLINE_FOOTNOTE_MACRO` occurrence at this level, recognized but **not
+/// yet built**.
+///
+/// Deferring construction is what keeps the numbers right. A footnote's
+/// assigned number is a side effect of *recognition order*, and the string
+/// pipeline recognizes in one left-to-right sweep over one flat string — so a
+/// footnote nested in a [`Styled`](crate::inlines::Styled) span that sits
+/// between two of this level's own footnotes must be numbered between them.
+/// Building every match up front (as this scan used to) assigns all of this
+/// level's numbers before the rebuild walk descends into any child, which
+/// reverses exactly that pair. Carrying the capture instead lets
+/// [`rebuild_footnote_level`] build each node at the moment its walk reaches
+/// it, after the gap before it — children and all — has been emitted.
+enum FootnoteMatch<'h> {
+    /// An escape (`\footnote:…`, `\footnoteref:…`): the backslash is dropped
+    /// and the rest kept literal, mirroring the string replacer's leading
+    /// `caps[0].starts_with('\\')` check — which runs *before* the
+    /// ref-vs-plain branch, so this is decided during the scan, not at build
+    /// time. It creates no node and needs no number.
+    Unescape {
+        full: std::ops::Range<usize>,
+        backslash: usize,
+    },
+
+    /// A candidate whose node — and therefore whose number — is produced when
+    /// the rebuild walk reaches it. It may still turn out to be one of the
+    /// forms this family leaves unrecognized, in which case its own text stays
+    /// literal, exactly as it did when the scan decided that.
+    Candidate {
+        full: std::ops::Range<usize>,
+        caps: regex::Captures<'h>,
+    },
+}
+
+/// Finds every footnote occurrence at this level, without building any of them
+/// — see [`FootnoteMatch`] for why construction is deferred.
+fn find_footnote_matches(s: &str) -> Vec<FootnoteMatch<'_>> {
     let mut matches = Vec::new();
 
     for caps in INLINE_FOOTNOTE_MACRO.captures_iter(s) {
@@ -282,62 +333,48 @@ fn find_footnote_matches<'src>(
 
         let full = whole.start()..whole.end();
 
-        // An escape (`\footnote:…`, `\footnoteref:…`) is honored by dropping
-        // the backslash and keeping the rest literal, mirroring the string
-        // replacer's leading `caps[0].starts_with('\\')` check — which runs
-        // *before* the ref-vs-plain branch below, so this must too.
         if whole.as_str().starts_with('\\') {
-            matches.push(MacroMatch {
-                kind: MacroMatchKind::Unescape {
-                    backslash: full.start,
-                },
+            matches.push(FootnoteMatch::Unescape {
+                backslash: full.start,
                 full,
             });
 
             continue;
         }
 
-        // The deprecated `footnoteref:[id,text]` / `footnoteref:[id]` form
-        // (group 1) packs its id and text into one bracket, split on the
-        // first comma, rather than taking the id from the macro target the
-        // way `footnote:id[…]` does.
-        if caps.get(1).is_some() {
-            // With no bracketed text at all (`footnoteref:[]`), it is left
-            // unrecognized — mirroring the string replacer's `next $&`.
-            let Some(raw) = caps.get(3) else {
-                continue;
-            };
-
-            let Some(node) = build_footnoteref_node(raw, &full, s, pieces, nodes, root, parser)
-            else {
-                continue;
-            };
-
-            matches.push(MacroMatch {
-                kind: MacroMatchKind::Node {
-                    consumed: full.clone(),
-                    node: Box::new(node),
-                },
-                full,
-            });
-
-            continue;
-        }
-
-        let Some(node) = build_footnote_node(&caps, &full, s, pieces, nodes, root, parser) else {
-            continue;
-        };
-
-        matches.push(MacroMatch {
-            kind: MacroMatchKind::Node {
-                consumed: full.clone(),
-                node: Box::new(node),
-            },
-            full,
-        });
+        matches.push(FootnoteMatch::Candidate { full, caps });
     }
 
     matches
+}
+
+/// Builds the [`Footnote`](InlineNode::Footnote) node one
+/// [`Candidate`](FootnoteMatch::Candidate) stands for, assigning its number
+/// here — at the point [`rebuild_footnote_level`]'s source-order walk reaches
+/// it — or `None` for the forms this family leaves unrecognized.
+#[allow(clippy::too_many_arguments)]
+fn build_candidate_node<'src>(
+    caps: &regex::Captures<'_>,
+    full: &std::ops::Range<usize>,
+    s: &str,
+    pieces: &[Piece],
+    nodes: &[InlineNode<'src>],
+    root: Span<'src>,
+    parser: &Parser,
+) -> Option<InlineNode<'src>> {
+    // The deprecated `footnoteref:[id,text]` / `footnoteref:[id]` form
+    // (group 1) packs its id and text into one bracket, split on the first
+    // comma, rather than taking the id from the macro target the way
+    // `footnote:id[…]` does.
+    if caps.get(1).is_some() {
+        // With no bracketed text at all (`footnoteref:[]`), it is left
+        // unrecognized — mirroring the string replacer's `next $&`.
+        let raw = caps.get(3)?;
+
+        return build_footnoteref_node(raw, full, s, pieces, nodes, root, parser);
+    }
+
+    build_footnote_node(caps, full, s, pieces, nodes, root, parser)
 }
 
 /// Builds one [`Footnote`](InlineNode::Footnote) node from a `footnote:` match,
@@ -893,6 +930,81 @@ mod tests {
                 folded,
                 golden_macros(fixture),
                 "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_footnote_nested_in_a_child_numbers_in_source_order() {
+        // The property this pass exists for, asserted where it is actually
+        // decided: a footnote nested in a child that falls **between** two of
+        // its level's own footnotes is numbered between them, because the
+        // string pipeline recognizes in one left-to-right sweep over one flat
+        // string.
+        //
+        // Every fixture here places a nested footnote in that position — after
+        // one sibling and before another — since that is the only arrangement
+        // the two orders disagree about: a nested footnote before every
+        // sibling, or after every sibling, numbers the same either way.
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in [
+            // Each container the walk descends into, with a plain sibling on
+            // either side.
+            "before footnote:[a] *span footnote:[b]* after footnote:[c]",
+            "before footnote:[a] _em footnote:[b]_ after footnote:[c]",
+            "before footnote:[a] #mark footnote:[b]# after footnote:[c]",
+            "before footnote:[a] ((a term footnote:[b])) after footnote:[c]",
+            // Nested two deep, so the recursion's own order is exercised.
+            "before footnote:[a] *outer _inner footnote:[b]_* after footnote:[c]",
+            "before footnote:[a] ((a *term footnote:[b]*)) after footnote:[c]",
+            // Two children, each carrying one, between two siblings.
+            "footnote:[a] *x footnote:[b]* mid *y footnote:[c]* footnote:[d]",
+            // The child's own footnote beside a sibling *inside* the same
+            // child, so the level-vs-child interleaving happens twice.
+            "footnote:[a] *x footnote:[b] y footnote:[c]* footnote:[d]",
+            // A named footnote reused from inside a child, whose number is
+            // taken from the definition rather than assigned.
+            "footnote:d[a note] *span footnote:d[]* after footnote:[c]",
+            // A child carrying an *unrecognized* footnote form beside a real
+            // one, so the cursor handling for a candidate that does not build
+            // is exercised in a nested walk too.
+            "before footnote:[a] *span footnote:[] and footnote:[b]* after footnote:[c]",
+        ] {
+            assert_eq!(
+                fold_html(&build_src(Span::new(fixture)), &renderer),
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_anchors_reference_text_is_not_scanned_for_footnotes() {
+        // The complement, and the reason the walk descends into an index term
+        // but not into an anchor's reference text: the anchor replacer
+        // *consumes* that text rather than emitting it, so a `footnote:[…]`
+        // written there never reaches the string pipeline's footnote pass
+        // either. Both sides agree that nothing is numbered — and a real
+        // footnote beside it still takes number 1.
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in [
+            "[[a,see footnote:[note]]] end",
+            "[[a,see footnote:[note]]] and footnote:[real] end",
+            "anchor:a[see footnote:[note]] and footnote:[real] end",
+        ] {
+            let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
+
+            assert_eq!(
+                folded,
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+
+            assert!(
+                !folded.contains("_footnoteref_2"),
+                "an anchor's reference text must not be numbered: {folded:?}"
             );
         }
     }
