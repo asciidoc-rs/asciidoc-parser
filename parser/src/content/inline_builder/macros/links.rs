@@ -2049,13 +2049,21 @@ fn build_email_node<'src>(
 ///
 /// Recurses into every container a `Ref` node can be nested inside —
 /// [`Styled`](InlineNode::Styled), another [`Ref`](InlineNode::Ref) (a link's
-/// own display children, or a cross-reference's), and
-/// [`Footnote`](InlineNode::Footnote) children — mirroring exactly where
+/// own display children, or a cross-reference's),
+/// [`Footnote`](InlineNode::Footnote), and
+/// [`IndexTerm`](InlineNode::IndexTerm) children — mirroring exactly where
 /// [`apply_macros`](super::apply_macros) and the footnote increment's own
 /// `emit_range` can place one. A cross-reference node itself is not
 /// registered — only a [`Link`](RefVariant::Link) has an asset-catalog entry —
 /// but its children are still walked, since a formatted cross-reference text
-/// could itself carry a nested link.
+/// could itself carry a nested link. A visible index term's shown text is the
+/// newest of the four, and carries every link spelling: all three of this
+/// family's passes descend into it.
+///
+/// The four containers are exactly the four node kinds that carry
+/// `children` — a fifth would be a new place a macro node can hide, and the
+/// corpus-wide side-effect sweep (`tests::inline_builder_side_effect_parity`)
+/// is what would catch one going unwalked, as it caught `IndexTerm` itself.
 pub(crate) fn apply_link_side_effects(nodes: &[InlineNode<'_>], parser: &Parser) {
     register_links_of_form(nodes, parser, LinkForm::AutoOrFormal);
     register_links_of_form(nodes, parser, LinkForm::Macro);
@@ -2081,6 +2089,10 @@ fn register_links_of_form(nodes: &[InlineNode<'_>], parser: &Parser, form: LinkF
 
             InlineNode::Footnote(footnote) => {
                 register_links_of_form(&footnote.children, parser, form);
+            }
+
+            InlineNode::IndexTerm(index_term) => {
+                register_links_of_form(&index_term.children, parser, form);
             }
 
             _ => {}

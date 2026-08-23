@@ -172,6 +172,17 @@ fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
 /// design §4.4's coarse fallback. This is the same lift the anchor and
 /// bare-e-mail families already made, for the same reason.
 ///
+/// What a visible term's shown text *encloses* is recognized only by the
+/// families that run **before** this one (image/icon), or by a rendered span
+/// the quotes step wrote earlier, whose own children this step resolves in
+/// full first — either way the construct is already a node, carried in
+/// [`children`](crate::inlines::IndexTerm::children). The families that run
+/// **after** (the three link spellings, anchors, cross-references) do not
+/// reach it: a plain visible term's shown text is an already-substituted
+/// *string* in [`terms`](crate::inlines::IndexTerm::terms), and the string
+/// pipeline goes on scanning that text in its one flat haystack where a tree
+/// has no nodes to descend into. Deferred, pinned by a divergence test.
+///
 /// As in the additive builder generally, this performs *no* recognition side
 /// effect; the string replacer records nothing in a catalog either (the HTML
 /// backend generates no index), so there is none to skip here.
@@ -1408,6 +1419,83 @@ mod tests {
         let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
         assert!(folded.contains("indexterm2:["));
         assert_eq!(golden_macros(source), "<strong>bold</strong> term");
+    }
+
+    #[test]
+    fn a_later_family_inside_a_visible_terms_shown_text_is_a_documented_divergence() {
+        // Found by the corpus-wide side-effect sweep
+        // (`tests::inline_builder_side_effect_parity`), and a *recognition*
+        // gap rather than a replay one — the same root cause seen from both
+        // sides.
+        //
+        // The string pipeline replaces a visible term with its shown text and
+        // nothing else, so that text goes on sitting in the one flat haystack
+        // every later pass scans: a `link:`/`mailto:` macro, a bare URL or
+        // address, an inline anchor, or a cross-reference written inside
+        // `((…))` is recognized by the pass that runs after this one, exactly
+        // as if the parentheses were not there.
+        //
+        // A tree cannot do that with the shown text it currently keeps. This
+        // family runs where the string step runs it — after image/icon, before
+        // the link families — and the shown text of a *plain* visible term is
+        // an already-substituted **string** in
+        // [`terms`](crate::inlines::IndexTerm::terms), not a subtree, so the
+        // families that follow have no nodes to descend into. (The families
+        // that run *before* this one are unaffected: their construct is
+        // already a node when the term encloses it, which is what
+        // [`children`](crate::inlines::IndexTerm::children) carries — see the
+        // parity test below for `image:`, and the side-effect sweep's own
+        // index-term test for a nested rendered span, whose children this step
+        // resolves in full before any of this level's families run.)
+        //
+        // Closing it needs a visible term's shown text to be nodes in every
+        // case, not only when it encloses a rendered span, *and* the families
+        // after this one to descend into them — a change to what the node
+        // carries, so it is its own increment rather than this one's.
+        for source in [
+            "((a term with a link:t.html[T] inside)) end",
+            "((a term with https://t.example inside)) end",
+            "((a term with an [[t]] anchor inside)) end",
+            "((a term with xref:s[X] inside)) end",
+            "indexterm2:[a term with a link:t.html[T] inside] end",
+        ] {
+            let nodes = build_src(Span::new(source));
+            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+
+            assert_ne!(
+                folded,
+                golden_macros(source),
+                "expected a divergence for {source:?}"
+            );
+
+            // The term itself *is* recognized — only what its shown text
+            // encloses is left as literal source.
+            assert!(
+                nodes.iter().any(|n| matches!(n, InlineNode::IndexTerm(_))),
+                "expected the term to be recognized for {source:?}: {nodes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_earlier_family_inside_a_visible_terms_shown_text_is_parity() {
+        // The complement of the divergence above, and the reason it is drawn
+        // where it is: `image:`/`icon:` runs *before* this family, so an image
+        // a visible term encloses is already an [`Image`](InlineNode::Image)
+        // node when the term is built, and rides along in the term's own
+        // `children`.
+        for source in [
+            "((a term with an image:t.png[T] inside)) end",
+            "indexterm2:[a term with an image:t.png[T] inside] end",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            assert_eq!(
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                golden_macros(source),
+                "expected parity for {source:?}"
+            );
+        }
     }
 
     #[test]

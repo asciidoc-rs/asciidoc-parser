@@ -491,9 +491,15 @@ fn build_anchor_reftext<'src>(
 /// Every other caller passes `false`.
 ///
 /// Recurses into every container an id-bearing node can be nested inside —
-/// [`Styled`](InlineNode::Styled), [`Ref`](InlineNode::Ref), and
-/// [`Footnote`](InlineNode::Footnote) children — mirroring exactly where the
+/// [`Styled`](InlineNode::Styled), [`Ref`](InlineNode::Ref),
+/// [`Footnote`](InlineNode::Footnote), and
+/// [`IndexTerm`](InlineNode::IndexTerm) children — mirroring exactly where the
 /// image and link increments' own side-effect functions recurse.
+///
+/// The four containers are exactly the four node kinds that carry
+/// `children` — a fifth would be a new place a macro node can hide, and the
+/// corpus-wide side-effect sweep (`tests::inline_builder_side_effect_parity`)
+/// is what would catch one going unwalked, as it caught `IndexTerm` itself.
 pub(crate) fn apply_ref_side_effects(
     nodes: &[InlineNode<'_>],
     parser: &Parser,
@@ -543,6 +549,15 @@ pub(crate) fn apply_ref_side_effects(
             InlineNode::Footnote(footnote) => {
                 apply_ref_side_effects(
                     &footnote.children,
+                    parser,
+                    source,
+                    leading_anchor_registered,
+                );
+            }
+
+            InlineNode::IndexTerm(index_term) => {
+                apply_ref_side_effects(
+                    &index_term.children,
                     parser,
                     source,
                     leading_anchor_registered,

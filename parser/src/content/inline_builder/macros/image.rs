@@ -1038,10 +1038,20 @@ fn parse_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
 /// tests, against their own `Parser`.
 ///
 /// Recurses into every container an `Image` node can be nested inside —
-/// [`Styled`](InlineNode::Styled), [`Ref`](InlineNode::Ref), and
-/// [`Footnote`](InlineNode::Footnote) children — mirroring exactly where
+/// [`Styled`](InlineNode::Styled), [`Ref`](InlineNode::Ref),
+/// [`Footnote`](InlineNode::Footnote), and
+/// [`IndexTerm`](InlineNode::IndexTerm) children — mirroring exactly where
 /// [`apply_macros`](super::apply_macros) and the footnote increment's own
-/// `emit_range` can place one.
+/// `emit_range` can place one. A visible index term's shown text is the
+/// newest of the four: it holds `children` only when the term encloses a
+/// construct the image pass already recognized
+/// (`((a term with an image:t.png[T] inside))`), which is precisely when a
+/// registration can hide there.
+///
+/// The four containers are exactly the four node kinds that carry
+/// `children` — a fifth would be a new place a macro node can hide, and the
+/// corpus-wide side-effect sweep (`tests::inline_builder_side_effect_parity`)
+/// is what would catch one going unwalked, as it caught `IndexTerm` itself.
 pub(crate) fn apply_image_side_effects(
     nodes: &[InlineNode<'_>],
     parser: &Parser,
@@ -1078,6 +1088,10 @@ pub(crate) fn apply_image_side_effects(
 
             InlineNode::Footnote(footnote) => {
                 apply_image_side_effects(&footnote.children, parser, source);
+            }
+
+            InlineNode::IndexTerm(index_term) => {
+                apply_image_side_effects(&index_term.children, parser, source);
             }
 
             _ => {}
