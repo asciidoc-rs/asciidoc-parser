@@ -737,7 +737,7 @@ mod tests {
         let mut content = Content::from(Span::new(source));
 
         parser.mark_footnote_spans.set(true);
-        SubstitutionGroup::Title.apply(&mut content, parser, None);
+        SubstitutionGroup::Title.apply_string_pipeline(&mut content, parser, None);
         parser.mark_footnote_spans.set(false);
 
         let reftext = strip_footnote_marker_spans(content.rendered_html());

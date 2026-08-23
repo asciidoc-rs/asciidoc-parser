@@ -116,7 +116,7 @@ fn oracle<'src>(source: &'src str, group: &SubstitutionGroup) -> Oracle<'src> {
     // Golden pass.
     let golden_parser = experimental(Parser::default());
     let mut golden_content = Content::from(Span::new(source));
-    group.apply(&mut golden_content, &golden_parser, None);
+    group.apply_string_pipeline(&mut golden_content, &golden_parser, None);
     let golden = golden_content.rendered_owned();
 
     // Recording pass, driving the production recorder.
@@ -124,7 +124,7 @@ fn oracle<'src>(source: &'src str, group: &SubstitutionGroup) -> Oracle<'src> {
     let recording_parser =
         experimental(Parser::default()).with_inline_substitution_renderer(recorder);
     let mut recording_content = Content::from(Span::new(source));
-    group.apply(&mut recording_content, &recording_parser, None);
+    group.apply_string_pipeline(&mut recording_content, &recording_parser, None);
     let marked = recording_content.rendered_owned();
 
     let markers = open_marker_count(&marked);

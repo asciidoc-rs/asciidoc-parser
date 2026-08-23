@@ -1134,7 +1134,7 @@ mod tests {
             r"<<target,a \{name} b>>",
         ] {
             let mut content = Content::from(Span::new(source));
-            SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
 
             let nodes = build_for_group(
                 &SubstitutionGroup::Normal,
@@ -1238,7 +1238,7 @@ mod tests {
                     ),
                 ] {
                     let mut content = Content::from(Span::new(&source));
-                    group.apply(&mut content, &parser, None);
+                    group.apply_string_pipeline(&mut content, &parser, None);
 
                     let nodes = build_for_group(
                         group,
@@ -1372,7 +1372,7 @@ mod tests {
             "stem:[a &copy; b]",
         ] {
             let mut content = Content::from(Span::new(source));
-            SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
 
             let nodes = build_for_group(
                 &SubstitutionGroup::Normal,
@@ -1422,7 +1422,7 @@ mod tests {
 
         let parity = |source: &str| {
             let mut content = Content::from(Span::new(source));
-            SubstitutionGroup::Normal.apply(&mut content, &configure(), None);
+            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &configure(), None);
 
             let built_parser = configure();
 
@@ -1552,7 +1552,7 @@ mod tests {
             ),
         ] {
             let mut content = Content::from(Span::new(source));
-            SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
 
             assert_eq!(content.rendered_str(), golden_html);
 

@@ -809,7 +809,7 @@ mod tests {
         let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
 
         let mut golden = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply(&mut golden, &configure(), None);
+        SubstitutionGroup::Normal.apply_string_pipeline(&mut golden, &configure(), None);
 
         assert_eq!(folded, golden.rendered_str(), "{nodes:#?}");
         assert!(folded.contains("Widget"), "{folded:?}");
@@ -1474,7 +1474,7 @@ mod tests {
         use crate::content::{Content, SubstitutionGroup};
 
         let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply(&mut content, parser, None);
+        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, None);
         content.rendered_str().to_string()
     }
 
@@ -1599,7 +1599,7 @@ and another.footnote:[note two]",
             let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
 
             let mut golden = Content::from(Span::new(filtered));
-            SubstitutionGroup::Normal.apply(&mut golden, &Parser::default(), None);
+            SubstitutionGroup::Normal.apply_string_pipeline(&mut golden, &Parser::default(), None);
 
             assert_eq!(
                 folded,

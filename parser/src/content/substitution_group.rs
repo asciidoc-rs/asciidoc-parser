@@ -261,6 +261,39 @@ impl SubstitutionGroup {
         }
     }
 
+    /// Runs **only** the string pipeline over `content` — no inline tree, no
+    /// fold — which is the golden-HTML oracle (§5.3) as a callable.
+    ///
+    /// Every differential corpus on this branch takes its golden by rendering a
+    /// fixture through the string pipeline and comparing it against the tree's
+    /// fold. Taking that golden from [`apply`](Self::apply) works only while
+    /// `rendered` *is* the string pipeline's output. The step 6 cutover makes
+    /// `rendered` a fold of the tree, at which point such a corpus compares the
+    /// fold against itself and passes for that reason, with nothing failing to
+    /// say so — see
+    /// [`snapshot`](crate::content::inline_builder) for the demonstration.
+    ///
+    /// So the corpora take their golden from here instead, and go on
+    /// differentiating for real. Today this is byte-identical to `apply`: the
+    /// tree is still additive, so the only difference is work the golden never
+    /// reads. Landing it *before* the cutover is what keeps that equivalence
+    /// checkable — the whole suite has to stay green across this change, which
+    /// is a claim the cutover itself could no longer make.
+    ///
+    /// The ~277 golden-HTML assertions deliberately do **not** take it: their
+    /// subject is `rendered_html()` itself, so they must go on exercising the
+    /// production entry point, and after the cutover they are precisely what
+    /// validates the fold.
+    #[cfg(test)]
+    pub(crate) fn apply_string_pipeline<'src>(
+        &self,
+        content: &mut Content<'src>,
+        parser: &Parser,
+        attrlist: Option<&Attrlist<'src>>,
+    ) {
+        self.run_pipeline(content, parser, attrlist);
+    }
+
     /// Runs the substitution pipeline for this group over `content`: extract
     /// passthroughs (when the group includes them), apply each step in order,
     /// restore the passthroughs, and finalize any deferred cross-references.

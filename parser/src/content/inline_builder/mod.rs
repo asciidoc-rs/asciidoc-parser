@@ -746,7 +746,7 @@ mod tests {
     /// production.
     fn golden(source: &str, parser: &Parser) -> String {
         let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply(&mut content, parser, None);
+        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, None);
         content.rendered_str().to_string()
     }
 
@@ -1933,7 +1933,7 @@ mod tests {
         fn golden_for_group(group: &SubstitutionGroup, source: &str) -> String {
             let golden_parser = parser_with_product();
             let mut content = Content::from(Span::new(source));
-            group.apply(&mut content, &golden_parser, None);
+            group.apply_string_pipeline(&mut content, &golden_parser, None);
             content.rendered_str().to_string()
         }
 

@@ -6493,7 +6493,7 @@ mod tests {
         use crate::content::{Content, SubstitutionGroup};
 
         let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply(&mut content, parser, None);
+        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, None);
         content.rendered_str().to_string()
     }
 

@@ -1320,7 +1320,7 @@ mod tests {
         // does — the documented `subs=attributes+` trick for inspecting a
         // stored attribute value.
         let mut content = Content::from(Span::new(source));
-        group.apply(&mut content, &parser_with_attribute("tag", "<b>"), None);
+        group.apply_string_pipeline(&mut content, &parser_with_attribute("tag", "<b>"), None);
 
         assert_eq!(content.rendered_str(), "&lt;b&gt;");
         assert_eq!(

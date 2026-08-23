@@ -134,7 +134,7 @@ fn corpus_parser() -> Parser {
 fn side_effects_with(source: &str, configure: impl Fn() -> Parser) -> (SideEffects, SideEffects) {
     let golden_parser = configure();
     let mut content = Content::from(Span::new(source));
-    SubstitutionGroup::Normal.apply(&mut content, &golden_parser, None);
+    SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &golden_parser, None);
 
     let builder_parser = configure();
     let nodes = build(Span::new(source), &builder_parser, None);

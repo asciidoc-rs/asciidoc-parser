@@ -3957,7 +3957,7 @@ mod tests {
             ),
         ] {
             let mut content = Content::from(Span::new(source));
-            SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
 
             assert_eq!(content.rendered_str(), golden_html, "golden for {source:?}");
 
@@ -4009,7 +4009,7 @@ mod tests {
             ("[.a~b~c]#y#", "<span class=\"a<sub>b</sub>c\">y</span>"),
         ] {
             let mut content = Content::from(Span::new(source));
-            SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
 
             assert_eq!(content.rendered_str(), golden_html);
 
