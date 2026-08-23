@@ -5456,6 +5456,63 @@ Each phase is a reviewable unit with a clear exit gate.
   gives the same bytes. This is test-only: nothing is wired in, and the corpus-wide fold-parity
   audit is unchanged.
 
+  *Step 6 prep landed as (a corpus-wide side-effect parity harness, and the index term it found):*
+  the increment above closed one half of what the blast-radius experiment left unmeasured — it
+  "neither calls the staged side effects nor sequences the fold against resolution". This one
+  closes the other half, and unlike its sibling it does **not** pass as written.
+
+  Recognizing a construct is not only about the bytes it renders. Four passes of the string
+  pipeline also write down what they saw — an image's target and a link's in the asset catalog, an
+  inline anchor's and a bibliography entry's id in the reference catalog, and a dangerous `link=`
+  scheme in the shared warnings list — and step 6 has to replay all four from the tree, exactly
+  once per parse and in the string pipeline's own pass order. That is what
+  [`apply_macro_side_effects`](../../parser/src/content/inline_builder/macros/mod.rs) is staged to
+  do, and until now it was pinned only by hand-written fixtures inside its own module, one per
+  ordering rule it has to honor.
+
+  [`inline_builder_side_effect_parity`](../../parser/src/tests/inline_builder_side_effect_parity.rs)
+  drives a corpus through both sides on two independently-configured parsers (§5.3's discipline —
+  each side registers into the parser it is given, so a shared one would see every entry twice and
+  fire every duplicate-id warning spuriously) and compares *everything either side wrote down*:
+  catalog entries in registration order, ids with their reftext and kind, and warnings in the
+  order the one shared list received them. The corpus covers each family alone and in company, the
+  link family's three-pass order (which fills the catalog in *pass* rather than document order),
+  an `imagesdir` in force, a registration reached from inside another construct's subtree, ids
+  duplicated across two families, and — the shapes most likely to over-register — an escaped
+  macro, one sealed in a passthrough, and one in monospace, each beside a live twin so an
+  over-eager replay shows up as a length mismatch rather than as two empty lists. Three guards
+  keep it honest: the corpus as a whole must write something, each of the four lists must be
+  reached, and the fixtures that write *nothing* are named rather than counted — `icon:` among
+  them, which shares the image family's pass and node kind but is not an asset.
+
+  What it found is one root cause with two faces. [`IndexTerm`](../../parser/src/inlines/index_term.rs)
+  is the **fourth** node kind carrying `children` — added by the visible-term increment above, after
+  all three side-effect walks were written — and none of the three descended into it, so an image,
+  link, or anchor a visible term encloses was recognized, rendered, and then registered nowhere.
+  The walks now recurse into it, and their doc comments say why four is the whole list: a fifth
+  child-bearing kind would be a new place a macro node can hide, and this sweep is what catches one.
+
+  The other face is a **recognition** gap the same fixtures expose, and it is not this increment's
+  to close. The string pipeline replaces a visible term with its shown text and nothing else, so
+  that text goes on sitting in the one flat haystack every later pass scans: a `link:` macro, a
+  bare URL, an anchor, or a cross-reference written inside `((…))` is recognized by the pass that
+  runs *after* the index-term pass, exactly as if the parentheses were not there. A tree cannot do
+  that with the shown text it currently keeps — a plain visible term's is an already-substituted
+  *string* in `terms`, not a subtree — so the families after this one have no nodes to descend
+  into. (The families *before* it are unaffected, which is why the image half of the sweep passes:
+  their construct is already a node when the term encloses it, and rides along in `children`. So
+  is a construct inside a rendered span the term encloses, whose children this step resolves in
+  full before any of this level's families run.) Closing it needs a visible term's shown text to be
+  nodes in **every** case, not only when it encloses a rendered span, *and* the families after this
+  one to descend into them — a change to what the node carries, so it is its own increment.
+  Deferred and pinned by a divergence test, with its parity complement beside it.
+
+  This is the first divergence found by asking about side effects rather than about bytes, and it
+  was invisible to the fold-parity audit for a reason worth recording: the audit's corpus had no
+  fixture putting a later family inside a visible term, so the *rendering* half of the same root
+  cause had gone unseen too. Re-running the audit shows no change to the divergence set, since the
+  shapes that expose it are new here. Coverage is diff-neutral; nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -6461,6 +6518,22 @@ Each phase is a reviewable unit with a clear exit gate.
        rather than by variant — paragraphs, admonitions, and the raw-delimited family — plus
        section titles, table cells, and footnote subtrees, with guards against vacuity and against
        the walk narrowing. It passes as written. See the step's own "landed as" note above.
+
+     - ✅ **prep (a corpus-wide side-effect parity harness).** The other half of what the
+       blast-radius measurement left unmeasured: it "neither calls the staged side effects nor
+       sequences the fold against resolution", and the harness above closed only the second
+       clause. `apply_macro_side_effects` — the replay of the four registrations the string
+       pipeline performs at recognition time — was pinned only by hand-written fixtures inside its
+       own module.
+       [`inline_builder_side_effect_parity`](../../parser/src/tests/inline_builder_side_effect_parity.rs)
+       drives a corpus through both sides on two independent parsers and compares every catalog
+       entry, id, and warning either wrote, in order. Unlike its sibling it does **not** pass as
+       written: `IndexTerm` is the fourth node kind carrying `children`, added after all three
+       side-effect walks were written, and none descended into it. The walks now do. The same
+       fixtures expose a *recognition* gap with the same root cause — the families that run after
+       the index-term pass cannot reach a plain visible term's shown text, which is a string
+       rather than a subtree — deferred to its own increment and pinned by a divergence test with
+       its parity complement beside it. See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
