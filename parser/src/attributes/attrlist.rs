@@ -26,6 +26,18 @@ pub struct Attrlist<'src> {
     attributes: Vec<ElementAttribute<'src>>,
     anchor: Option<CowStr<'src>>,
     source: Span<'src>,
+
+    /// The attrlist text this list was parsed from, kept only when `source`'s
+    /// own bytes are *not* that text — which happens exactly when
+    /// [`parse`](Self::parse) substituted an attribute reference into it, so
+    /// what was parsed is the *expanded* text while `source` holds the
+    /// author's `{name}` spelling. `None` otherwise, which is the common case.
+    ///
+    /// Only [`source_text`](Self::source_text) reads it, for
+    /// [`quoted_text_fallback_role`](Self::quoted_text_fallback_role) — the one
+    /// accessor that reads the attrlist's own text rather than a parsed
+    /// attribute.
+    source_text: Option<CowStr<'src>>,
 }
 
 impl<'src> Attrlist<'src> {
@@ -51,6 +63,17 @@ impl<'src> Attrlist<'src> {
             CowStr::from(source.data())
         };
 
+        // Every *parsed* field below comes out of `source_cow`, so an attribute
+        // reference in a value is already expanded by the time a caller reads
+        // it. `quoted_text_fallback_role` is the one accessor that reads the
+        // list's own text instead, and it must see the same expanded bytes —
+        // Asciidoctor's `parse_quoted_text_attributes` runs `sub_attributes`
+        // over the list and *then* takes the first positional verbatim. So the
+        // expanded text is retained whenever the substitution changed anything,
+        // and `source.data()` goes on serving the (overwhelmingly common) case
+        // where it did not.
+        let substituted = source_cow.as_ref() != source.data();
+
         if source_cow.starts_with('[') && source_cow.ends_with(']') {
             let anchor = source_cow[1..source_cow.len() - 1].to_owned();
 
@@ -60,6 +83,7 @@ impl<'src> Attrlist<'src> {
                         attributes,
                         anchor: Some(CowStr::from(anchor)),
                         source,
+                        source_text: substituted.then_some(source_cow),
                     },
                     after: source.discard_all(),
                 },
@@ -175,6 +199,7 @@ impl<'src> Attrlist<'src> {
                     attributes,
                     anchor: None,
                     source,
+                    source_text: substituted.then_some(source_cow),
                 },
                 after: source.discard_all(),
             },
@@ -204,6 +229,10 @@ impl<'src> Attrlist<'src> {
             ],
             anchor: None,
             source: language,
+
+            // A synthesized list has no attrlist text in the document at all
+            // (`source` is the language span), and nothing reads this for it.
+            source_text: None,
         }
     }
 
@@ -280,6 +309,10 @@ impl<'src> Attrlist<'src> {
             attributes: later_attributes,
             anchor: later_anchor,
             source: _,
+
+            // Kept from `self`, like `source` itself: only inline quoted text
+            // reads the list's own text, and an inline list is never merged.
+            source_text: _,
         } = later;
 
         if later_anchor.is_some() {
@@ -567,8 +600,18 @@ impl<'src> Attrlist<'src> {
         // `['a,b']` yields the role `'a`) rather than being treated as quoted
         // content. A quote-delimited first positional always leaves at least its
         // opening quote here, so the slice is never empty.
-        let raw = self.source.data();
+        let raw = self.source_text();
         Some(raw.split_once(',').map_or(raw, |(first, _)| first).trim())
+    }
+
+    /// The text this attribute list was parsed from: the attribute-expanded
+    /// text when [`parse`](Self::parse)'s own substitution changed anything,
+    /// and `source`'s own bytes otherwise.
+    fn source_text(&'src self) -> &'src str {
+        match &self.source_text {
+            Some(text) => text.as_ref(),
+            None => self.source.data(),
+        }
     }
 
     /// Returns any option attributes that were found.
@@ -2470,6 +2513,60 @@ mod tests {
             .unwrap_if_no_warnings();
 
             assert!(mi.item.quoted_text_fallback_role().is_none());
+        }
+
+        #[test]
+        fn quoted_first_positional_reads_the_substituted_text() {
+            // `parse` expands attribute references over the whole list before
+            // splitting it, so every *parsed* field is already expanded. The
+            // verbatim role must come from those same expanded bytes:
+            // Asciidoctor's `parse_quoted_text_attributes` runs
+            // `sub_attributes` over the list and *then* takes the first
+            // positional verbatim, and it does so regardless of the enclosing
+            // block's `subs` list.
+            let p = crate::Parser::default().with_intrinsic_attribute(
+                "myrole",
+                "highlight",
+                crate::parser::ModificationContext::Anywhere,
+            );
+
+            let mi = crate::attributes::Attrlist::parse(
+                crate::Span::new("'{myrole}'"),
+                &p,
+                AttrlistContext::Inline,
+            )
+            .unwrap_if_no_warnings();
+
+            assert_eq!(mi.item.quoted_text_fallback_role().unwrap(), "'highlight'");
+
+            // The comma boundary is applied *after* the substitution, so an
+            // expansion that introduces one truncates the role there too.
+            let p = crate::Parser::default().with_intrinsic_attribute(
+                "commarole",
+                "a,b",
+                crate::parser::ModificationContext::Anywhere,
+            );
+
+            let mi = crate::attributes::Attrlist::parse(
+                crate::Span::new("'{commarole}'"),
+                &p,
+                AttrlistContext::Inline,
+            )
+            .unwrap_if_no_warnings();
+
+            assert_eq!(mi.item.quoted_text_fallback_role().unwrap(), "'a");
+
+            // A missing attribute is left alone under the default
+            // `attribute-missing=skip`, so the substitution is a no-op and the
+            // source's own bytes still serve.
+            let mi = crate::attributes::Attrlist::parse(
+                crate::Span::new("'{missing}'"),
+                &crate::Parser::default(),
+                AttrlistContext::Inline,
+            )
+            .unwrap_if_no_warnings();
+
+            assert_eq!(mi.item.quoted_text_fallback_role().unwrap(), "'{missing}'");
         }
     }
 
