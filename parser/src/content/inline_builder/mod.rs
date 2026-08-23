@@ -202,7 +202,11 @@
 //!   `((term))`) is deferred only when its shown text crosses a rendered span —
 //!   an argument that is an **attribute list** (an `=`) is not deferred, since
 //!   the list only decides which of that argument's own bytes are shown and is
-//!   consumed rather than carried. The **UI**, **index-term**, and
+//!   consumed rather than carried. An escaped shorthand keeps its match literal
+//!   minus the backslash, *except* the paren-wrapped `\(((x)))`, which the
+//!   string replacer still renders as the flow term nested inside it: that one
+//!   becomes a **pair** of matches (the backslash's own, then the term's,
+//!   keeping a literal paren at each end). The **UI**, **index-term**, and
 //!   **cross-reference** families share the anchor's synthesized-run lift, and
 //!   for the same reason — none of those nodes carries a `Span`-typed field, so
 //!   a `kbd:`/`btn:`/`menu:` macro, an index term, or a cross-reference inside
@@ -848,6 +852,7 @@ mod tests {
             "indexterm:[primary, secondary]",
             "indexterm2:[shown]",
             "indexterm2:[Flash,see=HTML 5] then indexterm2:[see-also=\"CSS 3\"]",
+            r"an escaped \(((Coffee))) shorthand and its \((literal)) twin",
             "[[mid-anchor]] after the anchor",
             "text before anchor:named[Ref Text] and after",
             "a +++<b>raw</b>+++ passthrough",
@@ -1006,6 +1011,15 @@ mod tests {
         // nothing.
         assert_parity(
             "An indexterm2:[Coffee (C) Beans,see=Tea] term beside a ((Coffee (C) Beans)) one and link:x.html[O'Reilly,role=hl] and *bold*.",
+        );
+
+        // The escaped paren-wrapped shorthand — a *pair* of matches, where the
+        // backslash's own match drops it and the nested term rides between two
+        // kept parens — beside the escaped spellings that stay literal, a
+        // concealed term the shown one's output keeps from being the level's
+        // `Cow::Borrowed` no-op, and a character replacement inside the term.
+        assert_parity(
+            "An escaped \\(((Tom (C) Jerry >> Cartoons))) term beside \\((literal)) and (((concealed))) and *bold*.",
         );
 
         // UI macros (kbd/menu, gated on `experimental`) beside a quoted span.
@@ -1968,6 +1982,13 @@ mod tests {
                 // bytes either way.
                 "an indexterm2:[a & b,region=Kona] term",
                 "an indexterm2:[Coffee,region=a < b] term",
+                // The escaped paren-wrapped shorthand's nested term, carrying
+                // the same bare special. What an order decides here is only
+                // which bytes the term is read from; the two kept parens beside
+                // it are the level's own either way, and the backslash the
+                // pair's first match drops is never a special.
+                r"an escaped \(((a & b))) term",
+                r"an escaped \(((a &lt; b))) term",
                 // The same value written as the *entity spelling* of a
                 // special, for each of the three families that compute an
                 // attribute-list value. Under these orders nothing escaped it,

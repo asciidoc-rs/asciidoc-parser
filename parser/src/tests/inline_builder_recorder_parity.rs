@@ -823,6 +823,7 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "indexterm:[primary, secondary]",
         "indexterm2:[shown]",
         "indexterm2:[Flash,see=HTML 5] then indexterm2:[see-also=\"CSS 3\"]",
+        r"an escaped \(((Coffee))) shorthand and its \((literal)) twin",
         "[[mid-anchor]] after the anchor",
         "text before anchor:named[Ref Text] and after",
         "a +++<b>raw</b>+++ passthrough",

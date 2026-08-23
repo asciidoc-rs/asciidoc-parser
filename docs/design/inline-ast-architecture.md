@@ -1180,7 +1180,8 @@ Each phase is a reviewable unit with a clear exit gate.
   the node can hold an `Attrlist<'src>`, as the link/xref macros defer the same — deferred at the
   time, closed by a step 6 prep below, which finds the node needs no such list at all); the one
   escaped paren-wrapped shorthand the string replacer re-renders (`\(((x)))` → `(x)`) is likewise
-  left literal.
+  left literal — also at the time, and also closed by a step 6 prep below, as a *pair* of matches
+  rather than a new node shape.
   As throughout the additive builder, this performs *no* recognition side effect (the HTML backend
   builds no index, so the string replacer has none to skip either). This step is **additive**: nothing
   is wired into the parse path. Inline `Stem` is handled at passthrough time (step 5), not in the
@@ -4958,6 +4959,67 @@ Each phase is a reviewable unit with a clear exit gate.
   consume-across-levels case — plus the keeps, and the bare-attrlisted body whose content the
   passthrough pass's first scan already recognizes (`[method x-]+pass:[<b>]+`).
 
+  *Step 6 prep landed as (the escaped paren-wrapped shorthand, the index-term family's other named
+  deferral):* the sibling increment's closing sentence, taken in order — the half of what it named
+  that this family does own, the other half being the module-wide `range_is_verbatim` boundary. An
+  **escaped** index-term shorthand drops its backslash and keeps the rest literal, which is what the
+  builder did for every spelling of it; the string replacer has one exception, and its own branch
+  says why: *an escaped concealed term still processes a nested flow term*. Where the escaped
+  match's `encl_text` is itself **paren-wrapped**
+  ([`InlineIndextermReplacer`](../../parser/src/content/macros.rs)'s
+  `encl_text.starts_with('(') && encl_text.ends_with(')')`), the replacer strips those wrapping
+  parentheses off and renders what is left as a *visible* term between two literal parens, so
+  `\(((x)))` collapses to `(x)` rather than staying literal. The tree left the whole match literal
+  and pinned the difference — the shape Asciidoctor's own
+  `should only escape enclosing brackets if concealed index term is preceded by a backslash` spells,
+  which is where the corpus-wide fold-parity audit's remainder was still holding it.
+
+  Closing it needed no new mechanism, only the observation that this is **one match's source doing
+  two things** — the shape the escaped-attribute-list bracket increment already answered — so it
+  becomes a *pair* of matches that
+  [`rebuild_macro_level`](../../parser/src/content/inline_builder/macros/mod.rs) composes as it
+  composes any two adjacent ones: an
+  [`Unescape`](../../parser/src/content/inline_builder/macros/mod.rs) whose match **is** the
+  backslash it drops (so it emits nothing, exactly what the replacer does with that byte), then a
+  [`Node`](../../parser/src/content/inline_builder/macros/mod.rs) over the rest whose `consumed`
+  sub-range stops one byte inside each end — the same kept-parenthesis
+  narrowing the unescaped spellings already use for a single adjacent paren, applied to both ends at
+  once. Neither `MacroMatchKind` variant, nor the node, nor any gate or signature moves; the nested
+  term itself takes the visible branch's whole existing arithmetic (`normalize_index_text` then
+  `strip_see_and_seealso`), since it *is* that branch. The look-ahead bookkeeping falls out too: the
+  pair's `Node` half carries the `is_skip` the absorbed parens imply and a `rendered_nonempty` that
+  is unconditionally true — two kept parentheses are output whatever the term renders to — so a
+  concealed term sitting beside one is consumed rather than left literal by the
+  [`Cow::Borrowed`](../../parser/src/internal/regex.rs) no-op the level would otherwise be.
+
+  The family's *other* deferral is untouched and still decides first: the nested term is a shown
+  one, so a term crossing an opaque span is unreconstructable from this level's escaped string and
+  `\(((*bold* term)))` keeps the plain escaped shape with its own divergence test. What reaches
+  parity is the shape itself alone and in flow, a `see` / `see-also` clause stripped to its primary,
+  a newline collapsed and a term trimmed, a special character and a restored entity and a
+  typographic replacement in the shown text, an empty nested term, the trailing-paren absorption
+  running first so the wrapper's right half is a paren the closing pair absorbed
+  (`\(((x))))`, `\((((x))))`), the literal-staying twins beside it (`\((x))`, `\(((x))`,
+  `\((x)))`, `\indexterm:[x]`), twice in one flow, beside a rendered span, inside one, and the
+  nested term arriving from an **expanded value**. The formerly pinned divergence becomes a parity
+  test that also asserts the shape: a literal `(`, one visible `IndexTerm`, a literal `)`, and the
+  node's location the match minus the backslash the pair's first match drops. Fixtures join the
+  whole-pipeline broad sweep and combined-constructs corpus, the group-parity corpus, and the
+  structural recorder cross-check; a whole-document test drives the shape end to end through the
+  real parse path, in a paragraph and in a section heading's own title. Re-running the corpus-wide
+  fold-parity audit shows that golden fixture **gone** from the divergence set and no new
+  divergence; coverage is diff-neutral, and as with every prep piece before it, nothing further is
+  wired in.
+
+  What still defers in this family is now only the half that was never its own: a **visible term
+  crossing a rendered span**, in every spelling — shorthand, macro, attribute list, and this
+  increment's nested one — which is the module-wide `range_is_verbatim` boundary. Beyond the
+  family the remainder is unchanged: the boundary-class halves the sibling increments named — a
+  macro body class wanting more than one presented character, the closing character, and the
+  character-replacements step's consume-across-levels case — plus the keeps, and the
+  bare-attrlisted body whose content the passthrough pass's first scan already recognizes
+  (`[method x-]+pass:[<b>]+`).
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -5808,6 +5870,30 @@ Each phase is a reviewable unit with a clear exit gate.
        "landed as" note above. What still defers in this family is that span-crossing term (the
        module-wide `range_is_verbatim` boundary) and the escaped paren-wrapped shorthand
        `\(((x)))`; beyond it the remainder is unchanged.
+
+     - ✅ **prep (the escaped paren-wrapped shorthand).** The half of that closing sentence the
+       index-term family actually owns. An escaped shorthand drops its backslash and stays
+       literal, which is what the builder did for every spelling; the string replacer has one
+       exception, and its own branch says why — *an escaped concealed term still processes a
+       nested flow term*. Where the escaped match's `encl_text` is itself paren-wrapped,
+       [`InlineIndextermReplacer`](../../parser/src/content/macros.rs) strips those parentheses
+       off and renders what is left as a **visible** term between two literal parens, so
+       `\(((x)))` collapses to `(x)` — the shape Asciidoctor's own
+       `should only escape enclosing brackets…` golden spells, and where the audit's remainder
+       was holding it. It is one match's source doing two things, so it becomes the *pair* the
+       escaped-attribute-list bracket increment already answered with: an
+       [`Unescape`](../../parser/src/content/inline_builder/macros/mod.rs) whose match **is** the
+       backslash it drops, then a [`Node`](../../parser/src/content/inline_builder/macros/mod.rs)
+       whose `consumed` sub-range stops one byte inside each end — the family's own
+       kept-parenthesis narrowing, applied to both ends at once — which
+       [`rebuild_macro_level`](../../parser/src/content/inline_builder/macros/mod.rs) composes as
+       it composes any two adjacent matches. No variant, node field, gate, or signature moves;
+       the nested term takes the visible branch's existing arithmetic because it *is* that
+       branch. The formerly pinned divergence becomes a parity test that also asserts the shape.
+       See the step's own "landed as" note above. What still defers in this family is now only
+       the half that was never its own: a visible term crossing a rendered span, in every
+       spelling, which is the module-wide `range_is_verbatim` boundary; beyond it the remainder
+       is unchanged.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
