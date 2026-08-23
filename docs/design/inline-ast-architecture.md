@@ -5092,6 +5092,81 @@ Each phase is a reviewable unit with a clear exit gate.
   bare-attrlisted body whose content the passthrough pass's first scan already recognizes
   (`[method x-]+pass:[<b>]+`).
 
+  *Step 6 prep landed as (an attribute-list reference text enclosing a rendered span — the
+  cross-reference family):* the capture the rendered-span class left behind. When that class was
+  closed for the three reference-bearing families, each kept one shape: *a text carrying its own
+  attribute list*, whose display text comes back from an
+  [`Attrlist`](../../parser/src/attributes/attrlist.rs) **parse** rather than from a range of the
+  match string — and a parsed value, the note said, is bytes, which a rendered span has none of
+  until fold time. `xref:sec[*bold*,role=hl]` therefore stayed literal, one of the audit's
+  remaining golden-exercised divergences.
+
+  The finding is that the parse hands that value back to become the node's **children**, so it
+  needs no bytes either — only a way to survive the split intact. That is exactly what the
+  restore-the-value class already built for a masked passthrough:
+  [`tokened_bracket`](../../parser/src/content/inline_builder/macros/image.rs) puts a bracket into
+  the string pipeline's own *shape* before the parse, and
+  [`restored_value_children`](../../parser/src/content/inline_builder/macros/mod.rs) re-splits the
+  parsed value on its tokens and splices the masked **node** back in. The only thing that made a
+  span different was the pairing of each token with a body, which
+  [`Attrlist::into_owned_restoring`](../../parser/src/attributes/attrlist.rs) needs and a span
+  cannot supply. A cross-reference needs no such pairing at all: a
+  [`Ref`](../../parser/src/inlines/ref_node.rs)`{Xref}` carries `attrs: None`, and its `window` /
+  `role` / `xrefstyle` are plain fields read straight off the parse. So a new
+  [`tokened_text`](../../parser/src/content/inline_builder/macros/mod.rs) tokens **every** opaque
+  piece — a rendered span, an earlier-recognized macro node, a masked passthrough or STEM alike —
+  with no body to pair, and `restored_value_children`, lifted out of the link family and shared,
+  splices each node into the children.
+
+  The boundary that remains is drawn per **slot**, exactly as
+  [`text_attrlist`](../../parser/src/content/inline_builder/macros/links.rs)'s own `pre_restore`
+  draws it: a token reaching the `window=`, `role=`, or `xrefstyle=` this family reads as a
+  *string* names markup that exists only at fold time where a string is needed, so that shape
+  defers with its own divergence test.
+
+  The token is also what makes the *split* reproducible — a bracket's `,` / `=` / `"` are the
+  only bytes it reads, and a placeholder carries none of them — but the replacer splits over the
+  piece's own **markup**, which may: `xref:sec[a *b, c* d,role=hl]` renders
+  `a <strong>b, c</strong> d`, whose list splits at the comma *inside* the tag and ends the
+  anchor there. Rather than guess at that from the bytes — an ordinary `*bold*` hides nothing,
+  while `[.r]#x#` renders a `"` and an `=` the split reads harmlessly — the gate asks the parser:
+  [`tokened_split_agrees`](../../parser/src/content/inline_builder/macros/mod.rs) parses the
+  tokened text *and* the restored markup and compares them attribute by attribute, expanding the
+  tokened side's tokens first, so a split that moved shows up as a value that differs. Where the
+  two readings differ about the match's own extent the match is **deferred**, not recognized and
+  pinned: the tree never claims a construct the rendered document does not agree with. Deciding it means making the same tokened parse the builder
+  makes, in the gate — which is where this family's contract puts every deferral ("both builders
+  claim every shape they are handed"), and where it already re-derives the shorthand's own comma
+  split for the same reason.
+
+  One detail is this increment's own: `tokened_text` walks the level **piece by piece** rather
+  than copying the gaps between the opaque ones, because a byte of the match string may belong to
+  no piece at all — [`styled_sibling_boundaries`](../../parser/src/content/inline_builder/quotes.rs)
+  wraps an opaque span's placeholder in the two characters its rendering presents to a neighbour,
+  which exist for *recognition* and stand for markup the token already carries whole. Copying them
+  would splice a stray `<` and `>` into the value beside the node.
+
+  What reaches parity is the golden spelling alone and in flow, the span at either edge and in the
+  middle of the text, each of the three named attributes beside it, other span kinds and two spans
+  in one text, the recoverable pieces the text already carried (an escaped special, a restored
+  entity, a typographic replacement) beside a span, a collapsed newline, an `=` the parse finds
+  *incidental* (which falls through to the plain-text path that has carried an opaque piece all
+  along), and — reached through the same tokening — a **masked passthrough** or **STEM expression**
+  in such a text, which this family had deferred too. The formerly pinned divergence becomes a
+  parity test that also asserts the shape: the enclosed span itself as a child, with the named
+  attributes on the node's own fields. Fixtures join the whole-pipeline broad sweep and
+  combined-constructs corpus, the group-parity corpus, and the structural recorder cross-check —
+  which can now compare this form, the recorder having always recovered it structurally; a
+  whole-document test drives the shape end to end through the real parse path, in a paragraph and
+  in a section heading's own title. Coverage is diff-neutral, and nothing further is wired in.
+
+  What still defers of this class is the **image** family's attribute list, the one capture with no
+  display text to carry: its bracket's values are read as strings by `render_image` (a `title=`, an
+  `alt=`), so a span there is the per-slot boundary above with every slot on the wrong side. Beyond
+  it the remainder is unchanged: the boundary-class halves the sibling increments named — a macro
+  body class wanting more than one presented character, the closing character, and the
+  character-replacements step's consume-across-levels case — plus the keeps.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -5988,6 +6063,30 @@ Each phase is a reviewable unit with a clear exit gate.
        shown range holds no placeholder, so every spelling already at parity is byte-identical.
        Only the `Attrlist`-bearing argument still defers, its shown term coming back from a parse
        rather than a range; see the step's own "landed as" note above.
+
+     - ✅ **prep (an attribute-list reference text enclosing a rendered span).** The capture the
+       rendered-span class left behind, closed for the **cross-reference** family. A text carrying
+       its own attribute list gets its display text back from an
+       [`Attrlist`](../../parser/src/attributes/attrlist.rs) *parse* rather than from a range, and
+       a parsed value is bytes — which a rendered span has none of until fold time. But the parse
+       hands that value back to become the node's **children**, so it needs no bytes either, only
+       a way to survive the split: a new
+       [`tokened_text`](../../parser/src/content/inline_builder/macros/mod.rs) rewrites every
+       opaque piece into the index-keyed token
+       [`tokened_bracket`](../../parser/src/content/inline_builder/macros/image.rs) already uses,
+       and [`restored_value_children`](../../parser/src/content/inline_builder/macros/mod.rs) —
+       lifted out of the link family and shared — splices each **node** back in. Unlike a masked
+       construct no token needs a *body*, which is the only thing that had made a span different;
+       a `Ref{Xref}` carries `attrs: None`, so nothing rides on the list itself. The boundary is
+       redrawn per **slot**: a piece reaching the `window=` / `role=` / `xrefstyle=` this family
+       reads as a string still defers, decided in the gate where every cross-reference deferral is
+       decided. The token also has to make the *split* reproducible, which it does exactly when no
+       character the split reads is hidden inside a piece — so the gate parses the tokened text and
+       the restored markup and compares them attribute by attribute
+       ([`tokened_split_agrees`](../../parser/src/content/inline_builder/macros/mod.rs)),
+       deferring a match whose two readings differ about its extent. A masked passthrough or STEM in such a text comes along for free. See the step's
+       own "landed as" note above. The **image** family's bracket — the one capture with no
+       display text to carry — is what remains of the class.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

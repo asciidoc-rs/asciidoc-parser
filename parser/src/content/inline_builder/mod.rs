@@ -156,8 +156,8 @@
 //!   entity's own bytes, and a replacement's built-in rendering
 //!   ([`replacement_entity`](quotes::replacement_entity)), which are the
 //!   string pipeline's own haystack bytes there. The
-//!   one capture still holding that boundary in these families is a display text
-//!   carrying an attribute list, parsed as a real
+//!   one capture still holding that boundary in the two **link** families is a
+//!   display text carrying an attribute list, parsed as a real
 //!   [`Attrlist`]`<'src>` from the source's own
 //!   bytes rather than the escaped copy the replacer parses; the auto-link
 //!   family keeps one narrower deferral of its own, a **bare URL whose
@@ -183,9 +183,26 @@
 //!   over one placeholder, which leaves a handful of documented divergences of
 //!   extent (a `]` or a `&gt;&gt;` inside the span, markup carrying the
 //!   replacer's own attribute-list `=`/`,` probe beside a comma), each the
-//!   markup-perturbed reading against the tree's well-formed one. An image's
-//!   attribute list — the one capture with no display text to carry — still
-//!   defers it outright. An anchor
+//!   markup-perturbed reading against the tree's well-formed one. A
+//!   **cross-reference** carries it through its *attribute-list* text too
+//!   (`xref:sec[*bold*,role=hl]`): the value that parse hands back becomes the
+//!   node's children, so each opaque piece is tokened before the split
+//!   ([`tokened_text`](macros::tokened_text)) and spliced back as the node
+//!   itself ([`restored_value_children`](macros::restored_value_children)).
+//!   The boundary is then drawn per **slot** rather than per family — a piece
+//!   reaching the `window=` / `role=` / `xrefstyle=` this family reads as a
+//!   *string* has no bytes to be read as, and that shape alone defers. The
+//!   token is what makes the *split* reproducible — a bracket's `,` / `=` / `"`
+//!   are the only bytes it read, and a placeholder carries none of them — but
+//!   the replacer splits over the piece's own **markup**, which may
+//!   (`xref:sec[a *b, c* d,role=hl]` renders `a <strong>b, c</strong> d`,
+//!   whose list splits at the comma inside the tag). So the gate asks the
+//!   parser rather than the bytes: it parses the tokened text *and* the
+//!   restored markup and compares them attribute by attribute
+//!   ([`tokened_split_agrees`](macros::tokened_split_agrees)), deferring the
+//!   match whenever the two readings differ about its extent. An
+//!   image's attribute list — the one capture with no display text to carry —
+//!   still defers it outright. An anchor
 //!   renders from its id alone, so it is recognized whenever that id does not
 //!   cross a rendered span — its character class rules out an escaped special
 //!   entirely. Unlike every other reference-bearing family, an anchor is now
@@ -792,6 +809,7 @@ mod tests {
             "see <<target,Tom & Jerry>> now",
             "xref:other.adoc#frag[Other] doc",
             "xref:target[a < b & c] doc",
+            "xref:target[the *bold* steps,role=hl] doc",
             "link:a&b.html[x] macro",
             "link:index.html[Tom & Jerry] macro",
             "mailto:a&b@example.org[] address",
@@ -1408,6 +1426,25 @@ mod tests {
         assert_parity_with(
             "See xref:{id}[the *bold* steps] and <<{id},a _slanted_ label>> about {product}.",
             with_xref_attributes,
+        );
+
+        // The same text carrying an **attribute list**, whose parsed positional
+        // value is the node's children too: each opaque piece is tokened before
+        // the split and spliced back as the node itself, while the named
+        // attributes the split takes off reach the node's own plain fields.
+        assert_parity_with(
+            "See xref:{id}[the *bold* steps,role=hl] and xref:{id}[a `code` label,window=_blank].",
+            with_xref_attributes,
+        );
+
+        // A **masked** construct in such a text: the string replacer's own
+        // haystack holds a sentinel there too, so the split-agreement check
+        // leaves its token alone rather than comparing the tokened split
+        // against a body the replacer only splices at the very end. Driven
+        // through the whole pipeline, which is the only harness that runs the
+        // passthrough-extraction pass on both sides.
+        assert_parity(
+            "See xref:sec[a ++<b>x</b>++ b,role=hl] and xref:sec[*a* and stem:[x^2],role=hl].",
         );
 
         // The same lift where the opaque piece is a **masked passthrough** —
@@ -2039,6 +2076,10 @@ mod tests {
                 // is opaque exactly as it is under the normal one, and the
                 // classification must reach the children it recovered.
                 "xref:sec[a *bold* c] and a < b",
+                // And the same text carrying an attribute list, whose parsed
+                // positional value is tokened before the split and spliced back
+                // as the span's own node.
+                "xref:sec[a *bold* c,role=hl] and a < b",
                 // The same, for the `link:`/`mailto:` macro's own display text
                 // — the second family to carry an opaque piece structurally —
                 // and for the auto-link / formal-URL family's, the third.

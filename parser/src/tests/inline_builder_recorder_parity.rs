@@ -787,6 +787,7 @@ fn shapes_match_across_a_broad_general_purpose_sweep() {
         "see <<target,Tom & Jerry>> now",
         "xref:other.adoc#frag[Other] doc",
         "xref:target[a < b & c] doc",
+        "xref:target[the *bold* steps,role=hl] doc",
         "link:a&b.html[x] macro",
         "link:index.html[Tom & Jerry] macro",
         "mailto:a&b@example.org[] address",
@@ -1145,6 +1146,11 @@ fn shapes_match_across_combined_constructs() {
     // recovers from the rendered markup, so the two constructions can finally
     // be compared for this form.
     assert_shapes("See xref:sec[the *bold* steps] and <<sec,a _slanted_ label>> here.");
+
+    // The same text carrying an **attribute list**, whose parsed positional
+    // value is those same children — tokened before the split and spliced back
+    // as the span's own node.
+    assert_shapes("See xref:sec[the *bold* steps,role=hl] here.");
 
     // The `link:`/`mailto:` macro's own version of that lift, the second family
     // to take it — comparable here for the same reason.

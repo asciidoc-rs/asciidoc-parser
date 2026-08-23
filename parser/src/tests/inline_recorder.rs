@@ -1202,16 +1202,16 @@ fn inline_tree_for_a_listing_block_carries_callout_nodes() {
 
 #[test]
 fn xref_mirror_is_skipped_when_the_tree_defers_a_reference_form() {
-    // `xref:sec[*bold*,role=hl]` is a documented builder divergence (an
-    // *attribute-list* display text crossing a rendered span is left
-    // unrecognized, since its display text comes back from a parse rather
-    // than from a range the span's node can be recovered out of), so the
-    // tree holds *fewer* cross-reference nodes than the string pipeline
-    // deferred. The positional resolution mirror must detect the count
-    // mismatch and skip — leaving the tree in its honest unresolved state —
-    // rather than assign destinations to the wrong nodes (or panic).
+    // `xref:sec[*bold*,role=*hl*]` is a documented builder divergence (a
+    // rendered span reaching a value this family reads as a **string** — a
+    // `role=`, a `window=`, an `xrefstyle=` — is left unrecognized, since a
+    // span's markup exists only at fold time), so the tree holds *fewer*
+    // cross-reference nodes than the string pipeline deferred. The positional
+    // resolution mirror must detect the count mismatch and skip — leaving the
+    // tree in its honest unresolved state — rather than assign destinations to
+    // the wrong nodes (or panic).
     let mut parser = Parser::default().with_inline_tree(true);
-    let doc = parser.parse("[[sec]]The target.\n\nSee xref:sec[*bold*,role=hl].");
+    let doc = parser.parse("[[sec]]The target.\n\nSee xref:sec[*bold*,role=*hl*].");
 
     // The rendered output is unaffected (the string pipeline is
     // authoritative), …
