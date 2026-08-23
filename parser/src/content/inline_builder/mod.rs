@@ -308,6 +308,7 @@
 //!   analogous `pass:c,q[…]` form (see [`apply_passthroughs`]'s doc comment),
 //!   except a `Stem` node already has a single `value` field to hold the
 //!   result, so no richer subtree is needed.
+//!
 //! [`fold_html`] folds a finished tree back to output bytes; a section title
 //! also needs the **footnote-free** reading its cross-reference text and its
 //! auto-generated id are derived from, which
