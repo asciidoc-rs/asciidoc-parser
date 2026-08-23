@@ -9,27 +9,30 @@ use crate::{HasSpan, Span, inlines::InlineNode, strings::CowStr};
 pub struct IndexTerm<'src> {
     /// The term levels, from primary to tertiary.
     ///
-    /// Empty when the shown text is carried by [`children`](Self::children)
-    /// instead.
+    /// Empty when no already-substituted string can express the shown text —
+    /// see [`children`](Self::children).
     pub terms: Vec<CowStr<'src>>,
 
-    /// The shown text of a *visible* term, as child inline nodes — used when
-    /// that text crosses a construct whose own rendering it contains, which an
-    /// already-substituted string cannot express.
+    /// The shown text of a *visible* term, as the child inline nodes it
+    /// encloses.
     ///
-    /// A visible term's text is normally the single already-substituted string
-    /// in [`terms`](Self::terms), because that is what
-    /// [`IndexTermRenderParams`](crate::parser::IndexTermRenderParams) takes
-    /// and what the term's own source spells. But a term may enclose an
-    /// earlier-recognized construct — `((*tiger*))`, whose primary term is a
-    /// bold span — and *that* construct's rendering exists only when the tree
-    /// is folded, so it cannot be baked into a string at parse time. Such a
-    /// term carries its text here instead, as the nodes it encloses, and the
-    /// fold renders them with the same renderer as the surrounding flow.
+    /// This is what the fold renders, and it is the shown text's authoritative
+    /// form: a term's text is a *region of the document*, not an opaque
+    /// string, and anything written inside it — a link, an anchor, a
+    /// cross-reference, an image, a formatted span — is a construct in its own
+    /// right, recognized exactly as it would be outside the parentheses.
     ///
-    /// Empty for a concealed term (which shows nothing) and for every visible
-    /// term whose text [`terms`](Self::terms) already carries; the two are
-    /// never both populated.
+    /// [`terms`](Self::terms) carries the same text as the single
+    /// already-substituted string
+    /// [`IndexTermRenderParams`](crate::parser::IndexTermRenderParams) takes,
+    /// whenever one can express it. One cannot when the term encloses a
+    /// construct whose rendering exists only at fold time — `((*tiger*))`,
+    /// whose primary term is a bold span — and `terms` is then empty. The two
+    /// are built from the same source range and agree by construction, so a
+    /// consumer wanting the plain text may read `terms` and fall back to
+    /// folding these nodes.
+    ///
+    /// Empty for a concealed term, which shows nothing.
     pub children: Vec<InlineNode<'src>>,
 
     /// `true` for a *flow* term (`((term))` / `indexterm2:[…]`), whose primary

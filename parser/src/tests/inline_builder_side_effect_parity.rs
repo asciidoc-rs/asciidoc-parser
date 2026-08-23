@@ -247,6 +247,10 @@ const CORPUS: &[&str] = &[
     "((a term with an *[[t]]* anchor inside)) and [[u]] here",
     "((a term with *https://t.example* inside)) and https://u.example here",
     "((a term with an *image:t.png[T]* inside)) and image:u.png[U]",
+    "((a term with a link:t.html[T] inside)) and link:u.html[U]",
+    "((a term with https://t.example inside)) and https://u.example here",
+    "((a term with an [[t]] anchor inside)) and [[u]] here",
+    "((a term with t@example.org inside)) and u@example.org here",
     "indexterm2:[a term with an image:t.png[T] inside] and image:u.png[U]",
     "See xref:sec[a label with image:x.png[X]] here.",
     //
@@ -359,18 +363,18 @@ fn a_visible_index_terms_shown_text_is_walked_for_every_family() {
     // the newest of the four child-bearing node kinds and the one the three
     // side-effect walks did not descend into.
     //
-    // The image family reaches such a child directly, since its own pass runs
-    // *before* the index-term pass. The other families run after it, so they
-    // reach one only through a rendered span the quotes step wrote earlier —
-    // whose children this step resolves in full before any of this level's
-    // families run. Both routes are exercised, because both are how a
+    // Every family reaches such a child: the image pass because it runs
+    // *before* the index-term pass, so its node is already there when the term
+    // is built; the families that run *after* it because `apply_macro_families`
+    // hands them the term's own children as their own level. A construct
+    // inside a rendered span the term encloses is a third route, since this
+    // step resolves a span's children in full before any of this level's
+    // families run. All three are exercised, because all three are how a
     // registration can end up inside a term.
     //
-    // The bare-address pass has no row of its own: it shares this walk with
-    // the other two link spellings, and the one shape that would put it
-    // inside a term — `((a term with *t@example.org* inside))` — is not an
-    // address on *either* side, since the `>` closing `<strong>` is one of
-    // `INLINE_EMAIL`'s own mismatch characters (see `apply_macro_families`'s
+    // A bare address gets no `*…*` row: `((a term with *t@example.org*))` is
+    // not an address on *either* side, since the `>` closing `<strong>` is one
+    // of `INLINE_EMAIL`'s own mismatch characters (see `apply_macro_families`'s
     // doc comment, which uses this very shape as its example).
     for (source, expected) in [
         (
@@ -395,6 +399,30 @@ fn a_visible_index_terms_shown_text_is_walked_for_every_family() {
         ),
         (
             "((a term with an *[[t]]* anchor inside)) and [[u]] here",
+            (vec![], vec![], vec!["t", "u"]),
+        ),
+        (
+            "((a term with a link:t.html[T] inside)) and link:u.html[U]",
+            (vec![], vec!["t.html", "u.html"], vec![]),
+        ),
+        (
+            "((a term with https://t.example inside)) and https://u.example here",
+            (
+                vec![],
+                vec!["https://t.example", "https://u.example"],
+                vec![],
+            ),
+        ),
+        (
+            "((a term with t@example.org inside)) and u@example.org here",
+            (
+                vec![],
+                vec!["mailto:t@example.org", "mailto:u@example.org"],
+                vec![],
+            ),
+        ),
+        (
+            "((a term with an [[t]] anchor inside)) and [[u]] here",
             (vec![], vec![], vec!["t", "u"]),
         ),
     ] {

@@ -694,21 +694,19 @@ fn assert_node_equivalent(r: &InlineNode<'_>, b: &InlineNode<'_>, source: &str) 
         }
 
         (InlineNode::IndexTerm(ri), InlineNode::IndexTerm(bi)) => {
-            // A visible term *enclosing* a rendered span is the builder's
-            // one-sided richness, of exactly the kind this sweep already
-            // records elsewhere: the recorder recovers a shown term out of the
-            // finished string, so it can only ever hold that span's markup as
-            // text, where the builder carries the span itself as `children`
-            // and lets the fold render it (see `IndexTerm::children`). Compare
-            // `terms` only where the builder computed one, and compare the
-            // enclosed structure on its own terms below.
-            if bi.children.is_empty() {
+            // A visible term's `children` are the builder's one-sided
+            // richness, of exactly the kind this sweep already records
+            // elsewhere: the recorder recovers a shown term out of the
+            // finished string, so it holds that text — and any span's markup
+            // inside it — as a string alone, where the builder carries the
+            // shown text as nodes and lets the fold render them (see
+            // `IndexTerm::children`). So `children` is not compared, and
+            // `terms` is compared wherever the builder computed one. A term
+            // *enclosing a rendered span* is the case where it could not: its
+            // markup exists only at fold time, so no string built at parse
+            // time can spell it and the builder leaves `terms` empty.
+            if !bi.terms.is_empty() {
                 assert_eq!(ri.terms, bi.terms, "IndexTerm terms differ for {source:?}");
-            } else {
-                assert!(
-                    bi.terms.is_empty(),
-                    "a structural term carries no computed text for {source:?}"
-                );
             }
 
             assert_eq!(

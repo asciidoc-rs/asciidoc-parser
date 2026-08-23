@@ -311,6 +311,84 @@ fn apply_macro_families<'src>(
     // mirroring the string step's order.
     let nodes = indexterm_macros_level(nodes, root, parser, ctx, masked);
 
+    // A **visible** term's shown text is not a boundary the later families
+    // stop at. The string replacer puts that text back into the one flat
+    // haystack every later pass scans — `((a term with a link:t.html[T]))`
+    // links exactly as if the parentheses were not there — so the families
+    // below descend into the term's own
+    // [`children`](crate::inlines::IndexTerm::children), which is where this
+    // pass has just put that text. (A *concealed* term shows nothing, so the
+    // replacer leaves no text behind for them to scan and its `children` are
+    // empty.)
+    //
+    // Their own level, rather than one flat scan across the term and its
+    // neighbours: a term renders its shown text with no markup of its own, so
+    // its children read what stands beside the *term*, which is exactly the
+    // transparent case [`LevelContext::child_contexts`] already answers.
+    //
+    // The scan comes first because most levels hold no such term at all, and
+    // `child_contexts` builds a `Vec` (and, for a transparent span, this
+    // level's whole match string) that would then be thrown away.
+    let has_shown_term = nodes
+        .iter()
+        .any(|node| matches!(node, InlineNode::IndexTerm(term) if !term.children.is_empty()));
+
+    let nodes = if has_shown_term {
+        let contexts = LevelContext::child_contexts(&nodes, ctx, masked);
+
+        nodes
+            .into_iter()
+            .zip(contexts)
+            .map(|(node, inner)| match node {
+                InlineNode::IndexTerm(mut index_term) if !index_term.children.is_empty() => {
+                    index_term.children = apply_reference_families(
+                        std::mem::take(&mut index_term.children),
+                        root,
+                        parser,
+                        inner,
+                        masked,
+                        specials,
+                    );
+
+                    InlineNode::IndexTerm(index_term)
+                }
+
+                other => other,
+            })
+            .collect()
+    } else {
+        nodes
+    };
+
+    apply_reference_families(nodes, root, parser, ctx, masked, specials)
+
+    // Footnotes are **not** handled here. Every other family's recognition is
+    // order-independent (no cross-node side effect), so it is safe for them to
+    // run under this function's "resolve a whole subtree's children, then this
+    // level" recursion (see the closure at the top of this function). A
+    // footnote's assigned number is *not* order-independent, so it needs its
+    // own recursive walk that visits nodes in true left-to-right source order
+    // regardless of nesting depth — see [`apply_footnotes`], run once, as its
+    // own step in [`build`], after `apply_macros` has fully resolved every
+    // other family at every level.
+}
+
+/// The macro families that run **after** the index-term pass — the three link
+/// spellings, inline anchors, and cross-references — in the string step's own
+/// order.
+///
+/// Split out of [`apply_macro_families`] because it has two callers rather
+/// than one: this level, and a visible index term's shown text, which the
+/// string replacer hands back to exactly these passes. See the call site for
+/// why the term's children are their own level.
+fn apply_reference_families<'src>(
+    nodes: Vec<InlineNode<'src>>,
+    root: Span<'src>,
+    parser: &Parser,
+    ctx: LevelContext,
+    masked: Masked<'_>,
+    specials: ComputedSpecials,
+) -> Vec<InlineNode<'src>> {
     // Auto-links and formal-URL links (`INLINE_LINK`) run after the index-term
     // pass and before the `link:`/`mailto:` macro, mirroring the string step's
     // order (`INLINE_LINK` precedes `INLINE_LINK_MACRO`).
@@ -337,16 +415,6 @@ fn apply_macro_families<'src>(
     // Cross-references (`xref:id[…]`) run after the anchor pass, mirroring the
     // string step's order.
     xref_macros_level(nodes, root, parser, ctx, masked, specials)
-
-    // Footnotes are **not** handled here. Every other family's recognition is
-    // order-independent (no cross-node side effect), so it is safe for them to
-    // run under this function's "resolve a whole subtree's children, then this
-    // level" recursion (see the closure at the top of this function). A
-    // footnote's assigned number is *not* order-independent, so it needs its
-    // own recursive walk that visits nodes in true left-to-right source order
-    // regardless of nesting depth — see [`apply_footnotes`], run once, as its
-    // own step in [`build`], after `apply_macros` has fully resolved every
-    // other family at every level.
 }
 
 /// The eventual cutover's single entry point (design §5.2, Phase 4 step 6) for
