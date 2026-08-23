@@ -5726,6 +5726,99 @@ Each phase is a reviewable unit with a clear exit gate.
   purpose. No content that passed before diverges now. Coverage is diff-neutral, and nothing
   further is wired in.
 
+  *Step 6 prep landed as (the image family's attribute list):* the increment that opened the
+  rendered-span class for the link families closed it for every family with a display text to carry
+  and left the image family's bracket open — "a value the fold materializes rather than one frozen
+  at build time, which is a shape no increment has needed yet". Re-running the cutover experiment
+  says the cutover cannot wait for it.
+
+  Forcing the tree on for every parse and making `rendered` the fold leaves **18** of ~5,390 tests
+  failing, and every one is accounted for: 5 divergence tests that compare the two paths the cutover
+  leaves only one of, 5 footnote-in-a-heading (which `fold_reference_text` exists to close), 3 tests
+  of the `with_inline_tree` flag, 2 Strategy-A recorder sweeps, and **3 golden fixtures whose output
+  genuinely changes**. Those three split two-one: `` #`CB###2`# `` and its twin get *better*, where
+  the tree emits well-formed markup and the string pipeline interleaves tags;
+  `['{myrole}']++text++` gets worse, which is this branch's own documented attribute-list keep; and
+  `image:pause.png[title=*Pause* and Resume]`, a fixture from the language docs, lost its whole
+  macro — not a keep, but the deferred boundary coming due.
+
+  The image bracket now admits a rendered span, and the argument that kept it out cuts the other way
+  here. The per-slot rule the link families draw — a frozen span must not reach a slot the renderer
+  writes out — defers *every* image bracket, because every value an image's bracket holds is one
+  `render_image` writes out. A link has somewhere else to put a rendered span, since its display
+  text becomes the node's children; an image has no display text at all. So the rule's cost for this
+  family is the macro itself.
+
+  And the frozen bytes are simply the bytes. The string replacer reads its own bracket out of a
+  haystack the quotes step has already rendered with this same renderer, so
+  `title="<strong>Pause</strong> and Resume"` is what it writes too; freezing the span's build-time
+  fold reproduces that exactly rather than approximating it. It is also the same trade
+  `bracket_attrlist`'s masked branch already makes for a `Stem`, whose body is likewise a build-time
+  fold. What a frozen value cannot survive is being folded again through a *different* renderer —
+  `render_with`, which does not exist yet and which every other frozen value on this branch owes the
+  same debt to.
+
+  The one thing a rendered piece must still satisfy is the split: a token carries none of the
+  `,` / `=` / `"` an attribute list splits on and a span's markup may, so the two parses are compared
+  attribute by attribute and a disagreement defers the whole match. The **target** half of the old
+  boundary stays, and now has its own reason rather than sharing the bracket's: a target is resolved
+  as a path, where splicing markup in has no meaning.
+
+  That leaves the cutover **one** golden regression rather than two.
+
+  *Step 6 prep landed as (a quoted role, read from the attribute list's substituted text):* the
+  cutover's last golden regression, and the one the increment above named as "this branch's own
+  documented attribute-list keep". It was not a keep. The keep it was filed under is
+  `flatten_prior_markup`'s category — a later step of the same order rewriting bytes that live only
+  inside markup an earlier step emitted — and three of that keep's four shapes really are that. This
+  one was a *wrong answer* in `Attrlist` itself, which the string pipeline's own later step happened
+  to paper over.
+
+  [`Attrlist::parse`](../../parser/src/attributes/attrlist.rs) expands attribute references over the
+  whole list **before** splitting it, so every *parsed* field a caller reads is already expanded —
+  which is why `[{myrole}]`, `[.{myrole}]`, and `[#{myrole}]` were at parity in the tree all along.
+  [`quoted_text_fallback_role`](../../parser/src/attributes/attrlist.rs) is the one accessor that
+  reads the list's own **text** instead (Asciidoctor's `parse_quoted_text_attributes` takes a
+  quote-delimited first positional verbatim, quote characters included), and `parse` computed that
+  expanded text as `source_cow` and then *threw it away* — leaving that accessor to fall back to the
+  raw `source` span. So `['{myrole}']` yielded the role `'{myrole}'`.
+
+  The string pipeline hid it. Under the *normal* order the attribute-references step runs after
+  quotes, so it rewrote the `{myrole}` sitting inside the `class="'{myrole}'"` the quotes step had
+  just written, and the final bytes came out right — by the same accident this branch's keep
+  describes. The passthrough family has no such accident available, because its extraction pass runs
+  ahead of every step; `PassthroughRestoreReplacer` therefore substitutes the *stored* attrlist body
+  itself, at restore time, and its own comment says why. Two mechanisms, one surface, and the tree
+  reproduced neither.
+
+  The fix is `parse` retaining `source_cow` as [`source_text`](../../parser/src/attributes/attrlist.rs)
+  whenever the substitution changed anything — the field the attributed-span increment added for
+  precisely this accessor — with
+  [`into_owned`](../../parser/src/attributes/attrlist.rs) and `into_owned_restoring` carrying
+  `source_text()` forward instead of re-reading `self.source.data()`, so a list rebuilt from a
+  temporary does not reinstate the `{name}` spelling. That is Asciidoctor's own order:
+  `sub_attributes` over the list, *then* the verbatim first positional. No node field, gate, or
+  signature moves, and the string pipeline's rendered output is unchanged everywhere the later step
+  was already covering for it.
+
+  What lands here is therefore both halves at once. `['{myrole}']*bold*` — the quotes family, and
+  the shape the keep pinned — and `['{myrole}']++text++` — the passthrough family, and the cutover's
+  regression — become one parity corpus,
+  `a_quoted_role_reads_the_attribute_lists_substituted_text`, together with the `+…+` and backtick
+  spellings, a named attribute after the quoted positional, the comma-inside-the-quotes truncation
+  (which runs after the substitution, so an expansion introducing a comma truncates too), a missing
+  attribute under the default `attribute-missing=skip` (a no-op expansion, so the raw text is what
+  the role was already reading), and the three unquoted spellings that never took this path, pinned
+  so they still do not. The keep's own test keeps its other three shapes — a typographic
+  replacement, a restored entity, and a later sub's own span — which are genuinely markup-reading.
+
+  Re-running the corpus-wide fold-parity audit confirms the divergence set strictly **shrank**, by
+  exactly those two fixtures and nothing else. Coverage is diff-neutral (`attrlist.rs` stays at
+  100%), and nothing further is wired in. Re-running the cutover experiment leaves it at **zero**
+  golden regressions: 16 failing tests, all of them the divergence tests, footnote-in-a-heading
+  cases, flag tests, and recorder sweeps the cutover itself resolves, plus the one golden the tree
+  gets *better*.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -6816,6 +6909,23 @@ Each phase is a reviewable unit with a clear exit gate.
        and the **target** half of the boundary stays, now on its own reason (a target is resolved as
        a path). That leaves the cutover **one** golden regression rather than two. See the step's
        own "landed as" note above.
+
+     - ✅ **prep (a quoted role, read from the attribute list's substituted text).** The cutover's
+       **last golden regression**, filed as a keep by the increment above and not one: the
+       attribute-references half of `flatten_prior_markup`'s category was a wrong answer in
+       [`Attrlist`](../../parser/src/attributes/attrlist.rs) itself, which the string pipeline's own
+       later step papered over. `parse` expands attribute references over the whole list before
+       splitting it — so every *parsed* field is already expanded — but discarded that expanded text,
+       leaving [`quoted_text_fallback_role`](../../parser/src/attributes/attrlist.rs), the one
+       accessor that reads the list's own text rather than a parsed attribute, on the raw `source`
+       span. `parse` now retains it as
+       [`source_text`](../../parser/src/attributes/attrlist.rs) — the field the attributed-span
+       increment added for exactly this accessor — and `into_owned`/`into_owned_restoring` carry
+       `source_text()` forward, which is Asciidoctor's own `sub_attributes`-then-verbatim order. The
+       quotes family's `['{myrole}']*bold*` and the passthrough family's `['{myrole}']++text++` land
+       together as one parity corpus; the keep's other three shapes (a typographic replacement, a
+       restored entity, a later sub's own span) are genuinely markup-reading and stay. See the step's
+       own "landed as" note above. **The cutover now stands at zero golden regressions.**
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
