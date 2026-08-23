@@ -192,12 +192,15 @@
 //!   The boundary is then drawn per **slot** rather than per family — a piece
 //!   reaching the `window=` / `role=` / `xrefstyle=` this family reads as a
 //!   *string* has no bytes to be read as, and that shape alone defers. The
-//!   recognition-agreement gap above extends here too, and the token is what
-//!   makes it visible: an attribute-list delimiter *inside* the span
-//!   (`xref:sec[a *b, c* d,role=hl]`) ends the replacer's positional value
-//!   inside a tag — improperly nested markup no tree can represent — where the
-//!   token carries none of the `,`/`=`/`"` the split reads and the span stays
-//!   whole. An
+//!   token is what makes the *split* reproducible — a bracket's `,` / `=` / `"`
+//!   are the only bytes it read, and a placeholder carries none of them — but
+//!   the replacer splits over the piece's own **markup**, which may
+//!   (`xref:sec[a *b, c* d,role=hl]` renders `a <strong>b, c</strong> d`,
+//!   whose list splits at the comma inside the tag). So the gate asks the
+//!   parser rather than the bytes: it parses the tokened text *and* the
+//!   restored markup and compares them attribute by attribute
+//!   ([`tokened_split_agrees`](macros::tokened_split_agrees)), deferring the
+//!   match whenever the two readings differ about its extent. An
 //!   image's attribute list — the one capture with no display text to carry —
 //!   still defers it outright. An anchor
 //!   renders from its id alone, so it is recognized whenever that id does not

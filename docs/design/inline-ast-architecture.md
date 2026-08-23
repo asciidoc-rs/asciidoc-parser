@@ -5122,14 +5122,19 @@ Each phase is a reviewable unit with a clear exit gate.
   [`text_attrlist`](../../parser/src/content/inline_builder/macros/links.rs)'s own `pre_restore`
   draws it: a token reaching the `window=`, `role=`, or `xrefstyle=` this family reads as a
   *string* names markup that exists only at fold time where a string is needed, so that shape
-  defers with its own divergence test. The family's **recognition-agreement** gap reaches the
-  attribute-list spelling too, and the token is what makes it visible: an attribute-list
-  delimiter *inside* the span (`xref:sec[a *b, c* d,role=hl]`) ends the replacer's positional
-  value inside a tag — `a <strong>b</a>`, improperly nested markup no tree can represent — where
-  the token carries none of the `,` / `=` / `"` the split reads and the span stays whole. That is
-  the quotes step's crossed delimiters again, and it is pinned by its own test rather than
-  deferred: the same comma without a named attribute beside it has no attribute list to split at
-  all, and is at parity through the plain-text path. Deciding it means making the same tokened parse the builder
+  defers with its own divergence test.
+
+  The token is also what makes the *split* reproducible — a bracket's `,` / `=` / `"` are the
+  only bytes it reads, and a placeholder carries none of them — but the replacer splits over the
+  piece's own **markup**, which may: `xref:sec[a *b, c* d,role=hl]` renders
+  `a <strong>b, c</strong> d`, whose list splits at the comma *inside* the tag and ends the
+  anchor there. Rather than guess at that from the bytes — an ordinary `*bold*` hides nothing,
+  while `[.r]#x#` renders a `"` and an `=` the split reads harmlessly — the gate asks the parser:
+  [`tokened_split_agrees`](../../parser/src/content/inline_builder/macros/mod.rs) parses the
+  tokened text *and* the restored markup and compares them attribute by attribute, expanding the
+  tokened side's tokens first, so a split that moved shows up as a value that differs. Where the
+  two readings differ about the match's own extent the match is **deferred**, not recognized and
+  pinned: the tree never claims a construct the rendered document does not agree with. Deciding it means making the same tokened parse the builder
   makes, in the gate — which is where this family's contract puts every deferral ("both builders
   claim every shape they are handed"), and where it already re-derives the shorthand's own comma
   split for the same reason.
@@ -6075,9 +6080,11 @@ Each phase is a reviewable unit with a clear exit gate.
        a `Ref{Xref}` carries `attrs: None`, so nothing rides on the list itself. The boundary is
        redrawn per **slot**: a piece reaching the `window=` / `role=` / `xrefstyle=` this family
        reads as a string still defers, decided in the gate where every cross-reference deferral is
-       decided; and the family's recognition-agreement gap reaches this spelling, an attribute-list
-       delimiter inside the span splitting the replacer's own value inside a tag, pinned by its own
-       test. A masked passthrough or STEM in such a text comes along for free. See the step's
+       decided. The token also has to make the *split* reproducible, which it does exactly when no
+       character the split reads is hidden inside a piece — so the gate parses the tokened text and
+       the restored markup and compares them attribute by attribute
+       ([`tokened_split_agrees`](../../parser/src/content/inline_builder/macros/mod.rs)),
+       deferring a match whose two readings differ about its extent. A masked passthrough or STEM in such a text comes along for free. See the step's
        own "landed as" note above. The **image** family's bracket — the one capture with no
        display text to carry — is what remains of the class.
 

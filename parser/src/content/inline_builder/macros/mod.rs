@@ -22,6 +22,7 @@ use super::{
 };
 use crate::{
     Parser, Span,
+    attributes::{Attrlist, AttrlistContext},
     content::restored_entity_pattern,
     inlines::{CharRef, InlineNode},
     strings::CowStr,
@@ -72,7 +73,7 @@ pub(super) enum ComputedSpecials {
 /// (`doc@example.org`), replacing each with an
 /// [`Image`](InlineNode::Image), [`Ui`](InlineNode::Ui), or
 /// [`Ref`](InlineNode::Ref) node. An image node carries its own owned
-/// [`Attrlist`](crate::attributes::Attrlist) — the step that makes a macro node
+/// [`Attrlist`] — the step that makes a macro node
 /// *self-describing*, so the fold reconstructs the render parameters and calls
 /// the same `render_image`/`render_icon` the string step calls; a UI node
 /// carries the keys / label / menu path the string replacer computed, so its
@@ -147,7 +148,7 @@ pub(super) enum ComputedSpecials {
 /// its own child with no gate at all. What keeps
 /// the stricter gate is never a *family* now, only the one **capture** that
 /// must ride on the node as a real
-/// [`Attrlist`](crate::attributes::Attrlist)`<'src>`, parsed from the source's
+/// [`Attrlist`]`<'src>`, parsed from the source's
 /// own bytes: a link's attribute-list-bearing display text and an image's
 /// non-empty bracket (a cross-reference's own attribute list is parsed from a
 /// normalized *copy*, so it takes both lifts). The auto-link family
@@ -722,6 +723,92 @@ pub(super) fn tokened_text<'src>(
     (tokened, carried)
 }
 
+/// The bytes the **string replacer's own haystack** holds for a text
+/// [`tokened_text`] tokened: each token replaced by what the fold of the node
+/// it stands for emits, with the parser's own renderer — the renderer the
+/// string pipeline ran.
+///
+/// This is the other half of the token's contract. Tokening is what makes the
+/// attribute-list *split* reproducible: a bracket's `,` / `=` / `"` are the
+/// only bytes it reads, and an opaque piece's placeholder carries none of
+/// them. But the replacer splits over the piece's own **markup**, which may:
+/// `xref:sec[a *b, c* d,role=hl]` renders `a <strong>b, c</strong> d`, and its
+/// list splits at the comma *inside* the tag. A caller compares the two
+/// parses to find out (see [`tokened_split_agrees`]).
+pub(super) fn restored_markup_text(
+    tokened: &str,
+    carried: &[InlineNode<'_>],
+    parser: &Parser,
+) -> String {
+    let mut out = tokened.to_string();
+
+    for (n, node) in carried.iter().enumerate() {
+        let markup =
+            super::fold::fold_html(std::slice::from_ref(node), parser.renderer.as_ref(), parser);
+
+        out = out.replace(&format!("\u{96}{n}\u{97}"), &markup);
+    }
+
+    out
+}
+
+/// Whether an attribute list parsed from a [`tokened_text`] text splits the
+/// same way the string replacer's own parse of the **markup** does.
+///
+/// A token stands in for markup the replacer really sees, so the two parses
+/// agree exactly when no character the split reads is hidden inside a piece.
+/// Rather than guess at that from the bytes — an ordinary `*bold*` hides
+/// nothing, while `[.r]#x#` renders a `"` and an `=` that the split
+/// nonetheless reads harmlessly — this asks the parser: it compares the two
+/// lists attribute by attribute, expanding the tokened side's tokens first, so
+/// a split that moved shows up as a value that differs.
+///
+/// It answers only the *split*, not what the caller then does with each value.
+/// A token reaching a value the caller reads as a **string** — a
+/// cross-reference's `window=` / `role=` / `xrefstyle=` — splits identically
+/// on both sides and still has no bytes the caller can use, so a caller with
+/// such a slot asks [`holds_carried_token`] about it as well.
+pub(super) fn tokened_split_agrees(
+    tokened: &str,
+    carried: &[InlineNode<'_>],
+    parser: &Parser,
+) -> bool {
+    let restored = restored_markup_text(tokened, carried, parser);
+
+    let tokened_attrs = Attrlist::parse(Span::new(tokened), parser, AttrlistContext::Inline)
+        .item
+        .item;
+
+    let restored_attrs = Attrlist::parse(Span::new(&restored), parser, AttrlistContext::Inline)
+        .item
+        .item;
+
+    let tokened_list: Vec<_> = tokened_attrs.attributes().collect();
+    let restored_list: Vec<_> = restored_attrs.attributes().collect();
+
+    tokened_list.len() == restored_list.len()
+        && tokened_list
+            .iter()
+            .zip(restored_list.iter())
+            .all(|(tokened_attr, restored_attr)| {
+                tokened_attr.name() == restored_attr.name()
+                    && restored_markup_text(tokened_attr.value(), carried, parser)
+                        == restored_attr.value()
+            })
+}
+
+/// Whether `value` — one attribute the parse handed back — still holds a
+/// [`tokened_text`] token, which means an opaque piece landed in a value the
+/// caller reads as a **string** rather than carrying structurally.
+///
+/// A node has no bytes there, so such a match is deferred. This is the same
+/// per-*slot* boundary [`text_attrlist`](links)'s own `pre_restore` draws,
+/// reached for the stronger reason: a masked construct at least has a body to
+/// splice.
+pub(super) fn holds_carried_token(value: &str) -> bool {
+    value.contains('\u{96}')
+}
+
 /// Rebuilds a computed value that still holds [`tokened_text`] /
 /// [`tokened_bracket`](image::tokened_bracket) tokens as a node's children:
 /// each token becomes the node it stands for, and the bytes around it take
@@ -773,25 +860,13 @@ pub(super) fn restored_value_children<'src>(
     children
 }
 
-/// Whether `value` — one attribute the parse handed back — still holds a
-/// [`tokened_text`] token, which means an opaque piece landed in a value the
-/// caller reads as a **string** rather than carrying structurally.
-///
-/// A node has no bytes there, so such a match is deferred. This is the same
-/// per-*slot* boundary
-/// [`text_attrlist`](links)'s own `pre_restore` draws, reached for the
-/// stronger reason: a masked construct at least has a body to splice.
-pub(super) fn holds_carried_token(value: &str) -> bool {
-    value.contains('\u{96}')
-}
-
 /// Rebuilds a value the macros step **computed** off the level's match string
 /// as the children a node shows, taking whichever half of design §3.4.1
 /// `specials` names.
 ///
 /// A computed value is the one thing this step reads as *bytes* rather than
 /// carrying structurally: it comes back from an
-/// [`Attrlist`](crate::attributes::Attrlist) parse, so there is no range of
+/// [`Attrlist`] parse, so there is no range of
 /// nodes to rebuild it from and its classification has to be re-derived from
 /// the bytes themselves. What those bytes are worth is exactly what
 /// [`ComputedSpecials`] answers — see its two halves,
