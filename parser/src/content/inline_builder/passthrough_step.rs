@@ -3,7 +3,7 @@
 use super::{
     macros::{
         MacroMatch, MacroMatchKind,
-        image::{range_is_restorable, range_is_verbatim, restorable_body},
+        image::{node_is_restorable, range_is_restorable, range_is_verbatim, restorable_body},
         rebuild_macro_level,
     },
     quotes::{Piece, attributes_of, build_match_string, source_slice},
@@ -708,12 +708,19 @@ fn substitute_and_restore(
     // the same [`Escaped`](RawForm::Escaped) form every other
     // specialcharacters-only body does, and the fold escapes it with the
     // renderer it is given rather than the one this parse happens to carry.
+    //
+    // The test is `node_is_restorable` rather than `restorable_body`, though
+    // the two answer for the same set: this is a *discriminant*, and
+    // `restorable_body` produces bytes — rendering a `Stem` body, escaping an
+    // [`Escaped`](RawForm::Escaped) one — through the parser's renderer. Asking
+    // it here would run those calls a second time for every node the
+    // restoration loop below then renders for real, which a stateful renderer
+    // reports (its second answer is what lands in the value) and a renderer
+    // with side effects performs twice.
     if !pieces.iter().any(|piece| {
         piece.s_start + piece.s_len > range.start
             && piece.s_start < range.end
-            && nodes
-                .get(piece.node_index)
-                .is_some_and(|node| restorable_body(node, renderer).is_some())
+            && nodes.get(piece.node_index).is_some_and(node_is_restorable)
     }) {
         return (body_text.to_string(), RawForm::Escaped);
     }
@@ -1524,6 +1531,58 @@ mod tests {
         assert_eq!(
             probe, "[1]",
             "building the tree must not invoke the document's renderer; the probe is call one"
+        );
+    }
+
+    #[test]
+    fn a_mixed_bare_plus_body_renders_each_nested_node_once() {
+        // A bare `+…+` enclosing an already-extracted node is the one shape
+        // whose value is finished at build time, so it is also the one place
+        // the builder legitimately calls the document's renderer. It must call
+        // it *once* per nested node: the mixture test above it is a
+        // discriminant (`node_is_restorable`), not a second rendering.
+        //
+        // The counter has to be observable in the output, since a renderer
+        // behind an `Rc<dyn …>` cannot be downcast to read a field: each call
+        // emits its own ordinal. Before the fix the detection pass rendered
+        // the `$$…$$` node's `<` first, so the *second* answer (`[2]`) is what
+        // landed in the value and the probe afterwards read `[3]`.
+        #[derive(Debug, Default)]
+        struct OrdinalRenderer {
+            calls: std::cell::Cell<usize>,
+        }
+
+        impl crate::parser::InlineSubstitutionRenderer for OrdinalRenderer {
+            fn render_special_character(
+                &self,
+                _type_: crate::parser::SpecialCharacter,
+                dest: &mut String,
+            ) {
+                self.calls.set(self.calls.get() + 1);
+                dest.push_str(&format!("[{}]", self.calls.get()));
+            }
+        }
+
+        use super::super::test_support::assert_raw_form;
+        use crate::inlines::RawForm;
+
+        let parser =
+            Parser::default().with_inline_substitution_renderer(OrdinalRenderer::default());
+
+        let nodes = super::super::build(Span::new("+a $$b < c$$ d+"), &parser, None);
+
+        assert_eq!(nodes.len(), 1);
+        assert_raw_form(&nodes[0], RawForm::AsIs, "a b [1] c d");
+        assert_eq!(nodes[0].span().data(), "+a $$b < c$$ d+");
+
+        let mut probe = String::new();
+        parser
+            .renderer
+            .render_special_character(crate::parser::SpecialCharacter::Lt, &mut probe);
+
+        assert_eq!(
+            probe, "[2]",
+            "the nested node must be rendered once; the probe is call two"
         );
     }
 
