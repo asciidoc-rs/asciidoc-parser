@@ -14,7 +14,7 @@ impl SvgFileHandlerFixture {
 }
 
 impl SvgFileHandler for SvgFileHandlerFixture {
-    fn resolve_svg(&self, target: &str, _parser: &Parser) -> Option<String> {
+    fn resolve_svg(&self, target: &str, _context: &RenderContext) -> Option<String> {
         self.0.get(target).map(|v| v.to_string())
     }
 }

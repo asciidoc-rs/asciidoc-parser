@@ -17,7 +17,7 @@ use crate::{
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
         FootnoteRenderParams, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
-        LinkRenderParams, MenuRenderParams, XrefStyle, has_dangerous_scheme,
+        LinkRenderParams, MenuRenderParams, RenderContext, XrefStyle, has_dangerous_scheme,
         has_dangerous_self_href, is_uri_ish,
     },
     warnings::WarningType,
@@ -342,6 +342,8 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
                     .map(str::to_owned),
             );
 
+            let context = RenderContext::new(self.parser);
+
             let params = ImageRenderParams {
                 target,
                 alt: attrlist
@@ -356,11 +358,13 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
                     .named_or_positional_attribute("height", 3)
                     .map(|a| a.value()),
                 attrlist: &attrlist,
-                parser: self.parser,
+                context: &context,
             };
 
             self.parser.renderer.render_image(&params, dest);
         } else {
+            let context = RenderContext::new(self.parser);
+
             let params = IconRenderParams {
                 target,
                 alt: attrlist.named_attribute("alt").map_or(default_alt, |a| {
@@ -370,7 +374,7 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
                     .named_or_positional_attribute("size", 1)
                     .map(|a| a.value()),
                 attrlist: &attrlist,
-                parser: self.parser,
+                context: &context,
             };
 
             self.parser.renderer.render_icon(&params, dest);
@@ -560,11 +564,13 @@ impl Replacer for InlineMenuMacroReplacer<'_> {
             (vec![], None)
         };
 
+        let context = RenderContext::new(self.0);
+
         let params = MenuRenderParams {
             menu,
             submenus: &submenus,
             menuitem: menuitem.as_deref(),
-            parser: self.0,
+            context: &context,
         };
 
         self.0.renderer.render_menu(&params, dest);
@@ -970,13 +976,15 @@ impl Replacer for InlineLinkReplacer<'_> {
                 target.clone()
             };
 
+            let context = RenderContext::new(self.0);
+
             let params = LinkRenderParams {
                 target,
                 link_text,
                 extra_roles: vec!["bare"],
                 window: None,
                 attrlist: &attrlist,
-                parser: self.0,
+                context: &context,
             };
 
             self.0.renderer.render_link(&params, dest);
@@ -1118,13 +1126,15 @@ impl Replacer for InlineLinkReplacer<'_> {
 
         dest.push_str(&prefix);
 
+        let context = RenderContext::new(self.0);
+
         let params = LinkRenderParams {
             target,
             link_text,
             extra_roles,
             window,
             attrlist: &attrlist,
-            parser: self.0,
+            context: &context,
         };
 
         self.0.renderer.render_link(&params, dest);
@@ -1291,13 +1301,15 @@ impl Replacer for InlineLinkMacroReplacer<'_, '_> {
 
         self.parser.register_link(target.clone());
 
+        let context = RenderContext::new(self.parser);
+
         let params = LinkRenderParams {
             target,
             link_text: link_text.clone(),
             extra_roles,
             window,
             attrlist: &attrlist,
-            parser: self.parser,
+            context: &context,
         };
 
         self.parser.renderer.render_link(&params, dest);
@@ -1439,13 +1451,15 @@ impl Replacer for InlineEmailReplacer<'_> {
             .item
             .item;
 
+        let context = RenderContext::new(self.0);
+
         let params = LinkRenderParams {
             target: target.clone(),
             link_text: caps[2].to_owned(),
             extra_roles: vec![],
             window: None,
             attrlist: &attrlist,
-            parser: self.0,
+            context: &context,
         };
 
         self.0.renderer.render_link(&params, dest);

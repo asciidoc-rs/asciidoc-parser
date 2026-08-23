@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use crate::Parser;
+use crate::parser::RenderContext;
 
 /// An `SvgFileHandler` is responsible for providing the raw contents of an SVG
 /// file when an inline image macro requests that the SVG be embedded directly
@@ -25,8 +25,9 @@ pub trait SvgFileHandler: Debug {
     /// - `target`: The resolved path to the SVG file, already prefixed with the
     ///   value of the `imagesdir` attribute (if any). This is the same value
     ///   that would appear in the `src` attribute of a non-inline image.
-    /// - `parser`: An implementation may read document attribute values from
-    ///   the [`Parser`] state.
+    /// - `context`: The document state as of the point in the document this
+    ///   element came from. An implementation may read document attribute
+    ///   values from it. See [`RenderContext`].
     ///
     /// Return the string content of the SVG file if found. If no file is found
     /// (or it is not readable), return `None`; the inline image will then fall
@@ -37,5 +38,5 @@ pub trait SvgFileHandler: Debug {
     /// therefore must be encoded as UTF-8.
     ///
     /// [`Parser`]: crate::Parser
-    fn resolve_svg(&self, target: &str, parser: &Parser) -> Option<String>;
+    fn resolve_svg(&self, target: &str, context: &RenderContext) -> Option<String>;
 }

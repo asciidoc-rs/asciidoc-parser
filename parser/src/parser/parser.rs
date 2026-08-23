@@ -15,8 +15,8 @@ use crate::{
     parser::{
         AllowableValue, AttributeValue, DatetimeContext, DefaultPathResolver, DocinfoFileHandler,
         HtmlSubstitutionRenderer, ImageFileHandler, IncludeFileHandler, InlineSubstitutionRenderer,
-        ModificationContext, PathResolver, ReferenceTime, ResolvedAttributes, SafeMode, SourceLine,
-        SourceMap, SvgFileHandler,
+        ModificationContext, PathResolver, ReferenceTime, RenderContext, ResolvedAttributes,
+        SafeMode, SourceLine, SourceMap, SvgFileHandler,
         built_in_attrs::{
             built_in_attr, built_in_default_values, derived_backend_value,
             is_derived_backend_value, max_attribute_value_size_default, synthesized_attr,
@@ -1352,6 +1352,26 @@ impl Parser {
         }
 
         value
+    }
+
+    /// Takes a [`RenderContext`] from this parser's current state — the
+    /// document state a renderer is handed while it renders.
+    ///
+    /// Rendering reads *document* state (an `imagesdir`, whether `icons` is
+    /// set, the safe mode) as well as the element's own attribute list, and a
+    /// parser's document attributes are mutable parse state: what a renderer
+    /// reads depends on **when** it runs. A context is a snapshot, so it keeps
+    /// answering as this parser would have answered now, however the parse
+    /// moves on afterwards.
+    ///
+    /// Taking one costs a handful of reference-count bumps and no allocation,
+    /// so a caller that needs one per rendered element is free to take one per
+    /// rendered element. This is chiefly useful for **testing** a
+    /// [`PathResolver`], [`ImageFileHandler`], or [`SvgFileHandler`]
+    /// implementation directly, since those receive a context rather than a
+    /// parser.
+    pub fn render_context(&self) -> RenderContext {
+        RenderContext::new(self)
     }
 
     /// Captures the parser's fully-resolved document-attribute state so it can
@@ -4402,7 +4422,7 @@ mod tests {
         fn image_uri(
             &self,
             target_image_path: &str,
-            _parser: &Parser,
+            _context: &crate::parser::RenderContext,
             _asset_dir_key: Option<&str>,
         ) -> String {
             target_image_path.to_string()

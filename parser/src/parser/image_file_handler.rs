@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use crate::Parser;
+use crate::parser::RenderContext;
 
 /// An `ImageFileHandler` is responsible for providing the raw bytes of an image
 /// file when a referenced image must be embedded directly in the output as a
@@ -29,13 +29,14 @@ pub trait ImageFileHandler: Debug {
     ///   the value of the relevant asset-directory attribute (`imagesdir` or
     ///   `iconsdir`, as appropriate). This is the same value that would appear
     ///   in the `src` attribute of the image were it *not* embedded.
-    /// - `parser`: An implementation may read document attribute values from
-    ///   the [`Parser`] state.
+    /// - `context`: The document state as of the point in the document this
+    ///   element came from. An implementation may read document attribute
+    ///   values from it. See [`RenderContext`].
     ///
     /// Return the bytes of the image file if found. If no file is found (or it
     /// is not readable), return `None`; the image will then fall back to
     /// rendering an ordinary web path.
     ///
     /// [`Parser`]: crate::Parser
-    fn resolve_image(&self, target: &str, parser: &Parser) -> Option<Vec<u8>>;
+    fn resolve_image(&self, target: &str, context: &RenderContext) -> Option<Vec<u8>>;
 }

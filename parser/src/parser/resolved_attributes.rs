@@ -220,6 +220,14 @@ impl ResolvedAttributes {
     /// Returns the resolved interpreted value of the named document attribute.
     ///
     /// Mirrors [`Parser::attribute_value`](crate::Parser::attribute_value).
+    /// Returns the safe mode the parser ran under, captured with this
+    /// snapshot so a consumer that holds one (a
+    /// [`RenderContext`](crate::parser::RenderContext)) can answer the
+    /// mode-aware questions without a [`Parser`](crate::Parser) in hand.
+    pub(crate) fn safe_mode(&self) -> SafeMode {
+        self.safe
+    }
+
     pub(crate) fn attribute_value<N: AsRef<str>>(&self, name: N) -> InterpretedValue {
         let name = name.as_ref();
 
