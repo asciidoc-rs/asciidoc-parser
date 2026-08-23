@@ -412,6 +412,9 @@ mod special_chars;
 mod stem_step;
 
 #[cfg(test)]
+mod snapshot;
+
+#[cfg(test)]
 mod test_support;
 
 use attribute_refs::{SplicedSpecials, apply_attribute_references};
@@ -767,10 +770,24 @@ mod tests {
     /// lockstep — the same two-independent-parsers discipline this module's
     /// other differential corpora already use (see e.g. `footnotes.rs`).
     fn assert_parity_with(source: &str, configure: impl Fn() -> Parser) {
-        assert_eq!(
-            golden(source, &configure()),
-            built(source, &configure()),
-            "fold diverged from the real pipeline for {source:?}"
+        assert_parity_in("whole_pipeline", source, configure);
+    }
+
+    /// [`assert_parity_with`], recording into a named corpus.
+    ///
+    /// The comparison is not `golden` against `built` directly: both are handed
+    /// to [`snapshot::assert_recorded`], which checks the **fold** against a
+    /// checked-in recording of the known-good bytes and the **golden** against
+    /// that same recording. The fold is never what a recording is written from,
+    /// which is what keeps this corpus honest once `rendered_html()` becomes a
+    /// fold of the tree and `golden` stops being an independent construction
+    /// (design §5.2 Phase 4, step 6 — see [`snapshot`](super::snapshot)).
+    fn assert_parity_in(corpus: &str, source: &str, configure: impl Fn() -> Parser) {
+        super::snapshot::assert_recorded(
+            corpus,
+            source,
+            &golden(source, &configure()),
+            &built(source, &configure()),
         );
     }
 
@@ -883,9 +900,17 @@ mod tests {
             for (construct, body) in CONSTRUCTS {
                 let source = format!("{prefix}{body}{suffix}");
 
-                if golden(&source, &cross_product_parser())
-                    != built(&source, &cross_product_parser())
-                {
+                // The pair diverges exactly when the fold differs from the
+                // recorded known-good rendering. Reading the recording rather
+                // than re-deriving the golden is what keeps this sweep from
+                // collapsing to "no pairs diverge" once `rendered_html()` is
+                // itself a fold — see [`snapshot`](super::snapshot).
+                if !super::snapshot::matches_recording(
+                    "cross_product",
+                    &source,
+                    &golden(&source, &cross_product_parser()),
+                    &built(&source, &cross_product_parser()),
+                ) {
                     diverged.push((container, construct));
                 }
             }

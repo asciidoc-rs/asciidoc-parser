@@ -5819,6 +5819,62 @@ Each phase is a reviewable unit with a clear exit gate.
   cases, flag tests, and recorder sweeps the cutover itself resolves, plus the one golden the tree
   gets *better*.
 
+  *Step 6 landed as (a frozen recording, so the corpora survive the fold):* a prerequisite the
+  cutover needs and nothing had noticed. Every corpus on this branch is a differential — render a
+  fixture through the string pipeline, render it through the tree, assert the two agree — and that
+  works only while the two are independent constructions. Making `rendered_html()` a fold ends
+  that. A corpus that takes its golden by running `SubstitutionGroup::apply` and reading
+  `rendered` is then **comparing the fold against itself**, and passes for that reason.
+
+  This is not a hypothetical. Simulating the cutover (seed forced on, `rendered` := the fold) and
+  then *deliberately sabotaging* the fold — one stray byte appended to every
+  [`Raw`](../../parser/src/inlines/inline_node.rs) leaf — leaves the 259-fixture whole-pipeline
+  corpus **green**. Two hundred and fifty-nine fixtures asserting nothing, with no test failing to
+  say so.
+
+  So the golden stops being computed at test time and becomes a **recording**:
+  `parser/snapshots/<corpus>.txt`, checked in, reviewed like any other file, read rather than
+  derived. [`snapshot::assert_recorded`](../../parser/src/content/inline_builder/snapshot.rs)
+  takes the golden and the fold as *separate* parameters, and they are deliberately not
+  interchangeable — the **fold** is only ever compared against the recording, never written to
+  it, while the **golden** is the only thing `ASCIIDOC_UPDATE_SNAPSHOTS=1` writes. That asymmetry
+  is the whole mechanism: no rearrangement of the fold can satisfy a recording tautologically,
+  because the fold cannot author one.
+
+  In normal runs the golden is *also* checked against the recording. That is the transitional
+  half — a drift guard, so a recording cannot rot while the string pipeline still exists — and it
+  is deleted along with the string pipeline, at which point the recordings stand alone exactly as
+  the ~277 golden-HTML assertions (§5.3) already do. Recordings are merged rather than replaced
+  on update, so a filtered run only adds what it reached; removing a fixture is a deliberate hand
+  edit, since a corpus silently shrinking is the failure this file exists to prevent.
+
+  Two corpora take it here: the 259-fixture whole-pipeline sweep and the 119-pair cross-product.
+  The cross-product needed a variant — its subject is the *set* of diverging pairs rather than any
+  one pair, so [`matches_recording`](../../parser/src/content/inline_builder/snapshot.rs) reports
+  instead of asserting, and a pair diverges exactly when the fold differs from the recording. Its
+  three pinned pairs otherwise collapse to none under the cutover, which is the same tautology
+  wearing a different hat.
+
+  Verified by construction rather than by assertion: under a simulated cutover (with `golden`
+  driving the string pipeline directly, which the fold increment must also do or the drift guard
+  fires), all three snapshot-backed corpora **pass** with an honest fold and **fail** with the
+  sabotaged one, where the old assertion shape passed. Regeneration is idempotent.
+
+  **The generator is the string pipeline, deliberately.** Asciidoctor 2.0.26 was measured as the
+  alternative and is a genuinely independent oracle, but on this corpus it agrees on 202 of 259
+  fixtures; most of the remainder is the harness not passing each fixture's document attributes,
+  and the rest is real crate-versus-Asciidoctor divergence (an image role over a passthrough, an
+  attribute-list-prefixed span's role, `<<d,>>`'s empty text). Recording Asciidoctor is worth
+  doing — it is the only oracle that outlives the string pipeline *and* is not this crate — but it
+  is spec-conformance work with a divergence ledger of its own, not tautology work, and it should
+  not ride along here. Noted as a follow-up with the numbers attached.
+
+  What remains is the other corpora: roughly twenty golden-producing helpers across
+  `inline_builder`'s per-family test modules and `parser/src/tests/`, each with its own parser
+  configuration. **They are the fold increment's prerequisite list, not this one's leftovers** —
+  the cutover must not land until every corpus it would render tautological is either recorded or
+  knowingly exempted.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -6926,6 +6982,21 @@ Each phase is a reviewable unit with a clear exit gate.
        together as one parity corpus; the keep's other three shapes (a typographic replacement, a
        restored entity, a later sub's own span) are genuinely markup-reading and stay. See the step's
        own "landed as" note above. **The cutover now stands at zero golden regressions.**
+
+     - ✅ **prep (a frozen recording, so the corpora survive the fold).** A cutover prerequisite
+       nothing had noticed: a corpus that takes its golden from `apply` + `rendered` compares the
+       **fold against itself** once `rendered_html()` is a fold, and passes for that reason.
+       Demonstrated, not assumed — under a simulated cutover a deliberately sabotaged fold leaves
+       the 259-fixture whole-pipeline corpus green. The golden becomes a checked-in recording
+       (`parser/snapshots/`), read rather than derived, with
+       [`assert_recorded`](../../parser/src/content/inline_builder/snapshot.rs) taking golden and
+       fold as separate parameters so the fold can never author a recording; the golden is also
+       checked against it as a drift guard, deleted with the string pipeline. Two corpora take it
+       (the whole-pipeline sweep and the cross-product, the latter via
+       [`matches_recording`](../../parser/src/content/inline_builder/snapshot.rs) since its
+       subject is the diverging *set*). The generator is the string pipeline; Asciidoctor was
+       measured (202/259) and deferred as spec-conformance work. See the step's own "landed as"
+       note above. The remaining ~20 corpora are the **fold increment's prerequisite list**.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
