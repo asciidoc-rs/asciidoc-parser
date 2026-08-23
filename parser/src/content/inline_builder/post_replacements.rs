@@ -189,6 +189,82 @@ mod tests {
     };
 
     #[test]
+    fn a_post_replacement_in_a_cross_reference_text_is_a_documented_divergence() {
+        // Found by the cross-product sweep
+        // (`fold_matches_the_real_pipeline_for_every_construct_in_every_container`
+        // in the parent module), and it is the **deferred-cross-reference
+        // sentinel system** (design §4.2) showing through.
+        //
+        // A link's display text and a cross-reference's sit in the same
+        // position in the source, and this step treats them alike. The string
+        // pipeline cannot: by the time it runs, a *link* has been rendered
+        // inline into the one flat string this step scans, so its display text
+        // gets its `<br>` — while a deferred cross-reference has been replaced
+        // by a sentinel pair whose text lives in a **template**, which this
+        // step never sees at all. So the same bytes in the same place get a
+        // line break in one and not in the other, decided by nothing the
+        // author wrote.
+        //
+        // A tree has one answer for both, because a display text is a subtree
+        // either way and this step walks subtrees. That is what §4.2's
+        // retirement of the sentinel system makes true for real, so this is a
+        // **keep**: the divergence closes when the cutover deletes the
+        // template, not before.
+        //
+        // Driven through a real document, where the cross-reference resolves —
+        // a bare `Content` has no catalog, so *every* cross-reference is left
+        // as the sentinel there and the two would differ for a second,
+        // unrelated reason.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = crate::Parser::default()
+            .with_inline_tree(true)
+            .parse(concat!(
+                "[[tgt]]Target.\n",
+                "\n",
+                "x xref:tgt[pre z +\nw post] y\n",
+                "\n",
+                "x link:l.html[pre z +\nw post] y\n",
+            ));
+
+        let folds: Vec<(String, String)> = doc
+            .descendant_blocks()
+            .filter_map(|block| {
+                let (rendered, inlines) = (block.rendered_html_content()?, block.inlines()?);
+
+                Some((
+                    rendered.to_string(),
+                    fold_html(inlines, &HtmlSubstitutionRenderer {}),
+                ))
+            })
+            .collect();
+
+        assert_eq!(
+            folds,
+            [
+                // The anchor, unaffected and at parity.
+                (
+                    r##"<a id="tgt"></a>Target."##.to_string(),
+                    r##"<a id="tgt"></a>Target."##.to_string()
+                ),
+                // The cross-reference: the string pipeline never scanned its
+                // display text, the tree did.
+                (
+                    "x <a href=\"#tgt\">pre z +\nw post</a> y".to_string(),
+                    "x <a href=\"#tgt\">pre z<br>\nw post</a> y".to_string()
+                ),
+                // The link, in the same position, at parity on both sides —
+                // which is what makes the line above an asymmetry rather than
+                // a rule.
+                (
+                    "x <a href=\"l.html\">pre z<br>\nw post</a> y".to_string(),
+                    "x <a href=\"l.html\">pre z<br>\nw post</a> y".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn a_hard_line_break_becomes_a_line_break_leaf() {
         // A line ending in ` +` yields a `LineBreak` leaf in place of the ` +`;
         // the newline and following line stay as text.
