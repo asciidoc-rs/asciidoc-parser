@@ -215,10 +215,7 @@ fn find_indexterm_matches<'src>(
         let extra = s[whole.end()..].bytes().take_while(|b| *b == b')').count();
         let full = whole.start()..(whole.end() + extra);
 
-        if let Some(m) = build_indexterm_shorthand_match(inner, extra, full, escaped, pieces, root)
-        {
-            matches.push(m);
-        }
+        push_indexterm_shorthand_matches(inner, extra, full, escaped, pieces, root, &mut matches);
     }
 
     matches
@@ -363,8 +360,8 @@ fn shown_macro_term(arg: String, parser: &Parser) -> String {
     positional.unwrap_or(arg)
 }
 
-/// Builds the [`MacroMatch`] for an index-term **shorthand** (`((term))`,
-/// `(((primary, secondary, tertiary)))`), or `None` when the visible term
+/// Pushes the [`MacroMatch`]es for an index-term **shorthand** (`((term))`,
+/// `(((primary, secondary, tertiary)))`) — none at all when the visible term
 /// crosses an opaque span (see [`find_indexterm_matches`]).
 ///
 /// `inner` is the text between the outermost `((` and `))` (match group 3);
@@ -384,42 +381,115 @@ fn shown_macro_term(arg: String, parser: &Parser) -> String {
 /// [`rebuild_macro_level`] emits that edge `(`/`)` as literal text — the same
 /// sub-range mechanism the auto-link pass uses for a bare URL's kept prefix.
 ///
-/// An **escaped** shorthand (`\((…))`) drops its backslash and stays literal
-/// (an [`Unescape`](MacroMatchKind::Unescape)); the one string-replacer form
-/// that instead re-renders an escaped *paren-wrapped* term (`\(((x)))` →
-/// `(x)`) is left literal here, a documented divergence pinned by a test.
-fn build_indexterm_shorthand_match<'src>(
+/// # The two escaped spellings
+///
+/// An **escaped** shorthand (`\((…))`) drops its backslash and keeps the rest —
+/// absorbed parens included — literal, an
+/// [`Unescape`](MacroMatchKind::Unescape) matching the string replacer's plain
+/// `caps[0][1..]` byte-for-byte.
+///
+/// An escaped **paren-wrapped** one (`\(((x)))`) is the exception, and the
+/// replacer's own branch says why: *an escaped concealed term still processes a
+/// nested flow term*. It strips the wrapping parentheses off `encl_text` and
+/// renders what is left as a **visible** term between two literal parens, so
+/// `\(((x)))` collapses to `(x)` rather than staying literal. That is one
+/// match's source doing two things, which is exactly what a **pair** of matches
+/// expresses — an [`Unescape`](MacroMatchKind::Unescape) over the backslash
+/// alone, then a [`Node`](MacroMatchKind::Node) over the rest with a kept paren
+/// at *each* end of its `consumed` sub-range — and
+/// [`rebuild_macro_level`] composes the pair as it composes any two adjacent
+/// matches, so neither [`MacroMatchKind`] variant grows a new shape. It is the
+/// same composition the escaped-attribute-list bracket
+/// ([`passthrough_step`](super::super::passthrough_step)) reaches from the
+/// other direction; only the kept-paren narrowing is this family's own, and it
+/// is the narrowing the unescaped spellings above already use, applied to both
+/// ends at once.
+fn push_indexterm_shorthand_matches<'src>(
     inner: &str,
     extra: usize,
     full: std::ops::Range<usize>,
     escaped: bool,
     pieces: &[Piece],
     root: Span<'src>,
-) -> Option<RecognizedIndexterm<'src>> {
-    // An escaped shorthand drops its backslash and keeps the rest (including any
-    // absorbed parens) literal. The one form the string replacer treats
-    // specially — an escaped, paren-wrapped `\(((x)))`, which it collapses to
-    // `(x)` — is left literal here, a divergence documented and pinned by a
-    // test. Every other escaped spelling matches the string replacer's plain
-    // `caps[0][1..]` byte-for-byte.
-    if escaped {
-        return Some(RecognizedIndexterm {
-            macro_match: MacroMatch {
-                kind: MacroMatchKind::Unescape {
-                    backslash: full.start,
-                },
-                full,
-            },
-            rendered_nonempty: true,
-            is_skip: extra > 0,
-        });
-    }
-
+    matches: &mut Vec<RecognizedIndexterm<'src>>,
+) {
     // `encl_text` = the enclosed text plus any absorbed trailing parens, exactly
     // as the string replacer builds it before classifying.
     let mut encl_text = inner.to_string();
     for _ in 0..extra {
         encl_text.push(')');
+    }
+
+    if escaped {
+        // The escaped branch's own classification: a paren-wrapped `encl_text`
+        // is the nested flow term the replacer still renders (see this
+        // function's doc comment); anything else stays literal.
+        let nested = encl_text
+            .strip_prefix('(')
+            .and_then(|t| t.strip_suffix(')'))
+            // A shown term crossing an opaque span is unreconstructable from
+            // this level's escaped string, so the family's own recognition
+            // boundary decides first and the match keeps the literal shape —
+            // the same deferral every other visible spelling takes, pinned by
+            // its own divergence test.
+            .filter(|nested| !nested.contains(SPAN_PLACEHOLDER));
+
+        let Some(nested) = nested else {
+            matches.push(RecognizedIndexterm {
+                macro_match: MacroMatch {
+                    kind: MacroMatchKind::Unescape {
+                        backslash: full.start,
+                    },
+                    full,
+                },
+                rendered_nonempty: true,
+                is_skip: extra > 0,
+            });
+
+            return;
+        };
+
+        // The backslash alone. An `Unescape` whose match *is* the character it
+        // drops emits nothing, which is what the replacer does with this one.
+        matches.push(RecognizedIndexterm {
+            macro_match: MacroMatch {
+                kind: MacroMatchKind::Unescape {
+                    backslash: full.start,
+                },
+                full: full.start..(full.start + 1),
+            },
+            rendered_nonempty: false,
+            is_skip: false,
+        });
+
+        // Everything after it: the nested term, with the wrapping parenthesis at
+        // each end left outside `consumed` so `rebuild_macro_level` emits both
+        // as the literal text the replacer pushes around the rendered term.
+        let term_full = (full.start + 1)..full.end;
+        let consumed = (term_full.start + 1)..(term_full.end - 1);
+
+        let node = InlineNode::IndexTerm(IndexTerm {
+            terms: vec![CowStr::from(strip_see_and_seealso(&normalize_index_text(
+                nested, false,
+            )))],
+            visible: true,
+            location: source_slice(pieces, term_full.clone(), root),
+        });
+
+        matches.push(RecognizedIndexterm {
+            macro_match: MacroMatch {
+                kind: MacroMatchKind::Node {
+                    consumed,
+                    node: Box::new(node),
+                },
+                full: term_full,
+            },
+            // The two kept parentheses are output whatever the term renders to.
+            rendered_nonempty: true,
+            is_skip: extra > 0,
+        });
+
+        return;
     }
 
     // Classify the term, mirroring the string replacer's paren stripping. `term`
@@ -447,7 +517,7 @@ fn build_indexterm_shorthand_match<'src>(
         // crossing a synthesized run is recognized, exactly as in the macro
         // form's own check above.
         if term_src.contains(SPAN_PLACEHOLDER) {
-            return None;
+            return;
         }
 
         let term = strip_see_and_seealso(&normalize_index_text(term_src, false));
@@ -480,7 +550,7 @@ fn build_indexterm_shorthand_match<'src>(
     // match's first `(`; an `after` keeps its last `)`.
     let consumed = (full.start + usize::from(before))..(full.end - usize::from(after));
 
-    Some(RecognizedIndexterm {
+    matches.push(RecognizedIndexterm {
         macro_match: MacroMatch {
             kind: MacroMatchKind::Node {
                 consumed,
@@ -490,7 +560,7 @@ fn build_indexterm_shorthand_match<'src>(
         },
         rendered_nonempty,
         is_skip: extra > 0,
-    })
+    });
 }
 
 #[cfg(test)]
@@ -1007,7 +1077,8 @@ mod tests {
         let parser = Parser::default()
             .with_intrinsic_attribute("term", "coffee", ModificationContext::Anywhere)
             .with_intrinsic_attribute("second", "brewing", ModificationContext::Anywhere)
-            .with_intrinsic_attribute("shorthand", "((tea))", ModificationContext::Anywhere);
+            .with_intrinsic_attribute("shorthand", "((tea))", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("escaped", "\\(((tea)))", ModificationContext::Anywhere);
 
         let fixtures = [
             // The visible shorthand and macro spellings, whole and partial.
@@ -1029,6 +1100,14 @@ mod tests {
             "x {shorthand} y",
             // A kept literal parenthesis beside an expanded term.
             "x (((({term}))) y",
+            // The escaped paren-wrapped spelling, whose nested term is the same
+            // shown text read from the same synthesized run — the two kept
+            // parens are the level's own bytes either side of it.
+            "x \\((({term}))) y",
+            // The same spelling arriving *whole* from an expanded value, so the
+            // two kept parens are themselves sliced out of the synthesized run
+            // (as is the backslash the pair's first match drops).
+            "x {escaped} y",
         ];
 
         for source in fixtures {
@@ -1087,16 +1166,183 @@ mod tests {
     }
 
     #[test]
-    fn an_escaped_paren_wrapped_shorthand_is_a_documented_divergence() {
+    fn fold_matches_the_string_pipeline_through_escaped_paren_wrapped_shorthands() {
         // The one escaped shorthand the string replacer re-renders rather than
-        // leaving literal: an escaped, paren-wrapped `\(((x)))`, which it
-        // collapses to `(x)`. The builder drops the backslash and keeps the rest
-        // literal (`(((x)))`), a documented divergence — every other escaped
-        // spelling matches byte-for-byte (pinned by the corpus above).
-        let source = "\\(((x)))";
-        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+        // leaving literal: a paren-wrapped `\(((x)))`, whose wrapping parens it
+        // strips off `encl_text` before rendering what is left as a **visible**
+        // term between two literal parens ("an escaped concealed term still
+        // processes a nested flow term"), so the whole thing collapses to
+        // `(x)`. The builder expresses that as a pair of matches — an
+        // `Unescape` over the backslash alone, then a `Node` whose `consumed`
+        // sub-range keeps a paren at each end — and folds to the same bytes.
+        for fixture in [
+            // The shape itself, alone and in flow.
+            r"\(((x)))",
+            r"a \(((x))) b",
+            r"\(((a, b, c)))",
+            // The nested term takes the *visible* branch's whole arithmetic: a
+            // `see` / `see-also` clause is stripped to the primary term (the
+            // separators are `&gt;&gt;` / `&amp;&gt;` entities by macro time)…
+            r"\(((Coffee >> Beans)))",
+            r"\(((Coffee &> Tea)))",
+            // …a newline is collapsed to a space and the term is trimmed…
+            "\\(((multi\nline)))",
+            r"\((( spaced )))",
+            // …and a special character, a restored entity, and a typographic
+            // replacement all reach the shown text as the same entity bytes the
+            // string pipeline holds there.
+            r"\(((a < b)))",
+            r"\(((a &copy; b)))",
+            r"\(((Tom (C) Jerry)))",
+            r"\(((O'Reilly)))",
+            // An empty nested term shows nothing between the kept parens.
+            r"\((()))",
+            r"\((( )))",
+            // The trailing-paren absorption still runs first, so what is
+            // wrapped can itself carry parens — the extra `)` that the closing
+            // pair absorbed is the wrapper's own right half.
+            r"\(((x))))",
+            r"\((((x))))",
+            r"\(((x)))))",
+            r"\((((x)))",
+            // Beside its own literal-staying twins, whose `encl_text` is not
+            // paren-wrapped and which therefore only drop a backslash.
+            r"\((x))\(((y)))",
+            r"\indexterm:[x]\(((y)))",
+            // Twice in one flow, and beside constructs the earlier steps
+            // recognized.
+            r"\(((x))) \(((y)))",
+            r"*bold* \(((x))) _em_",
+            // Recognized inside a rendered span (the macros step descends).
+            r"_\(((x))) in em_",
+            // The shown term makes the substitution's output non-empty, so a
+            // concealed term beside it is consumed rather than left literal by
+            // the `Cow::Borrowed` no-op the level would otherwise be.
+            r"\(((x)))(((y)))",
+            r"\(((x))) and (((y)))",
+            r"(((y))) and \(((x)))",
+        ] {
+            assert_eq!(
+                fold_html(&build_src(Span::new(fixture)), &HtmlSubstitutionRenderer {}),
+                golden_macros(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
 
-        assert_eq!(folded, "(((x)))");
-        assert_eq!(golden_macros(source), "(x)");
+    #[test]
+    fn an_escaped_paren_wrapped_shorthand_becomes_a_term_between_two_literal_parens() {
+        // The shape the pair of matches produces: the backslash is gone, the
+        // wrapping parentheses ride beside the node as literal text, and the
+        // node is an ordinary visible term. Its location covers the match
+        // *minus* the backslash the pair's first match drops — the kept parens
+        // included, as every other shorthand node's location includes its own.
+        let nodes = build_src(Span::new("x \\(((coffee))) y"));
+
+        assert_eq!(nodes.len(), 5);
+        assert_text(&nodes[0], "x ", 1, 1);
+        assert_text(&nodes[1], "(", 1, 4);
+
+        let index_term = assert_index_term(&nodes[2]);
+        assert!(index_term.visible);
+        assert_eq!(index_term.terms.len(), 1);
+        assert_eq!(index_term.terms[0].as_ref(), "coffee");
+        assert_eq!(index_term.location.data(), "(((coffee)))");
+        assert_eq!(index_term.location.line(), 1);
+        assert_eq!(index_term.location.col(), 4);
+
+        assert_text(&nodes[3], ")", 1, 15);
+        assert_text(&nodes[4], " y", 1, 16);
+    }
+
+    #[test]
+    fn a_real_documents_escaped_paren_wrapped_shorthands_fold_to_their_rendered_strings() {
+        // End-to-end, through the real parse path, on the shape that named this
+        // increment: an escaped paren-wrapped shorthand renders as its nested
+        // term between two literal parens, so a tree that left the whole match
+        // literal would regress the moment `rendered_html()` becomes a fold of
+        // this tree. Driven in block content and in a heading's own title,
+        // whose `Title` group runs the same macros step.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = crate::Parser::default()
+            .with_inline_tree(true)
+            .parse(concat!(
+                "== A \\(((Coffee))) heading\n",
+                "\n",
+                "An escaped \\(((Coffee >> Beans))) term keeps its parens,\n",
+                "and \\((()))  shows nothing between them.\n",
+            ));
+
+        let mut folded_blocks = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert!(rendered.contains("(Coffee)"), "rendered: {rendered:?}");
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &crate::Parser::default()
+                ),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded_blocks += 1;
+        }
+
+        assert_eq!(folded_blocks, 1, "expected the paragraph to carry a tree");
+
+        let mut folded_titles = 0;
+
+        for block in doc.descendant_blocks() {
+            let crate::blocks::Block::Section(section) = block else {
+                continue;
+            };
+
+            assert_eq!(section.section_title(), "A (Coffee) heading");
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    section.section_title_inlines(),
+                    &HtmlSubstitutionRenderer {},
+                    &crate::Parser::default()
+                ),
+                section.section_title(),
+                "fold diverged from the rendered section title"
+            );
+
+            folded_titles += 1;
+        }
+
+        assert_eq!(folded_titles, 1, "expected the heading to carry a tree");
+    }
+
+    #[test]
+    fn an_escaped_paren_wrapped_term_over_a_span_is_a_documented_divergence() {
+        // The recognition boundary this spelling does *not* move: the nested
+        // term is a shown one, so a term crossing a rendered span is
+        // unreconstructable from this level's escaped match string and the
+        // family's own deferral decides first — the match keeps the plain
+        // escaped shape (backslash dropped, the rest literal) that every other
+        // escaped spelling takes. The string pipeline, by contrast, folds the
+        // span markup into the shown term and keeps only the wrapping parens.
+        let source = "\\(((*bold* term)))";
+        let nodes = build_src(Span::new(source));
+
+        assert!(
+            nodes.iter().all(|n| !matches!(n, InlineNode::IndexTerm(_))),
+            "a nested term crossing a span must be left unrecognized: {nodes:?}"
+        );
+
+        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        assert_eq!(folded, "(((<strong>bold</strong> term)))");
+        assert_eq!(golden_macros(source), "(<strong>bold</strong> term)");
     }
 }
