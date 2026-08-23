@@ -6038,6 +6038,44 @@ Each phase is a reviewable unit with a clear exit gate.
   than a gap: a `pass:c,q[…]` body, a `Stem` body, and a bare `+…+` body enclosing an
   already-extracted construct. So the honest form of the claim is: **this changes no output for any
   renderer that does not carry state**, and for one that does, only through those three.
+  *Step 6 landed as (the footnote-marker sentinel system, deleted — the first of the three):*
+  the cutover's second piece, and the first §4.2 deletion. `Section::parse` now gets a heading's
+  footnote-free reference text from
+  [`fold_reference_text`](../../parser/src/content/inline_builder/fold.rs) instead of from a
+  byte-level cut, and the whole sentinel apparatus goes with it: `FOOTNOTE_MARKER_START` /
+  `FOOTNOTE_MARKER_END`, `strip_footnote_marker_spans`,
+  `Content::remove_footnote_marker_sentinels`, `Parser::mark_footnote_spans`, and the two
+  `dest.push(…)` calls in [`InlineFootnoteMacroReplacer`](../../parser/src/content/macros.rs)
+  that emitted them.
+
+  The property being traded is worth stating precisely, because it is *not* "the fold is
+  authoritative" — `rendered` is still the string pipeline's here, and stays that way until the
+  next increment. What moves is one derived string: a heading's reference text and the id
+  derived from it. The sentinels existed only to make **one** render yield **two** strings, so
+  that counters and attribute-expanded footnotes were not processed twice. A tree yields two
+  strings from one render for free — they are two folds of it — so the constraint the sentinels
+  bought is satisfied by construction and the mechanism is pure overhead.
+
+  The prep increment that staged `fold_reference_text` pinned the equivalence against a corpus
+  of thirteen titles. That corpus is a list of fixtures someone thought to write down, which is
+  the failure mode the cross-product sweep was built to answer, so the swap was measured
+  corpus-wide first instead: a throwaway patch computed **both** answers for every section title
+  in the suite and logged any disagreement. Across ~5,390 tests there were **zero**. That is the
+  evidence the swap rests on; the fixture corpus survives as its written-down form.
+
+  With the strip gone there is no second implementation left to differentiate the reference text
+  against, so `fold_reference_text_matches_the_sentinel_strip` becomes
+  `fold_reference_text_omits_a_headings_footnote_markers`: the heading's own rendering is still
+  compared against the string pipeline (the §5.3 oracle, which still produces it), while the
+  reference text is compared against a **literal** expected string — the exact bytes the strip
+  produced, captured before it was deleted. The four unit tests of the strip itself go with the
+  function.
+
+  Re-running the corpus-wide fold-parity audit shows the divergence set **shrink by 16**, every
+  one of them a title whose only disagreement was the sentinel pair itself, which neither side
+  now emits. One row is re-spelled rather than added: a recorder test's own
+  `MARK_OPEN`/`MARK_CLOSE` fixture, which had appeared in both a with- and a without-sentinel
+  form and now appears once. Coverage is diff-neutral.
 
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
@@ -7207,6 +7245,18 @@ Each phase is a reviewable unit with a clear exit gate.
        tree). See the step's own "landed as" note above. What remains of step 6 is
        `rendered_html()` as the fold, the three sentinel deletions, and the side effects wired
        for real.
+
+     - ✅ **the footnote-marker sentinel system, deleted (the first of the three).**
+       `Section::parse` takes a heading's footnote-free reference text from
+       [`fold_reference_text`](../../parser/src/content/inline_builder/fold.rs) rather than from
+       a byte-level cut, and `FOOTNOTE_MARKER_START`/`_END`, `strip_footnote_marker_spans`,
+       `Content::remove_footnote_marker_sentinels`, `Parser::mark_footnote_spans`, and the
+       replacer's two `dest.push(…)` calls all go. `rendered` is still the string pipeline's:
+       what moves is one *derived* string. The sentinels existed only to make one render yield
+       two strings (so counters ran once), which a tree does by construction. Measured
+       corpus-wide before the swap — both answers computed for every section title in the suite,
+       **zero** disagreements — rather than on the staged fixture corpus alone; the audit's
+       divergence set shrinks by 16. See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

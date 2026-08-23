@@ -10,7 +10,7 @@ use crate::{
         parse_utils::parse_blocks_until,
     },
     content::{
-        Content, SubstitutionGroup, XrefSegment, strip_footnote_marker_spans,
+        Content, SubstitutionGroup, XrefSegment, inline_builder::fold_reference_text,
         substitute_attributes_in_reftext,
     },
     document::{InterpretedValue, RefType},
@@ -251,22 +251,20 @@ impl<'src> SectionBlock<'src> {
         //
         // A footnote in the title is a real, document-order footnote, but its
         // marker must not leak into the section's reference text (an xref's link
-        // text) or auto-generated ID. Marking the title's footnote markers with
-        // sentinels lets those be excised below from a single render — no second
+        // text) or auto-generated ID. The title's tree is what answers that: a
+        // footnote is a node, so the heading's own rendering and its
+        // footnote-free reference text are two folds of one tree
+        // ([`fold_reference_text`]), and "which regions were footnote markers"
+        // is a question about node kinds rather than about bytes. Still a single
         // substitution pass, so counters and attribute-expanded footnotes are
-        // processed exactly once.
+        // processed exactly once — which is what the sentinel pair this replaces
+        // existed to buy (design §4.2's first sentinel system).
         let mut section_title = Content::from(title_span);
-        parser.mark_footnote_spans.set(true);
         SubstitutionGroup::Title.apply(&mut section_title, parser, metadata.attrlist.as_ref());
-        parser.mark_footnote_spans.set(false);
 
         // The footnote-free rendering of the title, for the reference text and
-        // auto-generated ID; a no-op string copy when the title had no footnote.
-        let title_reftext = strip_footnote_marker_spans(section_title.rendered_html());
-
-        // Strip the now-consumed sentinels from the title itself, keeping the
-        // footnote marker so the heading still renders it.
-        section_title.remove_footnote_marker_sentinels();
+        // auto-generated ID.
+        let title_reftext = fold_reference_text(section_title.inlines(), &*parser.renderer, parser);
 
         // A section carrying the `bibliography` style implicitly adds that style
         // to each top-level unordered list in its body (see the "Bibliography
