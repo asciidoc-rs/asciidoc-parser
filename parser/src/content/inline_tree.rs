@@ -3,7 +3,8 @@
 //! machinery**.
 //!
 //! This module was the production tree source through Phase 2 and Phase 4's
-//! additive increments: when tree building was enabled on the [`Parser`],
+//! additive increments: when tree building was enabled on the [`Parser`] — an
+//! opt-in that has since retired along with it —
 //! `SubstitutionGroup::apply` re-ran the pipeline through the
 //! [`RecordingRenderer`] and parsed the recorded markers into each
 //! [`Content`]'s tree. The Phase 4 single-pass builder
@@ -48,7 +49,6 @@
 //! [`inline_recorder`]: ../../tests/inline_recorder.rs
 //! [`Content`]: crate::content::Content
 //! [`Parser`]: crate::Parser
-//! [`Parser::with_inline_tree`]: crate::Parser::with_inline_tree
 
 // Some node metadata is captured but not yet read by every consumer while the
 // tree is not yet canonical; the tree carries the full structure the public API

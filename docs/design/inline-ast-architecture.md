@@ -5990,6 +5990,54 @@ Each phase is a reviewable unit with a clear exit gate.
 
   Corpus-wide fold-parity audit: divergence set byte-identical, 60 rows either side. Coverage is
   diff-neutral.
+  *Step 6 landed as (the tree, built for every parse — the `with_inline_tree` flag retired):*
+  the first piece of the cutover proper, and deliberately the one that changes **no output at
+  all**. Every prior increment measured the cutover by forcing the seed on in a throwaway patch;
+  this makes that half real while leaving `rendered` exactly where it is, so the whole corpus
+  runs against a tree that is built but not yet read.
+
+  That ordering is the point. Turning the builder on for every parse and making the fold
+  authoritative are two independent risks — a builder that panics or mis-recognizes somewhere in
+  ~5,390 tests, and a fold whose bytes differ — and bundling them would report both as one red
+  suite. Split, the first is falsifiable on its own: with `rendered` still the string pipeline's,
+  the tree is purely additive, so the *only* tests that can fail are the ones asserting the tree
+  is absent. Two did, and nothing else moved.
+
+  `Parser::with_inline_tree` is gone from the public API. The `build_inline_tree` field it set
+  stays, defaulting to `true`, because the flag's plumbing was always doing a second job:
+  `SubstitutionGroup::apply` clears it on the counter-safe clone it hands the builder, since
+  building a tree re-enters `apply` for a passthrough body whose own substitution list must run
+  (`passthrough_text`), and that nested content needs no tree. It is now documented as the
+  recursion guard it is, with no public surface.
+
+  The two tests that asserted absence are rewritten rather than deleted. `inline_tree_is_empty_by_default`
+  becomes `inline_tree_is_built_by_default`, its assertion inverted. `is_block_inlines_is_some_but_empty_when_flag_off`
+  keeps the distinction it was really pinning — `Some(&[])` is a content-bearing block, `None` a
+  block with no direct content, and the two are not interchangeable — but reaches `Some(&[])`
+  through content that is *genuinely* empty (`----\n----`) rather than through a flag. Every
+  other call site simply drops a `.with_inline_tree(true)` that is now the default.
+
+  What this costs is performance, and it is the cutover's cost rather than this increment's: a
+  parser clone and a full recognition pass per content, on every parse. It is paid back when the
+  string pipeline stops being run for its output, which is what the increments below do.
+
+  The claim above — "changes no output at all" — needs one qualification, and it is the review
+  finding that sent this increment back the first time. Building the tree is only unobservable if
+  the build does not *call the document's renderer*, and it used to: a passthrough body was escaped
+  at build time, so a renderer carrying state saw extra calls and a **later block's** authoritative
+  output shifted under it. The two increments above closed that for every
+  specialcharacters body, and
+  `building_the_tree_does_not_consult_the_documents_renderer` now sweeps every construct to keep
+  it closed — measured at `build` rather than at `parse`, deliberately, since the string pipeline
+  legitimately calls the renderer and for an unresolved cross-reference calls it five times, with
+  and without a tree alike. Counting a whole parse would pin the string pipeline's own behavior and
+  call it this increment's.
+
+  Three shapes still consult it, each pinned by
+  `the_three_non_specialcharacters_bodies_still_consult_the_renderer` so they are a decision rather
+  than a gap: a `pass:c,q[…]` body, a `Stem` body, and a bare `+…+` body enclosing an
+  already-extracted construct. So the honest form of the claim is: **this changes no output for any
+  renderer that does not carry state**, and for one that does, only through those three.
 
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
@@ -7148,6 +7196,17 @@ Each phase is a reviewable unit with a clear exit gate.
        escaping moves to the fold. No expectation changed, and the audit's divergence set is
        byte-identical. See the step's own "landed as" note above. **This unblocks the always-on
        increment.**
+     - ✅ **the flag, retired: the tree is built for every parse.** The cutover's first piece,
+       and deliberately the one that changes no output: `SubstitutionGroup::apply` always takes
+       the tree seed, while `rendered` stays the string pipeline's. Splitting "build it always"
+       from "read it" is what makes each falsifiable alone — with the tree still additive, the
+       only tests that *can* fail are the two asserting its absence, and only those did.
+       `Parser::with_inline_tree` is gone from the public API; the `build_inline_tree` field it
+       set survives as the **recursion guard** its plumbing was always also serving (the clone
+       handed to the builder clears it, so a passthrough body's own re-entrant `apply` seeds no
+       tree). See the step's own "landed as" note above. What remains of step 6 is
+       `rendered_html()` as the fold, the three sentinel deletions, and the side effects wired
+       for real.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

@@ -19,10 +19,9 @@
 //! pass mutates the title's tree) and to footnote-embedded references (which
 //! live in a footnote's subtree).
 //!
-//! This harness checks all three, over whole documents, in one parse: with
-//! [`with_inline_tree`](crate::Parser::with_inline_tree) on, every content
-//! location carries *both* its rendered string and its tree, so the two are
-//! compared directly rather than reconstructed from a second parse.
+//! This harness checks all three, over whole documents, in one parse: every
+//! content location carries *both* its rendered string and its tree, so the two
+//! are compared directly rather than reconstructed from a second parse.
 
 use std::rc::Rc;
 
@@ -167,9 +166,11 @@ fn footnote_subtrees<'a, 'src>(
 /// A parser with `experimental` set, so the UI macros a fixture may carry are
 /// recognized by both sides alike, and with tree building on.
 fn parser() -> Parser {
-    Parser::default()
-        .with_inline_tree(true)
-        .with_intrinsic_attribute_bool("experimental", true, ModificationContext::Anywhere)
+    Parser::default().with_intrinsic_attribute_bool(
+        "experimental",
+        true,
+        ModificationContext::Anywhere,
+    )
 }
 
 /// Parses `source` once and asserts that folding each content location's tree

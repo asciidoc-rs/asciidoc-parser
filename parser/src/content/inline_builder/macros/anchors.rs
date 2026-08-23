@@ -1046,15 +1046,13 @@ mod tests {
 
         // The heading carries no content of its own, so the walk below also
         // reaches its `None` arm.
-        let doc = crate::Parser::default()
-            .with_inline_tree(true)
-            .parse(concat!(
-                "== A heading\n",
-                "\n",
-                "[[tgt,see image:t.png[T] there]]The target.\n",
-                "\n",
-                "Back to <<tgt>>.\n",
-            ));
+        let doc = crate::Parser::default().parse(concat!(
+            "== A heading\n",
+            "\n",
+            "[[tgt,see image:t.png[T] there]]The target.\n",
+            "\n",
+            "Back to <<tgt>>.\n",
+        ));
 
         let mut checked = 0;
 
@@ -1947,7 +1945,7 @@ mod tests {
         // folds to exactly the rendered string the string pipeline produced.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = Parser::default().with_inline_tree(true).parse(
+        let doc = Parser::default().parse(
             "[bibliography]\n* [[[gof,GoF]]] Gamma, Erich et al.\n* [[[pp]]] Hunt, Andrew.\n",
         );
 

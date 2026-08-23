@@ -2364,7 +2364,7 @@ mod tests {
         // regress the moment `rendered_html()` becomes a fold of this tree.
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = Parser::default().with_inline_tree(true).parse(concat!(
+        let doc = Parser::default().parse(concat!(
             "== A heading\n",
             "\n",
             "A sunset: image:++sunset_beach.jpg++[] under a masked name.\n",

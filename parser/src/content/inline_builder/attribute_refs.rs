@@ -1877,7 +1877,6 @@ mod tests {
         use crate::blocks::{FindBlocks, IsBlock};
 
         let doc = Parser::default()
-            .with_inline_tree(true)
             .parse(":attribute-missing: drop-line\n\nFirst line.\nA {nope} line.\nThird line.\n");
 
         let blocks: Vec<_> = doc.descendant_blocks().collect();
@@ -1907,7 +1906,7 @@ mod tests {
         // oracle — see `attribute_entry_substitutions`).
         use crate::blocks::{FindBlocks, IsBlock};
 
-        let doc = Parser::default().with_inline_tree(true).parse(
+        let doc = Parser::default().parse(
             ":app-name: pass:quotes[MyApp^2^]\n\n[subs=attributes+]\n------\n{app-name}\n------\n",
         );
 
