@@ -1437,6 +1437,16 @@ mod tests {
             with_xref_attributes,
         );
 
+        // A **masked** construct in such a text: the string replacer's own
+        // haystack holds a sentinel there too, so the split-agreement check
+        // leaves its token alone rather than comparing the tokened split
+        // against a body the replacer only splices at the very end. Driven
+        // through the whole pipeline, which is the only harness that runs the
+        // passthrough-extraction pass on both sides.
+        assert_parity(
+            "See xref:sec[a ++<b>x</b>++ b,role=hl] and xref:sec[*a* and stem:[x^2],role=hl].",
+        );
+
         // The same lift where the opaque piece is a **masked passthrough** —
         // the one opaque class the string pipeline also holds as a placeholder
         // of its own, since it restores passthroughs only after every step.

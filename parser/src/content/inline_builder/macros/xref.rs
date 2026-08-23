@@ -1787,6 +1787,12 @@ mod tests {
             // path, which has carried an opaque piece structurally all along.
             "xref:sec[a *b* c=d]",
             "xref:sec[*b* c=d]",
+            // (A **masked** construct in the same text is exercised against
+            // the *whole* pipeline instead — `golden_xref` deliberately skips
+            // the passthrough-extraction pass, so the two sides would read
+            // different text here. See
+            // `fold_matches_the_real_pipeline_for_a_masked_construct_in_an_attribute_list_text`.)
+            //
             // The shorthand spelling is unchanged: its reference text never
             // carried an attribute list at all.
             "<<sec,*bold*>>",

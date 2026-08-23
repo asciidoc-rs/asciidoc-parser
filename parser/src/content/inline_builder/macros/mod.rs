@@ -726,7 +726,8 @@ pub(super) fn tokened_text<'src>(
 /// The bytes the **string replacer's own haystack** holds for a text
 /// [`tokened_text`] tokened: each token replaced by what the fold of the node
 /// it stands for emits, with the parser's own renderer — the renderer the
-/// string pipeline ran.
+/// string pipeline ran. A **masked** construct's token is left alone: the
+/// replacer's own haystack holds a sentinel there too.
 ///
 /// This is the other half of the token's contract. Tokening is what makes the
 /// attribute-list *split* reproducible: a bracket's `,` / `=` / `"` are the
@@ -743,6 +744,16 @@ pub(super) fn restored_markup_text(
     let mut out = tokened.to_string();
 
     for (n, node) in carried.iter().enumerate() {
+        // A **masked** construct is left as its token. The replacer's haystack
+        // holds its own `\u{96}`*n*`\u{97}` sentinel there — not the body,
+        // which `Passthroughs::restore_to` splices only after every step has
+        // run — so the two sides already agree on those bytes, and expanding
+        // one here would compare the tokened split against a string the
+        // replacer never split.
+        if image::node_is_restorable(node) {
+            continue;
+        }
+
         let markup =
             super::fold::fold_html(std::slice::from_ref(node), parser.renderer.as_ref(), parser);
 
