@@ -1,7 +1,11 @@
 //! The passthrough-extraction substitution step.
 
 use super::{
-    macros::{MacroMatch, MacroMatchKind, image::range_is_verbatim, rebuild_macro_level},
+    macros::{
+        MacroMatch, MacroMatchKind,
+        image::{range_is_restorable, range_is_verbatim, restorable_body},
+        rebuild_macro_level,
+    },
     quotes::{Piece, attributes_of, build_match_string, source_slice},
     special_chars::Masked,
 };
@@ -90,7 +94,13 @@ use crate::{
 /// boundary character it does consume (present unless the match sits at the
 /// very start of the level) is not part of the construct — it is kept as
 /// literal text before the node, reusing the same kept-prefix [`MacroMatch`]
-/// sub-range the auto-link increment introduced.
+/// sub-range the auto-link increment introduced. Because it runs in the
+/// *second* pass, its body may enclose a construct the first pass already
+/// replaced (`+a $$b$$ c+`, `` +you feel pass:q[`mono`].+ ``): the verbatim
+/// substitution runs over the placeholder as the string pipeline runs it over
+/// its own sentinel, and the inner body is spliced in **after** — see
+/// [`build_bare_unconstrained_match`]. The attribute-list-prefixed forms keep
+/// their verbatim gate, so `[method x-]+pass:[<b>]+` stays deferred.
 ///
 /// A **prohibited prefix** ahead of either attribute-list-prefixed bare form
 /// (`index:[attrs]+text+`, `` \[x-]`text` ``) is answered the way the string
@@ -171,7 +181,10 @@ pub(super) fn apply_passthroughs<'src>(
     // own order: the string pipeline runs `INLINE_PASS_MACRO` first, then
     // `INLINE_PASS` over what it left behind, so a construct the macro pass
     // already replaced (now an opaque placeholder in the rebuilt match
-    // string) is untouched by this second pass.
+    // string) is untouched by this second pass. A bare `+…+` may still
+    // *enclose* one, which the string pipeline reads as ordinary body text
+    // around its own sentinel and restores last; see
+    // [`build_bare_unconstrained_match`] for how that order is reproduced.
     apply_bare_attrlisted_pass_level(nodes, root, parser)
 }
 
@@ -216,7 +229,7 @@ fn apply_bare_attrlisted_pass_level<'src>(
         return nodes;
     }
 
-    let matches = find_bare_attrlisted_matches(&s, &pieces, root, parser);
+    let matches = find_bare_attrlisted_matches(&s, &nodes, &pieces, root, parser);
 
     if matches.is_empty() {
         return nodes;
@@ -389,13 +402,14 @@ fn find_passthrough_matches<'src>(
 /// own **prohibited-prefix retry**; see its doc comment.
 fn find_bare_attrlisted_matches<'src>(
     s: &str,
+    nodes: &[InlineNode<'src>],
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<MacroMatch<'src>> {
     let mut matches = Vec::new();
 
-    collect_bare_pass_matches(s, 0..s.len(), pieces, root, parser, &mut matches);
+    collect_bare_pass_matches(s, 0..s.len(), nodes, pieces, root, parser, &mut matches);
 
     matches
 }
@@ -436,9 +450,11 @@ fn find_bare_attrlisted_matches<'src>(
 ///
 /// The bare unconstrained form needs no retry at all — see
 /// [`build_bare_unconstrained_match`].
+#[allow(clippy::too_many_arguments)]
 fn collect_bare_pass_matches<'src>(
     s: &str,
     region: std::ops::Range<usize>,
+    nodes: &[InlineNode<'src>],
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
@@ -465,7 +481,7 @@ fn collect_bare_pass_matches<'src>(
         if !is_backtick && !is_plus_attrlisted {
             // Option 3: the bare unconstrained form (no attribute list).
             if let Some(m) =
-                build_bare_unconstrained_match(&caps, &full, offset, pieces, root, parser)
+                build_bare_unconstrained_match(&caps, &full, offset, nodes, pieces, root, parser)
             {
                 matches.push(m);
             }
@@ -490,7 +506,15 @@ fn collect_bare_pass_matches<'src>(
             // unchecked by the move — every match the retry does produce
             // passes this same gate, or `build_bare_unconstrained_match`'s
             // own copy of it, on its own range.
-            collect_bare_pass_matches(s, (full.start + 1)..full.end, pieces, root, parser, matches);
+            collect_bare_pass_matches(
+                s,
+                (full.start + 1)..full.end,
+                nodes,
+                pieces,
+                root,
+                parser,
+                matches,
+            );
 
             continue;
         }
@@ -565,9 +589,35 @@ fn collect_bare_pass_matches<'src>(
 /// with nothing left to re-scan it afterward (this is already the last pass),
 /// so it is plain parity rather than a divergence.
 ///
-/// Returns `None` for a non-verbatim match (crossing an escaped special or a
-/// rendered span), left unrecognized exactly as every other macro family in
-/// this module defers one.
+/// # A body enclosing an **already-extracted** passthrough
+///
+/// This pass runs second, over what the [`INLINE_PASS_MACRO`] pass left
+/// behind, so a `+…+` body can enclose a construct that pass already replaced
+/// — `+a $$b$$ c+`, `+you feel pass:q[`mono`].+`, both documented AsciiDoc
+/// idioms. The string pipeline sees its own **sentinel** there and treats it
+/// as ordinary body text: it applies the verbatim substitution to the body
+/// *with the sentinel still in it*, stores the result as this passthrough's
+/// own entry, and lets the final restore splice the inner body in afterwards.
+///
+/// The tree reproduces that order exactly. The body is read from the level's
+/// **match string** — where an already-built [`Raw`](InlineNode::Raw) or
+/// [`Stem`](crate::inlines::Stem) leaf stands as one
+/// [`SPAN_PLACEHOLDER`](super::quotes::SPAN_PLACEHOLDER), the same shape the
+/// sentinel has —
+/// [`passthrough_text`] runs over those bytes as written, and each placeholder
+/// in the *result* is then replaced by what the fold of that node emits
+/// ([`restorable_body`]). Substituting first and splicing after is what keeps
+/// an inner `<b>` from being escaped a second time; a placeholder passes
+/// through the verbatim substitution unchanged, so the two agree position for
+/// position.
+///
+/// The gate is correspondingly [`range_is_restorable`]: a masked construct is
+/// admitted, and so is a [`synthesized`](Piece::synthesized) run (the match
+/// string carries its bytes exactly, and this no longer slices `'src` for the
+/// body). Only the node's `location` keeps design §4.4's coarse span. Nothing
+/// else can reach this pass — it runs before the escaping, quotes, and macros
+/// steps, so a [`CharRef`](InlineNode::CharRef) leaf or a rendered span does
+/// not exist yet.
 ///
 /// `offset` is where the scanned slice starts in the level's match string —
 /// non-zero inside a [`collect_bare_pass_matches`] retry — and is added back
@@ -576,11 +626,12 @@ fn build_bare_unconstrained_match<'src>(
     caps: &regex::Captures<'_>,
     full: &std::ops::Range<usize>,
     offset: usize,
+    nodes: &[InlineNode<'src>],
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
 ) -> Option<MacroMatch<'src>> {
-    if !range_is_verbatim(pieces, full) {
+    if !range_is_restorable(nodes, pieces, full) {
         return None;
     }
 
@@ -602,8 +653,8 @@ fn build_bare_unconstrained_match<'src>(
 
     let consumed = delim_start..full.end;
     let location = source_slice(pieces, consumed.clone(), root);
-    let body_span = source_slice(pieces, body, root);
-    let value = passthrough_text(body_span.data(), &SubstitutionGroup::Verbatim, parser);
+
+    let value = substitute_and_restore(body_m.as_str(), &body, nodes, pieces, parser);
 
     Some(MacroMatch {
         kind: MacroMatchKind::Node {
@@ -615,6 +666,82 @@ fn build_bare_unconstrained_match<'src>(
         },
         full: full.clone(),
     })
+}
+
+/// Applies the verbatim substitution to a bare `+…+` body and splices each
+/// already-extracted node's own fold bytes back in — the restore-last order
+/// the string pipeline itself performs, where the sentinel it holds for such a
+/// node is ordinary body text until the final restore.
+///
+/// `body_text` is the body as it stands in the level's **match string** and
+/// `range` is where that body sits in it, so the overlapping [`Piece`]s say
+/// exactly which of its bytes are an extracted node's
+/// [`SPAN_PLACEHOLDER`](super::quotes::SPAN_PLACEHOLDER) and which are ordinary
+/// text. That distinction cannot
+/// be recovered from the substituted string: the placeholder is an ordinary
+/// (private-use) character a source can spell **literally**
+/// (`+b\u{E0F0}c+`), and a scan of the substituted bytes would read the two
+/// alike — splicing a body at the literal one, and dropping the real node's.
+///
+/// So the walk is by piece rather than by character. Each run of ordinary
+/// text between two restorable pieces is substituted on its own and appended,
+/// then the piece's restored body is appended verbatim. Substituting run by
+/// run gives the same bytes as substituting the whole body at once, because
+/// the verbatim group is `specialcharacters` alone — a per-character map, so
+/// it distributes over concatenation and no match can span a run boundary.
+///
+/// A body enclosing no restorable piece is simply the substituted body, which
+/// is every `+…+` that was already at parity.
+fn substitute_and_restore(
+    body_text: &str,
+    range: &std::ops::Range<usize>,
+    nodes: &[InlineNode<'_>],
+    pieces: &[Piece],
+    parser: &Parser,
+) -> String {
+    let renderer = parser.renderer.as_ref();
+    let mut out = String::new();
+    let mut cursor = range.start;
+
+    for piece in pieces {
+        let p_end = piece.s_start + piece.s_len;
+
+        if p_end <= range.start || piece.s_start >= range.end {
+            continue;
+        }
+
+        let Some(body) = nodes
+            .get(piece.node_index)
+            .and_then(|node| restorable_body(node, renderer))
+        else {
+            continue;
+        };
+
+        // The gate (`range_is_restorable`) admits only a body whose every
+        // restorable piece lies wholly inside it, so a piece reaching here is
+        // within `range` and at or after the cursor: the run is always a real
+        // slice, and `unwrap_or_default` states that without adding a branch
+        // no test could reach.
+        let run = body_text
+            .get(cursor.saturating_sub(range.start)..piece.s_start.saturating_sub(range.start))
+            .unwrap_or_default();
+
+        out.push_str(&passthrough_text(run, &SubstitutionGroup::Verbatim, parser));
+        out.push_str(body.as_ref());
+        cursor = p_end;
+    }
+
+    let tail = body_text
+        .get(cursor.saturating_sub(range.start)..)
+        .unwrap_or_default();
+
+    out.push_str(&passthrough_text(
+        tail,
+        &SubstitutionGroup::Verbatim,
+        parser,
+    ));
+
+    out
 }
 
 /// Builds one [`Raw`](InlineNode::Raw) node from a verbatim, unescaped
@@ -2059,6 +2186,84 @@ mod tests {
     }
 
     #[test]
+    fn fold_matches_the_string_pipeline_for_a_bare_form_over_an_extracted_passthrough() {
+        // The bare `+…+` form runs in this step's *second* pass, so its body
+        // can enclose a construct the first pass already replaced. The string
+        // pipeline sees its own sentinel there and treats it as ordinary body
+        // text — substituting over it and letting the final restore splice the
+        // inner body in afterwards — and this reproduces that order exactly.
+        for fixture in [
+            // The two documented AsciiDoc idioms, from the language docs.
+            "+Sometimes you feel pass:q[`mono`].+ Sometimes you +$$don\'t$$+.",
+            "+you feel pass:q[`mono`].+",
+            // Each delimited form the first pass recognizes, inside the body.
+            "+a $$b$$ c+",
+            "+a pass:[b] c+",
+            "+a ++b++ c+",
+            "+a +++<i>y</i>+++ c+",
+            // The restored body carrying markup: spliced *after* the verbatim
+            // substitution, so it is emitted once rather than escaped twice.
+            "+a pass:[<b>x</b>] c+",
+            // And a body whose own specials the substitution *does* escape,
+            // beside the restored one — the order the splice has to respect.
+            "+a $$<b>$$ c+",
+            "+a < b $$c$$ d+",
+            // The extracted construct at either edge, as the whole body, and
+            // twice in one body.
+            "+$$a$$+",
+            "+$$a$$ b+",
+            "+a $$b$$+",
+            "+a $$b$$ c $$d$$ e+",
+            // A STEM expression, the other node kind the one extraction pass
+            // produces.
+            "+a stem:[x^2] c+",
+            // The escaped attribute-list bracket's own retry reaches the same
+            // relaxation: the rest of the rejected match is re-scanned, and
+            // the shorter bare form it finds there may itself enclose a
+            // construct the first pass replaced.
+            "['role']\\+++++++++This++++++++++++",
+            "['role']\\+++This+++",
+            "['role']\\++This++",
+            "index:[attrs]+a $$b$$ c+",
+            // The forms that were already at parity, unchanged.
+            "+plain+",
+            "+a `b` c+",
+            "+a *b* c+",
+            // A body carrying [`SPAN_PLACEHOLDER`] **literally**. The
+            // character is an ordinary private-use one a source can spell, so
+            // the restore's own split reads a separator where no piece stands;
+            // it writes the character back rather than consuming a body that
+            // is not there, which is what keeps the rest of the body from
+            // being dropped. Covered at either edge, alone, and beside a real
+            // restored body on both sides of it.
+            "a +b\u{E0F0}c+ d",
+            "a +\u{E0F0}+ d",
+            "a +\u{E0F0}b+ d",
+            "a +b\u{E0F0}+ d",
+            "a +pass:[<b>]\u{E0F0}tail+ d",
+            "a +head\u{E0F0}pass:[<b>]+ d",
+            "a +b\u{E0F0}c\u{E0F0}d+ e",
+        ] {
+            assert_eq!(
+                fold_html(&build_src(Span::new(fixture)), &HtmlSubstitutionRenderer {}),
+                golden_passthroughs(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bare_form_over_an_extracted_passthrough_is_one_raw_node() {
+        // The shape behind that parity: one `Raw` leaf whose value already
+        // carries the inner passthrough's restored body, exactly as the string
+        // pipeline's own entry does by the time the restore runs.
+        let nodes = build_src(Span::new("+a $$b$$ c+"));
+
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(assert_raw(&nodes[0], "a b c").data(), "+a $$b$$ c+");
+    }
+
+    #[test]
     fn a_bare_unconstrained_passthrough_is_a_raw_node() {
         // `+text+` with no attribute list folds through a plain `Raw` leaf —
         // like the double-plus/double-dollar forms, an absent attrlist means
@@ -2153,12 +2358,13 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_unconstrained_match_whose_content_crosses_an_already_built_node_is_deferred() {
-        // A candidate bare-unconstrained match whose body spans an
-        // already-built (opaque) node — here a `Styled` span from a hand-built
-        // level, standing in for what an earlier pass-macro-level match would
-        // leave behind — is left unrecognized rather than mis-sliced, the same
-        // guard every other macro family in this module keeps.
+    fn a_bare_unconstrained_match_whose_content_crosses_an_unrestorable_node_is_deferred() {
+        // A candidate bare-unconstrained match whose body spans an opaque node
+        // whose own fold bytes are *not* known at build time — here a `Styled`
+        // span from a hand-built level — is left unrecognized rather than
+        // mis-sliced. (An already-built passthrough or STEM leaf, which the
+        // pass-macro level really does leave behind, is admitted and restored;
+        // see `fold_matches_the_string_pipeline_for_a_bare_form_over_an_extracted_passthrough`.)
         let source = Span::new("+x+");
 
         let nodes = vec![

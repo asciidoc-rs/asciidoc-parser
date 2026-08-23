@@ -5218,6 +5218,72 @@ Each phase is a reviewable unit with a clear exit gate.
   with no display text to carry; beyond it the remainder is unchanged — the boundary-class halves
   the sibling increments named, plus the keeps.
 
+  *Step 6 prep landed as (a bare `+…+` body enclosing an already-extracted passthrough):* the
+  passthrough-extraction step runs as **two passes** — `INLINE_PASS_MACRO` (`+++…+++`, `++…++`,
+  `$$…$$`, `pass:[…]`), then `INLINE_PASS` over what it left behind — so a bare `+…+` body can
+  enclose a construct the first pass already replaced. Two documented AsciiDoc idioms spell it,
+  and the language docs' own sentence exercises both:
+  `` +Sometimes you feel pass:q[`mono`].+ Sometimes you +$$don't$$+. ``
+
+  The string pipeline sees its own **sentinel** there and does the least interesting thing
+  possible with it: it treats it as ordinary body text, applies the verbatim substitution to the
+  body *with the sentinel still in it*, stores that as this passthrough's own entry, and lets the
+  final restore splice the inner body in afterwards. The builder was reading its body through
+  [`source_slice`](../../parser/src/content/inline_builder/quotes.rs) and gating on
+  [`range_is_verbatim`](../../parser/src/content/inline_builder/macros/image.rs), so an
+  already-built [`Raw`](../../parser/src/inlines/inline_node.rs) leaf in the body — atomic, with
+  no `'src` slice of its own — deferred the whole match and left the `+` delimiters literal.
+
+  It reproduces that order exactly instead. The body is read from the level's **match string**,
+  where the already-built leaf stands as one
+  [`SPAN_PLACEHOLDER`](../../parser/src/content/inline_builder/quotes.rs) — the same shape the
+  sentinel has — and a new
+  [`substitute_and_restore`](../../parser/src/content/inline_builder/passthrough_step.rs) walks
+  the body's own [`Piece`](../../parser/src/content/inline_builder/quotes.rs)s: each run of
+  ordinary text between two restorable pieces goes through
+  [`passthrough_text`](../../parser/src/content/inline_builder/passthrough_step.rs) on its own,
+  and each piece contributes what the fold of that node emits
+  ([`restorable_body`](../../parser/src/content/inline_builder/macros/image.rs)) verbatim.
+  Substituting first and splicing after is the whole point: it is what keeps an inner `<b>` from
+  being escaped a second time. Substituting run by run gives the same bytes as substituting the
+  whole body at once, because the verbatim group is `specialcharacters` alone — a per-character
+  map, so it distributes over concatenation and no match can span a run boundary.
+
+  Walking by *piece* rather than scanning the substituted string for the placeholder character is
+  what makes the splice unambiguous. `SPAN_PLACEHOLDER` is an ordinary private-use character, so a
+  source can spell one **literally** (`+b\u{E0F0}c+`), and a scan reads the two alike: it would
+  splice a node's body at the literal one and then run out of bodies before the real placeholder,
+  silently dropping everything after it. The pieces say which is which; the literal character is
+  ordinary text inside a run and comes through untouched. Pinned at either edge, alone, twice in
+  one body, and on both sides of a real restored body.
+
+  The gate becomes
+  [`range_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs) — nothing else
+  can reach this pass, which runs before the escaping, quotes, and macros steps, so a `CharRef`
+  leaf or a rendered span does not exist yet; a
+  [`synthesized`](../../parser/src/content/inline_builder/quotes.rs) run comes along too, since
+  the body no longer slices `'src`.
+
+  What reaches parity is both documented idioms, each delimited form the first pass recognizes
+  inside the body, a restored body carrying markup (emitted once, not escaped twice) beside one
+  whose own specials the substitution *does* escape, the extracted construct at either edge and as
+  the whole body and twice in one body, a STEM expression (the other node kind the one extraction
+  pass produces), and the escaped attribute-list bracket's own **retry**, whose re-scan finds a
+  shorter bare form that may itself enclose one — which is how
+  `['role']\+++++++++This++++++++++++` reaches parity as a second closed golden fixture without a
+  line of its own. The forms already at parity are unchanged. A structural test asserts the shape:
+  one `Raw` leaf whose value already carries the inner body, exactly as the string pipeline's own
+  entry does by restore time. The two **attribute-list-prefixed** bare forms keep the verbatim
+  gate — their attribute list is parsed from an `'src` span and the `x-` spelling re-runs a whole
+  nested `Normal` build over the body — so `[method x-]+pass:[<b>]+` stays deferred with its own
+  test. The structural recorder sweep deliberately omits this shape: the builder makes one leaf
+  where the recorder, recovering structure from the finished string, sees the inner construct's
+  own markers and splits the same text into several — the leaf-boundary asymmetry that module's
+  doc comment already describes, not a divergence.
+
+  Re-running the corpus-wide fold-parity audit shows **two** golden fixtures gone from the
+  divergence set and no new divergence; coverage is diff-neutral, and nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -6156,6 +6222,27 @@ Each phase is a reviewable unit with a clear exit gate.
        relaxed. All three formerly pinned divergences become parity tests, with a separate corpus
        driving the three-pass registration order through the real pipeline on both sides; see the
        step's own "landed as" note above.
+
+     - ✅ **prep (a bare `+…+` body enclosing an already-extracted passthrough).** The
+       passthrough-extraction step runs as two passes, so a bare `+…+` body can enclose a
+       construct the first pass already replaced (`+a $$b$$ c+`,
+       `` +you feel pass:q[`mono`].+ ``, both documented idioms). The string pipeline treats its
+       own sentinel there as ordinary body text — substituting over it and letting the final
+       restore splice the inner body in afterwards — where the builder read its body through
+       `source_slice` and deferred on the atomic leaf. It now reads the body from the level's
+       **match string** and walks that body's own `Piece`s
+       ([`substitute_and_restore`](../../parser/src/content/inline_builder/passthrough_step.rs)):
+       each run of ordinary text between two restorable pieces goes through
+       [`passthrough_text`](../../parser/src/content/inline_builder/passthrough_step.rs) on its
+       own, and each piece contributes its fold bytes verbatim — substitute first, restore after,
+       which is what keeps an inner `<b>` from being escaped twice. Walking by piece rather than
+       scanning for the placeholder character is what disambiguates a `SPAN_PLACEHOLDER` a source
+       spells **literally**, which a scan would splice a body at and then silently truncate the
+       rest of the body. The gate becomes
+       [`range_is_restorable`](../../parser/src/content/inline_builder/macros/image.rs). The
+       escaped-bracket retry's own re-scan inherits the lift, closing a second golden fixture; the
+       two attribute-list-prefixed bare forms keep the verbatim gate, so `[method x-]+pass:[<b>]+`
+       stays deferred. See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
