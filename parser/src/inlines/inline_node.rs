@@ -158,6 +158,7 @@ mod tests {
             }),
             InlineNode::Ref(Ref {
                 variant: RefVariant::Link,
+                link_form: Some(crate::inlines::LinkForm::Macro),
                 target: CowStr::from("https://example.com"),
                 children: vec![],
                 roles: vec![],

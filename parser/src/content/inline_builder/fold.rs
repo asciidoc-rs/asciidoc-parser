@@ -736,6 +736,7 @@ mod tests {
     fn resolved_xref_with_signifier(xrefstyle: Option<XrefStyle>) -> InlineNode<'static> {
         InlineNode::Ref(Ref {
             variant: RefVariant::Xref,
+            link_form: None,
             target: CowStr::from("install"),
             children: vec![],
             roles: vec![],

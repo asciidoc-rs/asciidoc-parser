@@ -88,6 +88,20 @@ pub struct Ref<'src> {
     /// always `None` for an [`Xref`](RefVariant::Xref).
     pub attrs: Option<Attrlist<'src>>,
 
+    /// For a [`Link`](RefVariant::Link), which of AsciiDoc's three link
+    /// spellings the source used; `None` for a cross-reference.
+    ///
+    /// The three spellings render alike but are *written* differently — a
+    /// `link:`/`mailto:` macro, a URL standing on its own (or carrying a
+    /// bracketed text), and a bare e-mail address — so a consumer that writes
+    /// AsciiDoc back out needs this to reproduce the source, and one that
+    /// reports on a document can tell an explicit macro from an
+    /// automatically-recognized URL. It is also what lets the asset catalog be
+    /// filled in the order AsciiDoc's own substitution performs, which runs
+    /// the three spellings as three separate passes over the whole content
+    /// rather than in document order.
+    pub link_form: Option<LinkForm>,
+
     /// The source location of the whole reference.
     pub location: Span<'src>,
 }
@@ -96,6 +110,22 @@ impl<'src> HasSpan<'src> for Ref<'src> {
     fn span(&self) -> Span<'src> {
         self.location
     }
+}
+
+/// Which of AsciiDoc's three link spellings a [`Ref`]`{Link}` was written as
+/// (see [`Ref::link_form`]).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LinkForm {
+    /// A URL written on its own (`https://example.org`), optionally carrying a
+    /// bracketed display text (`https://example.org[Docs]`) or angle brackets
+    /// (`<https://example.org>`).
+    AutoOrFormal,
+
+    /// A `link:`/`mailto:` macro (`link:index.html[Docs]`).
+    Macro,
+
+    /// A bare e-mail address written in the flow (`doc@example.org`).
+    Email,
 }
 
 /// Whether a [`Ref`] is a link or a cross-reference. ASG: `variant`.

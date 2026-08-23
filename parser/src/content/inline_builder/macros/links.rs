@@ -21,7 +21,7 @@ use crate::{
             special_chars::Masked,
         },
     },
-    inlines::{InlineNode, Ref, RefVariant},
+    inlines::{InlineNode, LinkForm, Ref, RefVariant},
     parser::{InlineSubstitutionRenderer, has_dangerous_scheme},
     strings::CowStr,
 };
@@ -666,6 +666,7 @@ fn build_inline_link_node<'src>(
 
     let node = InlineNode::Ref(Ref {
         variant: RefVariant::Link,
+        link_form: Some(LinkForm::AutoOrFormal),
         target: CowStr::from(target),
         children,
         roles,
@@ -730,8 +731,8 @@ fn build_inline_link_node<'src>(
 /// Like the rest of this additive builder it performs no `register_link` side
 /// effect; [`apply_link_side_effects`] stages that for the cutover, and needs
 /// no angle-specific case — an angle node is `InlineLinkReplacer`'s own pass,
-/// so [`link_form`] already classifies it as
-/// [`AutoOrFormal`](LinkForm::AutoOrFormal) from its `location` and `target`.
+/// so it records the same [`AutoOrFormal`](LinkForm::AutoOrFormal)
+/// [`link_form`](crate::inlines::Ref::link_form) its non-angle sibling does.
 ///
 /// [`InlineLinkReplacer`]: crate::content::macros
 fn build_angle_link_node<'src>(
@@ -818,6 +819,7 @@ fn build_angle_link_node<'src>(
 
     let node = InlineNode::Ref(Ref {
         variant: RefVariant::Link,
+        link_form: Some(LinkForm::AutoOrFormal),
         target: CowStr::from(target),
         children,
         roles: vec![CowStr::from("bare")],
@@ -872,20 +874,18 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 /// - **Auto-links and formal-URL links** (`https://example.org`, `https://example.org[text]`)
 ///   are matched by a *different* pattern (`INLINE_LINK`, with its bare-URL
 ///   trailing-punctuation handling) and are a separate later increment.
-/// - **A macro whose own `link:`/`mailto:` marker is not verbatim** — a
-///   *wholly* expanded macro (`:m: link:index.html[Docs]`, then `{m}`) — is
-///   deferred. Its target and bracketed text could be read from the match
-///   string like every other value here, but the node's `location` would then
-///   fall back to the expansion's coarse span (design §4.4), and that location
-///   is the very signal [`link_form`] reads to tell this pass's nodes apart
-///   from the other two link passes' when [`apply_link_side_effects`] replays
-///   the string pipeline's own family-pass registration order. A macro whose
-///   marker *is* written in the source (`link:{url}[Docs]`,
-///   `mailto:{addr}[Team]`) keeps an honest location and is recognized.
 ///
-/// Apart from that marker, a [`synthesized`](Piece::synthesized) run is
-/// admitted: the target and display text are read out of the level's match
-/// string, which carries an expanded value's bytes exactly.
+/// A [`synthesized`](Piece::synthesized) run is admitted throughout, the
+/// macro's own `link:`/`mailto:` **marker** included: the target and display
+/// text are read out of the level's match string, which carries an expanded
+/// value's bytes exactly, and only the node's `location` falls back to the
+/// expansion's coarse span (design §4.4). A *wholly* expanded macro
+/// (`:m: link:index.html[Docs]`, then `{m}`) used to defer for that location
+/// alone — it was the signal that told this pass's nodes from the other two
+/// link passes' when [`apply_link_side_effects`] replays the string
+/// pipeline's family-pass registration order — and no longer does: the node
+/// records the spelling itself, on
+/// [`Ref::link_form`](crate::inlines::Ref::link_form).
 ///
 /// An **escaped special** ([`CharRef`](InlineNode::CharRef)`::Special`) is
 /// admitted too, in an attribute-list text as much as anywhere else
@@ -1046,29 +1046,19 @@ fn find_link_macro_matches<'src>(
         // rendered-span note. The `link:`/`mailto:` marker and the brackets
         // need no gate of their own: those bytes are literal, and no atomic
         // piece — a placeholder, or an entity delimited by `&` and `;` — can
-        // supply them. (The marker keeps its own stricter, verbatim gate
-        // below, for `link_form`'s sake; a text carrying an attribute list
-        // has its own gate inside `text_attrlist`, since its display text
-        // comes back from a *parse*: a masked construct is tokened through
-        // that parse and restored after it, a rendered span still deferred.)
+        // supply them. The marker needs no gate of its own either, now that
+        // the node records which spelling built it
+        // ([`Ref::link_form`](crate::inlines::Ref::link_form)) rather than
+        // having it re-derived from `location` — so a *wholly* expanded macro
+        // (`:m: link:index.html[Docs]`, then `{m}`) is recognized, with only
+        // its `location` taking design §4.4's coarse span. A text carrying an
+        // attribute list has its own gate inside `text_attrlist`, since its
+        // display text comes back from a *parse*: a masked construct is
+        // tokened through that parse and restored after it, a rendered span
+        // still deferred.
         if let Some(target) = caps.get(3)
             && !range_is_restorable(nodes, pieces, &(target.start()..target.end()))
         {
-            continue;
-        }
-
-        // The macro's own `link:`/`mailto:` marker must be verbatim source, so
-        // the node's `location` still starts with it — the signal
-        // [`link_form`] reads (see [`link_macro_level`]'s own scope note). The
-        // marker runs from the match's start to wherever the target group
-        // begins; one of groups 2 (empty target) and 3 always participates.
-        let marker = full.start
-            ..caps
-                .get(2)
-                .or_else(|| caps.get(3))
-                .map_or(full.end, |m| m.start());
-
-        if !range_is_verbatim(pieces, &marker) {
             continue;
         }
 
@@ -1497,6 +1487,7 @@ pub(super) fn build_link_node<'src>(
 
     Some(InlineNode::Ref(Ref {
         variant: RefVariant::Link,
+        link_form: Some(LinkForm::Macro),
         target: CowStr::from(target),
         children,
         roles,
@@ -1932,6 +1923,7 @@ fn build_email_node<'src>(
 
     InlineNode::Ref(Ref {
         variant: RefVariant::Link,
+        link_form: Some(LinkForm::Email),
         target: CowStr::from(format!("mailto:{address}")),
         children: macro_text_children(address, range, false, nodes, pieces, root),
         roles: vec![],
@@ -1989,14 +1981,13 @@ fn build_email_node<'src>(
 /// registers as `["https://a.example", "b.html"]`, not `["b.html",
 /// "https://a.example"]`), so this function makes **three** passes over the
 /// tree — all auto-link/formal-URL matches first, then all `link:`/`mailto:`
-/// macro matches, then all bare addresses — rather than one. [`link_form`]
-/// tells them apart from the node's own `location` and `target` (a
-/// `link:`/`mailto:` macro's location always starts with its literal prefix,
-/// and only a bare address yields a `mailto:` target without one;
-/// [`inline_link_level`] never builds a node for `INLINE_LINK`'s own
-/// link-macro branch, deferring that whole form to [`link_macro_level`] — see
-/// [`inline_link_level`]'s own doc comment — so this is a reliable,
-/// no-recomputation signal, not a heuristic).
+/// macro matches, then all bare addresses — rather than one.
+/// [`Ref::link_form`](crate::inlines::Ref::link_form) tells them apart: each
+/// pass records the spelling on the node it builds, so this reads a fact
+/// rather than re-deriving one. (It used to be re-derived from the node's
+/// `location` and `target`, which cost this family a deferral — a macro whose
+/// own literal marker was not verbatim source had no location to read — see
+/// [`link_macro_level`]'s own scope note.)
 ///
 /// Recurses into every container a `Ref` node can be nested inside —
 /// [`Styled`](InlineNode::Styled), another [`Ref`](InlineNode::Ref) (a link's
@@ -2013,28 +2004,13 @@ pub(crate) fn apply_link_side_effects(nodes: &[InlineNode<'_>], parser: &Parser)
     register_links_of_form(nodes, parser, LinkForm::Email);
 }
 
-/// Which of the three link-recognizing passes built a
-/// [`Ref`](InlineNode::Ref) node — see [`apply_link_side_effects`]'s own
-/// "Registration order" note.
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum LinkForm {
-    /// An auto-link or formal-URL link, built by [`inline_link_level`].
-    AutoOrFormal,
-
-    /// A `link:`/`mailto:` macro, built by [`link_macro_level`].
-    Macro,
-
-    /// A bare e-mail address, built by [`email_level`].
-    Email,
-}
-
 /// Walks `nodes`, registering only the [`Ref`](InlineNode::Ref)`{Link}` nodes
 /// of the given `form`, in document order.
 fn register_links_of_form(nodes: &[InlineNode<'_>], parser: &Parser, form: LinkForm) {
     for node in nodes {
         match node {
             InlineNode::Ref(reference) => {
-                if reference.variant == RefVariant::Link && link_form(reference) == form {
+                if reference.link_form == Some(form) {
                     parser.register_link(reference.target.to_string());
                 }
 
@@ -2054,25 +2030,6 @@ fn register_links_of_form(nodes: &[InlineNode<'_>], parser: &Parser, form: LinkF
     }
 }
 
-/// Tells which pass built a link [`Ref`](InlineNode::Ref) node from its own
-/// `location` and `target`: only [`link_macro_level`] ever builds a node whose
-/// matched source starts with a literal `link:`/`mailto:` prefix, and — of the
-/// two passes left — only [`email_level`] builds one whose target carries the
-/// `mailto:` scheme ([`inline_link_level`]'s own targets always carry one of
-/// [`INLINE_LINK`]'s `https?`/`file`/`ftp`/`irc` schemes instead). See
-/// [`apply_link_side_effects`]'s own doc comment.
-fn link_form(reference: &Ref<'_>) -> LinkForm {
-    let text = reference.location.data();
-
-    if text.starts_with("link:") || text.starts_with("mailto:") {
-        LinkForm::Macro
-    } else if reference.target.starts_with("mailto:") {
-        LinkForm::Email
-    } else {
-        LinkForm::AutoOrFormal
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing)]
@@ -2086,7 +2043,7 @@ mod tests {
     use crate::{
         HasSpan, Parser, Span,
         content::inline_builder::build,
-        inlines::{CharRef, InlineNode, SpanForm, StyleVariant},
+        inlines::{CharRef, InlineNode, LinkForm, SpanForm, StyleVariant},
         parser::{DefaultPathResolver, HtmlSubstitutionRenderer},
         strings::CowStr,
     };
@@ -6216,9 +6173,9 @@ mod tests {
         // The angle form is `InlineLinkReplacer`'s own branch — the *first* of
         // the three link passes — so it registers alongside (and in source
         // order with) the auto-links and formal-URL links, before any
-        // `link:`/`mailto:` macro. `link_form` reaches that classification with
-        // no angle-specific case: the node's location does not start with a
-        // `link:`/`mailto:` prefix, and its target is not a `mailto:` one.
+        // `link:`/`mailto:` macro. It needs no angle-specific case: the node
+        // records the same `AutoOrFormal` `link_form` its non-angle sibling
+        // does.
         let source = "link:b.html[B] then <https://a.example> then https://c.example";
         let parser = Parser::default().with_catalog_assets(true);
         let nodes = build_with(Span::new(source), &parser);
@@ -6420,6 +6377,11 @@ mod tests {
                 "link:index.html[Docs]",
                 ModificationContext::Anywhere,
             )
+            .with_intrinsic_attribute(
+                "mailto-src",
+                "mailto:team@example.org[Team]",
+                ModificationContext::Anywhere,
+            )
     }
 
     /// The real, public pipeline's output for `source` — the golden for the
@@ -6528,29 +6490,93 @@ mod tests {
     }
 
     #[test]
-    fn a_wholly_expanded_link_macro_is_a_documented_divergence() {
+    fn fold_matches_the_string_pipeline_for_a_wholly_expanded_link_macro() {
         // A `link:`/`mailto:` macro whose own marker comes from the expansion
-        // has no location starting with that marker, and that location is the
-        // signal `link_form` reads to replay the string pipeline's family-pass
-        // registration order. Rather than build a node the side-effect walk
-        // would then mis-attribute, the macro is left literal.
-        //
-        // If this boundary is ever lifted (with a signal that does not depend
-        // on the location), fold this fixture into the parity corpus above.
+        // is recognized now that the node records which spelling built it
+        // ([`Ref::link_form`]) instead of having it re-derived from
+        // `location` — the signal `apply_link_side_effects` reads to replay
+        // the string pipeline's family-pass registration order. Only the
+        // node's `location` takes design §4.4's coarse span. This closes the
+        // divergence `a_wholly_expanded_link_macro_is_a_documented_divergence`
+        // used to pin, per its own "if this boundary is ever lifted" note.
         let parser = expanding_parser();
-        let source = "see {link-src} now";
 
-        let nodes = build(Span::new(source), &parser, None);
+        for fixture in [
+            // The whole macro from one expansion, alone and in flow.
+            "{link-src}",
+            "see {link-src} now",
+            // The `mailto:` spelling, and a macro whose marker *and* target
+            // both come from expansions.
+            "write {mailto-src} now",
+            "see {link-src} and {link-src} now",
+            // Beside the two other link spellings, whose own registration
+            // passes run before and after this one.
+            "see {link-src} and https://example.org and doc@example.org now",
+            // Inside a rendered span, where the macros step descends.
+            "*see {link-src} now*",
+            // A marker written in the source still keeps its honest location.
+            "see link:{url}[{label}] now",
+        ] {
+            assert_eq!(
+                fold_html(
+                    &build(Span::new(fixture), &parser, None),
+                    &HtmlSubstitutionRenderer {}
+                ),
+                golden_normal(fixture, &parser),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+    }
 
-        assert!(
-            nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-            "a wholly expanded link macro must stay literal: {nodes:?}"
-        );
+    #[test]
+    fn a_wholly_expanded_link_macro_keeps_a_coarse_location_and_its_form() {
+        // The shape behind that parity: the node is a `Macro`-form link — the
+        // signal the registration walk reads — with the whole attribute
+        // reference as its `location`, design §4.4's coarse fallback.
+        let parser = expanding_parser();
+        let nodes = build(Span::new("see {link-src} now"), &parser, None);
 
-        assert!(
-            golden_normal(source, &parser).contains("<a href"),
-            "the golden fixture stopped recognizing the link"
-        );
+        let reference = nodes
+            .iter()
+            .find_map(|n| match n {
+                InlineNode::Ref(reference) => Some(reference),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected a Ref node: {nodes:?}"));
+
+        assert_eq!(reference.link_form, Some(LinkForm::Macro));
+        assert_eq!(reference.target.as_ref(), "index.html");
+        assert_eq!(reference.location.data(), "{link-src}");
+    }
+
+    #[test]
+    fn matches_the_golden_pipelines_registration_for_expanded_link_macros() {
+        // The registration order that used to depend on the node's location:
+        // an expanded macro registers in the *macro* pass, between the two URL
+        // link forms' pass and the bare-e-mail one's, wherever it stands in
+        // the source. Driven through the real pipeline on both sides, since
+        // these fixtures need the `AttributeReferences` step.
+        for fixture in [
+            "{link-src}",
+            "see {link-src} now",
+            "see {link-src} and https://example.org now",
+            "https://a.example then {link-src} then doc@example.org",
+            "doc@example.org then {link-src}",
+            "{link-src} then link:b.html[B]",
+        ] {
+            let builder_parser = expanding_parser().with_catalog_assets(true);
+            let nodes = build(Span::new(fixture), &builder_parser, None);
+            apply_link_side_effects(&nodes, &builder_parser);
+
+            let golden_parser = expanding_parser().with_catalog_assets(true);
+            golden_normal(fixture, &golden_parser);
+
+            assert_eq!(
+                builder_parser.catalog().links(),
+                golden_parser.catalog().links(),
+                "registered links diverged for {fixture:?}"
+            );
+        }
     }
 
     #[test]
