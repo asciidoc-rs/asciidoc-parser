@@ -276,6 +276,12 @@ fn fold_matches_the_rendered_string_after_resolution() {
         "[[a]]A.\n\n[[b]]B.\n\nSee <<a>>.footnote:[and also <<b>>] and <<b>>.",
         // A footnote in a heading, beside a reference to that heading.
         "[#sect]\n== Section footnote:[a note]\n\nSee <<sect>>.",
+        // A footnote nested in a child that falls between two of its level's
+        // own: the catalog's footnote list is in document order, so this
+        // fixture fails on the *subtree-to-text* pairing — not only on the
+        // fold — if the numbering order slips.
+        "before footnote:[a] *span footnote:[b]* after footnote:[c]",
+        "before footnote:[a] ((a term footnote:[b])) after footnote:[c]",
         // Footnote texts carrying their own inline constructs.
         "A claim.footnote:[the *strong* and _soft_ evidence]",
         "A claim.footnote:[see link:https://example.org[the source]]",
