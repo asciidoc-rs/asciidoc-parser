@@ -5513,6 +5513,72 @@ Each phase is a reviewable unit with a clear exit gate.
   cause had gone unseen too. Re-running the audit shows no change to the divergence set, since the
   shapes that expose it are new here. Coverage is diff-neutral; nothing further is wired in.
 
+  *Step 6 prep landed as (a visible index term's shown text, handed back to the later families):*
+  the recognition half the sweep above named, closed for the shorthand spellings.
+
+  A visible term's shown text is not a boundary the other macro families stop at. The string
+  replacer replaces `((term))` with that text and nothing else, so the text goes on sitting in the
+  one flat haystack every later pass scans: a `link:` macro, a bare URL or address, an inline
+  anchor, or a cross-reference written inside `((…))` is recognized by the pass that runs after the
+  index-term pass, exactly as if the parentheses were not there.
+
+  Two things had to change for a tree to say the same. First, what the node **carries**:
+  [`shown_term`](../../parser/src/content/inline_builder/macros/indexterm.rs) built a `children`
+  subtree only when no already-substituted string could express the shown text (a term enclosing a
+  rendered span), and a plain term's text was a string in
+  [`terms`](../../parser/src/inlines/index_term.rs) alone — nothing for a later family to descend
+  into. It now builds **both**, from the same range: `children` is the shown text's authoritative
+  form (a term's text is a region of the document, not an opaque string), and `terms` carries the
+  same text as the single string
+  [`IndexTermRenderParams`](../../parser/src/parser/inline_substitution_renderer.rs) takes whenever
+  one can express it. The two agree by construction —
+  [`shown_term_range`](../../parser/src/content/inline_builder/macros/indexterm.rs) answers the
+  normalization as offsets and `emit_shown_term_range` performs the two remaining rewrites
+  structurally — which is what makes carrying both a widening rather than a choice, and leaves
+  every existing `terms` reader working.
+
+  Second, **who sees them**: the five families that run after this one (the three link spellings,
+  inline anchors, cross-references) move into an
+  [`apply_reference_families`](../../parser/src/content/inline_builder/macros/mod.rs) that
+  [`apply_macro_families`](../../parser/src/content/inline_builder/macros/mod.rs) now calls twice —
+  once for this level, and once per visible term, over the term's own children. Their own level
+  rather than one flat scan, because a term renders its shown text with no markup of its own, so
+  its children read what stands beside the *term* — exactly the transparent case
+  [`LevelContext::child_contexts`](../../parser/src/content/inline_builder/quotes.rs) already
+  answers, and the same treatment a transparent span's children get.
+
+  Making `children` the common case immediately surfaced a **third** face of the sweep's own root
+  cause, in a walk nobody had thought to check:
+  [`classify_unescaped_specials`](../../parser/src/content/inline_builder/special_chars.rs) — which
+  under an order omitting `specialcharacters` turns a literal `<`/`>`/`&` into a `Raw` leaf — also
+  did not descend into `IndexTerm`, so `an escaped \(((a & b))) term` under a `Macros`-only group
+  escaped an ampersand the string pipeline leaves alone. The existing `build_for_group` corpus
+  caught it the moment the term's text became nodes.
+
+  What reaches parity is each later family inside a term (`link:`, `mailto:`, a bare URL, a bare
+  address, `[[id]]`, `anchor:id[…]`), at either edge of the shown text and as the whole of it,
+  twice in one term, two families in one term, beside a twin outside the term so the pass order
+  that fills the asset catalog is exercised from both sides, the two paren-keeping spellings whose
+  shown text is a narrowing, inside a rendered span and with one inside the term, and the nested
+  `((… ((term)) …))` shorthand. A cross-reference cannot be asserted this way — `golden_macros`
+  runs a bare `Content`, which has no catalog, so *every* `xref:`/`<<…>>` is left as the deferred
+  sentinel there — so a whole-document test drives both spellings through the real parse path
+  instead, in block content and in a heading's own title. The side-effect sweep gains the same
+  shapes on its side.
+
+  What still defers is the **macro** spellings (`indexterm:[…]`, `indexterm2:[…]`), which keep
+  their shown text as a string alone: an attribute list's shown term is the value `Attrlist::parse`
+  returns for its first positional attribute, which is not a range of this level's match string, so
+  nodes built from that range would not agree with it — and this family cannot tell that case from
+  the plain one before the list is parsed. Closing it needs the attribute-list narrowing itself
+  expressed as a range of the match string, the way `shown_term_range` already expresses `trim` and
+  the `see` strip; pinned by its own divergence test. The structural recorder sweep's index-term
+  comparison is relaxed to match the widened node: `children` is one-sided richness it never
+  compares, and `terms` is compared wherever the builder computed one.
+
+  Re-running the corpus-wide fold-parity audit shows no change to the divergence set; coverage is
+  diff-neutral, and nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -6534,6 +6600,21 @@ Each phase is a reviewable unit with a clear exit gate.
        the index-term pass cannot reach a plain visible term's shown text, which is a string
        rather than a subtree — deferred to its own increment and pinned by a divergence test with
        its parity complement beside it. See the step's own "landed as" note above.
+
+     - ✅ **prep (a visible index term's shown text, handed back to the later families).** The
+       recognition half the sweep above named, closed for the shorthand spellings. A visible term's
+       shown text is not a boundary the other macro families stop at — the string replacer puts it
+       back into the one flat haystack every later pass scans — so `shown_term` now builds the
+       `children` subtree **always**, not only when no string can express the text, and the five
+       families that run after this one move into an `apply_reference_families` that
+       `apply_macro_families` calls once for this level and once per visible term over its own
+       children (their own level, the transparent case `child_contexts` already answers). `terms`
+       goes on carrying the same text as a string wherever one exists, so the node is widened
+       rather than reshaped. Making `children` the common case surfaced a third walk with the same
+       omission — `classify_unescaped_specials` — caught by the existing `build_for_group` corpus.
+       The macro spellings still defer, since an attribute list's shown term is not a range of the
+       match string; pinned by their own divergence test. See the step's own "landed as" note
+       above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

@@ -172,16 +172,24 @@ fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
 /// design §4.4's coarse fallback. This is the same lift the anchor and
 /// bare-e-mail families already made, for the same reason.
 ///
-/// What a visible term's shown text *encloses* is recognized only by the
-/// families that run **before** this one (image/icon), or by a rendered span
-/// the quotes step wrote earlier, whose own children this step resolves in
-/// full first — either way the construct is already a node, carried in
-/// [`children`](crate::inlines::IndexTerm::children). The families that run
-/// **after** (the three link spellings, anchors, cross-references) do not
-/// reach it: a plain visible term's shown text is an already-substituted
-/// *string* in [`terms`](crate::inlines::IndexTerm::terms), and the string
-/// pipeline goes on scanning that text in its one flat haystack where a tree
-/// has no nodes to descend into. Deferred, pinned by a divergence test.
+/// A visible term's shown text is **not** a boundary the other macro families
+/// stop at, because the string replacer puts that text back into the one flat
+/// haystack every later pass scans. So the shorthand spellings carry it as
+/// nodes in [`children`](crate::inlines::IndexTerm::children) — always, not
+/// only when it encloses a rendered span — and
+/// [`apply_macro_families`](super::apply_macro_families) hands those children
+/// to the families that run after this one, as their own level. The families
+/// that run *before* it need nothing: their construct is already a node when
+/// the term encloses it.
+///
+/// The **macro** spellings (`indexterm:[…]`, `indexterm2:[…]`) keep their shown
+/// text as a string alone. An attribute list's shown term is the value
+/// [`Attrlist::parse`](Attrlist) returns for its first positional attribute,
+/// which is not a range of this level's match string, so nodes built from that
+/// range would not agree with it — and this family cannot tell that case from
+/// the plain one before the list is parsed. What such a term's text encloses
+/// therefore stays unreached by the later families; pinned by a divergence
+/// test.
 ///
 /// As in the additive builder generally, this performs *no* recognition side
 /// effect; the string replacer records nothing in a catalog either (the HTML
@@ -306,16 +314,22 @@ impl TermSource {
     }
 }
 
-/// The shown text of a visible term, in whichever of the two forms an
-/// [`IndexTerm`] node can carry it (see [`IndexTerm::children`]).
-enum ShownTerm<'src> {
-    /// The already-substituted string the string replacer computes, which is
-    /// what every term whose own bytes the match string spells in full becomes.
-    Computed(String),
+/// The shown text of a visible term, in both of the forms an [`IndexTerm`]
+/// node can carry it (see [`IndexTerm::children`]).
+///
+/// The two are built from the *same* range of the level's match string and
+/// agree by construction — [`shown_term_range`] answers the normalization as
+/// offsets, and [`emit_shown_term_range`] performs the two remaining byte
+/// rewrites structurally — so a caller is free to take either or both.
+struct ShownTerm<'src> {
+    /// The already-substituted string the string replacer computes.
+    ///
+    /// `None` when the term crosses a construct whose rendering exists only at
+    /// fold time, which no string built now can spell.
+    computed: Option<String>,
 
-    /// The nodes the term encloses, for a term crossing a construct whose
-    /// rendering exists only at fold time.
-    Children(Vec<InlineNode<'src>>),
+    /// The nodes the term encloses.
+    children: Vec<InlineNode<'src>>,
 }
 
 /// The range of `text` the string replacer *shows*, as a narrowing of the
@@ -417,10 +431,6 @@ fn shown_term<'src>(
         computed = computed.replace("\\]", "]");
     }
 
-    if !computed.contains(SPAN_PLACEHOLDER) {
-        return ShownTerm::Computed(computed);
-    }
-
     let shown_source = source.narrow(&range);
     let mut children = Vec::new();
 
@@ -436,7 +446,10 @@ fn shown_term<'src>(
         );
     }
 
-    ShownTerm::Children(children)
+    ShownTerm {
+        computed: (!computed.contains(SPAN_PLACEHOLDER)).then_some(computed),
+        children,
+    }
 }
 
 /// Emits the nodes one contiguous range of a shown term covers, performing
@@ -549,26 +562,33 @@ fn build_indexterm_macro_match<'src>(
 
         let shown = shown_term(s, &source, false, true, nodes, pieces, root);
 
-        let (terms, children, rendered_nonempty) = match shown {
-            ShownTerm::Computed(term) => {
+        let (terms, children, rendered_nonempty) = match shown.computed {
+            Some(term) => {
                 let term = shown_macro_term(term, parser);
                 let rendered_nonempty = !term.is_empty();
 
+                // The macro spelling keeps its shown text as a **string**
+                // alone. An attribute list's shown term is the value
+                // [`Attrlist::parse`](Attrlist) returns for its first
+                // positional attribute, which is not a range of this level's
+                // match string, so the nodes built from that range would not
+                // agree with it — and this family cannot tell the two cases
+                // apart before the list is parsed. So the later macro families
+                // still do not reach what *this* spelling's shown text
+                // encloses; the shorthand's own note records the boundary.
                 (vec![CowStr::from(term)], vec![], rendered_nonempty)
             }
 
-            ShownTerm::Children(children) => {
-                // An attribute list's shown term is the value
-                // [`Attrlist::parse`](Attrlist) returns for its first
-                // positional attribute, not a range of this level's match
-                // string, so there is nothing to carry structurally and the
-                // macro is deferred — the boundary the increment that read the
-                // list here deliberately did not move.
+            None => {
+                // As above, with nothing to carry as a string either: the term
+                // crosses a construct whose rendering exists only at fold
+                // time, and an attribute list would decide which of its bytes
+                // are shown.
                 if source.text(s).contains('=') {
                     return None;
                 }
 
-                (vec![], children, true)
+                (vec![], shown.children, true)
             }
         };
 
@@ -761,15 +781,15 @@ fn push_indexterm_shorthand_matches<'src>(
         let term_full = (full.start + 1)..full.end;
         let consumed = (term_full.start + 1)..(term_full.end - 1);
 
-        let (terms, children) =
-            match shown_term(s, &encl.narrow(&nested), true, false, nodes, pieces, root) {
-                ShownTerm::Computed(term) => (vec![CowStr::from(term)], vec![]),
-                ShownTerm::Children(children) => (vec![], children),
-            };
+        let shown = shown_term(s, &encl.narrow(&nested), true, false, nodes, pieces, root);
+
+        let terms: Vec<CowStr<'src>> = shown
+            .computed
+            .map_or_else(Vec::new, |term| vec![CowStr::from(term)]);
 
         let node = InlineNode::IndexTerm(IndexTerm {
             terms,
-            children,
+            children: shown.children,
             visible: true,
             location: source_slice(pieces, term_full.clone(), root),
         });
@@ -812,15 +832,13 @@ fn push_indexterm_shorthand_matches<'src>(
     let location = source_slice(pieces, full.clone(), root);
 
     let (node, rendered_nonempty) = if visible {
-        let (terms, children, shown_nonempty) =
-            match shown_term(s, &encl.narrow(&term_sub), true, false, nodes, pieces, root) {
-                ShownTerm::Computed(term) => {
-                    let shown_nonempty = !term.is_empty();
-                    (vec![CowStr::from(term)], vec![], shown_nonempty)
-                }
+        let shown = shown_term(s, &encl.narrow(&term_sub), true, false, nodes, pieces, root);
 
-                ShownTerm::Children(children) => (vec![], children, true),
-            };
+        let shown_nonempty = shown.computed.as_ref().is_none_or(|term| !term.is_empty());
+
+        let terms: Vec<CowStr<'src>> = shown
+            .computed
+            .map_or_else(Vec::new, |term| vec![CowStr::from(term)]);
 
         // The match renders output when it shows a non-empty term or keeps a
         // literal parenthesis beside it.
@@ -829,7 +847,7 @@ fn push_indexterm_shorthand_matches<'src>(
         (
             InlineNode::IndexTerm(IndexTerm {
                 terms,
-                children,
+                children: shown.children,
                 visible: true,
                 location,
             }),
@@ -1422,42 +1440,126 @@ mod tests {
     }
 
     #[test]
-    fn a_later_family_inside_a_visible_terms_shown_text_is_a_documented_divergence() {
-        // Found by the corpus-wide side-effect sweep
-        // (`tests::inline_builder_side_effect_parity`), and a *recognition*
-        // gap rather than a replay one — the same root cause seen from both
-        // sides.
-        //
-        // The string pipeline replaces a visible term with its shown text and
-        // nothing else, so that text goes on sitting in the one flat haystack
-        // every later pass scans: a `link:`/`mailto:` macro, a bare URL or
-        // address, an inline anchor, or a cross-reference written inside
-        // `((…))` is recognized by the pass that runs after this one, exactly
-        // as if the parentheses were not there.
-        //
-        // A tree cannot do that with the shown text it currently keeps. This
-        // family runs where the string step runs it — after image/icon, before
-        // the link families — and the shown text of a *plain* visible term is
-        // an already-substituted **string** in
-        // [`terms`](crate::inlines::IndexTerm::terms), not a subtree, so the
-        // families that follow have no nodes to descend into. (The families
-        // that run *before* this one are unaffected: their construct is
-        // already a node when the term encloses it, which is what
-        // [`children`](crate::inlines::IndexTerm::children) carries — see the
-        // parity test below for `image:`, and the side-effect sweep's own
-        // index-term test for a nested rendered span, whose children this step
-        // resolves in full before any of this level's families run.)
-        //
-        // Closing it needs a visible term's shown text to be nodes in every
-        // case, not only when it encloses a rendered span, *and* the families
-        // after this one to descend into them — a change to what the node
-        // carries, so it is its own increment rather than this one's.
+    fn fold_matches_the_string_pipeline_for_a_later_family_inside_a_visible_term() {
+        // The shorthand half of the boundary the side-effect sweep found, now
+        // closed. The string replacer puts a visible term's shown text back
+        // into the one flat haystack every later pass scans, so a `link:`
+        // macro, a bare URL or address, an inline anchor, or a
+        // cross-reference written inside `((…))` is recognized by the pass
+        // that runs after this one, exactly as if the parentheses were not
+        // there. The tree reaches the same answer by handing the term's own
+        // `children` to those same passes, as their own level.
         for source in [
             "((a term with a link:t.html[T] inside)) end",
+            "((a term with a mailto:t@example.org[T] inside)) end",
             "((a term with https://t.example inside)) end",
             "((a term with an [[t]] anchor inside)) end",
-            "((a term with xref:s[X] inside)) end",
-            "indexterm2:[a term with a link:t.html[T] inside] end",
+            "((a term with an anchor:t[Ref] inside)) end",
+            // A cross-reference is not in this corpus: `golden_macros` runs a
+            // bare `Content`, which has no catalog, so *every* `xref:`/`<<…>>`
+            // is left as the deferred-cross-reference sentinel there whether
+            // or not a term encloses it. The whole-document test below drives
+            // that spelling through the real parse path instead.
+            // At either edge of the shown text, and as the whole of it.
+            "((link:t.html[T] leads)) end",
+            "((trails link:t.html[T])) end",
+            "((link:t.html[T])) end",
+            // Twice in one term, and two families in one term.
+            "((a link:t.html[T] and link:u.html[U] term)) end",
+            "((a link:t.html[T] and https://u.example term)) end",
+            // Beside a twin outside the term, so the pass order that fills
+            // the catalog is exercised from both sides.
+            "((a link:t.html[T] term)) and link:u.html[U] here",
+            "((a https://t.example term)) and https://u.example here",
+            // The paren-keeping spellings, whose shown text is a narrowing of
+            // the enclosed bytes rather than all of them.
+            "(((a link:t.html[T] term)) end",
+            "((a link:t.html[T] term))) end",
+            // Inside a rendered span, and with one inside the term.
+            "*((a link:t.html[T] term))* end",
+            "((a *link:t.html[T]* term)) end",
+            // The nested `((… ((term)) …))` shorthand this family also builds.
+            "a ((((a link:t.html[T] term)))) end",
+            // A term with nothing for the later families to find, unchanged.
+            "((a plain term)) end",
+            "((a *bold* term)) end",
+        ] {
+            assert_eq!(
+                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                golden_macros(source),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cross_reference_inside_a_visible_term_resolves_in_a_real_document() {
+        // The one later family the byte-parity corpus above cannot reach: a
+        // cross-reference needs a catalog to resolve against, which a bare
+        // `Content` has none of. Driven end to end instead, where the term's
+        // shown text must carry a resolved `<a href="#…">` exactly as the
+        // rendered string does — in block content and in a heading's own
+        // title, both of which run this same macros step.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        let doc = crate::Parser::default()
+            .with_inline_tree(true)
+            .parse(concat!(
+                "[[target]]\n",
+                "== The Target\n",
+                "\n",
+                "See ((a term with xref:target[the target] inside)) here.\n",
+                "\n",
+                "And ((a term with <<target,the target>> inside)) too.\n",
+            ));
+
+        let mut folded = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert!(
+                rendered.contains(r##"<a href="#target">the target</a>"##),
+                "expected a resolved cross-reference, got {rendered:?}"
+            );
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &crate::Parser::default()
+                ),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            folded += 1;
+        }
+
+        assert_eq!(folded, 2, "expected both paragraphs to carry a tree");
+    }
+
+    #[test]
+    fn a_later_family_inside_a_macro_spelling_term_is_a_documented_divergence() {
+        // The half the shorthand's lift does *not* reach. An
+        // `indexterm2:[…]` argument carrying an `=` shows only what
+        // [`Attrlist::parse`](Attrlist) returns for its first positional
+        // attribute, which is not a range of this level's match string — so
+        // the nodes built from that range would not agree with the shown
+        // string, and this family cannot tell the two cases apart before the
+        // list is parsed. It therefore keeps its shown text as a string alone,
+        // and the families that run after this one have no nodes to descend
+        // into.
+        //
+        // Closing it needs the attribute-list narrowing itself expressed as a
+        // range of the match string, the way [`shown_term_range`] already
+        // expresses `trim` and the `see` strip — its own increment.
+        for source in [
+            r"indexterm2:[a term with a link:t.html[T\] inside] end",
+            "indexterm2:[a term with https://t.example inside] end",
         ] {
             let nodes = build_src(Span::new(source));
             let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
@@ -1468,8 +1570,6 @@ mod tests {
                 "expected a divergence for {source:?}"
             );
 
-            // The term itself *is* recognized — only what its shown text
-            // encloses is left as literal source.
             assert!(
                 nodes.iter().any(|n| matches!(n, InlineNode::IndexTerm(_))),
                 "expected the term to be recognized for {source:?}: {nodes:?}"

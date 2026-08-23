@@ -125,6 +125,11 @@ pub(super) fn classify_unescaped_specials<'src>(
                 out.push(InlineNode::Footnote(footnote));
             }
 
+            InlineNode::IndexTerm(mut index_term) => {
+                index_term.children = classify_unescaped_specials(index_term.children);
+                out.push(InlineNode::IndexTerm(index_term));
+            }
+
             other => out.push(other),
         }
     }
