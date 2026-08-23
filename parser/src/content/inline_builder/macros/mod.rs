@@ -1508,6 +1508,66 @@ mod tests {
     }
 
     #[test]
+    fn a_family_matching_across_an_earlier_familys_markup_is_a_documented_divergence() {
+        // Found by the cross-product sweep in this module's parent
+        // (`fold_matches_the_real_pipeline_for_every_construct_in_every_container`),
+        // and the same class as
+        // [`flatten_prior_markup`](super::super::special_chars::flatten_prior_markup)'s
+        // own — a step acting on another step's *emitted markup* — one level
+        // finer: not a later **step** reading an earlier step's tags, but a
+        // later **family of this same step** reading an earlier family's.
+        //
+        // The string pipeline runs its macro families as passes over one flat
+        // string, so by the time the cross-reference and footnote passes run,
+        // that string already holds the `</a>` the link pass wrote. Their
+        // patterns match straight through it, and the bracket a family reads
+        // as its own can begin inside one link's display text and end outside
+        // it: `link:t.html[pre xref:tgt[T] post]` renders an `<a>` nested
+        // inside an `<a>`, because the cross-reference's own bracketed text is
+        // `T</a> post`.
+        //
+        // A tree has no tags to match through. The link's display text is a
+        // subtree, and every family that runs after the link pass sees nodes,
+        // so a bracket cannot span the boundary at all — the construct stays
+        // where it was written, and the link keeps the text it was given.
+        //
+        // This is a **keep**: the tree's answer is the well-formed one, and
+        // the string pipeline's is markup no backend would choose to emit.
+        let parser = Parser::default();
+
+        for (source, golden_html, folded_html) in [
+            (
+                "x link:t.html[pre xref:tgt[T] post] y",
+                r##"x <a href="t.html">pre <a href="#tgt">T</a> post</a> y"##,
+                r##"x <a href="t.html">pre xref:tgt[T</a> post] y"##,
+            ),
+            (
+                "x link:t.html[pre footnote:[n] post] y",
+                concat!(
+                    r##"x <a href="t.html">pre <sup class="footnote">[<a id="_footnoteref_1" "##,
+                    r##"class="footnote" href="#_footnotedef_1" title="View footnote.">1</a>]"##,
+                    r##"</sup> y"##,
+                ),
+                r##"x <a href="t.html">pre footnote:[n</a> post] y"##,
+            ),
+        ] {
+            let mut content = Content::from(Span::new(source));
+            SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+
+            assert_eq!(content.rendered_str(), golden_html);
+
+            assert_eq!(
+                fold_html(
+                    &build(Span::new(source), &Parser::default(), None),
+                    &HtmlSubstitutionRenderer {},
+                    &Parser::default(),
+                ),
+                folded_html,
+            );
+        }
+    }
+
+    #[test]
     fn registers_every_family_from_a_single_call() {
         let source =
             "image:a.png[] link:b.html[B] https://c.example [[anchor-id]] xref:anchor-id[]";

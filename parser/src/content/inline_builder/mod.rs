@@ -778,6 +778,125 @@ mod tests {
         assert_parity_with(source, Parser::default);
     }
 
+    /// Every construct this module recognizes, written inside every nested
+    /// node list a tree can hold one in.
+    ///
+    /// The sweeps beside this one are corpora of *fixtures* — shapes someone
+    /// thought to write down. This one is a **cross-product**, generated from
+    /// two lists, and it exists because the shapes that turned out to be
+    /// broken were the ones nobody thought to write down. Three separate
+    /// increments of step 6 closed a walk that failed to descend into a
+    /// container (a visible index term's shown text, an anchor's reference
+    /// text, a footnote nested in a child), and in each case the reason no
+    /// corpus caught it was the same: the construct and the container were
+    /// each covered, but never crossed.
+    ///
+    /// Generating the cross-product makes "covered" mean something a fixture
+    /// list cannot. Adding a construct or a container extends the sweep by a
+    /// whole row or column rather than by one case, and a pair that starts
+    /// diverging fails here even when nobody had that pair in mind.
+    ///
+    /// The pairs that *do* diverge are pinned as a **set**, not skipped: each
+    /// is a documented keep with its own test (see
+    /// [`DIVERGING_PAIRS`]), and a pair leaving or joining that set is a
+    /// result either way.
+    const CONTAINERS: &[(&str, &str, &str)] = &[
+        // A rendered span: the container every other one nests inside too.
+        ("styled", "x *pre ", " post* y"),
+        // A smart-quoted span, which renders its own markup around a body
+        // this level's later steps still scan.
+        ("quoted", "x \"`pre ", " post`\" y"),
+        // The three display texts a `Ref` node carries.
+        ("link text", "x link:t.html[pre ", " post] y"),
+        ("xref text", "x xref:tgt[pre ", " post] y"),
+        // A visible index term's shown text, which reaches the flow.
+        ("index term", "x ((pre ", " post)) y"),
+        // A footnote's text, which reaches the catalog rather than the flow —
+        // so the *marker* is all the fold emits, and parity here is about the
+        // number and the marker, not about the text's own rendering.
+        ("footnote text", "x footnote:[pre ", " post] y"),
+        // An anchor's reference text, which reaches neither: the anchor
+        // replacer consumes it. Parity is therefore expected to be trivial,
+        // and that is the point — it pins that nothing the reference text
+        // encloses leaks into the flow.
+        ("anchor reftext", "x [[an,pre ", " post]] y"),
+    ];
+
+    /// Every construct the cross-product above writes into each container.
+    const CONSTRUCTS: &[(&str, &str)] = &[
+        ("bold", "*b*"),
+        ("subscript", "~s~"),
+        ("replacement", "(C)"),
+        ("line break", "z +\nw"),
+        ("image", "image:i.png[A]"),
+        ("icon", "icon:home[]"),
+        ("link macro", "link:l.html[L]"),
+        ("auto link", "https://e.example"),
+        ("email", "a@e.example"),
+        ("anchor", "[[an2]]"),
+        ("xref", "xref:tgt[T]"),
+        ("index term", "((t))"),
+        ("footnote", "footnote:[n]"),
+        ("passthrough", "+++<i>r</i>+++"),
+        ("stem", "stem:[x^2]"),
+        ("kbd", "kbd:[C]"),
+        ("attribute", "{product}"),
+    ];
+
+    /// The `(container, construct)` pairs the cross-product finds divergent,
+    /// each a documented keep carrying its own test. Named as a set so that a
+    /// pair joining it — or leaving it, which a fix does — fails the sweep.
+    const DIVERGING_PAIRS: &[(&str, &str)] = &[
+        // A later macro family matching **across** the markup an earlier
+        // family of the same step already emitted: the string pipeline's
+        // cross-reference and footnote passes scan a flat string that by then
+        // holds the link pass's own `</a>`, and match through it. See
+        // `a_family_matching_across_an_earlier_familys_markup_is_a_documented_divergence`
+        // in `macros/mod.rs`.
+        ("link text", "xref"),
+        ("link text", "footnote"),
+        // A post-replacement inside a **cross-reference's** display text. The
+        // string pipeline never scans that text: a deferred cross-reference
+        // holds it in a template, not in the flat string the post-replacement
+        // step runs over — where a *link's* display text, in the same
+        // position, is scanned and does get its `<br>`. The tree treats the
+        // two alike, which is what §4.2's retirement of the
+        // deferred-cross-reference sentinel makes true for real. See
+        // `a_post_replacement_in_a_cross_reference_text_is_a_documented_divergence`
+        // in `post_replacements.rs`.
+        ("xref text", "line break"),
+    ];
+
+    /// A parser for the cross-product: `experimental` for the UI macros, and
+    /// the one attribute its `{product}` construct references.
+    fn cross_product_parser() -> Parser {
+        Parser::default()
+            .with_intrinsic_attribute("experimental", "", ModificationContext::Anywhere)
+            .with_intrinsic_attribute("product", "Widget", ModificationContext::Anywhere)
+    }
+
+    #[test]
+    fn fold_matches_the_real_pipeline_for_every_construct_in_every_container() {
+        let mut diverged: Vec<(&str, &str)> = vec![];
+
+        for (container, prefix, suffix) in CONTAINERS {
+            for (construct, body) in CONSTRUCTS {
+                let source = format!("{prefix}{body}{suffix}");
+
+                if golden(&source, &cross_product_parser())
+                    != built(&source, &cross_product_parser())
+                {
+                    diverged.push((container, construct));
+                }
+            }
+        }
+
+        assert_eq!(
+            diverged, DIVERGING_PAIRS,
+            "the set of diverging (container, construct) pairs changed"
+        );
+    }
+
     /// A broad, general-purpose sweep of inline fixtures — reusing the shape
     /// of the Phase 1 byte-parity corpus
     /// ([`NORMAL_CORPUS`](crate::tests::inline_recorder)) that pins the

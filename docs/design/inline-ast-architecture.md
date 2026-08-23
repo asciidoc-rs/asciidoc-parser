@@ -5678,6 +5678,54 @@ Each phase is a reviewable unit with a clear exit gate.
   Re-running the corpus-wide fold-parity audit shows no change to the divergence set; coverage is
   diff-neutral, and nothing further is wired in.
 
+  *Step 6 prep landed as (a cross-product sweep: every construct in every container):* the three
+  increments above each closed a walk that failed to descend into a container — a visible index
+  term's shown text, an anchor's reference text, a footnote nested in a child — and in each case
+  the reason no corpus caught it was the same. **The construct and the container were each covered,
+  but never crossed.** Every corpus on this branch is a list of fixtures someone thought to write
+  down, and what was broken was what nobody thought to write down.
+
+  This one is generated instead. `fold_matches_the_real_pipeline_for_every_construct_in_every_container`
+  takes a list of the nested node lists a tree can hold a construct in — a rendered span, a
+  smart-quoted span, each of the three display texts a `Ref` carries, a visible index term's shown
+  text, a footnote's text, an anchor's reference text — crossed with a list of every construct this
+  module recognizes, and asserts fold parity for the whole product. Adding either extends the sweep
+  by a **row or a column** rather than by one case.
+
+  The pairs that diverge are pinned as a *set* rather than skipped, so a pair joining it — or
+  leaving it, which a fix does — fails the sweep either way. There are three, and both root causes
+  were new:
+
+  *A later family matching across an earlier family's own markup.* The string pipeline runs its
+  macro families as passes over one flat string, so by the time the cross-reference and footnote
+  passes run, that string already holds the `</a>` the link pass wrote — and their patterns match
+  straight through it. `link:t.html[pre xref:tgt[T] post]` renders an `<a>` **nested inside an
+  `<a>`**, because the cross-reference's own bracketed text is `T</a> post`. A tree has no tags to
+  match through: the link's display text is a subtree, so a bracket cannot span the boundary at all.
+  This is the same class as
+  [`flatten_prior_markup`](../../parser/src/content/inline_builder/special_chars.rs)'s own, one
+  level finer — not a later *step* reading an earlier step's tags, but a later *family of this same
+  step* reading an earlier family's — and a **keep**: the tree's answer is the well-formed one.
+
+  *A post-replacement inside a cross-reference's display text.* A link's display text and a
+  cross-reference's sit in the same position in the source, and the post-replacements step treats
+  them alike. The string pipeline cannot: by then a link has been rendered inline into the one flat
+  string that step scans, so its text gets its `<br>`, while a **deferred** cross-reference has been
+  replaced by a sentinel pair whose text lives in a *template* the step never sees. The same bytes
+  in the same place get a line break in one and not in the other, decided by nothing the author
+  wrote. A tree has one answer for both, which is what §4.2's retirement of the
+  deferred-cross-reference sentinel makes true for real — so this is a keep that **closes at the
+  cutover**, and a third piece of evidence for that retirement, after the corpus in the
+  document-parity harness and the fold's own `resolved` handling.
+
+  Both are driven through a real document where it matters (a bare `Content` has no catalog, so
+  every cross-reference is left as its sentinel there and would differ for a second, unrelated
+  reason). The sweep itself is test-only. Re-running the corpus-wide fold-parity audit picks up
+  exactly the three fixtures the two divergence tests add and nothing else — which is what a
+  documented keep looks like in that log, and the first time this branch has *added* to it on
+  purpose. No content that passed before diverges now. Coverage is diff-neutral, and nothing
+  further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -6740,6 +6788,18 @@ Each phase is a reviewable unit with a clear exit gate.
        walk reaches it. The same pass gains `IndexTerm` (a visible term's shown text reaches the
        flow) and deliberately still skips an anchor's `reftext` (which the anchor replacer
        consumes). See the step's own "landed as" note above.
+
+     - ✅ **prep (a cross-product sweep).** The three increments above each closed a walk that
+       failed to descend into a container, and each time the reason no corpus caught it was that
+       the construct and the container were covered separately but never crossed. This sweep is
+       **generated** rather than listed: every nested node list a tree can hold a construct in,
+       crossed with every construct the module recognizes, with the diverging pairs pinned as a set
+       so one joining or leaving it fails either way. Three pairs diverge, on two root causes both
+       new — a later macro family matching *across* the markup an earlier family of the same step
+       emitted (a keep: the tree's answer is the well-formed one), and a post-replacement inside a
+       cross-reference's display text, which the string pipeline never scans because a deferred
+       cross-reference's text lives in a template (a keep that closes at the cutover, and a third
+       piece of evidence for retiring that sentinel). See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
