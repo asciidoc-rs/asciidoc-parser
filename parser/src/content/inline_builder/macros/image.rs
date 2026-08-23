@@ -1040,18 +1040,21 @@ fn parse_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
 /// Recurses into every container an `Image` node can be nested inside —
 /// [`Styled`](InlineNode::Styled), [`Ref`](InlineNode::Ref),
 /// [`Footnote`](InlineNode::Footnote), and
-/// [`IndexTerm`](InlineNode::IndexTerm) children — mirroring exactly where
+/// [`IndexTerm`](InlineNode::IndexTerm) children, and an
+/// [`Anchor`](InlineNode::Anchor)'s `reftext` — mirroring exactly where
 /// [`apply_macros`](super::apply_macros) and the footnote increment's own
-/// `emit_range` can place one. A visible index term's shown text is the
-/// newest of the four: it holds `children` only when the term encloses a
-/// construct the image pass already recognized
-/// (`((a term with an image:t.png[T] inside))`), which is precisely when a
-/// registration can hide there.
+/// `emit_range` can place one. Both of the last two hold an image the image
+/// pass had already recognized when the enclosing node was built
+/// (`((a term with an image:t.png[T] inside))`,
+/// `[[id,see image:t.png[T]]]`), which is precisely when a registration can
+/// hide there.
 ///
-/// The four containers are exactly the four node kinds that carry
-/// `children` — a fifth would be a new place a macro node can hide, and the
-/// corpus-wide side-effect sweep (`tests::inline_builder_side_effect_parity`)
-/// is what would catch one going unwalked, as it caught `IndexTerm` itself.
+/// The five are every nested node list an [`InlineNode`] holds: the four
+/// `children` fields, and an [`Anchor`](InlineNode::Anchor)'s `reftext`, which
+/// is one despite not being named like one. A sixth would be a new place a
+/// macro node can hide, and the corpus-wide side-effect sweep
+/// (`tests::inline_builder_side_effect_parity`) is what would catch one going
+/// unwalked, as it caught `IndexTerm` and `reftext` in turn.
 pub(crate) fn apply_image_side_effects(
     nodes: &[InlineNode<'_>],
     parser: &Parser,
@@ -1092,6 +1095,12 @@ pub(crate) fn apply_image_side_effects(
 
             InlineNode::IndexTerm(index_term) => {
                 apply_image_side_effects(&index_term.children, parser, source);
+            }
+
+            InlineNode::Anchor(anchor) => {
+                if let Some(reftext) = &anchor.reftext {
+                    apply_image_side_effects(reftext, parser, source);
+                }
             }
 
             _ => {}

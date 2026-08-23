@@ -2051,19 +2051,22 @@ fn build_email_node<'src>(
 /// [`Styled`](InlineNode::Styled), another [`Ref`](InlineNode::Ref) (a link's
 /// own display children, or a cross-reference's),
 /// [`Footnote`](InlineNode::Footnote), and
-/// [`IndexTerm`](InlineNode::IndexTerm) children — mirroring exactly where
+/// [`IndexTerm`](InlineNode::IndexTerm) children, and an
+/// [`Anchor`](InlineNode::Anchor)'s `reftext` — mirroring exactly where
 /// [`apply_macros`](super::apply_macros) and the footnote increment's own
 /// `emit_range` can place one. A cross-reference node itself is not
 /// registered — only a [`Link`](RefVariant::Link) has an asset-catalog entry —
 /// but its children are still walked, since a formatted cross-reference text
-/// could itself carry a nested link. A visible index term's shown text is the
-/// newest of the four, and carries every link spelling: all three of this
-/// family's passes descend into it.
+/// could itself carry a nested link. A visible index term's shown text and an
+/// anchor's reference text both carry every link spelling: all three of this
+/// family's passes descend into them.
 ///
-/// The four containers are exactly the four node kinds that carry
-/// `children` — a fifth would be a new place a macro node can hide, and the
-/// corpus-wide side-effect sweep (`tests::inline_builder_side_effect_parity`)
-/// is what would catch one going unwalked, as it caught `IndexTerm` itself.
+/// The five are every nested node list an [`InlineNode`] holds: the four
+/// `children` fields, and an [`Anchor`](InlineNode::Anchor)'s `reftext`, which
+/// is one despite not being named like one. A sixth would be a new place a
+/// macro node can hide, and the corpus-wide side-effect sweep
+/// (`tests::inline_builder_side_effect_parity`) is what would catch one going
+/// unwalked, as it caught `IndexTerm` and `reftext` in turn.
 pub(crate) fn apply_link_side_effects(nodes: &[InlineNode<'_>], parser: &Parser) {
     register_links_of_form(nodes, parser, LinkForm::AutoOrFormal);
     register_links_of_form(nodes, parser, LinkForm::Macro);
@@ -2093,6 +2096,12 @@ fn register_links_of_form(nodes: &[InlineNode<'_>], parser: &Parser, form: LinkF
 
             InlineNode::IndexTerm(index_term) => {
                 register_links_of_form(&index_term.children, parser, form);
+            }
+
+            InlineNode::Anchor(anchor) => {
+                if let Some(reftext) = &anchor.reftext {
+                    register_links_of_form(reftext, parser, form);
+                }
             }
 
             _ => {}

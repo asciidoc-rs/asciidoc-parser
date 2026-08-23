@@ -5579,6 +5579,53 @@ Each phase is a reviewable unit with a clear exit gate.
   Re-running the corpus-wide fold-parity audit shows no change to the divergence set; coverage is
   diff-neutral, and nothing further is wired in.
 
+  *Step 6 prep landed as (an anchor's reference text — the fifth nested node list):*
+  the side-effect sweep's own doc comment claimed the walks reach "exactly the four node kinds that
+  carry `children`". Asking that claim the sweep's own question — *is there a fifth?* — turns up one
+  immediately, and it is the one a walk written by matching on `children` is bound to miss:
+  [`Anchor::reftext`](../../parser/src/inlines/anchor.rs) is a nested node list that is not named
+  like one.
+
+  Adding a corpus row for it exposed **two** divergences at once, on every anchor spelling
+  (`[[id,…]]`, `anchor:id[…]`, `[[[label]]]`). A construct the reference text encloses
+  (`[[a,see image:t.png[T]]]`) was not registered — the walks did not descend there — and the
+  registered **reference text itself** differed: the string replacer catalogs the text it has
+  already rendered (`see <span class="image">…`), where the builder catalogued nothing at all.
+
+  Both come from one place.
+  [`build_anchor_reftext`](../../parser/src/content/inline_builder/macros/anchors.rs) deferred a
+  reference text crossing an atomic piece, leaving the field `None` — the same class every sibling
+  family has closed in turn, and closed the same way here: the text is carried **structurally**, as
+  the nodes the range covers, which is what the field's own `Vec<InlineNode<'src>>` type has always
+  allowed. The two byte rewrites the verbatim path performs with `str` methods become ranges (a
+  shorthand's `trim_end` narrows the range, since trailing whitespace is ordinary text and never a
+  placeholder; a macro's escaped `\]` drops its backslash as a gap between two emitted ranges, the
+  same structural unescape the reference-bearing families already use), and the verbatim path keeps
+  its exact prior shape, including its precisely-sliced `location`.
+
+  With nodes there, the registered string is a **mixed** fold, and the mix is the interesting part:
+  a reference text's own `Text` runs carry the level's *match-string* bytes — already substituted,
+  since a reference text is read after the escaping and quotes steps have run — so folding one would
+  escape it a second time (`[&#169; 1995]` → `[&amp;#169; 1995]`). Those contribute their value as
+  it stands, exactly as the field's original single-`Text` reader gave it; only an enclosed
+  construct, whose bytes exist nowhere until the tree is folded, is folded, through the parser's own
+  renderer. That trade is safe for the same reason it is in the link families: the bytes go into the
+  **catalog** rather than straight to output, and a cross-reference reaching them is rendered by
+  this same renderer.
+
+  Nothing about an anchor's *rendering* changes — `render_anchor` emits the id and nothing else, so
+  the fold-parity audit could never have seen any of this. What changes is what a **cross-reference
+  to the anchor** shows, which a whole-document test now drives end to end. The formerly pinned
+  divergence (`[[id,*bold*]]` leaves `reftext` unpopulated) becomes a structural parity test.
+
+  One shape was checked and deliberately left alone: the footnote pass does **not** descend into a
+  reference text, and must not — the anchor replacer consumes that text rather than emitting it, so
+  a `footnote:[…]` written there never reaches the string pipeline's footnote pass either, and both
+  sides agree that nothing is numbered.
+
+  Re-running the corpus-wide fold-parity audit shows no change to the divergence set; coverage is
+  diff-neutral, and nothing further is wired in.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -6615,6 +6662,20 @@ Each phase is a reviewable unit with a clear exit gate.
        The macro spellings still defer, since an attribute list's shown term is not a range of the
        match string; pinned by their own divergence test. See the step's own "landed as" note
        above.
+
+     - ✅ **prep (an anchor's reference text, the fifth nested node list).** The side-effect sweep's
+       own claim that the walks reach "exactly the four node kinds that carry `children`" asked of
+       itself turns up a fifth immediately: `Anchor::reftext` is a nested node list not named like
+       one, and so the one a walk written by matching on `children` is bound to miss. A corpus row
+       for it exposed two divergences on every anchor spelling — a construct the reference text
+       encloses went unregistered, and the registered reference *text* differed, since
+       `build_anchor_reftext` deferred a text crossing an atomic piece and left the field `None`.
+       The text is now carried structurally (the same close every sibling family made for its own
+       display text), the three walks descend into it, and the registered string is a mixed fold:
+       a `Text` run contributes its already-substituted match-string bytes unchanged, an enclosed
+       construct is folded through the parser's own renderer. An anchor's rendering does not change
+       — which is why the fold-parity audit could never have seen this — but what a cross-reference
+       to it shows does, pinned end to end. See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

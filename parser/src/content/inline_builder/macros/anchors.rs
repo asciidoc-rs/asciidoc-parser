@@ -3,13 +3,15 @@
 //! item.
 
 use super::{
-    MacroMatch, MacroMatchKind, image::range_is_verbatim_or_synthesized, rebuild_macro_level,
+    MacroMatch, MacroMatchKind, emit_range_unescaping_brackets,
+    image::range_is_verbatim_or_synthesized, rebuild_macro_level,
 };
 use crate::{
     Parser, Span,
     content::{
         INLINE_ANCHOR, INLINE_BIBLIO_ANCHOR,
         inline_builder::{
+            fold_html,
             quotes::{
                 LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, emit_range,
                 range_overlaps_synthesized, source_slice, text_slice,
@@ -364,8 +366,16 @@ fn build_anchor_node<'src>(
 
     let id = text_slice(nodes, pieces, id_range)?;
 
-    let reftext = reftext_match
-        .and_then(|m| build_anchor_reftext(m.start()..m.end(), pieces, root, nodes, is_shorthand));
+    let reftext = reftext_match.and_then(|m| {
+        build_anchor_reftext(
+            m.as_str(),
+            m.start()..m.end(),
+            pieces,
+            root,
+            nodes,
+            is_shorthand,
+        )
+    });
 
     Some(InlineNode::Anchor(Anchor {
         id,
@@ -395,6 +405,7 @@ fn build_anchor_node<'src>(
 /// counterpart of their own, the same policy
 /// [`emit_range`] already applies to every fragment of an expanded value.
 fn build_anchor_reftext<'src>(
+    raw_text: &str,
     range: std::ops::Range<usize>,
     pieces: &[Piece],
     root: Span<'src>,
@@ -402,7 +413,7 @@ fn build_anchor_reftext<'src>(
     shorthand: bool,
 ) -> Option<Vec<InlineNode<'src>>> {
     if !range_is_verbatim_or_synthesized(pieces, &range) {
-        return None;
+        return structural_anchor_reftext(raw_text, range, pieces, nodes, shorthand);
     }
 
     let synthesized = range_overlaps_synthesized(pieces, &range);
@@ -445,6 +456,60 @@ fn build_anchor_reftext<'src>(
     };
 
     Some(vec![child])
+}
+
+/// An anchor's reference text that crosses an **atomic** piece — an
+/// earlier-recognized construct the reference text encloses
+/// (`[[id,see image:t.png[T]]]`), carried here as one
+/// [`SPAN_PLACEHOLDER`] rather than as the bytes it renders to.
+///
+/// No string built now can spell such a text: the construct's markup exists
+/// only at fold time. So it is carried **structurally**, as the nodes the
+/// range covers, which is what the field's own type has always allowed and
+/// what the sibling families already do for a display text
+/// ([`IndexTerm::children`](crate::inlines::IndexTerm), a link's or a
+/// cross-reference's own children). Nothing about the anchor's *rendering*
+/// changes — `render_anchor` emits the id and nothing else — but the reference
+/// text is what a cross-reference to this anchor shows, and what the
+/// registration walk descends into to find a construct hiding there.
+///
+/// The two byte rewrites the verbatim path performs with `str` methods are
+/// performed as ranges instead: a shorthand's `trim_end` narrows the range
+/// (trailing whitespace is ordinary text, never a placeholder), and a macro's
+/// escaped `\]` drops its backslash as a *gap* between two emitted ranges —
+/// the same structural unescape
+/// [`emit_range_unescaping_brackets`] performs for the reference-bearing
+/// families.
+fn structural_anchor_reftext<'src>(
+    raw_text: &str,
+    range: std::ops::Range<usize>,
+    pieces: &[Piece],
+    nodes: &[InlineNode<'src>],
+    shorthand: bool,
+) -> Option<Vec<InlineNode<'src>>> {
+    let mut out = Vec::new();
+
+    if shorthand {
+        // Trailing whitespace is ordinary text, never a placeholder, so
+        // trimming it off the *text* trims exactly the same bytes off the
+        // range. It cannot trim the range away entirely: this path is reached
+        // only for a text crossing an **atomic** piece, which is not
+        // whitespace — so the emptiness the verbatim path has to guard
+        // against is unreachable here, and the `is_empty` check below covers
+        // it anyway without a branch of its own.
+        let trimmed = raw_text.trim_end();
+
+        emit_range(
+            nodes,
+            pieces,
+            range.start..(range.start + trimmed.len()),
+            &mut out,
+        );
+    } else {
+        emit_range_unescaping_brackets(raw_text, range, nodes, pieces, &mut out);
+    }
+
+    (!out.is_empty()).then_some(out)
 }
 
 /// Performs the recognition side effects the string pipeline attaches to an
@@ -493,13 +558,16 @@ fn build_anchor_reftext<'src>(
 /// Recurses into every container an id-bearing node can be nested inside —
 /// [`Styled`](InlineNode::Styled), [`Ref`](InlineNode::Ref),
 /// [`Footnote`](InlineNode::Footnote), and
-/// [`IndexTerm`](InlineNode::IndexTerm) children — mirroring exactly where the
+/// [`IndexTerm`](InlineNode::IndexTerm) children, and an
+/// [`Anchor`](InlineNode::Anchor)'s own `reftext` — mirroring exactly where the
 /// image and link increments' own side-effect functions recurse.
 ///
-/// The four containers are exactly the four node kinds that carry
-/// `children` — a fifth would be a new place a macro node can hide, and the
-/// corpus-wide side-effect sweep (`tests::inline_builder_side_effect_parity`)
-/// is what would catch one going unwalked, as it caught `IndexTerm` itself.
+/// The five are every nested node list an [`InlineNode`] holds: the four
+/// `children` fields, and an [`Anchor`](InlineNode::Anchor)'s `reftext`, which
+/// is one despite not being named like one. A sixth would be a new place a
+/// macro node can hide, and the corpus-wide side-effect sweep
+/// (`tests::inline_builder_side_effect_parity`) is what would catch one going
+/// unwalked, as it caught `IndexTerm` and `reftext` in turn.
 pub(crate) fn apply_ref_side_effects(
     nodes: &[InlineNode<'_>],
     parser: &Parser,
@@ -513,10 +581,10 @@ pub(crate) fn apply_ref_side_effects(
                 // from its own earlier pass (see
                 // [`apply_biblio_side_effects`]), so it is skipped here.
                 if !anchor.is_bibliography && !is_bibliography_inner(anchor, source) {
-                    let reftext = anchor_reftext_str(anchor);
+                    let reftext = anchor_reftext_string(anchor, parser);
 
                     if parser
-                        .register_ref(&anchor.id, reftext, RefType::Anchor)
+                        .register_ref(&anchor.id, reftext.as_deref(), RefType::Anchor)
                         .is_err()
                         && !(leading_anchor_registered
                             && anchor.location.byte_offset() == source.byte_offset())
@@ -526,6 +594,10 @@ pub(crate) fn apply_ref_side_effects(
                             WarningType::DuplicateId(anchor.id.to_string()),
                         );
                     }
+                }
+
+                if let Some(reftext) = &anchor.reftext {
+                    apply_ref_side_effects(reftext, parser, source, leading_anchor_registered);
                 }
             }
 
@@ -610,7 +682,7 @@ pub(crate) fn apply_biblio_side_effects(
     if parser
         .register_ref(
             &anchor.id,
-            anchor_reftext_str(anchor),
+            anchor_reftext_string(anchor, parser).as_deref(),
             RefType::Bibliography,
         )
         .is_err()
@@ -619,15 +691,51 @@ pub(crate) fn apply_biblio_side_effects(
     }
 }
 
-/// The reference text `str` a built [`Anchor`] node's `reftext` carries, when
-/// it is populated (a single verbatim [`Text`](InlineNode::Text) child — see
-/// [`build_anchor_reftext`]), mirroring the `Option<&str>`
-/// [`register_ref`](Parser::register_ref) itself expects.
-fn anchor_reftext_str<'a>(anchor: &'a Anchor<'_>) -> Option<&'a str> {
-    match anchor.reftext.as_deref() {
-        Some([InlineNode::Text { value, .. }]) => Some(value.as_ref()),
-        _ => None,
+/// The reference text a built [`Anchor`] node's `reftext` carries, as the
+/// **string** [`register_ref`](Parser::register_ref) takes.
+///
+/// A cross-reference to this anchor shows what the catalog holds, so the
+/// registered text has to be the reference text's *rendering* — which is what
+/// the string replacer registers, having rendered it already by the time it
+/// catalogs the id.
+///
+/// A reference text of a single verbatim [`Text`](InlineNode::Text) run — the
+/// overwhelmingly common case — is that rendering already, and contributes its
+/// bytes unchanged, exactly as the field's original single-`Text` reader gave
+/// them. A construct the reference text **encloses**
+/// ([`structural_anchor_reftext`]) has no such bytes until the tree is folded,
+/// so it is folded here, through the parser's own renderer: the same trade
+/// [`restorable_body`](super::image::restorable_body) makes for a `Stem`, and
+/// the same one the link families' own attribute lists make for a rendered
+/// span. Folding is faithful because these bytes go into the catalog rather
+/// than straight to output, and a cross-reference reaching them is rendered by
+/// this same renderer.
+fn anchor_reftext_string(anchor: &Anchor<'_>, parser: &Parser) -> Option<String> {
+    let reftext = anchor.reftext.as_deref()?;
+    let mut out = String::new();
+
+    for node in reftext {
+        match node {
+            // A reference text's own [`Text`](InlineNode::Text) runs carry the
+            // level's **match-string** bytes — already substituted, since a
+            // reference text is read after the escaping and quotes steps have
+            // run over the content. Folding one would escape it a second time
+            // (`[&#169; 1995]` → `[&amp;#169; 1995]`), so it contributes its
+            // value as it stands, exactly as the field's original single-`Text`
+            // reader did.
+            InlineNode::Text { value, .. } => out.push_str(value.as_ref()),
+
+            // Everything else is an earlier-recognized construct the reference
+            // text encloses, whose bytes exist only at fold time.
+            other => out.push_str(&fold_html(
+                std::slice::from_ref(other),
+                parser.renderer.as_ref(),
+                parser,
+            )),
+        }
     }
+
+    Some(out)
 }
 
 /// Mirrors `InlineAnchorReplacer`'s own `is_bibliography_inner` check: a
@@ -928,23 +1036,77 @@ mod tests {
     }
 
     #[test]
-    fn an_anchor_reference_text_over_a_span_is_consumed() {
-        // A reference text that is a rendered span (`[[id,*bold*]]`) does not
-        // reach the flow: the anchor is still recognized (its id alone renders),
-        // the span is consumed with the match, and the node's `reftext` is left
-        // `None` (a non-verbatim reference text the builder does not slice from
-        // `'src`). The fold still matches the string pipeline byte-for-byte.
+    fn a_cross_reference_shows_a_structural_reference_text_in_a_real_document() {
+        // What the reference text is *for*, end to end: a cross-reference to
+        // the anchor shows what the catalog holds for it, so a reference text
+        // enclosing an earlier-recognized construct has to reach the catalog
+        // with that construct's own rendering in it. Driven through the real
+        // parse path, where the registration and the resolution both happen.
+        use crate::blocks::{FindBlocks, IsBlock};
+
+        // The heading carries no content of its own, so the walk below also
+        // reaches its `None` arm.
+        let doc = crate::Parser::default()
+            .with_inline_tree(true)
+            .parse(concat!(
+                "== A heading\n",
+                "\n",
+                "[[tgt,see image:t.png[T] there]]The target.\n",
+                "\n",
+                "Back to <<tgt>>.\n",
+            ));
+
+        let mut checked = 0;
+
+        for block in doc.descendant_blocks() {
+            let (Some(rendered), Some(inlines)) = (block.rendered_html_content(), block.inlines())
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                crate::content::inline_builder::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &crate::Parser::default()
+                ),
+                rendered,
+                "fold diverged from the rendered string for {inlines:?}"
+            );
+
+            checked += 1;
+        }
+
+        assert_eq!(checked, 2, "expected both paragraphs to carry a tree");
+
+        // The reference text the catalog holds carries the image's own
+        // rendering, and that is what the cross-reference shows.
+        assert_eq!(
+            doc.catalog().get_ref("tgt").and_then(|e| e.reftext.clone()),
+            Some(r##"see <span class="image"><img src="t.png" alt="T"></span> there"##.to_string())
+        );
+    }
+
+    #[test]
+    fn an_anchor_reference_text_over_a_span_is_carried_structurally() {
+        // A reference text enclosing a rendered span (`[[id,*bold*]]`) does not
+        // reach the flow — the anchor's id alone renders, and the span is
+        // consumed with the match — but it *is* what a cross-reference to this
+        // anchor shows, so the node carries it: as the nodes the range covers,
+        // since no string built at parse time can spell the span's markup.
         let source = "[[id,*bold*]]";
         let nodes = build_src(Span::new(source));
 
         assert_eq!(nodes.len(), 1);
         let anchor = assert_anchor(&nodes[0]);
         assert_eq!(anchor.id.as_ref(), "id");
-        assert!(
-            anchor.reftext.is_none(),
-            "a non-verbatim reference text is left unpopulated"
-        );
         assert_eq!(anchor.location.data(), "[[id,*bold*]]");
+
+        match anchor.reftext.as_deref() {
+            Some([InlineNode::Styled(_)]) => {}
+
+            other => panic!("expected a reference text of the span itself, got {other:?}"),
+        }
 
         let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
         assert_eq!(folded, golden_macros(source));
