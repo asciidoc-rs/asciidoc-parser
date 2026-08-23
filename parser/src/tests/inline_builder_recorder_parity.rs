@@ -55,6 +55,9 @@
 //! - `is_icon` (on [`Image`]) — the recorder's own recorded marker does not
 //!   distinguish `icon:` from `image:` (both fold through the same kind), so it
 //!   always reports `false`; the builder sets it honestly.
+//! - `link_form` (on [`Ref`]) — all three link spellings render to the same `<a
+//!   …>` markup, which is all the recorder has to recover from, so it is always
+//!   `None` there; the builder records which pass built the node.
 //!
 //! Several more differences are structural rather than field-level, so they
 //! are handled by the comparator itself instead of being excluded outright.
@@ -587,6 +590,14 @@ fn assert_node_equivalent(r: &InlineNode<'_>, b: &InlineNode<'_>, source: &str) 
         (InlineNode::Ref(rr), InlineNode::Ref(br)) => {
             assert_eq!(rr.variant, br.variant, "Ref variant differs for {source:?}");
             assert_eq!(rr.target, br.target, "Ref target differs for {source:?}");
+
+            // `link_form` is intentionally never compared: the recorder
+            // recovers a link from its rendered `<a …>` markup, which all
+            // three spellings share, so it is always `None` there, while the
+            // builder carries the spelling as a structural fact (the same
+            // one-sided richness an anchor's `reftext` and an image's
+            // `is_icon` have).
+            let _ = (&rr.link_form, &br.link_form);
 
             // When a `Link`'s display text carried its own attribute list,
             // `render_link` (and so `fold_link`) reads `role`/`window`

@@ -471,6 +471,7 @@ fn build_xref_node<'src>(
 
     InlineNode::Ref(Ref {
         variant: RefVariant::Xref,
+        link_form: None,
         target: CowStr::from(target),
         children,
         roles,
@@ -725,6 +726,7 @@ fn build_xref_shorthand_node<'src>(
 
     InlineNode::Ref(Ref {
         variant: RefVariant::Xref,
+        link_form: None,
         target: CowStr::from(target),
         children,
         roles: vec![],

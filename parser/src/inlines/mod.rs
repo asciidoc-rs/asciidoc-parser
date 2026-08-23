@@ -53,7 +53,7 @@ mod inline_node;
 pub use inline_node::InlineNode;
 
 mod ref_node;
-pub use ref_node::{Ref, RefVariant};
+pub use ref_node::{LinkForm, Ref, RefVariant};
 
 mod stem;
 pub use stem::{Stem, StemNotation};

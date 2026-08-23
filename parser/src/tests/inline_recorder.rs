@@ -2279,6 +2279,7 @@ fn section_title_footnote_carries_its_subtree_and_resolved_xref() {
 fn unresolved_xref() -> InlineNode<'static> {
     crate::inlines::InlineNode::Ref(crate::inlines::Ref {
         variant: RefVariant::Xref,
+        link_form: None,
         target: "tgt".into(),
         children: vec![],
         roles: vec![],
@@ -2306,6 +2307,7 @@ fn defining_footnote(children: Vec<InlineNode<'static>>) -> InlineNode<'static> 
 fn link_over(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
     InlineNode::Ref(crate::inlines::Ref {
         variant: RefVariant::Link,
+        link_form: Some(crate::inlines::LinkForm::Macro),
         target: "https://example.org".into(),
         children,
         roles: vec![],

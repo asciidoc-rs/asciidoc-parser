@@ -867,6 +867,11 @@ fn node_of<'src>(rec: &Rec, span: Span<'src>) -> InlineNode<'src> {
                 window,
             } => InlineNode::Ref(Ref {
                 variant: *variant,
+                // The Strategy-A recorder recovers a link from its rendered
+                // `<a …>` markup, which the three spellings share, so it has
+                // no way to tell them apart; the single-pass builder sets this
+                // honestly (as with an image's `is_icon`).
+                link_form: None,
                 target: CowStr::from(target.clone()),
                 children: to_inline(children, span),
                 roles: roles.iter().cloned().map(CowStr::from).collect(),
@@ -925,6 +930,9 @@ fn leaf_node_of<'src>(node: &LeafNode, span: Span<'src>) -> InlineNode<'src> {
             window,
         } => InlineNode::Ref(Ref {
             variant: *variant,
+            // Not distinguishable from the rendered markup — see the container
+            // arm above.
+            link_form: None,
             target: CowStr::from(target.clone()),
             children: vec![],
             roles: roles.iter().cloned().map(CowStr::from).collect(),

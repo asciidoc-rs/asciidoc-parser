@@ -5167,6 +5167,57 @@ Each phase is a reviewable unit with a clear exit gate.
   body class wanting more than one presented character, the closing character, and the
   character-replacements step's consume-across-levels case — plus the keeps.
 
+  *Step 6 prep landed as (a `link:`/`mailto:` macro whose own marker is not verbatim — the
+  family's last non-verbatim rule):* the one boundary in this module drawn around neither a
+  *piece* nor a *capture* but around the node's own **`location`**. Three passes recognize a
+  link — the auto-link / formal-URL family, the `link:`/`mailto:` macro, and the bare e-mail
+  address — and the string pipeline runs them as three passes over the whole content, so the
+  asset catalog fills in *pass* order rather than document order.
+  [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) replays
+  that by walking the tree three times, which needs to know which pass built each node; it
+  answered by reading the node's `location` back and asking whether it starts with a literal
+  `link:` / `mailto:`. That made the location load-bearing, so a macro whose own marker is not
+  verbatim source had to be **deferred**: a *wholly* expanded macro (`:m: link:index.html[Docs]`,
+  then `{m}`), one reached through a wholly-synthesized seed, and one written inside markup an
+  earlier step of the same order flattened — three separate documented divergences, each pinned
+  with the same "if this boundary is ever lifted (with a signal that does not depend on the
+  location), fold this fixture into the parity corpus" note.
+
+  The signal is the node's to carry, and Phase 4's whole business is making nodes
+  **self-describing**. [`Ref`](../../parser/src/inlines/ref_node.rs) gains
+  `link_form: Option<`[`LinkForm`](../../parser/src/inlines/ref_node.rs)`>`, set by whichever
+  pass builds the node and `None` for a cross-reference, and the registration walk reads it
+  instead of re-deriving anything. The field earns its place on its own terms rather than as an
+  internal marker: the three spellings render alike but are *written* differently, so a consumer
+  writing AsciiDoc back out needs exactly this to reproduce the source, and one reporting on a
+  document can tell an explicit macro from an automatically-recognized URL — the same kind of
+  fact an [`Image`](../../parser/src/inlines/image.rs)'s `is_icon` and an
+  [`Anchor`](../../parser/src/inlines/anchor.rs)'s `is_bibliography` already carry. With it the
+  `range_is_verbatim` call on the marker is **deleted rather than relaxed**, and the private
+  `link_form` function with it.
+
+  All three formerly pinned divergences become parity tests. What reaches parity is the whole
+  macro from one expansion alone and in flow, the `mailto:` spelling, a macro whose marker and
+  target both come from expansions, one beside the two other link spellings (whose own
+  registration passes run before and after this one), one inside a rendered span, one in a
+  wholly-synthesized seed (a filtered multi-line block), and one inside flattened markup under
+  `subs=quotes,specialcharacters,macros`. A separate corpus drives the **registration order**
+  through the real pipeline on both sides — the thing the location used to be read for —
+  including an expanded macro interleaved with a bare URL and a bare address, so the three-pass
+  order is pinned for the newly-recognized form as it already is for the verbatim one. A
+  structural test asserts the shape: a `Macro`-form node whose `location` is the whole attribute
+  reference, design §4.4's coarse span. The recorder cross-check adds `link_form` to its list of
+  one-sided-richness exemptions, beside `is_icon` and an anchor's `reftext`: all three spellings
+  render to the same `<a …>` markup, which is all the recorder has to recover from.
+  Re-running the corpus-wide fold-parity audit shows both golden-exercised fixtures **gone** from
+  the divergence set and no new divergence; coverage is diff-neutral, and nothing further is
+  wired in.
+
+  With this the `link:`/`mailto:` family draws no boundary the other macro families do not. What
+  remains of the rendered-span class is the **image** family's attribute list, the one capture
+  with no display text to carry; beyond it the remainder is unchanged — the boundary-class halves
+  the sibling increments named, plus the keeps.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -6087,6 +6138,24 @@ Each phase is a reviewable unit with a clear exit gate.
        deferring a match whose two readings differ about its extent. A masked passthrough or STEM in such a text comes along for free. See the step's
        own "landed as" note above. The **image** family's bracket — the one capture with no
        display text to carry — is what remains of the class.
+
+     - ✅ **prep (a `link:`/`mailto:` macro whose own marker is not verbatim).** The one boundary
+       in this module drawn around neither a piece nor a capture but around the node's own
+       **`location`**. The string pipeline registers links in *pass* order rather than document
+       order, so
+       [`apply_link_side_effects`](../../parser/src/content/inline_builder/macros/links.rs) walks
+       the tree three times — and it told the passes apart by reading the node's `location` back
+       and asking whether it starts with a literal `link:` / `mailto:`. That made the location
+       load-bearing, deferring every macro whose marker is not verbatim source: a wholly expanded
+       `{m}`, one in a wholly-synthesized seed, and one inside markup an earlier step of the same
+       order flattened. The signal is the node's to carry, which is Phase 4's whole business:
+       [`Ref`](../../parser/src/inlines/ref_node.rs) gains
+       `link_form: Option<`[`LinkForm`](../../parser/src/inlines/ref_node.rs)`>`, set by whichever
+       pass builds it — a fact a consumer writing AsciiDoc back out needs in its own right, like
+       an image's `is_icon` — and the marker's `range_is_verbatim` call is deleted rather than
+       relaxed. All three formerly pinned divergences become parity tests, with a separate corpus
+       driving the three-pass registration order through the real pipeline on both sides; see the
+       step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

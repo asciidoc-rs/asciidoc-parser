@@ -116,7 +116,18 @@
 //!   escaped `&`, or one abutting an already-recognized construct (whose
 //!   *rendered* last character the pattern's mismatch-prefix group reads and a
 //!   placeholder hides — the same boundary the auto-link family's own required
-//!   prefix already enforces), is deferred. Each family reuses the shared
+//!   prefix already enforces), is deferred. A link node also records **which
+//!   of the three spellings** wrote it
+//!   ([`Ref::link_form`](crate::inlines::Ref::link_form)) — a fact a consumer
+//!   writing AsciiDoc back out needs, and the one
+//!   [`apply_link_side_effects`](macros::links::apply_link_side_effects) reads
+//!   to fill the asset catalog in the order AsciiDoc's own substitution does
+//!   (three passes over the whole content, not document order). Recording it
+//!   on the node rather than re-deriving it from the node's `location` is what
+//!   lets a `link:`/`mailto:` macro be recognized when its own marker is not
+//!   verbatim source — a *wholly* expanded macro (`:m: link:index.html[Docs]`,
+//!   then `{m}`), one in a wholly-synthesized seed, and one written inside
+//!   markup an earlier step of the same order flattened. Each family reuses the shared
 //!   pattern the string step
 //!   matches with ([`INLINE_IMAGE_MACRO`](crate::content::INLINE_IMAGE_MACRO), [`INLINE_KBD_BTN_MACRO`](crate::content::INLINE_KBD_BTN_MACRO),
 //!   [`INLINE_MENU_MACRO`](crate::content::INLINE_MENU_MACRO), [`INLINE_LINK_MACRO`](crate::content::INLINE_LINK_MACRO), [`INLINE_LINK`](crate::content::INLINE_LINK),
@@ -1637,11 +1648,7 @@ mod tests {
             // A cross-reference in a wholly-synthesized seed, in both
             // spellings: nothing on a `Ref{Xref}` node is `Span`-typed, so its
             // target and reference text come from the match string (or
-            // `text_slice`) rather than an `'src` slice. The `link:`/`mailto:`
-            // macro, whose own literal marker must be verbatim, still
-            // defers — see
-            // `a_macro_construct_is_deferred_when_the_whole_seed_is_synthesized`
-            // below.
+            // `text_slice`) rather than an `'src` slice.
             (
                 "  see <<target>> and\n  xref:other[the other one]",
                 "see <<target>> and\nxref:other[the other one]",
@@ -1650,13 +1657,16 @@ mod tests {
             // macro in either spelling of its bracket: neither needs an `'src`
             // slice — an empty attribute list parses from a zero-length span,
             // and a non-empty one is parsed from the match string and owned
-            // off it. The `link:`/`mailto:` macro, whose own literal marker
-            // must be verbatim, still defers — see
-            // `a_macro_construct_is_deferred_when_the_whole_seed_is_synthesized`
-            // below.
+            // off it. The `link:`/`mailto:` macro joins them now that the node
+            // records its own spelling (`Ref::link_form`) rather than having it
+            // re-derived from `location`.
             (
                 "  visit https://example.org[the site]\n  or https://plain.example",
                 "visit https://example.org[the site]\nor https://plain.example",
+            ),
+            (
+                "  read link:index.html[the docs]\n  or mailto:team@example.org[write]",
+                "read link:index.html[the docs]\nor mailto:team@example.org[write]",
             ),
             (
                 "  see image:sunset.jpg[] and\n  icon:home[] here",
@@ -2551,27 +2561,34 @@ mod tests {
         }
 
         /// A documented divergence the flattening policy inherits rather than
-        /// introduces: a `link:`/`mailto:` **macro** written inside a node an
+        /// closed: a `link:`/`mailto:` **macro** written inside a node an
         /// earlier step turned into markup.
         ///
         /// The flattened markup is a *synthesized* run — its value is the
         /// fold, which has no `'src` slice of its own — and that pass alone
-        /// among the macro families requires its own `link:`/`mailto:` marker
-        /// to be verbatim, because
-        /// [`link_form`](macros::links::link_form) tells this pass's nodes
-        /// from the other link passes' by whether the node's `location` starts
-        /// with that literal marker (the "no new node field" signal that
-        /// replays the string pipeline's family-pass registration order). It
-        /// is the same boundary a wholly expanded `{m}` macro already has —
-        /// reached here through a flattened span instead of an attribute
-        /// expansion.
-        ///
-        /// Every other family reads what it needs from the level's match
-        /// string and is recognized in flattened text just as the string
-        /// pipeline recognizes it in the escaped tags; the corpus above pins
-        /// an auto-link, an image macro, and a footnote doing exactly that.
+        /// among the macro families used to require its own `link:`/`mailto:`
+        /// marker to be verbatim, because the family told this pass's nodes
+        /// from the other link passes' by whether the node's `location`
+        /// started with that literal marker. It no longer does: the node
+        /// records its own spelling
+        /// ([`Ref::link_form`](crate::inlines::Ref::link_form)), which is what
+        /// [`apply_link_side_effects`](macros::links::apply_link_side_effects)
+        /// reads to replay the string pipeline's family-pass registration
+        /// order. So this reads like every other family — which computes what
+        /// it needs from the level's match string and is recognized in
+        /// flattened text just as the string pipeline recognizes it in the
+        /// escaped tags; the corpus above pins an auto-link, an image macro,
+        /// and a footnote doing the same.
         #[test]
-        fn a_link_macro_inside_flattened_markup_is_a_documented_divergence() {
+        fn a_link_macro_inside_flattened_markup_folds_to_the_string_pipelines_bytes() {
+            // Under an order that escapes *after* a markup-producing step, the
+            // quotes step's own output is flattened into one `Text` for the
+            // escaping step to split — so a `link:` macro written inside it
+            // sits in a wholly-synthesized run. That used to defer, because
+            // this family required its own marker to be verbatim source; the
+            // node now records its spelling instead (`Ref::link_form`), so the
+            // macro is recognized and the fold reproduces the string
+            // pipeline's own bytes.
             let (group, invalid) =
                 SubstitutionGroup::from_custom_string(None, "quotes,specialcharacters,macros");
             assert!(invalid.is_empty());
@@ -2587,15 +2604,7 @@ mod tests {
             let nodes = build_group(&group, source, &built_parser);
             let built = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &built_parser);
 
-            assert_ne!(
-                built, golden,
-                "expected the documented divergence to still reproduce; the boundary may have \
-                 been lifted — if so, fold this fixture into the parity corpus above"
-            );
-            assert_eq!(
-                built,
-                "&lt;strong&gt;a link:index.html[Docs] b&lt;/strong&gt;"
-            );
+            assert_eq!(built, golden);
         }
     }
 
@@ -2614,14 +2623,14 @@ mod tests {
     /// value (see [`apply_attribute_references`]'s own doc comment), now
     /// reached at the tree's root instead of a nested splice.
     ///
-    /// The second — exercised by this test's own fixture — is a
+    /// The second — exercised by this test's own fixture — *was* a
     /// `link:`/`mailto:` macro whose own marker is not verbatim, which a
-    /// wholly-synthesized seed guarantees: that marker is what keeps the
-    /// node's `location` telling this pass's nodes from the other link
-    /// passes' when
+    /// wholly-synthesized seed guarantees. That marker used to be what told
+    /// this pass's nodes from the other link passes' when
     /// [`apply_link_side_effects`](macros::links::apply_link_side_effects)
-    /// replays the string pipeline's registration order (see
-    /// [`link_macro_level`](macros::links::link_macro_level)).
+    /// replays the string pipeline's registration order; the node now records
+    /// its own spelling ([`Ref::link_form`](crate::inlines::Ref::link_form))
+    /// instead, so the macro is recognized here too.
     ///
     /// Everything else is recognized here, including an image macro with an
     /// *empty* bracket and every URL-link spelling — both exercised by the
@@ -2632,7 +2641,14 @@ mod tests {
     /// of which computes every value it holds from the match string or
     /// [`text_slice`](quotes::text_slice)).
     #[test]
-    fn a_macro_construct_is_deferred_when_the_whole_seed_is_synthesized() {
+    fn a_macro_construct_is_recognized_when_the_whole_seed_is_synthesized() {
+        // A wholly-synthesized seed — a filtered, multi-line block whose joined
+        // text has no contiguous `'src` slice — used to defer every macro
+        // family needing its own verbatim marker. The `link:`/`mailto:` family
+        // was the last one holding that rule, and it no longer needs it: the
+        // node records which spelling built it (`Ref::link_form`) rather than
+        // having it re-derived from `location`. So the macro is recognized
+        // here too, with only its `location` taking design §4.4's coarse span.
         let filtered = "see link:https://example.org[Example] here";
         let source = "  see link:https://example.org[Example] here";
 
@@ -2652,11 +2668,6 @@ mod tests {
         );
         let built = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &built_parser);
 
-        assert_ne!(
-            built, golden,
-            "expected the documented divergence to still reproduce; the boundary may have \
-             been lifted — if so, fold this fixture back into the parity sweep above"
-        );
-        assert_eq!(built, "see link:https://example.org[Example] here");
+        assert_eq!(built, golden);
     }
 }
