@@ -36,7 +36,61 @@ pub(crate) fn fold_html(
     parser: &Parser,
 ) -> String {
     let mut out = String::new();
-    fold_into_html(nodes, renderer, parser, &mut out);
+    fold_into_html(nodes, renderer, parser, Footnotes::Marked, &mut out);
+    out
+}
+
+/// Whether a fold writes a [`Footnote`](InlineNode::Footnote)'s in-flow
+/// marker.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Footnotes {
+    /// Write it: the ordinary fold, which is what the flow of a block shows.
+    Marked,
+
+    /// Omit it, marker and all, leaving the surrounding text as though the
+    /// footnote had not been written — see [`fold_reference_text`].
+    Stripped,
+}
+
+/// The fold a **section title** contributes as its reference text and as the
+/// source of its auto-generated id: [`fold_html`] with each footnote's in-flow
+/// marker omitted.
+///
+/// A footnote in a heading is a real, document-order footnote — it is numbered
+/// and it renders in the heading itself — but its marker must not appear in
+/// the text a cross-reference to that heading shows, nor in the id derived
+/// from that text (issue #594). The string pipeline reaches the same answer by
+/// rendering the title **once** with the footnote renderer bracketing each
+/// marker in a pair of sentinels
+/// ([`FOOTNOTE_MARKER_START`](crate::content::FOOTNOTE_MARKER_START) …
+/// [`FOOTNOTE_MARKER_END`](crate::content::FOOTNOTE_MARKER_END), enabled for
+/// that one render by `Parser::mark_footnote_spans`), cutting the bracketed
+/// regions out
+/// ([`strip_footnote_marker_spans`](crate::content::strip_footnote_marker_spans)),
+/// and then removing the now-spent sentinels from the title's own rendering
+/// and from its deferred cross-reference template
+/// (`Content::remove_footnote_marker_sentinels`). Rendering once is what keeps
+/// counters and attribute-expanded footnotes from being processed twice, and
+/// the sentinels are what make one render yield two strings.
+///
+/// A tree needs none of it. The footnote is a node, so the two strings are two
+/// folds of the same tree, and "which regions were footnote markers" is a
+/// question about node kinds rather than about bytes. This is therefore the
+/// **first of the three sentinel systems** design §4.2 names to lose its
+/// reason to exist; deleting it is the cutover's own job (§5.2 Phase 4, step
+/// 6), and until then this is staged and unwired, like every other piece of
+/// that step.
+///
+/// The strip recurses, exactly as the byte-level one does over the whole
+/// rendered string: a footnote nested inside a rendered span, or inside a
+/// cross-reference's own display text, is omitted there too.
+pub(crate) fn fold_reference_text(
+    nodes: &[InlineNode<'_>],
+    renderer: &dyn InlineSubstitutionRenderer,
+    parser: &Parser,
+) -> String {
+    let mut out = String::new();
+    fold_into_html(nodes, renderer, parser, Footnotes::Stripped, &mut out);
     out
 }
 
@@ -46,11 +100,14 @@ pub(crate) fn fold_html(
 /// `parser` is threaded through because rendering some nodes — an
 /// [`Image`](InlineNode::Image), whose `render_image`/`render_icon` reads the
 /// document's safe mode, `data-uri`, and `icons`/`icontype` attributes — is a
-/// function of document context, not of the node alone.
+/// function of document context, not of the node alone. `footnotes` is
+/// threaded through because a heading's own reference text omits its footnote
+/// markers wherever they sit — see [`fold_reference_text`].
 fn fold_into_html(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineSubstitutionRenderer,
     parser: &Parser,
+    footnotes: Footnotes,
     out: &mut String,
 ) {
     for node in nodes {
@@ -117,23 +174,30 @@ fn fold_into_html(
             }
 
             InlineNode::Ref(reference) if reference.variant == RefVariant::Link => {
-                fold_link(reference, renderer, parser, out);
+                fold_link(reference, renderer, parser, footnotes, out);
             }
 
             InlineNode::Ref(reference) if reference.variant == RefVariant::Xref => {
-                fold_xref(reference, renderer, parser, out);
+                fold_xref(reference, renderer, parser, footnotes, out);
             }
 
             InlineNode::Anchor(anchor) => {
-                fold_anchor(anchor, renderer, parser, out);
+                fold_anchor(anchor, renderer, parser, footnotes, out);
             }
 
             InlineNode::IndexTerm(index_term) => {
-                fold_index_term(index_term, renderer, parser, out);
+                fold_index_term(index_term, renderer, parser, footnotes, out);
             }
 
             InlineNode::Footnote(footnote) => {
-                fold_footnote(footnote, renderer, out);
+                // A heading's own reference text omits the marker entirely —
+                // the node is skipped rather than folded to nothing, since
+                // `render_footnote` is a backend's to define and a backend
+                // that emitted anything would leak it (see
+                // [`fold_reference_text`]).
+                if footnotes == Footnotes::Marked {
+                    fold_footnote(footnote, renderer, out);
+                }
             }
 
             InlineNode::Callout(callout) => {
@@ -149,7 +213,7 @@ fn fold_into_html(
                 // string pipeline's quotes step did: the same `QuoteType`,
                 // attribute list, and id it recognized, so the bytes match.
                 let mut body = String::new();
-                fold_into_html(&styled.children, renderer, parser, &mut body);
+                fold_into_html(&styled.children, renderer, parser, footnotes, &mut body);
 
                 let scope = match styled.form {
                     SpanForm::Constrained => QuoteScope::Constrained,
@@ -323,10 +387,17 @@ fn fold_link(
     reference: &Ref<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
     parser: &Parser,
+    footnotes: Footnotes,
     out: &mut String,
 ) {
     let mut link_text = String::new();
-    fold_into_html(&reference.children, renderer, parser, &mut link_text);
+    fold_into_html(
+        &reference.children,
+        renderer,
+        parser,
+        footnotes,
+        &mut link_text,
+    );
 
     // Sliced (empty) from the node's own location so its lifetime matches when
     // no attribute list was parsed.
@@ -384,10 +455,17 @@ fn fold_xref(
     reference: &Ref<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
     parser: &Parser,
+    footnotes: Footnotes,
     out: &mut String,
 ) {
     let mut provided = String::new();
-    fold_into_html(&reference.children, renderer, parser, &mut provided);
+    fold_into_html(
+        &reference.children,
+        renderer,
+        parser,
+        footnotes,
+        &mut provided,
+    );
 
     // Whether a display text was *provided* is the presence of a child, not
     // what that child folds to: the `<<id,>>` shorthand records a
@@ -448,6 +526,7 @@ fn fold_anchor(
     anchor: &Anchor<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
     parser: &Parser,
+    footnotes: Footnotes,
     out: &mut String,
 ) {
     let reftext = if anchor.is_bibliography {
@@ -455,7 +534,7 @@ fn fold_anchor(
     } else {
         anchor.reftext.as_ref().map(|children| {
             let mut s = String::new();
-            fold_into_html(children, renderer, parser, &mut s);
+            fold_into_html(children, renderer, parser, footnotes, &mut s);
             s
         })
     };
@@ -494,6 +573,7 @@ fn fold_index_term(
     index_term: &IndexTerm<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
     parser: &Parser,
+    footnotes: Footnotes,
     out: &mut String,
 ) {
     let mut folded_children = String::new();
@@ -502,7 +582,13 @@ fn fold_index_term(
         if index_term.children.is_empty() {
             Some(index_term.terms.first().map_or("", CowStr::as_ref))
         } else {
-            fold_into_html(&index_term.children, renderer, parser, &mut folded_children);
+            fold_into_html(
+                &index_term.children,
+                renderer,
+                parser,
+                footnotes,
+                &mut folded_children,
+            );
             Some(folded_children.as_str())
         }
     } else {
@@ -637,6 +723,94 @@ mod tests {
         },
         strings::CowStr,
     };
+
+    /// The string pipeline's own two answers for a section title: the
+    /// rendering the heading shows, and the footnote-free text its reference
+    /// and auto-generated id are derived from.
+    ///
+    /// This is exactly what `Section::parse` does — render the title once with
+    /// `mark_footnote_spans` on, cut the bracketed regions out, then strip the
+    /// spent sentinels from the rendering itself.
+    fn golden_title(source: &str, parser: &Parser) -> (String, String) {
+        use crate::content::{Content, SubstitutionGroup, strip_footnote_marker_spans};
+
+        let mut content = Content::from(Span::new(source));
+
+        parser.mark_footnote_spans.set(true);
+        SubstitutionGroup::Title.apply(&mut content, parser, None);
+        parser.mark_footnote_spans.set(false);
+
+        let reftext = strip_footnote_marker_spans(content.rendered_html());
+        content.remove_footnote_marker_sentinels();
+
+        (content.rendered_html().to_string(), reftext)
+    }
+
+    #[test]
+    fn fold_reference_text_matches_the_sentinel_strip() {
+        // The tree's answer to the footnote-marker sentinel system: the two
+        // strings the string pipeline gets from one marked render plus a
+        // byte-level cut are two *folds of the same tree*, and "which regions
+        // were footnote markers" is a question about node kinds rather than
+        // about bytes.
+        //
+        // Every fixture is checked from both ends: `fold_html` reproduces the
+        // heading's own rendering (sentinels removed), and
+        // `fold_reference_text` reproduces the footnote-free text the
+        // reference and the auto-generated id are derived from.
+        let fixtures = [
+            // No footnote at all: the two strings are the same, and the strip
+            // is a no-op on both sides.
+            "Plain title",
+            "A *bold* title",
+            "Tom & Jerry",
+            // The shape that names this: a footnote in a heading.
+            "Section 2footnote:[second footnote]",
+            "footnote:[leading] Section",
+            "Section footnote:[middle] title",
+            "A footnote:[one] and footnote:[two] title",
+            // A named footnote, and a bare reference to one.
+            "Named.footnote:disc[a discussion]",
+            // The marker nested inside constructs the strip has to recurse
+            // through: a rendered span, and a cross-reference's display text.
+            "A *bold footnote:[inside a span] title*",
+            "See xref:sec[the footnote:[inside a text] steps] here",
+            // Beside the other constructs a title can carry, so the strip is
+            // shown to remove the marker and nothing else.
+            "A footnote:[note] and image:x.png[Alt] and `code`",
+            "A footnote:[note] and a (C) and an -- em dash",
+            "A footnote:[note] and a +++<b>raw</b>+++ passthrough",
+        ];
+
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in fixtures {
+            // Two independent parsers, since a footnote's number is document
+            // state: one for each side of the comparison (design §5.3).
+            let (rendered, reftext) = golden_title(fixture, &Parser::default());
+
+            let built_parser = Parser::default();
+            let nodes = crate::content::inline_builder::build_for_group(
+                &crate::content::SubstitutionGroup::Title,
+                CowStr::from(fixture),
+                Span::new(fixture),
+                &built_parser,
+                None,
+            );
+
+            assert_eq!(
+                fold_html_with_parser(&nodes, &renderer, &built_parser),
+                rendered,
+                "the heading's own rendering diverged for {fixture:?}"
+            );
+
+            assert_eq!(
+                super::fold_reference_text(&nodes, &renderer, &built_parser),
+                reftext,
+                "the footnote-free reference text diverged for {fixture:?}"
+            );
+        }
+    }
 
     #[test]
     fn fold_emits_raw_verbatim() {
