@@ -37,6 +37,11 @@
 //! ASCIIDOC_UPDATE_SNAPSHOTS=1 cargo test -p asciidoc-parser --lib
 //! ```
 //!
+//! That is a plain, multi-threaded `cargo test` on purpose: recording is safe
+//! under concurrency, and it is pinned that way
+//! (`concurrent_update_runs_keep_every_fixture`). It was not always — see the
+//! note on the write in [`Store::recorded_for`].
+//!
 //! Recordings are **merged**, not replaced, so a filtered run only adds and
 //! updates the fixtures it reached. Removing a fixture means deleting its line
 //! by hand — deliberately, since a corpus silently shrinking is the failure
@@ -112,15 +117,33 @@ impl Store<'_> {
                 .entry(key.clone())
                 .or_insert_with(|| load_from(&key, corpus));
 
-            decide(entries, source, golden, self.updating)
+            let decision = decide(entries, source, golden, self.updating);
+
+            // The write happens **while the lock is still held**. It has to:
+            // the file must reflect the map generation that was just produced,
+            // and releasing first lets another thread's *older* generation land
+            // last and silently delete every fixture recorded since. That is
+            // not theoretical — with the write outside the lock, thirty-two
+            // concurrent recordings leave a file holding **one** of them, and
+            // the documented regeneration command is a plain, multi-threaded
+            // `cargo test`, so that is the ordinary path rather than an exotic
+            // one.
+            //
+            // Holding the lock across the write means an IO failure panics
+            // under it. That is the rare, already-catastrophic case, and it is
+            // exactly what `lock`'s poison recovery exists for; the *common*
+            // panics (a missing recording, a conflict, a failed assertion) all
+            // still happen below, after the guard is dropped.
+            if let Decision::Recorded(snapshot) = &decision {
+                std::fs::create_dir_all(self.dir).expect("create snapshots dir");
+                write_to(&key, snapshot);
+            }
+
+            decision
         };
 
         match outcome {
-            Decision::Recorded(snapshot) => {
-                std::fs::create_dir_all(self.dir).expect("create snapshots dir");
-                write_to(&key, &snapshot);
-                None
-            }
+            Decision::Recorded(_) => None,
 
             Decision::Conflict { existing } => panic!(
                 "conflicting recordings for {source:?} in {corpus}.txt:\n  {existing:?}\n  \
@@ -228,8 +251,17 @@ fn decide(
 fn load_from(file: &Path, corpus: &str) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
 
-    let Ok(text) = std::fs::read_to_string(file) else {
-        return out;
+    let text = match std::fs::read_to_string(file) {
+        Ok(text) => text,
+
+        // A *missing* file reads as empty: that is what lets a brand-new corpus
+        // be created by one update run. Any other failure must not — treating,
+        // say, a permission error as "no fixtures recorded" would have an
+        // update run rewrite the file from scratch and silently shrink the
+        // corpus to whatever this invocation happened to reach.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return out,
+
+        Err(error) => panic!("cannot read {corpus}.txt: {error}"),
     };
 
     for line in text.lines() {
@@ -660,6 +692,68 @@ mod tests {
 
         dir.store(false)
             .assert_recorded("corpus", "src", "golden", "golden");
+    }
+
+    #[test]
+    fn concurrent_update_runs_keep_every_fixture() {
+        // The bug this pins: the write used to happen *after* the lock was
+        // released, so a thread that had cloned an older, smaller map could
+        // land last and overwrite everything recorded since. Measured with the
+        // write outside the lock, thirty-two concurrent recordings left a file
+        // holding **one** of them.
+        //
+        // It matters because the documented regeneration command is a plain
+        // `cargo test`, which is multi-threaded — a maintainer regenerating the
+        // corpus would have silently got a fraction of it.
+        const FIXTURES: usize = 32;
+
+        let dir = TempDir::new("concurrent-update");
+        let path = dir.0.clone();
+
+        std::thread::scope(|scope| {
+            for i in 0..FIXTURES {
+                let path = &path;
+
+                scope.spawn(move || {
+                    Store {
+                        dir: path,
+                        updating: true,
+                    }
+                    .assert_recorded(
+                        "corpus",
+                        &format!("src{i}"),
+                        "golden",
+                        "golden",
+                    );
+                });
+            }
+        });
+
+        let recorded = load_from(&dir.0.join("corpus.txt"), "corpus");
+
+        assert_eq!(recorded.len(), FIXTURES);
+
+        for i in 0..FIXTURES {
+            assert_eq!(
+                recorded.get(&format!("src{i}")).map(String::as_str),
+                Some("golden"),
+                "src{i} was lost from the recording"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot read")]
+    fn a_read_failure_that_is_not_a_missing_file_is_loud() {
+        // A missing file reads as empty so a new corpus can be created. Any
+        // other failure must not: treating it as "no fixtures recorded" would
+        // have an update run rewrite the file and shrink the corpus to whatever
+        // that invocation reached. A directory standing where the file belongs
+        // is the portable way to provoke a non-`NotFound` error.
+        let dir = TempDir::new("unreadable");
+        std::fs::create_dir_all(dir.0.join("corpus.txt")).unwrap();
+
+        let _ = load_from(&dir.0.join("corpus.txt"), "corpus");
     }
 
     #[test]
