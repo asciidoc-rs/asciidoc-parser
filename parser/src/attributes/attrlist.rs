@@ -31,11 +31,18 @@ pub struct Attrlist<'src> {
     source: Span<'src>,
 
     /// The attrlist text this list was parsed from, kept only when `source`'s
-    /// own bytes are *not* that text — which happens exactly when
-    /// [`into_owned`](Self::into_owned) rebuilt the list from a temporary and
-    /// re-tagged it with a coarser source span. `None` for every list parsed
-    /// straight from the source it describes, where `source.data()` already is
-    /// that text.
+    /// own bytes are *not* that text. There are two such cases, and both are
+    /// about the same thing — the bytes the parse actually read:
+    ///
+    ///   - [`parse`](Self::parse) substituted attribute references into the
+    ///     text before splitting it, so what it parsed is the *expanded* text
+    ///     and `source` holds the author's `{name}` spelling.
+    ///   - [`into_owned`](Self::into_owned) rebuilt the list from a temporary
+    ///     and re-tagged it with a coarser source span, so `source` holds
+    ///     whatever that span covers rather than the attrlist text at all.
+    ///
+    /// `None` for every list whose `source.data()` already *is* the text it
+    /// was parsed from — the common case.
     ///
     /// Only [`source_text`](Self::source_text) reads it, for
     /// [`quoted_text_fallback_role`](Self::quoted_text_fallback_role) — the one
@@ -65,7 +72,15 @@ impl<'src> Attrlist<'src> {
     /// `'src` slice reproduces). An owned copy of the text this list was parsed
     /// from therefore rides along in
     /// [`source_text`](Self::source_text), so that accessor goes on reading it.
+    ///
+    /// That copy is taken through [`source_text`](Self::source_text) rather
+    /// than off `self.source` directly, so a list whose own
+    /// [`parse`](Self::parse) already expanded an attribute reference carries
+    /// the *expanded* text forward rather than reinstating the `{name}`
+    /// spelling the re-tag is discarding the span for.
     pub(crate) fn into_owned<'dst>(self, source: Span<'dst>) -> Attrlist<'dst> {
+        let source_text = CowStr::from(self.source_text().to_string());
+
         Attrlist {
             attributes: self
                 .attributes
@@ -74,7 +89,7 @@ impl<'src> Attrlist<'src> {
                 .collect(),
             anchor: self.anchor.map(CowStr::into_owned),
             source,
-            source_text: Some(CowStr::from(self.source.data().to_string())),
+            source_text: Some(source_text),
         }
     }
 
@@ -95,6 +110,8 @@ impl<'src> Attrlist<'src> {
         source: Span<'dst>,
         bodies: &[&str],
     ) -> Attrlist<'dst> {
+        let source_text = CowStr::from(self.source_text().to_string());
+
         Attrlist {
             attributes: self
                 .attributes
@@ -108,12 +125,7 @@ impl<'src> Attrlist<'src> {
             // match at the first `]`, so `[x]` never arrives here intact.
             anchor: self.anchor.map(CowStr::into_owned),
             source,
-            source_text: Some(restore_into(
-                CowStr::from(self.source.data()),
-                bodies,
-                &mut [],
-                &mut Vec::new(),
-            )),
+            source_text: Some(restore_into(source_text, bodies, &mut [], &mut Vec::new())),
         }
     }
 
@@ -139,6 +151,17 @@ impl<'src> Attrlist<'src> {
             CowStr::from(source.data())
         };
 
+        // Every *parsed* field below comes out of `source_cow`, so an attribute
+        // reference in a value is already expanded by the time a caller reads
+        // it. `quoted_text_fallback_role` is the one accessor that reads the
+        // list's own text instead, and it must see the same expanded bytes —
+        // Asciidoctor's `parse_quoted_text_attributes` runs `sub_attributes`
+        // over the list and *then* takes the first positional verbatim. So the
+        // expanded text is retained whenever the substitution changed anything,
+        // and `source.data()` goes on serving the (overwhelmingly common) case
+        // where it did not.
+        let substituted = source_cow.as_ref() != source.data();
+
         if source_cow.starts_with('[') && source_cow.ends_with(']') {
             let anchor = source_cow[1..source_cow.len() - 1].to_owned();
 
@@ -148,7 +171,7 @@ impl<'src> Attrlist<'src> {
                         attributes,
                         anchor: Some(CowStr::from(anchor)),
                         source,
-                        source_text: None,
+                        source_text: substituted.then_some(source_cow),
                     },
                     after: source.discard_all(),
                 },
@@ -264,7 +287,7 @@ impl<'src> Attrlist<'src> {
                     attributes,
                     anchor: None,
                     source,
-                    source_text: None,
+                    source_text: substituted.then_some(source_cow),
                 },
                 after: source.discard_all(),
             },

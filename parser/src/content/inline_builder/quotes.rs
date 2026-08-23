@@ -3877,26 +3877,25 @@ mod tests {
     }
 
     #[test]
-    fn an_attribute_list_rewritten_by_a_later_step_is_a_documented_divergence() {
-        // The complement of the boundary above, and not one this step can
-        // draw: under the *normal* order the steps that run **after** quotes
-        // (attribute references, character replacements) go on matching over
-        // the string pipeline's whole rendered string — the markup the quotes
-        // step just wrote included — so they rewrite bytes that live only
-        // inside a rendered `class`/`id` attribute. A later *sub* of this same
-        // step does it too (`[.a~b~c]#y#`, whose subscript sub runs after the
-        // unquoted one that consumed the attribute list). A tree's markup
-        // exists at fold time alone, and its later transducers see the nodes,
-        // not the tags, so an attribute list is whatever the sub that
-        // recognized it parsed, and nothing rewrites it afterwards.
+    fn a_quoted_role_reads_the_attribute_lists_substituted_text() {
+        // A quote-delimited first positional is the one thing an attribute
+        // list yields from its own *text* rather than from a parsed attribute
+        // (`quoted_text_fallback_role`, mirroring the `else` branch of
+        // Asciidoctor's `parse_quoted_text_attributes`, which takes the role
+        // verbatim — quote characters included). `Attrlist::parse` expands
+        // attribute references over the whole list before splitting it, so
+        // that accessor reads the *expanded* text, exactly as
+        // `parse_quoted_text_attributes` reads the string its own
+        // `sub_attributes` returned.
         //
-        // This is the same class as `flatten_prior_markup`'s own (design
-        // §5.2, Phase 4 step 6's late-escaping increment) — a step acting on
-        // another step's emitted markup — seen from the other side, and it
-        // costs four shapes: an attribute reference in a single-quoted role, a
-        // typographic replacement, a *restored* entity (whose escaped
-        // `&amp;amp;` the replacements step unwinds one level in the rendered
-        // markup), and a later sub's own span.
+        // Every family that parses an attribute list therefore agrees on a
+        // quoted role, whichever step recognized it: the quotes step, whose
+        // list is a slice of the buffer (`['{myrole}']*bold*`), and the
+        // passthrough-extraction step, whose list the string pipeline
+        // substitutes at *restore* time instead (`['{myrole}']++text++`, see
+        // `PassthroughRestoreReplacer`). The unquoted spellings — a bare
+        // positional, a shorthand role, an id — never took this path at all,
+        // and are here to pin that they still do not.
         let parser = crate::Parser::default().with_intrinsic_attribute(
             "myrole",
             "highlight",
@@ -3904,10 +3903,104 @@ mod tests {
         );
 
         for (source, golden_html) in [
+            // The quoted positional, in each family that parses a list.
             (
                 "['{myrole}']*bold*",
                 "<strong class=\"'highlight'\">bold</strong>",
             ),
+            (
+                "['{myrole}']#text#",
+                "<span class=\"'highlight'\">text</span>",
+            ),
+            (
+                "['{myrole}']`code`",
+                "<code class=\"'highlight'\">code</code>",
+            ),
+            (
+                "['{myrole}']++text++",
+                "<span class=\"'highlight'\">text</span>",
+            ),
+            (
+                "['{myrole}']+text+",
+                "<span class=\"'highlight'\">text</span>",
+            ),
+            // A named attribute after the quoted positional: the role is the
+            // source up to the first comma, so the tail changes nothing.
+            (
+                "['{myrole}',foo]++text++",
+                "<span class=\"'highlight'\">text</span>",
+            ),
+            // A comma *inside* the quotes still truncates the role there
+            // (Asciidoctor's `str.slice 0, (str.index ',')` runs after the
+            // substitution, so an expansion introducing one truncates too).
+            ("['a,{myrole}']#text#", "<span class=\"'a\">text</span>"),
+            // A missing attribute leaves the reference alone under the default
+            // `attribute-missing=skip`, so the expansion is a no-op and the
+            // raw text is what the role was already reading.
+            (
+                "['{missing}']#text#",
+                "<span class=\"'{missing}'\">text</span>",
+            ),
+            // The unquoted spellings, which read a parsed attribute instead.
+            (
+                "[{myrole}]++text++",
+                "<span class=\"highlight\">text</span>",
+            ),
+            (
+                "[.{myrole}]++text++",
+                "<span class=\"highlight\">text</span>",
+            ),
+            ("[#{myrole}]++text++", "<span id=\"highlight\">text</span>"),
+            (
+                "[{myrole}]*bold*",
+                "<strong class=\"highlight\">bold</strong>",
+            ),
+        ] {
+            let mut content = Content::from(Span::new(source));
+            SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+
+            assert_eq!(content.rendered_str(), golden_html, "golden for {source:?}");
+
+            let folded = super::super::fold_html(
+                &super::super::build(Span::new(source), &parser, None),
+                &HtmlSubstitutionRenderer {},
+                &parser,
+            );
+
+            assert_eq!(folded, content.rendered_str(), "mismatch for {source:?}");
+        }
+    }
+
+    #[test]
+    fn an_attribute_list_rewritten_by_a_later_step_is_a_documented_divergence() {
+        // The complement of the boundary above, and not one this step can
+        // draw: under the *normal* order the steps that run **after** quotes
+        // (character replacements) go on matching over the string pipeline's
+        // whole rendered string — the markup the quotes step just wrote
+        // included — so they rewrite bytes that live only inside a rendered
+        // `class`/`id` attribute. A later *sub* of this same step does it too
+        // (`[.a~b~c]#y#`, whose subscript sub runs after the unquoted one that
+        // consumed the attribute list). A tree's markup exists at fold time
+        // alone, and its later transducers see the nodes, not the tags, so an
+        // attribute list is whatever the sub that recognized it parsed, and
+        // nothing rewrites it afterwards.
+        //
+        // This is the same class as `flatten_prior_markup`'s own (design
+        // §5.2, Phase 4 step 6's late-escaping increment) — a step acting on
+        // another step's emitted markup — seen from the other side, and it
+        // costs three shapes: a typographic replacement, a *restored* entity
+        // (whose escaped `&amp;amp;` the replacements step unwinds one level
+        // in the rendered markup), and a later sub's own span.
+        //
+        // The **attribute-references** step used to cost a fourth
+        // (`['{myrole}']*bold*`), and no longer does: that one was never
+        // really about a later step reading emitted markup, but about
+        // `Attrlist::parse` discarding the substituted text one accessor
+        // needs — see `a_quoted_role_reads_the_attribute_lists_substituted_text`
+        // above. What is left here is genuinely markup-reading.
+        let parser = crate::Parser::default();
+
+        for (source, golden_html) in [
             ("[.a(C)c]#x#", "<span class=\"a&#169;c\">x</span>"),
             (
                 "[.a&amp;b]*bold*",
