@@ -129,7 +129,7 @@ fn fold_into_html(
             }
 
             InlineNode::IndexTerm(index_term) => {
-                fold_index_term(index_term, renderer, out);
+                fold_index_term(index_term, renderer, parser, out);
             }
 
             InlineNode::Footnote(footnote) => {
@@ -473,6 +473,17 @@ fn fold_anchor(
 /// contract), so `render_index_term` emits it verbatim and the fold reproduces
 /// the string pipeline's bytes exactly.
 ///
+/// A visible term whose text encloses an earlier-recognized construct
+/// (`((*tiger*))`) carries it as [`children`](IndexTerm::children) instead, and
+/// this folds them — with the same `renderer`, so the enclosed span's markup is
+/// whatever the surrounding flow's would be — into the same
+/// already-substituted string the seam takes. That is the one thing a
+/// build-time `terms[0]` could not hold: a span's markup exists only at fold
+/// time. It is the relationship [`fold_link`]'s own `link_text` has to
+/// [`Ref::children`](crate::inlines::Ref::children), reached for the same
+/// reason. The two are never both populated, so the branch is a straight
+/// either/or rather than a precedence rule.
+///
 /// The node's `terms` mirrors what the
 /// (test-only) `inline_tree` recorder stores — the single
 /// shown term for a visible node, empty for a concealed one; the richer
@@ -482,10 +493,18 @@ fn fold_anchor(
 fn fold_index_term(
     index_term: &IndexTerm<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
+    parser: &Parser,
     out: &mut String,
 ) {
+    let mut folded_children = String::new();
+
     let visible_term = if index_term.visible {
-        Some(index_term.terms.first().map_or("", CowStr::as_ref))
+        if index_term.children.is_empty() {
+            Some(index_term.terms.first().map_or("", CowStr::as_ref))
+        } else {
+            fold_into_html(&index_term.children, renderer, parser, &mut folded_children);
+            Some(folded_children.as_str())
+        }
     } else {
         None
     };

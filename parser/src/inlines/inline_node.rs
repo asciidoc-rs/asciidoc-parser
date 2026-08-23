@@ -197,6 +197,7 @@ mod tests {
             }),
             InlineNode::IndexTerm(IndexTerm {
                 terms: vec![CowStr::from("term")],
+                children: vec![],
                 visible: false,
                 location,
             }),
