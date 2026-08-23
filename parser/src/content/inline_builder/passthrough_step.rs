@@ -654,14 +654,14 @@ fn build_bare_unconstrained_match<'src>(
     let consumed = delim_start..full.end;
     let location = source_slice(pieces, consumed.clone(), root);
 
-    let value = substitute_and_restore(body_m.as_str(), &body, nodes, pieces, parser);
+    let (value, form) = substitute_and_restore(body_m.as_str(), &body, nodes, pieces, parser);
 
     Some(MacroMatch {
         kind: MacroMatchKind::Node {
             consumed,
             node: Box::new(InlineNode::Raw {
                 value: CowStr::from(value),
-                form: RawForm::AsIs,
+                form,
                 location,
             }),
         },
@@ -699,8 +699,30 @@ fn substitute_and_restore(
     nodes: &[InlineNode<'_>],
     pieces: &[Piece],
     parser: &Parser,
-) -> String {
+) -> (String, RawForm) {
     let renderer = parser.renderer.as_ref();
+
+    // The overwhelmingly common case: a `+…+` body with nothing extracted
+    // inside it. Then there is no interleaving to do — the body is one
+    // `Verbatim` run, which is to say the author's literal text — so it takes
+    // the same [`Escaped`](RawForm::Escaped) form every other
+    // specialcharacters-only body does, and the fold escapes it with the
+    // renderer it is given rather than the one this parse happens to carry.
+    if !pieces.iter().any(|piece| {
+        piece.s_start + piece.s_len > range.start
+            && piece.s_start < range.end
+            && nodes
+                .get(piece.node_index)
+                .is_some_and(|node| restorable_body(node, renderer).is_some())
+    }) {
+        return (body_text.to_string(), RawForm::Escaped);
+    }
+
+    // Otherwise the value genuinely interleaves escaped text with another
+    // node's *fold* bytes, and no single form describes it: it is built here
+    // and emitted as-is. That keeps this one frozen against the parse's
+    // renderer, which is the residue this shape owes to `render_with` — the
+    // same debt a `pass:c,q[…]` body and a `Stem` body carry.
     let mut out = String::new();
     let mut cursor = range.start;
 
@@ -742,7 +764,7 @@ fn substitute_and_restore(
         parser,
     ));
 
-    out
+    (out, RawForm::AsIs)
 }
 
 /// Builds one [`Raw`](InlineNode::Raw) node from a verbatim, unescaped
@@ -1304,6 +1326,67 @@ mod tests {
         );
 
         assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "pass:[x]");
+    }
+
+    #[test]
+    fn a_bare_plus_body_is_literal_text_unless_it_restores_something() {
+        use super::super::test_support::assert_raw_form;
+        use crate::inlines::RawForm;
+
+        // A bare `+…+` body is `SubstitutionGroup::Verbatim` like `++…++`, so
+        // by rights it is the author's literal text too. It could not say so
+        // while one shape stood in the way: a body *enclosing a construct the
+        // first extraction pass already replaced* interleaves escaped text with
+        // that node's own **fold** bytes, and no single form describes the
+        // mixture.
+        //
+        // That shape is rare and the plain one is not, so the mixture is
+        // detected rather than assumed: with nothing restorable inside the
+        // body, the value is the author's bytes and the fold escapes them.
+        let nodes = build_src(Span::new("+a < b+"));
+        assert_raw_form(&nodes[0], RawForm::Escaped, "a < b");
+
+        // The mixture keeps `AsIs`, since part of its value is another node's
+        // rendering rather than anything an escape could reproduce.
+        let nodes = build_src(Span::new("+a $$<b>$$ c+"));
+        assert_raw_form(&nodes[0], RawForm::AsIs, "a &lt;b&gt; c");
+    }
+
+    #[test]
+    fn a_bare_plus_body_honors_the_renderer_the_fold_is_given() {
+        // The observable consequence, and the reason this is worth its own
+        // increment rather than a documented deferral: `+…+` is a common
+        // construct, and its body used to be escaped against whichever renderer
+        // the *parse* carried.
+        #[derive(Debug)]
+        struct BracketRenderer;
+
+        impl crate::parser::InlineSubstitutionRenderer for BracketRenderer {
+            fn render_special_character(
+                &self,
+                type_: crate::parser::SpecialCharacter,
+                dest: &mut String,
+            ) {
+                dest.push_str(match type_ {
+                    crate::parser::SpecialCharacter::Lt => "[LT]",
+                    crate::parser::SpecialCharacter::Gt => "[GT]",
+                    crate::parser::SpecialCharacter::Ampersand => "[AMP]",
+                });
+            }
+        }
+
+        let parser = Parser::default();
+        let nodes = build_src(Span::new("+a < b > c & d+"));
+
+        assert_eq!(
+            super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
+            "a &lt; b &gt; c &amp; d"
+        );
+
+        assert_eq!(
+            super::super::fold_html(&nodes, &BracketRenderer, &parser),
+            "a [LT] b [GT] c [AMP] d"
+        );
     }
 
     #[test]
