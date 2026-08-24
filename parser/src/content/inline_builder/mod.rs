@@ -795,12 +795,15 @@ mod tests {
         // unescaped because the value expands *after* `specialcharacters` ran.
         // Nothing extracted it and nothing restores it — the string replacer
         // reads these very bytes. `{cpp}` is `C&#43;&#43;`, so the expansion
-        // leaves one `Raw` per `&`, twice per occurrence.
+        // leaves one `Raw` per `&`.
+        //
+        // Deliberately in plain flow rather than inside a macro: a construct
+        // that *recognizes* the expanded value consumes these leaves into its
+        // own node, which is exactly what
+        // `an_xref_target_may_be_attribute_expanded` pins for `xref:{cpp}[…]`.
         assert_eq!(
-            origins("see xref:{cpp}[{cpp}]."),
+            origins("see {cpp} today."),
             vec![
-                (RawOrigin::Substitution, "&".to_string()),
-                (RawOrigin::Substitution, "&".to_string()),
                 (RawOrigin::Substitution, "&".to_string()),
                 (RawOrigin::Substitution, "&".to_string()),
             ]
