@@ -1612,10 +1612,57 @@ mod tests {
             .filter(|w| w.warning == WarningType::EmptyShorthandName)
             .count();
 
-        assert_eq!(empty_shorthand_name_warnings, 5);
+        // Six delimiters name nothing: the four leading `%`, the `%` followed
+        // only by tabs, and the two `%` after them. (The whitespace-only name
+        // was silently accepted until
+        // https://github.com/asciidoc-rs/asciidoc-parser/issues/1273.)
+        assert_eq!(empty_shorthand_name_warnings, 6);
 
         assert!(doc.warnings().all(|w| w.source.data() == "%%%%\t\t%%%f"
             || w.warning == WarningType::MissingBlockAfterTitleOrAttributeList));
+    }
+
+    #[test]
+    fn whitespace_only_shorthand_id_does_not_shadow_a_real_one() {
+        // A shorthand name made only of whitespace was accepted without a
+        // warning and then surfaced as an empty ID. Because `id()` reports the
+        // first shorthand item that starts with `#`, that empty ID hid a real
+        // one declared later in the same attrlist.
+        // See https://github.com/asciidoc-rs/asciidoc-parser/issues/1273.
+        let mut p = Parser::default();
+        let doc = p.parse("[x#\t#realid]\nhello");
+
+        assert_eq!(doc.child_blocks().next().unwrap().id().unwrap(), "realid");
+
+        assert_eq!(
+            doc.warnings()
+                .filter(|w| w.warning == WarningType::EmptyShorthandName)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn whitespace_only_shorthand_ids_do_not_collide_in_the_catalog() {
+        // Each whitespace-only ID used to be registered in the ID catalog as
+        // the empty string, so a second one reported `DuplicateId("")`.
+        // See https://github.com/asciidoc-rs/asciidoc-parser/issues/1273.
+        let mut p = Parser::default();
+        let doc = p.parse("[x#\t]\nhello\n\n[y#\t]\nworld");
+
+        assert!(doc.child_blocks().all(|b| b.id().is_none()));
+
+        assert!(
+            !doc.warnings()
+                .any(|w| matches!(w.warning, WarningType::DuplicateId(_)))
+        );
+
+        assert_eq!(
+            doc.warnings()
+                .filter(|w| w.warning == WarningType::EmptyShorthandName)
+                .count(),
+            2
+        );
     }
 
     #[test]
