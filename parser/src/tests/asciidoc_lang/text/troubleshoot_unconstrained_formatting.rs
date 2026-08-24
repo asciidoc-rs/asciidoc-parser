@@ -445,9 +445,33 @@ The mix of constrained and unconstrained formatting marks in the line is ambiguo
             panic!("Unexpected block type: {block2:?}");
         };
 
+        // NOTE: this is the **one golden output the inline-AST cutover changes**
+        // (design §5.2 Phase 4, step 6), and it changes for the better.
+        //
+        // The string pipeline ran its quoted-text subs as passes over one flat
+        // string, so the `#`-delimited highlight pass matched across the markup
+        // the monospace pass had already written, and emitted a `<mark>` opened
+        // inside a `<code>` and closed outside it — markup no backend would
+        // choose to produce, and not well-formed HTML:
+        //
+        //     <mark><code>CB<mark>#2</code></mark> and
+        // <mark><code>CB</mark>#3</code></mark>
+        //
+        // A tree has no tags to match through: the monospace span's content is
+        // a subtree, so a later sub's delimiter cannot span its boundary. The
+        // extra `#`s stay literal inside the span, and the nesting is
+        // well-formed. This is the same class as the keep the cross-product
+        // sweep documents for the macro families (a later family matching
+        // across an earlier family's markup), reached one step out.
+        //
+        // The prose this test quotes still holds in substance — the mix of
+        // constrained and unconstrained marks is ambiguous, and neither
+        // pipeline gives you `CB###2` — but the specific scrambling it calls
+        // "a scrambled mess" was an artifact of substituting over rendered
+        // markup, and the tree does not reproduce it.
         assert_eq!(
             sb2.content().rendered_html(),
-            r#"<mark><code>CB<mark>#2</code></mark> and <mark><code>CB</mark>#3</code></mark>"#
+            r#"<mark><code>CB###2</code></mark> and <mark><code>CB###3</code></mark>"#
         );
 
         assert!(blocks.next().is_none());

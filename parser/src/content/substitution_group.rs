@@ -261,6 +261,26 @@ impl SubstitutionGroup {
                 attrlist,
             );
 
+            // The tree is now **authoritative** for the rendered string: what
+            // `rendered_html()` returns is a fold of it, not the string
+            // pipeline's own output (design §5.2 Phase 4, step 6).
+            //
+            // Content carrying a *deferred cross-reference* is the one
+            // exception, and it is temporary. Such a content's rendered string
+            // is rebuilt from a placeholder template each time resolution runs
+            // (`Content::rebuild_rendered`), so making the fold authoritative
+            // there means teaching resolution to re-fold instead — which is the
+            // deferred-cross-reference sentinel system's own retirement (§4.2's
+            // second), and its own increment. Until then such a content keeps
+            // the template path end to end rather than having the two
+            // mechanisms interleave.
+            if content.deferred_parts().is_none() {
+                let folded =
+                    crate::content::inline_builder::fold_html(&tree, &*parser.renderer, parser);
+
+                content.rendered = crate::strings::CowStr::from(folded);
+            }
+
             content.set_inlines(tree);
         }
     }
@@ -278,11 +298,13 @@ impl SubstitutionGroup {
     /// [`snapshot`](crate::content::inline_builder) for the demonstration.
     ///
     /// So the corpora take their golden from here instead, and go on
-    /// differentiating for real. Today this is byte-identical to `apply`: the
-    /// tree is still additive, so the only difference is work the golden never
-    /// reads. Landing it *before* the cutover is what keeps that equivalence
-    /// checkable — the whole suite has to stay green across this change, which
-    /// is a claim the cutover itself could no longer make.
+    /// differentiating for real. It was landed one increment *before* the
+    /// cutover, while it was still byte-identical to `apply` — the tree being
+    /// additive then, the only difference was work the golden never reads — so
+    /// that the rewiring could be checked by the whole suite staying green,
+    /// which is a claim the cutover itself could no longer make. As of this
+    /// increment the two genuinely differ, and this is the only remaining way
+    /// to reach the string pipeline's own output.
     ///
     /// The ~277 golden-HTML assertions deliberately do **not** take it: their
     /// subject is `rendered_html()` itself, so they must go on exercising the
