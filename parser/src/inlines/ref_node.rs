@@ -66,15 +66,28 @@ pub struct Ref<'src> {
     /// `None` for a [`Link`](RefVariant::Link).
     pub derived: Option<DerivedReference>,
 
-    /// For a cross-reference, the `xrefstyle=` override supplied via the
-    /// macro's own attribute-list text (`xref:id[text,xrefstyle=full]`).
-    /// `None` when the macro carries no such override — which does *not*
-    /// mean the target's reference text is used verbatim: the fold still
-    /// falls back to the document-wide `xrefstyle` attribute in effect for
-    /// this reference, mirroring `InlineXrefReplacer`'s own
-    /// `xrefstyle_override.or_else(|| document_xrefstyle(parser))`. Always
-    /// `None` for a [`Link`](RefVariant::Link) and for the `<<id>>` shorthand,
-    /// which has no attribute-list text of its own.
+    /// For a cross-reference, the **effective** `xrefstyle`: the
+    /// `xrefstyle=` override supplied via the macro's own attribute-list text
+    /// (`xref:id[text,xrefstyle=full]`) when there is one, and otherwise the
+    /// document-wide `xrefstyle` attribute **in effect at this point in the
+    /// document**. `None` means no style at all — the target's reference text
+    /// is used verbatim — rather than "ask the document". Always `None` for a
+    /// [`Link`](RefVariant::Link).
+    ///
+    /// It is resolved here, at build time, rather than read when the node is
+    /// folded, because the effective style is a *document-order* fact: a
+    /// `:xrefstyle:` line rebinds it for everything that follows, so the value
+    /// in effect where the reference was written is not generally the value in
+    /// effect at the end of the parse. Reading it at fold time would therefore
+    /// re-style a reference whenever the fold runs later than the parse — which
+    /// is precisely what a re-fold at reference-resolution time does. Resolving
+    /// it into the node is design §3.3.1 point 1 (rendering is a pure fold,
+    /// with every order-dependent fact already resolved into node values),
+    /// and it is the same reading `InlineXrefReplacer` makes, in the same
+    /// pass.
+    ///
+    /// The `<<id>>` shorthand carries no attribute-list text, so its effective
+    /// style is always the document-wide one.
     pub xrefstyle: Option<XrefStyle>,
 
     /// For a [`Link`](RefVariant::Link) whose display text carried its own

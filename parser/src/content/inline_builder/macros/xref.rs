@@ -14,7 +14,7 @@ use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::{
-        INLINE_XREF,
+        INLINE_XREF, document_xrefstyle,
         inline_builder::{
             quotes::{LevelContext, Piece, build_match_string, source_slice},
             special_chars::Masked,
@@ -478,7 +478,14 @@ fn build_xref_node<'src>(
         window,
         resolved: None,
         derived,
-        xrefstyle,
+
+        // The *effective* style, not the macro's override: an
+        // `xrefstyle=` on the macro wins, and otherwise the document-wide
+        // `xrefstyle` **in effect at this point in the document** is resolved
+        // into the node here — the same reading, at the same moment, the string
+        // replacer makes (design §3.3.1 point 1: every order-dependent fact is
+        // resolved into node values at build time, so the fold is pure).
+        xrefstyle: xrefstyle.or_else(|| document_xrefstyle(parser)),
         attrs: None,
         location,
     })
@@ -733,7 +740,11 @@ fn build_xref_shorthand_node<'src>(
         window: None,
         resolved: None,
         derived,
-        xrefstyle: None,
+
+        // The shorthand carries no attribute list, so its effective style is
+        // the document-wide one, resolved here for the same reason the macro
+        // form resolves it here.
+        xrefstyle: document_xrefstyle(parser),
         attrs: None,
         location,
     })
@@ -745,8 +756,11 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use super::super::super::test_support::{
-        assert_entity, assert_styled, assert_text, build_src, fold_html, link_text_of,
+    use super::super::super::{
+        build,
+        test_support::{
+            assert_entity, assert_styled, assert_text, build_src, fold_html, link_text_of,
+        },
     };
     use crate::{
         HasSpan, Parser, Span,
@@ -2040,15 +2054,104 @@ mod tests {
     }
 
     #[test]
-    fn an_xref_shorthand_never_carries_an_xrefstyle_override() {
-        // The `<<id>>` shorthand has no attribute-list text of its own (see the
-        // `Ref::xrefstyle` field docs): its node's `xrefstyle` override is
-        // always `None`, even though the document-wide default can still apply
-        // at fold time.
+    fn an_xref_shorthand_has_no_style_of_its_own() {
+        // The `<<id>>` shorthand has no attribute-list text to carry an
+        // override (see the `Ref::xrefstyle` field docs), so its effective
+        // style is whatever the document says — `None` under a parser with no
+        // `xrefstyle` set.
         let nodes = build_src(Span::new("<<install,Install Now>>"));
 
         let reference = assert_xref(&nodes[0]);
         assert_eq!(reference.xrefstyle, None);
+    }
+
+    /// A parser whose document-wide `xrefstyle` attribute is `value`.
+    fn parser_with_xrefstyle(value: &str) -> Parser {
+        Parser::default().with_intrinsic_attribute(
+            "xrefstyle",
+            value,
+            crate::parser::ModificationContext::Anywhere,
+        )
+    }
+
+    #[test]
+    fn a_node_carries_the_effective_xrefstyle_not_the_override() {
+        // `Ref::xrefstyle` is the style **in effect where the reference was
+        // written**, resolved at build time. That is what makes the fold a pure
+        // function of the tree, which in turn is what lets it run at
+        // reference-resolution time — long after the parse, when the
+        // document-wide `xrefstyle` may have been rebound by a later
+        // `:xrefstyle:` line. See
+        // `fold_xref_reads_the_effective_xrefstyle_off_the_node`, and the
+        // whole-document fixtures in `inline_builder_document_parity`, which
+        // fail without this.
+        let parser = parser_with_xrefstyle("full");
+
+        // Both spellings pick the document-wide style up.
+        for source in ["<<install>>", "xref:install[]", "xref:install[Install Now]"] {
+            let nodes = build(Span::new(source), &parser, None);
+            let reference = assert_xref(&nodes[0]);
+
+            assert_eq!(
+                reference.xrefstyle,
+                Some(XrefStyle::Full),
+                "no document-wide style on the node for {source:?}"
+            );
+        }
+
+        // A macro-level `xrefstyle=` still wins over it.
+        let nodes = build(
+            Span::new("xref:install[Install,xrefstyle=short]"),
+            &parser,
+            None,
+        );
+        assert_eq!(assert_xref(&nodes[0]).xrefstyle, Some(XrefStyle::Short));
+
+        // And the *bare* `:xrefstyle:` spelling, which `document_xrefstyle`
+        // reads as `Basic` rather than parsing a value.
+        let set = Parser::default().with_intrinsic_attribute_bool(
+            "xrefstyle",
+            true,
+            crate::parser::ModificationContext::Anywhere,
+        );
+
+        let nodes = build(Span::new("<<install>>"), &set, None);
+        assert_eq!(assert_xref(&nodes[0]).xrefstyle, Some(XrefStyle::Basic));
+    }
+
+    #[test]
+    fn fold_matches_the_string_pipeline_under_a_document_wide_xrefstyle() {
+        // The differential corpus for the reading above: with the style
+        // resolved into the node rather than read at fold time, the fold still
+        // reproduces the string pipeline's bytes — the string replacer making
+        // the very same `document_xrefstyle` call in the very same pass.
+        //
+        // These fold to the *unresolved* fallback (a bare `Content` has no
+        // catalog), which is the shape both sides agree on here; the resolved
+        // shape, where `xrefstyle` actually changes the bytes, is pinned over
+        // whole documents in `inline_builder_document_parity`.
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for style in ["full", "short", "basic"] {
+            let parser = parser_with_xrefstyle(style);
+
+            for fixture in [
+                "<<install>>",
+                "<<install,Install Now>>",
+                "xref:install[]",
+                "xref:install[Install Now]",
+                "xref:install[Install,xrefstyle=short]",
+                "See <<install>> and xref:other.adoc#frag[] now.",
+            ] {
+                let folded = fold_html(&build(Span::new(fixture), &parser, None), &renderer);
+
+                assert_eq!(
+                    folded,
+                    golden_xref_with(fixture, &parser),
+                    "fold diverged from the string pipeline for {fixture:?} under xrefstyle={style:?}"
+                );
+            }
+        }
     }
 
     #[test]

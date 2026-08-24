@@ -4,7 +4,6 @@ use super::{callouts::replacement_type_of, quotes::quote_type_of};
 use crate::{
     Parser,
     attributes::{Attrlist, AttrlistContext},
-    content::document_xrefstyle,
     inlines::{
         Anchor, Callout, CalloutGuard, CharRef, Footnote, Image, IndexTerm, InlineNode, RawForm,
         Ref, RefVariant, SpanForm, Stem, StemNotation, Ui, UiKind,
@@ -466,12 +465,11 @@ fn fold_link(
 /// `None` here) and a target that carries its own destination without a
 /// catalog (`derived`, populated at build time — see the `Ref::derived` field
 /// docs): an inter-document target, and the empty target naming the current
-/// document as a whole. The effective `xrefstyle` is the node's own
-/// macro-level override if present, otherwise the document-wide `xrefstyle`
-/// attribute in effect for this reference — mirroring `InlineXrefReplacer`'s
-/// own `xrefstyle_override.or_else(|| document_xrefstyle(parser))` exactly
-/// (see the `Ref::xrefstyle` field docs); the cutover (design §5.2 Phase 4,
-/// step 6) wires catalog resolution to the tree.
+/// document as a whole. The `xrefstyle` is taken straight off the node, which
+/// carries the **effective** style resolved at build time (see the
+/// `Ref::xrefstyle` field docs), so this fold consults no document state for
+/// it; the cutover (design §5.2 Phase 4, step 6) wires catalog resolution to
+/// the tree.
 fn fold_xref(
     reference: &Ref<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
@@ -505,14 +503,18 @@ fn fold_xref(
     // materialized into a `String` vector for the borrow.
     let roles: Vec<String> = reference.roles.iter().map(|r| r.to_string()).collect();
 
-    let xrefstyle = reference.xrefstyle.or_else(|| document_xrefstyle(parser));
-
     let params = XrefRenderParams {
         target: reference.target.as_ref(),
         provided_text,
         window: reference.window.as_deref(),
         roles: &roles,
-        xrefstyle,
+
+        // Taken straight off the node: the *effective* style is resolved into
+        // it at build time (see [`Ref::xrefstyle`]), so this fold consults no
+        // document state and stays a pure function of the tree — which is what
+        // lets it run at reference-resolution time, long after the parse whose
+        // `xrefstyle` was in effect.
+        xrefstyle: reference.xrefstyle,
         derived: reference.derived.as_ref(),
         resolved: reference.resolved.as_ref(),
     };
@@ -953,36 +955,49 @@ mod tests {
     }
 
     #[test]
-    fn fold_xref_falls_back_to_the_document_wide_xrefstyle() {
-        // A node with no macro-level `xrefstyle` override still picks up the
-        // document-wide `xrefstyle` attribute in effect for the reference,
-        // mirroring `InlineXrefReplacer`'s own
-        // `xrefstyle_override.or_else(|| document_xrefstyle(parser))` (see the
-        // `Ref::xrefstyle` field docs) — this is the document-wide default a
-        // hand-built node with no override still observes.
+    fn fold_xref_reads_the_effective_xrefstyle_off_the_node() {
+        // The fold consults **no** document state for `xrefstyle`: the
+        // effective style is resolved into the node at build time (see the
+        // `Ref::xrefstyle` field docs), so the same node folds the same way
+        // whatever the parser it is handed says.
+        //
+        // That is the property the deferred-cross-reference retirement needs.
+        // A re-fold runs at reference-resolution time, and the document-wide
+        // `xrefstyle` in effect *there* is whatever the last `:xrefstyle:` line
+        // in the document left set — not what was in effect where the
+        // reference was written. Reading it at fold time would therefore
+        // silently re-style a reference the string pipeline had already styled.
         let renderer = HtmlSubstitutionRenderer {};
-        let nodes = [resolved_xref_with_signifier(None)];
 
-        // With no document-wide `xrefstyle` set, the target's reference text
-        // (here `None`, so the bracketed fallback) is used verbatim.
-        let unstyled = fold_html_with_parser(&nodes, &renderer, &Parser::default());
-        assert!(!unstyled.contains("Section 2"), "folded: {unstyled}");
-
-        let parser = Parser::default().with_intrinsic_attribute(
+        // A parser whose document-wide `xrefstyle` says `full`, which the
+        // fold must ignore in both directions.
+        let full = Parser::default().with_intrinsic_attribute(
             "xrefstyle",
             "full",
             ModificationContext::Anywhere,
         );
 
-        let styled = fold_html_with_parser(&nodes, &renderer, &parser);
+        // `None` on the node means "no style", not "ask the document".
+        let unstyled =
+            fold_html_with_parser(&[resolved_xref_with_signifier(None)], &renderer, &full);
+
+        assert!(!unstyled.contains("Section 2"), "folded: {unstyled}");
+
+        // And a node carrying a style is honored even by a parser that has
+        // none set.
+        let styled = fold_html_with_parser(
+            &[resolved_xref_with_signifier(Some(XrefStyle::Full))],
+            &renderer,
+            &Parser::default(),
+        );
+
         assert!(styled.contains("Section 2, &#8220;"), "folded: {styled}");
     }
 
     #[test]
-    fn fold_xref_macro_level_xrefstyle_overrides_the_document_wide_default() {
-        // A macro-level `xrefstyle=` override (`Ref::xrefstyle`) wins over the
-        // document-wide `xrefstyle` attribute, exactly as
-        // `InlineXrefReplacer`'s own `xrefstyle_override` takes precedence.
+    fn fold_xref_honors_each_style_the_node_can_carry() {
+        // The complement of the test above: a node carrying `Short` folds as
+        // `Short`, with the document-wide `full` again ignored.
         let renderer = HtmlSubstitutionRenderer {};
         let nodes = [resolved_xref_with_signifier(Some(XrefStyle::Short))];
 

@@ -6133,6 +6133,37 @@ Each phase is a reviewable unit with a clear exit gate.
 
   Coverage is diff-neutral (`substitution_group.rs` stays at 100%).
 
+  *Step 6 landed as (a cross-reference's effective `xrefstyle`, resolved into the node):* the
+  first prep for the deferred-cross-reference retirement, and one the fold-parity audit cannot
+  see. [`Ref::xrefstyle`](../../parser/src/inlines/ref_node.rs) held the macro's own
+  `xrefstyle=` **override**, and
+  [`fold_xref`](../../parser/src/content/inline_builder/fold.rs) supplied the fallback itself
+  (`reference.xrefstyle.or_else(|| document_xrefstyle(parser))`). That is fine only while the fold
+  runs in the same pass as the parse. The effective style is a *document-order* fact — a
+  `:xrefstyle:` line rebinds it for everything after it — so a fold running **later** than the
+  parse reads whatever the last such line left set, and silently re-styles a reference the string
+  pipeline had already styled. A re-fold at reference-resolution time is exactly that later fold,
+  which is what the retirement below needs.
+
+  So the field becomes the **effective** style, resolved at build time by whichever builder makes
+  the node ([`build_xref_node`](../../parser/src/content/inline_builder/macros/xref.rs) for the
+  macro form, [`build_xref_shorthand_node`](../../parser/src/content/inline_builder/macros/xref.rs)
+  for `<<id>>`), which is the same `document_xrefstyle` reading `InlineXrefReplacer` makes, in the
+  same pass. `None` now means *no style* rather than *ask the document*, and the fold consults no
+  document state for it — §3.3.1 point 1, applied to one more order-dependent fact.
+
+  What pins it is not the audit, which compares `apply`'s own fold against `run_pipeline` in the
+  same parse and therefore reads the same attribute on both sides (0 new, 0 closed — correctly).
+  It is the whole-document harness
+  ([`inline_builder_document_parity`](../../parser/src/tests/inline_builder_document_parity.rs)),
+  whose fold runs after resolution with a *fresh* `Parser` for render context: four fixtures with
+  `:sectnums:` and a document-wide `:xrefstyle:` — set at the top, rebound midway, rebound to a
+  different value, and overridden per-macro — all of which **fail on the base branch** (`Install`
+  where the string pipeline says `Section 1, &#8220;Install&#8221;`) and pass here. That the
+  harness's own `fold_parser` is a default one is what made the gap visible at all.
+
+  Coverage is diff-neutral (`fold.rs` 3/3, `xref.rs` 16/7, `ref_node.rs` 0/0 — identical to base).
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -7326,6 +7357,20 @@ Each phase is a reviewable unit with a clear exit gate.
        better (`#`CB###2`#`, whose mis-nested `<mark>`/`<code>` was an artifact of substituting
        over rendered markup). Audit: production divergences 18 → 9, none new, all nine accounted
        for. See the step's own "landed as" note above.
+
+     - ✅ **prep (a cross-reference's effective `xrefstyle`, resolved into the node).** The first
+       prep for the retirement below, and the first found by asking *what does a fold that runs
+       later than its parse read differently?* [`Ref::xrefstyle`](../../parser/src/inlines/ref_node.rs)
+       held only the macro's `xrefstyle=` override, with
+       [`fold_xref`](../../parser/src/content/inline_builder/fold.rs) supplying the document-wide
+       fallback at fold time. The effective style is a document-order fact — a `:xrefstyle:` line
+       rebinds it for everything after it — so a re-fold at reference-resolution time would read
+       the *end-of-parse* value and re-style a reference the string pipeline had already styled.
+       The field becomes the effective style, resolved at build time by the same
+       `document_xrefstyle` call `InlineXrefReplacer` makes in the same pass; `None` now means *no
+       style* rather than *ask the document*. Pinned by four whole-document fixtures that fail on
+       base, not by the audit, which cannot see this class. See the step's own "landed as" note
+       above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
