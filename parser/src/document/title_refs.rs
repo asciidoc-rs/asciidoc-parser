@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use crate::{
     HasSpan, Span,
     blocks::{Block, IsBlock},
-    content::{XrefSegment, render_xref_template},
+    content::{XrefSegment, render_xref_template, unescape_sentinels},
     document::Catalog,
     parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext},
 };
@@ -205,8 +205,12 @@ fn compute<'src>(
     let mut xrefs = node.xrefs.clone();
 
     for xref in xrefs.iter_mut() {
+        // The catalog holds the document's own text, so a target leaves escaped
+        // form to be matched against it (see `Content::resolve_references`).
+        let target = unescape_sentinels(&xref.target);
+
         let mut resolved = resolver.resolve(&ResolutionContext {
-            target: &xref.target,
+            target: &target,
             provided_text: xref.provided_text.as_deref(),
             derived: xref.derived.as_ref(),
         });
@@ -230,7 +234,7 @@ fn compute<'src>(
         // correct.
         if !has_explicit_text
             && let Some(reference) = resolved.as_mut()
-            && let Some(target_id) = lookup_id(catalog, &xref.target)
+            && let Some(target_id) = lookup_id(catalog, &target)
             && let Some(&(target_index, target_node)) = id_to_node.get(target_id.as_str())
             && reference.href.strip_prefix('#') == Some(target_id.as_str())
         {
@@ -269,7 +273,7 @@ fn compute<'src>(
         // A target that resolved to nothing — and did not carry its own derived
         // destination — is an unresolved reference, reported against the title.
         if resolved.is_none() && xref.derived.is_none() {
-            warnings.unresolved(&xref.target, node.source);
+            warnings.unresolved(&target, node.source);
         }
 
         xref.resolved = resolved;

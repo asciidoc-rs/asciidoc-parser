@@ -5,7 +5,7 @@ use regex::{Captures, Regex, RegexBuilder, Replacer};
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    content::Content,
+    content::{Content, escape_sentinels, unescape_sentinels},
     document::{InterpretedValue, RefType},
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
@@ -398,9 +398,16 @@ impl LookaheadReplacer for QuoteReplacer<'_> {
                     // Assigning an ID to inline quoted text (e.g.,
                     // `[#free_the_world]#free the world#`) makes that phrase
                     // referenceable, so register it in the catalog. A duplicate
-                    // ID here is non-fatal (first registration wins).
+                    // ID here is non-fatal (first registration wins). The ID is
+                    // read out of escaped text, and the catalog holds the
+                    // document's own (see `escape_sentinels`), so it leaves
+                    // escaped form on the way in.
                     if let Some(id) = &id {
-                        let _ = self.parser.register_ref(id, None, RefType::Anchor);
+                        let _ = self.parser.register_ref(
+                            &unescape_sentinels(id),
+                            None,
+                            RefType::Anchor,
+                        );
                     }
 
                     self.parser.renderer.render_quoted_substitution(
@@ -441,9 +448,12 @@ impl LookaheadReplacer for QuoteReplacer<'_> {
                 // Assigning an ID to inline quoted text (e.g.,
                 // `[#free_the_world]#free the world#`) makes that phrase
                 // referenceable, so register it in the catalog. A duplicate ID
-                // here is non-fatal (first registration wins).
+                // here is non-fatal (first registration wins). The ID leaves
+                // escaped form on the way in, as above.
                 if let Some(id) = &id {
-                    let _ = self.parser.register_ref(id, None, RefType::Anchor);
+                    let _ =
+                        self.parser
+                            .register_ref(&unescape_sentinels(id), None, RefType::Anchor);
                 }
 
                 self.parser
@@ -642,6 +652,12 @@ struct AttributeReplacer<'p> {
     /// whole line in `drop-line` mode, or a line the dropped reference left
     /// empty in `drop` mode (Asciidoctor's `reject_if_empty`).
     missing_on_line: bool,
+
+    /// Whether a substituted attribute value should have its reserved sentinel
+    /// codepoints escaped on the way in. Set only when replacing references in
+    /// content being substituted, which is held in escaped form (see
+    /// [`escape_sentinels`]).
+    escape_sentinels: bool,
 }
 
 impl<'p> AttributeReplacer<'p> {
@@ -679,7 +695,15 @@ impl<'p> AttributeReplacer<'p> {
             source_matches,
             match_index: 0,
             missing_on_line: false,
+            escape_sentinels: false,
         }
+    }
+
+    /// Escapes the reserved sentinel codepoints of every attribute value this
+    /// replacer splices in, for the content path (see the field docs).
+    fn escaping_sentinels(mut self) -> Self {
+        self.escape_sentinels = true;
+        self
     }
 
     /// Returns the source span to attribute a recorded warning to for the
@@ -807,7 +831,17 @@ impl Replacer for AttributeReplacer<'_> {
         // A value-less `Set` attribute (e.g. `:foo:` with no `=value`)
         // substitutes to an empty string, matching Asciidoctor.
         if let InterpretedValue::Value(value) = value {
-            dest.push_str(value.as_ref());
+            // An attribute's value is stored as the document wrote it, so a
+            // reserved sentinel codepoint in it enters the text being
+            // substituted unescaped unless it is escaped here (see
+            // `escape_sentinels`). Only the content path asks for this: a value
+            // spliced into a macro target or an attribute list is not part of
+            // the escaped text and is restored by no one.
+            if self.escape_sentinels {
+                dest.push_str(&escape_sentinels(value.as_ref()));
+            } else {
+                dest.push_str(value.as_ref());
+            }
         }
     }
 }
@@ -871,7 +905,8 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
         // against `source_lines.len()`, so the entry is always present; `.get`
         // keeps the access panic-free regardless.
         let source_line = source_lines.and_then(|lines| lines.get(index).copied());
-        let mut replacer = AttributeReplacer::new(parser, mode, source, source_line);
+        let mut replacer =
+            AttributeReplacer::new(parser, mode, source, source_line).escaping_sentinels();
 
         let replaced = ATTRIBUTE_REFERENCE.replace_all(line, replacer.by_ref());
 

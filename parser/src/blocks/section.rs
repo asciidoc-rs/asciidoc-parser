@@ -11,7 +11,7 @@ use crate::{
     },
     content::{
         Content, SubstitutionGroup, XrefSegment, strip_footnote_marker_spans,
-        substitute_attributes_in_reftext,
+        substitute_attributes_in_reftext, unescape_sentinels,
     },
     document::{InterpretedValue, RefType},
     internal::debug::DebugSliceReference,
@@ -255,18 +255,32 @@ impl<'src> SectionBlock<'src> {
         // sentinels lets those be excised below from a single render — no second
         // substitution pass, so counters and attribute-expanded footnotes are
         // processed exactly once.
+        //
+        // The title is substituted in the escaped sentinel form (see
+        // `escape_sentinels`) and left there, so that the marker excision below
+        // reads only the markers this substitution wrote — never a copy of a
+        // marker sentinel the document itself typed.
         let mut section_title = Content::from(title_span);
         parser.mark_footnote_spans.set(true);
-        SubstitutionGroup::Title.apply(&mut section_title, parser, metadata.attrlist.as_ref());
+        SubstitutionGroup::Title.apply_keeping_sentinels_escaped(
+            &mut section_title,
+            parser,
+            metadata.attrlist.as_ref(),
+        );
         parser.mark_footnote_spans.set(false);
 
         // The footnote-free rendering of the title, for the reference text and
         // auto-generated ID; a no-op string copy when the title had no footnote.
-        let title_reftext = strip_footnote_marker_spans(section_title.rendered());
+        let title_reftext =
+            unescape_sentinels(&strip_footnote_marker_spans(section_title.rendered())).into_owned();
 
         // Strip the now-consumed sentinels from the title itself, keeping the
         // footnote marker so the heading still renders it.
         section_title.remove_footnote_marker_sentinels();
+
+        // Every sentinel-reading pass over the title has now run, so the
+        // document's own sentinel codepoints can be restored.
+        section_title.unescape_sentinels();
 
         // A section carrying the `bibliography` style implicitly adds that style
         // to each top-level unordered list in its body (see the "Bibliography

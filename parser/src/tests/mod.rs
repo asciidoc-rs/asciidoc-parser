@@ -15,5 +15,6 @@ mod parse_termination;
 pub(crate) mod prelude;
 pub(crate) mod sdd;
 mod security;
+mod sentinels;
 mod table_cell_directive_warnings;
 mod xref;
