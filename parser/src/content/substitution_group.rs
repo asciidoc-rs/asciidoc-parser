@@ -275,8 +275,11 @@ impl SubstitutionGroup {
             // the template path end to end rather than having the two
             // mechanisms interleave.
             if content.deferred_parts().is_none() {
-                let folded =
-                    crate::content::inline_builder::fold_html(&tree, &*parser.renderer, parser);
+                let folded = crate::content::inline_builder::fold_html(
+                    &tree,
+                    &*parser.renderer,
+                    &parser.render_context(),
+                );
 
                 content.rendered = crate::strings::CowStr::from(folded);
             }

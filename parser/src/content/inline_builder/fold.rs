@@ -2,8 +2,7 @@
 
 use super::{callouts::replacement_type_of, quotes::quote_type_of};
 use crate::{
-    Parser,
-    attributes::{Attrlist, AttrlistContext},
+    attributes::Attrlist,
     inlines::{
         Anchor, Callout, CalloutGuard, CharRef, Footnote, Image, IndexTerm, InlineNode, RawForm,
         Ref, RefVariant, SpanForm, Stem, StemNotation, Ui, UiKind,
@@ -11,7 +10,7 @@ use crate::{
     parser::{
         CalloutGuard as ParserCalloutGuard, CalloutRenderParams, FootnoteRenderParams,
         IconRenderParams, ImageRenderParams, IndexTermRenderParams, InlineSubstitutionRenderer,
-        LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType, SpecialCharacter,
+        LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType, RenderContext, SpecialCharacter,
         XrefRenderParams,
     },
     strings::CowStr,
@@ -29,13 +28,21 @@ use crate::{
 /// [`Stem`](InlineNode::Stem), and [`LineBreak`](InlineNode::LineBreak), plus
 /// the design-legal [`Raw`](InlineNode::Raw) leaf; a later increment extends
 /// it as the transducer grows new kinds.
+///
+/// `context` is the document state this fold renders under — see
+/// [`RenderContext`]. It is taken as a parameter rather than derived from a
+/// [`Parser`](crate::Parser) here because a fold does not necessarily run
+/// during the parse that produced the tree: content carrying a deferred
+/// cross-reference is folded again after resolution, under the attributes that
+/// were in effect where it was *written* rather than wherever the parse ended
+/// up.
 pub(crate) fn fold_html(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineSubstitutionRenderer,
-    parser: &Parser,
+    context: &RenderContext,
 ) -> String {
     let mut out = String::new();
-    fold_into_html(nodes, renderer, parser, Footnotes::Marked, &mut out);
+    fold_into_html(nodes, renderer, context, Footnotes::Marked, &mut out);
     out
 }
 
@@ -82,26 +89,26 @@ pub(crate) enum Footnotes {
 pub(crate) fn fold_reference_text(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineSubstitutionRenderer,
-    parser: &Parser,
+    context: &RenderContext,
 ) -> String {
     let mut out = String::new();
-    fold_into_html(nodes, renderer, parser, Footnotes::Stripped, &mut out);
+    fold_into_html(nodes, renderer, context, Footnotes::Stripped, &mut out);
     out
 }
 
 /// Appends the fold of `nodes` to `out` (the recursive worker for
 /// [`fold_html`]).
 ///
-/// `parser` is threaded through because rendering some nodes — an
+/// `context` is threaded through because rendering some nodes — an
 /// [`Image`](InlineNode::Image), whose `render_image`/`render_icon` reads the
 /// document's safe mode, `data-uri`, and `icons`/`icontype` attributes — is a
-/// function of document context, not of the node alone. `footnotes` is
+/// function of document state, not of the node alone. `footnotes` is
 /// threaded through because a heading's own reference text omits its footnote
 /// markers wherever they sit — see [`fold_reference_text`].
 fn fold_into_html(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineSubstitutionRenderer,
-    parser: &Parser,
+    context: &RenderContext,
     footnotes: Footnotes,
     out: &mut String,
 ) {
@@ -178,27 +185,27 @@ fn fold_into_html(
             }
 
             InlineNode::Image(image) => {
-                fold_image(image, renderer, parser, out);
+                fold_image(image, renderer, context, out);
             }
 
             InlineNode::Ui(ui) => {
-                fold_ui(ui, renderer, parser, out);
+                fold_ui(ui, renderer, context, out);
             }
 
             InlineNode::Ref(reference) if reference.variant == RefVariant::Link => {
-                fold_link(reference, renderer, parser, footnotes, out);
+                fold_link(reference, renderer, context, footnotes, out);
             }
 
             InlineNode::Ref(reference) if reference.variant == RefVariant::Xref => {
-                fold_xref(reference, renderer, parser, footnotes, out);
+                fold_xref(reference, renderer, context, footnotes, out);
             }
 
             InlineNode::Anchor(anchor) => {
-                fold_anchor(anchor, renderer, parser, footnotes, out);
+                fold_anchor(anchor, renderer, context, footnotes, out);
             }
 
             InlineNode::IndexTerm(index_term) => {
-                fold_index_term(index_term, renderer, parser, footnotes, out);
+                fold_index_term(index_term, renderer, context, footnotes, out);
             }
 
             InlineNode::Footnote(footnote) => {
@@ -213,7 +220,7 @@ fn fold_into_html(
             }
 
             InlineNode::Callout(callout) => {
-                fold_callout(callout, renderer, parser, out);
+                fold_callout(callout, renderer, context, out);
             }
 
             InlineNode::Stem(stem) => {
@@ -225,7 +232,7 @@ fn fold_into_html(
                 // string pipeline's quotes step did: the same `QuoteType`,
                 // attribute list, and id it recognized, so the bytes match.
                 let mut body = String::new();
-                fold_into_html(&styled.children, renderer, parser, footnotes, &mut body);
+                fold_into_html(&styled.children, renderer, context, footnotes, &mut body);
 
                 let scope = match styled.form {
                     SpanForm::Constrained => QuoteScope::Constrained,
@@ -292,7 +299,7 @@ pub(super) fn render_char(ch: char, renderer: &dyn InlineSubstitutionRenderer, o
 fn fold_image(
     image: &Image<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
-    parser: &Parser,
+    context: &RenderContext,
     out: &mut String,
 ) {
     // A macro-built image always carries its attribute list; a node hand-built
@@ -303,9 +310,7 @@ fn fold_image(
         Some(attrlist) => attrlist,
 
         None => {
-            empty = Attrlist::parse(image.location.slice(0..0), parser, AttrlistContext::Inline)
-                .item
-                .item;
+            empty = Attrlist::empty(image.location.slice(0..0));
 
             &empty
         }
@@ -318,8 +323,6 @@ fn fold_image(
         .unwrap_or_default();
 
     if image.is_icon {
-        let context = parser.render_context();
-
         let params = IconRenderParams {
             target: image.target.as_ref(),
             restored_target_ranges: &image.restored_target_ranges,
@@ -328,13 +331,11 @@ fn fold_image(
                 .named_or_positional_attribute("size", 1)
                 .map(|a| a.value()),
             attrlist,
-            context: &context,
+            context,
         };
 
         renderer.render_icon(&params, out);
     } else {
-        let context = parser.render_context();
-
         let params = ImageRenderParams {
             target: image.target.as_ref(),
             restored_target_ranges: &image.restored_target_ranges,
@@ -342,7 +343,7 @@ fn fold_image(
             width: image.width.as_deref(),
             height: image.height.as_deref(),
             attrlist,
-            context: &context,
+            context,
         };
 
         renderer.render_image(&params, out);
@@ -353,12 +354,12 @@ fn fold_image(
 /// `render_keyboard`/`render_button`/`render_menu` the string pipeline's macros
 /// step calls, reconstructing the render parameters from the keys / label /
 /// menu path the macro step captured, so the output is byte-for-byte identical.
-/// `parser` is threaded through because rendering a menu reads the document's
+/// `context` is threaded through because rendering a menu reads the document's
 /// `icons` attribute to choose the caret between menu levels.
 fn fold_ui(
     ui: &Ui<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
-    parser: &Parser,
+    context: &RenderContext,
     out: &mut String,
 ) {
     match &ui.kind {
@@ -378,13 +379,11 @@ fn fold_ui(
         } => {
             let submenus: Vec<String> = submenus.iter().map(|s| s.to_string()).collect();
 
-            let context = parser.render_context();
-
             let params = MenuRenderParams {
                 menu: menu.as_ref(),
                 submenus: &submenus,
                 menuitem: item.as_deref(),
-                context: &context,
+                context,
             };
 
             renderer.render_menu(&params, out);
@@ -404,7 +403,7 @@ fn fold_ui(
 fn fold_link(
     reference: &Ref<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
-    parser: &Parser,
+    context: &RenderContext,
     footnotes: Footnotes,
     out: &mut String,
 ) {
@@ -412,7 +411,7 @@ fn fold_link(
     fold_into_html(
         &reference.children,
         renderer,
-        parser,
+        context,
         footnotes,
         &mut link_text,
     );
@@ -425,13 +424,7 @@ fn fold_link(
         Some(attrs) => attrs,
 
         None => {
-            empty_attrlist = Attrlist::parse(
-                reference.location.slice(0..0),
-                parser,
-                AttrlistContext::Inline,
-            )
-            .item
-            .item;
+            empty_attrlist = Attrlist::empty(reference.location.slice(0..0));
 
             &empty_attrlist
         }
@@ -439,15 +432,13 @@ fn fold_link(
 
     let extra_roles: Vec<&str> = reference.roles.iter().map(|r| r.as_ref()).collect();
 
-    let context = parser.render_context();
-
     let params = LinkRenderParams {
         target: reference.target.to_string(),
         link_text,
         extra_roles,
         window: reference.window.as_deref(),
         attrlist,
-        context: &context,
+        context,
     };
 
     renderer.render_link(&params, out);
@@ -473,7 +464,7 @@ fn fold_link(
 fn fold_xref(
     reference: &Ref<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
-    parser: &Parser,
+    context: &RenderContext,
     footnotes: Footnotes,
     out: &mut String,
 ) {
@@ -481,7 +472,7 @@ fn fold_xref(
     fold_into_html(
         &reference.children,
         renderer,
-        parser,
+        context,
         footnotes,
         &mut provided,
     );
@@ -548,7 +539,7 @@ fn fold_xref(
 fn fold_anchor(
     anchor: &Anchor<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
-    parser: &Parser,
+    context: &RenderContext,
     footnotes: Footnotes,
     out: &mut String,
 ) {
@@ -557,7 +548,7 @@ fn fold_anchor(
     } else {
         anchor.reftext.as_ref().map(|children| {
             let mut s = String::new();
-            fold_into_html(children, renderer, parser, footnotes, &mut s);
+            fold_into_html(children, renderer, context, footnotes, &mut s);
             s
         })
     };
@@ -595,7 +586,7 @@ fn fold_anchor(
 fn fold_index_term(
     index_term: &IndexTerm<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
-    parser: &Parser,
+    context: &RenderContext,
     footnotes: Footnotes,
     out: &mut String,
 ) {
@@ -608,7 +599,7 @@ fn fold_index_term(
             fold_into_html(
                 &index_term.children,
                 renderer,
-                parser,
+                context,
                 footnotes,
                 &mut folded_children,
             );
@@ -675,7 +666,7 @@ fn fold_footnote(
 fn fold_callout(
     callout: &Callout<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
-    parser: &Parser,
+    context: &RenderContext,
     out: &mut String,
 ) {
     let guard = match &callout.guard {
@@ -683,13 +674,11 @@ fn fold_callout(
         CalloutGuard::Xml => ParserCalloutGuard::Xml,
     };
 
-    let context = parser.render_context();
-
     renderer.render_callout(
         &CalloutRenderParams {
             number: callout.number.as_ref(),
             guard,
-            context: &context,
+            context,
         },
         out,
     );
@@ -737,7 +726,7 @@ mod tests {
 
     use super::{
         super::test_support::{build_src, fold_html},
-        fold_html as fold_html_with_parser,
+        fold_html as fold_html_with_context,
     };
     use crate::{
         Parser, Span,
@@ -822,13 +811,13 @@ mod tests {
             );
 
             assert_eq!(
-                fold_html_with_parser(&nodes, &renderer, &built_parser),
+                fold_html_with_context(&nodes, &renderer, &built_parser.render_context()),
                 golden.rendered_html(),
                 "the heading's own rendering diverged for {fixture:?}"
             );
 
             assert_eq!(
-                super::fold_reference_text(&nodes, &renderer, &built_parser),
+                super::fold_reference_text(&nodes, &renderer, &built_parser.render_context()),
                 expected_reftext,
                 "the footnote-free reference text diverged for {fixture:?}"
             );
@@ -978,17 +967,20 @@ mod tests {
         );
 
         // `None` on the node means "no style", not "ask the document".
-        let unstyled =
-            fold_html_with_parser(&[resolved_xref_with_signifier(None)], &renderer, &full);
+        let unstyled = fold_html_with_context(
+            &[resolved_xref_with_signifier(None)],
+            &renderer,
+            &full.render_context(),
+        );
 
         assert!(!unstyled.contains("Section 2"), "folded: {unstyled}");
 
         // And a node carrying a style is honored even by a parser that has
         // none set.
-        let styled = fold_html_with_parser(
+        let styled = fold_html_with_context(
             &[resolved_xref_with_signifier(Some(XrefStyle::Full))],
             &renderer,
-            &Parser::default(),
+            &Parser::default().render_context(),
         );
 
         assert!(styled.contains("Section 2, &#8220;"), "folded: {styled}");
@@ -1007,7 +999,7 @@ mod tests {
             ModificationContext::Anywhere,
         );
 
-        let folded = fold_html_with_parser(&nodes, &renderer, &parser);
+        let folded = fold_html_with_context(&nodes, &renderer, &parser.render_context());
 
         // `Short` shows only the signifier label, with none of `Full`'s
         // quoted-title suffix.

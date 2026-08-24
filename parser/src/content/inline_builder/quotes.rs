@@ -2620,7 +2620,11 @@ mod tests {
             };
 
             assert_eq!(
-                super::super::fold_html(inlines, &HtmlSubstitutionRenderer {}, &Parser::default()),
+                super::super::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &Parser::default().render_context()
+                ),
                 rendered,
                 "fold diverged from the rendered string for {inlines:?}"
             );
@@ -2663,7 +2667,11 @@ mod tests {
             };
 
             assert_eq!(
-                super::super::fold_html(inlines, &HtmlSubstitutionRenderer {}, &Parser::default()),
+                super::super::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &Parser::default().render_context()
+                ),
                 rendered,
                 "fold diverged from the rendered string for {inlines:?}"
             );
@@ -2708,7 +2716,11 @@ mod tests {
             };
 
             assert_eq!(
-                super::super::fold_html(inlines, &HtmlSubstitutionRenderer {}, &Parser::default()),
+                super::super::fold_html(
+                    inlines,
+                    &HtmlSubstitutionRenderer {},
+                    &Parser::default().render_context()
+                ),
                 rendered,
                 "fold diverged from the rendered string for {inlines:?}"
             );
@@ -3860,7 +3872,11 @@ mod tests {
             ),
         ] {
             let nodes = build_src(Span::new(source));
-            let folded = super::super::fold_html(&nodes, &renderer, &crate::Parser::default());
+            let folded = super::super::fold_html(
+                &nodes,
+                &renderer,
+                &crate::Parser::default().render_context(),
+            );
             let golden = golden_passthroughs(source);
 
             assert_eq!(golden, golden_html);
@@ -3965,7 +3981,7 @@ mod tests {
             let folded = super::super::fold_html(
                 &super::super::build(Span::new(source), &parser, None),
                 &HtmlSubstitutionRenderer {},
-                &parser,
+                &parser.render_context(),
             );
 
             assert_eq!(folded, content.rendered_str(), "mismatch for {source:?}");
@@ -4017,7 +4033,7 @@ mod tests {
             let folded = super::super::fold_html(
                 &super::super::build(Span::new(source), &parser, None),
                 &HtmlSubstitutionRenderer {},
-                &parser,
+                &parser.render_context(),
             );
 
             assert_ne!(

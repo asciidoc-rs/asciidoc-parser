@@ -1378,7 +1378,7 @@ mod tests {
                 crate::content::inline_builder::fold_html(
                     inlines,
                     &HtmlSubstitutionRenderer {},
-                    &crate::Parser::default()
+                    &crate::Parser::default().render_context()
                 ),
                 rendered,
                 "fold diverged from the rendered string for {inlines:?}"
@@ -1405,7 +1405,7 @@ mod tests {
                 crate::content::inline_builder::fold_html(
                     section.section_title_inlines(),
                     &HtmlSubstitutionRenderer {},
-                    &crate::Parser::default()
+                    &crate::Parser::default().render_context()
                 ),
                 section.section_title(),
                 "fold diverged from the rendered section title"
@@ -1526,7 +1526,7 @@ mod tests {
                 crate::content::inline_builder::fold_html(
                     inlines,
                     &HtmlSubstitutionRenderer {},
-                    &crate::Parser::default()
+                    &crate::Parser::default().render_context()
                 ),
                 rendered,
                 "fold diverged from the rendered string for {inlines:?}"
@@ -1656,7 +1656,7 @@ mod tests {
                 crate::content::inline_builder::fold_html(
                     &nodes,
                     &HtmlSubstitutionRenderer {},
-                    &parser
+                    &parser.render_context()
                 ),
                 golden.rendered_str(),
                 "fold diverged from the string pipeline for {source:?}"
@@ -1822,7 +1822,7 @@ mod tests {
                 crate::content::inline_builder::fold_html(
                     inlines,
                     &HtmlSubstitutionRenderer {},
-                    &crate::Parser::default()
+                    &crate::Parser::default().render_context()
                 ),
                 rendered,
                 "fold diverged from the rendered string for {inlines:?}"
@@ -1846,7 +1846,7 @@ mod tests {
                 crate::content::inline_builder::fold_html(
                     section.section_title_inlines(),
                     &HtmlSubstitutionRenderer {},
-                    &crate::Parser::default()
+                    &crate::Parser::default().render_context()
                 ),
                 section.section_title(),
                 "fold diverged from the rendered section title"
@@ -1892,7 +1892,7 @@ mod tests {
                 crate::content::inline_builder::fold_html(
                     inlines,
                     &HtmlSubstitutionRenderer {},
-                    &crate::Parser::default()
+                    &crate::Parser::default().render_context()
                 ),
                 rendered,
                 "fold diverged from the rendered string for {inlines:?}"
@@ -1919,7 +1919,7 @@ mod tests {
                 crate::content::inline_builder::fold_html(
                     section.section_title_inlines(),
                     &HtmlSubstitutionRenderer {},
-                    &crate::Parser::default()
+                    &crate::Parser::default().render_context()
                 ),
                 section.section_title(),
                 "fold diverged from the rendered section title"

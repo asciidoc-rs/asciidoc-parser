@@ -307,6 +307,27 @@ impl<'src> Attrlist<'src> {
     /// language via [`nth_attribute(2)`](Self::nth_attribute) — without
     /// this parser performing any syntax highlighting itself.
     ///
+    /// An attribute list with no attributes, located at `source`.
+    ///
+    /// For an inline node that carries no attribute list of its own but folds
+    /// through one anyway (a hand-built [`Image`](crate::inlines::Image), which
+    /// the builder never produces without its list). `source` should be a
+    /// zero-length slice of the node's own location, so the empty list's
+    /// lifetime and position match the node a consumer reached it from.
+    ///
+    /// This exists so the fold need not *parse* an empty span — which would
+    /// cost an attribute-reference substitution pass and, more to the point,
+    /// require a [`Parser`] at a place that has only the
+    /// document state a render needs.
+    pub(crate) fn empty(source: Span<'src>) -> Self {
+        Self {
+            attributes: vec![],
+            anchor: None,
+            source,
+            source_text: None,
+        }
+    }
+
     /// The `source` span is set to the language span, since that is the only
     /// portion of the synthesized list that appears in the document source.
     pub(crate) fn source_with_language(language: Span<'src>) -> Self {

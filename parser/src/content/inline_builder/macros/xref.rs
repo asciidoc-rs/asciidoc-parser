@@ -1276,7 +1276,7 @@ mod tests {
             super::super::super::fold_html(
                 inlines,
                 &HtmlSubstitutionRenderer {},
-                &Parser::default()
+                &Parser::default().render_context()
             ),
             rendered,
             "fold diverged from the rendered string for {inlines:?}"
@@ -2223,7 +2223,11 @@ mod tests {
         assert_eq!(reference.target.as_ref(), "install");
         assert_eq!(reference.derived, None);
 
-        let folded = super::super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser);
+        let folded = super::super::super::fold_html(
+            &nodes,
+            &HtmlSubstitutionRenderer {},
+            &parser.render_context(),
+        );
         assert!(folded.contains(r##"href="#install""##), "folded: {folded}");
         assert_eq!(folded, golden_xref_with(source, &parser));
     }
@@ -2250,7 +2254,11 @@ mod tests {
             .expect("a fragmentless self-reference carries a derived destination");
         assert_eq!(derived.href, "#");
 
-        let folded = super::super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser);
+        let folded = super::super::super::fold_html(
+            &nodes,
+            &HtmlSubstitutionRenderer {},
+            &parser.render_context(),
+        );
         assert_eq!(folded, golden_xref_with(source, &parser));
     }
 
@@ -2340,7 +2348,11 @@ mod tests {
             let nodes = super::super::super::build(Span::new(source), &parser, None);
 
             assert_eq!(
-                super::super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
+                super::super::super::fold_html(
+                    &nodes,
+                    &HtmlSubstitutionRenderer {},
+                    &parser.render_context()
+                ),
                 golden_normal(source, &parser),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -2404,7 +2416,11 @@ mod tests {
         }
 
         assert_eq!(
-            super::super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
+            super::super::super::fold_html(
+                &nodes,
+                &HtmlSubstitutionRenderer {},
+                &parser.render_context()
+            ),
             golden_normal(source, &parser)
         );
     }
@@ -2435,7 +2451,11 @@ mod tests {
         );
 
         assert_eq!(
-            super::super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
+            super::super::super::fold_html(
+                &nodes,
+                &HtmlSubstitutionRenderer {},
+                &parser.render_context()
+            ),
             golden_normal(source, &parser)
         );
     }

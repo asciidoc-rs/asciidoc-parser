@@ -264,7 +264,11 @@ impl<'src> SectionBlock<'src> {
 
         // The footnote-free rendering of the title, for the reference text and
         // auto-generated ID.
-        let title_reftext = fold_reference_text(section_title.inlines(), &*parser.renderer, parser);
+        let title_reftext = fold_reference_text(
+            section_title.inlines(),
+            &*parser.renderer,
+            &parser.render_context(),
+        );
 
         // A section carrying the `bibliography` style implicitly adds that style
         // to each top-level unordered list in its body (see the "Bibliography

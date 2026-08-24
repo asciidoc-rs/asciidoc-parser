@@ -1386,12 +1386,16 @@ mod tests {
         let nodes = build_src(Span::new("+a < b > c & d+"));
 
         assert_eq!(
-            super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
+            super::super::fold_html(
+                &nodes,
+                &HtmlSubstitutionRenderer {},
+                &parser.render_context()
+            ),
             "a &lt; b &gt; c &amp; d"
         );
 
         assert_eq!(
-            super::super::fold_html(&nodes, &BracketRenderer, &parser),
+            super::super::fold_html(&nodes, &BracketRenderer, &parser.render_context()),
             "a [LT] b [GT] c [AMP] d"
         );
     }
@@ -1472,12 +1476,16 @@ mod tests {
         let nodes = build_src(Span::new("++a < b > c & d++"));
 
         assert_eq!(
-            super::super::fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
+            super::super::fold_html(
+                &nodes,
+                &HtmlSubstitutionRenderer {},
+                &parser.render_context()
+            ),
             "a &lt; b &gt; c &amp; d"
         );
 
         assert_eq!(
-            super::super::fold_html(&nodes, &BracketRenderer, &parser),
+            super::super::fold_html(&nodes, &BracketRenderer, &parser.render_context()),
             "a [LT] b [GT] c [AMP] d"
         );
 
@@ -1486,7 +1494,7 @@ mod tests {
         let raw = build_src(Span::new("+++a < b+++"));
 
         assert_eq!(
-            super::super::fold_html(&raw, &BracketRenderer, &parser),
+            super::super::fold_html(&raw, &BracketRenderer, &parser.render_context()),
             "a < b"
         );
     }
@@ -2085,7 +2093,7 @@ mod tests {
                 crate::content::inline_builder::fold_html(
                     inlines,
                     &HtmlSubstitutionRenderer {},
-                    &Parser::default()
+                    &Parser::default().render_context()
                 ),
                 rendered,
                 "fold diverged from the rendered string for {inlines:?}"
@@ -2233,7 +2241,7 @@ mod tests {
                 crate::content::inline_builder::fold_html(
                     inlines,
                     &HtmlSubstitutionRenderer {},
-                    &Parser::default()
+                    &Parser::default().render_context()
                 ),
                 rendered,
                 "fold diverged from the rendered string for {inlines:?}"
