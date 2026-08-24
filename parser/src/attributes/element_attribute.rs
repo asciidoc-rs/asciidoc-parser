@@ -258,11 +258,17 @@ impl<'src> ElementAttribute<'src> {
                 &value[*curr..]
             };
 
+            // Trim before testing for a bare delimiter: an item such as `#\t`
+            // carries no name (`parse_shorthand_items` reports it as
+            // `WarningType::EmptyShorthandName`) and must be discarded here
+            // just as `#` is, rather than surfacing as an empty ID, role, or
+            // option — and, in the case of an ID, shadowing a real one
+            // declared later in the same attrlist.
+            next_item = next_item.trim_end();
+
             if next_item == "#" || next_item == "." || next_item == "%" {
                 continue;
             }
-
-            next_item = next_item.trim_end();
 
             if !next_item.is_empty() {
                 result.push(next_item);
@@ -647,30 +653,30 @@ fn parse_shorthand_items(source: &str, warnings: &mut Vec<WarningType>) -> Vec<u
         // Assumption: First character is a delimiter.
         let after_delimiter = span.discard(1);
 
-        match after_delimiter.position(is_shorthand_delimiter) {
-            None => {
-                if after_delimiter.is_empty() {
-                    warnings.push(WarningType::EmptyShorthandName);
-                    shorthand_item_indices.push(span.byte_offset());
-                    span = after_delimiter;
-                } else {
-                    shorthand_item_indices.push(span.byte_offset());
-                    span = span.discard_all();
-                }
-            }
-
-            Some(0) => {
-                shorthand_item_indices.push(span.byte_offset());
-                warnings.push(WarningType::EmptyShorthandName);
-                span = after_delimiter;
-            }
+        // The name runs from the delimiter to the next one, or to the end of
+        // the value if this is the last item.
+        let (name, after) = match after_delimiter.position(is_shorthand_delimiter) {
+            None => (after_delimiter, after_delimiter.discard_all()),
 
             Some(index) => {
-                let mi: MatchedItem<Span> = span.into_parse_result(index + 1);
-                shorthand_item_indices.push(span.byte_offset());
-                span = mi.after;
+                let mi: MatchedItem<Span> = after_delimiter.into_parse_result(index);
+                (mi.item, mi.after)
             }
+        };
+
+        shorthand_item_indices.push(span.byte_offset());
+
+        // Emptiness is decided on the trimmed name, matching what the
+        // shorthand accessors read back: a name made only of whitespace
+        // (`[x#\t]`) names nothing, exactly as a missing one (`[x#]`) does.
+        // Deciding it on the raw text instead would let the whitespace-only
+        // name through unreported and then surface it as an empty ID, role, or
+        // option.
+        if name.data().trim().is_empty() {
+            warnings.push(WarningType::EmptyShorthandName);
         }
+
+        span = after;
     }
 
     shorthand_item_indices
@@ -1552,6 +1558,138 @@ mod tests {
         }
 
         #[test]
+        fn error_whitespace_only_id() {
+            // A name made only of whitespace names nothing, exactly as a
+            // missing name does. It used to be accepted without a warning and
+            // then surface as an empty ID.
+            // See https://github.com/asciidoc-rs/asciidoc-parser/issues/1273.
+            let p = Parser::default();
+
+            let (element_attr, offset, warning_types) = crate::attributes::ElementAttribute::parse(
+                &CowStr::from("abc#\t"),
+                0,
+                &p,
+                ParseShorthand(true),
+                AttrlistContext::Inline,
+            );
+
+            assert_eq!(
+                element_attr,
+                ElementAttribute {
+                    name: None,
+                    shorthand_items: &["abc"],
+                    value: "abc#\t"
+                }
+            );
+
+            assert_eq!(element_attr.block_style().unwrap(), "abc");
+            assert!(element_attr.id().is_none());
+            assert!(element_attr.roles().is_empty());
+            assert!(element_attr.options().is_empty());
+
+            assert_eq!(offset, 5);
+            assert_eq!(warning_types, vec![WarningType::EmptyShorthandName]);
+        }
+
+        #[test]
+        fn error_whitespace_only_id_does_not_shadow_later_id() {
+            // The empty ID that a whitespace-only name used to yield came
+            // first, so it hid the real ID declared after it.
+            // See https://github.com/asciidoc-rs/asciidoc-parser/issues/1273.
+            let p = Parser::default();
+
+            let (element_attr, offset, warning_types) = crate::attributes::ElementAttribute::parse(
+                &CowStr::from("abc#\t#realid"),
+                0,
+                &p,
+                ParseShorthand(true),
+                AttrlistContext::Inline,
+            );
+
+            assert_eq!(
+                element_attr,
+                ElementAttribute {
+                    name: None,
+                    shorthand_items: &["abc", "#realid"],
+                    value: "abc#\t#realid"
+                }
+            );
+
+            assert_eq!(element_attr.block_style().unwrap(), "abc");
+            assert_eq!(element_attr.id().unwrap(), "realid");
+            assert!(element_attr.roles().is_empty());
+            assert!(element_attr.options().is_empty());
+
+            assert_eq!(offset, 12);
+            assert_eq!(warning_types, vec![WarningType::EmptyShorthandName]);
+        }
+
+        #[test]
+        fn error_whitespace_only_role() {
+            // See https://github.com/asciidoc-rs/asciidoc-parser/issues/1273.
+            let p = Parser::default();
+
+            let (element_attr, offset, warning_types) = crate::attributes::ElementAttribute::parse(
+                &CowStr::from("abc.\t"),
+                0,
+                &p,
+                ParseShorthand(true),
+                AttrlistContext::Inline,
+            );
+
+            assert_eq!(
+                element_attr,
+                ElementAttribute {
+                    name: None,
+                    shorthand_items: &["abc"],
+                    value: "abc.\t"
+                }
+            );
+
+            assert_eq!(element_attr.block_style().unwrap(), "abc");
+            assert!(element_attr.id().is_none());
+            assert!(element_attr.roles().is_empty());
+            assert!(element_attr.options().is_empty());
+
+            assert_eq!(offset, 5);
+            assert_eq!(warning_types, vec![WarningType::EmptyShorthandName]);
+        }
+
+        #[test]
+        fn error_whitespace_only_option() {
+            // A non-breaking space is whitespace, too, and (unlike a plain
+            // space) survives the trailing-space trim applied to the attribute
+            // value before the shorthand is parsed.
+            // See https://github.com/asciidoc-rs/asciidoc-parser/issues/1273.
+            let p = Parser::default();
+
+            let (element_attr, offset, warning_types) = crate::attributes::ElementAttribute::parse(
+                &CowStr::from("abc%\u{a0}"),
+                0,
+                &p,
+                ParseShorthand(true),
+                AttrlistContext::Inline,
+            );
+
+            assert_eq!(
+                element_attr,
+                ElementAttribute {
+                    name: None,
+                    shorthand_items: &["abc"],
+                    value: "abc%\u{a0}"
+                }
+            );
+
+            assert_eq!(element_attr.block_style().unwrap(), "abc");
+            assert!(element_attr.id().is_none());
+            assert!(element_attr.roles().is_empty());
+            assert!(element_attr.options().is_empty());
+
+            assert_eq!(offset, 6);
+            assert_eq!(warning_types, vec![WarningType::EmptyShorthandName]);
+        }
+
+        #[test]
         fn id_only() {
             let p = Parser::default();
 
@@ -1847,7 +1985,10 @@ mod tests {
             let earlier = parse("%%%%\t\t%%%f");
             let later = parse("f");
 
-            assert_eq!(earlier.options(), vec!["", "f"]);
+            // The `%\t\t` run names nothing either, so it never becomes an
+            // option to be merged in the first place.
+            // See https://github.com/asciidoc-rs/asciidoc-parser/issues/1273.
+            assert_eq!(earlier.options(), vec!["f"]);
 
             let merged =
                 crate::attributes::ElementAttribute::merge_block_style_shorthand(&earlier, &later);
