@@ -17,7 +17,7 @@ use crate::{
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
         FootnoteRenderParams, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
-        LinkRenderParams, MenuRenderParams, RenderContext, XrefStyle, has_dangerous_scheme,
+        LinkRenderParams, MenuRenderParams, XrefStyle, has_dangerous_scheme,
         has_dangerous_self_href, is_uri_ish,
     },
     warnings::WarningType,
@@ -342,7 +342,7 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
                     .map(str::to_owned),
             );
 
-            let context = RenderContext::new(self.parser);
+            let context = self.parser.render_context();
 
             let params = ImageRenderParams {
                 target,
@@ -363,7 +363,7 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
 
             self.parser.renderer.render_image(&params, dest);
         } else {
-            let context = RenderContext::new(self.parser);
+            let context = self.parser.render_context();
 
             let params = IconRenderParams {
                 target,
@@ -564,7 +564,7 @@ impl Replacer for InlineMenuMacroReplacer<'_> {
             (vec![], None)
         };
 
-        let context = RenderContext::new(self.0);
+        let context = self.0.render_context();
 
         let params = MenuRenderParams {
             menu,
@@ -976,7 +976,7 @@ impl Replacer for InlineLinkReplacer<'_> {
                 target.clone()
             };
 
-            let context = RenderContext::new(self.0);
+            let context = self.0.render_context();
 
             let params = LinkRenderParams {
                 target,
@@ -1126,7 +1126,7 @@ impl Replacer for InlineLinkReplacer<'_> {
 
         dest.push_str(&prefix);
 
-        let context = RenderContext::new(self.0);
+        let context = self.0.render_context();
 
         let params = LinkRenderParams {
             target,
@@ -1301,7 +1301,7 @@ impl Replacer for InlineLinkMacroReplacer<'_, '_> {
 
         self.parser.register_link(target.clone());
 
-        let context = RenderContext::new(self.parser);
+        let context = self.parser.render_context();
 
         let params = LinkRenderParams {
             target,
@@ -1451,7 +1451,7 @@ impl Replacer for InlineEmailReplacer<'_> {
             .item
             .item;
 
-        let context = RenderContext::new(self.0);
+        let context = self.0.render_context();
 
         let params = LinkRenderParams {
             target: target.clone(),

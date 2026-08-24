@@ -1365,12 +1365,20 @@ impl Parser {
     /// moves on afterwards.
     ///
     /// Taking one costs a handful of reference-count bumps and no allocation,
-    /// so a caller that needs one per rendered element is free to take one per
-    /// rendered element. This is chiefly useful for **testing** a
-    /// [`PathResolver`], [`ImageFileHandler`], or [`SvgFileHandler`]
-    /// implementation directly, since those receive a context rather than a
-    /// parser.
-    pub fn render_context(&self) -> RenderContext {
+    /// so a caller that needs one per rendered element takes one per rendered
+    /// element, which is what the substitution steps do.
+    ///
+    /// This is the **only** way a context is built, in or out of the crate:
+    /// [`RenderContext`]'s own constructor is not reachable from outside
+    /// [`parser`](crate::parser), and this is crate-private. A consumer
+    /// receives a context (as an [`InlineSubstitutionRenderer`], a
+    /// [`PathResolver`], an [`ImageFileHandler`], or a [`SvgFileHandler`])
+    /// rather than constructing one. If a downstream need to construct one
+    /// appears — unit-testing a handler implementation is the likely one —
+    /// this is what would be made public.
+    ///
+    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+    pub(crate) fn render_context(&self) -> RenderContext {
         RenderContext::new(self)
     }
 

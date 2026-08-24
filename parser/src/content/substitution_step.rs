@@ -10,7 +10,7 @@ use crate::{
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
         CalloutGuard, CalloutRenderParams, CharacterReplacementType, InlineSubstitutionRenderer,
-        QuoteScope, QuoteType, RenderContext, SpecialCharacter, attribute_lookup_name,
+        QuoteScope, QuoteType, SpecialCharacter, attribute_lookup_name,
     },
     strings::CowStr,
     warnings::WarningType,
@@ -1497,7 +1497,7 @@ impl LookaheadReplacer for CalloutReplacer<'_> {
             None => CalloutGuard::LineComment(""),
         };
 
-        let context = RenderContext::new(self.parser);
+        let context = self.parser.render_context();
 
         self.renderer.render_callout(
             &CalloutRenderParams {

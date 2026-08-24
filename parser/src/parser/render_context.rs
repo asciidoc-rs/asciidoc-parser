@@ -52,7 +52,11 @@ pub struct RenderContext {
 
 impl RenderContext {
     /// Takes a context from `parser`'s current state.
-    pub(crate) fn new(parser: &Parser) -> Self {
+    ///
+    /// Visible only within [`parser`](crate::parser), so that
+    /// [`Parser::render_context`] is the single way a context is built —
+    /// see its docs for why that is crate-private.
+    pub(super) fn new(parser: &Parser) -> Self {
         Self {
             attributes: parser.snapshot_attributes(),
             path_resolver: Rc::clone(&parser.path_resolver),
