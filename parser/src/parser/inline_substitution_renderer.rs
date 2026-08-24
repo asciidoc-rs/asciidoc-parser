@@ -25,9 +25,9 @@ use crate::{
 /// [`render_image`](Self::render_image) inherit the crate's `data-uri`
 /// embedding and `opts=inline` SVG handling — which read bytes through the
 /// [`ImageFileHandler`](crate::parser::ImageFileHandler) and
-/// [`SvgFileHandler`](crate::parser::SvgFileHandler) registered on the
-/// [`Parser`](crate::Parser) — so a downstream renderer gets that behavior
-/// without needing to reproduce it.
+/// [`SvgFileHandler`](crate::parser::SvgFileHandler) the parse was configured
+/// with — so a downstream renderer gets that behavior without needing to
+/// reproduce it.
 ///
 /// Note that these defaults delegate to the HTML renderer's *own* methods
 /// rather than routing back through `self`: an override of one method does not
@@ -38,10 +38,14 @@ use crate::{
 /// (calling `self.image_uri(…)`) if the two must agree. The sole exception is
 /// [`icon_uri`](Self::icon_uri): its default derives an icon path and then
 /// calls `self.image_uri(…)`, so it alone *does* reflect an `image_uri`
-/// override. A renderer that resolves asset URIs itself can reach the
-/// registered handlers through
-/// [`Parser::image_file_handler`](crate::Parser::image_file_handler) and
-/// [`Parser::svg_file_handler`](crate::Parser::svg_file_handler).
+/// override. A renderer that resolves asset URIs itself can reach the same
+/// handlers — and the same [`PathResolver`](crate::parser::PathResolver) — off
+/// the [`RenderContext`] it is handed, through
+/// [`image_file_handler`](RenderContext::image_file_handler),
+/// [`svg_file_handler`](RenderContext::svg_file_handler), and
+/// [`path_resolver`](RenderContext::path_resolver). The identically-named
+/// [`Parser`](crate::Parser) accessors answer the same question for a caller
+/// that holds the parser, which a renderer does not.
 pub trait InlineSubstitutionRenderer: Debug {
     /// Renders the substitution for a special character.
     ///
