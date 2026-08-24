@@ -10,7 +10,7 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::{QuoteSub, maybe_has_quotes, quote_subs},
-    inlines::{CharRef, InlineNode, RawForm, SpanForm, StyleVariant, Styled},
+    inlines::{CharRef, InlineNode, RawForm, RawOrigin, SpanForm, StyleVariant, Styled},
     parser::{HtmlSubstitutionRenderer, InlineSubstitutionRenderer, QuoteScope, QuoteType},
     strings::CowStr,
 };
@@ -1554,6 +1554,7 @@ pub(super) fn emit_range<'src>(
             out.push(InlineNode::Raw {
                 value: CowStr::from(sliced.to_string()),
                 form: RawForm::AsIs,
+                origin: RawOrigin::Substitution,
                 location: node.span(),
             });
 

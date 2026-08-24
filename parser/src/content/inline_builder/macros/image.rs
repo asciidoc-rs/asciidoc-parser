@@ -1255,7 +1255,7 @@ mod tests {
             build, char_replacements::apply_character_replacements, macros::apply_macros,
             special_chars::Masked,
         },
-        inlines::{CharRef, Image, InlineNode, RawForm, SpanForm, StyleVariant},
+        inlines::{CharRef, Image, InlineNode, RawForm, RawOrigin, SpanForm, StyleVariant},
         parser::{DefaultPathResolver, HtmlSubstitutionRenderer},
         strings::CowStr,
     };
@@ -2578,6 +2578,7 @@ mod tests {
             InlineNode::Raw {
                 value: CowStr::from("raw"),
                 form: RawForm::AsIs,
+                origin: RawOrigin::Passthrough,
                 location: root,
             },
             InlineNode::Stem(crate::inlines::Stem {

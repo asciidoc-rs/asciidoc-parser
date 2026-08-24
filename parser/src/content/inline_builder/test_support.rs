@@ -11,7 +11,7 @@ use super::{build, quotes::apply_quotes, special_chars::apply_special_characters
 use crate::{
     HasSpan, Parser, Span,
     content::{Content, Passthroughs, SubstitutionStep},
-    inlines::{CharRef, InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
+    inlines::{CharRef, InlineNode, RawOrigin, Ref, RefVariant, SpanForm, StyleVariant},
     parser::HtmlSubstitutionRenderer,
     strings::CowStr,
 };
@@ -124,11 +124,11 @@ pub(super) fn assert_entity<'src>(node: &InlineNode<'src>, entity: &str) -> Span
 ///
 /// The assertion is on the folded bytes rather than on the node's `value`
 /// field, because a `Raw` node carries one of two
-/// [`form`](crate::inlines::RawForm)s: `AsIs`, whose value already *is* those
-/// bytes, and `Escaped`, whose value is the author's logical text that the fold
-/// escapes. What every caller here means is "this passthrough contributes these
-/// bytes", and that is the same question for both forms — where reading the
-/// field is only the same question for one of them.
+/// [`form`](crate::inlines::RawForm)s: `AsIs`, whose value already
+/// *is* those bytes, and `Escaped`, whose value is the author's logical text
+/// that the fold escapes. What every caller here means is "this passthrough
+/// contributes these bytes", and that is the same question for both forms —
+/// where reading the field is only the same question for one of them.
 pub(super) fn assert_raw<'src>(node: &InlineNode<'src>, value: &str) -> Span<'src> {
     match node {
         InlineNode::Raw { location, .. } => {
@@ -151,8 +151,15 @@ pub(super) fn assert_raw<'src>(node: &InlineNode<'src>, value: &str) -> Span<'sr
 /// Used where the *shape* is the subject: that a `+++…+++` body is `AsIs`
 /// output while a `++…++` body is `Escaped` logical text, which is what keeps
 /// a passthrough's escaping a property of the fold's renderer rather than of
-/// the parse's.
-pub(super) fn assert_raw_form(node: &InlineNode<'_>, form: crate::inlines::RawForm, value: &str) {
+/// the parse's — and that both are
+/// [`Passthrough`](RawOrigin::Passthrough)-origin, unlike the `Raw` leaves a
+/// substitution leaves behind in place.
+pub(super) fn assert_raw_form(
+    node: &InlineNode<'_>,
+    form: crate::inlines::RawForm,
+    origin: RawOrigin,
+    value: &str,
+) {
     // Compared as a whole node rather than by matching out the two fields,
     // which keeps this free of a fallback arm only a failing test could reach.
     // `location` is taken from `node` itself, so it is deliberately not part of
@@ -163,6 +170,8 @@ pub(super) fn assert_raw_form(node: &InlineNode<'_>, form: crate::inlines::RawFo
         &InlineNode::Raw {
             value: CowStr::from(value),
             form,
+
+            origin,
             location: node.span(),
         }
     );
