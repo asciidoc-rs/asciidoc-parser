@@ -85,6 +85,20 @@ impl RenderContext {
         }
     }
 
+    /// Builds a context pairing `attributes` — a snapshot taken at some
+    /// earlier point in the parse — with `parser`'s configuration.
+    ///
+    /// See [`Parser::render_context_with`](crate::Parser), which is how this is
+    /// reached, for why the two halves come from different places.
+    pub(super) fn from_parts(attributes: ResolvedAttributes, parser: &Parser) -> Self {
+        Self {
+            attributes,
+            path_resolver: Rc::clone(&parser.path_resolver),
+            image_file_handler: parser.image_file_handler.clone(),
+            svg_file_handler: parser.svg_file_handler.clone(),
+        }
+    }
+
     /// Returns the value of the document attribute named `name`, exactly as
     /// [`Parser::attribute_value`] would have answered when this context was
     /// taken.

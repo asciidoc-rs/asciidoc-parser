@@ -4,7 +4,7 @@
 //! [substitutions]: https://docs.asciidoctor.org/asciidoc/latest/subs/
 
 use crate::{
-    Span,
+    Parser, Span,
     content::Passthrough,
     inlines::{InlineNode, RefVariant},
     parser::{
@@ -636,6 +636,7 @@ impl<'src> Content<'src> {
         resolver: &dyn ReferenceResolver,
         renderer: &dyn InlineSubstitutionRenderer,
         warnings: &mut ReferenceWarnings<'src>,
+        parser: &Parser,
     ) {
         let source = self.original;
 
@@ -672,8 +673,79 @@ impl<'src> Content<'src> {
             }
         }
 
-        self.rebuild_rendered(renderer);
-        self.resolve_tree_references();
+        // Exactly **one** of the two renderings runs. The fold is authoritative
+        // only where the tree is known to hold every cross-reference the string
+        // pipeline deferred, which `resolve_tree_references` reports as it
+        // mirrors; everywhere else the template's answer stands. Running both
+        // and keeping the second would be observable, not merely wasteful: a
+        // renderer is a host-supplied trait object, so a stateful one — a
+        // recorder, a numbering backend, anything counting its own callbacks —
+        // would see every callback for this content twice in one pass.
+        //
+        // Reaching the second arm means this content has deferred parts, and a
+        // content's retained attributes travel with those
+        // (`set_render_attributes` is called for exactly that content — see
+        // `only_deferred_content_retains_its_render_attributes`), so it always
+        // binds. It is written as a binding rather than an unwrap because the
+        // invariant lives in that pairing, not in the field's type.
+        if self.resolve_tree_references()
+            && let Some(attributes) = self.render_attributes.as_deref().cloned()
+        {
+            self.refold(attributes, renderer, parser);
+        } else {
+            self.rebuild_rendered(renderer);
+        }
+    }
+
+    /// Re-renders this content from its **tree**, now that resolution has
+    /// installed each cross-reference's destination into it.
+    ///
+    /// This is what retires the deferred-cross-reference sentinel system
+    /// (design §4.2's second). `rendered_html()` became a fold of the tree for
+    /// every other content at the cutover; the one exception was content
+    /// carrying a deferred cross-reference, whose rendering is rebuilt on every
+    /// resolution pass and so could not be a fold *taken at parse time*. It can
+    /// be a fold taken **here** instead — after the pass that resolved it —
+    /// which is the same answer reached one step later.
+    ///
+    /// `attributes` are the document attributes this content was parsed under,
+    /// which it retained itself because they are order-dependent; they are
+    /// paired here with the parser's own configuration, which is not. A content
+    /// that retained none has no deferred cross-reference and was already
+    /// folded authoritatively at parse time, so it never reaches here.
+    ///
+    /// **The caller gates this on the mirror having succeeded**, which is the
+    /// carve-out that replaces the old one. Until now a content carrying *any*
+    /// deferred cross-reference kept the template path end to end; now only one
+    /// whose tree does **not** hold every cross-reference the string pipeline
+    /// deferred does. That is the single-pass builder's documented set of
+    /// unrecognized forms (see the `inline_builder` module) — where one of them
+    /// applies, the tree is known not to describe this content, so folding it
+    /// would *lose* the construct rather than render it differently. The signal
+    /// is the block-level count match
+    /// [`mirror_tree_xref_resolution`](Self::mirror_tree_xref_resolution)
+    /// already computes, so the carve-out narrows on its own as each builder
+    /// prep teaches the builder one more form, and disappears when none is
+    /// left.
+    ///
+    /// This runs **instead of**
+    /// [`rebuild_rendered`](Self::rebuild_rendered), not after it. The template
+    /// still exists — it is what the other arm renders, and what the test-only
+    /// `rendered_from_template` keeps the fold differentiated against — but
+    /// rendering both and discarding one would be
+    /// observable rather than merely wasteful, since a stateful host renderer
+    /// would see every callback for this content twice in a single resolution
+    /// pass.
+    fn refold(
+        &mut self,
+        attributes: ResolvedAttributes,
+        renderer: &dyn InlineSubstitutionRenderer,
+        parser: &Parser,
+    ) {
+        let context = parser.render_context_with(attributes);
+        let folded = crate::content::inline_builder::fold_html(&self.inlines, renderer, &context);
+
+        self.rendered = CowStr::from(folded);
     }
 
     /// Mirrors the destinations just resolved for this content's deferred
@@ -701,19 +773,25 @@ impl<'src> Content<'src> {
     /// template when the footnote's text is extracted, so it is excluded from
     /// the block correlation above and correlated instead with the tree's
     /// footnote subtrees (see [`footnote_tree_xrefs`]).
-    fn resolve_tree_references(&mut self) {
+    ///
+    /// Returns what
+    /// [`mirror_tree_xref_resolution`](Self::mirror_tree_xref_resolution)
+    /// returns — whether the tree holds exactly the block-level
+    /// cross-references the string pipeline deferred — and `false` for a
+    /// content with no tree or nothing deferred, neither of which is re-folded.
+    fn resolve_tree_references(&mut self) -> bool {
         if self.inlines.is_empty() {
-            return;
+            return false;
         }
 
         let Some(deferred) = self.deferred.as_ref() else {
-            return;
+            return false;
         };
 
         let block_ordered = block_tree_xrefs(&deferred.template, &deferred.xrefs);
         let footnote_ordered = footnote_tree_xrefs(&deferred.template, &deferred.xrefs);
 
-        self.mirror_tree_xref_resolution(&block_ordered, &footnote_ordered);
+        self.mirror_tree_xref_resolution(&block_ordered, &footnote_ordered)
     }
 
     /// Installs a pre-computed list of resolved cross-reference destinations —
@@ -739,13 +817,28 @@ impl<'src> Content<'src> {
     /// It is a no-op for a tree holding no cross-reference node,
     /// non-destructive, and re-resolvable: each call overwrites the tree's
     /// resolved state from `block_ordered` and `footnote_ordered`.
+    ///
+    /// Returns whether the **block-level** correlation ran — i.e. whether the
+    /// tree holds exactly the cross-reference nodes whose placeholders the
+    /// string pipeline left in the template. A `false` means the builder left
+    /// at least one of them unrecognized, so this content's tree is known not
+    /// to describe its rendering; a caller that folds the tree instead of
+    /// rebuilding from that template (see [`refold`](Self::refold)) uses this
+    /// to tell the two apart.
+    ///
+    /// The **footnote** correlation is deliberately not part of that answer: a
+    /// footnote's text is extracted out of this content, so it is not part of
+    /// [`rendered`](Self::rendered) — a fold emits the footnote's *marker* and
+    /// never descends into its subtree (see `fold_footnote`). A footnote-side
+    /// skip therefore leaves the tree's own footnote nodes honestly unresolved
+    /// without making a fold of this content wrong.
     pub(crate) fn mirror_tree_xref_resolution(
         &mut self,
         block_ordered: &[Option<ResolvedReference>],
         footnote_ordered: &[Option<ResolvedReference>],
-    ) {
+    ) -> bool {
         if self.inlines.is_empty() {
-            return;
+            return false;
         }
 
         // The correlation is positional, so it requires the tree to hold
@@ -757,7 +850,8 @@ impl<'src> Content<'src> {
         // pairing is unknowable; the mirror is skipped for that list — leaving
         // its nodes in their honest unresolved state — rather than assigning
         // destinations to the wrong nodes.
-        if count_tree_xrefs(&self.inlines) == block_ordered.len() {
+        let block_mirrored = count_tree_xrefs(&self.inlines) == block_ordered.len();
+        if block_mirrored {
             let mut next = 0;
             assign_tree_xrefs(&mut self.inlines, block_ordered, &mut next);
         }
@@ -766,6 +860,34 @@ impl<'src> Content<'src> {
             let mut next = 0;
             assign_footnote_tree_xrefs(&mut self.inlines, footnote_ordered, &mut next);
         }
+
+        block_mirrored
+    }
+
+    /// Renders this content **from its deferred template**, without installing
+    /// the result — the answer [`refold`](Self::refold) replaced, exposed so a
+    /// test can still compare the two.
+    ///
+    /// A deferred content's rendering is now a fold of its tree wherever the
+    /// tree is authoritative, so the whole-document parity harness — which
+    /// checks a fold against [`rendered_html`](Self::rendered_html) — would
+    /// otherwise be comparing the fold against itself for exactly the content
+    /// the retirement changed. This is the independent construction it compares
+    /// against instead.
+    ///
+    /// `None` for a content with nothing deferred, which has no template.
+    #[cfg(test)]
+    pub(crate) fn rendered_from_template(
+        &self,
+        renderer: &dyn InlineSubstitutionRenderer,
+    ) -> Option<String> {
+        let deferred = self.deferred.as_ref()?;
+
+        Some(render_template(
+            &deferred.template,
+            &deferred.xrefs,
+            renderer,
+        ))
     }
 
     /// Rebuilds [`Content::rendered`] from the deferred template and the

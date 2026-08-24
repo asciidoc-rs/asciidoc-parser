@@ -316,14 +316,15 @@ fn footnote_in_heading_does_not_advance_a_counter_twice() {
 fn unresolved_reference_falls_back_and_warns() {
     // Parse without resolving, then resolve against the document's own catalog
     // (cloned so it does not alias the `&mut doc` borrow).
-    let mut doc = Parser::default().parse_deferred("See <<nope>>.\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred("See <<nope>>.\n");
 
     // Before resolution, the reference is pending.
     assert!(first_simple(&doc).content().has_unresolved_refs());
 
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
 
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].target, "nope");
@@ -349,7 +350,8 @@ fn xrefstyle_survives_deferred_resolution() {
 
     // Parse without resolving: the target section is parsed *after* the
     // reference, so it is still pending and renders the unresolved fallback.
-    let mut doc = Parser::default().parse_deferred(src);
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred(src);
     assert!(first_simple(&doc).content().has_unresolved_refs());
     assert_eq!(
         first_paragraph(&doc),
@@ -360,7 +362,7 @@ fn xrefstyle_survives_deferred_resolution() {
     // the signifier and number from the catalog entry registered for the target.
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
     assert!(warnings.is_empty());
     assert_eq!(
         first_paragraph(&doc),
@@ -374,7 +376,8 @@ fn host_resolver_can_attach_signifier() {
     // from a catalog `RefEntry`) can still opt a target into `full`/`short`
     // formatting by attaching a signifier with `with_signifier`. The style still
     // comes from the referencing document.
-    let mut doc = Parser::default().parse_deferred(":xrefstyle: full\n\nSee <<install>>.\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred(":xrefstyle: full\n\nSee <<install>>.\n");
 
     let resolver = CrossDocResolver {
         index: HashMap::from([(
@@ -390,7 +393,7 @@ fn host_resolver_can_attach_signifier() {
         )]),
     };
 
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
     assert!(warnings.is_empty());
     assert_eq!(
         first_paragraph(&doc),
@@ -403,9 +406,9 @@ fn reference_to_this_document_by_name_resolves_within_it() {
     // A target that names the document being parsed is a reference *into* this
     // document after all, so its fragment resolves against this document's own
     // catalog — even though the target was written in inter-document form.
-    let mut doc = Parser::default()
-        .with_primary_file_name("guide.adoc")
-        .parse_deferred("See <<guide.adoc#install>>.\n\n[#install]\n== Installation\n");
+    let mut parser = Parser::default().with_primary_file_name("guide.adoc");
+    let mut doc =
+        parser.parse_deferred("See <<guide.adoc#install>>.\n\n[#install]\n== Installation\n");
 
     // The fragment names a section parsed after the reference, so it is pending
     // until resolution, exactly like a plain forward reference.
@@ -413,7 +416,7 @@ fn reference_to_this_document_by_name_resolves_within_it() {
 
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
 
     assert!(warnings.is_empty());
 
@@ -429,19 +432,19 @@ fn reference_to_this_document_by_explicit_docname_attribute_resolves_within_it()
     // `docname` attribute rather than a primary file name. Asciidoctor treats
     // `doc.attributes['docname']` as the single source of truth for the
     // self-reference match, so an API-provided `docname` must be honored too.
-    let mut doc = Parser::default()
-        .with_intrinsic_attribute(
-            "docname",
-            "guide",
-            crate::parser::ModificationContext::ApiOnly,
-        )
-        .parse_deferred("See <<guide.adoc#install>>.\n\n[#install]\n== Installation\n");
+    let mut parser = Parser::default().with_intrinsic_attribute(
+        "docname",
+        "guide",
+        crate::parser::ModificationContext::ApiOnly,
+    );
+    let mut doc =
+        parser.parse_deferred("See <<guide.adoc#install>>.\n\n[#install]\n== Installation\n");
 
     assert!(first_simple(&doc).content().has_unresolved_refs());
 
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
 
     assert!(warnings.is_empty());
 
@@ -529,7 +532,8 @@ fn host_resolver_can_override_a_derived_destination() {
     // only a default: it is offered to the resolver (as
     // `ResolutionContext::derived`) rather than imposed, so a host that resolves
     // targets across a corpus can answer with its own.
-    let mut doc = Parser::default().parse_deferred("See <<tigers#about,About Tigers>>.\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred("See <<tigers#about,About Tigers>>.\n");
 
     // Until a resolver has run, the derived destination is what renders.
     assert_eq!(
@@ -538,7 +542,7 @@ fn host_resolver_can_override_a_derived_destination() {
     );
 
     let resolver = DerivedRewritingResolver;
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
 
     assert!(warnings.is_empty());
 
@@ -553,11 +557,12 @@ fn derived_destination_stands_when_the_resolver_declines() {
     // A resolver that returns `None` for a target that names another document
     // leaves the derived destination in place, and — unlike a target it could
     // not resolve — that is not reported as an unresolved reference.
-    let mut doc = Parser::default().parse_deferred("See <<tigers#about>> and <<nope>>.\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred("See <<tigers#about>> and <<nope>>.\n");
 
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
 
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].target, "nope");
@@ -614,7 +619,7 @@ fn cross_document_resolution() {
     // Document A still has the pending reference until we resolve it.
     assert!(first_simple(&doc_a).content().has_unresolved_refs());
 
-    let warnings = doc_a.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc_a.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
     assert!(warnings.is_empty());
 
     assert_eq!(
@@ -649,7 +654,7 @@ fn xrefstyle_carries_across_documents() {
     }
     let resolver = CrossDocResolver { index };
 
-    let warnings = doc_a.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc_a.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
     assert!(warnings.is_empty());
     assert_eq!(
         first_paragraph(&doc_a),
@@ -661,7 +666,8 @@ fn xrefstyle_carries_across_documents() {
 fn resolution_is_repeatable() {
     // Resolving twice against different resolvers yields the second result —
     // resolution is non-destructive.
-    let mut doc = Parser::default().parse_deferred("See <<topic>>.\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred("See <<topic>>.\n");
 
     let first = CrossDocResolver {
         index: HashMap::from([(
@@ -669,7 +675,7 @@ fn resolution_is_repeatable() {
             ResolvedReference::new("first.html#topic".to_string(), Some("First".to_string())),
         )]),
     };
-    doc.resolve_references(&first, &HtmlSubstitutionRenderer {});
+    doc.resolve_references(&first, &HtmlSubstitutionRenderer {}, &parser);
     assert_eq!(
         first_paragraph(&doc),
         "See <a href=\"first.html#topic\">First</a>."
@@ -681,7 +687,7 @@ fn resolution_is_repeatable() {
             ResolvedReference::new("second.html#topic".to_string(), Some("Second".to_string())),
         )]),
     };
-    doc.resolve_references(&second, &HtmlSubstitutionRenderer {});
+    doc.resolve_references(&second, &HtmlSubstitutionRenderer {}, &parser);
     assert_eq!(
         first_paragraph(&doc),
         "See <a href=\"second.html#topic\">Second</a>."
@@ -694,7 +700,8 @@ fn re_resolution_is_a_full_independent_sweep() {
     // resolver that no longer knows a target re-reports it as unresolved and
     // reverts the rendering to the fallback, even though an earlier pass had
     // resolved it.
-    let mut doc = Parser::default().parse_deferred("See <<topic>>.\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred("See <<topic>>.\n");
 
     let knows_topic = CrossDocResolver {
         index: HashMap::from([(
@@ -702,7 +709,7 @@ fn re_resolution_is_a_full_independent_sweep() {
             ResolvedReference::new("first.html#topic".to_string(), Some("Topic".to_string())),
         )]),
     };
-    let warnings = doc.resolve_references(&knows_topic, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&knows_topic, &HtmlSubstitutionRenderer {}, &parser);
     assert!(warnings.is_empty());
     assert_eq!(
         first_paragraph(&doc),
@@ -714,7 +721,7 @@ fn re_resolution_is_a_full_independent_sweep() {
     let knows_nothing = CrossDocResolver {
         index: HashMap::new(),
     };
-    let warnings = doc.resolve_references(&knows_nothing, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&knows_nothing, &HtmlSubstitutionRenderer {}, &parser);
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].target, "topic");
     assert_eq!(first_paragraph(&doc), "See <a href=\"#topic\">[topic]</a>.");
@@ -725,8 +732,8 @@ fn footnote_cross_references_resolve_via_host_resolver() {
     // Cross-references inside a footnote are resolved through a host-supplied
     // resolver too (the multi-document path), and an unresolved one falls back
     // and is reported.
-    let mut doc =
-        Parser::default().parse_deferred("Text.footnote:[See <<topic>> and <<missing>>.]\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred("Text.footnote:[See <<topic>> and <<missing>>.]\n");
 
     let resolver = CrossDocResolver {
         index: HashMap::from([(
@@ -734,7 +741,7 @@ fn footnote_cross_references_resolve_via_host_resolver() {
             ResolvedReference::new("other.html#topic".to_string(), Some("Topic".to_string())),
         )]),
     };
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
 
     assert_eq!(
         doc.catalog().footnotes()[0].text,
@@ -1368,11 +1375,14 @@ mod xrefs_in_titles {
             }
         }
 
-        let mut doc = Parser::default().parse_deferred("== See <<b>>\n\n[#b]\n== B <<missing>>");
+        let mut parser = Parser::default();
+
+        let mut doc = parser.parse_deferred("== See <<b>>\n\n[#b]\n== B <<missing>>");
 
         doc.resolve_references(
             &BespokeResolver,
             &crate::parser::HtmlSubstitutionRenderer {},
+            &Parser::default(),
         );
 
         let sections: Vec<_> = doc
@@ -1409,10 +1419,15 @@ mod xrefs_in_titles {
             }
         }
 
-        let mut doc = Parser::default().parse_deferred("== See <<b>>\n\n[#b]\n== B <<c>>");
+        let mut parser = Parser::default();
 
-        let warnings =
-            doc.resolve_references(&KnowsNothing, &crate::parser::HtmlSubstitutionRenderer {});
+        let mut doc = parser.parse_deferred("== See <<b>>\n\n[#b]\n== B <<c>>");
+
+        let warnings = doc.resolve_references(
+            &KnowsNothing,
+            &crate::parser::HtmlSubstitutionRenderer {},
+            &parser,
+        );
 
         let sections: Vec<_> = doc
             .child_blocks()
@@ -1470,6 +1485,7 @@ mod xrefs_in_titles {
         doc.resolve_references(
             &ExternalResolver,
             &crate::parser::HtmlSubstitutionRenderer {},
+            &Parser::default(),
         );
 
         let sections: Vec<_> = doc

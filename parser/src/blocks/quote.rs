@@ -578,6 +578,7 @@ impl<'src> QuoteBlock<'src> {
         resolver: &dyn ReferenceResolver,
         renderer: &dyn InlineSubstitutionRenderer,
         warnings: &mut ReferenceWarnings<'src>,
+        parser: &Parser,
     ) {
         let source = self.source;
 
@@ -594,7 +595,7 @@ impl<'src> QuoteBlock<'src> {
                 let mut owned_warnings = ReferenceWarnings::default();
 
                 for block in &mut dependent.blocks {
-                    block.resolve_references(resolver, renderer, &mut owned_warnings);
+                    block.resolve_references(resolver, renderer, &mut owned_warnings, parser);
                 }
 
                 owned_warnings.rehome_into(warnings, source);

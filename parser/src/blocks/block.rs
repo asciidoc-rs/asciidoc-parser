@@ -935,6 +935,7 @@ impl<'src> Block<'src> {
         resolver: &dyn ReferenceResolver,
         renderer: &dyn InlineSubstitutionRenderer,
         warnings: &mut ReferenceWarnings<'src>,
+        parser: &Parser,
     ) {
         // A section is not resolved here: its resolvable content is its
         // heading, which `content_mut` deliberately does not expose (see
@@ -943,24 +944,24 @@ impl<'src> Block<'src> {
         // cross-references *between* titles (forward and circular) — something
         // per-content resolution cannot see.
         if let Some(content) = self.content_mut() {
-            content.resolve_references(resolver, renderer, warnings);
+            content.resolve_references(resolver, renderer, warnings, parser);
         }
 
         // Tables hold their resolvable content in cells rather than in a single
         // `content_mut()` value, so they are resolved explicitly here.
         if let Self::Table(table) = self {
-            table.resolve_references(resolver, renderer, warnings);
+            table.resolve_references(resolver, renderer, warnings, parser);
         }
 
         // A Markdown-style blockquote holds its nested blocks in its own owned
         // source, which the generic `child_blocks_mut()` walk below does not
         // reach, so they are resolved explicitly here.
         if let Self::Quote(quote) = self {
-            quote.resolve_references(resolver, renderer, warnings);
+            quote.resolve_references(resolver, renderer, warnings, parser);
         }
 
         for child in self.child_blocks_mut() {
-            child.resolve_references(resolver, renderer, warnings);
+            child.resolve_references(resolver, renderer, warnings, parser);
         }
     }
 

@@ -683,7 +683,7 @@ impl Parser {
         // Resolve cross-references against this document's own catalog. For
         // multi-document workflows, use `parse_deferred` and resolve later with
         // a caller-supplied resolver via `Document::resolve_references`.
-        document.resolve_against_own_catalog(&*self.renderer);
+        document.resolve_against_own_catalog(&*self.renderer, self);
 
         document
     }
@@ -1380,6 +1380,24 @@ impl Parser {
     /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
     pub(crate) fn render_context(&self) -> RenderContext {
         RenderContext::new(self)
+    }
+
+    /// Takes a [`RenderContext`] that pairs `attributes` with **this parser's
+    /// configuration** — its path resolver and file handlers.
+    ///
+    /// This is how a fold running *later than its parse* is assembled. The two
+    /// halves come from different places on purpose:
+    ///
+    /// - the document attributes are **order-dependent** (a `:imagesdir:` line
+    ///   rebinds them for everything after it), so they must be the ones the
+    ///   content was parsed under — retained on the content itself, see
+    ///   `Content::render_attributes`;
+    /// - the resolver and handlers are **parse-wide configuration** that cannot
+    ///   change mid-parse, so the parser supplies them at fold time. They are
+    ///   also `Rc<dyn …>`, which is why a content does not retain them: doing
+    ///   so would cost [`Document`] its `Send`/`Sync`.
+    pub(crate) fn render_context_with(&self, attributes: ResolvedAttributes) -> RenderContext {
+        RenderContext::from_parts(attributes, self)
     }
 
     /// Returns the reference instant this parse has already captured for its

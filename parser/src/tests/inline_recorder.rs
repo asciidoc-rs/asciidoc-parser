@@ -1325,8 +1325,12 @@ fn xref_mirror_is_skipped_when_the_tree_defers_a_reference_form() {
     let mut parser = Parser::default();
     let doc = parser.parse("[[sec]]The target.\n\nSee xref:sec[*bold*,role=*hl*].");
 
-    // The rendered output is unaffected (the string pipeline is
-    // authoritative), …
+    // The rendered output is unaffected. That count mismatch is also what
+    // keeps this content on the **template** path: a deferred content is
+    // re-folded from its tree once resolution has installed its destinations
+    // (`Content::refold`), and the mirror's own success is the gate. Here the
+    // mirror skipped, so the tree is known not to describe this content and
+    // folding it would drop the cross-reference outright.
     let rendered = collect_rendered(&doc);
     assert!(
         rendered
@@ -1378,6 +1382,20 @@ fn footnote_xref_mirror_is_skipped_when_the_subtree_defers_a_reference_form() {
     assert!(
         footnote_refs.iter().all(|r| r.resolved.is_none()),
         "the footnote mirror must skip on a count mismatch: {footnote_refs:?}"
+    );
+
+    // The block's own rendering is unaffected either way. `Content::refold`
+    // gates only on the **block** half of the mirror, which succeeded here, so
+    // this content *is* re-folded from its tree — and that is correct: a
+    // footnote's text is extracted out of the block, so what the block renders
+    // for it is the marker, which the fold emits without descending into the
+    // subtree whose correlation was skipped.
+    let rendered = collect_rendered(&doc);
+    assert!(
+        rendered
+            .iter()
+            .any(|s| s.contains("href=\"#c\"") && s.contains("class=\"footnote\"")),
+        "the rendered block regressed: {rendered:?}"
     );
 }
 
@@ -1632,7 +1650,7 @@ fn inline_tree_same_target_refs_keep_per_reference_resolution() {
 
     let mut parser = Parser::default();
     let mut doc = parser.parse_deferred("See <<tgt,first>> and <<tgt,second>>.");
-    doc.resolve_references(&PerTextResolver, &HtmlSubstitutionRenderer {});
+    doc.resolve_references(&PerTextResolver, &HtmlSubstitutionRenderer {}, &parser);
 
     let hrefs: Vec<String> = collect_refs(&doc)
         .iter()
@@ -1959,12 +1977,16 @@ fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
 
     // First pass: the resolver recognizes the target, so the heading's tree xref
     // carries its destination.
-    doc.resolve_references(&FixedResolver(Some("#tgt")), &HtmlSubstitutionRenderer {});
+    doc.resolve_references(
+        &FixedResolver(Some("#tgt")),
+        &HtmlSubstitutionRenderer {},
+        &parser,
+    );
     assert_eq!(title_xref_href(&doc).as_deref(), Some("#tgt"));
 
     // Second pass: the resolver no longer recognizes the target, so the tree xref
     // must fall back to unresolved rather than keep the stale destination.
-    doc.resolve_references(&FixedResolver(None), &HtmlSubstitutionRenderer {});
+    doc.resolve_references(&FixedResolver(None), &HtmlSubstitutionRenderer {}, &parser);
     assert_eq!(
         title_xref_href(&doc),
         None,
@@ -2316,10 +2338,14 @@ fn re_resolving_clears_a_now_unresolved_footnote_tree_destination() {
     let mut parser = Parser::default();
     let mut doc = parser.parse_deferred("A claim.footnote:[see <<tgt>>]");
 
-    doc.resolve_references(&FixedResolver(Some("#tgt")), &HtmlSubstitutionRenderer {});
+    doc.resolve_references(
+        &FixedResolver(Some("#tgt")),
+        &HtmlSubstitutionRenderer {},
+        &parser,
+    );
     assert_eq!(footnote_xref_href(&doc).as_deref(), Some("#tgt"));
 
-    doc.resolve_references(&FixedResolver(None), &HtmlSubstitutionRenderer {});
+    doc.resolve_references(&FixedResolver(None), &HtmlSubstitutionRenderer {}, &parser);
     assert_eq!(
         footnote_xref_href(&doc),
         None,
