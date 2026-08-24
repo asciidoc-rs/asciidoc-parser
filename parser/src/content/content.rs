@@ -3,6 +3,8 @@
 //!
 //! [substitutions]: https://docs.asciidoctor.org/asciidoc/latest/subs/
 
+use std::borrow::Cow;
+
 use crate::{
     Span,
     content::Passthrough,
@@ -133,15 +135,22 @@ pub(crate) struct XrefSegment {
 }
 
 /// Sentinel codepoints (Unicode Private Use Area) bracketing a placeholder
-/// index in [`DeferredContent::template`]. These cannot collide with user text
-/// and are inert to the remaining substitution steps.
+/// index in [`DeferredContent::template`].
+///
+/// A document can type these codepoints — they are unassigned by Unicode, but
+/// perfectly valid in a `&str` — so they are *not* self-evidently the parser's
+/// own. What keeps them unambiguous is the escaping pass described on
+/// [`escape_sentinels`]: a document's own copies are replaced before
+/// substitution begins, so every occurrence the readers below see was written
+/// by the substitution pipeline itself.
 const XREF_PLACEHOLDER_START: char = '\u{E000}';
 const XREF_PLACEHOLDER_END: char = '\u{E001}';
 
 /// Sentinel codepoints (Unicode Private Use Area) bracketing a footnote's
 /// rendered inline marker while a section title is being substituted. Like the
-/// cross-reference placeholders above, these cannot collide with user text and
-/// are inert to the remaining substitution steps.
+/// cross-reference placeholders above, they are inert to the remaining
+/// substitution steps, and a document's own copies are escaped out of the way
+/// first (see [`escape_sentinels`]).
 ///
 /// A footnote in a section title is a real, document-order footnote, but its
 /// marker must be kept out of the section's reference text and auto-generated
@@ -152,6 +161,125 @@ const XREF_PLACEHOLDER_END: char = '\u{E001}';
 /// [`Content::remove_footnote_marker_sentinels`].
 pub(crate) const FOOTNOTE_MARKER_START: char = '\u{E002}';
 pub(crate) const FOOTNOTE_MARKER_END: char = '\u{E003}';
+
+/// Sentinel codepoints (C1 control range) bracketing an extracted
+/// passthrough's index while the other substitutions run. Defined here so the
+/// escaping pass below covers them alongside the Private Use Area sentinels;
+/// they are emitted and consumed by
+/// [`passthroughs`](crate::content::passthroughs).
+pub(crate) const PASSTHROUGH_PLACEHOLDER_START: char = '\u{96}';
+pub(crate) const PASSTHROUGH_PLACEHOLDER_END: char = '\u{97}';
+
+/// Introduces the escaped form of a reserved sentinel (see
+/// [`escape_sentinels`]). A document's own copies of this codepoint are
+/// escaped too, so an occurrence in escaped text always introduces an escape.
+const SENTINEL_ESCAPE: char = '\u{E004}';
+
+/// Every codepoint the substitution pipeline reserves as an in-band control
+/// sentinel, paired with the ASCII tag that stands in for it in escaped text.
+///
+/// The tags are arbitrary; all that matters is that each is distinct and that
+/// the escape introducer itself is in the table, so escaping is reversible.
+const RESERVED_SENTINELS: [(char, char); 7] = [
+    (XREF_PLACEHOLDER_START, 'a'),
+    (XREF_PLACEHOLDER_END, 'b'),
+    (FOOTNOTE_MARKER_START, 'c'),
+    (FOOTNOTE_MARKER_END, 'd'),
+    (PASSTHROUGH_PLACEHOLDER_START, 'e'),
+    (PASSTHROUGH_PLACEHOLDER_END, 'f'),
+    (SENTINEL_ESCAPE, 'g'),
+];
+
+/// Replaces each reserved sentinel codepoint a *document* typed with an escaped
+/// form, so that the only unescaped sentinels in the text being substituted are
+/// the ones the substitution pipeline wrote itself.
+///
+/// The sentinels are in-band: they are spliced into the same string as the
+/// document's text, so the passes that read them back — [`render_template`],
+/// [`rehome_xref_placeholders`], [`strip_footnote_marker_spans`], and the
+/// passthrough restore — cannot otherwise tell a sentinel the parser wrote
+/// from one the document did. Without this pass, a document that types
+/// `U+E000 0 U+E001` alongside a real cross-reference has that text read back
+/// as a placeholder, forging a second cross-reference into the output.
+///
+/// Escaped text is an internal representation: every path that hands rendered
+/// text back to a caller reverses it with [`unescape_sentinels`], so a
+/// document's private-use characters survive to the output unchanged. The two
+/// passes are exact inverses, so applying them in matched pairs nests safely
+/// (a passthrough's text, for example, is substituted by a nested
+/// escape/unescape pair while it is itself held in escaped form).
+///
+/// Text with no reserved codepoint — the overwhelming majority — is borrowed
+/// through unchanged.
+pub(crate) fn escape_sentinels(text: &str) -> Cow<'_, str> {
+    if !text.contains(is_reserved_sentinel) {
+        return Cow::Borrowed(text);
+    }
+
+    let mut out = String::with_capacity(text.len());
+
+    for c in text.chars() {
+        match RESERVED_SENTINELS
+            .iter()
+            .find(|(sentinel, _)| *sentinel == c)
+        {
+            Some((_, tag)) => {
+                out.push(SENTINEL_ESCAPE);
+                out.push(*tag);
+            }
+            None => out.push(c),
+        }
+    }
+
+    Cow::Owned(out)
+}
+
+/// Restores the document's own sentinel codepoints, reversing
+/// [`escape_sentinels`].
+///
+/// Applied once to each string as it leaves the substitution machinery. A
+/// dangling escape introducer cannot occur in text this pass is given (escaping
+/// always emits a tag), but is passed through literally rather than dropped if
+/// it somehow does.
+pub(crate) fn unescape_sentinels(text: &str) -> Cow<'_, str> {
+    if !text.contains(SENTINEL_ESCAPE) {
+        return Cow::Borrowed(text);
+    }
+
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c != SENTINEL_ESCAPE {
+            out.push(c);
+            continue;
+        }
+
+        match chars
+            .peek()
+            .and_then(|tag| RESERVED_SENTINELS.iter().find(|(_, t)| t == tag))
+        {
+            Some((sentinel, _)) => {
+                out.push(*sentinel);
+                chars.next();
+            }
+            None => out.push(SENTINEL_ESCAPE),
+        }
+    }
+
+    Cow::Owned(out)
+}
+
+/// Returns `true` if `c` is one of the codepoints the substitution pipeline
+/// reserves for its own use.
+///
+/// Written as a range test rather than a scan of [`RESERVED_SENTINELS`]: this
+/// runs over every character of every block's content, while the table itself
+/// is only consulted for text that has a sentinel in it. A unit test pins the
+/// two to the same set of codepoints.
+fn is_reserved_sentinel(c: char) -> bool {
+    matches!(c, '\u{96}' | '\u{97}' | '\u{E000}'..='\u{E004}')
+}
 
 /// Removes each footnote marker span — a [`FOOTNOTE_MARKER_START`] …
 /// [`FOOTNOTE_MARKER_END`] region and everything between, i.e. the sentinels
@@ -418,6 +546,31 @@ impl<'src> Content<'src> {
         self.passthroughs = passthroughs;
     }
 
+    /// Escapes the reserved sentinel codepoints this content's *own text*
+    /// contains, so the substitution pipeline can tell its own in-band
+    /// sentinels from the document's text. See [`escape_sentinels`].
+    ///
+    /// Called once, before substitution begins; the matching
+    /// [`unescape_sentinels`](Self::unescape_sentinels) call restores them.
+    pub(crate) fn escape_sentinels(&mut self) {
+        if let Cow::Owned(escaped) = escape_sentinels(self.rendered.as_ref()) {
+            self.rendered = escaped.into();
+        }
+    }
+
+    /// Restores the document's own sentinel codepoints in
+    /// [`rendered`](Self::rendered), reversing
+    /// [`escape_sentinels`](Self::escape_sentinels).
+    ///
+    /// The deferred template is deliberately left escaped: it is an internal
+    /// representation that is re-rendered (through [`render_template`], whose
+    /// callers unescape the result) each time references are resolved.
+    pub(crate) fn unescape_sentinels(&mut self) {
+        if let Cow::Owned(unescaped) = unescape_sentinels(self.rendered.as_ref()) {
+            self.rendered = unescaped.into();
+        }
+    }
+
     /// Removes the [`FOOTNOTE_MARKER_START`]/[`FOOTNOTE_MARKER_END`] sentinels
     /// bracketing each footnote marker, *keeping* the marker itself, so the
     /// content renders normally. Called after a section title's reference text
@@ -590,12 +743,22 @@ impl<'src> Content<'src> {
                     && xref.derived.is_none()
                     && template.contains(&Content::xref_placeholder(index))
                 {
-                    warnings.unresolved(&xref.target, source);
+                    warnings.unresolved(&unescape_sentinels(&xref.target), source);
                 }
             }
         }
 
-        self.rebuild_rendered(renderer);
+        // Content that carries no deferred cross-reference is untouched here:
+        // its rendering left escaped form at the end of substitution, and
+        // unescaping again would read a document's own escape sequence as one
+        // of ours.
+        if self.deferred.is_some() {
+            self.rebuild_rendered(renderer);
+
+            // The template is held in escaped form, so the rebuilt rendering is
+            // too; hand it back as the document wrote it.
+            self.unescape_sentinels();
+        }
     }
 
     /// Rebuilds [`Content::rendered`] from the deferred template and the
@@ -678,7 +841,9 @@ pub(crate) fn render_xref_template(
     xrefs: &[XrefSegment],
     renderer: &dyn InlineSubstitutionRenderer,
 ) -> String {
-    render_template(template, xrefs, renderer)
+    // The template is held in escaped form (see `escape_sentinels`); this is
+    // the title's final rendering, so it leaves escaped form here.
+    unescape_sentinels(&render_template(template, xrefs, renderer)).into_owned()
 }
 
 /// Splices resolved (or fallback) cross-reference renderings into a placeholder
@@ -726,11 +891,13 @@ fn render_template(
             }
 
             None => {
-                // Unreachable while `template` and `xrefs` come from the same
-                // `Content` (indices are assigned sequentially). If that
-                // invariant is ever broken, emit the raw placeholder rather than
-                // silently dropping the span, so the breakage is visible.
-                debug_assert!(false, "xref placeholder index {body:?} out of range");
+                // Not a placeholder this template owns: emit the text
+                // literally. Placeholder indices are assigned sequentially into
+                // the same `Content`'s `xrefs`, so this is unreachable for a
+                // placeholder the substitution wrote; text is never rejected
+                // here (nor asserted against) because a sequence that merely
+                // looks like a placeholder is content, and content is passed
+                // through.
                 out.push(XREF_PLACEHOLDER_START);
                 out.push_str(body);
                 out.push(XREF_PLACEHOLDER_END);
@@ -773,7 +940,9 @@ impl FootnoteDeferred {
     /// Renders the footnote text from the template and the current (resolved or
     /// unresolved) state of its cross-references.
     pub(crate) fn render(&self, renderer: &dyn InlineSubstitutionRenderer) -> String {
-        render_template(&self.template, &self.xrefs, renderer)
+        // The template is held in escaped form (see `escape_sentinels`); the
+        // footnote's text is user-facing, so it leaves escaped form here.
+        unescape_sentinels(&render_template(&self.template, &self.xrefs, renderer)).into_owned()
     }
 
     /// Resolves the footnote's cross-references using `resolver`, reporting any
@@ -793,7 +962,7 @@ impl FootnoteDeferred {
             });
 
             if xref.resolved.is_none() && xref.derived.is_none() {
-                warnings.unresolved(&xref.target, source);
+                warnings.unresolved(&unescape_sentinels(&xref.target), source);
             }
         }
     }
@@ -878,6 +1047,103 @@ mod tests {
 
             assert!(matches!(content.rendered, CowStr::Boxed(_)));
             assert_eq!(content.rendered.as_ref(), "ab");
+        }
+    }
+
+    mod escape_sentinels {
+        use std::borrow::Cow;
+
+        use super::super::{
+            FOOTNOTE_MARKER_END, FOOTNOTE_MARKER_START, PASSTHROUGH_PLACEHOLDER_END,
+            PASSTHROUGH_PLACEHOLDER_START, RESERVED_SENTINELS, SENTINEL_ESCAPE,
+            XREF_PLACEHOLDER_END, XREF_PLACEHOLDER_START, escape_sentinels, is_reserved_sentinel,
+            unescape_sentinels,
+        };
+
+        #[test]
+        fn the_range_test_and_the_table_describe_the_same_codepoints() {
+            for (sentinel, _) in RESERVED_SENTINELS {
+                assert!(
+                    is_reserved_sentinel(sentinel),
+                    "{sentinel:?} is reserved but not covered by the range test"
+                );
+            }
+
+            for c in '\u{0}'..=char::MAX {
+                assert_eq!(
+                    is_reserved_sentinel(c),
+                    RESERVED_SENTINELS
+                        .iter()
+                        .any(|(sentinel, _)| *sentinel == c),
+                    "the range test and the table disagree about {c:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn borrows_text_with_no_reserved_codepoint() {
+            assert!(matches!(
+                escape_sentinels("plain text"),
+                Cow::Borrowed("plain text")
+            ));
+
+            assert!(matches!(
+                unescape_sentinels("plain text"),
+                Cow::Borrowed("plain text")
+            ));
+        }
+
+        #[test]
+        fn escaped_text_holds_no_reserved_codepoint() {
+            let typed = format!(
+                "a{XREF_PLACEHOLDER_START}0{XREF_PLACEHOLDER_END}b{FOOTNOTE_MARKER_START}\
+                 c{FOOTNOTE_MARKER_END}d{PASSTHROUGH_PLACEHOLDER_START}1\
+                 {PASSTHROUGH_PLACEHOLDER_END}e{SENTINEL_ESCAPE}f"
+            );
+
+            let escaped = escape_sentinels(&typed);
+
+            for reserved in [
+                XREF_PLACEHOLDER_START,
+                XREF_PLACEHOLDER_END,
+                FOOTNOTE_MARKER_START,
+                FOOTNOTE_MARKER_END,
+                PASSTHROUGH_PLACEHOLDER_START,
+                PASSTHROUGH_PLACEHOLDER_END,
+            ] {
+                assert!(
+                    !escaped.contains(reserved),
+                    "escaped text still contains {reserved:?}: {escaped:?}"
+                );
+            }
+
+            // The escape introducer is the one reserved codepoint that remains,
+            // and every occurrence of it is one the escaping wrote.
+            assert_eq!(escaped.matches(SENTINEL_ESCAPE).count(), 7, "{escaped:?}");
+
+            assert_eq!(unescape_sentinels(&escaped), typed);
+        }
+
+        #[test]
+        fn round_trips_an_escape_introducer_followed_by_a_tag() {
+            // The sequence a document is most likely to be mangled by: its own
+            // escape introducer followed by a character that is also an escape
+            // tag. Escaping the introducer keeps the pair distinguishable.
+            let typed = format!("x{SENTINEL_ESCAPE}ay");
+
+            assert_eq!(unescape_sentinels(&escape_sentinels(&typed)), typed);
+        }
+
+        #[test]
+        fn passes_a_dangling_escape_introducer_through() {
+            // Cannot arise from `escape_sentinels` (which always writes a tag),
+            // so this only pins down that a malformed sequence is content, not a
+            // dropped character.
+            let dangling = format!("x{SENTINEL_ESCAPE}");
+            assert_eq!(unescape_sentinels(&dangling), dangling);
+
+            let unknown_tag = format!("x{SENTINEL_ESCAPE}zy");
+            assert_eq!(unescape_sentinels(&unknown_tag), unknown_tag);
         }
     }
 

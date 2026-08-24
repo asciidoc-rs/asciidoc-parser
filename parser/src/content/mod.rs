@@ -6,8 +6,10 @@
 mod content;
 pub use content::Content;
 pub(crate) use content::{
-    FOOTNOTE_MARKER_END, FOOTNOTE_MARKER_START, FootnoteDeferred, OwnedTitle, XrefSegment,
+    FOOTNOTE_MARKER_END, FOOTNOTE_MARKER_START, FootnoteDeferred, OwnedTitle,
+    PASSTHROUGH_PLACEHOLDER_END, PASSTHROUGH_PLACEHOLDER_START, XrefSegment, escape_sentinels,
     rehome_xref_placeholders, render_xref_template, sanitize_title, strip_footnote_marker_spans,
+    unescape_sentinels,
 };
 
 mod macros;

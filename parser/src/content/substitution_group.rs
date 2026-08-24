@@ -226,6 +226,38 @@ impl SubstitutionGroup {
         parser: &Parser,
         attrlist: Option<&Attrlist>,
     ) {
+        self.apply_keeping_sentinels_escaped(content, parser, attrlist);
+
+        // Hand back the document's own text: the sentinel codepoints escaped on
+        // the way in (see `Content::escape_sentinels`) are restored now that
+        // every pass that reads them has run.
+        content.unescape_sentinels();
+    }
+
+    /// Applies this substitution group, leaving the result in the *escaped*
+    /// sentinel form (see
+    /// [`escape_sentinels`](crate::content::escape_sentinels)).
+    ///
+    /// Only the section-title path wants this: it has one more sentinel-reading
+    /// pass to run (excising the footnote markers from the reference text and
+    /// auto-generated ID) before the text is user-facing, and that pass must
+    /// not see a document's own copy of a marker sentinel. It calls
+    /// [`Content::unescape_sentinels`] itself once that pass is done. Every
+    /// other caller wants [`apply`](Self::apply).
+    pub(crate) fn apply_keeping_sentinels_escaped(
+        &self,
+        content: &mut Content<'_>,
+        parser: &Parser,
+        attrlist: Option<&Attrlist>,
+    ) {
+        // The substitution steps below mark their work in-band, with sentinel
+        // codepoints spliced into the same string as the document's text. A
+        // document can type those codepoints itself, so its own copies are
+        // escaped out of the way first; otherwise they are read back as the
+        // parser's own control sequences (forging, for instance, a second
+        // cross-reference into the output).
+        content.escape_sentinels();
+
         let steps = self.steps();
 
         let passthroughs: Option<Passthroughs> =

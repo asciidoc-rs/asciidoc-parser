@@ -1867,7 +1867,12 @@ impl Parser {
         // references. The stored `text` is the unresolved fallback rendering
         // until then, so it is always clean.
         let (text, deferred) = if xrefs.is_empty() {
-            (text, None)
+            // The text was extracted from content held in escaped sentinel form
+            // (see `escape_sentinels`); it is user-facing from here, so it
+            // leaves escaped form now. The deferred branch below does the same
+            // from `FootnoteDeferred::render`, keeping its template escaped for
+            // later re-rendering.
+            (crate::content::unescape_sentinels(&text).into_owned(), None)
         } else {
             let deferred = crate::content::FootnoteDeferred::new(text, xrefs);
             let rendered = deferred.render(&*self.renderer);
