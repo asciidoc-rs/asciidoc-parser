@@ -60,20 +60,47 @@ where
             warnings.append(&mut maw.warnings);
         }
 
-        if let BlockParseOutcome::Parsed(mi) = maw.item {
-            source = mi.after.discard_empty_lines();
-            blocks.push(mi.item);
-        } else if let BlockParseOutcome::Dropped(after) = maw.item {
-            // A dropped block (`attribute-missing=drop-line`) contributes no
-            // block, but parsing must still advance past its source.
-            source = after.discard_empty_lines();
+        let after = match maw.item {
+            BlockParseOutcome::Parsed(mi) => {
+                let after = mi.after;
+                blocks.push(mi.item);
+                after
+            }
+
+            BlockParseOutcome::Dropped(after) => {
+                // A dropped block (`attribute-missing=drop-line`) contributes
+                // no block, but parsing must still advance past its source.
+                after
+            }
+
+            BlockParseOutcome::NoMatch => {
+                // `source` is non-blank by the loop guard and the
+                // `discard_empty_lines` calls, yet no block could be made of
+                // it. That happens when a line is not blank by
+                // `Span::take_empty_line`'s reckoning (space and tab only) but
+                // holds nothing a block can be built from — a lone vertical tab
+                // (U+000B), form feed (U+000C), or carriage return, each of
+                // which the block parsers discard as trailing whitespace
+                // (issue #1234). Consume the line and carry on, exactly as if
+                // it had been blank: leaving it unconsumed would spin this loop
+                // forever, and breaking out of the loop would silently truncate
+                // whatever follows it.
+                source.take_normalized_line().after
+            }
+        };
+
+        // Progress guarantee. Every outcome above is expected to advance past
+        // at least one line of `source`, but the loop is bounded on the source
+        // being non-empty, not on it having moved — so an outcome that reports
+        // no progress (a future parser bug, or a case not yet foreseen) would
+        // spin here forever rather than fail visibly. Stop instead: truncating
+        // the parse loses content, but it terminates, and an infinite loop in
+        // a library parsing untrusted input is the worse failure by far.
+        if after.byte_offset() <= source.byte_offset() {
+            break;
         }
 
-        // `BlockParseOutcome::NoMatch` is intentionally not handled: it only
-        // arises for empty/blank input, which never reaches here because the
-        // loop guard and the `discard_empty_lines` calls above keep `source`
-        // non-blank. (Matching the behavior before drop-line support, which
-        // likewise only advanced on a successful parse.)
+        source = after.discard_empty_lines();
     }
 
     parser.block_nesting_depth -= 1;

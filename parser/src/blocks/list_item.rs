@@ -521,6 +521,16 @@ impl<'src> ListItem<'src> {
             // always a block macro, never `+`-prefixed content, so it can't set
             // `had_content_starting_with_plus`.)
             if let BlockParseOutcome::Dropped(after) = indented_block_maw.item {
+                // Progress guarantee: a dropped block is expected to have
+                // consumed the source it stands for, but this loop is not
+                // otherwise bounded by the source shrinking, so an outcome
+                // reporting no progress would spin here forever (issue #1234).
+                // End the list item instead — truncating is a visible loss;
+                // hanging is not recoverable at all.
+                if after.byte_offset() <= next.byte_offset() {
+                    break;
+                }
+
                 next = after;
                 continuation_active = false;
                 next_block_must_be_indented = true;

@@ -737,15 +737,24 @@ impl<'src> Block<'src> {
                     metadata.anchor = None;
                     metadata.attrlist = None;
                     metadata.block_start = metadata.source;
-                } else if !metadata.source.data().is_empty() {
+                } else if metadata.block_start.byte_offset() > source.byte_offset() {
                     // The metadata scan consumed one or more do-nothing lines
                     // (e.g. a lone empty `[[]]` anchor) that produced no title,
                     // anchor, or attribute list, and no block follows them. The
                     // lines are still consumed, so report the source as dropped
                     // (resuming at `block_start`) rather than falling through to
                     // `NoMatch`: a non-blank source left unadvanced would spin
-                    // the block-collection loop. Genuinely empty/blank input
-                    // (nothing consumed) still reaches `NoMatch` below.
+                    // the block-collection loop.
+                    //
+                    // The test is that `block_start` actually moved past the
+                    // `source` this call was given, not merely that the source
+                    // is non-empty. A non-empty source from which the scan
+                    // consumed *nothing* leaves `block_start == source`, so
+                    // reporting it as dropped resumes exactly where this call
+                    // began — the very spin this branch exists to prevent
+                    // (issue #1234). Such a source falls through to `NoMatch`
+                    // below, along with genuinely empty/blank input, and the
+                    // block-collection loops skip its first line.
                     return MatchAndWarnings {
                         item: BlockParseOutcome::Dropped(metadata.block_start),
                         warnings,
