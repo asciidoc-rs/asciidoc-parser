@@ -22,7 +22,7 @@ use crate::{
 /// `data-uri`, and `icons` attributes); tests that need a non-default
 /// document call [`super::fold_html`] directly with their own parser.
 pub(super) fn fold_html(nodes: &[InlineNode<'_>], renderer: &HtmlSubstitutionRenderer) -> String {
-    super::fold_html(nodes, renderer, &Parser::default())
+    super::fold_html(nodes, renderer, &Parser::default().render_context())
 }
 
 /// Builds the single-pass tree for `source` with a default parser and no

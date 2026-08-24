@@ -492,7 +492,7 @@ mod tests {
             let folded = crate::content::inline_builder::fold_html(
                 &build(Span::new(fixture), &parser, None),
                 &renderer,
-                &parser,
+                &parser.render_context(),
             );
 
             assert_eq!(
@@ -649,7 +649,7 @@ mod tests {
             crate::content::inline_builder::fold_html(
                 &nodes,
                 &HtmlSubstitutionRenderer {},
-                &experimental_parser()
+                &experimental_parser().render_context()
             ),
             golden_macros_with("\\kbd:[X]", &experimental_parser())
         );
@@ -793,7 +793,7 @@ mod tests {
             let folded = crate::content::inline_builder::fold_html(
                 &build(Span::new(fixture), &parser, None),
                 &renderer,
-                &parser,
+                &parser.render_context(),
             );
 
             assert_eq!(
@@ -957,7 +957,7 @@ mod tests {
                 crate::content::inline_builder::fold_html(
                     &nodes,
                     &HtmlSubstitutionRenderer {},
-                    &parser
+                    &parser.render_context()
                 ),
                 golden_normal(source, &parser),
                 "fold diverged from the string pipeline for {source:?}"
@@ -1053,7 +1053,7 @@ mod tests {
                 crate::content::inline_builder::fold_html(
                     &nodes,
                     &HtmlSubstitutionRenderer {},
-                    &parser
+                    &parser.render_context()
                 ),
                 golden_normal(filtered, &parser),
                 "fold diverged from the string pipeline for {filtered:?}"
@@ -1090,7 +1090,7 @@ mod tests {
             crate::content::inline_builder::fold_html(
                 inlines,
                 &HtmlSubstitutionRenderer {},
-                &Parser::default()
+                &Parser::default().render_context()
             ),
             rendered,
             "fold diverged from the rendered string for {inlines:?}"
@@ -1131,7 +1131,7 @@ mod tests {
             crate::content::inline_builder::fold_html(
                 inlines,
                 &HtmlSubstitutionRenderer {},
-                &Parser::default()
+                &Parser::default().render_context()
             ),
             rendered,
             "fold diverged from the rendered string for {inlines:?}"

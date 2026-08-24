@@ -1524,7 +1524,7 @@ mod tests {
                 crate::content::inline_builder::fold_html(
                     &nodes,
                     &HtmlSubstitutionRenderer {},
-                    &expanding_parser()
+                    &expanding_parser().render_context()
                 ),
                 golden_normal(source, &expanding_parser()),
                 "fold diverged from the string pipeline for {source:?}"
@@ -1691,7 +1691,7 @@ and another.footnote:[note two]",
                 crate::content::inline_builder::fold_html(
                     inlines,
                     &HtmlSubstitutionRenderer {},
-                    &Parser::default()
+                    &Parser::default().render_context()
                 ),
                 rendered,
                 "fold diverged from the rendered string for {inlines:?}"

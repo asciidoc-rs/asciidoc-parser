@@ -199,7 +199,7 @@ fn check_document(source: &str) -> Vec<String> {
 
     for location in &locations {
         assert_eq!(
-            fold_html(location.inlines, &renderer, &fold_parser),
+            fold_html(location.inlines, &renderer, &fold_parser.render_context()),
             location.rendered,
             "the {} fold diverged from its rendered string for {source:?}",
             location.what
@@ -235,7 +235,7 @@ fn check_document(source: &str) -> Vec<String> {
 
     for (subtree, text) in subtrees.iter().zip(texts.iter()) {
         assert_eq!(
-            &fold_html(subtree, &renderer, &fold_parser),
+            &fold_html(subtree, &renderer, &fold_parser.render_context()),
             text,
             "a footnote's subtree fold diverged from its registered text for {source:?}"
         );
@@ -387,7 +387,13 @@ fn fold_matches_the_rendered_string_after_resolution() {
 
     let folded: Vec<String> = locations(&doc)
         .iter()
-        .map(|l| fold_html(l.inlines, &HtmlSubstitutionRenderer {}, &Parser::default()))
+        .map(|l| {
+            fold_html(
+                l.inlines,
+                &HtmlSubstitutionRenderer {},
+                &Parser::default().render_context(),
+            )
+        })
         .collect();
 
     assert!(
@@ -416,8 +422,16 @@ fn a_stateful_renderer_is_not_required_for_the_fold() {
     let fold_parser = Parser::default();
 
     for location in locations(&doc) {
-        let once = fold_html(location.inlines, &HtmlSubstitutionRenderer {}, &fold_parser);
-        let twice = fold_html(location.inlines, &HtmlSubstitutionRenderer {}, &fold_parser);
+        let once = fold_html(
+            location.inlines,
+            &HtmlSubstitutionRenderer {},
+            &fold_parser.render_context(),
+        );
+        let twice = fold_html(
+            location.inlines,
+            &HtmlSubstitutionRenderer {},
+            &fold_parser.render_context(),
+        );
 
         assert_eq!(once, twice);
         assert_eq!(once, location.rendered);
@@ -429,7 +443,11 @@ fn a_stateful_renderer_is_not_required_for_the_fold() {
 
     for location in locations(&doc) {
         assert_eq!(
-            fold_html(location.inlines, shared.as_ref(), &fold_parser),
+            fold_html(
+                location.inlines,
+                shared.as_ref(),
+                &fold_parser.render_context()
+            ),
             location.rendered
         );
     }

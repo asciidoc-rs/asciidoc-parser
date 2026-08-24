@@ -456,7 +456,7 @@ mod tests {
             let folded = crate::content::inline_builder::fold_html(
                 &build_verbatim(Span::new(fixture), parser, None),
                 &HtmlSubstitutionRenderer {},
-                parser,
+                &parser.render_context(),
             );
 
             assert_eq!(

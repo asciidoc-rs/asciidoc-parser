@@ -1888,7 +1888,11 @@ mod tests {
         assert_eq!(rendered, "First line.\nThird line.");
 
         assert_eq!(
-            super::super::fold_html(inlines, &HtmlSubstitutionRenderer {}, &Parser::default()),
+            super::super::fold_html(
+                inlines,
+                &HtmlSubstitutionRenderer {},
+                &Parser::default().render_context()
+            ),
             rendered,
             "fold diverged from the rendered string for {inlines:?}"
         );
@@ -1919,7 +1923,11 @@ mod tests {
         assert_eq!(rendered, "MyApp&lt;sup&gt;2&lt;/sup&gt;");
 
         assert_eq!(
-            super::super::fold_html(inlines, &HtmlSubstitutionRenderer {}, &Parser::default()),
+            super::super::fold_html(
+                inlines,
+                &HtmlSubstitutionRenderer {},
+                &Parser::default().render_context()
+            ),
             rendered,
             "fold diverged from the rendered string for {inlines:?}"
         );

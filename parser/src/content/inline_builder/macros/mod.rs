@@ -822,8 +822,11 @@ pub(super) fn restored_markup_text(
             continue;
         }
 
-        let markup =
-            super::fold::fold_html(std::slice::from_ref(node), parser.renderer.as_ref(), parser);
+        let markup = super::fold::fold_html(
+            std::slice::from_ref(node),
+            parser.renderer.as_ref(),
+            &parser.render_context(),
+        );
 
         out = out.replace(&format!("\u{96}{n}\u{97}"), &markup);
     }
@@ -1149,7 +1152,11 @@ mod tests {
             // drop. (No `{source:?}` message: a multi-line assertion's message
             // argument is a failure-only region, which the coverage report
             // counts as an uncovered line in a file whose tests it measures.)
-            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser);
+            let folded = fold_html(
+                &nodes,
+                &HtmlSubstitutionRenderer {},
+                &parser.render_context(),
+            );
 
             assert_eq!(folded, content.rendered_html());
             assert!(!folded.contains('\\'));
@@ -1248,7 +1255,11 @@ mod tests {
                         None,
                     );
 
-                    let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser);
+                    let folded = fold_html(
+                        &nodes,
+                        &HtmlSubstitutionRenderer {},
+                        &parser.render_context(),
+                    );
 
                     assert_eq!(folded, content.rendered_html(), "{source:?}");
                     assert!(folded.contains(expected), "{source:?}: {folded:?}");
@@ -1288,7 +1299,11 @@ mod tests {
                 None,
             );
 
-            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser);
+            let folded = fold_html(
+                &nodes,
+                &HtmlSubstitutionRenderer {},
+                &parser.render_context(),
+            );
 
             assert_eq!(folded, content.rendered_html(), "{source:?}");
             assert!(folded.contains(expected), "{source:?}: {folded:?}");
@@ -1383,7 +1398,11 @@ mod tests {
             );
 
             assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}, &parser),
+                fold_html(
+                    &nodes,
+                    &HtmlSubstitutionRenderer {},
+                    &parser.render_context()
+                ),
                 content.rendered_html(),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -1435,7 +1454,11 @@ mod tests {
             );
 
             assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}, &built_parser),
+                fold_html(
+                    &nodes,
+                    &HtmlSubstitutionRenderer {},
+                    &built_parser.render_context()
+                ),
                 content.rendered_html(),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -1560,7 +1583,7 @@ mod tests {
                 fold_html(
                     &build(Span::new(source), &Parser::default(), None),
                     &HtmlSubstitutionRenderer {},
-                    &Parser::default(),
+                    &Parser::default().render_context(),
                 ),
                 folded_html,
             );

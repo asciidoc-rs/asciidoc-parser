@@ -314,7 +314,11 @@ pub(super) fn flatten_prior_markup<'src>(
             }
 
             let location = node.span();
-            let value = fold_html(std::slice::from_ref(&as_pre_escape(node)), renderer, parser);
+            let value = fold_html(
+                std::slice::from_ref(&as_pre_escape(node)),
+                renderer,
+                &parser.render_context(),
+            );
 
             InlineNode::Text {
                 value: CowStr::from(value),

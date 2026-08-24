@@ -753,7 +753,11 @@ mod tests {
     /// a real cutover would call — through the built-in HTML renderer.
     fn built(source: &str, parser: &Parser) -> String {
         let nodes = build(Span::new(source), parser, None);
-        fold_html(&nodes, &HtmlSubstitutionRenderer {}, parser)
+        fold_html(
+            &nodes,
+            &HtmlSubstitutionRenderer {},
+            &parser.render_context(),
+        )
     }
 
     /// Asserts that `source` folds identically whether taken through the real
@@ -1872,7 +1876,11 @@ mod tests {
                 &built_parser,
                 None,
             );
-            let built = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &built_parser);
+            let built = fold_html(
+                &nodes,
+                &HtmlSubstitutionRenderer {},
+                &built_parser.render_context(),
+            );
 
             assert_eq!(
                 built, golden,
@@ -1943,7 +1951,11 @@ mod tests {
 
             let built_parser = parser_with_product();
             let nodes = build_group(group, source, &built_parser);
-            let built = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &built_parser);
+            let built = fold_html(
+                &nodes,
+                &HtmlSubstitutionRenderer {},
+                &built_parser.render_context(),
+            );
 
             assert_eq!(
                 built, golden,
@@ -2723,7 +2735,11 @@ mod tests {
 
                 let built_parser = parser_with_product();
                 let nodes = build_group(&group, source, &built_parser);
-                let built = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &built_parser);
+                let built = fold_html(
+                    &nodes,
+                    &HtmlSubstitutionRenderer {},
+                    &built_parser.render_context(),
+                );
 
                 assert_ne!(
                     built, golden,
@@ -2777,7 +2793,11 @@ mod tests {
 
             let built_parser = parser_with_product();
             let nodes = build_group(&group, source, &built_parser);
-            let built = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &built_parser);
+            let built = fold_html(
+                &nodes,
+                &HtmlSubstitutionRenderer {},
+                &built_parser.render_context(),
+            );
 
             assert_eq!(built, golden);
         }
@@ -2841,7 +2861,11 @@ mod tests {
             &built_parser,
             None,
         );
-        let built = fold_html(&nodes, &HtmlSubstitutionRenderer {}, &built_parser);
+        let built = fold_html(
+            &nodes,
+            &HtmlSubstitutionRenderer {},
+            &built_parser.render_context(),
+        );
 
         assert_eq!(built, golden);
     }
