@@ -7,8 +7,10 @@
 use super::computed_value_children;
 use super::{
     ComputedSpecials, MacroMatch, MacroMatchKind, holds_carried_token,
-    image::range_has_no_opaque_piece, macro_text_children, rebuild_macro_level,
-    restored_value_children, tokened_split_agrees, tokened_text,
+    image::{range_has_no_opaque_piece, range_is_substitution_restorable},
+    links::restore_masked_passthroughs,
+    macro_text_children, rebuild_macro_level, restored_value_children, tokened_split_agrees,
+    tokened_text,
 };
 use crate::{
     Parser, Span,
@@ -119,6 +121,56 @@ pub(super) fn xref_macros_level<'src>(
     }
 
     rebuild_macro_level(&nodes, &pieces, &s, matches)
+}
+
+/// Mirrors the string replacer's own `id.contains('<')` refusal: a shorthand
+/// whose id holds rendered inline markup is not a valid reference, and
+/// Asciidoctor leaves it untouched (`<<link:https://example.com[], Example>>`).
+///
+/// This became reachable only with
+/// [`range_is_substitution_restorable`].
+/// Before it, markup in an id was always an *opaque* piece, so the gate refused
+/// the match before any id existed to check — which is why
+/// [`build_xref_shorthand_node`] documents needing no counterpart to the guard.
+/// A substitution-produced `<` is not opaque (`:markup: <b>x</b>`, then
+/// `<<{markup}>>`), so the check has to be made for real now.
+///
+/// It reads the **restored** id, since that is what the replacer's `id` holds:
+/// a `<` hiding behind a placeholder is still a `<` to it.
+fn shorthand_id_has_no_rendered_markup(
+    s: &str,
+    id_range: &std::ops::Range<usize>,
+    nodes: &[InlineNode<'_>],
+    pieces: &[Piece],
+    parser: &Parser,
+) -> bool {
+    let matched = s.get(id_range.start..id_range.end).unwrap_or_default();
+
+    !restored_range(matched, id_range.clone(), nodes, pieces, parser).contains('<')
+}
+
+/// The bytes a range of the level's match string holds once every placeholder
+/// standing in for a **substitution-produced** [`Raw`](InlineNode::Raw) leaf is
+/// filled in — which is what the string replacer's own haystack held there.
+///
+/// Borrowed unchanged when the range crosses no such leaf, which is every
+/// ordinary cross-reference.
+///
+/// Only reached for a range
+/// [`range_is_substitution_restorable`]
+/// admitted, so the splice never reaches a masked construct — whose bytes the
+/// replacer would *not* have held yet, and which keeps its match deferred.
+fn restored_range<'a>(
+    matched: &'a str,
+    range: std::ops::Range<usize>,
+    nodes: &[InlineNode<'_>],
+    pieces: &[Piece],
+    parser: &Parser,
+) -> std::borrow::Cow<'a, str> {
+    restore_masked_passthroughs(matched, &range, nodes, pieces, parser.renderer.as_ref())
+        .map_or(std::borrow::Cow::Borrowed(matched), |(text, _)| {
+            std::borrow::Cow::Owned(text)
+        })
 }
 
 /// Finds every recognized cross-reference at this level — the `xref:` macro
@@ -242,7 +294,10 @@ fn find_xref_matches<'src>(
                 // makes. A comma the *markup* of an opaque piece contributes
                 // cannot move that split unnoticed: such a piece would have to
                 // sit in the id half, which this gate then rejects.
-                range_has_no_opaque_piece(nodes, pieces, &shorthand_id_range(s, inner))
+                let id_range = shorthand_id_range(s, inner);
+
+                range_is_substitution_restorable(nodes, pieces, &id_range)
+                    && shorthand_id_has_no_rendered_markup(s, &id_range, nodes, pieces, parser)
             }
 
             None => {
@@ -266,7 +321,7 @@ fn find_xref_matches<'src>(
                 // the same reason.
                 let attrlist_text = caps.get(4).filter(|text| text.as_str().contains('='));
 
-                range_has_no_opaque_piece(nodes, pieces, &(target.start()..target.end()))
+                range_is_substitution_restorable(nodes, pieces, &(target.start()..target.end()))
                     && attrlist_text.is_none_or(|text| {
                         range_has_no_opaque_piece(nodes, pieces, &(text.start()..text.end()))
                             || attrlist_text_carries_its_opaque_pieces(
@@ -459,9 +514,24 @@ fn build_xref_node<'src>(
     // match whose group 2 (the shorthand's inner) participated to
     // [`build_xref_shorthand_node`] instead.
     #[allow(clippy::unwrap_used)]
-    let raw_target = caps.get(3).unwrap().as_str();
+    let target_match = caps.get(3).unwrap();
 
-    let (target, derived) = xref_target_and_derived(raw_target, true, parser);
+    // The target's bytes as the string replacer reads them. A leaf the match
+    // string stands in as a placeholder — an expanded attribute value's `&`,
+    // say (`xref:{cpp}[…]`, where `{cpp}` is `C&#43;&#43;`) — contributes its
+    // own bytes here. The gate admits only such leaves, so the splice always
+    // finishes the value into bytes the replacer's own haystack held; a
+    // *masked* construct, whose bytes it would not have held yet, keeps the
+    // match deferred instead.
+    let restored_target = restored_range(
+        target_match.as_str(),
+        target_match.range(),
+        nodes,
+        pieces,
+        parser,
+    );
+
+    let (target, derived) = xref_target_and_derived(restored_target.as_ref(), true, parser);
 
     let raw_text = caps.get(4).map_or("", |m| m.as_str());
     let (children, window, roles, xrefstyle) =
@@ -690,6 +760,15 @@ fn build_xref_shorthand_node<'src>(
     let inner_data = s.get(inner.start..inner.end).unwrap_or_default();
 
     // Split an optional ", reference text" off the id at the first comma.
+    //
+    // Split on the **matched** bytes, not on restored ones. Only the id half is
+    // read as a string and so only it is restored (below); the text half
+    // becomes structured children, and its range is in match-string
+    // coordinates — restoring the whole inner first would shift every offset
+    // the text is then sliced with. No comma can hide behind a placeholder
+    // anyway: a substitution leaves a `Raw` leaf only for `<`, `>`, and `&`, so
+    // a comma in an expanded value is `Text` and stands in the match string
+    // itself.
     let comma = inner_data.find(',');
 
     let raw_id = match comma {
@@ -697,7 +776,13 @@ fn build_xref_shorthand_node<'src>(
         None => inner_data,
     };
 
-    let (target, derived) = xref_target_and_derived(raw_id.trim(), false, parser);
+    // The id's bytes as the string replacer reads them — see
+    // [`restored_range`]. The `trim` is applied after, on the restored value,
+    // exactly as the replacer trims its own `id`.
+    let id_range = inner.start..inner.start + raw_id.len();
+    let restored_id = restored_range(raw_id, id_range, nodes, pieces, parser);
+
+    let (target, derived) = xref_target_and_derived(restored_id.trim(), false, parser);
 
     let location = source_slice(pieces, full.clone(), root);
 
@@ -764,10 +849,28 @@ mod tests {
     };
     use crate::{
         HasSpan, Parser, Span,
-        content::{Content, SubstitutionStep},
+        content::{Content, SubstitutionGroup, SubstitutionStep},
         inlines::{CharRef, InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
         parser::{HtmlSubstitutionRenderer, XrefStyle},
     };
+
+    /// The string pipeline's output through the **whole** `Normal` group —
+    /// the attributes step included — with any deferred cross-reference
+    /// finalized to its unresolved fallback.
+    ///
+    /// [`golden_xref`] deliberately drives the macro-family steps only, which
+    /// is right for a verbatim fixture and wrong for one whose target is
+    /// *attribute-expanded*: it would leave `{cpp}` unexpanded on the golden
+    /// side while the builder expands it, and report the difference as a
+    /// divergence the fixture does not have.
+    fn golden_whole_pipeline(source: &str) -> String {
+        let parser = Parser::default();
+        let mut content = Content::from(Span::new(source));
+
+        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
+        content.finalize_deferred(&HtmlSubstitutionRenderer {});
+        content.rendered_str().to_string()
+    }
 
     /// The string pipeline's output through the **macros** step for `source`,
     /// with any deferred cross-references finalized to their unresolved
@@ -2423,6 +2526,43 @@ mod tests {
             ),
             golden_normal(source, &parser)
         );
+    }
+
+    #[test]
+    fn an_xref_target_may_be_attribute_expanded() {
+        // The point of this increment. `{cpp}` is `C&#43;&#43;`, and §3.4.1
+        // leaves an expanded value's `&` unescaped — so the target crosses two
+        // `Raw` leaves, which the match string stands in as placeholders.
+        //
+        // Those leaves are `RawOrigin::Substitution`: nothing extracted them
+        // and nothing restores them, so the string replacer's own haystack held
+        // exactly these bytes. Filling the placeholders in therefore reaches
+        // parity rather than departing from it — where a *masked* passthrough,
+        // which the replacer would not have restored yet, keeps its match
+        // deferred (`a_deferred_xref_target_over_a_passthrough_is_a_documented_divergence`).
+        let renderer = HtmlSubstitutionRenderer {};
+
+        for fixture in [
+            "see xref:{cpp}[{cpp}].",
+            "see xref:{cpp}[].",
+            "see <<{cpp}>>.",
+            "see <<{cpp},the {cpp} page>>.",
+        ] {
+            let nodes = build_src(Span::new(fixture));
+
+            assert_eq!(
+                fold_html(&nodes, &renderer),
+                golden_whole_pipeline(fixture),
+                "fold diverged from the string pipeline for {fixture:?}"
+            );
+        }
+
+        // The target itself is the *restored* value, not the placeholders a
+        // first attempt at this left in it.
+        let nodes = build_src(Span::new("see xref:{cpp}[{cpp}]."));
+        let reference = assert_xref(&nodes[1]);
+
+        assert_eq!(reference.target.as_ref(), "C&#43;&#43;");
     }
 
     #[test]

@@ -20,7 +20,7 @@ use crate::{
         },
         normalize_text_lf_escaped_bracket,
     },
-    inlines::{Image, InlineNode, RawForm},
+    inlines::{Image, InlineNode, RawForm, RawOrigin},
     parser::{
         InlineSubstitutionRenderer, has_dangerous_scheme, has_dangerous_self_href, is_uri_ish,
     },
@@ -304,6 +304,70 @@ fn atomic_piece_is_recoverable(nodes: &[InlineNode<'_>], piece: &Piece) -> bool 
         .get(piece.node_index)
         .and_then(charref_entity)
         .is_some()
+}
+
+/// [`range_has_no_opaque_piece`], further admitting a
+/// [`Raw`](InlineNode::Raw) leaf a **substitution produced in place** — an
+/// expanded attribute value's literal `<`, `>`, or `&`, which §3.4.1 leaves
+/// unescaped because the value expands *after* `specialcharacters` ran
+/// ([`RawOrigin::Substitution`]).
+///
+/// The match string stands such a leaf in as one placeholder, so a value
+/// reading it needs the same splice a masked construct's does
+/// ([`restore_masked_passthroughs`](super::links)) — but the *timing* that
+/// makes [`range_is_restorable`] wrong for a cross-reference does not apply
+/// here, and that is the whole distinction:
+///
+/// - A **masked passthrough** is restored by a later pass. A deferred
+///   cross-reference's target is captured into its segment *before* that pass
+///   runs, so the string pipeline's own `href` holds the sentinel — and a tree
+///   that read the restored bytes would diverge from it (see
+///   `a_deferred_xref_target_over_a_passthrough_is_a_documented_divergence`).
+///   [`range_is_restorable`] admits it; this does not.
+///
+/// - A **substitution-produced** leaf was never extracted and is never
+///   restored. Its bytes are simply *there*, in the very haystack the string
+///   replacer reads, so filling the placeholder in reaches parity rather than
+///   departing from it.
+///
+/// Deciding this from the node's own [`RawOrigin`] rather than from the
+/// extraction pass's `Masked` list is what makes it reliable: that list is
+/// keyed by location identity and is empty on call paths where the identity is
+/// not in hand, so the same node classified differently depending on which pass
+/// was asking.
+pub(in crate::content::inline_builder) fn range_is_substitution_restorable(
+    nodes: &[InlineNode<'_>],
+    pieces: &[Piece],
+    range: &std::ops::Range<usize>,
+) -> bool {
+    for piece in pieces {
+        let p_end = piece.s_start + piece.s_len;
+
+        // Skip pieces that do not overlap the range.
+        if p_end <= range.start || piece.s_start >= range.end {
+            continue;
+        }
+
+        if !piece.atomic {
+            continue;
+        }
+
+        if matches!(
+            nodes.get(piece.node_index),
+            Some(InlineNode::Raw {
+                origin: RawOrigin::Substitution,
+                ..
+            })
+        ) {
+            continue;
+        }
+
+        if !atomic_piece_is_recoverable(nodes, piece) {
+            return false;
+        }
+    }
+
+    true
 }
 
 /// [`range_has_no_opaque_piece`], further admitting a **masked** piece — a
