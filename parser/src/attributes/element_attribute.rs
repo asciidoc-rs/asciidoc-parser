@@ -193,20 +193,11 @@ impl<'src> ElementAttribute<'src> {
     /// its shorthand items resolve the block style to `source`.
     pub(crate) fn synthesized_source_style() -> Self {
         const SOURCE: &str = "source";
-        let mut warnings: Vec<WarningType> = vec![];
-        let shorthand_item_indices = parse_shorthand_items(SOURCE, &mut warnings);
-
-        // `source` is a single shorthand item with no delimiters, so parsing it
-        // can never warn. Guard that invariant rather than plumb an always-empty
-        // list back to the caller.
-        debug_assert!(
-            warnings.is_empty(),
-            "synthesizing the `source` block style should not produce warnings, got: {warnings:?}"
-        );
+        let (value, shorthand_item_indices) = synthesize_shorthand(Some(SOURCE), None, &[], &[]);
 
         Self {
             name: None,
-            value: CowStr::from(SOURCE),
+            value: CowStr::from(value),
             shorthand_item_indices,
             positional_index: Some(1),
             value_is_quoted: false,
@@ -462,7 +453,9 @@ impl<'src> ElementAttribute<'src> {
     ///
     /// The result is a freshly synthesized positional attribute whose value
     /// re-encodes the merged shorthand so that the usual accessors continue to
-    /// work.
+    /// work. A component with an empty name — which a run of shorthand
+    /// delimiters produces, and which every accessor discards — is left out of
+    /// that encoding; see [`synthesize_shorthand`].
     pub(crate) fn merge_block_style_shorthand(earlier: &Self, later: &Self) -> Self {
         let block_style = later
             .block_style_internal()
@@ -475,41 +468,8 @@ impl<'src> ElementAttribute<'src> {
         let mut options = earlier.options_internal();
         options.extend(later.options_internal());
 
-        let mut value = String::new();
-        if let Some(block_style) = block_style {
-            value.push_str(block_style);
-        }
-        if let Some(id) = id {
-            value.push('#');
-            value.push_str(id);
-        }
-        for role in &roles {
-            value.push('.');
-            value.push_str(role);
-        }
-        for option in &options {
-            value.push('%');
-            value.push_str(option);
-        }
-
-        // The shorthand string is synthesized entirely from components that
-        // were already parsed and validated when their source lines were read
-        // (a block style, a non-empty ID, and non-empty roles/options, each
-        // separated by a single delimiter). Re-parsing it therefore can never
-        // produce a warning, so rather than plumb an always-empty warning list
-        // back to the caller we assert that invariant — turning a silent
-        // discard into an explicit, regression-guarded one.
-        let mut warnings: Vec<WarningType> = vec![];
-        let shorthand_item_indices = if value.is_empty() {
-            vec![]
-        } else {
-            parse_shorthand_items(&value, &mut warnings)
-        };
-
-        debug_assert!(
-            warnings.is_empty(),
-            "merging block-style shorthand should not produce warnings, got: {warnings:?}"
-        );
+        let (value, shorthand_item_indices) =
+            synthesize_shorthand(block_style, id, &roles, &options);
 
         Self {
             name: None,
@@ -540,29 +500,7 @@ impl<'src> ElementAttribute<'src> {
         let id = self.id_internal();
         let options = self.options_internal();
 
-        // Rebuild the shorthand string from the retained components, recording
-        // the start offset of each shorthand item as it is appended. The
-        // components were validated (and stripped of their delimiters) when the
-        // source line was parsed, so these offsets match what
-        // `parse_shorthand_items` would produce for the same string — without
-        // re-parsing it (or having to discard its always-empty warnings).
-        let mut value = String::new();
-        let mut shorthand_item_indices: Vec<usize> = vec![];
-
-        if let Some(block_style) = block_style {
-            shorthand_item_indices.push(value.len());
-            value.push_str(block_style);
-        }
-        if let Some(id) = id {
-            shorthand_item_indices.push(value.len());
-            value.push('#');
-            value.push_str(id);
-        }
-        for option in &options {
-            shorthand_item_indices.push(value.len());
-            value.push('%');
-            value.push_str(option);
-        }
+        let (value, shorthand_item_indices) = synthesize_shorthand(block_style, id, &[], &options);
 
         Self {
             name: None,
@@ -636,6 +574,62 @@ impl<'src> ElementAttribute<'src> {
     pub(crate) fn value_is_substituted(&self) -> bool {
         self.value_is_substituted
     }
+}
+
+/// Build the shorthand encoding of a set of shorthand components that were
+/// already parsed from one or more source lines, returning the synthesized
+/// value together with the start offset of each shorthand item within it.
+///
+/// Components are written in the canonical shorthand order: block style, ID,
+/// roles, then options.
+///
+/// An empty component is elided rather than written out as a delimiter with
+/// nothing following it. A run of delimiters in the source (`[%%%%]`) yields
+/// components with empty names — reported as
+/// [`WarningType::EmptyShorthandName`] when that line was parsed — and every
+/// shorthand accessor already discards a bare `#`, `.`, or `%`, so writing
+/// them back out would re-encode a defect that nothing reads and that
+/// re-parsing the result would warn about a second time.
+///
+/// The offsets are recorded as each component is appended rather than by
+/// re-parsing the finished string. Shorthand items never contain a delimiter
+/// of their own (each was split at one and stripped of it when its source line
+/// was read), so appending them back in this order reproduces exactly the
+/// offsets [`parse_shorthand_items`] would report for the same string —
+/// without re-running it, and so without the warnings a re-parse would raise.
+fn synthesize_shorthand(
+    block_style: Option<&str>,
+    id: Option<&str>,
+    roles: &[&str],
+    options: &[&str],
+) -> (String, Vec<usize>) {
+    let mut value = String::new();
+    let mut shorthand_item_indices: Vec<usize> = vec![];
+
+    if let Some(block_style) = block_style.filter(|bs| !bs.is_empty()) {
+        shorthand_item_indices.push(value.len());
+        value.push_str(block_style);
+    }
+
+    if let Some(id) = id.filter(|id| !id.is_empty()) {
+        shorthand_item_indices.push(value.len());
+        value.push('#');
+        value.push_str(id);
+    }
+
+    for role in roles.iter().filter(|role| !role.is_empty()) {
+        shorthand_item_indices.push(value.len());
+        value.push('.');
+        value.push_str(role);
+    }
+
+    for option in options.iter().filter(|option| !option.is_empty()) {
+        shorthand_item_indices.push(value.len());
+        value.push('%');
+        value.push_str(option);
+    }
+
+    (value, shorthand_item_indices)
 }
 
 fn parse_shorthand_items(source: &str, warnings: &mut Vec<WarningType>) -> Vec<usize> {
@@ -1843,9 +1837,65 @@ mod tests {
         }
 
         #[test]
+        fn empty_shorthand_names_are_elided() {
+            // A run of shorthand delimiters yields components with empty names
+            // (reported as `EmptyShorthandName` when that line was parsed).
+            // They carry nothing the accessors read, so the merged shorthand
+            // leaves them out rather than re-encoding a bare delimiter — which
+            // would make the synthesized value warn if it were parsed again.
+            // See https://github.com/asciidoc-rs/asciidoc-parser/issues/1237.
+            let earlier = parse("%%%%\t\t%%%f");
+            let later = parse("f");
+
+            assert_eq!(earlier.options(), vec!["", "f"]);
+
+            let merged =
+                crate::attributes::ElementAttribute::merge_block_style_shorthand(&earlier, &later);
+
+            assert_eq!(
+                merged,
+                ElementAttribute {
+                    name: None,
+                    shorthand_items: &["f", "%f"],
+                    value: "f%f",
+                }
+            );
+
+            assert_eq!(merged.block_style().unwrap(), "f");
+            assert!(merged.id().is_none());
+            assert!(merged.roles().is_empty());
+            assert_eq!(merged.options(), vec!["f"]);
+        }
+
+        #[test]
+        fn empty_role_and_id_names_are_elided() {
+            // The same for runs of `.` and `#`: only the named components
+            // survive into the merged shorthand.
+            let earlier = parse("...role");
+            let later = parse("style##myid");
+
+            let merged =
+                crate::attributes::ElementAttribute::merge_block_style_shorthand(&earlier, &later);
+
+            assert_eq!(
+                merged,
+                ElementAttribute {
+                    name: None,
+                    shorthand_items: &["style", "#myid", ".role"],
+                    value: "style#myid.role",
+                }
+            );
+
+            assert_eq!(merged.block_style().unwrap(), "style");
+            assert_eq!(merged.id().unwrap(), "myid");
+            assert_eq!(merged.roles(), vec!["role"]);
+            assert!(merged.options().is_empty());
+        }
+
+        #[test]
         fn two_empty_positionals_stay_empty() {
-            // Merging two empty first positionals exercises the empty-value
-            // branch, which produces an attribute with no shorthand items.
+            // Merging two first positionals that carry nothing produces an
+            // attribute with an empty value and no shorthand items.
             let earlier = parse("");
             let later = parse("");
 

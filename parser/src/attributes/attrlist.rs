@@ -1595,6 +1595,30 @@ mod tests {
     }
 
     #[test]
+    fn merge_block_attribute_line_with_empty_shorthand_names() {
+        // Two consecutive block attribute lines whose shorthand contains runs
+        // of delimiters used to abort a debug build: merging re-parsed the
+        // synthesized shorthand, and the empty option names it re-encoded
+        // raised `EmptyShorthandName` against a `debug_assert!` that claimed
+        // the situation could not arise. The document now parses the same way
+        // in both profiles, with the malformed shorthand reported once — as an
+        // ordinary warning against the line that actually carried it.
+        // See https://github.com/asciidoc-rs/asciidoc-parser/issues/1237.
+        let mut p = Parser::default();
+        let doc = p.parse("\\i\n[%%%%\t\t%%%f]\r\n[f]");
+
+        let empty_shorthand_name_warnings = doc
+            .warnings()
+            .filter(|w| w.warning == WarningType::EmptyShorthandName)
+            .count();
+
+        assert_eq!(empty_shorthand_name_warnings, 5);
+
+        assert!(doc.warnings().all(|w| w.source.data() == "%%%%\t\t%%%f"
+            || w.warning == WarningType::MissingBlockAfterTitleOrAttributeList));
+    }
+
+    #[test]
     fn merge_block_attribute_line_anchor_later_wins() {
         let p = Parser::default();
 
