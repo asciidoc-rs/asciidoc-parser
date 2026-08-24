@@ -63,7 +63,14 @@ pub(crate) struct ResolvedAttributes {
 
     /// Current value of each counter as of the end of parsing. A counter value
     /// supersedes any like-named attribute.
-    counter_values: HashMap<String, String>,
+    ///
+    /// Shared with the parser via [`Arc`], on the same copy-on-write terms as
+    /// the two tables above: every parser-side mutation goes through
+    /// [`Arc::make_mut`], so a snapshot taken here is frozen at the moment it
+    /// was taken and taking one allocates nothing. That matters because a
+    /// snapshot is no longer only an end-of-parse artifact — it is taken often
+    /// enough that a per-snapshot `HashMap` clone would show.
+    counter_values: Arc<HashMap<String, String>>,
 
     /// The safe mode the parser ran under. It is not stored in any attribute
     /// table, so the snapshot captures it here to resolve the mode-aware
@@ -136,7 +143,7 @@ impl ResolvedAttributes {
     pub(crate) fn new(
         attribute_values: Arc<HashMap<String, AttributeValue>>,
         default_attribute_values: Arc<HashMap<String, String>>,
-        counter_values: HashMap<String, String>,
+        counter_values: Arc<HashMap<String, String>>,
         safe: SafeMode,
         reference_time: Option<ReferenceTime>,
         input_mtime: Option<ReferenceTime>,
@@ -509,11 +516,70 @@ mod tests {
         ResolvedAttributes::new(
             Arc::new(attribute_values),
             Arc::new(default_attribute_values),
-            counter_values,
+            Arc::new(counter_values),
             SafeMode::Secure,
             None,
             None,
         )
+    }
+
+    #[test]
+    fn a_snapshots_counters_are_frozen_against_the_parser() {
+        // The copy-on-write property the `Arc` exists for, and the reason the
+        // counter table is shared rather than copied: a snapshot must keep
+        // reading the values that were current when it was taken, however the
+        // parser advances afterwards.
+        //
+        // The two attribute tables have always been shared this way; the
+        // counters were copied instead, which was affordable only while a
+        // snapshot was an end-of-parse artifact taken once per document.
+        //
+        // Asserted through `Parser`, not by hand, because the property is a
+        // claim about `Arc::make_mut` at the parser's own mutation sites — a
+        // hand-built `Arc` would hold no matter what those sites did.
+        let parser = crate::Parser::default();
+
+        assert_eq!(parser.counter("chapter", None), "1");
+
+        let snapshot = parser.snapshot_attributes();
+
+        assert_eq!(parser.counter("chapter", None), "2");
+        assert_eq!(parser.counter("figure", None), "1");
+
+        // The snapshot still reads `1`, and has not gained the counter that
+        // was created after it was taken.
+        assert_eq!(
+            snapshot.attribute_value("chapter"),
+            InterpretedValue::Value("1".to_string())
+        );
+
+        assert_eq!(snapshot.attribute_value("figure"), InterpretedValue::Unset);
+
+        // And a snapshot taken now sees the advanced values, so the freeze is
+        // per-snapshot rather than a table that stopped tracking.
+        let later = parser.snapshot_attributes();
+
+        assert_eq!(
+            later.attribute_value("chapter"),
+            InterpretedValue::Value("2".to_string())
+        );
+
+        // That much was already true when the table was copied: a copy is
+        // frozen too. What is new is *how* — the snapshot shares the parser's
+        // table rather than copying it, which is the whole point and the only
+        // part a test can distinguish. `later` was taken with no mutation
+        // since, so it must still be the very same allocation the parser
+        // holds; `snapshot` must not be, the parser having detached from it
+        // through `Arc::make_mut` on the next advance.
+        assert!(Arc::ptr_eq(
+            &later.counter_values,
+            &parser.counter_values.borrow()
+        ));
+
+        assert!(!Arc::ptr_eq(
+            &snapshot.counter_values,
+            &parser.counter_values.borrow()
+        ));
     }
 
     #[test]
@@ -598,7 +664,7 @@ mod tests {
         let attrs = ResolvedAttributes::new(
             Arc::new(attribute_values),
             Arc::new(HashMap::new()),
-            HashMap::new(),
+            Arc::new(HashMap::new()),
             SafeMode::Server,
             None,
             None,
@@ -626,7 +692,7 @@ mod tests {
         let attrs = ResolvedAttributes::new(
             Arc::new(HashMap::new()),
             Arc::new(HashMap::new()),
-            HashMap::new(),
+            Arc::new(HashMap::new()),
             SafeMode::Server,
             None,
             None,
@@ -650,7 +716,7 @@ mod tests {
         let attrs = ResolvedAttributes::new(
             Arc::new(attribute_values),
             Arc::new(HashMap::new()),
-            HashMap::new(),
+            Arc::new(HashMap::new()),
             SafeMode::Server,
             None,
             None,
@@ -671,7 +737,7 @@ mod tests {
         let attrs = ResolvedAttributes::new(
             Arc::new(attribute_values),
             Arc::new(HashMap::new()),
-            HashMap::new(),
+            Arc::new(HashMap::new()),
             SafeMode::Safe,
             None,
             None,
@@ -709,7 +775,7 @@ mod tests {
             ResolvedAttributes::new(
                 Arc::new(attribute_values),
                 Arc::new(HashMap::new()),
-                HashMap::new(),
+                Arc::new(HashMap::new()),
                 SafeMode::Secure,
                 None,
                 None,
