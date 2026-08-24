@@ -55,12 +55,12 @@ pub enum InlineNode<'src> {
     /// record of the language's "this text is off limits" behavior. ASG:
     /// `inlineLiteral` with `name="raw"`.
     ///
-    /// [`form`](RawForm) says whether `value` is already output bytes or
-    /// logical text the fold escapes. Both are opaque to the transducer steps —
-    /// that is what makes them one node kind rather than two — but only one is
-    /// "raw HTML by design", and conflating them made a passthrough's escaping
-    /// a function of whichever renderer the *parse* carried rather than of the
-    /// one the fold is given.
+    /// [`form`](RawForm) says whether `value` is already output
+    /// bytes or logical text the fold escapes. Both are opaque to the
+    /// transducer steps — that is what makes them one node kind rather than
+    /// two — but only one is "raw HTML by design", and conflating them made
+    /// a passthrough's escaping a function of whichever renderer the
+    /// *parse* carried rather than of the one the fold is given.
     Raw {
         /// The content this node contributes, in the shape [`form`](Self::Raw)
         /// names.
@@ -68,6 +68,9 @@ pub enum InlineNode<'src> {
 
         /// Whether the fold emits [`value`](Self::Raw) as-is or escapes it.
         form: RawForm,
+
+        /// Where this raw output came from — see [`RawOrigin`].
+        origin: RawOrigin,
 
         /// The source location this content derives from.
         location: Span<'src>,
@@ -137,8 +140,8 @@ mod tests {
         HasSpan, Span,
         inlines::{
             Anchor, Callout, CalloutGuard, CharRef, Footnote, Image, IndexTerm, InlineNode,
-            RawForm, Ref, RefVariant, SpanForm, Stem, StemNotation, StyleVariant, Styled, Ui,
-            UiKind,
+            RawForm, RawOrigin, Ref, RefVariant, SpanForm, Stem, StemNotation, StyleVariant,
+            Styled, Ui, UiKind,
         },
         strings::CowStr,
     };
@@ -159,6 +162,7 @@ mod tests {
             InlineNode::Raw {
                 value: CowStr::from("<b>"),
                 form: RawForm::AsIs,
+                origin: RawOrigin::Substitution,
                 location,
             },
             InlineNode::Styled(Styled {
@@ -302,6 +306,43 @@ mod tests {
         assert_eq!(ui_kinds.len(), 3);
         assert_eq!(callout_guards.len(), 2);
     }
+}
+
+/// Where a [`Raw`](InlineNode::Raw) node's content came from.
+///
+/// Orthogonal to [`RawForm`], which says what the fold *does* with the bytes.
+/// This says who produced them, and it answers two different questions.
+///
+/// For a **consumer**, it sharpens the security story design §3.4 gives this
+/// node kind. "This document emits raw HTML" is visible as `Raw` nodes in the
+/// tree; whether that came from an author writing an explicit passthrough or
+/// from a substitution expanding an attribute value is the difference between a
+/// deliberate escape hatch and a value that may have arrived from elsewhere.
+///
+/// For the **builder**, it is the difference between content the extraction
+/// pass is holding and content that is simply there. The string pipeline's own
+/// haystack carries a sentinel where a [`Passthrough`](Self::Passthrough)
+/// node's text belongs, and splices the real text back only when it rewrites
+/// the rendered string — so a *computed value* that reads those bytes before
+/// the restore (a cross-reference's target, captured into its deferred segment)
+/// sees the sentinel, while one that reads a
+/// [`Substitution`](Self::Substitution) node's bytes sees exactly what the
+/// replacer saw. Recording it on the node is what lets a recognition gate tell
+/// the two apart without having to know which pass it is running in.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum RawOrigin {
+    /// An explicit passthrough the extraction pass pulled out before any step
+    /// ran: `+++…+++`, `++…++`, `$$…$$`, `pass:[…]`, or an inline STEM body.
+    ///
+    /// The author asked for this text to be off limits.
+    Passthrough,
+
+    /// Raw output a substitution produced **in place**, with no extraction
+    /// involved: a literal `<`, `>`, or `&` from an expanded attribute value
+    /// (which §3.4.1 leaves unescaped, since the value expands *after*
+    /// `specialcharacters` ran), a special an effective order never escaped, or
+    /// a slice of an entity's own bytes.
+    Substitution,
 }
 
 /// How a [`Raw`](InlineNode::Raw) node's value reaches the output.

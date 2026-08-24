@@ -12,7 +12,7 @@ use super::{
 use crate::{
     Parser, Span,
     content::{Content, INLINE_PASS, INLINE_PASS_MACRO, SubstitutionGroup},
-    inlines::{InlineNode, RawForm, SpanForm, StyleVariant, Styled},
+    inlines::{InlineNode, RawForm, RawOrigin, SpanForm, StyleVariant, Styled},
     strings::CowStr,
 };
 
@@ -662,6 +662,7 @@ fn build_bare_unconstrained_match<'src>(
             node: Box::new(InlineNode::Raw {
                 value: CowStr::from(value),
                 form,
+                origin: RawOrigin::Passthrough,
                 location,
             }),
         },
@@ -794,6 +795,7 @@ fn build_passthrough_node<'src>(
         return InlineNode::Raw {
             value: CowStr::from(content.data()),
             form: RawForm::AsIs,
+            origin: RawOrigin::Passthrough,
             location,
         };
     }
@@ -812,6 +814,7 @@ fn build_passthrough_node<'src>(
         return InlineNode::Raw {
             value: CowStr::from(content.data()),
             form: RawForm::Escaped,
+            origin: RawOrigin::Passthrough,
             location,
         };
     }
@@ -852,6 +855,7 @@ fn build_passthrough_node<'src>(
     InlineNode::Raw {
         value,
         form: RawForm::AsIs,
+        origin: RawOrigin::Passthrough,
         location,
     }
 }
@@ -975,6 +979,7 @@ fn build_attrlisted_passthrough_node<'src>(
         vec![InlineNode::Raw {
             value: CowStr::from(body_span.data()),
             form,
+            origin: RawOrigin::Passthrough,
             location: body_span,
         }]
     };
@@ -1057,6 +1062,7 @@ fn build_bare_attrlisted_passthrough_node<'src>(
         vec![InlineNode::Raw {
             value: CowStr::from(body_span.data()),
             form: RawForm::Escaped,
+            origin: RawOrigin::Passthrough,
             location: body_span,
         }]
     };
@@ -1338,7 +1344,7 @@ mod tests {
     #[test]
     fn a_bare_plus_body_is_literal_text_unless_it_restores_something() {
         use super::super::test_support::assert_raw_form;
-        use crate::inlines::RawForm;
+        use crate::inlines::{RawForm, RawOrigin};
 
         // A bare `+…+` body is `SubstitutionGroup::Verbatim` like `++…++`, so
         // by rights it is the author's literal text too. It could not say so
@@ -1351,12 +1357,17 @@ mod tests {
         // detected rather than assumed: with nothing restorable inside the
         // body, the value is the author's bytes and the fold escapes them.
         let nodes = build_src(Span::new("+a < b+"));
-        assert_raw_form(&nodes[0], RawForm::Escaped, "a < b");
+        assert_raw_form(&nodes[0], RawForm::Escaped, RawOrigin::Passthrough, "a < b");
 
         // The mixture keeps `AsIs`, since part of its value is another node's
         // rendering rather than anything an escape could reproduce.
         let nodes = build_src(Span::new("+a $$<b>$$ c+"));
-        assert_raw_form(&nodes[0], RawForm::AsIs, "a &lt;b&gt; c");
+        assert_raw_form(
+            &nodes[0],
+            RawForm::AsIs,
+            RawOrigin::Passthrough,
+            "a &lt;b&gt; c",
+        );
     }
 
     #[test]
@@ -1403,7 +1414,7 @@ mod tests {
     #[test]
     fn a_specialcharacters_body_is_literal_text_the_fold_escapes() {
         use super::super::test_support::assert_raw_form;
-        use crate::inlines::RawForm;
+        use crate::inlines::{RawForm, RawOrigin};
 
         // The shape this increment exists for. `SubstitutionGroup` decides
         // which form a passthrough body takes, and the two are not the same
@@ -1418,26 +1429,31 @@ mod tests {
         // Both stay opaque to every later step — that is what keeps them one
         // node kind — so this pins the distinction the kind alone cannot.
         let nodes = build_src(Span::new("+++<b>+++"));
-        assert_raw_form(&nodes[0], RawForm::AsIs, "<b>");
+        assert_raw_form(&nodes[0], RawForm::AsIs, RawOrigin::Passthrough, "<b>");
 
         let nodes = build_src(Span::new("pass:[<b>]"));
-        assert_raw_form(&nodes[0], RawForm::AsIs, "<b>");
+        assert_raw_form(&nodes[0], RawForm::AsIs, RawOrigin::Passthrough, "<b>");
 
         let nodes = build_src(Span::new("++<b>++"));
-        assert_raw_form(&nodes[0], RawForm::Escaped, "<b>");
+        assert_raw_form(&nodes[0], RawForm::Escaped, RawOrigin::Passthrough, "<b>");
 
         let nodes = build_src(Span::new("$$<b>$$"));
-        assert_raw_form(&nodes[0], RawForm::Escaped, "<b>");
+        assert_raw_form(&nodes[0], RawForm::Escaped, RawOrigin::Passthrough, "<b>");
 
         // The attribute-listed forms carry theirs as the `Styled` wrapper's
         // one child, and split the same way.
         let nodes = build_src(Span::new("[.role]+++<b>+++"));
         let children = assert_styled(&nodes[0], StyleVariant::Unquoted, SpanForm::Unconstrained);
-        assert_raw_form(&children[0], RawForm::AsIs, "<b>");
+        assert_raw_form(&children[0], RawForm::AsIs, RawOrigin::Passthrough, "<b>");
 
         let nodes = build_src(Span::new("[.role]++<b>++"));
         let children = assert_styled(&nodes[0], StyleVariant::Unquoted, SpanForm::Unconstrained);
-        assert_raw_form(&children[0], RawForm::Escaped, "<b>");
+        assert_raw_form(
+            &children[0],
+            RawForm::Escaped,
+            RawOrigin::Passthrough,
+            "<b>",
+        );
     }
 
     #[test]
@@ -1572,7 +1588,7 @@ mod tests {
         }
 
         use super::super::test_support::assert_raw_form;
-        use crate::inlines::RawForm;
+        use crate::inlines::{RawForm, RawOrigin};
 
         let parser =
             Parser::default().with_inline_substitution_renderer(OrdinalRenderer::default());
@@ -1580,7 +1596,12 @@ mod tests {
         let nodes = super::super::build(Span::new("+a $$b < c$$ d+"), &parser, None);
 
         assert_eq!(nodes.len(), 1);
-        assert_raw_form(&nodes[0], RawForm::AsIs, "a b [1] c d");
+        assert_raw_form(
+            &nodes[0],
+            RawForm::AsIs,
+            RawOrigin::Passthrough,
+            "a b [1] c d",
+        );
         assert_eq!(nodes[0].span().data(), "+a $$b < c$$ d+");
 
         let mut probe = String::new();

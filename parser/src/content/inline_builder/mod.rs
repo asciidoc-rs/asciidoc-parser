@@ -736,9 +736,76 @@ mod tests {
     use crate::{
         Parser, Span,
         content::{Content, SubstitutionGroup, inline_builder::fold_html},
+        inlines::{InlineNode, RawOrigin},
         parser::{HtmlSubstitutionRenderer, ModificationContext},
         strings::CowStr,
     };
+
+    #[test]
+    fn a_raw_leafs_origin_says_who_produced_it() {
+        // `RawOrigin` is a property of the *node*, not of the pass that happens
+        // to be looking at it. That is the point: a recognition gate can ask
+        // "would the string replacer have seen these bytes, or a sentinel?"
+        // without knowing whether the extraction pass's identity is in hand —
+        // which is what an earlier attempt at this got wrong, by inferring
+        // provenance from a `Masked` list that is empty on some call paths.
+        let parser = Parser::default();
+
+        let origins = |source: &str| -> Vec<(RawOrigin, String)> {
+            build(Span::new(source), &parser, None)
+                .iter()
+                .filter_map(|node| match node {
+                    InlineNode::Raw { origin, value, .. } => {
+                        Some((*origin, value.as_ref().to_string()))
+                    }
+
+                    _ => None,
+                })
+                .collect()
+        };
+
+        // Every construction is folded into one comparison per group, with the
+        // source carried *in* the compared value rather than in an assertion
+        // message. A message argument on a line of its own is a failure-only
+        // region the coverage report counts as uncovered at every call site —
+        // the same trap `assert_special_char` documents in `test_support`.
+
+        // Every explicit passthrough spelling: the author asked for this text
+        // to be off limits, and the extraction pass is holding it.
+        let by_spelling: Vec<(&str, Vec<RawOrigin>)> =
+            ["+++<b>x</b>+++", "++a < b++", "$$<i>$$", "pass:[<b>]"]
+                .into_iter()
+                .map(|source| {
+                    let found = origins(source).into_iter().map(|(o, _)| o).collect();
+                    (source, found)
+                })
+                .collect();
+
+        assert_eq!(
+            by_spelling,
+            vec![
+                ("+++<b>x</b>+++", vec![RawOrigin::Passthrough]),
+                ("++a < b++", vec![RawOrigin::Passthrough]),
+                ("$$<i>$$", vec![RawOrigin::Passthrough]),
+                ("pass:[<b>]", vec![RawOrigin::Passthrough]),
+            ]
+        );
+
+        // An expanded attribute value's literal `&`, which §3.4.1 leaves
+        // unescaped because the value expands *after* `specialcharacters` ran.
+        // Nothing extracted it and nothing restores it — the string replacer
+        // reads these very bytes. `{cpp}` is `C&#43;&#43;`, so the expansion
+        // leaves one `Raw` per `&`, twice per occurrence.
+        assert_eq!(
+            origins("see xref:{cpp}[{cpp}]."),
+            vec![
+                (RawOrigin::Substitution, "&".to_string()),
+                (RawOrigin::Substitution, "&".to_string()),
+                (RawOrigin::Substitution, "&".to_string()),
+                (RawOrigin::Substitution, "&".to_string()),
+            ]
+        );
+    }
 
     /// Runs `source` through the real, public `SubstitutionGroup::Normal`
     /// pipeline, exactly as a real block's content is substituted in

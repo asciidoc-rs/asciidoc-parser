@@ -11,7 +11,7 @@ use crate::{
     Parser, Span,
     content::{ATTRIBUTE_REFERENCE, AttributeMissing},
     document::InterpretedValue,
-    inlines::{InlineNode, RawForm},
+    inlines::{InlineNode, RawForm, RawOrigin},
     parser::attribute_lookup_name,
     strings::CowStr,
 };
@@ -1020,6 +1020,7 @@ fn split_attribute_value<'src>(
         out.push(InlineNode::Raw {
             value: CowStr::from(ch.to_string()),
             form: RawForm::AsIs,
+            origin: RawOrigin::Substitution,
             location,
         });
 

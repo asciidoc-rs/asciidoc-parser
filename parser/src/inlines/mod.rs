@@ -50,7 +50,7 @@ mod index_term;
 pub use index_term::IndexTerm;
 
 mod inline_node;
-pub use inline_node::{InlineNode, RawForm};
+pub use inline_node::{InlineNode, RawForm, RawOrigin};
 
 mod ref_node;
 pub use ref_node::{LinkForm, Ref, RefVariant};

@@ -5,7 +5,7 @@
 use super::{fold_html, passthrough_step::is_special};
 use crate::{
     HasSpan, Parser, Span,
-    inlines::{CharRef, InlineNode, RawForm, RefVariant},
+    inlines::{CharRef, InlineNode, RawForm, RawOrigin, RefVariant},
     parser::InlineSubstitutionRenderer,
     strings::CowStr,
 };
@@ -249,6 +249,7 @@ fn split_verbatim<'src>(location: Span<'src>, leaf: SpecialLeaf, out: &mut Vec<I
             SpecialLeaf::Raw => InlineNode::Raw {
                 value: CowStr::from(ch_span.data()),
                 form: RawForm::AsIs,
+                origin: RawOrigin::Substitution,
                 location: ch_span,
             },
         });
@@ -352,6 +353,7 @@ fn as_pre_escape<'src>(node: InlineNode<'src>) -> InlineNode<'src> {
         InlineNode::Text { value, location } => InlineNode::Raw {
             value,
             form: RawForm::AsIs,
+            origin: RawOrigin::Substitution,
             location,
         },
 
@@ -548,6 +550,7 @@ fn split_synthesized<'src>(
             SpecialLeaf::Raw => InlineNode::Raw {
                 value: CowStr::from(ch.to_string()),
                 form: RawForm::AsIs,
+                origin: RawOrigin::Substitution,
                 location,
             },
         });
@@ -578,7 +581,7 @@ mod tests {
         Span,
         content::{Content, SubstitutionStep},
         inlines::{
-            Anchor, CharRef, Footnote, InlineNode, RawForm, Ref, RefVariant, SpanForm,
+            Anchor, CharRef, Footnote, InlineNode, RawForm, RawOrigin, Ref, RefVariant, SpanForm,
             StyleVariant, Styled,
         },
         parser::HtmlSubstitutionRenderer,
@@ -1017,6 +1020,7 @@ mod tests {
             InlineNode::Raw {
                 value: CowStr::from(location.data()),
                 form: RawForm::AsIs,
+                origin: RawOrigin::Passthrough,
                 location,
             },
         ]);
