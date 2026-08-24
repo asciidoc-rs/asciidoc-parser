@@ -113,7 +113,8 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// ## Parameters
     ///
     /// * `target_image_path`: path to the target image
-    /// * `parser`: Current document parser state
+    /// * `context`: The document state as of the point in the document this
+    ///   image came from — see [`RenderContext`]
     /// * `asset_dir_key`: If provided, the attribute key used to look up the
     ///   directory where the image is located. If not provided, `imagesdir` is
     ///   used.

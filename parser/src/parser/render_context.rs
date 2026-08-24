@@ -86,6 +86,58 @@ impl RenderContext {
     pub fn safe_mode(&self) -> SafeMode {
         self.attributes.safe_mode()
     }
+
+    /// Returns the [`PathResolver`] the parse was configured with — the one
+    /// the built-in HTML backend resolves an image or icon target through.
+    ///
+    /// A custom [`InlineSubstitutionRenderer`] that resolves targets itself
+    /// can use this to resolve them the same way, rather than reimplementing
+    /// the resolution.
+    ///
+    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+    pub fn path_resolver(&self) -> &dyn PathResolver {
+        self.path_resolver.as_ref()
+    }
+
+    /// Returns the [`ImageFileHandler`] the parse was configured with, if any.
+    ///
+    /// A custom [`InlineSubstitutionRenderer`] that resolves image URIs itself
+    /// (rather than inheriting
+    /// [`image_uri`](crate::parser::InlineSubstitutionRenderer::image_uri)'s
+    /// default `data-uri` embedding) can use this to read an image's bytes
+    /// through the same handler the built-in HTML renderer uses. `None` when
+    /// no handler was registered, in which case there is no way to embed
+    /// images and a web path should be used instead.
+    ///
+    /// This is the render-time counterpart of
+    /// [`Parser::image_file_handler`](crate::Parser::image_file_handler): a
+    /// renderer is handed a context rather than a parser, so this is how it
+    /// reaches the handler.
+    ///
+    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+    pub fn image_file_handler(&self) -> Option<&dyn ImageFileHandler> {
+        self.image_file_handler.as_deref()
+    }
+
+    /// Returns the [`SvgFileHandler`] the parse was configured with, if any.
+    ///
+    /// A custom [`InlineSubstitutionRenderer`] that renders inline SVG images
+    /// itself (rather than inheriting
+    /// [`render_image`](crate::parser::InlineSubstitutionRenderer::render_image)'s
+    /// `opts=inline` handling) can use this to read an SVG's contents through
+    /// the same handler the built-in HTML renderer uses. `None` when no
+    /// handler was registered, in which case inline SVG contents are
+    /// unavailable and the alt text should be used instead.
+    ///
+    /// This is the render-time counterpart of
+    /// [`Parser::svg_file_handler`](crate::Parser::svg_file_handler): a
+    /// renderer is handed a context rather than a parser, so this is how it
+    /// reaches the handler.
+    ///
+    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+    pub fn svg_file_handler(&self) -> Option<&dyn SvgFileHandler> {
+        self.svg_file_handler.as_deref()
+    }
 }
 
 #[cfg(test)]
@@ -184,5 +236,14 @@ mod tests {
         assert!(Rc::ptr_eq(&context.path_resolver, &parser.path_resolver));
         assert!(context.image_file_handler.is_none());
         assert!(context.svg_file_handler.is_none());
+
+        // The default resolver is always present, and reaching it through the
+        // accessor resolves a path the same way — an accessor wired to the
+        // wrong field would answer differently rather than merely compare
+        // unequal.
+        assert_eq!(
+            context.path_resolver().web_path("b.png", Some("img")),
+            "img/b.png"
+        );
     }
 }

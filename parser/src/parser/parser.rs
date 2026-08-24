@@ -2500,12 +2500,15 @@ impl Parser {
 
     /// Returns the [`ImageFileHandler`] registered on this parser, if any.
     ///
-    /// A custom [`InlineSubstitutionRenderer`] that resolves image URIs itself
+    /// Returns `None` when no handler was registered via
+    /// [`with_image_file_handler`].
+    ///
+    /// A renderer is handed a [`RenderContext`] rather than a parser, so a
+    /// custom [`InlineSubstitutionRenderer`] that resolves image URIs itself
     /// (rather than inheriting [`image_uri`]'s default `data-uri` embedding)
-    /// can use this to read an image's bytes through the same handler the
-    /// built-in HTML renderer uses. Returns `None` when no handler was
-    /// registered via [`with_image_file_handler`], in which case there is
-    /// no way to embed images and a web path should be used instead.
+    /// reaches the handler through
+    /// [`RenderContext::image_file_handler`] instead of here. This accessor is
+    /// for a caller that holds the parser.
     ///
     /// [`ImageFileHandler`]: crate::parser::ImageFileHandler
     /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
@@ -2517,13 +2520,15 @@ impl Parser {
 
     /// Returns the [`SvgFileHandler`] registered on this parser, if any.
     ///
-    /// A custom [`InlineSubstitutionRenderer`] that renders inline SVG images
+    /// Returns `None` when no handler was registered via
+    /// [`with_svg_file_handler`].
+    ///
+    /// A renderer is handed a [`RenderContext`] rather than a parser, so a
+    /// custom [`InlineSubstitutionRenderer`] that renders inline SVG images
     /// itself (rather than inheriting [`render_image`]'s `opts=inline`
-    /// handling) can use this to read an SVG's contents through the same
-    /// handler the built-in HTML renderer uses. Returns `None` when no
-    /// handler was registered via [`with_svg_file_handler`], in which case
-    /// inline SVG contents are unavailable and the alt text should be used
-    /// instead.
+    /// handling) reaches the handler through
+    /// [`RenderContext::svg_file_handler`] instead of here. This accessor is
+    /// for a caller that holds the parser.
     ///
     /// [`SvgFileHandler`]: crate::parser::SvgFileHandler
     /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer

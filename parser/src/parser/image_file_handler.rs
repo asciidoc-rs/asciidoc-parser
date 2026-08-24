@@ -36,7 +36,5 @@ pub trait ImageFileHandler: Debug {
     /// Return the bytes of the image file if found. If no file is found (or it
     /// is not readable), return `None`; the image will then fall back to
     /// rendering an ordinary web path.
-    ///
-    /// [`Parser`]: crate::Parser
     fn resolve_image(&self, target: &str, context: &RenderContext) -> Option<Vec<u8>>;
 }

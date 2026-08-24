@@ -36,7 +36,5 @@ pub trait SvgFileHandler: Debug {
     /// # Encoding
     /// If a `Some` result is provided, it is a typical Rust [`String`] and
     /// therefore must be encoded as UTF-8.
-    ///
-    /// [`Parser`]: crate::Parser
     fn resolve_svg(&self, target: &str, context: &RenderContext) -> Option<String>;
 }
