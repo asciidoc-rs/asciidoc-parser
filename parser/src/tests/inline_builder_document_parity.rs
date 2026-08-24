@@ -434,3 +434,99 @@ fn a_stateful_renderer_is_not_required_for_the_fold() {
         );
     }
 }
+
+// The document-attribute state each content retains for the fold that will run
+// *after* resolution — design §4.2's second sentinel system, whose retirement
+// is the increment this one stages.
+
+#[test]
+fn document_stays_send_and_sync() {
+    // Retaining anything from the parser's *configuration* — its renderer,
+    // path resolver, or file handlers, all `Rc<dyn …>` — would take this away,
+    // silently, since nothing else pins it. `Parser` itself is deliberately
+    // neither; a `Document` is both, and a consumer that parses on one thread
+    // and renders on another depends on that.
+    //
+    // This is why a content retains its `ResolvedAttributes` (the
+    // order-dependent half, `Arc`-shared and thread-safe) rather than a whole
+    // `RenderContext`.
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    assert_send::<crate::Document<'static>>();
+    assert_sync::<crate::Document<'static>>();
+}
+
+#[test]
+fn only_deferred_content_retains_its_render_attributes() {
+    use crate::blocks::Block;
+
+    // Retention is deliberately narrow: a context costs a handful of
+    // reference-count bumps, but the overwhelming majority of content is never
+    // re-rendered and so never folded later than its parse.
+    let mut parser = crate::Parser::default();
+
+    let doc = parser.parse("[[tgt]]Plain paragraph.\n\nSee <<tgt>> and <<missing>>.");
+
+    let contexts: Vec<bool> = doc
+        .child_blocks()
+        .filter_map(|block| match block {
+            Block::Simple(simple) => Some(simple.content().render_attributes().is_some()),
+            _ => None,
+        })
+        .collect();
+
+    // The anchor-bearing paragraph carries no cross-reference of its own, so
+    // it needs no context; the one that does, does.
+    assert_eq!(contexts, vec![false, true]);
+
+    // And a block with no cross-references anywhere never gets one.
+    let doc = parser.parse("Just prose with an image:x.png[X].");
+
+    let Some(Block::Simple(simple)) = doc.child_blocks().next() else {
+        panic!("expected a simple block");
+    };
+
+    assert!(simple.content().render_attributes().is_none());
+}
+
+#[test]
+fn each_content_retains_the_attributes_of_its_own_point_in_the_document() {
+    use crate::blocks::Block;
+
+    // The reason the context is taken during the parse rather than
+    // reconstructed at resolution time. Document attributes are mutable parse
+    // state: `:imagesdir:` rebinds for everything after it, so the value in
+    // effect at the *end* of a document is not generally the value in effect
+    // where a given content was written.
+    //
+    // Two cross-reference-bearing paragraphs straddling a `:imagesdir:` line
+    // must therefore disagree about it — which is exactly what a fold running
+    // after resolution has to reproduce, and what a single end-of-parse
+    // snapshot could not.
+    let mut parser = crate::Parser::default();
+
+    let doc = parser.parse(concat!(
+        "[[tgt]]Target.\n\n",
+        "First <<tgt>>.\n\n",
+        ":imagesdir: img\n\n",
+        "Second <<tgt>>.",
+    ));
+
+    let dirs: Vec<String> = doc
+        .child_blocks()
+        .filter_map(|block| match block {
+            Block::Simple(simple) => simple.content().render_attributes(),
+            _ => None,
+        })
+        .map(|attributes| {
+            attributes
+                .attribute_value("imagesdir")
+                .as_maybe_str()
+                .unwrap_or("<unset>")
+                .to_string()
+        })
+        .collect();
+
+    assert_eq!(dirs, vec!["<unset>".to_string(), "img".to_string()]);
+}
