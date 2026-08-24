@@ -14,7 +14,7 @@ impl ImageFileHandlerFixture {
 }
 
 impl ImageFileHandler for ImageFileHandlerFixture {
-    fn resolve_image(&self, target: &str, _parser: &Parser) -> Option<Vec<u8>> {
+    fn resolve_image(&self, target: &str, _context: &RenderContext) -> Option<Vec<u8>> {
         self.0.get(target).map(|v| v.to_vec())
     }
 }

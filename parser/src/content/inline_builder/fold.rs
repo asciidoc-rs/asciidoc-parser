@@ -323,6 +323,8 @@ fn fold_image(
         .unwrap_or_default();
 
     if image.is_icon {
+        let context = parser.render_context();
+
         let params = IconRenderParams {
             target: image.target.as_ref(),
             restored_target_ranges: &image.restored_target_ranges,
@@ -331,11 +333,13 @@ fn fold_image(
                 .named_or_positional_attribute("size", 1)
                 .map(|a| a.value()),
             attrlist,
-            parser,
+            context: &context,
         };
 
         renderer.render_icon(&params, out);
     } else {
+        let context = parser.render_context();
+
         let params = ImageRenderParams {
             target: image.target.as_ref(),
             restored_target_ranges: &image.restored_target_ranges,
@@ -343,7 +347,7 @@ fn fold_image(
             width: image.width.as_deref(),
             height: image.height.as_deref(),
             attrlist,
-            parser,
+            context: &context,
         };
 
         renderer.render_image(&params, out);
@@ -379,11 +383,13 @@ fn fold_ui(
         } => {
             let submenus: Vec<String> = submenus.iter().map(|s| s.to_string()).collect();
 
+            let context = parser.render_context();
+
             let params = MenuRenderParams {
                 menu: menu.as_ref(),
                 submenus: &submenus,
                 menuitem: item.as_deref(),
-                parser,
+                context: &context,
             };
 
             renderer.render_menu(&params, out);
@@ -438,13 +444,15 @@ fn fold_link(
 
     let extra_roles: Vec<&str> = reference.roles.iter().map(|r| r.as_ref()).collect();
 
+    let context = parser.render_context();
+
     let params = LinkRenderParams {
         target: reference.target.to_string(),
         link_text,
         extra_roles,
         window: reference.window.as_deref(),
         attrlist,
-        parser,
+        context: &context,
     };
 
     renderer.render_link(&params, out);
@@ -677,11 +685,13 @@ fn fold_callout(
         CalloutGuard::Xml => ParserCalloutGuard::Xml,
     };
 
+    let context = parser.render_context();
+
     renderer.render_callout(
         &CalloutRenderParams {
             number: callout.number.as_ref(),
             guard,
-            parser,
+            context: &context,
         },
         out,
     );

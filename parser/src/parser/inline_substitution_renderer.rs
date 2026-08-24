@@ -3,9 +3,10 @@ use std::{fmt::Debug, sync::LazyLock};
 use regex::Regex;
 
 use crate::{
-    Parser,
     attributes::Attrlist,
-    parser::{DerivedReference, ResolvedReference, SafeMode, XrefSignifier, XrefStyle},
+    parser::{
+        DerivedReference, RenderContext, ResolvedReference, SafeMode, XrefSignifier, XrefStyle,
+    },
 };
 
 /// An implementation of `InlineSubstitutionRenderer` is used when converting
@@ -24,8 +25,8 @@ use crate::{
 /// [`render_image`](Self::render_image) inherit the crate's `data-uri`
 /// embedding and `opts=inline` SVG handling — which read bytes through the
 /// [`ImageFileHandler`](crate::parser::ImageFileHandler) and
-/// [`SvgFileHandler`](crate::parser::SvgFileHandler) registered on the
-/// [`Parser`] — so a downstream renderer gets that behavior without needing to
+/// [`SvgFileHandler`](crate::parser::SvgFileHandler) the parse was configured
+/// with — so a downstream renderer gets that behavior without needing to
 /// reproduce it.
 ///
 /// Note that these defaults delegate to the HTML renderer's *own* methods
@@ -37,10 +38,14 @@ use crate::{
 /// (calling `self.image_uri(…)`) if the two must agree. The sole exception is
 /// [`icon_uri`](Self::icon_uri): its default derives an icon path and then
 /// calls `self.image_uri(…)`, so it alone *does* reflect an `image_uri`
-/// override. A renderer that resolves asset URIs itself can reach the
-/// registered handlers through
-/// [`Parser::image_file_handler`](crate::Parser::image_file_handler) and
-/// [`Parser::svg_file_handler`](crate::Parser::svg_file_handler).
+/// override. A renderer that resolves asset URIs itself can reach the same
+/// handlers — and the same [`PathResolver`](crate::parser::PathResolver) — off
+/// the [`RenderContext`] it is handed, through
+/// [`image_file_handler`](RenderContext::image_file_handler),
+/// [`svg_file_handler`](RenderContext::svg_file_handler), and
+/// [`path_resolver`](RenderContext::path_resolver). The identically-named
+/// [`Parser`](crate::Parser) accessors answer the same question for a caller
+/// that holds the parser, which a renderer does not.
 pub trait InlineSubstitutionRenderer: Debug {
     /// Renders the substitution for a special character.
     ///
@@ -112,7 +117,8 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// ## Parameters
     ///
     /// * `target_image_path`: path to the target image
-    /// * `parser`: Current document parser state
+    /// * `context`: The document state as of the point in the document this
+    ///   image came from — see [`RenderContext`]
     /// * `asset_dir_key`: If provided, the attribute key used to look up the
     ///   directory where the image is located. If not provided, `imagesdir` is
     ///   used.
@@ -124,10 +130,10 @@ pub trait InlineSubstitutionRenderer: Debug {
     fn image_uri(
         &self,
         target_image_path: &str,
-        parser: &Parser,
+        context: &RenderContext,
         asset_dir_key: Option<&str>,
     ) -> String {
-        DEFAULT_HTML_RENDERER.image_uri(target_image_path, parser, asset_dir_key)
+        DEFAULT_HTML_RENDERER.image_uri(target_image_path, context, asset_dir_key)
     }
 
     /// Renders an icon.
@@ -154,11 +160,11 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// safely converted to a data URI.
     ///
     /// The return value of this method can be safely used in an image tag.
-    fn icon_uri(&self, name: &str, _attrlist: &Attrlist, parser: &Parser) -> String {
+    fn icon_uri(&self, name: &str, _attrlist: &Attrlist, context: &RenderContext) -> String {
         let icon = if has_extname(name) {
             name.to_owned()
         } else {
-            let icontype = parser
+            let icontype = context
                 .attribute_value("icontype")
                 .as_maybe_str()
                 .unwrap_or("png")
@@ -167,7 +173,7 @@ pub trait InlineSubstitutionRenderer: Debug {
             format!("{name}.{icontype}")
         };
 
-        self.image_uri(&icon, parser, Some("iconsdir"))
+        self.image_uri(&icon, context, Some("iconsdir"))
     }
 
     /// Renders a link.
@@ -409,9 +415,10 @@ pub struct ImageRenderParams<'a> {
     /// Attribute list.
     pub attrlist: &'a Attrlist<'a>,
 
-    /// Parser. The rendered may find document settings (such as an image
-    /// directory) in the parser's document attributes.
-    pub parser: &'a Parser,
+    /// The document state as of the point in the document this element came
+    /// from — where a renderer finds document settings such as an image
+    /// directory. See [`RenderContext`].
+    pub context: &'a RenderContext,
 }
 
 /// Provides parsed parameters for an icon to be rendered.
@@ -436,9 +443,10 @@ pub struct IconRenderParams<'a> {
     /// Attribute list.
     pub attrlist: &'a Attrlist<'a>,
 
-    /// Parser. The rendered may find document settings (such as an image
-    /// directory) in the parser's document attributes.
-    pub parser: &'a Parser,
+    /// The document state as of the point in the document this element came
+    /// from — where a renderer finds document settings such as an image
+    /// directory. See [`RenderContext`].
+    pub context: &'a RenderContext,
 }
 
 /// Provides parsed parameters for an icon to be rendered.
@@ -459,9 +467,10 @@ pub struct LinkRenderParams<'a> {
     /// Attribute list.
     pub attrlist: &'a Attrlist<'a>,
 
-    /// Parser. The rendered may find document settings (such as an image
-    /// directory) in the parser's document attributes.
-    pub parser: &'a Parser,
+    /// The document state as of the point in the document this element came
+    /// from — where a renderer finds document settings such as an image
+    /// directory. See [`RenderContext`].
+    pub context: &'a RenderContext,
 }
 
 /// Provides parameters for rendering a [callout] number.
@@ -479,9 +488,11 @@ pub struct CalloutRenderParams<'a> {
     /// enabled.
     pub guard: CalloutGuard<'a>,
 
-    /// Parser. The renderer reads the `icons`, `iconsdir`, and `icontype`
-    /// document attributes to decide how to render the callout.
-    pub parser: &'a Parser,
+    /// The document state as of the point in the document this callout came
+    /// from. The renderer reads the `icons`, `iconsdir`, and `icontype`
+    /// document attributes from it to decide how to render the callout. See
+    /// [`RenderContext`].
+    pub context: &'a RenderContext,
 }
 
 /// Describes the characters that guard (hide) a callout number in verbatim
@@ -564,9 +575,10 @@ pub struct MenuRenderParams<'a> {
     /// `menu:File[]` with no items).
     pub menuitem: Option<&'a str>,
 
-    /// Parser, used to read the `icons` document attribute when choosing how to
-    /// render the caret between menu levels.
-    pub parser: &'a Parser,
+    /// The document state as of the point in the document this menu reference
+    /// came from, used to read the `icons` document attribute when choosing
+    /// how to render the caret between menu levels. See [`RenderContext`].
+    pub context: &'a RenderContext,
 }
 
 /// Provides parameters for rendering the inline marker of a [`footnote`] macro.
@@ -643,14 +655,14 @@ impl HtmlSubstitutionRenderer {
         target: &str,
         restored_target_ranges: &[std::ops::Range<usize>],
         attrlist: &Attrlist,
-        parser: &Parser,
+        context: &RenderContext,
     ) -> String {
         match attrlist.named_attribute("imagesdir") {
             Some(imagesdir) => {
                 let dir_ranges = imagesdir.restored_value_ranges();
 
                 if restored_target_ranges.is_empty() && dir_ranges.is_empty() {
-                    return normalize_web_path(target, parser, Some(imagesdir.value()), true);
+                    return normalize_web_path(target, context, Some(imagesdir.value()), true);
                 }
 
                 // The two masked values flow into one joined path, so their
@@ -666,20 +678,20 @@ impl HtmlSubstitutionRenderer {
                 bodies.extend(target_bodies);
 
                 splice_restored_bodies(
-                    &normalize_web_path(&masked_target, parser, Some(&masked_dir), true),
+                    &normalize_web_path(&masked_target, context, Some(&masked_dir), true),
                     &bodies,
                 )
             }
 
             None => {
                 if restored_target_ranges.is_empty() {
-                    return self.image_uri(target, parser, None);
+                    return self.image_uri(target, context, None);
                 }
 
                 let (masked_target, bodies) =
                     mask_restored_ranges(target, restored_target_ranges, 0);
 
-                splice_restored_bodies(&self.image_uri(&masked_target, parser, None), &bodies)
+                splice_restored_bodies(&self.image_uri(&masked_target, context, None), &bodies)
             }
         }
     }
@@ -932,7 +944,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             params.target,
             params.restored_target_ranges,
             params.attrlist,
-            params.parser,
+            params.context,
         );
         let alt_encoded = encode_attribute_value(params.alt.clone());
 
@@ -973,7 +985,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         // effect below the `Secure` safe mode. In `Secure` mode an SVG image
         // renders as an ordinary `<img>`, matching Ruby Asciidoctor.
         let svg_active = (format == Some("svg") || params.target.contains(".svg"))
-            && params.parser.safe_mode() < SafeMode::Secure;
+            && params.context.safe_mode() < SafeMode::Secure;
 
         // An inline SVG is embedded verbatim and has no meaningful `src`, so a
         // `link=self` on it is left as the literal `self` rather than resolved
@@ -985,7 +997,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             // Embed the SVG contents directly. When the contents cannot be read
             // (no handler is registered, or it cannot find the file), fall back
             // to the alt text, mirroring Ruby Asciidoctor.
-            read_svg_contents(&src, params.width, params.height, params.parser)
+            read_svg_contents(&src, params.width, params.height, params.context)
                 .unwrap_or_else(|| format!(r#"<span class="alt">{alt}</span>"#, alt = params.alt))
         } else if svg_active && params.attrlist.has_option("interactive") {
             // Render an interactive SVG as an `<object>` element so its embedded
@@ -1001,7 +1013,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                     fallback.value(),
                     fallback.restored_value_ranges(),
                     params.attrlist,
-                    params.parser,
+                    params.context,
                 );
                 format!(
                     r#"<img src="{fallback_src}" alt="{alt_encoded}"{dimension_attrs}>"#,
@@ -1043,17 +1055,17 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
     fn image_uri(
         &self,
         target_image_path: &str,
-        parser: &Parser,
+        context: &RenderContext,
         asset_dir_key: Option<&str>,
     ) -> String {
         let asset_dir_key = asset_dir_key.unwrap_or("imagesdir");
 
-        let asset_dir = parser
+        let asset_dir = context
             .attribute_value(asset_dir_key)
             .as_maybe_str()
             .map(|s| s.to_string());
 
-        let normalized = normalize_web_path(target_image_path, parser, asset_dir.as_deref(), true);
+        let normalized = normalize_web_path(target_image_path, context, asset_dir.as_deref(), true);
 
         // Asciidoctor embeds the image as a data URI when the `data-uri`
         // attribute is set and the safe mode is below `SafeMode::Secure`. A
@@ -1067,11 +1079,11 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         // This crate never performs file I/O itself, so an absent handler (or
         // one that cannot find the file) degrades silently to the web path,
         // mirroring how a missing `SvgFileHandler` degrades an inline SVG.
-        if parser.safe_mode() < SafeMode::Secure
-            && parser.is_attribute_set("data-uri")
+        if context.safe_mode() < SafeMode::Secure
+            && context.is_attribute_set("data-uri")
             && !is_uri_ish(target_image_path)
-            && let Some(handler) = parser.image_file_handler.as_ref()
-            && let Some(bytes) = handler.resolve_image(&normalized, parser)
+            && let Some(handler) = context.image_file_handler.as_ref()
+            && let Some(bytes) = handler.resolve_image(&normalized, context)
         {
             let mimetype = data_uri_mimetype(target_image_path);
             let encoded = crate::internal::base64::strict_encode(&bytes);
@@ -1089,19 +1101,19 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         // must read the sentinel-shaped bytes the string pipeline's own
         // probe reads — and the bodies splice back in afterwards.
         let src = if params.restored_target_ranges.is_empty() {
-            self.icon_uri(params.target, params.attrlist, params.parser)
+            self.icon_uri(params.target, params.attrlist, params.context)
         } else {
             let (masked_target, bodies) =
                 mask_restored_ranges(params.target, params.restored_target_ranges, 0);
 
             splice_restored_bodies(
-                &self.icon_uri(&masked_target, params.attrlist, params.parser),
+                &self.icon_uri(&masked_target, params.attrlist, params.context),
                 &bodies,
             )
         };
 
-        let img = if params.parser.is_attribute_set("icons") {
-            let icons = params.parser.attribute_value("icons");
+        let img = if params.context.is_attribute_set("icons") {
+            let icons = params.context.attribute_value("icons");
             if let Some(icons) = icons.as_maybe_str()
                 && icons == "font"
             {
@@ -1195,8 +1207,8 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         // and not font-based); the font (`<i>`) and text (`[alt]`) branches have
         // no `src`, so a `link=self` on them stays literal (see
         // `render_icon_or_image`).
-        let link_self_href = if params.parser.is_attribute_set("icons")
-            && params.parser.attribute_value("icons").as_maybe_str() != Some("font")
+        let link_self_href = if params.context.is_attribute_set("icons")
+            && params.context.attribute_value("icons").as_maybe_str() != Some("font")
         {
             Some(src.as_str())
         } else {
@@ -1354,21 +1366,21 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
     fn render_callout(&self, params: &CalloutRenderParams, dest: &mut String) {
         let n = params.number;
-        let parser = params.parser;
+        let context = params.context;
 
-        if parser.attribute_value("icons").as_maybe_str() == Some("font") {
+        if context.attribute_value("icons").as_maybe_str() == Some("font") {
             dest.push_str(&format!(
                 r#"<i class="conum" data-value="{n}"></i><b>({n})</b>"#
             ));
-        } else if parser.is_attribute_set("icons") {
-            let icontype = parser
+        } else if context.is_attribute_set("icons") {
+            let icontype = context
                 .attribute_value("icontype")
                 .as_maybe_str()
                 .unwrap_or("png")
                 .to_owned();
 
             let icon = format!("callouts/{n}.{icontype}");
-            let src = self.image_uri(&icon, parser, Some("iconsdir"));
+            let src = self.image_uri(&icon, context, Some("iconsdir"));
 
             dest.push_str(&format!(r#"<img src="{src}" alt="{n}">"#));
         } else {
@@ -1414,7 +1426,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
     }
 
     fn render_menu(&self, params: &MenuRenderParams, dest: &mut String) {
-        let caret = if params.parser.attribute_value("icons").as_maybe_str() == Some("font") {
+        let caret = if params.context.attribute_value("icons").as_maybe_str() == Some("font") {
             r#"&#160;<i class="fa fa-angle-right caret"></i> "#
         } else {
             r#"&#160;<b class="caret">&#8250;</b> "#
@@ -1714,14 +1726,14 @@ fn encode_html_attribute(value: &str) -> String {
 
 fn normalize_web_path(
     target: &str,
-    parser: &Parser,
+    context: &RenderContext,
     start: Option<&str>,
     preserve_uri_target: bool,
 ) -> String {
     if preserve_uri_target && is_uri_ish(target) {
         encode_spaces_in_uri(target)
     } else {
-        parser.path_resolver.web_path(target, start)
+        context.path_resolver.web_path(target, start)
     }
 }
 
@@ -1808,10 +1820,10 @@ fn read_svg_contents(
     src: &str,
     width: Option<&str>,
     height: Option<&str>,
-    parser: &Parser,
+    context: &RenderContext,
 ) -> Option<String> {
-    let handler = parser.svg_file_handler.as_ref()?;
-    let mut svg = handler.resolve_svg(src, parser)?;
+    let handler = context.svg_file_handler.as_ref()?;
+    let mut svg = handler.resolve_svg(src, context)?;
 
     // Strip anything that precedes the opening `<svg>` tag (e.g. `<?xml … ?>`).
     if svg.starts_with('<')

@@ -43,6 +43,9 @@ pub use svg_file_handler::SvgFileHandler;
 
 pub(crate) mod preprocessor;
 
+mod render_context;
+pub use render_context::RenderContext;
+
 mod resolved_attributes;
 pub(crate) use resolved_attributes::{ResolvedAttributes, attribute_lookup_name};
 

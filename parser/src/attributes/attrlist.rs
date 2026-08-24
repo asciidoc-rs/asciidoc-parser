@@ -317,6 +317,9 @@ impl<'src> Attrlist<'src> {
             ],
             anchor: None,
             source: language,
+
+            // A synthesized list has no attrlist text in the document at all
+            // (`source` is the language span), and nothing reads this for it.
             source_text: None,
         }
     }
@@ -394,6 +397,9 @@ impl<'src> Attrlist<'src> {
             attributes: later_attributes,
             anchor: later_anchor,
             source: _,
+
+            // Kept from `self`, like `source` itself: only inline quoted text
+            // reads the list's own text, and an inline list is never merged.
             source_text: _,
         } = later;
 
@@ -2628,6 +2634,60 @@ mod tests {
 
             // The location tag is the span it was re-tagged with, unchanged.
             assert_eq!(owned.span().data(), "'a<b'");
+        }
+
+        #[test]
+        fn quoted_first_positional_reads_the_substituted_text() {
+            // `parse` expands attribute references over the whole list before
+            // splitting it, so every *parsed* field is already expanded. The
+            // verbatim role must come from those same expanded bytes:
+            // Asciidoctor's `parse_quoted_text_attributes` runs
+            // `sub_attributes` over the list and *then* takes the first
+            // positional verbatim, and it does so regardless of the enclosing
+            // block's `subs` list.
+            let p = crate::Parser::default().with_intrinsic_attribute(
+                "myrole",
+                "highlight",
+                crate::parser::ModificationContext::Anywhere,
+            );
+
+            let mi = crate::attributes::Attrlist::parse(
+                crate::Span::new("'{myrole}'"),
+                &p,
+                AttrlistContext::Inline,
+            )
+            .unwrap_if_no_warnings();
+
+            assert_eq!(mi.item.quoted_text_fallback_role().unwrap(), "'highlight'");
+
+            // The comma boundary is applied *after* the substitution, so an
+            // expansion that introduces one truncates the role there too.
+            let p = crate::Parser::default().with_intrinsic_attribute(
+                "commarole",
+                "a,b",
+                crate::parser::ModificationContext::Anywhere,
+            );
+
+            let mi = crate::attributes::Attrlist::parse(
+                crate::Span::new("'{commarole}'"),
+                &p,
+                AttrlistContext::Inline,
+            )
+            .unwrap_if_no_warnings();
+
+            assert_eq!(mi.item.quoted_text_fallback_role().unwrap(), "'a");
+
+            // A missing attribute is left alone under the default
+            // `attribute-missing=skip`, so the substitution is a no-op and the
+            // source's own bytes still serve.
+            let mi = crate::attributes::Attrlist::parse(
+                crate::Span::new("'{missing}'"),
+                &crate::Parser::default(),
+                AttrlistContext::Inline,
+            )
+            .unwrap_if_no_warnings();
+
+            assert_eq!(mi.item.quoted_text_fallback_role().unwrap(), "'{missing}'");
         }
     }
 

@@ -9067,6 +9067,71 @@ mod passthroughs {
     }
 
     #[test]
+    fn quoted_role_resolves_attribute_reference_without_the_attributes_sub() {
+        // The quotes family's own half of the test above, and the case that
+        // half was masking. `Attrlist::parse` expands attribute references over
+        // the whole list before splitting it, regardless of the enclosing
+        // block's `subs` — which is what Asciidoctor's
+        // `parse_quoted_text_attributes` does too (it calls `sub_attributes`
+        // unconditionally). A quote-delimited first positional is the one value
+        // that comes from the list's own *text* rather than from a parsed
+        // attribute, so it has to read those same expanded bytes.
+        //
+        // Under the default `subs` the attribute-references step runs after
+        // quotes and rewrites the reference inside the `class` the quotes step
+        // just wrote, so the final bytes came out right either way. Drop that
+        // step from the order and only the expansion at parse time is left.
+        // This is a crate-specific regression test, not a port.
+        let render = |input: &str| {
+            let mut p = Parser::default().with_intrinsic_attribute(
+                "myrole",
+                "highlight",
+                ModificationContext::Anywhere,
+            );
+
+            let maw = crate::blocks::Block::parse(crate::Span::new(input), &mut p);
+
+            let crate::blocks::Block::Simple(block) = maw.item.unwrap().item else {
+                panic!("expected a simple block");
+            };
+
+            block.content().rendered_str().to_string()
+        };
+
+        // The default order, where the later attribute-references step was
+        // covering for this.
+        assert_eq!(
+            render("['{myrole}']#text#"),
+            r#"<span class="'highlight'">text</span>"#
+        );
+
+        // An order with no attribute-references step at all: the expansion at
+        // parse time is the only one there is.
+        assert_eq!(
+            render("[subs=\"quotes\"]\n['{myrole}']#text#"),
+            r#"<span class="'highlight'">text</span>"#
+        );
+
+        assert_eq!(
+            render("[subs=\"specialcharacters,quotes\"]\n['{myrole}']*bold*"),
+            r#"<strong class="'highlight'">bold</strong>"#
+        );
+
+        // The unquoted spellings read a parsed attribute instead, and were
+        // already expanding under the same order — which is what made the
+        // quoted one's behavior inconsistent rather than merely late.
+        assert_eq!(
+            render("[subs=\"quotes\"]\n[{myrole}]#text#"),
+            r#"<span class="highlight">text</span>"#
+        );
+
+        assert_eq!(
+            render("[subs=\"quotes\"]\n[.{myrole}]#text#"),
+            r#"<span class="highlight">text</span>"#
+        );
+    }
+
+    #[test]
     fn should_allow_inline_double_plus_passthrough_to_be_escaped_using_backslash() {
         verifies!(
             r#"

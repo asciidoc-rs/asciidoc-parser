@@ -15,8 +15,8 @@ use crate::{
     parser::{
         AllowableValue, AttributeValue, DatetimeContext, DefaultPathResolver, DocinfoFileHandler,
         HtmlSubstitutionRenderer, ImageFileHandler, IncludeFileHandler, InlineSubstitutionRenderer,
-        ModificationContext, PathResolver, ReferenceTime, ResolvedAttributes, SafeMode, SourceLine,
-        SourceMap, SvgFileHandler,
+        ModificationContext, PathResolver, ReferenceTime, RenderContext, ResolvedAttributes,
+        SafeMode, SourceLine, SourceMap, SvgFileHandler,
         built_in_attrs::{
             built_in_attr, built_in_default_values, derived_backend_value,
             is_derived_backend_value, max_attribute_value_size_default, synthesized_attr,
@@ -235,7 +235,7 @@ pub struct Parser {
     ///
     /// [counter]: https://docs.asciidoctor.org/asciidoc/latest/attributes/counters/
     /// [`attribute_value()`]: Self::attribute_value
-    pub(crate) counter_values: RefCell<HashMap<String, String>>,
+    pub(crate) counter_values: RefCell<Arc<HashMap<String, String>>>,
 
     /// Running state for inline `{counter:…}` / `{counter2:…}` counters whose
     /// target attribute is *locked* (API-set or a locked built-in).
@@ -590,7 +590,7 @@ impl Default for Parser {
             in_bibliography_list_item: Cell::new(false),
             mark_footnote_spans: Cell::new(false),
             pending_block_title: None,
-            counter_values: RefCell::new(HashMap::new()),
+            counter_values: RefCell::new(Arc::new(HashMap::new())),
             locked_counter_values: RefCell::new(HashMap::new()),
             locked_attribute_names: HashSet::new(),
             nested_document_depth: 0,
@@ -785,7 +785,7 @@ impl Parser {
         self.pending_block_title = None;
 
         // Reset counter (and captioned-block) numbering for each new document.
-        self.counter_values.borrow_mut().clear();
+        Arc::make_mut(&mut self.counter_values.borrow_mut()).clear();
         self.locked_counter_values.borrow_mut().clear();
 
         // Start each parse at the outermost block-nesting level. The counter is
@@ -1369,6 +1369,49 @@ impl Parser {
         value
     }
 
+    /// Takes a [`RenderContext`] from this parser's current state — the
+    /// document state a renderer is handed while it renders.
+    ///
+    /// Rendering reads *document* state (an `imagesdir`, whether `icons` is
+    /// set, the safe mode) as well as the element's own attribute list, and a
+    /// parser's document attributes are mutable parse state: what a renderer
+    /// reads depends on **when** it runs. A context is a snapshot, so it keeps
+    /// answering as this parser would have answered now, however the parse
+    /// moves on afterwards.
+    ///
+    /// Taking one costs a handful of reference-count bumps and no allocation,
+    /// so a caller that needs one per rendered element takes one per rendered
+    /// element, which is what the substitution steps do.
+    ///
+    /// This is the **only** way a context is built, in or out of the crate:
+    /// [`RenderContext`]'s own constructor is not reachable from outside
+    /// [`parser`](crate::parser), and this is crate-private. A consumer
+    /// receives a context (as an [`InlineSubstitutionRenderer`], a
+    /// [`PathResolver`], an [`ImageFileHandler`], or a [`SvgFileHandler`])
+    /// rather than constructing one. If a downstream need to construct one
+    /// appears — unit-testing a handler implementation is the likely one —
+    /// this is what would be made public.
+    ///
+    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+    pub(crate) fn render_context(&self) -> RenderContext {
+        RenderContext::new(self)
+    }
+
+    /// Returns the reference instant this parse has already captured for its
+    /// time-dependent attributes, or `None` if nothing has read one yet.
+    ///
+    /// A [`RenderContext`] takes this so a renderer or handler reading
+    /// `{docdate}` sees the same instant the content around it was rendered
+    /// with — see
+    /// [`ResolvedAttributes::freeze_datetime`]. It deliberately does **not**
+    /// force the capture: `None` here means nothing has been rendered from one
+    /// of these attributes, so there is nothing to be inconsistent with, and
+    /// forcing it would put a clock read and an allocation on every rendered
+    /// element.
+    pub(crate) fn captured_datetime_context(&self) -> Option<DatetimeContext> {
+        self.datetime_context.borrow().clone()
+    }
+
     /// Captures the parser's fully-resolved document-attribute state so it can
     /// outlive the parser — for example, retained on a [`Document`] to answer
     /// [`attribute_value`]/[`has_attribute`]/[`is_attribute_set`] without a
@@ -1388,7 +1431,7 @@ impl Parser {
         ResolvedAttributes::new(
             Arc::clone(&self.attribute_values),
             Arc::clone(&self.default_attribute_values),
-            self.counter_values.borrow().clone(),
+            Arc::clone(&self.counter_values.borrow()),
             self.safe,
             self.reference_time.clone(),
             self.input_mtime.clone(),
@@ -1525,7 +1568,7 @@ impl Parser {
 
         // Either way the partner supersedes (and resets) any counter of the
         // same name, mirroring a direct assignment.
-        self.counter_values.borrow_mut().remove(partner);
+        Arc::make_mut(&mut self.counter_values.borrow_mut()).remove(partner);
 
         if let InterpretedValue::Unset = value {
             // The toggle is off, so the partner turns on. This mirroring
@@ -2502,12 +2545,15 @@ impl Parser {
 
     /// Returns the [`ImageFileHandler`] registered on this parser, if any.
     ///
-    /// A custom [`InlineSubstitutionRenderer`] that resolves image URIs itself
+    /// Returns `None` when no handler was registered via
+    /// [`with_image_file_handler`].
+    ///
+    /// A renderer is handed a [`RenderContext`] rather than a parser, so a
+    /// custom [`InlineSubstitutionRenderer`] that resolves image URIs itself
     /// (rather than inheriting [`image_uri`]'s default `data-uri` embedding)
-    /// can use this to read an image's bytes through the same handler the
-    /// built-in HTML renderer uses. Returns `None` when no handler was
-    /// registered via [`with_image_file_handler`], in which case there is
-    /// no way to embed images and a web path should be used instead.
+    /// reaches the handler through
+    /// [`RenderContext::image_file_handler`] instead of here. This accessor is
+    /// for a caller that holds the parser.
     ///
     /// [`ImageFileHandler`]: crate::parser::ImageFileHandler
     /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
@@ -2519,13 +2565,15 @@ impl Parser {
 
     /// Returns the [`SvgFileHandler`] registered on this parser, if any.
     ///
-    /// A custom [`InlineSubstitutionRenderer`] that renders inline SVG images
+    /// Returns `None` when no handler was registered via
+    /// [`with_svg_file_handler`].
+    ///
+    /// A renderer is handed a [`RenderContext`] rather than a parser, so a
+    /// custom [`InlineSubstitutionRenderer`] that renders inline SVG images
     /// itself (rather than inheriting [`render_image`]'s `opts=inline`
-    /// handling) can use this to read an SVG's contents through the same
-    /// handler the built-in HTML renderer uses. Returns `None` when no
-    /// handler was registered via [`with_svg_file_handler`], in which case
-    /// inline SVG contents are unavailable and the alt text should be used
-    /// instead.
+    /// handling) reaches the handler through
+    /// [`RenderContext::svg_file_handler`] instead of here. This accessor is
+    /// for a caller that holds the parser.
     ///
     /// [`SvgFileHandler`]: crate::parser::SvgFileHandler
     /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
@@ -2690,7 +2738,7 @@ impl Parser {
 
         // An explicit assignment supersedes (and resets) any counter of the same
         // name.
-        self.counter_values.borrow_mut().remove(&attr_name);
+        Arc::make_mut(&mut self.counter_values.borrow_mut()).remove(&attr_name);
 
         // The derived `backend-html5-doctype-*` attribute tracks `doctype`
         // automatically (it is synthesized on lookup), so no refresh is needed.
@@ -2715,7 +2763,7 @@ impl Parser {
             value: InterpretedValue::Value(value.as_ref().to_owned()),
         };
 
-        self.counter_values.borrow_mut().remove(&attr_name);
+        Arc::make_mut(&mut self.counter_values.borrow_mut()).remove(&attr_name);
         Arc::make_mut(&mut self.attribute_values).insert(attr_name, attribute_value);
     }
 
@@ -2899,7 +2947,7 @@ impl Parser {
 
         // An explicit assignment supersedes (and resets) any counter of the same
         // name. This is what lets `:!name:` reset a counter.
-        self.counter_values.borrow_mut().remove(&attr_name);
+        Arc::make_mut(&mut self.counter_values.borrow_mut()).remove(&attr_name);
 
         // The derived `backend-html5-doctype-*` attribute tracks `doctype`
         // automatically (it is synthesized on lookup), so no refresh is needed.
@@ -3064,8 +3112,7 @@ impl Parser {
                 .borrow_mut()
                 .insert(name.to_string(), next.clone());
         } else {
-            self.counter_values
-                .borrow_mut()
+            Arc::make_mut(&mut self.counter_values.borrow_mut())
                 .insert(name.to_string(), next.clone());
         }
 
@@ -4425,7 +4472,7 @@ mod tests {
         fn image_uri(
             &self,
             target_image_path: &str,
-            _parser: &Parser,
+            _context: &crate::parser::RenderContext,
             _asset_dir_key: Option<&str>,
         ) -> String {
             target_image_path.to_string()

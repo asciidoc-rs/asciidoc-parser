@@ -352,6 +352,8 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
                     .map(str::to_owned),
             );
 
+            let context = self.parser.render_context();
+
             let params = ImageRenderParams {
                 target,
                 // The string pipeline's target still carries the passthrough
@@ -370,11 +372,13 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
                     .named_or_positional_attribute("height", 3)
                     .map(|a| a.value()),
                 attrlist: &attrlist,
-                parser: self.parser,
+                context: &context,
             };
 
             self.parser.renderer.render_image(&params, dest);
         } else {
+            let context = self.parser.render_context();
+
             let params = IconRenderParams {
                 target,
                 // As above: the sentinel restore happens after rendering.
@@ -386,7 +390,7 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
                     .named_or_positional_attribute("size", 1)
                     .map(|a| a.value()),
                 attrlist: &attrlist,
-                parser: self.parser,
+                context: &context,
             };
 
             self.parser.renderer.render_icon(&params, dest);
@@ -590,11 +594,13 @@ impl Replacer for InlineMenuMacroReplacer<'_> {
             (vec![], None)
         };
 
+        let context = self.0.render_context();
+
         let params = MenuRenderParams {
             menu,
             submenus: &submenus,
             menuitem: menuitem.as_deref(),
-            parser: self.0,
+            context: &context,
         };
 
         self.0.renderer.render_menu(&params, dest);
@@ -1057,13 +1063,15 @@ impl Replacer for InlineLinkReplacer<'_> {
                 target.clone()
             };
 
+            let context = self.0.render_context();
+
             let params = LinkRenderParams {
                 target,
                 link_text,
                 extra_roles: vec!["bare"],
                 window: None,
                 attrlist: &attrlist,
-                parser: self.0,
+                context: &context,
             };
 
             self.0.renderer.render_link(&params, dest);
@@ -1205,13 +1213,15 @@ impl Replacer for InlineLinkReplacer<'_> {
 
         dest.push_str(&prefix);
 
+        let context = self.0.render_context();
+
         let params = LinkRenderParams {
             target,
             link_text,
             extra_roles,
             window,
             attrlist: &attrlist,
-            parser: self.0,
+            context: &context,
         };
 
         self.0.renderer.render_link(&params, dest);
@@ -1385,13 +1395,15 @@ impl Replacer for InlineLinkMacroReplacer<'_, '_> {
 
         self.parser.register_link(target.clone());
 
+        let context = self.parser.render_context();
+
         let params = LinkRenderParams {
             target,
             link_text: link_text.clone(),
             extra_roles,
             window,
             attrlist: &attrlist,
-            parser: self.parser,
+            context: &context,
         };
 
         self.parser.renderer.render_link(&params, dest);
@@ -1548,13 +1560,15 @@ impl Replacer for InlineEmailReplacer<'_> {
             .item
             .item;
 
+        let context = self.0.render_context();
+
         let params = LinkRenderParams {
             target: target.clone(),
             link_text: caps[2].to_owned(),
             extra_roles: vec![],
             window: None,
             attrlist: &attrlist,
-            parser: self.0,
+            context: &context,
         };
 
         self.0.renderer.render_link(&params, dest);

@@ -63,7 +63,14 @@ pub(crate) struct ResolvedAttributes {
 
     /// Current value of each counter as of the end of parsing. A counter value
     /// supersedes any like-named attribute.
-    counter_values: HashMap<String, String>,
+    ///
+    /// Shared with the parser via [`Arc`], on the same copy-on-write terms as
+    /// the two tables above: every parser-side mutation goes through
+    /// [`Arc::make_mut`], so a snapshot taken here is frozen at the moment it
+    /// was taken and taking one allocates nothing. That matters because a
+    /// snapshot is no longer only an end-of-parse artifact — it is taken often
+    /// enough that a per-snapshot `HashMap` clone would show.
+    counter_values: Arc<HashMap<String, String>>,
 
     /// The safe mode the parser ran under. It is not stored in any attribute
     /// table, so the snapshot captures it here to resolve the mode-aware
@@ -82,6 +89,15 @@ pub(crate) struct ResolvedAttributes {
     /// costs only a pointer here — this snapshot is embedded in a
     /// size-sensitive cell enum.
     datetime_inputs: Option<Box<DatetimeInputs>>,
+
+    /// The instant the *parser* already captured for this parse, when it had
+    /// captured one — see
+    /// [`freeze_datetime`](Self::freeze_datetime) for when this is set and
+    /// why. `None` leaves
+    /// [`resolve_datetime_attribute`](Self::resolve_datetime_attribute) to
+    /// capture on demand, which is what an end-of-parse
+    /// [`Document`](crate::Document) snapshot does.
+    frozen_datetime: Option<DatetimeContext>,
 }
 
 impl std::hash::Hash for ResolvedAttributes {
@@ -99,6 +115,7 @@ impl std::hash::Hash for ResolvedAttributes {
         hash_table(self.counter_values.iter(), state);
         self.safe.hash(state);
         self.datetime_inputs.hash(state);
+        self.frozen_datetime.hash(state);
     }
 }
 
@@ -136,7 +153,7 @@ impl ResolvedAttributes {
     pub(crate) fn new(
         attribute_values: Arc<HashMap<String, AttributeValue>>,
         default_attribute_values: Arc<HashMap<String, String>>,
-        counter_values: HashMap<String, String>,
+        counter_values: Arc<HashMap<String, String>>,
         safe: SafeMode,
         reference_time: Option<ReferenceTime>,
         input_mtime: Option<ReferenceTime>,
@@ -147,6 +164,7 @@ impl ResolvedAttributes {
             counter_values,
             safe,
             datetime_inputs: DatetimeInputs::new(reference_time, input_mtime),
+            frozen_datetime: None,
         }
     }
 
@@ -208,6 +226,42 @@ impl ResolvedAttributes {
         if let Some(class) = class {
             attrs.insert("toc-class".to_string(), derived(class));
         }
+    }
+
+    /// Freezes this snapshot's time-dependent attributes at `captured`, the
+    /// instant the parser had already taken for its parse.
+    ///
+    /// Set only for a [`RenderContext`](crate::parser::RenderContext), and only
+    /// when the parser had in fact captured — which it has iff something in
+    /// the parse already read a time-dependent attribute. That is exactly the
+    /// case where a fresh capture here could *disagree with output the parse
+    /// has already produced*: a renderer or handler reading `{docdate}` must
+    /// see the same day the content around it was rendered with, whatever the
+    /// wall clock has done since. A `RenderContext` is taken per rendered
+    /// element and outlives nothing, so this is the difference between a
+    /// snapshot and a second reading.
+    ///
+    /// Passing `None` (the parser has captured nothing) deliberately leaves the
+    /// lazy path in place: there is no already-rendered value to be consistent
+    /// with, and forcing a capture here would put a clock read and an
+    /// allocation on every rendered element — defeating the laziness that keeps
+    /// a parse which never mentions one of these attributes free of that cost.
+    ///
+    /// An end-of-parse [`Document`](crate::Document) snapshot does not use
+    /// this; see
+    /// [`resolve_datetime_attribute`](Self::resolve_datetime_attribute)'s
+    /// "Consistency of an unpinned clock" for why a *post*-parse lookup is
+    /// deliberately a fresh reading.
+    pub(crate) fn freeze_datetime(&mut self, captured: Option<DatetimeContext>) {
+        self.frozen_datetime = captured;
+    }
+
+    /// Returns the safe mode the parser ran under, captured with this
+    /// snapshot so a consumer that holds one (a
+    /// [`RenderContext`](crate::parser::RenderContext)) can answer the
+    /// mode-aware questions without a [`Parser`](crate::Parser) in hand.
+    pub(crate) fn safe_mode(&self) -> SafeMode {
+        self.safe
     }
 
     /// Returns the resolved interpreted value of the named document attribute.
@@ -300,13 +354,17 @@ impl ResolvedAttributes {
             return None;
         }
 
-        // Absent any pinned clock the inputs box is `None`; capture from the
-        // defaults (SOURCE_DATE_EPOCH, then the real wall clock) in that case.
-        // See the doc comment above on why an unpinned capture is intentionally
-        // taken fresh here rather than frozen from the parse.
-        let context = match &self.datetime_inputs {
-            Some(inputs) => inputs.capture(),
-            None => DatetimeContext::capture(None, None),
+        // A snapshot that was handed the parser's own capture resolves from
+        // it, so it cannot disagree with content that parse already rendered.
+        //
+        // Otherwise: absent any pinned clock the inputs box is `None`; capture
+        // from the defaults (SOURCE_DATE_EPOCH, then the real wall clock) in
+        // that case. See the doc comment above on why an unpinned capture is
+        // intentionally taken fresh here rather than frozen from the parse.
+        let context = match (&self.frozen_datetime, &self.datetime_inputs) {
+            (Some(frozen), _) => frozen.clone(),
+            (None, Some(inputs)) => inputs.capture(),
+            (None, None) => DatetimeContext::capture(None, None),
         };
 
         context
@@ -509,11 +567,70 @@ mod tests {
         ResolvedAttributes::new(
             Arc::new(attribute_values),
             Arc::new(default_attribute_values),
-            counter_values,
+            Arc::new(counter_values),
             SafeMode::Secure,
             None,
             None,
         )
+    }
+
+    #[test]
+    fn a_snapshots_counters_are_frozen_against_the_parser() {
+        // The copy-on-write property the `Arc` exists for, and the reason the
+        // counter table is shared rather than copied: a snapshot must keep
+        // reading the values that were current when it was taken, however the
+        // parser advances afterwards.
+        //
+        // The two attribute tables have always been shared this way; the
+        // counters were copied instead, which was affordable only while a
+        // snapshot was an end-of-parse artifact taken once per document.
+        //
+        // Asserted through `Parser`, not by hand, because the property is a
+        // claim about `Arc::make_mut` at the parser's own mutation sites — a
+        // hand-built `Arc` would hold no matter what those sites did.
+        let parser = crate::Parser::default();
+
+        assert_eq!(parser.counter("chapter", None), "1");
+
+        let snapshot = parser.snapshot_attributes();
+
+        assert_eq!(parser.counter("chapter", None), "2");
+        assert_eq!(parser.counter("figure", None), "1");
+
+        // The snapshot still reads `1`, and has not gained the counter that
+        // was created after it was taken.
+        assert_eq!(
+            snapshot.attribute_value("chapter"),
+            InterpretedValue::Value("1".to_string())
+        );
+
+        assert_eq!(snapshot.attribute_value("figure"), InterpretedValue::Unset);
+
+        // And a snapshot taken now sees the advanced values, so the freeze is
+        // per-snapshot rather than a table that stopped tracking.
+        let later = parser.snapshot_attributes();
+
+        assert_eq!(
+            later.attribute_value("chapter"),
+            InterpretedValue::Value("2".to_string())
+        );
+
+        // That much was already true when the table was copied: a copy is
+        // frozen too. What is new is *how* — the snapshot shares the parser's
+        // table rather than copying it, which is the whole point and the only
+        // part a test can distinguish. `later` was taken with no mutation
+        // since, so it must still be the very same allocation the parser
+        // holds; `snapshot` must not be, the parser having detached from it
+        // through `Arc::make_mut` on the next advance.
+        assert!(Arc::ptr_eq(
+            &later.counter_values,
+            &parser.counter_values.borrow()
+        ));
+
+        assert!(!Arc::ptr_eq(
+            &snapshot.counter_values,
+            &parser.counter_values.borrow()
+        ));
     }
 
     #[test]
@@ -598,7 +715,7 @@ mod tests {
         let attrs = ResolvedAttributes::new(
             Arc::new(attribute_values),
             Arc::new(HashMap::new()),
-            HashMap::new(),
+            Arc::new(HashMap::new()),
             SafeMode::Server,
             None,
             None,
@@ -626,7 +743,7 @@ mod tests {
         let attrs = ResolvedAttributes::new(
             Arc::new(HashMap::new()),
             Arc::new(HashMap::new()),
-            HashMap::new(),
+            Arc::new(HashMap::new()),
             SafeMode::Server,
             None,
             None,
@@ -650,7 +767,7 @@ mod tests {
         let attrs = ResolvedAttributes::new(
             Arc::new(attribute_values),
             Arc::new(HashMap::new()),
-            HashMap::new(),
+            Arc::new(HashMap::new()),
             SafeMode::Server,
             None,
             None,
@@ -671,7 +788,7 @@ mod tests {
         let attrs = ResolvedAttributes::new(
             Arc::new(attribute_values),
             Arc::new(HashMap::new()),
-            HashMap::new(),
+            Arc::new(HashMap::new()),
             SafeMode::Safe,
             None,
             None,
@@ -709,7 +826,7 @@ mod tests {
             ResolvedAttributes::new(
                 Arc::new(attribute_values),
                 Arc::new(HashMap::new()),
-                HashMap::new(),
+                Arc::new(HashMap::new()),
                 SafeMode::Secure,
                 None,
                 None,

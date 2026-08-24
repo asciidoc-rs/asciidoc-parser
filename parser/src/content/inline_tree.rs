@@ -446,7 +446,7 @@ impl InlineSubstitutionRenderer for RecordingRenderer {
             extra_roles: params.extra_roles.clone(),
             window: params.window,
             attrlist: params.attrlist,
-            parser: params.parser,
+            context: params.context,
         };
 
         let mut probe = String::new();
@@ -1214,7 +1214,7 @@ mod tests {
             extra_roles: vec![],
             window: None,
             attrlist: &attrlist,
-            parser: &parser,
+            context: &parser.render_context(),
         };
 
         let mut dest = String::new();
