@@ -167,6 +167,68 @@ fn a_typed_marker_sentinel_does_not_truncate_a_section_reftext() {
     assert_eq!(section.id(), Some("_alphabeta"));
 }
 
+/// Returns the rendered text of the last paragraph together with the number of
+/// warnings the parse recorded — an unresolved cross-reference both renders its
+/// fallback and warns, so the count is what separates "resolved" from "looks
+/// resolved".
+fn last_paragraph_and_warnings(source: &str) -> (String, usize) {
+    let doc = Parser::default().parse(source);
+    let warnings = doc.warnings().count();
+
+    let mut rendered = String::new();
+    for block in doc.descendant_blocks() {
+        if let Block::Simple(simple) = block {
+            rendered = simple.content().rendered().to_string();
+        }
+    }
+
+    (rendered, warnings)
+}
+
+#[test]
+fn a_natural_cross_reference_matches_a_title_holding_a_sentinel() {
+    // A natural cross-reference matches on the target's *reference text*, which
+    // for a section is its rendered title — the document's own text, held
+    // outside the escaped form the substitution works in. The target is read
+    // out of escaped text, so it leaves escaped form to be matched, or a title
+    // carrying a reserved codepoint could never be referenced by name.
+    let (rendered, warnings) =
+        last_paragraph_and_warnings("== Alpha\u{e000}beta\n\nSee <<Alpha\u{e000}beta>>.\n");
+
+    assert_eq!(warnings, 0, "reference did not resolve: {rendered:?}");
+    assert_eq!(
+        rendered,
+        "See <a href=\"#_alphabeta\">Alpha\u{e000}beta</a>."
+    );
+}
+
+#[test]
+fn a_cross_reference_matches_an_id_holding_a_sentinel() {
+    // An ID assigned to inline quoted text is read out of escaped text and
+    // registered, so it leaves escaped form on the way into the catalog to meet
+    // the (likewise unescaped) target.
+    let (rendered, warnings) =
+        last_paragraph_and_warnings("[#a\u{e000}b]#phrase#\n\nSee <<a\u{e000}b>>.\n");
+
+    assert_eq!(warnings, 0, "reference did not resolve: {rendered:?}");
+    assert_eq!(
+        rendered, "See <a href=\"#a\u{e000}b\">[a\u{e000}b]</a>.",
+        "the ID reaches the output as the document wrote it"
+    );
+}
+
+#[test]
+fn a_cross_reference_matches_a_block_id_holding_a_sentinel() {
+    // A block's ID comes from its attribute list, which is parsed from the
+    // source and so never enters escaped form at all. The target it is matched
+    // against does, which is why the two meet unescaped.
+    let (rendered, warnings) =
+        last_paragraph_and_warnings("[#a\u{e000}b]\nparagraph\n\nSee <<a\u{e000}b>>.\n");
+
+    assert_eq!(warnings, 0, "reference did not resolve: {rendered:?}");
+    assert_eq!(rendered, "See <a href=\"#a\u{e000}b\">[a\u{e000}b]</a>.");
+}
+
 #[test]
 fn a_typed_escape_introducer_round_trips() {
     // The codepoint that introduces an escaped sentinel is itself escaped, so a

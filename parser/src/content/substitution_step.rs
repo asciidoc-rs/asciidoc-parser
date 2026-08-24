@@ -5,7 +5,7 @@ use regex::{Captures, Regex, RegexBuilder, Replacer};
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    content::{Content, escape_sentinels},
+    content::{Content, escape_sentinels, unescape_sentinels},
     document::{InterpretedValue, RefType},
     internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
     parser::{
@@ -398,9 +398,16 @@ impl LookaheadReplacer for QuoteReplacer<'_> {
                     // Assigning an ID to inline quoted text (e.g.,
                     // `[#free_the_world]#free the world#`) makes that phrase
                     // referenceable, so register it in the catalog. A duplicate
-                    // ID here is non-fatal (first registration wins).
+                    // ID here is non-fatal (first registration wins). The ID is
+                    // read out of escaped text, and the catalog holds the
+                    // document's own (see `escape_sentinels`), so it leaves
+                    // escaped form on the way in.
                     if let Some(id) = &id {
-                        let _ = self.parser.register_ref(id, None, RefType::Anchor);
+                        let _ = self.parser.register_ref(
+                            &unescape_sentinels(id),
+                            None,
+                            RefType::Anchor,
+                        );
                     }
 
                     self.parser.renderer.render_quoted_substitution(
@@ -441,9 +448,12 @@ impl LookaheadReplacer for QuoteReplacer<'_> {
                 // Assigning an ID to inline quoted text (e.g.,
                 // `[#free_the_world]#free the world#`) makes that phrase
                 // referenceable, so register it in the catalog. A duplicate ID
-                // here is non-fatal (first registration wins).
+                // here is non-fatal (first registration wins). The ID leaves
+                // escaped form on the way in, as above.
                 if let Some(id) = &id {
-                    let _ = self.parser.register_ref(id, None, RefType::Anchor);
+                    let _ =
+                        self.parser
+                            .register_ref(&unescape_sentinels(id), None, RefType::Anchor);
                 }
 
                 self.parser

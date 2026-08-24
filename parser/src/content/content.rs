@@ -727,8 +727,14 @@ impl<'src> Content<'src> {
             debug_assert!(!template.is_empty());
 
             for (index, xref) in xrefs.iter_mut().enumerate() {
+                // A target is matched against the catalog, which holds the
+                // document's own text (an ID as it was written, a section's
+                // reference text). The segment keeps the target in escaped form
+                // — it is rendered back into escaped text — so the key handed
+                // to the resolver leaves escaped form here. See
+                // [`escape_sentinels`].
                 xref.resolved = resolver.resolve(&ResolutionContext {
-                    target: &xref.target,
+                    target: &unescape_sentinels(&xref.target),
                     provided_text: xref.provided_text.as_deref(),
                     derived: xref.derived.as_ref(),
                 });
@@ -955,8 +961,10 @@ impl FootnoteDeferred {
         source: Span<'src>,
     ) {
         for xref in self.xrefs.iter_mut() {
+            // The catalog holds the document's own text, so the lookup key
+            // leaves escaped form here (see `Content::resolve_references`).
             xref.resolved = resolver.resolve(&ResolutionContext {
-                target: &xref.target,
+                target: &unescape_sentinels(&xref.target),
                 provided_text: xref.provided_text.as_deref(),
                 derived: xref.derived.as_ref(),
             });
