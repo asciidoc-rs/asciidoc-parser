@@ -60,6 +60,9 @@ where
             warnings.append(&mut maw.warnings);
         }
 
+        // Where the outcome says parsing should resume. `NoMatch` consumed
+        // nothing, so it resumes where this iteration began — which the
+        // progress rule below turns into an advance.
         let after = match maw.item {
             BlockParseOutcome::Parsed(mi) => {
                 let after = mi.after;
@@ -67,38 +70,37 @@ where
                 after
             }
 
-            BlockParseOutcome::Dropped(after) => {
-                // A dropped block (`attribute-missing=drop-line`) contributes
-                // no block, but parsing must still advance past its source.
-                after
-            }
+            // A dropped block (`attribute-missing=drop-line`) contributes no
+            // block, but parsing must still advance past its source.
+            BlockParseOutcome::Dropped(after) => after,
 
-            BlockParseOutcome::NoMatch => {
-                // `source` is non-blank by the loop guard and the
-                // `discard_empty_lines` calls, yet no block could be made of
-                // it. That happens when a line is not blank by
-                // `Span::take_empty_line`'s reckoning (space and tab only) but
-                // holds nothing a block can be built from — a lone vertical tab
-                // (U+000B), form feed (U+000C), or carriage return, each of
-                // which the block parsers discard as trailing whitespace
-                // (issue #1234). Consume the line and carry on, exactly as if
-                // it had been blank: leaving it unconsumed would spin this loop
-                // forever, and breaking out of the loop would silently truncate
-                // whatever follows it.
-                source.take_normalized_line().after
-            }
+            BlockParseOutcome::NoMatch => source,
         };
 
-        // Progress guarantee. Every outcome above is expected to advance past
-        // at least one line of `source`, but the loop is bounded on the source
-        // being non-empty, not on it having moved — so an outcome that reports
-        // no progress (a future parser bug, or a case not yet foreseen) would
-        // spin here forever rather than fail visibly. Stop instead: truncating
-        // the parse loses content, but it terminates, and an infinite loop in
-        // a library parsing untrusted input is the worse failure by far.
-        if after.byte_offset() <= source.byte_offset() {
-            break;
-        }
+        // Progress guarantee. This loop is bounded on `source` being non-empty,
+        // not on it having moved, so an outcome that consumed nothing would
+        // spin here forever. Consume a line ourselves instead: whatever the
+        // block parsers could not make a block of is dropped exactly as a blank
+        // line would be, and the loop is guaranteed to advance because
+        // `take_normalized_line` consumes at least one byte of a non-empty
+        // source.
+        //
+        // `NoMatch` on a non-blank source is the case that actually arrives
+        // here (issue #1234). `source` is non-blank by the loop guard and the
+        // `discard_empty_lines` calls, yet no block could be made of it — which
+        // happens for a line that is not blank by `Span::take_empty_line`'s
+        // reckoning (space and tab only) but holds nothing a block can be built
+        // from: a lone vertical tab (U+000B), form feed (U+000C), or carriage
+        // return, each of which the block parsers discard as trailing
+        // whitespace. Dropping just that line, rather than ending the loop,
+        // keeps whatever follows it parsing. A `Parsed` or `Dropped` outcome
+        // that reports no progress is not expected to occur, and takes the same
+        // recovery.
+        let after = if after.byte_offset() > source.byte_offset() {
+            after
+        } else {
+            source.take_normalized_line().after
+        };
 
         source = after.discard_empty_lines();
     }

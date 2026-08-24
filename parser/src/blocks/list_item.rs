@@ -520,26 +520,24 @@ impl<'src> ListItem<'src> {
             // to be indented or reintroduced with a `+`. (A dropped block is
             // always a block macro, never `+`-prefixed content, so it can't set
             // `had_content_starting_with_plus`.)
-            if let BlockParseOutcome::Dropped(after) = indented_block_maw.item {
-                // Progress guarantee: a dropped block is expected to have
-                // consumed the source it stands for, but this loop is not
-                // otherwise bounded by the source shrinking, so an outcome
-                // reporting no progress would spin here forever (issue #1234).
-                // End the list item instead — truncating is a visible loss;
-                // hanging is not recoverable at all.
-                if after.byte_offset() <= next.byte_offset() {
-                    break;
-                }
-
+            //
+            // Progress guarantee (issue #1234): the drop is only followed when
+            // it actually advanced past `next`. This loop is not otherwise
+            // bounded by the source shrinking, so a `Dropped` reporting no
+            // progress would spin here forever; one that did not advance falls
+            // through to the `break` below instead, ending the list item the
+            // same way an unparseable source does.
+            if let BlockParseOutcome::Dropped(after) = indented_block_maw.item
+                && after.byte_offset() > next.byte_offset()
+            {
                 next = after;
                 continuation_active = false;
                 next_block_must_be_indented = true;
                 continue;
             }
 
-            // `NoMatch` only arises for empty/blank input, which is filtered out
-            // above before we get here; the defensive `break` mirrors the
-            // pre-drop-line code path.
+            // Anything else ends the list item: `NoMatch` (no block could be
+            // made of this source), or the non-advancing `Dropped` above.
             let BlockParseOutcome::Parsed(indented_block_mi) = indented_block_maw.item else {
                 break;
             };
