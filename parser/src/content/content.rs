@@ -764,11 +764,11 @@ impl<'src> Content<'src> {
     /// Rebuilds [`Content::rendered`] from the deferred template and the
     /// current (resolved or unresolved) state of its cross-references.
     fn rebuild_rendered(&mut self, renderer: &dyn InlineSubstitutionRenderer) {
-        let Some(deferred) = self.deferred.as_ref() else {
-            return;
-        };
-
-        self.rendered = render_template(&deferred.template, &deferred.xrefs, renderer).into();
+        // Both callers establish that there is a template to rebuild from, so
+        // the guard here is only a safety net.
+        if let Some(deferred) = self.deferred.as_ref() {
+            self.rendered = render_template(&deferred.template, &deferred.xrefs, renderer).into();
+        }
     }
 }
 
@@ -1050,6 +1050,36 @@ mod tests {
         }
     }
 
+    mod impl_debug {
+        use crate::{
+            Span,
+            content::{Content, XrefSegment},
+        };
+
+        #[test]
+        fn shows_the_deferred_state_only_when_there_is_one() {
+            let mut content = Content::from(Span::new("see <<a>>"));
+
+            // The cross-reference-free case (the overwhelming majority) debugs
+            // as a plain `original` + `rendered` pair.
+            assert!(!format!("{content:?}").contains("deferred"));
+
+            content.set_deferred_xrefs(vec![XrefSegment {
+                target: "a".to_string(),
+                provided_text: None,
+                window: None,
+                roles: vec![],
+                xrefstyle: None,
+                derived: None,
+                resolved: None,
+            }]);
+
+            let debug = format!("{content:?}");
+            assert!(debug.contains("deferred"), "{debug:?}");
+            assert!(debug.contains("XrefSegment"), "{debug:?}");
+        }
+    }
+
     mod escape_sentinels {
         use std::borrow::Cow;
 
@@ -1236,6 +1266,62 @@ mod tests {
                 sanitize_title("Title <dangling and more"),
                 "Title <dangling and more",
             );
+        }
+    }
+
+    mod render_template {
+        use super::super::{
+            XREF_PLACEHOLDER_END, XREF_PLACEHOLDER_START, XrefSegment, render_template,
+        };
+        use crate::parser::HtmlSubstitutionRenderer;
+
+        fn segment(target: &str) -> XrefSegment {
+            XrefSegment {
+                target: target.to_string(),
+                provided_text: None,
+                window: None,
+                roles: vec![],
+                xrefstyle: None,
+                derived: None,
+                resolved: None,
+            }
+        }
+
+        fn render(template: &str, xrefs: &[XrefSegment]) -> String {
+            render_template(template, xrefs, &HtmlSubstitutionRenderer {})
+        }
+
+        #[test]
+        fn splices_a_reference_into_its_placeholder() {
+            let template = format!("see {XREF_PLACEHOLDER_START}0{XREF_PLACEHOLDER_END} here");
+
+            assert_eq!(
+                render(&template, &[segment("a")]),
+                r##"see <a href="#a">[a]</a> here"##
+            );
+        }
+
+        #[test]
+        fn passes_an_unterminated_placeholder_through_literally() {
+            // A start sentinel with no end cannot arise from the substitution
+            // (which always writes both), and a document's own copy is escaped
+            // before it gets here, so this only pins down that the text is
+            // emitted rather than swallowed.
+            let unterminated = format!("a{XREF_PLACEHOLDER_START}0 no end");
+
+            assert_eq!(render(&unterminated, &[segment("a")]), unterminated);
+        }
+
+        #[test]
+        fn passes_an_unmatched_placeholder_through_literally() {
+            // Likewise for a bracketed body that names no reference this
+            // template owns: a sequence that merely looks like a placeholder is
+            // content, and reaches the output as content.
+            let out_of_range = format!("x{XREF_PLACEHOLDER_START}9{XREF_PLACEHOLDER_END}y");
+            assert_eq!(render(&out_of_range, &[segment("a")]), out_of_range);
+
+            let non_numeric = format!("x{XREF_PLACEHOLDER_START}xyz{XREF_PLACEHOLDER_END}y");
+            assert_eq!(render(&non_numeric, &[segment("a")]), non_numeric);
         }
     }
 
