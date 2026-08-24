@@ -282,6 +282,22 @@ impl SubstitutionGroup {
             }
 
             content.set_inlines(tree);
+
+            // Content carrying a deferred cross-reference is the only content
+            // whose rendering is rebuilt after the parse, so it is the only
+            // content that will be *folded* after the parse — and a fold needs
+            // the document attributes this content was written under, which by
+            // then the parse has moved on from. Retain them here, where "now"
+            // is still that point in the document.
+            //
+            // Nothing reads them yet: the retirement of the
+            // deferred-cross-reference sentinel system (design §4.2's second)
+            // is the increment that re-folds instead of rebuilding from the
+            // template. Landing the retention first is what keeps that step
+            // checkable — this one changes no output at all.
+            if content.deferred_parts().is_some() {
+                content.set_render_attributes(parser.snapshot_attributes());
+            }
         }
     }
 

@@ -9,7 +9,7 @@ use crate::{
     inlines::{InlineNode, RefVariant},
     parser::{
         InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
-        ResolvedReference, XrefRenderParams,
+        ResolvedAttributes, ResolvedReference, XrefRenderParams,
     },
     strings::CowStr,
 };
@@ -102,6 +102,43 @@ pub struct Content<'src> {
     ///
     /// [inline AST architecture]: https://github.com/scouten/asciidoc-parser/blob/main/docs/design/inline-ast-architecture.md
     inlines: Vec<InlineNode<'src>>,
+
+    /// The document attributes as of the point in the document this content
+    /// was parsed — the *order-dependent* half of what a fold of
+    /// [`inlines`](Self::inlines) needs, and the reason it can be folded
+    /// **later than its parse**.
+    ///
+    /// Retained only for content carrying a deferred cross-reference, which is
+    /// the only content whose rendering is rebuilt after the parse (see
+    /// [`resolve_references`](Self::resolve_references)); `None` for everything
+    /// else, which is nearly everything.
+    ///
+    /// It must be taken *here* rather than read back at resolution time,
+    /// because document attributes are mutable parse state: a `:imagesdir:` or
+    /// `:icons:` line rebinds them for everything after it, so what is in
+    /// effect at the end of a document is not generally what was in effect
+    /// where this content was written.
+    ///
+    /// # Why the attributes and not a whole [`RenderContext`](crate::parser::RenderContext)
+    ///
+    /// A fold also needs the path resolver and the file handlers. Those are
+    /// *parse-wide configuration* rather than document state — they cannot
+    /// change mid-parse — so nothing is lost by not freezing them, and freezing
+    /// them here would cost something real: they are `Rc<dyn …>`, so retaining
+    /// them would make [`Content`], and with it [`Document`](crate::Document),
+    /// no longer [`Send`]/[`Sync`]. A `Document` is both today
+    /// (`document_stays_send_and_sync` pins it), which is worth more than
+    /// saving the caller from supplying the parser it already holds. The
+    /// increment that folds at resolution time assembles a `RenderContext`
+    /// from this plus that configuration.
+    ///
+    /// Boxed for the same reason [`deferred`](Self::deferred) is, and shared
+    /// from the parser by [`Arc`](std::sync::Arc) internally, so retaining one
+    /// allocates nothing beyond the box.
+    ///
+    /// Like [`inlines`](Self::inlines), it is derived rather than identifying,
+    /// so it is excluded from [`PartialEq`]/[`Eq`]/[`Hash`] and from [`Debug`].
+    render_attributes: Option<Box<ResolvedAttributes>>,
 }
 
 /// The deferred (cross-reference-bearing) portion of a [`Content`].
@@ -229,6 +266,13 @@ pub(crate) struct OwnedTitle {
     /// The placeholder template and cross-references, when the title carries
     /// any; `None` for the (overwhelmingly common) cross-reference-free title.
     deferred: Option<(String, Vec<XrefSegment>)>,
+
+    /// The document attributes the title's own content carried, so the rebuilt
+    /// [`Content`] can still be folded later than its parse — see
+    /// [`Content::render_attributes`]. Travels with `deferred`, since the two
+    /// are populated together and a title carrying no deferred
+    /// cross-reference is never re-rendered.
+    render_attributes: Option<Box<ResolvedAttributes>>,
 }
 
 impl<'src> Content<'src> {
@@ -253,7 +297,33 @@ impl<'src> Content<'src> {
             deferred: None,
             passthroughs: Vec::new(),
             inlines: Vec::new(),
+            render_attributes: None,
         }
+    }
+
+    /// The document attributes as of this content's own parse, when they were
+    /// retained — see [`render_attributes`](Self::render_attributes) (the
+    /// field).
+    ///
+    /// `Some` exactly for content carrying a deferred cross-reference.
+    // Consumed only by tests until the deferred-cross-reference sentinel
+    // system's retirement (design §4.2's second) folds at resolution time —
+    // the same staging the `inline_builder` module's fold and side effects
+    // are under.
+    #[allow(dead_code)]
+    pub(crate) fn render_attributes(&self) -> Option<&ResolvedAttributes> {
+        self.render_attributes.as_deref()
+    }
+
+    /// Retains `attributes` as this content's document-attribute state, for
+    /// the fold that will run after resolution.
+    ///
+    /// Called once, from
+    /// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup),
+    /// after the pipeline has run and the deferred cross-references (if any)
+    /// are known.
+    pub(crate) fn set_render_attributes(&mut self, attributes: ResolvedAttributes) {
+        self.render_attributes = Some(Box::new(attributes));
     }
 
     /// Returns a fully-owned snapshot of this content's rendered text and
@@ -266,6 +336,7 @@ impl<'src> Content<'src> {
                 .deferred
                 .as_ref()
                 .map(|d| (d.template.clone(), d.xrefs.clone())),
+            render_attributes: self.render_attributes.clone(),
         }
     }
 
@@ -282,6 +353,7 @@ impl<'src> Content<'src> {
                 .map(|(template, xrefs)| Box::new(DeferredContent { template, xrefs })),
             passthroughs: Vec::new(),
             inlines: Vec::new(),
+            render_attributes: title.render_attributes,
         }
     }
 
@@ -320,6 +392,7 @@ impl<'src> Content<'src> {
             deferred: None,
             passthroughs: Vec::new(),
             inlines: Vec::new(),
+            render_attributes: None,
         }
     }
 
@@ -1086,6 +1159,7 @@ impl<'src> From<Span<'src>> for Content<'src> {
             deferred: None,
             passthroughs: Vec::new(),
             inlines: Vec::new(),
+            render_attributes: None,
         }
     }
 }
