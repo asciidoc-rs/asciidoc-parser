@@ -1497,11 +1497,13 @@ impl LookaheadReplacer for CalloutReplacer<'_> {
             None => CalloutGuard::LineComment(""),
         };
 
+        let context = self.parser.render_context();
+
         self.renderer.render_callout(
             &CalloutRenderParams {
                 number: &number,
                 guard,
-                parser: self.parser,
+                context: &context,
             },
             dest,
         );

@@ -86,7 +86,7 @@ impl InlineSubstitutionRenderer for FigureImages {
         // embedding, which reads the image bytes through the registered
         // `ImageFileHandler` — behavior a custom renderer previously could not
         // reproduce.
-        let uri = self.image_uri(params.target, params.parser, None);
+        let uri = self.image_uri(params.target, params.context, None);
 
         dest.push_str(&format!(
             r#"<figure data-src="{uri}">{alt}</figure>"#,
@@ -144,7 +144,7 @@ fn file_handler_accessors_expose_registered_handlers() {
         .expect("image file handler should be registered");
 
     assert_eq!(
-        image_handler.resolve_image("fixtures/circle.svg", &parser),
+        image_handler.resolve_image("fixtures/circle.svg", &parser.render_context()),
         Some(CIRCLE_SVG.as_bytes().to_vec())
     );
 
@@ -153,9 +153,39 @@ fn file_handler_accessors_expose_registered_handlers() {
         .expect("SVG file handler should be registered");
 
     assert_eq!(
-        svg_handler.resolve_svg("fixtures/circle.svg", &parser),
+        svg_handler.resolve_svg("fixtures/circle.svg", &parser.render_context()),
         Some(CIRCLE_SVG.to_string())
     );
+
+    // The same two handlers are reachable from a `RenderContext`, which is
+    // what actually matters: a renderer is handed a context rather than a
+    // parser, so these accessors — not the `Parser` ones above — are how a
+    // custom `InlineSubstitutionRenderer` reads an asset the way the built-in
+    // one does.
+    let context = parser.render_context();
+
+    assert_eq!(
+        context
+            .image_file_handler()
+            .expect("image file handler should be reachable from the context")
+            .resolve_image("fixtures/circle.svg", &context),
+        Some(CIRCLE_SVG.as_bytes().to_vec())
+    );
+
+    assert_eq!(
+        context
+            .svg_file_handler()
+            .expect("SVG file handler should be reachable from the context")
+            .resolve_svg("fixtures/circle.svg", &context),
+        Some(CIRCLE_SVG.to_string())
+    );
+
+    // And a context from a parser with none registered reports none, so the
+    // accessors are not merely returning something non-`None`.
+    let bare_context = bare.render_context();
+
+    assert!(bare_context.image_file_handler().is_none());
+    assert!(bare_context.svg_file_handler().is_none());
 }
 
 /// A renderer that overrides nothing, so every substitution falls through to

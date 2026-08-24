@@ -11,7 +11,7 @@ pub(crate) use crate::{
         IsBlock, QuoteType, SectionType, SimpleBlockStyle, Stripes, VerticalAlignment,
     },
     content::SubstitutionGroup,
-    parser::ModificationContext,
+    parser::{ModificationContext, RenderContext},
     tests::{
         assert_dom::*,
         fixtures::{attributes::*, blocks::*, content::*, document::*, parser::*, warnings::*, *},
