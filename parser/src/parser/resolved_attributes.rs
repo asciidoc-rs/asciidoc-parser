@@ -89,6 +89,15 @@ pub(crate) struct ResolvedAttributes {
     /// costs only a pointer here — this snapshot is embedded in a
     /// size-sensitive cell enum.
     datetime_inputs: Option<Box<DatetimeInputs>>,
+
+    /// The instant the *parser* already captured for this parse, when it had
+    /// captured one — see
+    /// [`freeze_datetime`](Self::freeze_datetime) for when this is set and
+    /// why. `None` leaves
+    /// [`resolve_datetime_attribute`](Self::resolve_datetime_attribute) to
+    /// capture on demand, which is what an end-of-parse
+    /// [`Document`](crate::Document) snapshot does.
+    frozen_datetime: Option<DatetimeContext>,
 }
 
 impl std::hash::Hash for ResolvedAttributes {
@@ -106,6 +115,7 @@ impl std::hash::Hash for ResolvedAttributes {
         hash_table(self.counter_values.iter(), state);
         self.safe.hash(state);
         self.datetime_inputs.hash(state);
+        self.frozen_datetime.hash(state);
     }
 }
 
@@ -154,6 +164,7 @@ impl ResolvedAttributes {
             counter_values,
             safe,
             datetime_inputs: DatetimeInputs::new(reference_time, input_mtime),
+            frozen_datetime: None,
         }
     }
 
@@ -215,6 +226,34 @@ impl ResolvedAttributes {
         if let Some(class) = class {
             attrs.insert("toc-class".to_string(), derived(class));
         }
+    }
+
+    /// Freezes this snapshot's time-dependent attributes at `captured`, the
+    /// instant the parser had already taken for its parse.
+    ///
+    /// Set only for a [`RenderContext`](crate::parser::RenderContext), and only
+    /// when the parser had in fact captured — which it has iff something in
+    /// the parse already read a time-dependent attribute. That is exactly the
+    /// case where a fresh capture here could *disagree with output the parse
+    /// has already produced*: a renderer or handler reading `{docdate}` must
+    /// see the same day the content around it was rendered with, whatever the
+    /// wall clock has done since. A `RenderContext` is taken per rendered
+    /// element and outlives nothing, so this is the difference between a
+    /// snapshot and a second reading.
+    ///
+    /// Passing `None` (the parser has captured nothing) deliberately leaves the
+    /// lazy path in place: there is no already-rendered value to be consistent
+    /// with, and forcing a capture here would put a clock read and an
+    /// allocation on every rendered element — defeating the laziness that keeps
+    /// a parse which never mentions one of these attributes free of that cost.
+    ///
+    /// An end-of-parse [`Document`](crate::Document) snapshot does not use
+    /// this; see
+    /// [`resolve_datetime_attribute`](Self::resolve_datetime_attribute)'s
+    /// "Consistency of an unpinned clock" for why a *post*-parse lookup is
+    /// deliberately a fresh reading.
+    pub(crate) fn freeze_datetime(&mut self, captured: Option<DatetimeContext>) {
+        self.frozen_datetime = captured;
     }
 
     /// Returns the safe mode the parser ran under, captured with this
@@ -315,13 +354,17 @@ impl ResolvedAttributes {
             return None;
         }
 
-        // Absent any pinned clock the inputs box is `None`; capture from the
-        // defaults (SOURCE_DATE_EPOCH, then the real wall clock) in that case.
-        // See the doc comment above on why an unpinned capture is intentionally
-        // taken fresh here rather than frozen from the parse.
-        let context = match &self.datetime_inputs {
-            Some(inputs) => inputs.capture(),
-            None => DatetimeContext::capture(None, None),
+        // A snapshot that was handed the parser's own capture resolves from
+        // it, so it cannot disagree with content that parse already rendered.
+        //
+        // Otherwise: absent any pinned clock the inputs box is `None`; capture
+        // from the defaults (SOURCE_DATE_EPOCH, then the real wall clock) in
+        // that case. See the doc comment above on why an unpinned capture is
+        // intentionally taken fresh here rather than frozen from the parse.
+        let context = match (&self.frozen_datetime, &self.datetime_inputs) {
+            (Some(frozen), _) => frozen.clone(),
+            (None, Some(inputs)) => inputs.capture(),
+            (None, None) => DatetimeContext::capture(None, None),
         };
 
         context

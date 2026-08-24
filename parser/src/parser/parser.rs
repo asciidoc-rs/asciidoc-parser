@@ -1382,6 +1382,21 @@ impl Parser {
         RenderContext::new(self)
     }
 
+    /// Returns the reference instant this parse has already captured for its
+    /// time-dependent attributes, or `None` if nothing has read one yet.
+    ///
+    /// A [`RenderContext`] takes this so a renderer or handler reading
+    /// `{docdate}` sees the same instant the content around it was rendered
+    /// with — see
+    /// [`ResolvedAttributes::freeze_datetime`]. It deliberately does **not**
+    /// force the capture: `None` here means nothing has been rendered from one
+    /// of these attributes, so there is nothing to be inconsistent with, and
+    /// forcing it would put a clock read and an allocation on every rendered
+    /// element.
+    pub(crate) fn captured_datetime_context(&self) -> Option<DatetimeContext> {
+        self.datetime_context.borrow().clone()
+    }
+
     /// Captures the parser's fully-resolved document-attribute state so it can
     /// outlive the parser — for example, retained on a [`Document`] to answer
     /// [`attribute_value`]/[`has_attribute`]/[`is_attribute_set`] without a

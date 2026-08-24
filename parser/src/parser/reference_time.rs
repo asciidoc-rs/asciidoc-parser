@@ -235,7 +235,7 @@ impl DatetimeInputs {
 /// observe a single, consistent instant. It ports Asciidoctor's
 /// `Document#fill_datetime_attributes`, but resolves each attribute on demand
 /// rather than materializing all eight up front.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct DatetimeContext {
     /// Drives the `local*` attributes.
     now: ReferenceTime,

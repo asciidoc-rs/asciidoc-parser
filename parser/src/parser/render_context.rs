@@ -31,8 +31,18 @@ use crate::{
 /// query here answers as the parser would have at the moment the context was
 /// taken.
 ///
+/// # Not `Clone`, deliberately
+///
+/// A context is something a renderer or handler is *handed*, for the duration
+/// of one call. It is deliberately not clonable, so it cannot be retained
+/// past that — which is what keeps it from forming a reference cycle: a
+/// context holds an [`Rc`] to each file handler, so a handler that stored one
+/// would own the thing that owns it, and neither would ever be freed. Taking
+/// one is cheap enough that a caller who wants a context later should take a
+/// fresh one instead of keeping this one.
+///
 /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct RenderContext {
     /// The document attributes, and the safe mode, as of the moment this
     /// context was taken.
@@ -57,8 +67,18 @@ impl RenderContext {
     /// [`Parser::render_context`] is the single way a context is built —
     /// see its docs for why that is crate-private.
     pub(super) fn new(parser: &Parser) -> Self {
+        let mut attributes = parser.snapshot_attributes();
+
+        // A snapshot resolves the time-dependent attributes lazily, capturing
+        // afresh — right for an end-of-parse `Document`, wrong here. This
+        // context is handed to a renderer *during* the parse, so a fresh
+        // capture could report a different `{docdate}` than the content around
+        // it was rendered with. Inherit the parse's own capture when it has
+        // one.
+        attributes.freeze_datetime(parser.captured_datetime_context());
+
         Self {
-            attributes: parser.snapshot_attributes(),
+            attributes,
             path_resolver: Rc::clone(&parser.path_resolver),
             image_file_handler: parser.image_file_handler.clone(),
             svg_file_handler: parser.svg_file_handler.clone(),
@@ -144,10 +164,16 @@ impl RenderContext {
     }
 }
 
+/// Serializes the tests that write `SOURCE_DATE_EPOCH`, which is process-wide
+/// state the whole test binary shares.
+#[cfg(test)]
+static SOURCE_DATE_EPOCH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
 
+    use super::SOURCE_DATE_EPOCH_LOCK;
     use crate::{
         Parser,
         document::InterpretedValue,
@@ -227,6 +253,67 @@ mod tests {
             parser.render_context().attribute_value("imagesdir"),
             InterpretedValue::Value("img".to_string())
         );
+    }
+
+    #[test]
+    fn a_context_inherits_the_parses_own_datetime_capture() {
+        // A snapshot resolves `docdate` and its family *lazily*, capturing the
+        // clock afresh on each read. That is right for an end-of-parse
+        // `Document` snapshot and wrong for a context, which is handed to a
+        // renderer during the parse: a fresh capture there can report a
+        // different day than the content around it was rendered with — the
+        // exact class of "depends on when it runs" this type exists to remove.
+        //
+        // `SOURCE_DATE_EPOCH` is what makes the clock movable deterministically
+        // (no waiting for midnight). Serialized against the other test that
+        // sets it, since the environment is process-wide.
+        let _guard = SOURCE_DATE_EPOCH_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        // 2020-01-02, then 2021-06-07.
+        //
+        // SAFETY: the lock above serializes every test in this crate that
+        // writes this variable, and no other thread reads it concurrently.
+        unsafe { std::env::set_var("SOURCE_DATE_EPOCH", "1577923200") };
+
+        let parser = Parser::default();
+
+        // Reading it through the parser is what captures and caches the
+        // instant — as rendering content that mentions `{docdate}` would.
+        assert_eq!(
+            parser.attribute_value("docdate"),
+            InterpretedValue::Value("2020-01-02".to_string())
+        );
+
+        // SAFETY: as above.
+        unsafe { std::env::set_var("SOURCE_DATE_EPOCH", "1623024000") };
+
+        // The parser stays on the captured day...
+        assert_eq!(
+            parser.attribute_value("docdate"),
+            InterpretedValue::Value("2020-01-02".to_string())
+        );
+
+        // ...and so must a context taken from it. Before the fix this read
+        // `2021-06-07`.
+        assert_eq!(
+            parser.render_context().attribute_value("docdate"),
+            InterpretedValue::Value("2020-01-02".to_string())
+        );
+
+        // A parser that has captured *nothing* keeps the lazy path: there is
+        // no already-rendered value to be consistent with, so a context reads
+        // the clock as it stands rather than forcing a capture per element.
+        let fresh = Parser::default();
+
+        assert_eq!(
+            fresh.render_context().attribute_value("docdate"),
+            InterpretedValue::Value("2021-06-07".to_string())
+        );
+
+        // SAFETY: as above.
+        unsafe { std::env::remove_var("SOURCE_DATE_EPOCH") };
     }
 
     #[test]
