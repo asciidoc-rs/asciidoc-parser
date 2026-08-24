@@ -59,27 +59,23 @@ pub(crate) enum Footnotes {
 /// A footnote in a heading is a real, document-order footnote — it is numbered
 /// and it renders in the heading itself — but its marker must not appear in
 /// the text a cross-reference to that heading shows, nor in the id derived
-/// from that text (issue #594). The string pipeline reaches the same answer by
-/// rendering the title **once** with the footnote renderer bracketing each
-/// marker in a pair of sentinels
-/// ([`FOOTNOTE_MARKER_START`](crate::content::FOOTNOTE_MARKER_START) …
-/// [`FOOTNOTE_MARKER_END`](crate::content::FOOTNOTE_MARKER_END), enabled for
-/// that one render by `Parser::mark_footnote_spans`), cutting the bracketed
-/// regions out
-/// ([`strip_footnote_marker_spans`](crate::content::strip_footnote_marker_spans)),
-/// and then removing the now-spent sentinels from the title's own rendering
-/// and from its deferred cross-reference template
-/// (`Content::remove_footnote_marker_sentinels`). Rendering once is what keeps
-/// counters and attribute-expanded footnotes from being processed twice, and
-/// the sentinels are what make one render yield two strings.
+/// from that text (issue #594).
+///
+/// The string pipeline used to reach that answer with a sentinel system: it
+/// rendered the title **once** with the footnote renderer bracketing each
+/// marker in a pair of Private-Use-Area codepoints, cut the bracketed regions
+/// out for the reference text, and then removed the now-spent sentinels from
+/// the title's own rendering and from its deferred cross-reference template.
+/// Rendering once is what kept counters and attribute-expanded footnotes from
+/// being processed twice; the sentinels were what made one render yield two
+/// strings.
 ///
 /// A tree needs none of it. The footnote is a node, so the two strings are two
 /// folds of the same tree, and "which regions were footnote markers" is a
-/// question about node kinds rather than about bytes. This is therefore the
-/// **first of the three sentinel systems** design §4.2 names to lose its
-/// reason to exist; deleting it is the cutover's own job (§5.2 Phase 4, step
-/// 6), and until then this is staged and unwired, like every other piece of
-/// that step.
+/// question about node kinds rather than about bytes — still one substitution
+/// pass, so the counters are still processed once. `Section::parse` calls this
+/// for a heading's reference text, and the whole sentinel system (design
+/// §4.2's **first of three**) is deleted.
 ///
 /// The strip recurses, exactly as the byte-level one does over the whole
 /// rendered string: a footnote nested inside a rendered span, or inside a
@@ -751,70 +747,68 @@ mod tests {
         strings::CowStr,
     };
 
-    /// The string pipeline's own two answers for a section title: the
-    /// rendering the heading shows, and the footnote-free text its reference
-    /// and auto-generated id are derived from.
-    ///
-    /// This is exactly what `Section::parse` does — render the title once with
-    /// `mark_footnote_spans` on, cut the bracketed regions out, then strip the
-    /// spent sentinels from the rendering itself.
-    fn golden_title(source: &str, parser: &Parser) -> (String, String) {
-        use crate::content::{Content, SubstitutionGroup, strip_footnote_marker_spans};
-
-        let mut content = Content::from(Span::new(source));
-
-        parser.mark_footnote_spans.set(true);
-        SubstitutionGroup::Title.apply_string_pipeline(&mut content, parser, None);
-        parser.mark_footnote_spans.set(false);
-
-        let reftext = strip_footnote_marker_spans(content.rendered_html());
-        content.remove_footnote_marker_sentinels();
-
-        (content.rendered_html().to_string(), reftext)
-    }
-
     #[test]
-    fn fold_reference_text_matches_the_sentinel_strip() {
-        // The tree's answer to the footnote-marker sentinel system: the two
-        // strings the string pipeline gets from one marked render plus a
-        // byte-level cut are two *folds of the same tree*, and "which regions
-        // were footnote markers" is a question about node kinds rather than
-        // about bytes.
+    fn fold_reference_text_omits_a_headings_footnote_markers() {
+        // The tree's answer to the footnote-marker sentinel system this
+        // increment deleted: the two strings `Section::parse` needs — the
+        // rendering the heading shows, and the footnote-free text its reference
+        // and auto-generated id are derived from — are two *folds of the same
+        // tree*, and "which regions were footnote markers" is a question about
+        // node kinds rather than about bytes.
         //
-        // Every fixture is checked from both ends: `fold_html` reproduces the
-        // heading's own rendering (sentinels removed), and
-        // `fold_reference_text` reproduces the footnote-free text the
-        // reference and the auto-generated id are derived from.
+        // Every fixture is checked from both ends. The heading's own rendering
+        // is compared against the string pipeline, which still produces it and
+        // is the golden-HTML oracle (§5.3). The footnote-free reference text is
+        // compared against a **literal** expected string: with the sentinel
+        // strip gone there is no second implementation left to differentiate
+        // against, so the expectation is written down instead — these are the
+        // exact bytes that strip produced, captured before it was deleted.
         let fixtures = [
-            // No footnote at all: the two strings are the same, and the strip
-            // is a no-op on both sides.
-            "Plain title",
-            "A *bold* title",
-            "Tom & Jerry",
+            // No footnote at all: the two strings are the same.
+            ("Plain title", "Plain title"),
+            ("A *bold* title", "A <strong>bold</strong> title"),
+            ("Tom & Jerry", "Tom &amp; Jerry"),
             // The shape that names this: a footnote in a heading.
-            "Section 2footnote:[second footnote]",
-            "footnote:[leading] Section",
-            "Section footnote:[middle] title",
-            "A footnote:[one] and footnote:[two] title",
-            // A named footnote, and a bare reference to one.
-            "Named.footnote:disc[a discussion]",
-            // The marker nested inside constructs the strip has to recurse
+            ("Section 2footnote:[second footnote]", "Section 2"),
+            ("footnote:[leading] Section", " Section"),
+            ("Section footnote:[middle] title", "Section  title"),
+            ("A footnote:[one] and footnote:[two] title", "A  and  title"),
+            // A named footnote.
+            ("Named.footnote:disc[a discussion]", "Named."),
+            // The marker nested inside constructs the omission has to recurse
             // through: a rendered span, and a cross-reference's display text.
-            "A *bold footnote:[inside a span] title*",
-            "See xref:sec[the footnote:[inside a text] steps] here",
-            // Beside the other constructs a title can carry, so the strip is
+            (
+                "A *bold footnote:[inside a span] title*",
+                "A <strong>bold  title</strong>",
+            ),
+            (
+                "See xref:sec[the footnote:[inside a text] steps] here",
+                "See <a href=\"#sec\">the footnote:[inside a text</a> steps] here",
+            ),
+            // Beside the other constructs a title can carry, so the omission is
             // shown to remove the marker and nothing else.
-            "A footnote:[note] and image:x.png[Alt] and `code`",
-            "A footnote:[note] and a (C) and an -- em dash",
-            "A footnote:[note] and a +++<b>raw</b>+++ passthrough",
+            (
+                "A footnote:[note] and image:x.png[Alt] and `code`",
+                "A  and <span class=\"image\"><img src=\"x.png\" alt=\"Alt\"></span> and <code>code</code>",
+            ),
+            (
+                "A footnote:[note] and a (C) and an -- em dash",
+                "A  and a &#169; and an&#8201;&#8212;&#8201;em dash",
+            ),
+            (
+                "A footnote:[note] and a +++<b>raw</b>+++ passthrough",
+                "A  and a <b>raw</b> passthrough",
+            ),
         ];
 
         let renderer = HtmlSubstitutionRenderer {};
 
-        for fixture in fixtures {
+        for (fixture, expected_reftext) in fixtures {
             // Two independent parsers, since a footnote's number is document
             // state: one for each side of the comparison (design §5.3).
-            let (rendered, reftext) = golden_title(fixture, &Parser::default());
+            let golden_parser = Parser::default();
+            let mut golden = crate::content::Content::from(Span::new(fixture));
+            crate::content::SubstitutionGroup::Title.apply(&mut golden, &golden_parser, None);
 
             let built_parser = Parser::default();
             let nodes = crate::content::inline_builder::build_for_group(
@@ -827,13 +821,13 @@ mod tests {
 
             assert_eq!(
                 fold_html_with_parser(&nodes, &renderer, &built_parser),
-                rendered,
+                golden.rendered_html(),
                 "the heading's own rendering diverged for {fixture:?}"
             );
 
             assert_eq!(
                 super::fold_reference_text(&nodes, &renderer, &built_parser),
-                reftext,
+                expected_reftext,
                 "the footnote-free reference text diverged for {fixture:?}"
             );
         }
