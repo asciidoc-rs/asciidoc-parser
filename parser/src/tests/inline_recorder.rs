@@ -2505,6 +2505,7 @@ fn strong_over(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
         roles: vec![],
         attrs: None,
         children,
+        passthrough: None,
         location: Span::new(""),
     })
 }

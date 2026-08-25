@@ -173,6 +173,7 @@ mod tests {
                 roles: vec![],
                 attrs: None,
                 children: vec![],
+                passthrough: None,
                 location,
             }),
             InlineNode::Ref(Ref {
@@ -229,6 +230,8 @@ mod tests {
             InlineNode::Stem(Stem {
                 notation: StemNotation::AsciiMath,
                 value: CowStr::from("x^2"),
+                subs: crate::content::SubstitutionGroup::Stem,
+                source_text: None,
                 location,
             }),
             InlineNode::LineBreak { location },

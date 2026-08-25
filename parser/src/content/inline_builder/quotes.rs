@@ -1347,6 +1347,7 @@ fn rebuild_level<'src>(
                     roles,
                     attrs,
                     children,
+                    passthrough: None,
                     location: source_slice(pieces, construct.clone(), root),
                 }));
             }
@@ -1824,6 +1825,7 @@ mod tests {
             roles: vec![],
             attrs: None,
             children: vec![],
+            passthrough: None,
             location: Span::new("x"),
         };
 
@@ -1887,6 +1889,7 @@ mod tests {
             roles: vec![],
             attrs: None,
             children: vec![],
+            passthrough: None,
             location: Span::new("x"),
         };
 
@@ -2094,6 +2097,7 @@ mod tests {
                 roles: Vec::new(),
                 attrs: None,
                 children: Vec::new(),
+                passthrough: None,
                 location: Span::new("x"),
             })
         }
@@ -2240,6 +2244,7 @@ mod tests {
                 roles: Vec::new(),
                 attrs: None,
                 children,
+                passthrough: None,
                 location: Span::new("x"),
             })
         }
@@ -2495,6 +2500,7 @@ mod tests {
             roles: Vec::new(),
             attrs: None,
             children: Vec::new(),
+            passthrough: None,
             location: Span::new("[#x]##y##"),
         };
 
@@ -2545,6 +2551,7 @@ mod tests {
             roles: Vec::new(),
             attrs: None,
             children,
+            passthrough: None,
             location: Span::new("[width=10]##x ##"),
         };
 
@@ -3109,6 +3116,7 @@ mod tests {
             roles: vec![],
             attrs: None,
             children: vec![],
+            passthrough: None,
             location: source,
         })];
 

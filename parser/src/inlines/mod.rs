@@ -59,7 +59,7 @@ mod stem;
 pub use stem::{Stem, StemNotation};
 
 mod styled;
-pub use styled::{SpanForm, StyleVariant, Styled};
+pub use styled::{PassthroughWrapper, SpanForm, StyleVariant, Styled};
 
 mod ui;
 pub use ui::{Ui, UiKind};
