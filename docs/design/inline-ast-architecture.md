@@ -6460,6 +6460,43 @@ Each phase is a reviewable unit with a clear exit gate.
   removed. With this, every recognition side effect the string pipeline performs is performed from
   the tree, and what is left of step 6 is the string pipeline itself.
 
+  *What "the string pipeline itself" still owns (surveyed, not yet built):* with every recognition
+  side effect replayed from the tree, `run_pipeline` is no longer the source of anything a *caller*
+  reads — but it is still the only producer of six things the parse needs internally. They are not
+  one increment, and three of them are blocked on a decision rather than on effort, so the survey is
+  recorded here rather than re-derived each session.
+
+  - **A deferred cross-reference's segments** (`XrefSegment`). The node carries every field except
+    [`provided_text`](../../parser/src/content/content.rs), which the segment holds as a **string**
+    while the node holds its display text as *children*. Blocked on the same question as
+    `role=*hl*` below.
+  - **A footnote's catalog text.** Ordering, not shape: the footnote registry is consulted *during*
+    the same content's substitution, for a `footnote:id[]` back-reference, so it cannot be replayed
+    after the pass the way a callout's registration could.
+  - **`{counter:…}` advancement.** The builder is handed a counter-safe *clone* precisely so a
+    counter advances once, from the pipeline; and the value is spliced during substitution, so it
+    cannot come from a tree built afterwards. This one is only solvable **by** removing the
+    pipeline, not before it.
+  - **The link family's dangerous-scheme warning** — the one side effect the replay does not carry.
+    A dangerous scheme leaves the macro *literal*, so there is no
+    [`Ref`](../../parser/src/inlines/ref_node.rs) node to hang it on; recording it needs a
+    node-level fact, the way `RawOrigin` was one.
+  - **[`Content::passthroughs()`](../../parser/src/content/content.rs).** §4.2 says it "can be
+    retained as a filtered view over the tree", and the view needs more than exists: a
+    `Passthrough` carries `subs`, `type_` and `attrlist`, and no
+    [`Raw`](../../parser/src/inlines/inline_node.rs) field reconstructs a resolved substitution
+    group — while the `[attrs]+++…+++` form builds a
+    `Styled` node rather than a `Raw` at all. It is `pub` with **no production consumer**, only its
+    own tests, so *deleting* it is as live an option as building the view.
+  - **The description-list term carve-out**, which registers from the string pipeline because it
+    runs the steps directly and builds no tree.
+
+  Two of the six turn on one question: whether a computed **string** slot — `Ref::roles`,
+  `window`, `xrefstyle`, and the link and image families' equivalents — can hold markup that exists
+  only at fold time. Today it cannot, which is why `xref:sec[*bold*,role=*hl*]` stays deferred and
+  why a segment's `provided_text` cannot come from a node. Answering it once unblocks both; leaving
+  it unanswered blocks both no matter how much else lands.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
