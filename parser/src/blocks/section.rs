@@ -525,12 +525,21 @@ impl<'src> SectionBlock<'src> {
             .mirror_tree_xref_resolution(block_ordered, footnote_ordered);
     }
 
-    /// Returns the section title's inline tree. Used by the inline-tree tests
-    /// to inspect the title's mirrored cross-reference resolution; empty
-    /// unless tree building is enabled on the [`Parser`](crate::Parser).
-    #[cfg(test)]
+    /// Returns the section title's inline tree — the tree the document-order
+    /// title pass folds to render this heading, and which that pass then
+    /// mirrors its resolved destinations into.
     pub(crate) fn section_title_inlines(&self) -> &[crate::inlines::InlineNode<'src>] {
         self.section_title.inlines()
+    }
+
+    /// The document attributes in force where this heading was written, when
+    /// they were retained — the order-dependent half of the render context a
+    /// fold of the tree above needs. See
+    /// [`Content::render_attributes`](crate::content::Content).
+    pub(crate) fn section_title_render_attributes(
+        &self,
+    ) -> Option<&crate::parser::ResolvedAttributes> {
+        self.section_title.render_attributes()
     }
 
     /// Returns the ID under which this section is registered in the catalog, if

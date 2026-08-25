@@ -619,6 +619,7 @@ impl<'src> Document<'src> {
                 resolver,
                 renderer,
                 &mut warnings,
+                parser,
             );
 
             // Footnote text is extracted out of block content, so its
@@ -668,6 +669,7 @@ impl<'src> Document<'src> {
                 &resolver,
                 renderer,
                 &mut warnings,
+                parser,
             );
 
             // Footnote text is extracted out of block content, so its

@@ -25,8 +25,12 @@ use std::collections::HashMap;
 use crate::{
     HasSpan, Span,
     blocks::{Block, IsBlock},
-    content::{XrefSegment, block_tree_xrefs, footnote_tree_xrefs, render_xref_template},
+    content::{
+        XrefSegment, block_tree_xrefs, fold_resolved_title, footnote_tree_xrefs,
+        render_xref_template,
+    },
     document::Catalog,
+    inlines::InlineNode,
     parser::{
         InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
         ResolvedReference,
@@ -75,6 +79,18 @@ struct TitleNode<'src> {
 
     /// The title's source span, for anchoring an unresolved-reference warning.
     source: Span<'src>,
+
+    /// A copy of the title's inline tree, which the pass folds to produce
+    /// `rendered` — see [`fold_resolved_title`] for why it is a copy.
+    inlines: Vec<InlineNode<'src>>,
+
+    /// The document attributes in force where this title was written, retained
+    /// on its content because a fold running later than its parse cannot read
+    /// them from the parser (design §4.2's second sentinel system).
+    ///
+    /// `None` leaves the title on the template path, as it does everywhere
+    /// else.
+    render_attributes: Option<crate::parser::ResolvedAttributes>,
 }
 
 /// Resolves the cross-references embedded in every section heading and block
@@ -91,6 +107,7 @@ pub(crate) fn resolve_title_references<'src>(
     resolver: &dyn ReferenceResolver,
     renderer: &dyn InlineSubstitutionRenderer,
     warnings: &mut ReferenceWarnings<'src>,
+    parser: &crate::Parser,
 ) {
     let mut nodes: Vec<TitleNode<'src>> = Vec::new();
     collect(blocks, &mut nodes);
@@ -124,6 +141,7 @@ pub(crate) fn resolve_title_references<'src>(
             &mut memo,
             &mut in_progress,
             warnings,
+            parser,
         );
     }
 
@@ -144,11 +162,16 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
                     section.reference_id()
                 };
 
+                let template = template.to_string();
+                let xrefs = xrefs.to_vec();
+
                 nodes.push(TitleNode {
-                    template: template.to_string(),
-                    xrefs: xrefs.to_vec(),
+                    template,
+                    xrefs,
                     map_id,
                     source: section.section_title_source(),
+                    inlines: section.section_title_inlines().to_vec(),
+                    render_attributes: section.section_title_render_attributes().cloned(),
                 });
             }
         } else {
@@ -161,15 +184,19 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
             // mutably borrowed while the template is in scope.
             let source = block.span();
 
-            if let Some((template, xrefs)) = block
-                .block_title_content_mut()
-                .and_then(|title| title.deferred_parts())
+            if let Some(title) = block.block_title_content_mut()
+                && let Some((template, xrefs)) = title.deferred_parts()
             {
+                let template = template.to_string();
+                let xrefs = xrefs.to_vec();
+
                 nodes.push(TitleNode {
-                    template: template.to_string(),
-                    xrefs: xrefs.to_vec(),
+                    template,
+                    xrefs,
                     map_id: None,
                     source,
+                    inlines: title.inlines().to_vec(),
+                    render_attributes: title.render_attributes().cloned(),
                 });
             }
         }
@@ -232,6 +259,7 @@ fn compute<'src>(
     memo: &mut [Option<Resolution>],
     in_progress: &mut [bool],
     warnings: &mut ReferenceWarnings<'src>,
+    parser: &crate::Parser,
 ) -> String {
     if let Some(Some(resolution)) = memo.get(index) {
         return resolution.rendered.clone();
@@ -300,6 +328,7 @@ fn compute<'src>(
                         memo,
                         in_progress,
                         warnings,
+                        parser,
                     ))
                 };
             }
@@ -314,13 +343,11 @@ fn compute<'src>(
         xref.resolved = resolved;
     }
 
-    let rendered = render_xref_template(&node.template, &xrefs, renderer);
-
     // The resolved destinations, in placeholder order and filtered to those the
     // template still splices, so they line up one-to-one with the title tree's
     // cross-reference nodes when mirrored (see `write_back`). This reuses the
-    // very `xrefs` that produced `rendered`, so the tree cannot disagree with
-    // the string.
+    // very `xrefs` the rendering below is computed from, so the tree cannot
+    // disagree with the string.
     let block_ordered = block_tree_xrefs(&node.template, &xrefs);
 
     // The complementary set: a cross-reference the title's footnotes carry was
@@ -328,6 +355,24 @@ fn compute<'src>(
     // is absent from `block_ordered` and belongs to a footnote subtree of the
     // title tree instead.
     let footnote_ordered = footnote_tree_xrefs(&node.template, &xrefs);
+
+    // The title's rendering is a **fold of its tree**, with the destinations
+    // just resolved installed into it — the same answer `Content::refold` gives
+    // a deferred paragraph, reached here rather than after the pass because
+    // this string is also what a reference *to* this title splices in as its
+    // link text. Rendering the template as well, and keeping only one, would
+    // put every deferred title through a host renderer twice.
+    //
+    // The template is the fallback for a title whose tree the builder left
+    // short of the cross-references the string pipeline deferred, and for one
+    // that retained no attributes to fold under.
+    let rendered = node
+        .render_attributes
+        .as_ref()
+        .and_then(|attributes| {
+            fold_resolved_title(&node.inlines, &block_ordered, attributes, renderer, parser)
+        })
+        .unwrap_or_else(|| render_xref_template(&node.template, &xrefs, renderer));
 
     if let Some(flag) = in_progress.get_mut(index) {
         *flag = false;
