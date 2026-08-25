@@ -417,6 +417,12 @@ mod snapshot;
 mod test_support;
 
 use attribute_refs::{SplicedSpecials, apply_attribute_references};
+// Staged for the eventual authoritative-fold half of the cutover (see this
+// module's own doc comment); not yet called from any real parse path, so —
+// unlike the step re-exports below — reachable only via `cfg(test)` callers
+// and future external callers today.
+#[allow(unused_imports)]
+pub(crate) use callouts::apply_callout_side_effects;
 use callouts::apply_callouts;
 use char_replacements::apply_character_replacements;
 // Consumed only by `cfg(test)` callers and future external callers until the
@@ -424,11 +430,6 @@ use char_replacements::apply_character_replacements;
 #[allow(unused_imports)]
 pub(crate) use fold::{fold_html, fold_reference_text};
 use footnotes::apply_footnotes;
-// Staged for the eventual authoritative-fold half of the cutover (see this
-// module's own doc comment); not yet called from any real parse path, so —
-// unlike the step re-exports below — reachable only via `cfg(test)` callers
-// and future external callers today.
-#[allow(unused_imports)]
 pub(crate) use macros::apply_macro_side_effects;
 use macros::{ComputedSpecials, apply_macros};
 use passthrough_step::apply_passthroughs;

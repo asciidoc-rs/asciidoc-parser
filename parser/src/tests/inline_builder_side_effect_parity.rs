@@ -676,3 +676,86 @@ fn a_passthrough_body_with_its_own_macros_registers_once() {
         "the image after a passthrough should be catalogued exactly once"
     );
 }
+
+// The callouts step's own registration, replayed from the tree — the one
+// recognition side effect that is not a macro family.
+
+#[test]
+fn a_callout_list_validates_against_tree_registered_callouts() {
+    // `Parser::callout_defined` is what a callout list consults when it is
+    // parsed, one block after the listing that defines them. With the string
+    // pipeline's `register_callout` suppressed, the numbers it finds are the
+    // ones `apply_callout_side_effects` put there from the tree — so a list
+    // whose items match the callouts must produce no warning, and one that
+    // overshoots must still be caught.
+    let mut parser = Parser::default();
+
+    let doc = parser.parse(concat!(
+        "----\n",
+        "line one <1>\n",
+        "line two <2>\n",
+        "----\n",
+        "<1> First.\n",
+        "<2> Second.\n",
+    ));
+
+    let callout_warnings: Vec<_> = doc
+        .warnings()
+        .filter(|w| matches!(w.warning, WarningType::NoCalloutFound(_)))
+        .collect();
+
+    assert!(
+        callout_warnings.is_empty(),
+        "a matching callout list should not warn: {callout_warnings:?}"
+    );
+
+    // The complement: a list item with no callout behind it. This is what fails
+    // if the replay stops registering, so it is the assertion that keeps the
+    // pair above from passing vacuously.
+    let doc = parser.parse(concat!(
+        "----\n",
+        "line one <1>\n",
+        "----\n",
+        "<1> First.\n",
+        "<2> Second.\n",
+    ));
+
+    let missing: Vec<_> = doc
+        .warnings()
+        .filter(|w| matches!(w.warning, WarningType::NoCalloutFound(2)))
+        .collect();
+
+    assert_eq!(
+        missing.len(),
+        1,
+        "expected one `no callout found for <2>` warning: {:?}",
+        doc.warnings().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn an_auto_numbered_callout_registers_its_resolved_number() {
+    // `<.>` carries no number in the source; the builder resolves it to the
+    // sequential value and stores that on the node, so the replay registers a
+    // real number rather than re-deriving one from a counter it does not have.
+    let mut parser = Parser::default();
+
+    let doc = parser.parse(concat!(
+        "----\n",
+        "line one <.>\n",
+        "line two <.>\n",
+        "----\n",
+        "<.> First.\n",
+        "<.> Second.\n",
+    ));
+
+    let callout_warnings: Vec<_> = doc
+        .warnings()
+        .filter(|w| matches!(w.warning, WarningType::NoCalloutFound(_)))
+        .collect();
+
+    assert!(
+        callout_warnings.is_empty(),
+        "auto-numbered callouts should register 1 and 2: {callout_warnings:?}"
+    );
+}

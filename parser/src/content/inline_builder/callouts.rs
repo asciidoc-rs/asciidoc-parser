@@ -52,6 +52,58 @@ use crate::{
 /// does not call `Parser::register_callout`, deferring the callout catalog's
 /// validation to the cutover (design §5.2 Phase 4, step 6), exactly as the
 /// image and link increments defer their own catalog registrations.
+/// Registers every callout the tree carries with `parser`, so the callout list
+/// that annotates the block can be validated against them.
+///
+/// The callouts step's own recognition side effect, replayed from the tree —
+/// the counterpart of
+/// [`apply_macro_side_effects`](super::macros::apply_macro_side_effects) for
+/// the one family that is not a macro. It runs on the real parse path from
+/// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup), while
+/// `Parser::suppress_recognition_side_effects` gates the string pipeline's own
+/// `register_callout` for the same content.
+///
+/// A callout number is registered in document order, which is what
+/// [`Parser::callout_defined`](crate::Parser) reads when the following callout
+/// list is parsed — a *later block*, so this runs early enough for it.
+///
+/// A [`Callout`](InlineNode::Callout) node's `number` is already the resolved
+/// sequential value for an auto-numbered `<.>`, so no counter is consulted
+/// here. A number that does not parse as a `u32` is skipped, exactly as the
+/// string pipeline skips it.
+///
+/// The walk recurses into every container a node can nest inside. Callouts are
+/// recognized in **verbatim** content, where no quotes or macros step runs, so
+/// in practice they are always top-level; recursing costs nothing and keeps
+/// this walk from silently narrowing if that ever stops being true.
+pub(crate) fn apply_callout_side_effects(nodes: &[InlineNode<'_>], parser: &Parser) {
+    for node in nodes {
+        match node {
+            InlineNode::Callout(callout) => {
+                if let Ok(number) = callout.number.parse::<u32>() {
+                    parser.register_callout(number);
+                }
+            }
+
+            InlineNode::Styled(styled) => apply_callout_side_effects(&styled.children, parser),
+            InlineNode::Ref(reference) => apply_callout_side_effects(&reference.children, parser),
+            InlineNode::Footnote(footnote) => {
+                apply_callout_side_effects(&footnote.children, parser);
+            }
+            InlineNode::IndexTerm(index_term) => {
+                apply_callout_side_effects(&index_term.children, parser);
+            }
+            InlineNode::Anchor(anchor) => {
+                if let Some(reftext) = anchor.reftext.as_ref() {
+                    apply_callout_side_effects(reftext, parser);
+                }
+            }
+
+            _ => {}
+        }
+    }
+}
+
 pub(super) fn apply_callouts<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,

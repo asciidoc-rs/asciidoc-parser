@@ -264,11 +264,11 @@ impl SubstitutionGroup {
         // puts a registering construct after a nested `apply` within one
         // content; restoring is kept because it is correct by construction
         // rather than by that absence.
-        let suppressed = parser.suppress_macro_side_effects.replace(true);
+        let suppressed = parser.suppress_recognition_side_effects.replace(true);
 
         self.run_pipeline(content, parser, attrlist);
 
-        parser.suppress_macro_side_effects.set(suppressed);
+        parser.suppress_recognition_side_effects.set(suppressed);
 
         if let Some((value, mut tree_parser)) = tree_seed {
             // The builder must not recurse into tree building itself: a
@@ -327,6 +327,12 @@ impl SubstitutionGroup {
                 content.original(),
                 false,
             );
+
+            // The callouts step's own registration, replayed the same way. It
+            // is not a macro family — callouts are recognized in verbatim
+            // content, where the macros step does not run at all — so it is a
+            // sibling call rather than part of the composition above.
+            crate::content::inline_builder::apply_callout_side_effects(&tree, parser);
 
             content.set_inlines(tree);
 

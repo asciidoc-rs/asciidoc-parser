@@ -6432,6 +6432,34 @@ Each phase is a reviewable unit with a clear exit gate.
   That is the last thing still registering from the string pipeline, and it goes when the pipeline
   does.
 
+  *Step 6 landed as (the callout registration, the last recognition side effect):* the increment
+  above re-attached the four **macro** side effects and left one behind, because it is not a macro
+  family at all: a callout is recognized in *verbatim* content, where the macros step never runs.
+  [`apply_callout_side_effects`](../../parser/src/content/inline_builder/callouts.rs) replays it the
+  same way, as a sibling call rather than part of the composition, and the suppression flag widens
+  from `suppress_macro_side_effects` to `suppress_recognition_side_effects` to say so.
+
+  It is simpler than the macro four in two ways and more subtle in one. Simpler: a
+  [`Callout`](../../parser/src/inlines/callout.rs) node already carries its **resolved** number — an
+  auto-numbered `<.>` was resolved when the node was built — so the replay consults no counter, and
+  the ordering that matters is satisfied for free, since the consumer
+  ([`Parser::callout_defined`](../../parser/src/parser/parser.rs)) reads it when the *following*
+  block, the callout list, is parsed.
+
+  Subtle: a duplicated registration here would be **invisible**. `CalloutCatalog` holds one
+  `Vec<u32>`, read through `contains` and cleared per list, so registering `1` twice answers exactly
+  as registering it once — unlike the asset and reference catalogs, whose entries a consumer reads
+  in order and where a double shows immediately. So the gate on the string pipeline's own
+  `register_callout` buys nothing observable *today*; it is there for correctness by construction
+  and for the day the pipeline goes, and the code says that rather than implying a check it cannot
+  make. What *is* falsifiable is the replay: without it, `no callout found for <N>` fires for every
+  callout list in the suite.
+
+  Two tests drive it through whole parses — a matching list that must not warn paired with an
+  overshooting one that must, and an auto-numbered `<.>` pair — and both fail when the replay is
+  removed. With this, every recognition side effect the string pipeline performs is performed from
+  the tree, and what is left of step 6 is the string pipeline itself.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -7737,8 +7765,20 @@ Each phase is a reviewable unit with a clear exit gate.
        images/links/refs/warnings byte-identical to base. Dropping the replay fails 69 tests;
        hoisting the window to a whole parse fails 161 — the second is the description-list **term**
        carve-out, the last thing still registering from the string pipeline. See the step's own
-       "landed as" note above. What remains of step 6 is taking `run_pipeline` off the production
-       path, which takes the passthrough sentinel system and that carve-out with it.
+       "landed as" note above.
+
+     - ✅ **the callout registration, the last recognition side effect.** Not a macro family — a
+       callout is recognized in *verbatim* content, where the macros step never runs — so
+       [`apply_callout_side_effects`](../../parser/src/content/inline_builder/callouts.rs) replays
+       it as a sibling call, and the flag widens to `suppress_recognition_side_effects`. A
+       `Callout` node already carries its **resolved** number, so the replay consults no counter,
+       and the consumer (`Parser::callout_defined`) reads it a block later, when the callout list
+       is parsed. A duplicate here would be *invisible* — `CalloutCatalog` is one `Vec<u32>` read
+       through `contains` — so the gate buys correctness by construction rather than anything
+       observable, and says so; what is falsifiable is the replay, without which every callout list
+       in the suite warns. With this, **every** recognition side effect is performed from the tree,
+       and what is left of step 6 is the string pipeline itself. See the step's own "landed as"
+       note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

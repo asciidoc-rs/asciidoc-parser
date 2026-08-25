@@ -477,15 +477,16 @@ pub struct Parser {
     /// tree of its own. Nothing else sets it, and no public API exposes it.
     pub(crate) build_inline_tree: bool,
 
-    /// Whether the **string pipeline's** macro-recognition side effects — an
-    /// image target, a link target, an inline anchor's or bibliography entry's
-    /// id, and the image family's dangerous-`link=`-scheme warning — are
-    /// suppressed for the content currently being substituted.
+    /// Whether the **string pipeline's** recognition side effects — an image
+    /// target, a link target, an inline anchor's or bibliography entry's id,
+    /// the image family's dangerous-`link=`-scheme warning, and a callout
+    /// number — are suppressed for the content currently being substituted.
     ///
-    /// Those four are exactly what
-    /// [`apply_macro_side_effects`](crate::content::inline_builder) replays;
-    /// the *link* family's own dangerous-scheme warning is not among them,
-    /// and so is not suppressed here.
+    /// Those are exactly what the builder replays: the first four through
+    /// [`apply_macro_side_effects`](crate::content::inline_builder), the last
+    /// through [`apply_callout_side_effects`](crate::content::inline_builder).
+    /// The *link* family's own dangerous-scheme warning is not among them, and
+    /// so is not suppressed here.
     ///
     /// Set by `SubstitutionGroup::apply` around its authoritative string pass,
     /// for exactly the content whose tree it then replays them from.
@@ -504,7 +505,7 @@ pub struct Parser {
     /// `SubstitutionGroup::apply` (`blocks::list_item_marker`) and so builds no
     /// tree to replay from. It disappears when step 6 takes the string pipeline
     /// off the production path.
-    pub(crate) suppress_macro_side_effects: std::cell::Cell<bool>,
+    pub(crate) suppress_recognition_side_effects: std::cell::Cell<bool>,
 }
 
 /// A warning recorded in a form that does not borrow the source so it can live
@@ -620,7 +621,7 @@ impl Default for Parser {
             input_mtime: None,
             datetime_context: RefCell::new(None),
             build_inline_tree: true,
-            suppress_macro_side_effects: std::cell::Cell::new(false),
+            suppress_recognition_side_effects: std::cell::Cell::new(false),
         }
     }
 }
@@ -1808,7 +1809,7 @@ impl Parser {
         ref_type: RefType,
     ) -> Result<(), crate::document::DuplicateIdError> {
         // Suppressed for content whose tree replays this registration — see
-        // `suppress_macro_side_effects`. `Ok` rather than an error is what the
+        // `suppress_recognition_side_effects`. `Ok` rather than an error is what the
         // caller needs: the string replacer raises its duplicate-id warning on
         // `Err`, and that warning is the replay's to raise, from the same
         // `register_ref` reaching the real catalog a moment later.
@@ -1816,7 +1817,7 @@ impl Parser {
         // Only a *macro* registration can reach here inside that window — the
         // block, section and description-list-term registrations all happen
         // outside substitution — so nothing else is caught by it.
-        if self.suppress_macro_side_effects.get() {
+        if self.suppress_recognition_side_effects.get() {
             return Ok(());
         }
 
@@ -1846,7 +1847,7 @@ impl Parser {
     /// Takes `&self` so it can be called from the macros substitution step,
     /// which only holds a shared reference to the parser.
     pub(crate) fn register_image(&self, target: String, imagesdir: Option<String>) {
-        if self.suppress_macro_side_effects.get() {
+        if self.suppress_recognition_side_effects.get() {
             return;
         }
 
@@ -1865,7 +1866,7 @@ impl Parser {
     /// Takes `&self` so it can be called from the macros substitution step,
     /// which only holds a shared reference to the parser.
     pub(crate) fn register_link(&self, target: String) {
-        if self.suppress_macro_side_effects.get() {
+        if self.suppress_recognition_side_effects.get() {
             return;
         }
 
