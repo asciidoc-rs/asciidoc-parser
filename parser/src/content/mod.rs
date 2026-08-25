@@ -6,8 +6,8 @@
 mod content;
 pub use content::Content;
 pub(crate) use content::{
-    FootnoteDeferred, OwnedTitle, XrefSegment, block_tree_xrefs, footnote_tree_xrefs,
-    rehome_xref_placeholders, render_xref_template, sanitize_title,
+    FootnoteDeferred, OwnedTitle, XrefSegment, block_tree_xrefs, fold_resolved_title,
+    footnote_tree_xrefs, rehome_xref_placeholders, render_xref_template, sanitize_title,
 };
 
 pub(crate) mod inline_builder;

@@ -6321,6 +6321,71 @@ Each phase is a reviewable unit with a clear exit gate.
   `DeferredContent::template` — waits on both, and on the whole-document parity harness no longer
   needing the template as the oracle the fold is checked against.
 
+  *Step 6 landed as (a title's rendering joins the fold, closing the retirement's other half):*
+  the increment above retired the deferred-cross-reference sentinel system for content resolved by
+  [`Content::resolve_references`](../../parser/src/content/content.rs) and named a title as what
+  still deferred. A title is not resolved per content: a cross-reference between two titles —
+  forward, or circular — needs coordination the per-content pass cannot do, so
+  [`title_refs`](../../parser/src/document/title_refs.rs) computes every title's rendering together,
+  in document order, breaking cycles the way Asciidoctor does. That pass rendered the template.
+
+  It now folds instead, and **where** it folds is the whole design. The obvious place is the pass's
+  write-back walk, after the resolutions are computed — and that is wrong: the pass needs each
+  title's rendering *while it runs*, because that string is the link text a reference **to** that
+  title splices in. Folding afterwards would leave the template render standing as the coordination
+  input and add a second one, which is precisely the double callback the increment above removed. So
+  the fold happens inside `compute`, in place of `render_xref_template`, with the template kept as
+  the fallback. `the_title_pass_renders_each_title_once` pins it with a counting renderer, and fails
+  on the write-back placement.
+
+  Folding there means folding without a `&mut` to the blocks — the pass walks them again afterwards
+  to install what it computed — so [`fold_resolved_title`](../../parser/src/content/content.rs)
+  folds a **clone** of the title's tree, and the real tree still takes the later mirror. Only the
+  block-level destinations are installed into that clone: a fold emits a footnote's *marker* and
+  never descends into its subtree, so the mirror's footnote half has no counterpart here (it was
+  written, found dead by coverage, and removed).
+
+  The coordination survives the fold because it never lived in the template. A
+  [`ResolvedReference`](../../parser/src/parser/reference_resolver.rs) carries the reference text
+  the pass computed for its target, `assign_tree_xrefs` installs it on the node, and `fold_xref`
+  reads it there — so the fold reproduces the coordinated answer, cycles and all, rather than a
+  per-title one.
+  `a_folded_heading_keeps_the_cross_title_coordination` pins three shapes (a forward reference, a
+  cycle whose inner link text falls back to `[id]` with the nested anchor dropped, and a footnote in
+  a heading) — and passes on the base branch too, which is the point: **this increment changes no
+  output.** Measured over the whole suite, 59 of 60 deferred titles take the fold and every one of
+  them reproduces the template byte for byte; the 60th has an empty tree and keeps the template.
+
+  It costs callbacks, and the review that found it was right to. Folding renders the **whole**
+  title, where the template render it replaces touched only the placeholders: measured on
+  `== A *bold* image:x.png[X] a < b <<t>>`, total renderer calls go 13 → 16, and the three added are
+  duplicates of calls the string pipeline already made at parse time. That is the transitional cost
+  of an authoritative fold rather than one this path invents — a plain paragraph's `<` is rendered
+  twice *today* (once by `run_pipeline`, once by the fold that overwrites its answer), and a
+  deferred paragraph has paid exactly this since the increment above; the fixtures that were already
+  folding measure 9 → 9 and 12 → 12, unchanged. A title was the last content on the cheaper template
+  path, and it was cheaper only because its rendering was less correct. The duplication ends for all
+  of them together when step 6 takes the string pipeline off the production path; it cannot end
+  here, because folding a tree means rendering it. What *is* avoidable, and avoided, is rendering
+  the same title twice within the pass.
+
+  It also corrected an oracle the increment above introduced.
+  `the_fold_reproduces_the_template_for_every_deferred_content` walked block titles, and could not:
+  a title's own deferred segments are never resolved in place — the pass resolves a *clone* of them,
+  since the coordination is cross-title — so `rendered_from_template` renders the **uncoordinated**
+  fallback for one. It passed only because every title fixture in that corpus happened to coincide
+  (`[tgt]` on both sides). A section-title fixture made it fail honestly; titles are out of that
+  test now, and covered by the coordination pins instead.
+
+  What still defers is `xref:sec[*bold*,role=*hl*]` — a rendered span reaching a value the macro
+  families read as a *string*. It is no longer only a cross-reference concern: `Ref::roles` is
+  `Vec<CowStr>`, and the link and image families draw the same boundary in their own gates, so
+  closing it means giving a computed *string* slot somewhere to put fold-time markup rather than
+  teaching one family one form. Retiring the template itself — the sentinel constants,
+  `render_template`, `DeferredContent::template` — waits on that and on
+  `Content::rendered_from_template`, which is now the only thing keeping the fold differentiated
+  against an independent construction.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -7584,11 +7649,33 @@ Each phase is a reviewable unit with a clear exit gate.
        — both closed as the two preps above. Exactly one of the two renderings runs: rendering both
        and keeping the second would be *observable*, not merely wasteful, since a stateful host
        renderer would see every callback twice in one pass
-       (`resolution_renders_a_deferred_content_once`). That costs the whole-document harness its oracle for this content, so the template's answer
-       becomes reachable test-only and a fourteen-fixture corpus compares the two directly. What
+       (`resolution_renders_a_deferred_content_once`). That costs the whole-document harness its
+       oracle for this content, so the template's answer becomes reachable test-only and a
+       fixture corpus compares the two directly. What
        still defers is `xref:sec[*bold*,role=*hl*]` (a rendered span reaching a string-read value)
        and a **title's** deferred cross-references, which `title_refs` still renders from the
-       template. See the step's own "landed as" note above. What remains of step 6 is the
+       template. See the step's own "landed as" note above.
+
+     - ✅ **a title's rendering joins the fold — the retirement's other half.**
+       [`title_refs`](../../parser/src/document/title_refs.rs) computes every title's rendering
+       together, in document order, so a cross-reference between titles coordinates; it now folds
+       the title's tree in place of rendering its template. **Inside `compute`**, not in the
+       write-back walk — the pass needs each rendering *while it runs*, as the link text a
+       reference to that title splices in, so folding afterwards would leave both and render every
+       deferred title twice (`the_title_pass_renders_each_title_once`, which fails on that
+       placement). It folds a **clone** of the tree, since the pass holds no `&mut` to the blocks
+       there, and installs only the block-level destinations: a fold emits a footnote's marker
+       without descending into its subtree. The coordination rides on the destinations, not the
+       template, so it survives — pinned over a forward reference, a cycle, and a footnote in a
+       heading, all of which pass on base too: **this changes no output.** 59 of 60 deferred titles
+       in the suite take the fold, each reproducing the template byte for byte; the 60th has an
+       empty tree. It costs three duplicate renderer callbacks per deferred title (13 → 16 on a
+       heading carrying a span, an image and a special character) — the transitional cost of an
+       authoritative fold, which every other content already pays and which ends for all of them
+       when step 6 takes the string pipeline off the production path. It also corrected an oracle:
+       the previous increment's template differential
+       walked block titles, whose segments are never resolved in place, and passed only by
+       coincidence. See the step's own "landed as" note above. What remains of step 6 is the
        passthrough sentinel system and the side effects wired for real.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that

@@ -901,6 +901,82 @@ impl<'src> Content<'src> {
     }
 }
 
+/// Renders a **title's** tree, with `block_ordered` / `footnote_ordered`
+/// installed into a copy of it, or `None` when that tree is not authoritative
+/// for the title.
+///
+/// This is [`Content::refold`] for the one path that cannot use it. A title's
+/// rendering is computed by the document-order pass
+/// (the `title_refs` module) rather than installed by
+/// [`resolve_references`](Content::resolve_references), because a
+/// cross-reference between two titles needs coordination the per-content pass
+/// cannot do — and that pass needs each title's rendering *while it runs*, as
+/// the link text another title's reference splices in. So the fold has to
+/// happen there, in place of the template render, rather than after it: taking
+/// both would render every deferred title twice through a host renderer that
+/// may be counting (see `Content::resolve_references`).
+///
+/// Hence the copy. The pass holds no `&mut` to the blocks while it computes —
+/// it walks them again afterwards to install what it computed — so it folds a
+/// clone of the tree and leaves the real one to that later mirror, which
+/// installs the same destinations from the same lists.
+///
+/// `None` is the same carve-out
+/// [`mirror_tree_xref_resolution`](Content::mirror_tree_xref_resolution)
+/// reports: a tree holding fewer block-level cross-references than the string
+/// pipeline deferred does not describe this title, so folding it would drop the
+/// construct. The caller renders the template instead.
+///
+/// Folding renders the **whole** title, not just its cross-references — every
+/// styled span, image and special character in it — where the template render
+/// this replaces touched only the placeholders. Measured on a heading carrying
+/// all three, that is three more renderer callbacks per deferred title (13 → 16
+/// for `== A *bold* image:x.png[X] a < b <<t>>`). The calls are duplicates: the
+/// string pipeline already made them at parse time.
+///
+/// That is the transitional cost of an authoritative fold, not a cost this path
+/// adds. Every content already pays it — a plain paragraph's `<` is rendered
+/// twice today, once by `run_pipeline` and once by the fold that overwrites its
+/// answer — and a *deferred paragraph* has paid exactly this since the fold
+/// moved to resolution time. A title was the last content still on the cheaper
+/// template path, and it was cheaper only because its rendering was less
+/// correct. The duplication ends for all of them together, when step 6 takes
+/// the string pipeline off the production path; it cannot end here, because
+/// folding a tree means rendering it.
+///
+/// What this *does* avoid is rendering the same title twice within this pass:
+/// the fold replaces the template render rather than joining it — see the
+/// caller, and `the_title_pass_renders_each_title_once`.
+///
+/// Only the **block-level** destinations are installed, and the mirror's
+/// footnote half has no counterpart here: a fold emits a footnote's *marker*
+/// and never descends into its subtree (see `fold_footnote`), so a destination
+/// installed there could not reach this string. The real tree still gets both,
+/// from the caller's own later mirror — that tree is read by consumers, not
+/// just folded.
+pub(crate) fn fold_resolved_title(
+    inlines: &[InlineNode<'_>],
+    block_ordered: &[Option<ResolvedReference>],
+    attributes: &ResolvedAttributes,
+    renderer: &dyn InlineSubstitutionRenderer,
+    parser: &Parser,
+) -> Option<String> {
+    if inlines.is_empty() || count_tree_xrefs(inlines) != block_ordered.len() {
+        return None;
+    }
+
+    let mut tree = inlines.to_vec();
+
+    let mut next = 0;
+    assign_tree_xrefs(&mut tree, block_ordered, &mut next);
+
+    let context = parser.render_context_with(attributes.clone());
+
+    Some(crate::content::inline_builder::fold_html(
+        &tree, renderer, &context,
+    ))
+}
+
 /// Builds the placeholder-ordered list of resolved destinations that
 /// [`Content::mirror_tree_xref_resolution`] installs into an inline tree.
 ///

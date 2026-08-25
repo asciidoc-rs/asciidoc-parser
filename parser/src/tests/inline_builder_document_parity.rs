@@ -596,10 +596,8 @@ fn the_fold_reproduces_the_template_for_every_deferred_content() {
         "See <<other.adoc#topic>>.",
         // A macro-form reference carrying an attribute list.
         "[[tgt]]Target.\n\nSee xref:tgt[the target,role=hl].",
-        // In a table cell and in a block title, which reach resolution by
-        // their own paths.
+        // In a table cell, which reaches resolution by its own path.
         "[[tgt]]Target.\n\n|===\n|See <<tgt>>.\n|===",
-        "[[tgt]]Target.\n\n.See <<tgt>>\nA paragraph.",
     ];
 
     let renderer = HtmlSubstitutionRenderer {};
@@ -634,15 +632,21 @@ fn the_fold_reproduces_the_template_for_every_deferred_content() {
             fixture: &str,
             compared: &mut usize,
         ) {
-            // Every content-bearing shape this corpus reaches: a paragraph, a
-            // block title (its own substituted content), and a simple table
-            // cell (which is not a block at all).
+            // Every content-bearing shape this corpus reaches: a paragraph and
+            // a simple table cell (which is not a block at all).
+            //
+            // A **title** is deliberately not one of them, block or section.
+            // `rendered_from_template` renders a content's *own* deferred
+            // segments, and a title's are never resolved in place: the
+            // document-order pass resolves a clone of them (it has to — the
+            // coordination is cross-title) and installs only the result. So the
+            // template it would render here is the uncoordinated one, and
+            // comparing against it would report a divergence the title does not
+            // have. Titles are covered by
+            // `a_folded_heading_keeps_the_cross_title_coordination` instead,
+            // which pins the coordinated answer directly.
             if let Block::Simple(simple) = block {
                 check(simple.content(), renderer, fixture, compared);
-            }
-
-            if let Some(title) = block.block_title_content() {
-                check(title, renderer, fixture, compared);
             }
 
             if let Block::Table(table) = block {
@@ -747,5 +751,120 @@ fn resolution_renders_a_deferred_content_once() {
         counting.xrefs.get(),
         2,
         "resolution rendered this content's cross-references more than once"
+    );
+}
+
+#[test]
+fn a_folded_heading_keeps_the_cross_title_coordination() {
+    // A title's rendering is a fold of its tree too, taken by the
+    // document-order pass (`title_refs`) in place of the template render it
+    // used to do — not after it, since that string is also the link text a
+    // reference *to* this title splices in, and computing both would put every
+    // deferred title through a host renderer twice.
+    //
+    // What makes a title its own case is the coordination: the pass resolves
+    // titles in document order and lets one title's rendering become another's
+    // reference text, breaking cycles the way Asciidoctor does. That survives
+    // the fold because it rides on the *destination* — a `ResolvedReference`
+    // carries the text the pass computed, the mirror installs it on the node,
+    // and `fold_xref` reads it there — rather than on the template.
+    //
+    // So the oracle here is the coordinated answer itself, not the title's own
+    // template: a title's deferred segments are never resolved in place (the
+    // pass resolves a clone), so rendering that template would give the
+    // *uncoordinated* fallback and prove nothing.
+    let cases = [
+        // A forward reference: `<<second>>` names a heading parsed later, whose
+        // reference text is its own title. The uncoordinated answer is `[second]`.
+        (
+            "== See <<second>>\n\nBody.\n\n[[second]]\n== The Second\n\nMore.",
+            vec![r##"See <a href="#second">The Second</a>"##, "The Second"],
+        ),
+        // A cycle: computing `a` recurses into `b`, which reaches `a` while it
+        // is still in progress and falls back to the bracketed `[a]` rather
+        // than recursing forever. `b`'s rendering is then spliced into `a`'s as
+        // link text, where the renderer drops the nested anchor.
+        (
+            "[[a]]\n== A cites <<b>>\n\nBody.\n\n[[b]]\n== B cites <<a>>\n\nMore.",
+            vec![
+                r##"A cites <a href="#b">B cites [a]</a>"##,
+                r##"B cites <a href="#a">[a]</a>"##,
+            ],
+        ),
+        // A footnote inside a heading: its embedded reference is re-homed out
+        // of the title's own template, so the two correlation lists partition.
+        (
+            "[[tgt]]Target.\n\n== A Heading.footnote:[see <<tgt>>]\n\nBody.",
+            vec![concat!(
+                "A Heading.",
+                r##"<sup class="footnote">[<a id="_footnoteref_1" class="footnote" "##,
+                r##"href="#_footnotedef_1" title="View footnote.">1</a>]</sup>"##
+            )],
+        ),
+    ];
+
+    for (source, expected) in cases {
+        let mut parser = parser();
+        let doc = parser.parse(source);
+
+        let headings: Vec<String> = doc
+            .child_blocks()
+            .filter_map(|block| match block {
+                crate::blocks::Block::Section(section) => Some(section.section_title().to_string()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(headings, expected, "for {source:?}");
+    }
+}
+
+#[test]
+fn the_title_pass_renders_each_title_once() {
+    use crate::parser::{CatalogResolver, InlineSubstitutionRenderer, XrefRenderParams};
+
+    // The title-side counterpart of `resolution_renders_a_deferred_content_once`,
+    // and the property that makes the fold a *replacement* for the document-order
+    // pass's template render rather than an addition to it.
+    //
+    // The pass needs each title's rendering while it runs — it is the link text
+    // a reference to that title splices in — so the fold has to happen inside
+    // `compute`, in place of `render_xref_template`. Folding after the pass
+    // instead (in its write-back walk, the obvious place) would leave both, and
+    // every deferred title would reach a host renderer twice.
+    #[derive(Debug, Default)]
+    struct CountingRenderer {
+        xrefs: std::cell::Cell<usize>,
+    }
+
+    impl InlineSubstitutionRenderer for CountingRenderer {
+        fn render_xref(&self, params: &XrefRenderParams, dest: &mut String) {
+            self.xrefs.set(self.xrefs.get() + 1);
+            HtmlSubstitutionRenderer {}.render_xref(params, dest);
+        }
+    }
+
+    // Two headings, one cross-reference each, and neither references the other
+    // — so the pass has no reason to render either more than once and the count
+    // is exactly the number of cross-references.
+    let mut parser = parser();
+    let mut doc = parser.parse_deferred(concat!(
+        "[[tgt]]Target.\n\n",
+        "== First sees <<tgt>>\n\n",
+        "Body.\n\n",
+        "== Second sees <<tgt>>\n\n",
+        "More.",
+    ));
+
+    let catalog = doc.catalog().clone();
+    let resolver = CatalogResolver::new(&catalog);
+    let counting = CountingRenderer::default();
+
+    doc.resolve_references(&resolver, &counting, &parser);
+
+    assert_eq!(
+        counting.xrefs.get(),
+        2,
+        "the document-order title pass rendered a title more than once"
     );
 }
