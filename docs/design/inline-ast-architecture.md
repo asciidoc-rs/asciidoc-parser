@@ -6703,6 +6703,70 @@ Each phase is a reviewable unit with a clear exit gate.
   interpolate unescaped; neither is reachable from this class (an anchor id admits no span, and an
   inline SVG has no attribute list a span survives into), so both are left where they are.
 
+
+  *Step 6 landed as (a deferred cross-reference's segments, read off the tree):* the survey of what
+  `run_pipeline` still owns named six things and said two of them turned on **one** question —
+  whether a computed slot can hold markup that exists only at fold time. The increment two above
+  answered it for the computed *string* slots and named this as the other: an
+  [`XrefSegment`](../../parser/src/content/content.rs) holds every field a `Ref{Xref}` node already
+  carries — `target`, `window`, `roles`, `xrefstyle` and `derived` are plain values the builder
+  resolved at recognition time — **except** `provided_text`, which the segment holds as a string
+  where the node holds its display text as *children*.
+
+  That slot takes the **fold of those children**, and the two answers differ for a stated reason
+  rather than by accident. A computed string slot had no output worth matching: the string
+  pipeline captures a deferred cross-reference's template *before* passthroughs are restored, so a
+  `role=` leaks a `\u{96}0\u{97}` sentinel, and where it does not leak it spells rendered markup
+  into a class name. A **display text** is the opposite case — it is markup by nature, and the
+  string replacer captures exactly `<strong>bold</strong>` out of its own already-rendered haystack
+  — so here the fold *reproduces* the byte string rather than approximating it. One family, two
+  slots, two answers, each matching what its own string path actually produces.
+
+  [`block_tree_xref_segments`](../../parser/src/content/content.rs) and
+  [`footnote_tree_xref_segments`](../../parser/src/content/content.rs) are the derivation, walking
+  exactly the traversals [`assign_tree_xrefs`](../../parser/src/content/content.rs) and
+  `assign_footnote_tree_xrefs` already walk — so a derived segment and an installed destination
+  address the same node, and the block/footnote partition is the one
+  `block_tree_xrefs`/`footnote_tree_xrefs` already draw. Nothing is wired: they are staged building
+  blocks under `#[allow(dead_code)]` and a `cfg(test)` re-export, the same staging every recognition
+  side effect was under before the cutover re-attached it.
+
+  Two decisions are worth recording because a later reader will otherwise re-derive them. The fold
+  runs **at the end of the parse**, with the renderer the parse carried, which is where the string
+  replacer computes it too; deriving it at *resolution* time would read whatever renderer that
+  caller passed and hand the resolver a different `ResolutionContext` than the string pipeline does
+  — the same renderer-timing hazard review raised against the increment above, avoided here by
+  construction rather than argued about. And [`resolved`](../../parser/src/content/content.rs) is
+  deliberately **not** carried across: it is resolution's *output*, filled in later and mirrored
+  back onto the node, so a node re-read after a sweep yields the segment it yielded before one,
+  which is what makes the derivation idempotent.
+
+  [`inline_builder_xref_segment_parity`](../../parser/src/tests/inline_builder_xref_segment_parity.rs)
+  is the corpus, over whole documents parsed with `parse_deferred` (so both sides carry
+  `resolved: None` and the comparison is of *recognition* alone): 37 fixtures across both
+  spellings, the present-but-empty text, a display text carrying each of the three recoverable
+  pieces, a passthrough, a nested macro, the attribute-list form's other fields, a derived
+  destination, an unresolved target, several references in one content, a reference nested in a
+  span, the footnote-embedded complement, and three other content-bearing locations. Every field of
+  every segment is compared, and two vacuity guards keep a corpus that stopped deferring from
+  passing.
+  Exactly **one** shape diverges and it is the sibling increment's own, pinned as such: for
+  `xref:tgt[*bold*,role=*hl*]` the `role` differs by that increment's rule while `provided_text` is
+  byte-identical — which is precisely the claim this one makes.
+
+  Audit: **36** rows either side, 0 new and 0 closed, as it must be — the diff adds no production
+  path at all. Coverage is diff-neutral on `content.rs` (21 missed regions and 8 missed lines either
+  side). Falsifiable: deriving `provided_text` from the children's source spans instead of their
+  fold fails both tests.
+
+  *What this leaves of the survey:* three items. `Content::passthroughs()` as a tree-backed view
+  (public-API shaping, and *deleting* it is as live an option as building it), the link family's
+  dangerous-scheme warning (which needs a node-level fact, since a rejected macro is left literal
+  and there is no `Ref` node to hang it on), and the two the survey called hard-blocked — a
+  footnote's catalog text (an ordering problem: the registry is read *during* the same content's
+  substitution) and `{counter:}` advancement (solvable only **by** removing the pipeline). With
+  this one staged, the string-slot question the survey raised has no open consequences left.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -8088,6 +8152,30 @@ Each phase is a reviewable unit with a clear exit gate.
        today with no tree involved. Audit: 36 rows either side, 0 new, 0 closed (the sweep itself
        had to be re-derived, `rendered` being the fold now); coverage diff-neutral on all changed
        files. See the step's own "landed as" note above.
+
+     - ✅ **a deferred cross-reference's segments, read off the tree.** The second of the two
+       survey items that turned on the computed-slot question, and the one the string-slot
+       increment named as taking the *other* answer. An
+       [`XrefSegment`](../../parser/src/content/content.rs) holds every field a `Ref{Xref}` node
+       already carries but `provided_text`, which the segment holds as a string where the node holds
+       its display text as **children** — so that slot takes the **fold** of them. A display text
+       is markup by nature and the string replacer captures `<strong>bold</strong>` out of its
+       own already-rendered haystack, where a computed *string* slot had no output worth matching
+       (its template is captured before passthroughs are restored, so it leaks a sentinel). One
+       family, two slots, two answers, each matching what its own string path produces.
+       [`block_tree_xref_segments`](../../parser/src/content/content.rs) and
+       [`footnote_tree_xref_segments`](../../parser/src/content/content.rs) walk exactly
+       `assign_tree_xrefs`' and `assign_footnote_tree_xrefs`' own traversals, so a derived segment
+       and an installed destination address the same node; both are staged and unwired, like every
+       recognition side effect before its re-attachment. The fold runs at the **end of the parse**
+       with the parse's own renderer — deriving it at resolution time would hand the resolver a
+       different `ResolutionContext` than the string pipeline does — and `resolved` is
+       deliberately not carried across, which is what makes the derivation idempotent.
+       [`inline_builder_xref_segment_parity`](../../parser/src/tests/inline_builder_xref_segment_parity.rs)
+       compares every field of every segment over 37 whole-document fixtures; exactly one shape
+       diverges and it is the sibling increment's own `role=`, pinned beside a `provided_text` that
+       is byte-identical. Audit: 36 rows either side, 0 new and 0 closed (the diff adds no
+       production path); coverage diff-neutral. See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
