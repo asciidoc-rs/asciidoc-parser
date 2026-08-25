@@ -4,13 +4,25 @@ use regex::Regex;
 
 use crate::{
     HasSpan, Parser, Span,
-    content::{
-        Content, Passthroughs, SubstitutionStep, apply_macros_with_leading_anchor_registered,
-    },
-    document::RefType,
+    content::{Content, SubstitutionGroup, SubstitutionStep},
     span::MatchedItem,
-    warnings::{Warning, WarningType},
+    warnings::Warning,
 };
+
+/// The substitution group a description-list **term** takes: the `normal`
+/// group's own order, minus the attribute-references step that already ran
+/// during parsing (so `{blank}` and friends were resolved before the marker
+/// was recognized). Asciidoctor substitutes a term with `normal` too; this
+/// spelling is the same list with the one already-applied step removed.
+static TERM_SUBSTITUTIONS: LazyLock<SubstitutionGroup> = LazyLock::new(|| {
+    SubstitutionGroup::Custom(vec![
+        SubstitutionStep::SpecialCharacters,
+        SubstitutionStep::Quotes,
+        SubstitutionStep::CharacterReplacements,
+        SubstitutionStep::Macros,
+        SubstitutionStep::PostReplacement,
+    ])
+});
 
 /// A list item is signaled by one of several designated marker sequences.
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -206,57 +218,15 @@ impl<'src> ListItemMarker<'src> {
             return;
         };
 
-        // A description-list term is substituted with the `normal` group. The
-        // attribute-references step already ran during parsing (so the marker
-        // could be recognized), so the remaining steps run here. Passthrough
-        // spans are extracted first and restored last so their payloads are
-        // shielded from the intervening substitutions, mirroring the structure
-        // of `SubstitutionGroup::apply` for the normal group.
-        let passthroughs = Passthroughs::extract_from(term, parser);
-
-        SubstitutionStep::SpecialCharacters.apply(term, parser, None);
-        SubstitutionStep::Quotes.apply(term, parser, None);
-        SubstitutionStep::CharacterReplacements.apply(term, parser, None);
-
-        // A leading inline anchor (`[[id]]` or `[[id,reftext]]`) at the start of
-        // the term is registered in the catalog before the macros step renders
-        // it, so that only its own duplicate-registration warning is suppressed
-        // during that pass. Any other term goes straight through the macros
-        // step.
-        if term.rendered_html().starts_with("[[") {
-            if let Some(captures) = LEADING_INLINE_ANCHOR.captures(term.rendered_html()) {
-                let id = &captures[1];
-
-                // If reftext is provided, use it. Otherwise, use the text after
-                // the anchor as the default reftext.
-                let reftext = captures.get(2).map(|m| m.as_str().to_string()).or_else(|| {
-                    // Use the text after the anchor as default reftext.
-                    captures.get(3).map(|m| m.as_str().trim().to_string())
-                });
-
-                // Register the anchor in the catalog.
-                if let Err(_duplicate_error) =
-                    parser.register_ref(id, reftext.as_deref(), RefType::Anchor)
-                {
-                    warnings.push(Warning::new(
-                        term.original(),
-                        WarningType::DuplicateId(id.to_string()),
-                    ));
-                }
-            }
-
-            apply_macros_with_leading_anchor_registered(term, parser);
-        } else {
-            SubstitutionStep::Macros.apply(term, parser, None);
-        }
-
-        SubstitutionStep::PostReplacement.apply(term, parser, None);
-
-        // Restore the extracted passthroughs and finalize any deferred
-        // cross-references, matching the tail of `SubstitutionGroup::apply`.
-        passthroughs.restore_to(term, parser);
-        term.set_passthroughs(passthroughs.0);
-        term.finalize_deferred(&*parser.renderer);
+        // A description-list term is substituted with the `normal` group, in
+        // that group's own order minus its attribute-references step, which
+        // already ran during parsing so the marker could be recognized at all.
+        // Running it through `SubstitutionGroup::apply` rather than the steps
+        // directly is what gives the term a **tree**: the seed, the
+        // authoritative fold, and the replay of every recognition side effect
+        // come with it, so a term no longer registers from the string pipeline
+        // (design §5.2 Phase 4, step 6 — this was the last content that did).
+        TERM_SUBSTITUTIONS.apply_to_description_list_term(term, parser, warnings);
     }
 
     /// Return a mutable reference to the term content of a description-list
@@ -539,29 +509,6 @@ static DESCRIPTION_LIST_MARKER: LazyLock<Regex> = LazyLock::new(|| {
             )
             (?::::?:?|;;)           # Delimiter: ::, :::, ::::, or ;;
             (?:$|[\ \t])            # End of line or whitespace after marker
-        "#,
-    )
-    .unwrap()
-});
-
-/// Matches a leading inline anchor at the start of text.
-///
-/// Captures:
-/// - Group 1: The anchor ID
-/// - Group 2: Optional reftext (after comma)
-/// - Group 3: Text after the anchor (used as default reftext if group 2 is
-///   absent)
-static LEADING_INLINE_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
-    #[allow(clippy::unwrap_used)]
-    Regex::new(
-        r#"(?x)
-            ^                           # Start of string
-            \[\[                        # Opening [[
-            ([\p{Alphabetic}_:]         # (1) Anchor ID: first char must be letter, _, or :
-             [\p{Alphabetic}\p{Nd}_\-:.]*)  # Rest of ID: letters, digits, _, -, :, .
-            (?:,\s*([^\]]+))?           # (2) Optional reftext after comma
-            \]\]                        # Closing ]]
-            (.*)                        # (3) Text after the anchor
         "#,
     )
     .unwrap()

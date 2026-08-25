@@ -24,21 +24,6 @@ use crate::{
 };
 
 pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
-    apply_macros_internal(content, parser, false);
-}
-
-pub(crate) fn apply_macros_with_leading_anchor_registered(
-    content: &mut Content<'_>,
-    parser: &Parser,
-) {
-    apply_macros_internal(content, parser, true);
-}
-
-fn apply_macros_internal(
-    content: &mut Content<'_>,
-    parser: &Parser,
-    leading_anchor_registered: bool,
-) {
     let /* mut */ text = content.rendered_html().to_string();
     let found_square_bracket = text.contains('[');
     let found_colon = text.contains(':');
@@ -163,7 +148,6 @@ fn apply_macros_internal(
         let replacer = InlineAnchorReplacer {
             parser,
             source: content.original(),
-            leading_anchor_registered,
             haystack: &haystack,
         };
 
@@ -1715,7 +1699,6 @@ pub(crate) static INLINE_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
 struct InlineAnchorReplacer<'p, 'src, 'h> {
     parser: &'p Parser,
     source: Span<'src>,
-    leading_anchor_registered: bool,
 
     /// The text being scanned, retained so the shorthand form can be tested for
     /// a preceding `[` (see the bibliography-anchor note in `replace_append`).
@@ -1773,7 +1756,6 @@ impl Replacer for InlineAnchorReplacer<'_, '_, '_> {
                 .parser
                 .register_ref(id, reftext.as_deref(), crate::document::RefType::Anchor)
                 .is_err()
-            && !(self.leading_anchor_registered && caps.get(0).is_some_and(|m| m.start() == 0))
         {
             self.parser.record_substitution_warning(
                 self.source,

@@ -547,15 +547,14 @@ fn structural_anchor_reftext<'src>(
 /// [`InlineAnchorReplacer`](crate::content::macros) does (against the
 /// content's own span, not the individual anchor's).
 ///
-/// `leading_anchor_registered` mirrors
-/// [`apply_macros_with_leading_anchor_registered`](super::apply_macros)'s own
-/// parameter: a description-list term pre-registers its own leading
-/// `[[id]]`/`[[id,reftext]]` before running the macros pass (see
-/// `DefinedTerm::substitute` in `blocks::list_item_marker`), so — once this
-/// function is wired in for real at the same call site — passing `true` there
-/// suppresses the duplicate-id warning this function would otherwise raise
-/// for that very same anchor, which sits at byte offset `0` of `source`.
-/// Every other caller passes `false`.
+/// `leading_anchor_registered` says a description-list **term**'s leading
+/// `[[id]]`/`[[id,reftext]]` was already registered, with the rest of the term
+/// as its default reference text — the term's own rule, which runs from the
+/// same tree just before this function (see
+/// `SubstitutionGroup::apply_to_description_list_term`). Passing `true`
+/// suppresses the duplicate-id warning this function would otherwise raise for
+/// that very anchor, which sits at byte offset `0` of `source`. Every other
+/// caller passes `false`.
 ///
 /// Recurses into every container an id-bearing node can be nested inside —
 /// [`Styled`](InlineNode::Styled), [`Ref`](InlineNode::Ref),

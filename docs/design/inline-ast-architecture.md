@@ -6576,6 +6576,59 @@ Each phase is a reviewable unit with a clear exit gate.
   own rather than inheriting this increment's answer, and until it is decided the image family keeps
   freezing the rendered markup and the link family keeps refusing the match.
 
+  *Step 6 landed as (a description-list term joins the tree — the last content registering from the
+  string pipeline):* the increment that re-attached the recognition side effects measured what still
+  registered outside the tree by widening its suppression window to a whole parse and counting the
+  failures: 161, of which the second cause was "the description-list **term** carve-out, the last
+  thing still registering from the string pipeline". This is that carve-out.
+
+  A term ran the substitution steps **directly** — `Passthroughs::extract_from`, five
+  `SubstitutionStep::apply` calls, `restore_to`, `finalize_deferred` — a hand copy of
+  `run_pipeline`'s body written before there was a tree to build. So a term had no tree, its
+  rendering was the string pipeline's rather than a fold, and its constructs registered from the
+  replacers. It runs through
+  [`SubstitutionGroup::apply`](../../parser/src/content/substitution_group.rs) now, under a group
+  spelled out for it: the `normal` order minus its attribute-references step, which already ran
+  during *parsing* so the `::` marker could be recognized at all. The seed, the authoritative fold,
+  the suppression window and the replay all come with that.
+
+  One rule had to move rather than disappear. A leading `[[id]]` / `[[id,reftext]]` in a term takes
+  the **rest of the term** as its default reference text, so `[[cpu]]CPU::` makes `<<cpu>>` display
+  *CPU* — a fact about where the anchor sits in a *term*, not about the node, so it cannot live in
+  [`apply_ref_side_effects`](../../parser/src/content/inline_builder/macros/anchors.rs). It runs
+  from the same tree instead, at the one point where the tree exists and nothing has registered from
+  it yet: between the build and the replay. The replay is then told the anchor is already registered
+  — which is what `leading_anchor_registered`, the parameter the side-effect increment staged and
+  every caller passed `false`, has been waiting for.
+
+  Reading that rule off the tree makes one deliberate difference. The regex it replaces ran *before*
+  the macros step, so a term whose remainder held a macro registered the macro's **source**:
+  `[[x]]image:a.png[]Term::` catalogued `image:a.png[]Term` as the reference text. The fold of the
+  same nodes gives the rendering, which is what every other reference text on this branch is. Two
+  tests pin the rule and that difference; a third pins the property the suppression window newly
+  puts at risk for a term, that a registering construct in one is recorded exactly **once**.
+
+  A second difference is a limitation of *when* a term registers rather than of reading the rule off
+  the tree, and review asked for it to be pinned. The leading anchor is registered while the term is
+  **parsed** — which is what lets a later cross-reference resolve it at all — and that is before any
+  cross-reference *inside* the term has a destination, so a `<<b>>` there contributes its unresolved
+  fallback to the catalogued reference text and keeps it: the entry is never revisited. The tree is
+  the better of the two readings even so. The regex ran before the macros step, so it caught the
+  same reference as escaped *source* (`See &lt;&lt;b&gt;&gt;`), never a link at all; the fold gives
+  `See <a href="#b">[b]</a>`. Neither depends on whether the target is defined before or after the
+  term, and `a_terms_default_reftext_folds_before_nested_references_resolve` pins both directions.
+
+  Three pieces of machinery go with the carve-out: the `LEADING_INLINE_ANCHOR` regex,
+  `apply_macros_with_leading_anchor_registered`, and `InlineAnchorReplacer`'s own
+  `leading_anchor_registered` field and the check it guarded. The string replacers' *registrations*
+  stay — deleting those is what happens when `run_pipeline` leaves the production path — but nothing
+  passes `true` through them any more, so the branch that read it was dead.
+
+  The audit is the cleanest kind of no-op: **49** rows either side, 0 new and 0 closed. A term now
+  goes through the same fold every other content does, and it reproduces the string pipeline's own
+  bytes for every term in the suite. Coverage is diff-neutral on all four changed files. Both halves
+  are falsifiable: dropping the term's leading-anchor registration fails five tests, and passing
+  `false` for the flag while still registering fails two (a doubled duplicate-id warning).
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -7920,6 +7973,26 @@ Each phase is a reviewable unit with a clear exit gate.
        (`image:pause.png[title=*Pause* and Resume]`) rather than a closed deferral, and the slot has
        a third reading neither system offers, so it wants deciding on its own. See the step's own
        "landed as" note above.
+
+     - ✅ **a description-list term joins the tree.** The carve-out the side-effect increment
+       measured and named: a term ran the substitution steps *directly* — a hand copy of
+       `run_pipeline`'s body predating the tree — so it had no tree, its rendering was not a fold,
+       and its constructs registered from the replacers. It goes through
+       [`SubstitutionGroup::apply`](../../parser/src/content/substitution_group.rs) now, under the
+       `normal` order minus its attribute-references step (which already ran during *parsing*, so
+       the `::` marker could be recognized). The term's one rule of its own — a leading `[[id]]`
+       takes the **rest of the term** as its default reference text — runs from the same tree,
+       between the build and the replay, which is what finally passes `leading_anchor_registered`
+       its `true`. Reading it off the tree makes one deliberate difference: the default reference
+       text is now the *rendering* of the rest, where the pre-macros regex catalogued a macro's
+       source (`[[x]]image:a.png[]Term::`). A term also registers while it is *parsed*, so a
+       cross-reference inside it contributes its unresolved fallback to the catalogued reference
+       text and keeps it — a limitation of *when*, not of the tree, and still the better of the two
+       readings (the regex caught the same reference as escaped source, never a link).
+       `LEADING_INLINE_ANCHOR`,
+       `apply_macros_with_leading_anchor_registered` and `InlineAnchorReplacer`'s own flag go with
+       it. Audit: 49 rows either side, 0 new, 0 closed; coverage diff-neutral on all four files.
+       See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

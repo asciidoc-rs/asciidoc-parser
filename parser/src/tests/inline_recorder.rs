@@ -2591,6 +2591,146 @@ fn footnote_xref_mirror_leaves_a_block_level_reference_alone() {
     assert_eq!(resolved_href_in(content.inlines()), None);
 }
 
+#[test]
+fn a_description_list_term_carries_an_inline_tree() {
+    // A description-list term used to run the substitution steps directly,
+    // which left it the one content with no tree at all — and, with the
+    // recognition side effects now replayed from the tree, the last content
+    // still registering from the string pipeline. It runs through
+    // `SubstitutionGroup::apply_to_description_list_term` now, so it has both.
+    let mut parser = Parser::default();
+    let doc = parser.parse("[[cpu]]*CPU*:: The brain of the computer.");
+
+    let tree = description_term_tree(&doc);
+
+    assert!(
+        matches!(tree.first(), Some(InlineNode::Anchor(anchor)) if anchor.id.as_ref() == "cpu"),
+        "expected the term's leading anchor as a node: {tree:?}"
+    );
+
+    assert!(
+        matches!(tree.get(1), Some(InlineNode::Styled(_))),
+        "expected the term's formatting span as a node: {tree:?}"
+    );
+}
+
+#[test]
+fn a_term_registers_its_leading_anchor_from_the_tree() {
+    // The term's own rule — a leading `[[id]]` takes the **rest of the term**
+    // as its default reference text — now runs from the tree, between the
+    // build and the replay (see
+    // `SubstitutionGroup::apply_to_description_list_term`). An explicit
+    // `[[id,reftext]]` still wins over the default.
+    let mut parser = Parser::default();
+    let doc = parser.parse("[[cpu]]CPU:: The brain.\n\n[[gpu,Graphics]]GPU:: The other one.");
+
+    assert_eq!(
+        doc.catalog().get_ref("cpu").unwrap().reftext.as_deref(),
+        Some("CPU")
+    );
+
+    assert_eq!(
+        doc.catalog().get_ref("gpu").unwrap().reftext.as_deref(),
+        Some("Graphics")
+    );
+}
+
+#[test]
+fn a_terms_default_reftext_is_the_rendering_of_the_rest() {
+    // The one deliberate difference reading that rule off the tree makes. The
+    // regex it replaces ran *before* the macros step, so a term whose
+    // remainder held a macro registered the macro's **source** as the
+    // reference text; the fold of the same nodes gives the rendering, which is
+    // what every other reference text on this branch is.
+    let mut parser = Parser::default();
+    let doc = parser.parse("[[x]]image:a.png[]Term:: d");
+
+    assert_eq!(
+        doc.catalog().get_ref("x").unwrap().reftext.as_deref(),
+        Some(r#"<span class="image"><img src="a.png" alt="a"></span>Term"#)
+    );
+}
+
+#[test]
+fn a_term_performs_each_recognition_side_effect_exactly_once() {
+    // What the replay has to get right for a term specifically: the string
+    // pipeline's own registrations are suppressed for the term's pass now, so
+    // a construct that registers must be recorded once by the replay — not
+    // twice, and not zero times.
+    let mut parser = Parser::default().with_catalog_assets(true);
+    let doc = parser.parse("image:a.png[]Term:: https://example.org[Link]");
+
+    let catalog = doc.catalog();
+
+    assert_eq!(
+        catalog
+            .images
+            .iter()
+            .map(|i| i.target.as_str())
+            .collect::<Vec<_>>(),
+        vec!["a.png"]
+    );
+
+    // The description (not the term) carries the link, which registers through
+    // the ordinary content path — so the two halves of the item agree.
+    assert_eq!(
+        catalog.links.iter().map(|l| l.as_str()).collect::<Vec<_>>(),
+        vec!["https://example.org"]
+    );
+}
+
+#[test]
+fn a_terms_default_reftext_folds_before_nested_references_resolve() {
+    // A term's leading anchor is registered while the term is *parsed*, which
+    // is what lets a later cross-reference resolve it at all — and that is
+    // before any cross-reference *inside* the term has a destination. So a
+    // `<<b>>` in the term contributes its **unresolved fallback** to the
+    // catalogued reference text, and keeps it: the entry is never revisited.
+    //
+    // This is a limitation of registering at parse time, not of reading the
+    // reftext from the tree, and the tree is the better of the two readings.
+    // The regex this increment replaced ran before the macros step, so it
+    // caught the reference as escaped *source* (`See &lt;&lt;b&gt;&gt;`) —
+    // never a link at all. Both are unchanged by whether the target is
+    // defined before or after the term.
+    for source in [
+        "[[a]]See <<b>>:: d\n\n[[b]]Target:: e\n\nRef: <<a>>.",
+        "[[b]]Target:: e\n\n[[a]]See <<b>>:: d\n\nRef: <<a>>.",
+    ] {
+        let mut parser = Parser::default();
+        let doc = parser.parse(source);
+
+        assert_eq!(
+            doc.catalog().get_ref("a").unwrap().reftext.as_deref(),
+            Some(r##"See <a href="#b">[b]</a>"##),
+            "the term's catalogued reftext regressed for {source:?}"
+        );
+
+        let rendered = collect_rendered(&doc);
+        assert!(
+            rendered
+                .iter()
+                .any(|s| s.contains(r##"<a href="#a">See [b]</a>"##)),
+            "the reference to the term regressed: {rendered:?}"
+        );
+    }
+}
+
+/// The inline tree of the first description-list term in `doc`.
+fn description_term_tree<'a>(doc: &'a crate::Document<'a>) -> Vec<InlineNode<'a>> {
+    use crate::blocks::{Block, FindBlocks, ListItemMarker};
+
+    for block in doc.descendant_blocks() {
+        if let Block::ListItem(item) = block
+            && let ListItemMarker::DefinedTerm { term, .. } = item.list_item_marker()
+        {
+            return term.inlines().to_vec();
+        }
+    }
+
+    panic!("no description-list term in the document");
+}
+
 /// One resolved destination, for the footnote-embedded list.
 fn fixed_destination() -> Vec<Option<crate::parser::ResolvedReference>> {
     vec![Some(crate::parser::ResolvedReference::new(
