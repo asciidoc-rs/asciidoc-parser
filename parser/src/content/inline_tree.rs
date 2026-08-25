@@ -857,6 +857,9 @@ fn node_of<'src>(rec: &Rec, span: Span<'src>) -> InlineNode<'src> {
                 roles: roles.iter().cloned().map(CowStr::from).collect(),
                 attrs: None,
                 children: to_inline(children, span),
+                // The Strategy-A recorder recovers structure from rendered
+                // output, so it has no extraction-pass identity to carry.
+                passthrough: None,
                 location: span,
             }),
 
@@ -890,6 +893,8 @@ fn node_of<'src>(rec: &Rec, span: Span<'src>) -> InlineNode<'src> {
                 InlineNode::Stem(Stem {
                     notation: *notation,
                     value: CowStr::from(value),
+                    subs: crate::content::SubstitutionGroup::Stem,
+                    source_text: None,
                     location: span,
                 })
             }

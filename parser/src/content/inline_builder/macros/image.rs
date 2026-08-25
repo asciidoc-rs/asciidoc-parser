@@ -2648,6 +2648,8 @@ mod tests {
             InlineNode::Stem(crate::inlines::Stem {
                 notation: crate::inlines::StemNotation::AsciiMath,
                 value: CowStr::from("x"),
+                subs: crate::content::SubstitutionGroup::Stem,
+                source_text: None,
                 location: root,
             }),
         ];

@@ -12,7 +12,7 @@ use super::{
 use crate::{
     Parser, Span,
     content::{Content, INLINE_PASS, INLINE_PASS_MACRO, SubstitutionGroup},
-    inlines::{InlineNode, RawForm, RawOrigin, SpanForm, StyleVariant, Styled},
+    inlines::{InlineNode, PassthroughWrapper, RawForm, RawOrigin, SpanForm, StyleVariant, Styled},
     strings::CowStr,
 };
 
@@ -986,6 +986,18 @@ fn build_attrlisted_passthrough_node<'src>(
         StyleVariant::Unquoted
     };
 
+    // The wrapper is what the extraction pass records as one entry, so the
+    // record rides here. Under the `x-` compatibility marker the body goes
+    // through the **normal** substitutions as a subtree, which is both why the
+    // group is `Normal` there and why no child could carry it.
+    let subs = if old_behavior {
+        SubstitutionGroup::Normal
+    } else if boundary == "+++" {
+        SubstitutionGroup::None
+    } else {
+        SubstitutionGroup::Verbatim
+    };
+
     let children = if old_behavior {
         apply_normal_subs(body_span, parser)
     } else {
@@ -1026,6 +1038,10 @@ fn build_attrlisted_passthrough_node<'src>(
         roles,
         attrs,
         children,
+        passthrough: Some(PassthroughWrapper {
+            subs,
+            text: body_span.data().to_string(),
+        }),
         location,
     })
 }
@@ -1087,6 +1103,14 @@ fn build_bare_attrlisted_passthrough_node<'src>(
         StyleVariant::Unquoted
     };
 
+    // As above: the wrapper carries the record, and the compat marker's
+    // subtree body is why it cannot live on a child.
+    let subs = if old_behavior && !is_backtick {
+        SubstitutionGroup::Normal
+    } else {
+        SubstitutionGroup::Verbatim
+    };
+
     let children = if old_behavior && !is_backtick {
         apply_normal_subs(body_span, parser)
     } else {
@@ -1112,6 +1136,10 @@ fn build_bare_attrlisted_passthrough_node<'src>(
         roles,
         attrs,
         children,
+        passthrough: Some(PassthroughWrapper {
+            subs,
+            text: body_span.data().to_string(),
+        }),
         location,
     })
 }
@@ -1240,6 +1268,7 @@ mod tests {
                 roles: vec![],
                 attrs: None,
                 children: vec![],
+                passthrough: None,
                 location,
             }),
             InlineNode::Text {
@@ -2363,6 +2392,7 @@ mod tests {
                 roles: vec![],
                 attrs: None,
                 children: vec![],
+                passthrough: None,
                 location: source.slice(8..9),
             }),
             InlineNode::Text {
@@ -2773,6 +2803,7 @@ mod tests {
                 roles: vec![],
                 attrs: None,
                 children: vec![],
+                passthrough: None,
                 location: source.slice(1..2),
             }),
             InlineNode::Text {

@@ -244,11 +244,15 @@ fn build_stem_node<'src>(
         return None;
     }
 
-    let value = stem_expression_value(&emitted, notation, &subs, parser);
+    let (value, source) = stem_expression_value(&emitted, notation, &subs, parser);
 
     Some(InlineNode::Stem(Stem {
         notation,
+        // The author's expression is recorded only where the group changed it,
+        // the same rule `RawOrigin::Passthrough`'s own `source_text` follows.
+        source_text: (source != value).then_some(source),
         value: CowStr::from(value),
+        subs,
         location,
     }))
 }
@@ -281,7 +285,7 @@ fn stem_expression_value(
     notation: StemNotation,
     subs: &SubstitutionGroup,
     parser: &Parser,
-) -> String {
+) -> (String, String) {
     if let [InlineNode::Text { value: text, .. }] = emitted {
         let mut expr = text.to_string();
 
@@ -297,10 +301,11 @@ fn stem_expression_value(
             expr = expr[1..expr.len() - 1].to_string();
         }
 
-        return passthrough_text(&expr, subs, parser);
+        return (passthrough_text(&expr, subs, parser), expr);
     }
 
     let mut value = String::new();
+    let mut source = String::new();
 
     for node in emitted {
         match node {
@@ -312,10 +317,12 @@ fn stem_expression_value(
                 }
 
                 value.push_str(&passthrough_text(&text, subs, parser));
+                source.push_str(&text);
             }
 
             InlineNode::Raw { value: raw, .. } => {
                 value.push_str(raw);
+                source.push_str(raw);
             }
 
             // Unreachable: `apply_stem` runs immediately after
@@ -325,7 +332,7 @@ fn stem_expression_value(
         }
     }
 
-    value
+    (value, source)
 }
 
 #[cfg(test)]

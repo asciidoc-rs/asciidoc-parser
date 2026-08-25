@@ -6857,6 +6857,81 @@ Each phase is a reviewable unit with a clear exit gate.
   the bare `+…+` form is extracted in a *second* pass, so the two orders are not equal by
   construction and the view's own increment owes that its own corpus.
 
+
+  *Step 6 landed as (the last two passthrough forms record their own):* the increment before this
+  one closed five of the seven forms and named the two it could not: an inline **STEM** body, which
+  is a [`Stem`](../../parser/src/inlines/stem.rs) node rather than a `Raw` one, and the `x-`
+  **compatibility marker**, whose body goes through the normal substitutions as a subtree. Both now
+  record, so every form the extraction pass makes an entry for has one in the tree — with a single
+  exception review found, recorded at the end of this note.
+
+  Neither was recoverable, and measuring said so rather than assuming it. A `Stem` node carried
+  **neither** fact: its group varies by spelling (`Stem` for a bare macro, `Custom([…])` for
+  `stem:c,q[…]`, `Normal` for `stem:n[…]`) where the node kind alone would imply one answer, and
+  its `value` is already-substituted text (`p &lt; q`) where
+  [`Passthrough::text`](../../parser/src/content/passthroughs.rs) returns the author's `p < q`. It
+  gains the same `subs` / `source_text` pair `RawOrigin::Passthrough` took, spelled out rather than
+  shared: the two node kinds are far apart and a common struct would have reshaped a public type one
+  increment after landing it.
+
+  The compatibility marker turned out to be **one spelling of three**, which is what made the fix
+  narrow. ``[x-]`tick` `` and `[x-]+++raw+++` already recorded correctly — their bodies are `Raw`
+  leaves — and only `[x-]++attr++` has no leaf at all, its body being a subtree. So the record goes
+  where the *entry* is:
+  [`Styled`](../../parser/src/inlines/styled.rs) gains one
+  `Option<`[`PassthroughWrapper`](../../parser/src/inlines/styled.rs)`>`, `None` for every ordinary
+  span, `Some` for the wrapper the extraction pass builds. One `Option` rather than two fields,
+  because the two facts are meaningless apart and absent from the overwhelming majority of spans.
+
+  Marking the wrapper for *all three* spellings rather than only the broken one is the choice worth
+  recording, because it creates an invariant a walk can get wrong: two of the three also carry the
+  same pair on a `Raw` leaf **inside** the wrapper, so a walk that read the marker *and* descended
+  into it would report them twice where the pass records once.
+  `a_marked_wrapper_is_one_entry_not_two` pins it over all three prefixed spellings —
+  deliberately including the two that *would* double-count, since the one that forced the marker
+  has no inner leaf and would pass either way.
+
+  *The order is now a decision, not an accident.* The previous increment observed document order and
+  extraction order to be equal for every fixture and warned that they are not equal by construction.
+  They are not: the bare `+…+` form is pulled out in a second pass and STEM in its own, so
+  `+++A+++ and stem:[B] and [x-]++C++ and ++D++` extracts as `A, C, D, B` where the author wrote
+  `A, B, C, D`. The view will return **document order** — the tree's own — which is a deliberate,
+  documented behavior change to a `pub` method whose only consumers today are its own tests, and
+  which costs nothing that survives the cutover, since extraction order is an artifact of the
+  two-pass implementation step 6 deletes. The corpus therefore compares the two sides as
+  **multisets** — its subject is the facts — and `the_view_returns_document_order` pins the order
+  from both ends: the tree's list is exactly the source's, and it is *not* the pass's, so a fixture
+  that stopped distinguishing them fails rather than quietly weakening.
+
+  Audit: 36 rows either side, 0 new and 0 closed — no rendered byte moves. Coverage diff-neutral on
+  all three changed files. Three claims, three sabotages: dropping a `Stem`'s `source_text`,
+  reporting its group as the bare-macro default, and descending into a marked wrapper each fail the
+  corpus. (The first sabotage initially appeared to pass and did not: `source_text: None` leaves the
+  computed source unused, which `#![deny(warnings)]` makes a *compile* error, so no test ran — a
+  reminder that "the suite did not fail" and "the suite disagreed" are different readings of the
+  same exit code.)
+
+  *The one shape still short of an entry,* which review found and the corpus had a blind spot for:
+  a STEM expression **embedding** an already-extracted passthrough. The pass records **two** entries
+  there — the inner body, and the STEM itself, whose own text keeps the `\u{96}0\u{97}` sentinel
+  where that body was lifted out — while
+  [`stem_expression_value`](../../parser/src/content/inline_builder/stem_step.rs) splices each inner
+  body back in, so the tree keeps one `Stem` holding the *restored* text and the inner leaf is gone.
+  Under an explicit substitution list it is sharper still: the expression is not local to each run,
+  so `apply_stem` builds no node at all and the tree records only the **inner** passthrough. This is
+  a limitation rather than a regression — a `Stem` carried neither fact before this increment, so
+  the outer entry was unrecorded either way — and
+  `a_stem_expression_embedding_a_passthrough_records_one_entry_of_two` pins all of it, shapes and
+  counts. Closing it most likely means keeping the inner nodes as the `Stem`'s **children** instead
+  of folding them into its value, which is a structural change and its own increment.
+
+  *What the view still needs:* the walk, and the nested-STEM shape above. Every other form records;
+  what remains is
+  `Content::passthroughs()` returning a view built from the tree rather than a field the extraction
+  pass fills, and — because this repository's `CHANGELOG.md` is generated by `release-plz` from
+  commit messages rather than hand-edited — that increment's own commit message is what has to carry
+  the ordering change into the release notes.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -8290,6 +8365,30 @@ Each phase is a reviewable unit with a clear exit gate.
        Two forms record nothing where the pass records an entry (an inline STEM body, and the `x-`
        compatibility marker's subtree), pinned by their own test. Audit: 36 rows either side, 0 new
        and 0 closed; coverage diff-neutral. See the step's own "landed as" note above.
+
+     - ✅ **prep (the last two passthrough forms record their own).** The two the increment above
+       named: an inline **STEM** body (a [`Stem`](../../parser/src/inlines/stem.rs) node, not a
+       `Raw` one) and the `x-` **compatibility marker** (whose body is a subtree). A `Stem` carried
+       *neither* fact — its group varies by spelling (`Stem` / `Custom([…])` / `Normal`) and its
+       `value` is already-substituted where `text()` is the author's — so it gains the same
+       `subs`/`source_text` pair, spelled out rather than shared. The marker turned out to be one
+       spelling of three: ``[x-]`tick` `` and `[x-]+++raw+++` already recorded via their `Raw`
+       leaves, and only `[x-]++attr++` has none, so
+       [`Styled`](../../parser/src/inlines/styled.rs) gains one
+       `Option<`[`PassthroughWrapper`](../../parser/src/inlines/styled.rs)`>` — `None` for every
+       ordinary span — marking the wrapper the extraction pass builds, which is what it records as
+       one entry. Marking all three spellings creates the invariant that a walk must **not** descend
+       into a marked wrapper, pinned over the two that would otherwise double-count. The **order**
+       is now a decided difference rather than an observed coincidence: extraction order is a
+       two-pass artifact, so the view will return document order, and the corpus compares facts as
+       multisets while `the_view_returns_document_order` pins the order from both ends. Review found
+       the one shape still short of an entry, which the corpus had a blind spot for: a STEM
+       expression **embedding** a passthrough, where the pass records two entries (the inner body,
+       and the STEM whose own text keeps the sentinel) and the tree records one — or, under an
+       explicit substitution list, only the inner one, `apply_stem` building no node at all. A
+       limitation rather than a regression, since a `Stem` carried neither fact before; pinned by
+       its own test and owed to the view's increment. Audit: 36 rows either side, 0 new and 0
+       closed; coverage diff-neutral on all three files. See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

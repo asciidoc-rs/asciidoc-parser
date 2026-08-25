@@ -696,6 +696,7 @@ mod tests {
                 value: CowStr::from(loc.data()),
                 location: loc,
             }],
+            passthrough: None,
             location: loc,
         });
 
@@ -949,6 +950,7 @@ mod tests {
                 roles: vec![],
                 attrs: None,
                 children: child(),
+                passthrough: None,
                 location: loc,
             }),
             InlineNode::Ref(Ref {
