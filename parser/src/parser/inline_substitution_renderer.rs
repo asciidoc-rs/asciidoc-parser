@@ -1246,15 +1246,26 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             // handler), so escape the quote delimiter here — mirroring the
             // image `alt`/`title` handling.
             target = encode_attribute_value(params.target.clone()),
+            // The `id` and each role are author-supplied for the same reason
+            // the `target` is, and reach this attribute by the same route, so
+            // they take the same escape — as `render_xref`'s own roles and the
+            // icon branch's `class` fragments already do.
             id = if let Some(id) = id {
-                format!(r#" id="{id}""#)
+                format!(r#" id="{id}""#, id = encode_attribute_value(id.to_owned()))
             } else {
                 "".to_owned()
             },
             class = if roles.is_empty() {
                 "".to_owned()
             } else {
-                format!(r#" class="{roles}""#, roles = roles.join(" "))
+                format!(
+                    r#" class="{roles}""#,
+                    roles = roles
+                        .iter()
+                        .map(|role| encode_attribute_value((*role).to_owned()))
+                        .collect::<Vec<String>>()
+                        .join(" ")
+                )
             },
             // Mirrors Asciidoctor's HTML5 converter: `title="#{node.attr 'title'}"`
             // is emitted (after the class) when the link carries a `title`
@@ -1604,7 +1615,19 @@ fn render_icon_or_image(
     roles.insert(0, type_);
 
     dest.push_str(r#"<span class=""#);
-    dest.push_str(&roles.join(" "));
+
+    // The wrapper's own `type_` is a literal, but every other role here — an
+    // attribute-list role, and a `float=` value — is author-supplied and takes
+    // the same quote escape the `href` above and the icon branch's own `class`
+    // fragments take.
+    dest.push_str(
+        &roles
+            .iter()
+            .map(|role| encode_attribute_value((*role).to_owned()))
+            .collect::<Vec<String>>()
+            .join(" "),
+    );
+
     dest.push_str(r#"">"#);
     dest.push_str(&img);
     dest.push_str("</span>");
@@ -1985,7 +2008,15 @@ fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&str>) -> Strin
             "".to_string()
         };
 
-        format!(r#" target="{window}"{rel_noopener}"#)
+        // The `window` is author-supplied (a `window=` attribute, or the `^`
+        // suffix's hard-coded `_blank`), so the quote delimiter is escaped
+        // here for the same reason the `href` and `title` escape it. The
+        // `_blank` comparison above reads the value as written, before the
+        // escape, so a `rel="noopener"` decision is unaffected.
+        format!(
+            r#" target="{window}"{rel_noopener}"#,
+            window = encode_attribute_value(window.to_owned())
+        )
     } else if let Some(rel) = rel {
         format!(r#" rel="{rel}""#)
     } else {

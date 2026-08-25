@@ -7,10 +7,7 @@
 use super::computed_value_children;
 use super::{
     ComputedSpecials, MacroMatch, MacroMatchKind,
-    image::{
-        MaskedPiece, Tokened, range_is_restorable, range_is_verbatim, restorable_body,
-        tokened_bracket,
-    },
+    image::{Tokened, range_is_restorable, range_is_verbatim, restorable_body, tokened_bracket},
     macro_text_children, rebuild_macro_level, restored_value_children, tokened_split_agrees,
 };
 use crate::{
@@ -115,14 +112,13 @@ use crate::{
 /// with it a **bare** link's shown text (a slice of the target's own range)
 /// and the `<url>` form's whole interior (see [`build_angle_link_node`]). An
 /// **attribute-list text** is computed too — its display text comes back from
-/// an [`Attrlist`] parse rather than from a range — so [`text_attrlist`] keeps
-/// the same gate there for a *rendered* span, whose bytes exist only at fold
-/// time: a placeholder inside a parsed value has no node it can be mapped back
-/// to. A **masked** construct is the one such piece that does, its body being
-/// known at build time: [`text_attrlist`] tokens it through the parse and
-/// splices the node back into the children afterwards
-/// ([`restored_value_children`]). This is the third family to take that lift,
-/// after the cross-reference one (`xref::find_xref_matches`) and the
+/// an [`Attrlist`] parse rather than from a range — so [`text_attrlist`] gives
+/// every opaque piece there an index-keyed token instead: a **masked**
+/// construct, whose body is known at build time, and a **rendered** span,
+/// whose markup is its build-time fold. Each token comes back as the node
+/// itself in the display text ([`restored_value_children`]) and as those bytes
+/// in a slot the renderer writes out. This is the third family to take that
+/// lift, after the cross-reference one (`xref::find_xref_matches`) and the
 /// `link:`/`mailto:` macro ([`find_link_macro_matches`]).
 ///
 /// What the admission cannot do is make the *recognition* agree in every case,
@@ -374,10 +370,11 @@ fn build_inline_link_node<'src>(
     // admitted — see [`inline_link_level`]'s own rendered-span note. Its
     // closing `]` needs no gate of its own: that byte is literal, and no atomic
     // piece — a placeholder, or an entity delimited by `&` and `;` — can supply
-    // it. (A text carrying an attribute list has its own gate inside
+    // it. (A text carrying an attribute list is handled inside
     // `text_attrlist`, since its display text comes back from a *parse*
-    // rather than from a range: a masked construct is tokened through that
-    // parse and restored after it, a rendered span still deferred.)
+    // rather than from a range: every opaque piece is tokened through that
+    // parse, and each token is restored afterwards as the node itself in the
+    // display text or as its bytes in a slot the renderer writes out.)
     //
     // An expanded attribute value and an escaped special are admitted
     // throughout, since every value read here comes off the match string —
@@ -918,14 +915,14 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 /// piece's own node whole into them — so the text is carried *structurally*,
 /// and the fold re-renders exactly the markup the string replacer captured
 /// there. The **target** stays gated, since it is a value this pass computes
-/// off the match string. So does an **attribute-list text**, for the same
-/// reason: its display text comes back from an [`Attrlist`] parse rather than
-/// from a range, and a placeholder inside a *parsed* value has no node it can
-/// be mapped back to — unless it stands for a **masked** construct, whose body
-/// is known at build time, which [`text_attrlist`] tokens through the parse and
-/// splices back into the children afterwards ([`restored_value_children`]).
-/// This is the second family to take that lift, after the cross-reference one
-/// (see `xref::find_xref_matches`).
+/// off the match string. An **attribute-list text** takes a different route
+/// again: its display text comes back from an [`Attrlist`] parse rather than
+/// from a range, so [`text_attrlist`] gives every opaque piece there an
+/// index-keyed token before the parse and restores each afterwards — as the
+/// node itself in the display text ([`restored_value_children`]), and as its
+/// bytes (a masked body, or a rendered span's build-time fold) in a slot the
+/// renderer writes out. This is the second family to take that lift, after the
+/// cross-reference one (see `xref::find_xref_matches`).
 ///
 /// What the admission cannot do is make the *recognition* agree in every case,
 /// because the string replacer matches over the markup itself where this
@@ -1055,10 +1052,9 @@ fn find_link_macro_matches<'src>(
         // having it re-derived from `location` — so a *wholly* expanded macro
         // (`:m: link:index.html[Docs]`, then `{m}`) is recognized, with only
         // its `location` taking design §4.4's coarse span. A text carrying an
-        // attribute list has its own gate inside `text_attrlist`, since its
-        // display text comes back from a *parse*: a masked construct is
-        // tokened through that parse and restored after it, a rendered span
-        // still deferred.
+        // attribute list is handled inside `text_attrlist`, since its display
+        // text comes back from a *parse*: every opaque piece is tokened
+        // through that parse and restored after it.
         if let Some(target) = caps.get(3)
             && !range_is_restorable(nodes, pieces, &(target.start()..target.end()))
         {
@@ -1544,40 +1540,6 @@ struct TextAttrlist<'src> {
     restores: Vec<InlineNode<'src>>,
 }
 
-/// Whether any [`rendered`](MaskedPiece::rendered) piece's token came back
-/// from the parse in a slot other than the **first positional** attribute —
-/// the one slot [`text_attrlist`]'s caller carries structurally.
-///
-/// Every other slot is a value `render_link` writes out (an `id`, a `title`,
-/// a `role`, a `window`, an option), where a body frozen with the parser's own
-/// renderer would put the built-in backend's markup in a custom backend's
-/// output. A *masked* piece is exempt: its body is what the string pipeline
-/// itself splices, so it is faithful wherever it lands.
-fn rendered_token_escaped_the_display_text(
-    attrs: &Attrlist<'_>,
-    masked: &[MaskedPiece<'_, '_>],
-) -> bool {
-    let rendered: Vec<String> = masked
-        .iter()
-        .enumerate()
-        .filter(|(_, piece)| piece.rendered)
-        .map(|(n, _)| format!("\u{96}{n}\u{97}"))
-        .collect();
-
-    attrs.attributes().enumerate().any(|(index, attribute)| {
-        // `attributes()` yields every attribute in order, so index 0 is the
-        // first positional one whenever the list has any positional attribute
-        // at all; a named attribute there is not a display text and is checked
-        // like the rest.
-        let is_display_text = index == 0 && attribute.name().is_none();
-
-        !is_display_text
-            && rendered
-                .iter()
-                .any(|token| attribute.value().contains(token.as_str()))
-    })
-}
-
 /// Parses a link's bracketed **display text** as the [`Attrlist`]`<'src>` its
 /// node carries, mirroring what the string replacers parse: a
 /// newline-normalized copy of the (pre-`\]`-unescape) bracketed text, joined
@@ -1623,6 +1585,30 @@ fn rendered_token_escaped_the_display_text(
 /// [`restored_value_children`]) rather than as bytes the fold would escape a
 /// second time.
 ///
+/// A **rendered** piece — a span the quotes step made, an
+/// earlier-recognized macro node — is admitted the same way, in every slot,
+/// and its token's body is the *build-time fold* with the parser's own
+/// renderer ([`MaskedPiece`](super::image::MaskedPiece)). Those are the bytes
+/// the string replacer reads out of its own already-rendered haystack there, so
+/// a slot `render_link` writes out reproduces the string pipeline's answer
+/// (`link:x[Docs,title=*Pause*]` keeps its `<strong>`), which is the whole
+/// point: a frozen body is what makes the markup an author wrote survive into
+/// the attribute. Freezing costs one thing — a *later* fold with some other
+/// renderer sees the parse-time renderer's markup in those slots — and that is
+/// the same trade the image family's bracket makes for every value it holds
+/// ([`bracket_attrlist`](super::image)), so the three
+/// [`Attrlist`]-bearing families now agree on it. It is safe because a value
+/// reaching an attribute is escaped for the `"` delimiter where it lands
+/// (`encode_attribute_value`, applied by `render_link` to every slot it
+/// writes), so markup carried into a `title`/`class`/`id`/`target` cannot
+/// close the attribute it sits in — the guarantee the string pipeline cannot
+/// make, since it splices a passthrough's body into the *finished* string
+/// after every escape has run (asciidoctor#2661).
+///
+/// The **display text** is exempt from the freeze rather than from the escape:
+/// it becomes the node's children, so the fold renders each piece itself,
+/// with whatever renderer the fold is running.
+///
 /// `pre_restore` names the positional slots whose value the caller reads
 /// **before** that restore, and a token reaching one of them defers the whole
 /// match. There is exactly one such caller: a `mailto:`'s comma list, whose
@@ -1636,14 +1622,9 @@ fn rendered_token_escaped_the_display_text(
 /// rather than per family so that a masked piece in the display text beside a
 /// plain subject still restores.
 ///
-/// Returns `None` — the one shape still deferred outright — when the text
-/// crosses an **opaque** piece (a rendered span, an earlier-recognized macro
-/// node). That is not a bytes problem the match string can solve:
-/// [`build_match_string`] stands such a piece in as one [`SPAN_PLACEHOLDER`]
-/// where the string replacer's haystack holds its markup, and — unlike a
-/// masked construct, whose body is known at build time — its bytes exist only
-/// at fold time, so there is nothing to token (see [`link_macro_level`]'s own
-/// rendered-span note).
+/// Returns `None` for those two shapes alone: a `pre_restore` slot holding a
+/// token, and a list whose two parses disagree about the match's own extent
+/// ([`tokened_split_agrees`]).
 fn text_attrlist<'src>(
     raw_text: &str,
     text_range: std::ops::Range<usize>,
@@ -1683,27 +1664,14 @@ fn text_attrlist<'src>(
 
     let (text, attrs) = extract_attributes_from_text(Span::new(&tokened), parser, None);
 
-    // Two things have to hold before a token may stand for a **rendered**
-    // piece, and they are independent.
-    //
-    // First the *split* must land where the string replacer's own parse of the
+    // One thing has to hold before a token may stand for a **rendered** piece:
+    // the *split* must land where the string replacer's own parse of the
     // markup lands. A token carries none of the `,` / `=` / `"` the split
     // reads, and the replacer's markup may (`link:x[a *b, c* d,role=hl]`), so
     // the two are compared parse against parse — see [`tokened_split_agrees`].
-    //
-    // Then the value must be one nothing emits. A rendered piece's body is
-    // frozen with the parser's own renderer (see [`MaskedPiece::rendered`]),
-    // which is faithful for the display text — it becomes the node's children,
-    // carrying each piece's own node — and wrong for every other slot, each of
-    // which `render_link` writes out. This is the same per-**slot** boundary
-    // `pre_restore` below draws.
     let carried: Vec<InlineNode<'src>> = masked.iter().map(|piece| piece.node.clone()).collect();
 
     if !tokened_split_agrees(&tokened, &carried, parser) {
-        return None;
-    }
-
-    if rendered_token_escaped_the_display_text(&attrs, &masked) {
         return None;
     }
 
@@ -5185,24 +5153,86 @@ mod tests {
     }
 
     #[test]
-    fn a_span_in_a_rendered_attribute_defers_the_match() {
-        // The boundary this does *not* move, drawn per **slot**. A rendered
-        // piece's body is frozen with the parser's own renderer, which is
-        // faithful only for a value nothing emits — the display text, which
-        // becomes the node's children and carries each piece's own node. Every
-        // other slot is one `render_link` writes out, where the frozen markup
-        // would be the built-in backend's in a custom backend's output, so a
-        // span there defers the whole match. The split-agreement check is the
-        // other half, and defers for a different reason: see the fixtures
-        // below.
+    fn a_span_in_a_rendered_attribute_keeps_its_markup() {
+        // The boundary this family used to draw per **slot**, now gone. A
+        // rendered piece's body is the build-time fold with the parser's own
+        // renderer — the very bytes the string replacer reads out of its own
+        // already-rendered haystack — so a slot `render_link` writes out
+        // reproduces the string pipeline's answer rather than deferring the
+        // whole macro to literal text. This is the image family's own bracket
+        // rule (`bracket_attrlist`), which the three `Attrlist`-bearing
+        // families now share.
         for source in [
+            // The three shapes that used to defer, one per family.
             "link:index.html[x,role=*b*]",
             "link:index.html[x,title=*b*]",
             "https://example.org[x,role=*b*]",
-            // And the other half of the two checks: a span whose own markup
-            // carries a character the split reads, so the string replacer's
-            // list divides where the token cannot — the match's very extent
-            // differs, and it is deferred rather than recognized.
+            // Every other slot `render_link` writes out.
+            "link:index.html[x,id=*b*]",
+            "link:index.html[x,window=*b*]",
+            "link:index.html[x,opts=*b*]",
+            // The `mailto:` spelling, whose own comma list has slots of its
+            // own beside the named ones.
+            "mailto:a@example.org[x,title=*b*]",
+            // A span in a slot *and* in the display text at once — the two
+            // readings coexist: the text carries its node structurally, the
+            // slot takes the frozen bytes.
+            "link:index.html[*a*,role=*b*]",
+            // Other span kinds, and a span the slot only partly holds.
+            "link:index.html[x,title=`code` here]",
+            "link:index.html[x,title=a [.r]#b# c]",
+        ] {
+            assert_eq!(
+                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                golden_macros(source),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+
+            // Not vacuous: each fixture really is a link now, and the slot
+            // really does carry the span's markup.
+            let nodes = build_src(Span::new(source));
+
+            assert!(
+                nodes.iter().any(|n| matches!(n, InlineNode::Ref(_))),
+                "the match must be recognized: {nodes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_rendered_slot_cannot_break_out_of_its_attribute() {
+        // What makes carrying fold-time markup into a slot safe: the value is
+        // escaped for the `"` delimiter where it lands, so a span whose own
+        // markup carries a quote cannot close the attribute it sits in. The
+        // string pipeline reaches the same bytes here because it renders from
+        // the same values; what it cannot make inert is a *passthrough*, whose
+        // body it splices into the finished string after every escape has run
+        // (asciidoctor#2661) — the deliberate divergence its own test pins.
+        for (source, expected) in [
+            (
+                r#"link:index.html[x,title=[.r"z]#b#]"#,
+                r#"title="<span class=&quot;r&quot;z&quot;>b</span>""#,
+            ),
+            (
+                r#"link:index.html[x,role=[.r]#b#]"#,
+                r#"class="<span class=&quot;r&quot;>b</span>""#,
+            ),
+        ] {
+            let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+
+            assert!(folded.contains(expected), "{source:?}: {folded:?}");
+            assert_eq!(folded, golden_macros(source), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn a_span_whose_markup_splits_the_attribute_list_defers_the_match() {
+        // The other half of the two checks the rendered-piece token used to
+        // face, and the one that stays: a span whose own markup carries a
+        // character the split reads, so the string replacer's list divides
+        // where the token cannot. The match's very extent differs, so it is
+        // deferred rather than recognized — `tokened_split_agrees`.
+        for source in [
             "link:index.html[a *b, c* d,role=hl]",
             "https://example.org[a *b, c* d,role=hl]",
         ] {
@@ -5210,7 +5240,7 @@ mod tests {
 
             assert!(
                 nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-                "a span in a rendered attribute must stay literal: {nodes:?}"
+                "a split the two readings disagree on must stay literal: {nodes:?}"
             );
 
             // The string pipeline, by contrast, *does* build a link here.

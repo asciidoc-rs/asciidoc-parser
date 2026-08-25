@@ -6629,6 +6629,80 @@ Each phase is a reviewable unit with a clear exit gate.
   bytes for every term in the suite. Coverage is diff-neutral on all four changed files. Both halves
   are falsifiable: dropping the term's leading-anchor registration fails five tests, and passing
   `false` for the flag while still registering fails two (a doubled duplicate-id warning).
+
+  *Step 6 landed as (a computed attribute slot keeps its fold-time markup, made inert where it
+  lands):* the increment above answered the string-slot question for the cross-reference family and
+  said in the same breath that the image and link families were **not** the mechanical follow-on
+  they looked like — applying the same rule there moves
+  `image:pause.png[title=*Pause* and Resume]`, a fixture from the AsciiDoc language docs, from
+  `title="<strong>Pause</strong> and Resume"` to `title="*Pause* and Resume"`. Three readings were
+  available and the third, `title="Pause and Resume"` (the span's plain text, the only one an HTML
+  `title` can actually show), belonged to neither system. The decision is the first: **the title
+  example goes on working as it does today**, with the security concern that made the
+  cross-reference rule attractive answered on its own terms rather than by giving up the formatting.
+
+  The two families were not in the same place, which is what made this one increment rather than
+  two. The **image** family already froze a rendered span's markup into its bracket — it had to,
+  since every value an image holds is one `render_image` writes out, so the alternative deferred
+  every such bracket and the language-docs fixture lost its whole macro (the increment that closed
+  the cutover's last-but-one golden regression). The **link** families drew the opposite rule for
+  the same bytes: `text_attrlist` admitted a rendered span in the display text, which becomes the
+  node's children, and refused the whole match when a token reached any other slot
+  (`rendered_token_escaped_the_display_text`), so `link:index.html[Docs,role=*hl*]`,
+  `title=*Pause*`, `window=*x*` and `id=*x*` were all left **literal** — not a different rendering
+  of the macro but no macro at all, where the string pipeline builds one. That gate is deleted, so
+  the three `Attrlist`-bearing families now share the image bracket's rule and the same
+  `tokened_split_agrees` check remains the only thing a rendered piece must satisfy.
+
+  What makes the frozen bytes the *right* bytes is that they are the string replacer's own: it
+  parses its attribute list out of a haystack the quotes step has already rendered with this same
+  renderer, so `title="<strong>Pause</strong> and Resume"` is what it writes too. The cost is the
+  one the image family already carries and every frozen value on this branch owes — a *later* fold
+  through a different renderer would see the parse-time renderer's markup there — and §4.6 is
+  where a fold-**materialized** attribute value belongs. Until then this is parity, and it is now
+  uniform across the families rather than one of them being an exception.
+
+  The security half is what the decision asks for, and it is a real gap rather than a restatement.
+  A value reaching an attribute is escaped for the `"` delimiter *where it lands* — that is the
+  policy `render_image`, `render_icon`, and `render_xref` already state in so many words — and
+  `render_link` and `render_icon_or_image` left three out of it: a link's `id`, the `class` both
+  of them join their roles into, and the `target` a `window=` writes. Each is reachable today,
+  with no tree involved:
+  `link:x[Docs,role=+++a"b+++]` renders `class="a"b"` and injects whatever follows. They take
+  `encode_attribute_value` now, like the `href` and `title` beside them. That is what separates
+  this reading from the string pipeline's: escaping at render time is inert for markup an author
+  wrote (`<strong>` carries no quote, so the formatting survives untouched) and fatal to a
+  breakout — while the string pipeline splices a passthrough's body into the *finished* string
+  after every escape has run, which is asciidoctor#2661 and which the tree goes on not
+  reproducing. `a_rendered_slot_cannot_break_out_of_its_attribute` pins the pair.
+
+  Audit: **36** rows either side, 0 new and 0 closed. (The count is not comparable with the
+  earlier increments' because the sweep itself had to change: `rendered` *is* the fold now, so
+  comparing the fold against it answers nothing. It captures the string pipeline's own answer
+  where `apply` still has it — after `run_pipeline`, before the fold overwrites it — and
+  compares there instead, which also means a deferred cross-reference's content, folded later, no
+  longer contributes.) No golden source in the suite writes a rendered span into a link's
+  attribute list, which is why the class survived this long, and none writes a `"` into one of the
+  three newly-escaped slots. Falsifiability comes from the corpora instead: two rows join the
+  side-effect sweep, and they fail on base for a reason worth naming — a deferred macro is not
+  merely rendered literally, it also **registers nothing**, so
+  `link:https://example.org[Docs,role=*hl*]` was missing from `Document::catalog()` where the
+  string pipeline records it. The divergence test that pinned the old per-slot deferral is now a
+  parity corpus of ten fixtures, with the split-disagreement half kept as its own test.
+  Coverage is diff-neutral on all changed files.
+
+  *What this leaves:* the cross-reference family keeps the previous increment's rule rather than
+  joining this one, and the two are consistent because their string paths are: a deferred
+  cross-reference's template is captured **before** passthroughs are restored, so the string
+  pipeline leaks a `\u{96}0\u{97}` sentinel into `class=` and escapes a rendered span into
+  `class="&lt;strong&gt;hl&lt;/strong&gt;"` — there is no output there worth matching, so the
+  author's source is the better answer, while here there is one and it is Asciidoctor's. What still
+  defers in the link families is the split disagreement (`link:index.html[a *b, c* d,role=hl]`, the
+  markup-perturbed reading against the well-formed one) and a `mailto:`'s pre-restore subject and
+  body. `render_anchor`'s own `id`, and an inline SVG's rewritten `width`/`height`, still
+  interpolate unescaped; neither is reachable from this class (an anchor id admits no span, and an
+  inline SVG has no attribute list a span survives into), so both are left where they are.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -7993,6 +8067,27 @@ Each phase is a reviewable unit with a clear exit gate.
        `apply_macros_with_leading_anchor_registered` and `InlineAnchorReplacer`'s own flag go with
        it. Audit: 49 rows either side, 0 new, 0 closed; coverage diff-neutral on all four files.
        See the step's own "landed as" note above.
+
+     - ✅ **a computed attribute slot keeps its fold-time markup, made inert where it lands.** The
+       question the increment above left open and named as needing a decision of its own: whether
+       the image and link families' computed **string** slots should take the author's untranslated
+       source, as the cross-reference family's now do. They should not — that moves
+       `image:pause.png[title=*Pause* and Resume]`, an AsciiDoc-language-docs fixture, off the
+       answer both this crate and Asciidoctor give — so the two families keep the *fold-time*
+       markup, and the security property the source rule bought is obtained where it actually
+       belongs, at the attribute the value lands in. The **image** family already froze such a span
+       into its bracket; the **link** families deferred the whole macro whenever a token reached a
+       slot `render_link` writes out, leaving `link:index.html[Docs,role=*hl*]` literal and its
+       target unregistered. `rendered_token_escaped_the_display_text` is deleted, so the three
+       [`Attrlist`](../../parser/src/attributes/attrlist.rs)-bearing families share one rule and
+       [`tokened_split_agrees`](../../parser/src/content/inline_builder/macros/mod.rs) is the only
+       thing a rendered piece must still satisfy. The safety half closes a real gap in the policy
+       `render_image`/`render_icon`/`render_xref` already state: a link's `id` and `class` and the
+       `target` a `window=` writes took no `encode_attribute_value`, so
+       `link:x[Docs,role=+++a"b+++]` renders `class="a"b"` and injects what follows — reachable
+       today with no tree involved. Audit: 36 rows either side, 0 new, 0 closed (the sweep itself
+       had to be re-derived, `rendered` being the fold now); coverage diff-neutral on all changed
+       files. See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

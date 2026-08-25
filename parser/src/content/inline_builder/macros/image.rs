@@ -887,26 +887,32 @@ fn masked_default_alt(
 /// splices into the string pipeline's own finished string, so restoring one
 /// into a parsed value is faithful wherever that value goes.
 ///
-/// A **rendered span** is admitted too, and this is the one family where that
-/// is both necessary and safe.
+/// A **rendered span** is admitted too, and this is where that rule was first
+/// drawn; [`text_attrlist`](super::links) now draws the same one, so the three
+/// [`Attrlist`]-bearing families agree.
 ///
 /// *Necessary*, because it is the only way an image reaches parity at all.
 /// Every value an image's bracket holds is one `render_image` writes out — an
-/// `alt`, a `title`, a `width` — so the per-slot rule the link families draw
-/// ([`rendered_token_escaped_the_display_text`](super::links)) would defer
-/// *every* such bracket, and `image:pause.png[title=*Pause* and Resume]` (a
-/// fixture from the AsciiDoc language docs) would lose its whole macro. A link
-/// has somewhere else to put a rendered span — its display text becomes the
-/// node's children — and an image has no display text at all.
+/// `alt`, a `title`, a `width` — so a rule refusing a token in such a slot
+/// would defer *every* such bracket, and
+/// `image:pause.png[title=*Pause* and Resume]` (a fixture from the AsciiDoc
+/// language docs) would lose its whole macro. The link families had somewhere
+/// else to put a rendered span — a display text becomes the node's children —
+/// and drew that per-slot rule for a while; it cost them the same macro for
+/// `link:index.html[Docs,title=*Pause*]`, so they dropped it.
 ///
-/// *Safe*, because the frozen bytes are the bytes. The string replacer reads
-/// its own bracket out of a haystack the quotes step has already rendered
-/// **with this same renderer**, so `title="<strong>Pause</strong> and Resume"`
-/// is what it writes too; freezing the span's build-time fold here reproduces
-/// that exactly rather than approximating it. It is also the same trade this
-/// very function's masked branch already makes for a
-/// [`Stem`](crate::inlines::Stem), whose "body" is likewise a build-time fold
-/// ([`restorable_body`]).
+/// *Safe*, in two senses. The frozen bytes are the bytes: the string replacer
+/// reads its own bracket out of a haystack the quotes step has already
+/// rendered **with this same renderer**, so
+/// `title="<strong>Pause</strong> and Resume"` is what it writes too, and
+/// freezing the span's build-time fold here reproduces that exactly rather
+/// than approximating it. It is the same trade this very function's masked
+/// branch already makes for a [`Stem`](crate::inlines::Stem), whose "body" is
+/// likewise a build-time fold ([`restorable_body`]). And the markup cannot
+/// escape the attribute it is carried into: every value the image, icon and
+/// link renderers interpolate is escaped for the `"` delimiter where it lands
+/// (`encode_attribute_value`), so a span rendering a quote of its own —
+/// `[.r"z]#b#` — closes nothing.
 ///
 /// What a frozen value cannot survive is being folded again through a
 /// *different* renderer — [`render_with`](crate::Parser) (design §3.3.1,
@@ -1021,24 +1027,18 @@ pub(in crate::content::inline_builder) struct MaskedPiece<'a, 'src> {
 
     /// What the token restores to: exactly what the fold of
     /// [`node`](Self::node) emits (see [`restorable_body`]).
-    pub(in crate::content::inline_builder) body: Cow<'a, str>,
-
-    /// Whether this piece is markup the **fold** writes rather than a *masked*
-    /// construct whose body the string pipeline itself splices.
     ///
-    /// The distinction is what a caller admitting both has to act on. A masked
-    /// construct's body is known at build time in the same sense the string
-    /// pipeline knows it — `Passthroughs::restore_to` splices exactly these
-    /// bytes into its own finished string — so restoring it into a parsed
-    /// value is faithful wherever that value goes. A *rendered* piece's markup
-    /// is a function of the renderer, and [`body`](Self::body) freezes it with
-    /// the parser's own; that is right for a value nothing emits (it is what
-    /// the string replacer's own attribute list holds there) and wrong for one
-    /// a renderer writes out, since a custom backend would then see the
-    /// built-in backend's markup. A caller admitting these must therefore
-    /// carry the value **structurally** and refuse a match whose token reached
-    /// a slot the fold reads — see [`text_attrlist`](super::links).
-    pub(in crate::content::inline_builder) rendered: bool,
+    /// For a *masked* construct those bytes are known at build time in the
+    /// same sense the string pipeline knows them —
+    /// `Passthroughs::restore_to` splices exactly these into its own finished
+    /// string. For a **rendered** piece (admitted under
+    /// [`Tokened::MaskedOrRendered`]) they are the build-time fold with the
+    /// parser's own renderer, which is what the string replacer's
+    /// already-rendered haystack holds there; freezing them is what lets a
+    /// slot a renderer writes out carry markup the author wrote, at the cost
+    /// of a *later* fold with some other renderer seeing the parse-time
+    /// renderer's bytes in that slot.
+    pub(in crate::content::inline_builder) body: Cow<'a, str>,
 }
 
 /// Which pieces [`tokened_bracket`] gives a token to.
@@ -1050,9 +1050,11 @@ pub(in crate::content::inline_builder) enum Tokened {
     Masked,
 
     /// Also any other **opaque** piece: a rendered span, an
-    /// earlier-recognized macro node. Its body is the build-time fold, which
-    /// only a caller that carries the value structurally and refuses a token
-    /// in a slot the fold reads may use (see [`MaskedPiece::rendered`]).
+    /// earlier-recognized macro node. Its body is the build-time **fold** with
+    /// the parser's own renderer — the bytes the string replacer reads out of
+    /// its own already-rendered haystack there — which is what lets a value
+    /// carry markup an author wrote into a slot a renderer writes out (see
+    /// [`MaskedPiece::body`]).
     MaskedOrRendered,
 }
 
@@ -1128,11 +1130,7 @@ pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
             .flatten()
             .and_then(|node| {
                 if let Some(body) = restorable_body(node, renderer) {
-                    return Some(MaskedPiece {
-                        node,
-                        body,
-                        rendered: false,
-                    });
+                    return Some(MaskedPiece { node, body });
                 }
 
                 if admits == Tokened::Masked || charref_entity(node).is_some() {
@@ -1146,7 +1144,6 @@ pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
                         renderer,
                         &parser.render_context(),
                     )),
-                    rendered: true,
                 })
             });
 
@@ -1882,8 +1879,7 @@ mod tests {
         // The boundary this family used to keep, now lifted for the half that
         // could not survive it: an image's **bracket** crossing a rendered
         // span. See [`bracket_is_recognizable`] for why a frozen span is both
-        // necessary and safe here where it is neither for a link's other
-        // slots.
+        // necessary and safe — the rule the link families now share.
         for source in [
             // The fixture from the AsciiDoc language docs that named this.
             "Click image:pause.png[title=*Pause* and Resume] when you need a break.",
