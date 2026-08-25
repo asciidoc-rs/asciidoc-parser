@@ -6797,6 +6797,66 @@ Each phase is a reviewable unit with a clear exit gate.
   substitution) and `{counter:}` advancement (solvable only **by** removing the pipeline). With
   this one staged, the string-slot question the survey raised has no open consequences left.
 
+
+  *Step 6 landed as (a `Raw` node records the passthrough it came from):* the survey's fifth item —
+  [`Content::passthroughs()`](../../parser/src/content/content.rs) — is the one it called a live
+  choice rather than a task: "*deleting* it is as live an option as building the view", since it is
+  `pub` with no production consumer. The choice is made, and it is the **middle path**: keep the API
+  and back it with the tree. This is that decision's first prerequisite, and measuring the gap first
+  made it much smaller than the survey feared.
+
+  The public surface is two methods, [`text`](../../parser/src/content/passthroughs.rs) and
+  [`subs`](../../parser/src/content/passthroughs.rs) — `type_` and `attrlist` are `pub(crate)`, with
+  no accessor — and **five of the seven** passthrough forms are already exactly recoverable from
+  what the tree holds: `+++…+++` and a bare `pass:[…]` are
+  [`AsIs`](../../parser/src/inlines/inline_node.rs)/`None`, `++…++` and `$$…$$` are
+  `Escaped`/`Verbatim`, and a `Stem` node names its own group. So the survey's "chunkier than it
+  looks" is right but localizes to two facts, both about the same form.
+
+  A `pass:c,q[…]` body defeats [`RawForm`](../../parser/src/inlines/inline_node.rs) twice. It folds
+  `AsIs` exactly as a `+++…+++` body does, so the form cannot tell an arbitrary group from no group
+  at all; and an arbitrary group needs the substitution pipeline, which a fold — taking a renderer
+  and a `RenderContext` rather than a `Parser`, as the increment that made that change established
+  — has no way to reach, so the body is substituted at **build** time and `value` holds the
+  *result* where `text()` returns the *input*. Both facts now ride on the node:
+  [`RawOrigin::Passthrough`](../../parser/src/inlines/inline_node.rs) gains `subs` and
+  `source_text`.
+
+  Putting them inside the variant rather than beside it is what keeps this small and honest. Only
+  the passthrough-origin construction sites change — six in the lib, all in
+  [`passthrough_step`](../../parser/src/content/inline_builder/passthrough_step.rs), which is
+  exactly where the extraction pass already knows the answer — and the invariant becomes
+  structural: a group exists precisely when the origin is a passthrough, with no `Option` that could
+  be `None` for one. `RawOrigin` loses `Copy` and gains no lifetime, `source_text` being an owned
+  `String` present for one rare form.
+
+  `RawForm` stays. It is the *fold's* contract — emit or escape — and the two deliberately disagree
+  where the bare `+…+` form folds `AsIs` while its group is `Verbatim`, which two of this module's
+  own tests now state rather than infer. That disagreement is the argument for keeping both: a
+  reader asking what the fold does and a reader asking what the author wrote are asking different
+  questions.
+
+  [`inline_builder_passthrough_record_parity`](../../parser/src/tests/inline_builder_passthrough_record_parity.rs)
+  is the corpus, comparing every record the tree holds against the entry the extraction pass made
+  for the same source, in order: the delimited forms, the two `pass:` spellings, four explicit
+  substitution lists, an escaped closing bracket on both, several forms in one content, the
+  attribute-list-prefixed spelling, and the three containers the walk descends into. Both new fields
+  are falsifiable — dropping `source_text`, or reporting `None` for a resolved list, each fails it.
+
+  Two forms record **nothing** where the pass records an entry, and both are the view's problem
+  rather than the record's: an inline **STEM** body is a `Stem` node, not a `Raw` one, and the `x-`
+  **compatibility marker** sends its body through the normal substitutions as a subtree (which is
+  why its entry's group is `Normal`, the one attribute-list-prefixed spelling that differs from its
+  siblings). Their own test pins both. Audit: 36 rows either side, 0 new and 0 closed — no rendered
+  byte moves, the fold reading `form` exactly as before. Coverage diff-neutral.
+
+  *What the view still needs:* those two forms reached from wherever the tree does hold them, and
+  then the walk itself — `Content::passthroughs()` returning a view built from the tree rather than
+  a field the extraction pass fills. One thing to check before trusting either: this increment
+  compared **document** order against extraction order and found them equal for every fixture, but
+  the bare `+…+` form is extracted in a *second* pass, so the two orders are not equal by
+  construction and the view's own increment owes that its own corpus.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -8210,6 +8270,26 @@ Each phase is a reviewable unit with a clear exit gate.
        ones misaligned every one after it. All six walks now descend; the count guard had kept the
        old ones safe rather than complete. Audit: 36 rows either side, 0 new and 0 closed;
        coverage diff-neutral on both changed files. See the step's own "landed as" note above.
+
+     - ✅ **prep (a `Raw` node records the passthrough it came from).** The survey's fifth item is
+       the one it called a live *choice* — `Content::passthroughs()` is `pub` with no production
+       consumer, so deleting it was as real an option as backing it with the tree. The choice is the
+       middle path, and this is its first prerequisite. Measuring first shrank it: the public
+       surface is two methods (`text`/`subs` — `type_` and `attrlist` have no accessor), and **five
+       of seven** forms are already exactly recoverable from
+       [`RawForm`](../../parser/src/inlines/inline_node.rs) plus the node kind. A `pass:c,q[…]` body
+       defeats it twice — it folds `AsIs` just as `+++…+++` does, so the form cannot tell an
+       arbitrary group from none; and an arbitrary group needs the substitution pipeline, which a
+       fold taking a `RenderContext` rather than a `Parser` cannot reach, so the body is substituted
+       at build time and `value` holds the result where `text()` returns the input. Both facts now
+       ride inside
+       [`RawOrigin::Passthrough`](../../parser/src/inlines/inline_node.rs) (`subs`, `source_text`)
+       rather than beside it, so only the six passthrough-origin construction sites change and the
+       invariant is structural. `RawForm` stays — it is the fold's contract, and the two
+       deliberately disagree where the bare `+…+` form folds `AsIs` under a `Verbatim` group.
+       Two forms record nothing where the pass records an entry (an inline STEM body, and the `x-`
+       compatibility marker's subtree), pinned by their own test. Audit: 36 rows either side, 0 new
+       and 0 closed; coverage diff-neutral. See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

@@ -833,7 +833,10 @@ mod tests {
         let raw = InlineNode::Raw {
             value: CowStr::from(location.data()),
             form: RawForm::AsIs,
-            origin: RawOrigin::Passthrough,
+            origin: RawOrigin::Passthrough {
+                subs: crate::content::SubstitutionGroup::None,
+                source_text: None,
+            },
             location,
         };
 

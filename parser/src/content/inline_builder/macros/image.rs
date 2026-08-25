@@ -2639,7 +2639,10 @@ mod tests {
             InlineNode::Raw {
                 value: CowStr::from("raw"),
                 form: RawForm::AsIs,
-                origin: RawOrigin::Passthrough,
+                origin: RawOrigin::Passthrough {
+                    subs: crate::content::SubstitutionGroup::None,
+                    source_text: None,
+                },
                 location: root,
             },
             InlineNode::Stem(crate::inlines::Stem {
