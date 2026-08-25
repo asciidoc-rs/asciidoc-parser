@@ -1046,6 +1046,14 @@ fn count_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
 
             InlineNode::Styled(styled) => count_tree_xrefs(&styled.children),
 
+            // A **visible index term** shows its text in the flow, so the
+            // string replacer's own haystack holds any cross-reference written
+            // inside it and defers a segment for one. It is the fifth nested
+            // node list a tree can hold a construct in (see the side-effect
+            // sweep's own note), and the one a walk written by matching on
+            // `children` is bound to miss.
+            InlineNode::IndexTerm(index_term) => count_tree_xrefs(&index_term.children),
+
             _ => 0,
         })
         .sum()
@@ -1064,9 +1072,197 @@ fn count_footnote_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
 
             InlineNode::Styled(styled) => count_footnote_tree_xrefs(&styled.children),
 
+            InlineNode::IndexTerm(index_term) => count_footnote_tree_xrefs(&index_term.children),
+
             _ => 0,
         })
         .sum()
+}
+
+/// Derives the **block-level** deferred cross-reference segments from an
+/// already-built inline tree — the list `run_pipeline`'s own
+/// [`InlineXrefReplacer`](crate::content::macros) produces and
+/// [`Content::set_deferred_xrefs`] installs, read off the nodes instead.
+///
+/// This is one of the six things design §5.2's survey found the string pipeline
+/// still solely owning — the first of them the survey called *blocked* rather
+/// than merely unbuilt — staged here as its own building block exactly as every
+/// recognition side effect was (see
+/// [`apply_macro_side_effects`](crate::content::inline_builder)): nothing calls
+/// it on the production path yet, and wiring it in is the cutover's own job.
+///
+/// A [`Ref`](InlineNode::Ref)`{`[`Xref`](RefVariant::Xref)`}` node already
+/// carries every field an [`XrefSegment`] holds but one — `target`, `window`,
+/// `roles`, `xrefstyle` and `derived` are plain values the builder resolved at
+/// recognition time — so the survey recorded the family as blocked on
+/// [`provided_text`](XrefSegment::provided_text) alone, which the segment holds
+/// as a **string** where the node holds its display text as *children*.
+///
+/// That slot takes the **fold of those children**, and it is a different answer
+/// from the one the sibling increment gave `role=` / `window=` / `xrefstyle=`
+/// (the author's untranslated source, see
+/// [`untranslated_value`](crate::content::inline_builder)) for a reason worth
+/// stating: a display text *is* markup by nature. `xref:sec[*bold*]` shows
+/// bold text, and the string replacer captures exactly
+/// `<strong>bold</strong>` out of its own already-rendered haystack — so the
+/// fold reproduces the byte string rather than approximating it, where a
+/// computed string slot had no such answer to match.
+///
+/// The fold runs **here**, at the end of the parse, with the renderer the parse
+/// carried — which is where the string replacer computes it too. Deriving it
+/// later, at resolution time, would read whatever renderer that caller passed
+/// and hand the resolver a different [`ResolutionContext`] than the string
+/// pipeline does; taking it at build time keeps the two byte-identical and
+/// keeps this function a pure function of the tree plus the parse's own
+/// renderer.
+///
+/// Present-but-empty is preserved, because it is a distinction the renderer
+/// acts on: the `<<id,>>` shorthand records one empty
+/// [`Text`](InlineNode::Text) child, which the string replacer carries as
+/// `Some("")` and renders as an empty `<a>…</a>`, where an absent text
+/// (`None`) falls back to the target's reference text. So the `Option` keys on
+/// the **presence of a child**, not on what that child folds to — the same rule
+/// [`fold_xref`](crate::content::inline_builder) already applies, and the
+/// reason `build_xref_shorthand_node` builds a child for a comma-carrying
+/// shorthand at all.
+///
+/// The walk is [`assign_tree_xrefs`]'s, so the order is that walk's order: a
+/// pre-order traversal that consumes a slot per cross-reference node and does
+/// **not** descend into a [`Footnote`](InlineNode::Footnote) subtree, whose
+/// segments are re-homed out of the block template.
+/// [`footnote_tree_xref_segments`] derives the complementary list.
+// Consumed only by tests until the step 6 cutover wires it in, the same
+// staging every recognition side effect was under before it was re-attached.
+#[allow(dead_code)]
+pub(crate) fn block_tree_xref_segments(
+    nodes: &[InlineNode<'_>],
+    renderer: &dyn InlineSubstitutionRenderer,
+    context: &crate::parser::RenderContext,
+) -> Vec<XrefSegment> {
+    let mut out = Vec::new();
+    collect_tree_xref_segments(nodes, renderer, context, &mut out);
+    out
+}
+
+/// Derives the deferred cross-reference segments embedded in this tree's
+/// **footnote** subtrees — the exact complement of
+/// [`block_tree_xref_segments`], in the order
+/// [`footnote_tree_xrefs`] enumerates them.
+///
+/// A footnote cannot nest another footnote, so handing each footnote's own
+/// children to the block collector cannot skip anything — the same reuse
+/// [`assign_footnote_tree_xrefs`] makes.
+// Consumed only by tests until the step 6 cutover wires it in, the same
+// staging every recognition side effect was under before it was re-attached.
+#[allow(dead_code)]
+pub(crate) fn footnote_tree_xref_segments(
+    nodes: &[InlineNode<'_>],
+    renderer: &dyn InlineSubstitutionRenderer,
+    context: &crate::parser::RenderContext,
+) -> Vec<XrefSegment> {
+    let mut out = Vec::new();
+    collect_footnote_tree_xref_segments(nodes, renderer, context, &mut out);
+    out
+}
+
+/// The shared pre-order walk behind [`block_tree_xref_segments`], mirroring
+/// [`assign_tree_xrefs`]'s traversal so a derived segment and an installed
+/// destination address the same node.
+// Consumed only by tests until the step 6 cutover wires it in, the same
+// staging every recognition side effect was under before it was re-attached.
+#[allow(dead_code)]
+fn collect_tree_xref_segments(
+    nodes: &[InlineNode<'_>],
+    renderer: &dyn InlineSubstitutionRenderer,
+    context: &crate::parser::RenderContext,
+    out: &mut Vec<XrefSegment>,
+) {
+    for node in nodes {
+        match node {
+            InlineNode::Ref(reference) => {
+                if reference.variant == RefVariant::Xref {
+                    out.push(xref_segment_from_node(reference, renderer, context));
+                }
+
+                collect_tree_xref_segments(&reference.children, renderer, context, out);
+            }
+
+            InlineNode::Styled(styled) => {
+                collect_tree_xref_segments(&styled.children, renderer, context, out);
+            }
+
+            InlineNode::IndexTerm(index_term) => {
+                collect_tree_xref_segments(&index_term.children, renderer, context, out);
+            }
+
+            _ => {}
+        }
+    }
+}
+
+/// The shared walk behind [`footnote_tree_xref_segments`], mirroring
+/// [`assign_footnote_tree_xrefs`]'s traversal.
+// Consumed only by tests until the step 6 cutover wires it in, the same
+// staging every recognition side effect was under before it was re-attached.
+#[allow(dead_code)]
+fn collect_footnote_tree_xref_segments(
+    nodes: &[InlineNode<'_>],
+    renderer: &dyn InlineSubstitutionRenderer,
+    context: &crate::parser::RenderContext,
+    out: &mut Vec<XrefSegment>,
+) {
+    for node in nodes {
+        match node {
+            InlineNode::Footnote(footnote) => {
+                collect_tree_xref_segments(&footnote.children, renderer, context, out);
+            }
+
+            InlineNode::Ref(reference) => {
+                collect_footnote_tree_xref_segments(&reference.children, renderer, context, out);
+            }
+
+            InlineNode::Styled(styled) => {
+                collect_footnote_tree_xref_segments(&styled.children, renderer, context, out);
+            }
+
+            InlineNode::IndexTerm(index_term) => {
+                collect_footnote_tree_xref_segments(&index_term.children, renderer, context, out);
+            }
+
+            _ => {}
+        }
+    }
+}
+
+/// Reads one [`XrefSegment`] off a cross-reference node — see
+/// [`block_tree_xref_segments`] for why each field reads the way it does.
+///
+/// [`resolved`](XrefSegment::resolved) is deliberately **not** carried across:
+/// it is resolution's *output*, filled in later by
+/// [`Content::resolve_references`] and mirrored back onto the node by
+/// [`Content::mirror_tree_xref_resolution`]. A node re-read after a resolution
+/// sweep therefore yields the same segment it yielded before one, which is what
+/// makes this derivation idempotent.
+// Consumed only by tests until the step 6 cutover wires it in, the same
+// staging every recognition side effect was under before it was re-attached.
+#[allow(dead_code)]
+fn xref_segment_from_node(
+    reference: &crate::inlines::Ref<'_>,
+    renderer: &dyn InlineSubstitutionRenderer,
+    context: &crate::parser::RenderContext,
+) -> XrefSegment {
+    let provided_text = (!reference.children.is_empty())
+        .then(|| crate::content::inline_builder::fold_html(&reference.children, renderer, context));
+
+    XrefSegment {
+        target: reference.target.to_string(),
+        provided_text,
+        window: reference.window.as_ref().map(|w| w.to_string()),
+        roles: reference.roles.iter().map(|r| r.to_string()).collect(),
+        xrefstyle: reference.xrefstyle,
+        derived: reference.derived.clone(),
+        resolved: None,
+    }
 }
 
 /// Walks an inline node slice in document order and installs each
@@ -1110,6 +1306,10 @@ fn assign_tree_xrefs(
                 assign_tree_xrefs(&mut styled.children, ordered, next);
             }
 
+            InlineNode::IndexTerm(index_term) => {
+                assign_tree_xrefs(&mut index_term.children, ordered, next);
+            }
+
             _ => {}
         }
     }
@@ -1142,6 +1342,10 @@ fn assign_footnote_tree_xrefs(
 
             InlineNode::Styled(styled) => {
                 assign_footnote_tree_xrefs(&mut styled.children, ordered, next);
+            }
+
+            InlineNode::IndexTerm(index_term) => {
+                assign_footnote_tree_xrefs(&mut index_term.children, ordered, next);
             }
 
             _ => {}

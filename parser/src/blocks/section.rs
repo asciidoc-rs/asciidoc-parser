@@ -532,6 +532,16 @@ impl<'src> SectionBlock<'src> {
         self.section_title.inlines()
     }
 
+    /// Returns the section title's [`Content`] itself, for a caller that needs
+    /// more of it than [`section_title_inlines`](Self::section_title_inlines)
+    /// and [`section_title_render_attributes`](Self::section_title_render_attributes)
+    /// expose — the deferred cross-reference segments a heading carries, which
+    /// the document-order title pass resolves.
+    #[cfg(test)]
+    pub(crate) fn section_title_content(&self) -> &Content<'src> {
+        &self.section_title
+    }
+
     /// The document attributes in force where this heading was written, when
     /// they were retained — the order-dependent half of the render context a
     /// fold of the tree above needs. See
