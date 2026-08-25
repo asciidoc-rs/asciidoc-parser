@@ -195,6 +195,11 @@ const CORPUS: &[&str] = &[
     "a https://example.org[] bare-macro link",
     "visit https://example.org/path?q=1 now",
     "link:https://example.org[Example,role=external,window=_blank]",
+    // A rendered span in a slot `render_link` writes out. Both spellings were
+    // left *literal* by the builder until the slot rule went, so neither
+    // registered its target where the string pipeline registers one.
+    "link:https://example.org[Docs,role=*hl*] and more",
+    "https://example.org[Docs,title=*Pause* and Resume] and more",
     //
     // Anchors and bibliography entries.
     "[[the-anchor]]Anchored paragraph.",
