@@ -103,7 +103,9 @@ fn derived(nodes: &[InlineNode<'_>], out: &mut Vec<Record>) {
 /// The forms whose extraction entry and tree node correspond one-to-one.
 ///
 /// Every form now records; what differs is the *order*, which
-/// [`the_view_returns_document_order`] pins on its own.
+/// [`the_view_returns_document_order`] pins on its own. The one shape still
+/// short of an entry is a STEM expression **embedding** another passthrough —
+/// see [`a_stem_expression_embedding_a_passthrough_records_one_entry_of_two`].
 const CORPUS: &[&str] = &[
     // `+++…+++` and a bare `pass:[…]` — group `None`, body verbatim.
     "a +++<b>raw</b>+++ x",
@@ -272,4 +274,68 @@ fn a_marked_wrapper_is_one_entry_not_two() {
 
         assert_eq!(tree, golden(&content), "{source:?}");
     }
+}
+
+#[test]
+fn a_stem_expression_embedding_a_passthrough_records_one_entry_of_two() {
+    // The limitation review found, and the one shape the corpus above cannot
+    // cover: a STEM expression that *embeds* an already-extracted passthrough.
+    //
+    // The extraction pass records **two** entries there — the inner
+    // passthrough, and the STEM itself, whose own text keeps the `\u{96}0\u{97}`
+    // sentinel where that body was lifted out. `stem_expression_value` splices
+    // each inner body back in while computing the expression, so the tree keeps
+    // one `Stem` node holding the *restored* text and the inner leaf is gone.
+    //
+    // This is a limitation of the recording, not a regression: before this
+    // increment a `Stem` carried neither fact, so the tree recorded nothing for
+    // the outer entry either. What it means is that the claim "every form the
+    // pass makes an entry for has one in the tree" holds for every shape except
+    // this one, and the view's own increment owes it — most likely by keeping
+    // the inner nodes as the `Stem`'s children rather than folding them into
+    // its value, which is a structural change and not this increment's.
+    let parser = Parser::default();
+
+    let records = |source: &str| -> (Vec<Record>, Vec<Record>) {
+        let mut content = Content::from(Span::new(source));
+        SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+
+        let mut tree = vec![];
+        derived(content.inlines(), &mut tree);
+
+        (golden(&content), tree)
+    };
+
+    // The ordinary case: two entries out of the pass, one out of the tree, and
+    // the one it does record has the *restored* body where the pass keeps the
+    // sentinel — so neither the count nor the outer text matches.
+    for source in [
+        "a stem:[x +++<b>+++ y] z",
+        "a stem:[x $$lit$$ y] z",
+        "a latexmath:[x ++e++ y] z",
+    ] {
+        let (golden_records, tree) = records(source);
+
+        assert_eq!(golden_records.len(), 2, "{source:?}");
+        assert_eq!(tree.len(), 1, "{source:?}");
+        assert_eq!(tree[0].1, SubstitutionGroup::Stem, "{source:?}");
+
+        // The pass's outer entry keeps the sentinel; the tree's does not.
+        assert!(golden_records[1].0.contains('\u{96}'), "{source:?}");
+        assert!(!tree[0].0.contains('\u{96}'), "{source:?}");
+    }
+
+    // The sharper case, and the reason this test asserts shapes rather than
+    // just counts: under an explicit substitution list the expression is not
+    // *local* to each run, so `apply_stem` declines to build a node at all. The
+    // tree then records only the **inner** passthrough — the outer STEM entry
+    // has no node of any kind.
+    let (golden_records, tree) = records("a stem:c,q[x +++<b>+++ y] z");
+
+    assert_eq!(golden_records.len(), 2);
+    assert_eq!(
+        tree,
+        [("<b>".to_string(), SubstitutionGroup::None)],
+        "the deferred STEM should leave only its inner passthrough recorded"
+    );
 }
