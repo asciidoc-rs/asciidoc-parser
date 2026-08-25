@@ -323,7 +323,15 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
                 has_dangerous_scheme(link.value()).then_some(link.value())
             };
 
-            if let Some(rejected) = rejected {
+            // Suppressed for content whose tree replays this warning — see
+            // `Parser::suppress_macro_side_effects`. It is one of the four
+            // recognition side effects `apply_macro_side_effects` re-attaches,
+            // unlike the *link* family's own dangerous-scheme warning below,
+            // which the replay does not carry and which is therefore left to
+            // this pass in every case.
+            if let Some(rejected) = rejected
+                && !self.parser.suppress_macro_side_effects.get()
+            {
                 self.parser.record_substitution_warning(
                     self.source,
                     WarningType::UnsafeLinkSchemeRejected(rejected.to_owned()),

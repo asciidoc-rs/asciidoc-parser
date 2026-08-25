@@ -243,7 +243,32 @@ impl SubstitutionGroup {
             None
         };
 
+        // The string pipeline's own macro side effects — an image target, a link
+        // target, an anchor's or bibliography entry's id, and the image
+        // family's dangerous-`link=` warning — are suppressed for the duration
+        // of this pass, and replayed from the tree below. Both paths share one
+        // `Parser` now, so recognizing a construct twice would record it twice.
+        //
+        // Unconditional, rather than gated on a tree actually being built. The
+        // only content that reaches here without one is a passthrough body the
+        // *builder* re-enters `apply` for, and that call is handed the
+        // counter-safe clone — whose catalog is discarded with it — so nothing
+        // it records was ever going to be kept. The string pipeline's own
+        // re-entry for such a body carries the real parser and does build a
+        // tree, so it replays like any other content.
+        //
+        // Saved and restored rather than cleared. Either re-entry happens while
+        // this window is open and closes a window of its own, so clearing would
+        // leave the rest of *this* pass unsuppressed. No fixture currently
+        // distinguishes the two — the suite is green either way — because none
+        // puts a registering construct after a nested `apply` within one
+        // content; restoring is kept because it is correct by construction
+        // rather than by that absence.
+        let suppressed = parser.suppress_macro_side_effects.replace(true);
+
         self.run_pipeline(content, parser, attrlist);
+
+        parser.suppress_macro_side_effects.set(suppressed);
 
         if let Some((value, mut tree_parser)) = tree_seed {
             // The builder must not recurse into tree building itself: a
@@ -285,6 +310,23 @@ impl SubstitutionGroup {
 
                 content.rendered = crate::strings::CowStr::from(folded);
             }
+
+            // The recognition side effects the string pipeline just skipped,
+            // replayed from the tree — design §5.2's step 6, "re-attach the
+            // recognition side effects". They run here, after the whole
+            // pipeline rather than during its macros step, which keeps them in
+            // document order across contents and in the string pipeline's own
+            // pass order within one (see `apply_macro_side_effects`).
+            //
+            // `leading_anchor_registered` is `false`: the one caller that
+            // pre-registers a leading anchor is a description-list term, which
+            // runs the steps directly rather than through this function.
+            crate::content::inline_builder::apply_macro_side_effects(
+                &tree,
+                parser,
+                content.original(),
+                false,
+            );
 
             content.set_inlines(tree);
 
