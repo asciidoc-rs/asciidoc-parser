@@ -29,7 +29,7 @@
 
 use crate::{
     Parser,
-    blocks::{Block, FindBlocks},
+    blocks::{Block, FindBlocks, TableCellContent, TableRow},
     content::{Content, XrefSegment, block_tree_xref_segments, footnote_tree_xref_segments},
     parser::{HtmlSubstitutionRenderer, ModificationContext},
 };
@@ -52,6 +52,17 @@ fn parser() -> Parser {
 /// through the accessors that return a `&Content` rather than through
 /// `IsBlock`'s two.
 fn contents<'src>(doc: &'src crate::Document<'src>) -> Vec<(String, &'src Content<'src>)> {
+    fn cells<'src>(row: &'src TableRow<'src>, out: &mut Vec<(String, &'src Content<'src>)>) {
+        for cell in row.cells() {
+            // Only an inline (`Simple`) cell carries a single `Content`; an
+            // `AsciiDoc` cell is a nested standalone document, out of scope
+            // here exactly as it is for the sibling harness.
+            if let TableCellContent::Simple(content) = cell.content() {
+                out.push(("table cell".to_string(), content));
+            }
+        }
+    }
+
     fn walk<'src>(block: &'src Block<'src>, out: &mut Vec<(String, &'src Content<'src>)>) {
         match block {
             Block::Simple(simple) => {
@@ -71,6 +82,30 @@ fn contents<'src>(doc: &'src crate::Document<'src>) -> Vec<(String, &'src Conten
             Block::Quote(quote) => {
                 if let Some(content) = quote.content() {
                     out.push(("quote".to_string(), content));
+                }
+            }
+
+            // A **section title** is the location the document-order title pass
+            // resolves, with cross-title coordination the per-content pass
+            // cannot do — so it is the one deferred location whose segments a
+            // regression would be most visible in, and it reaches neither of
+            // the accessors above (a section's own content is its children).
+            Block::Section(section) => {
+                out.push(("section title".to_string(), section.section_title_content()));
+            }
+
+            // A table's cells are not blocks at all.
+            Block::Table(table) => {
+                if let Some(header) = table.header_row() {
+                    cells(header, out);
+                }
+
+                for row in table.body_rows() {
+                    cells(row, out);
+                }
+
+                if let Some(footer) = table.footer_row() {
+                    cells(footer, out);
                 }
             }
 
@@ -181,6 +216,22 @@ const CORPUS: &[&str] = &[
     ".A title with <<tgt>>\nParagraph body.\n\n[[tgt]]Target.",
     "[NOTE]\n====\nSee <<tgt>> here.\n====\n\n[[tgt]]Target.",
     "[quote]\n____\nSee <<tgt>> here.\n____\n\n[[tgt]]Target.",
+    // A **section title**, the location the document-order title pass owns —
+    // including a forward reference and a reference between two titles, the
+    // shapes that pass exists for.
+    "== See <<tgt>>\n\nBody.\n\n[[tgt]]Target.",
+    "== See <<second>>\n\nBody.\n\n[[second]]\n== The Second\n\nMore.",
+    "== A <<tgt,*bold*>> heading\n\nBody.\n\n[[tgt]]Target.",
+    // A **table cell**, which is not a block at all.
+    "|===\n|See <<tgt>> here. |Plain\n|===\n\n[[tgt]]Target.",
+    "|===\n|A <<tgt,*bold*>> cell\n|===\n\n[[tgt]]Target.",
+    // A cross-reference inside a **visible index term** — the fifth nested
+    // node list, which every one of these walks used to miss. The middle
+    // fixture is the one that matters: a reference the index term hides
+    // *between* two the walk does see, so a walk that skipped it would
+    // misalign the two after it rather than merely drop one.
+    "See ((a term with <<b>> in it)) here.\n\n[[b]]B.",
+    "See <<a>> and ((term <<b>>)) and <<c>>.\n\n[[a]]A.\n\n[[b]]B.\n\n[[c]]C.",
 ];
 
 #[test]
@@ -293,4 +344,114 @@ fn a_rendered_span_in_a_string_read_slot_keeps_its_documented_divergence() {
     assert_eq!(derived[0].window, golden[0].window);
     assert_eq!(derived[0].xrefstyle, golden[0].xrefstyle);
     assert_eq!(derived[0].derived, golden[0].derived);
+}
+
+#[test]
+fn a_reference_inside_an_index_term_macro_keeps_its_documented_divergence() {
+    // The index-term family's own remaining deferral, reached from this side.
+    // A *visible* term written in either shorthand carries its shown text as
+    // `children`, so a cross-reference inside it is a node the collectors walk
+    // — the parity corpus covers both spellings. The `indexterm2:[…]` **macro**
+    // spelling does not: its shown term comes back from an attribute-list parse
+    // rather than from a range of the match string, so the builder keeps it as
+    // a string and builds no subtree, and there is no node to derive a segment
+    // from.
+    //
+    // That is the builder's own documented limitation (see the index-term
+    // family's "landed as" note), not something the derivation can answer, and
+    // it is *safe* rather than merely known: the count guard
+    // `mirror_tree_xref_resolution` applies sees 0 tree slots against 1 deferred
+    // segment, so it declines to correlate and this content's tree is never
+    // treated as authoritative. This pins that the two sides really do differ
+    // here, so the day the builder learns the macro spelling this test fails and
+    // the fixture moves into the corpus above.
+    let source = "See indexterm2:[<<b>>] here.\n\n[[b]]B.";
+
+    let mut parser = parser();
+    let doc = parser.parse_deferred(source);
+    let context = parser.render_context();
+    let renderer = HtmlSubstitutionRenderer {};
+
+    let (_, content) = contents(&doc)
+        .into_iter()
+        .find(|(_, content)| content.deferred_parts().is_some())
+        .expect("the fixture must defer a cross-reference");
+
+    let (template, xrefs) = content.deferred_parts().unwrap();
+    let (golden, _) = partition(template, xrefs);
+    let derived = block_tree_xref_segments(content.inlines(), &renderer, &context);
+
+    // The string pipeline defers one; the tree offers none to derive from.
+    assert_eq!(golden.len(), 1);
+    assert_eq!(golden[0].target, "b");
+    assert!(
+        derived.is_empty(),
+        "the macro spelling now yields a subtree; fold this into the parity corpus: {derived:?}"
+    );
+}
+
+#[test]
+fn a_reference_hidden_by_an_index_term_still_correlates_onto_its_own_node() {
+    // The other half of the `IndexTerm` fix, and the half the corpus above
+    // cannot reach: `count_tree_xrefs` and `assign_tree_xrefs` are what
+    // *install* a resolved destination onto a node, and they skipped the same
+    // container the collectors did.
+    //
+    // The shape is chosen so a skip **misaligns** rather than merely drops: the
+    // hidden reference sits between two visible ones, so a walk that does not
+    // descend hands `<<c>>` the destination belonging to `<<b>>`. Asserting
+    // each node's own `href` is what catches that — a count assertion would
+    // not, and neither would a fixture with the hidden reference first or last.
+    //
+    // This also pins the *widening* the fix performs: before it, the count
+    // guard saw 2 tree slots against 3 deferred segments and declined to
+    // correlate at all, so no node carried a destination. Now every one does.
+    let mut parser = parser();
+
+    // `parse` resolves against the document's own catalog.
+    let doc =
+        parser.parse("See <<a>> and ((term <<b>>)) and <<c>>.\n\n[[a]]A.\n\n[[b]]B.\n\n[[c]]C.");
+
+    fn hrefs(nodes: &[crate::inlines::InlineNode<'_>], out: &mut Vec<(String, Option<String>)>) {
+        for node in nodes {
+            match node {
+                crate::inlines::InlineNode::Ref(reference)
+                    if reference.variant == crate::inlines::RefVariant::Xref =>
+                {
+                    out.push((
+                        reference.target.to_string(),
+                        reference.resolved.as_ref().map(|r| r.href.clone()),
+                    ));
+
+                    hrefs(&reference.children, out);
+                }
+
+                crate::inlines::InlineNode::Ref(reference) => hrefs(&reference.children, out),
+                crate::inlines::InlineNode::Styled(styled) => hrefs(&styled.children, out),
+                crate::inlines::InlineNode::IndexTerm(term) => hrefs(&term.children, out),
+                crate::inlines::InlineNode::Footnote(footnote) => hrefs(&footnote.children, out),
+
+                _ => {}
+            }
+        }
+    }
+
+    let (_, content) = contents(&doc)
+        .into_iter()
+        .find(|(_, content)| content.deferred_parts().is_some())
+        .expect("the fixture must defer a cross-reference");
+
+    let mut found = vec![];
+    hrefs(content.inlines(), &mut found);
+
+    // Each node carries its **own** target's destination — the assertion a
+    // misalignment fails, since `c` would otherwise hold `#b`.
+    assert_eq!(
+        found,
+        vec![
+            ("a".to_string(), Some("#a".to_string())),
+            ("b".to_string(), Some("#b".to_string())),
+            ("c".to_string(), Some("#c".to_string())),
+        ]
+    );
 }

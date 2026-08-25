@@ -1046,6 +1046,14 @@ fn count_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
 
             InlineNode::Styled(styled) => count_tree_xrefs(&styled.children),
 
+            // A **visible index term** shows its text in the flow, so the
+            // string replacer's own haystack holds any cross-reference written
+            // inside it and defers a segment for one. It is the fifth nested
+            // node list a tree can hold a construct in (see the side-effect
+            // sweep's own note), and the one a walk written by matching on
+            // `children` is bound to miss.
+            InlineNode::IndexTerm(index_term) => count_tree_xrefs(&index_term.children),
+
             _ => 0,
         })
         .sum()
@@ -1063,6 +1071,8 @@ fn count_footnote_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
             InlineNode::Ref(reference) => count_footnote_tree_xrefs(&reference.children),
 
             InlineNode::Styled(styled) => count_footnote_tree_xrefs(&styled.children),
+
+            InlineNode::IndexTerm(index_term) => count_footnote_tree_xrefs(&index_term.children),
 
             _ => 0,
         })
@@ -1181,6 +1191,10 @@ fn collect_tree_xref_segments(
                 collect_tree_xref_segments(&styled.children, renderer, context, out);
             }
 
+            InlineNode::IndexTerm(index_term) => {
+                collect_tree_xref_segments(&index_term.children, renderer, context, out);
+            }
+
             _ => {}
         }
     }
@@ -1209,6 +1223,10 @@ fn collect_footnote_tree_xref_segments(
 
             InlineNode::Styled(styled) => {
                 collect_footnote_tree_xref_segments(&styled.children, renderer, context, out);
+            }
+
+            InlineNode::IndexTerm(index_term) => {
+                collect_footnote_tree_xref_segments(&index_term.children, renderer, context, out);
             }
 
             _ => {}
@@ -1288,6 +1306,10 @@ fn assign_tree_xrefs(
                 assign_tree_xrefs(&mut styled.children, ordered, next);
             }
 
+            InlineNode::IndexTerm(index_term) => {
+                assign_tree_xrefs(&mut index_term.children, ordered, next);
+            }
+
             _ => {}
         }
     }
@@ -1320,6 +1342,10 @@ fn assign_footnote_tree_xrefs(
 
             InlineNode::Styled(styled) => {
                 assign_footnote_tree_xrefs(&mut styled.children, ordered, next);
+            }
+
+            InlineNode::IndexTerm(index_term) => {
+                assign_footnote_tree_xrefs(&mut index_term.children, ordered, next);
             }
 
             _ => {}

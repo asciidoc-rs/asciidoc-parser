@@ -6743,21 +6743,51 @@ Each phase is a reviewable unit with a clear exit gate.
 
   [`inline_builder_xref_segment_parity`](../../parser/src/tests/inline_builder_xref_segment_parity.rs)
   is the corpus, over whole documents parsed with `parse_deferred` (so both sides carry
-  `resolved: None` and the comparison is of *recognition* alone): 37 fixtures across both
+  `resolved: None` and the comparison is of *recognition* alone): 44 fixtures across both
   spellings, the present-but-empty text, a display text carrying each of the three recoverable
   pieces, a passthrough, a nested macro, the attribute-list form's other fields, a derived
   destination, an unresolved target, several references in one content, a reference nested in a
-  span, the footnote-embedded complement, and three other content-bearing locations. Every field of
-  every segment is compared, and two vacuity guards keep a corpus that stopped deferring from
-  passing.
+  span, the footnote-embedded complement, and every other content-bearing location a deferred
+  reference reaches — a **section title** (the one the document-order pass owns, including a
+  forward reference and a reference between two titles) and a **table cell** among them. Every
+  field of every segment is compared, and two vacuity guards keep a corpus that stopped deferring
+  from passing.
   Exactly **one** shape diverges and it is the sibling increment's own, pinned as such: for
   `xref:tgt[*bold*,role=*hl*]` the `role` differs by that increment's rule while `provided_text` is
   byte-identical — which is precisely the claim this one makes.
 
-  Audit: **36** rows either side, 0 new and 0 closed, as it must be — the diff adds no production
-  path at all. Coverage is diff-neutral on `content.rs` (21 missed regions and 8 missed lines either
-  side). Falsifiable: deriving `provided_text` from the children's source spans instead of their
-  fold fails both tests.
+  Review turned up a real one, and it was **not** confined to the new code: a cross-reference
+  written inside a *visible index term* is deferred by the string pipeline (the replacer's
+  haystack holds the term's shown text inline) while every one of these walks skipped
+  [`IndexTerm`](../../parser/src/inlines/index_term.rs), the fifth nested node list and the one a
+  walk written by matching on `children` is bound to miss. The side-effect sweep found exactly this
+  for its own three walks an increment ago; `count_tree_xrefs`, `assign_tree_xrefs` and their two
+  footnote siblings still had it. The failure mode is worse than a dropped entry:
+  `See <<a>> and ((term <<b>>)) and <<c>>` derived `[a, c]` against a golden `[a, b, c]`, so once
+  wired every reference *after* the hidden one would take the wrong destination. All six walks —
+  the two new collectors and the four that predate them — now descend, and the corpus fixture that
+  pins it is deliberately the *between-two-visible-ones* shape rather than the simpler one, since
+  that is the shape a misalignment shows up in. The pre-existing walks were safe rather than wrong
+  before this, because the count guard declined to correlate on the mismatch; what they were not is
+  complete, and the tree was silently never authoritative for such a content.
+
+  The index-term family's own remaining deferral shows up from this side too and stays: the
+  `indexterm2:[…]` **macro** spelling reads its shown term from an attribute-list parse rather
+  than from a range, so the builder keeps it as a string and builds no subtree — there is no
+  node to derive a segment from. That is the builder's documented limitation, not the
+  derivation's, and the same count guard keeps it safe; its own test pins the difference, so the
+  day the builder learns that spelling the fixture moves into the corpus.
+
+  Audit: **36** rows either side, 0 new and 0 closed — the walk fix changes when the correlation
+  *succeeds*, not what any content renders to. Coverage is diff-neutral on both changed files
+  (`content.rs` 21 missed regions and 8 missed lines, `section.rs` 40 and 39, either side).
+  Falsifiable in three places, and the third had to be built: deriving `provided_text` from the
+  children's source spans instead of their fold fails the corpus; reverting either collector's
+  `IndexTerm` arm fails it on the between-two-visible-ones fixture; and reverting the *count* or
+  *assign* arm failed nothing at all, since the corpus never reaches those. That gap is what
+  `a_reference_hidden_by_an_index_term_still_correlates_onto_its_own_node` closes — it resolves
+  the same shape for real and asserts each node's own `href`, which is the assertion a
+  misalignment fails where a count would pass.
 
   *What this leaves of the survey:* three items. `Content::passthroughs()` as a tree-backed view
   (public-API shaping, and *deleting* it is as live an option as building it), the link family's
@@ -8174,8 +8204,12 @@ Each phase is a reviewable unit with a clear exit gate.
        [`inline_builder_xref_segment_parity`](../../parser/src/tests/inline_builder_xref_segment_parity.rs)
        compares every field of every segment over 37 whole-document fixtures; exactly one shape
        diverges and it is the sibling increment's own `role=`, pinned beside a `provided_text` that
-       is byte-identical. Audit: 36 rows either side, 0 new and 0 closed (the diff adds no
-       production path); coverage diff-neutral. See the step's own "landed as" note above.
+       is byte-identical. Review found one real bug, and not in the new code: a cross-reference
+       inside a **visible index term** is deferred by the string pipeline while all four
+       pre-existing xref walks skipped `IndexTerm`, so a reference hidden *between* two visible
+       ones misaligned every one after it. All six walks now descend; the count guard had kept the
+       old ones safe rather than complete. Audit: 36 rows either side, 0 new and 0 closed;
+       coverage diff-neutral on both changed files. See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
