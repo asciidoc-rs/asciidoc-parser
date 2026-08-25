@@ -2,6 +2,7 @@ use crate::{
     HasSpan, Parser,
     attributes::Attrlist,
     content::{Content, Passthroughs, SubstitutionStep},
+    document::RefType,
     warnings::WarningType,
 };
 
@@ -226,6 +227,43 @@ impl SubstitutionGroup {
         parser: &Parser,
         attrlist: Option<&Attrlist<'src>>,
     ) {
+        self.apply_inner(content, parser, attrlist, None);
+    }
+
+    /// [`apply`](Self::apply) for a description-list **term**, which is the one
+    /// content with a registration rule of its own: a leading `[[id]]` /
+    /// `[[id,reftext]]` at the very start of the term is registered with the
+    /// **rest of the term** as its default reference text, so `[[cpu]]CPU::`
+    /// makes `<<cpu>>` display *CPU*.
+    ///
+    /// That rule cannot live in
+    /// [`apply_ref_side_effects`](crate::content::inline_builder): a leading
+    /// anchor is only special because of where it sits in a *term*, which is a
+    /// fact about the caller, not about the node. So the term passes its
+    /// warnings list here, the rule runs between the tree build and the replay
+    /// — the one point where the tree exists and nothing has registered from it
+    /// yet — and the replay is then told the anchor is already registered, so
+    /// it does not raise a second duplicate-id warning for it.
+    ///
+    /// Before this branch's step 6 the term ran the steps directly and
+    /// registered from the string pipeline, which made it the last content
+    /// doing so. It no longer is.
+    pub(crate) fn apply_to_description_list_term<'src>(
+        &self,
+        content: &mut Content<'src>,
+        parser: &Parser,
+        warnings: &mut Vec<crate::warnings::Warning<'src>>,
+    ) {
+        self.apply_inner(content, parser, None, Some(warnings));
+    }
+
+    fn apply_inner<'src>(
+        &self,
+        content: &mut Content<'src>,
+        parser: &Parser,
+        attrlist: Option<&Attrlist<'src>>,
+        term_warnings: Option<&mut Vec<crate::warnings::Warning<'src>>>,
+    ) {
         // Snapshot the pre-substitution value and the parser *before* the
         // authoritative pass runs. The parser clone captures every document
         // counter (footnote/callout numbers, `{counter:…}` values) at its
@@ -318,14 +356,19 @@ impl SubstitutionGroup {
             // document order across contents and in the string pipeline's own
             // pass order within one (see `apply_macro_side_effects`).
             //
-            // `leading_anchor_registered` is `false`: the one caller that
-            // pre-registers a leading anchor is a description-list term, which
-            // runs the steps directly rather than through this function.
+            // A description-list term's own leading-anchor rule runs first,
+            // between the build and the replay — see
+            // `apply_to_description_list_term`. Every other content passes
+            // `false`: it has no anchor registered ahead of the replay.
+            let leading_anchor_registered = term_warnings.is_some_and(|warnings| {
+                Self::register_term_leading_anchor(&tree, parser, content, warnings)
+            });
+
             crate::content::inline_builder::apply_macro_side_effects(
                 &tree,
                 parser,
                 content.original(),
-                false,
+                leading_anchor_registered,
             );
 
             // The callouts step's own registration, replayed the same way. It
@@ -347,6 +390,74 @@ impl SubstitutionGroup {
                 content.set_render_attributes(parser.snapshot_attributes());
             }
         }
+    }
+
+    /// Registers a description-list term's leading inline anchor, from the
+    /// term's own tree, and answers whether it did.
+    ///
+    /// The rule mirrors what the term used to read out of its half-substituted
+    /// string with a regex: the anchor must be the term's **first** node and
+    /// must start at the term's own first byte, and its reference text is its
+    /// own `[[id,reftext]]` text when it has one, or else the **rest of the
+    /// term**, trimmed.
+    ///
+    /// Reading "the rest of the term" from the tree rather than from that
+    /// string is one deliberate difference. The regex ran *before* the macros
+    /// step, so a term whose remainder held a macro registered the macro's
+    /// **source** as its reference text (`[[x]]image:a.png[]Term` registered
+    /// `image:a.png[]Term`); the fold of the same nodes gives the rendering
+    /// instead, which is what every other reference text on this branch is.
+    ///
+    /// Being the tree's **first** node is the whole of "at the start of the
+    /// term": that is what the regex's `^` anchor said, and the two agree
+    /// because a term's own source begins at its first non-space character.
+    /// There is deliberately no second test of the node's byte offset, and no
+    /// [`is_bibliography`](crate::inlines::Anchor) check either — a
+    /// bibliography anchor registers under its own
+    /// [`RefType`] from its own earlier pass, but it cannot lead a term in the
+    /// first place, since a bibliography list item's principal text is never
+    /// parsed as one. Both would be branches no input can take.
+    fn register_term_leading_anchor<'src>(
+        tree: &[crate::inlines::InlineNode<'src>],
+        parser: &Parser,
+        content: &Content<'src>,
+        warnings: &mut Vec<crate::warnings::Warning<'src>>,
+    ) -> bool {
+        use crate::inlines::InlineNode;
+
+        let Some(InlineNode::Anchor(anchor)) = tree.first() else {
+            return false;
+        };
+
+        let reftext = match &anchor.reftext {
+            Some(reftext) => Some(crate::content::inline_builder::fold_html(
+                reftext,
+                parser.renderer.as_ref(),
+                &parser.render_context(),
+            )),
+
+            None => {
+                let rest = crate::content::inline_builder::fold_html(
+                    tree.get(1..).unwrap_or_default(),
+                    parser.renderer.as_ref(),
+                    &parser.render_context(),
+                );
+
+                Some(rest.trim().to_string())
+            }
+        };
+
+        if parser
+            .register_ref(&anchor.id, reftext.as_deref(), RefType::Anchor)
+            .is_err()
+        {
+            warnings.push(crate::warnings::Warning::new(
+                content.original(),
+                WarningType::DuplicateId(anchor.id.to_string()),
+            ));
+        }
+
+        true
     }
 
     /// Runs **only** the string pipeline over `content` — no inline tree, no
