@@ -545,3 +545,134 @@ fn the_replay_is_not_a_no_op_for_any_family() {
         ]
     );
 }
+
+// The replay wired for real: `SubstitutionGroup::apply` performs these four
+// from the tree, and the string pipeline's own copies are suppressed for the
+// same content. What follows pins that switch through a whole parse, where the
+// harness above pins the two sides against each other in isolation.
+
+#[test]
+fn a_real_parse_records_each_side_effect_exactly_once() {
+    // The switch's own failure mode is not "nothing recorded" — the suite would
+    // be loud about that — but "recorded twice", which a `Vec`-backed catalog
+    // shows and a set-backed one would hide. Every fixture below carries a
+    // construct from a different family, and each must appear once.
+    let mut parser = Parser::default()
+        .with_catalog_assets(true)
+        .with_intrinsic_attribute_bool("experimental", true, ModificationContext::Anywhere);
+
+    let doc = parser.parse(concat!(
+        "image:x.png[X] and link:y.html[Y] and https://z.example[Z]\n",
+        "\n",
+        "[[anchor-id]]An anchor, and mailto:a@b.example[A].\n",
+    ));
+
+    let catalog = doc.catalog();
+
+    let images: Vec<(String, Option<String>)> = catalog
+        .images()
+        .iter()
+        .map(|i| (i.target.clone(), i.imagesdir.clone()))
+        .collect();
+
+    assert_eq!(
+        images,
+        [("x.png".to_string(), None)],
+        "an image target should be catalogued once"
+    );
+
+    // Pass order, not source order: the auto-link / formal-URL pass runs ahead
+    // of the `link:`/`mailto:` macro pass, so `z` precedes `y` even though it is
+    // written after it. `apply_macro_side_effects` reproduces that ordering
+    // because it composes the families in the string pipeline's own order — the
+    // property `links::apply_link_side_effects` documents for itself.
+    assert_eq!(
+        catalog.links().to_vec(),
+        [
+            "https://z.example".to_string(),
+            "y.html".to_string(),
+            "mailto:a@b.example".to_string(),
+        ],
+        "each link target should be catalogued once, in pass order"
+    );
+
+    assert!(
+        catalog.refs.contains_key("anchor-id"),
+        "the inline anchor's id should be registered: {:?}",
+        catalog.refs
+    );
+}
+
+#[test]
+fn a_duplicate_id_warns_once_through_a_real_parse() {
+    // The duplicate-id warning is the one side effect driven by a *failed*
+    // registration, so it is the one the suppression could most easily double
+    // or lose: the string replacer raises it when `register_ref` returns `Err`,
+    // and a suppressed `register_ref` returns `Ok`. The replay's own call to
+    // the real catalog is what must raise it instead — exactly once.
+    let mut parser = Parser::default();
+    let doc = parser.parse("[[dup]]One. [[dup]]Two.");
+
+    let duplicates: Vec<_> = doc
+        .warnings()
+        .filter(|w| matches!(w.warning, WarningType::DuplicateId(_)))
+        .collect();
+
+    assert_eq!(
+        duplicates.len(),
+        1,
+        "expected exactly one duplicate-id warning: {duplicates:?}"
+    );
+}
+
+#[test]
+fn a_description_list_term_still_registers_from_the_string_pipeline() {
+    // The carve-out, pinned. A term runs the substitution steps directly rather
+    // than through `SubstitutionGroup::apply` (see
+    // `blocks::list_item_marker::DefinedTerm::substitute`), so it builds no tree
+    // and has nothing to replay from — and it stays correct only because it
+    // never enters the suppression window, which lives inside `apply`. Hoisting
+    // the flag to cover a whole parse rather than one pass would drop this
+    // registration silently.
+    let mut parser = Parser::default();
+    let doc = parser.parse("[[term-id]]A term:: its description.");
+
+    assert!(
+        doc.catalog().refs.contains_key("term-id"),
+        "a term's leading anchor should still be registered: {:?}",
+        doc.catalog().refs
+    );
+}
+
+#[test]
+fn a_passthrough_body_with_its_own_macros_registers_once() {
+    // The nesting case the save-and-*restore* exists for. A `pass:` macro with
+    // an explicit substitution list re-enters `SubstitutionGroup::apply` for its
+    // body while the outer content's suppression window is open, and closes a
+    // window of its own on the way out. Restoring the previous value is what
+    // leaves the outer content suppressed for everything *after* the
+    // passthrough; clearing it instead would let the string pipeline record
+    // `outer.png` alongside the replay's copy.
+    //
+    // The body's own image is not catalogued at all, on this branch or before
+    // it — a pre-existing gap in how a `pass:`-with-subs body reaches the
+    // catalog, unrelated to this switch and unchanged by it. What this fixture
+    // pins is the count for `outer.png`, which is what the flag's lifetime
+    // decides.
+    let mut parser = Parser::default().with_catalog_assets(true);
+
+    let doc = parser.parse("pass:m[image:inner.png[I]] then image:outer.png[O]");
+
+    let images: Vec<String> = doc
+        .catalog()
+        .images()
+        .iter()
+        .map(|i| i.target.clone())
+        .collect();
+
+    assert_eq!(
+        images,
+        ["outer.png".to_string()],
+        "the image after a passthrough should be catalogued exactly once"
+    );
+}

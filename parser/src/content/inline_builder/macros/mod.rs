@@ -456,10 +456,19 @@ fn apply_reference_families<'src>(
 /// place (see [`apply_footnotes`](super::footnotes::apply_footnotes)'s own doc
 /// comment); it already runs during [`build`](super::build), not here.
 ///
-/// As with each of the three functions it composes, **nothing here is wired
-/// into a real parse path yet** — it is exercised only by this module's own
-/// tests, against their own `Parser`. `source` and `leading_anchor_registered`
-/// are threaded straight through to
+/// This is the **production** entry point for all four side effects:
+/// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup) calls it
+/// once per content, from the tree it just built, while the string pipeline's
+/// own copies are suppressed for that content (see
+/// `Parser::suppress_macro_side_effects`). Design §5.2's step 6 asks for
+/// exactly that — "re-attach the recognition side effects ... at the cutover
+/// ... which is what avoids double-counting each registration".
+///
+/// It runs *after* the whole string pass rather than during its macros step.
+/// Across contents that preserves document order, and within one content the
+/// composition below preserves the string pipeline's own pass order, which is
+/// what the two orderings above require. `source` and
+/// `leading_anchor_registered` are threaded straight through to
 /// [`anchors::apply_ref_side_effects`] — see its own doc comment for both.
 pub(crate) fn apply_macro_side_effects(
     nodes: &[InlineNode<'_>],

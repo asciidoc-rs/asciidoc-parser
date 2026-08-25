@@ -535,9 +535,11 @@ fn structural_anchor_reftext<'src>(
 /// deferred registrations, staged as its own building block for the eventual
 /// cutover (design §5.2, Phase 4 step 6): re-attaching it for real means
 /// calling it exactly once per parse, after the single-pass builder replaces
-/// the recorder as `Content`'s tree source, so nothing here is wired into a
-/// real parse yet — it is exercised only by this module's own tests, against
-/// their own `Parser`.
+/// the recorder as `Content`'s tree source. That is now done:
+/// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup) calls this
+/// once per content, from the tree it just built, and the string replacer's own
+/// `register_ref` is suppressed for that content (see
+/// `Parser::suppress_macro_side_effects`).
 ///
 /// `source` is the whole original content span being processed, used — like
 /// [`image::apply_image_side_effects`](super::image::apply_image_side_effects)'
@@ -663,8 +665,10 @@ pub(crate) fn apply_ref_side_effects(
 /// recursion here (and none needed for the bracketed label either: it stays in
 /// the flow as ordinary sibling nodes, see [`biblio_anchor_level`]).
 ///
-/// As with every staged side effect in this module, **nothing here is wired
-/// into a real parse path yet** — it is exercised only by this module's own
+/// As with every recognition side effect in this module, this now runs on the
+/// real parse path — see
+/// [`apply_macro_side_effects`](super::apply_macro_side_effects). It is also
+/// exercised directly by this module's own
 /// tests, against their own [`Parser`].
 pub(crate) fn apply_biblio_side_effects(
     nodes: &[InlineNode<'_>],

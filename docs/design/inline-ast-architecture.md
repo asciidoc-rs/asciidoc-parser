@@ -6386,6 +6386,52 @@ Each phase is a reviewable unit with a clear exit gate.
   `Content::rendered_from_template`, which is now the only thing keeping the fold differentiated
   against an independent construction.
 
+  *Step 6 landed as (the recognition side effects, re-attached for real):* the third of the four
+  things step 6 asks for, and the first that is not about the rendered string at all. Recognizing a
+  construct also means *writing it down*: an `image:` macro records its target in the asset catalog,
+  the three link passes record theirs, an inline anchor and a bibliography entry register their ids
+  in the reference catalog, and an image whose `link=` names a dangerous scheme records a warning.
+  All four were staged — built, composed as
+  [`apply_macro_side_effects`](../../parser/src/content/inline_builder/macros/mod.rs), and pinned by
+  their own corpus-wide harness — but every one of their doc comments still ended "nothing here is
+  wired into a real parse path yet". They are wired now.
+
+  The switch is a **suppression window**, not a deletion.
+  [`SubstitutionGroup::apply`](../../parser/src/content/substitution_group.rs) sets
+  `Parser::suppress_macro_side_effects` around its authoritative string pass and replays the four
+  from the tree afterwards. The string replacers' own `register_image` / `register_link` /
+  `register_ref` calls and the image family's dangerous-scheme warning stay where they are, gated;
+  deleting them outright is what the *next* step does, when `run_pipeline` leaves the production
+  path. Both paths share one `Parser` now, which is exactly why step 6 says to re-attach the side
+  effects at the cutover — "which is what avoids double-counting each registration".
+
+  Three details decided themselves. The replay runs **after** the whole string pass rather than
+  during its macros step: across contents that preserves document order, and within one content
+  `apply_macro_side_effects` already composes the families in the string pipeline's own pass order,
+  which is what its own doc comment was written to guarantee. A suppressed `register_ref` returns
+  **`Ok`**, not an error, because the string replacer raises its duplicate-id warning on `Err` and
+  that warning is the replay's to raise. And the *link* family's dangerous-scheme warning is **not**
+  suppressed, because the replay does not carry it — only the image family's is among the four.
+
+  Two things fell out of testing rather than design. The window was first gated on a tree actually
+  being built; the whole suite passes without that gate, and the reason is sound rather than
+  incidental — the only content reaching `apply` without a tree is a passthrough body the *builder*
+  re-enters for, handed the counter-safe clone whose catalog is discarded with it. The gate is gone.
+  And the flag is saved and restored rather than cleared, which no fixture currently distinguishes
+  (the suite is green either way, since none puts a registering construct after a nested `apply`
+  within one content); it is kept because it is correct by construction rather than by that absence,
+  and the code says so.
+
+  The audit is a whole-suite catalog diff rather than a rendered-string one, since no rendered byte
+  changes: every parse in the suite dumps its images, links, refs and warnings, and the **3,773**
+  records are byte-identical between this branch and its base. Dropping the replay fails **69**
+  tests; hoisting the window from one pass to a whole parse fails **161** — the first says the tree
+  is really the source now, the second says the description-list **term** carve-out is real. A term
+  runs the substitution steps directly rather than through `SubstitutionGroup::apply`, so it builds
+  no tree and has nothing to replay from; it stays correct only because it never enters the window.
+  That is the last thing still registering from the string pipeline, and it goes when the pipeline
+  does.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -7675,8 +7721,24 @@ Each phase is a reviewable unit with a clear exit gate.
        when step 6 takes the string pipeline off the production path. It also corrected an oracle:
        the previous increment's template differential
        walked block titles, whose segments are never resolved in place, and passed only by
-       coincidence. See the step's own "landed as" note above. What remains of step 6 is the
-       passthrough sentinel system and the side effects wired for real.
+       coincidence. See the step's own "landed as" note above.
+
+     - ✅ **the recognition side effects, re-attached for real.** The third of step 6's four asks,
+       and the first that is not about the rendered string:
+       [`apply_macro_side_effects`](../../parser/src/content/inline_builder/macros/mod.rs) — an
+       image target, three link passes' targets, an anchor's and a bibliography entry's id, and the
+       image family's dangerous-`link=` warning — runs from the tree, once per content, while
+       `Parser::suppress_macro_side_effects` gates the string pipeline's own copies for the same
+       pass. A **suppression window** rather than a deletion, because deleting the replacers'
+       registrations is what the next step does when `run_pipeline` leaves the production path.
+       A suppressed `register_ref` returns `Ok`, since the duplicate-id warning is the replay's to
+       raise; the *link* family's dangerous-scheme warning is not suppressed, since the replay does
+       not carry it. No rendered byte changes, so the audit is a catalog diff: **3,773** parses,
+       images/links/refs/warnings byte-identical to base. Dropping the replay fails 69 tests;
+       hoisting the window to a whole parse fails 161 — the second is the description-list **term**
+       carve-out, the last thing still registering from the string pipeline. See the step's own
+       "landed as" note above. What remains of step 6 is taking `run_pipeline` off the production
+       path, which takes the passthrough sentinel system and that carve-out with it.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

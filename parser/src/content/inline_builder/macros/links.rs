@@ -2014,9 +2014,10 @@ fn build_email_node<'src>(
 /// for the link family, staged as its own building block for the eventual
 /// cutover (design §5.2, Phase 4 step 6): re-attaching it for real means
 /// calling it exactly once per parse, after the single-pass builder replaces
-/// the recorder as `Content`'s tree source, so nothing here is wired into a
-/// real parse yet — it is exercised only by this module's own tests, against
-/// their own `Parser`.
+/// the recorder as `Content`'s tree source. That is now done: this runs once
+/// per content from the tree, and the string replacers' own `register_link`
+/// calls are suppressed for that content (see
+/// `Parser::suppress_macro_side_effects`).
 ///
 /// # Registration order across the three link forms
 ///

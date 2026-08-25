@@ -1198,8 +1198,9 @@ fn parse_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
 /// the eventual cutover (design §5.2, Phase 4 step 6): re-attaching it for
 /// real means calling it exactly once per parse, after the single-pass
 /// builder replaces the recorder as `Content`'s tree source, so nothing here
-/// is wired into a real parse yet — it is exercised only by this module's own
-/// tests, against their own `Parser`.
+/// is now wired into the real parse path — see
+/// [`apply_macro_side_effects`](super::apply_macro_side_effects) — and is also
+/// exercised directly by this module's own tests, against their own `Parser`.
 ///
 /// Recurses into every container an `Image` node can be nested inside —
 /// [`Styled`](InlineNode::Styled), [`Ref`](InlineNode::Ref),
