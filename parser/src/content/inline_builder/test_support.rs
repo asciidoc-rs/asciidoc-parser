@@ -154,6 +154,20 @@ pub(super) fn assert_raw<'src>(node: &InlineNode<'src>, value: &str) -> Span<'sr
 /// the parse's — and that both are
 /// [`Passthrough`](RawOrigin::Passthrough)-origin, unlike the `Raw` leaves a
 /// substitution leaves behind in place.
+/// A [`Passthrough`](RawOrigin::Passthrough) origin carrying `subs` and no
+/// `source_text` — the shape every form but `pass:c,q[…]` takes.
+///
+/// Spelled out at each call site rather than defaulted, so a test states the
+/// group it expects instead of letting it be inferred from the
+/// [`RawForm`](crate::inlines::RawForm) beside it. The two deliberately
+/// disagree for the bare `+…+` form, which is `Verbatim` but folds `AsIs`.
+pub(super) fn passthrough(subs: crate::content::SubstitutionGroup) -> RawOrigin {
+    RawOrigin::Passthrough {
+        subs,
+        source_text: None,
+    }
+}
+
 pub(super) fn assert_raw_form(
     node: &InlineNode<'_>,
     form: crate::inlines::RawForm,

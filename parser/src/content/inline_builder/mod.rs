@@ -757,7 +757,7 @@ mod tests {
                 .iter()
                 .filter_map(|node| match node {
                     InlineNode::Raw { origin, value, .. } => {
-                        Some((*origin, value.as_ref().to_string()))
+                        Some((origin.clone(), value.as_ref().to_string()))
                     }
 
                     _ => None,
@@ -785,10 +785,34 @@ mod tests {
         assert_eq!(
             by_spelling,
             vec![
-                ("+++<b>x</b>+++", vec![RawOrigin::Passthrough]),
-                ("++a < b++", vec![RawOrigin::Passthrough]),
-                ("$$<i>$$", vec![RawOrigin::Passthrough]),
-                ("pass:[<b>]", vec![RawOrigin::Passthrough]),
+                (
+                    "+++<b>x</b>+++",
+                    vec![RawOrigin::Passthrough {
+                        subs: crate::content::SubstitutionGroup::None,
+                        source_text: None
+                    }]
+                ),
+                (
+                    "++a < b++",
+                    vec![RawOrigin::Passthrough {
+                        subs: crate::content::SubstitutionGroup::Verbatim,
+                        source_text: None
+                    }]
+                ),
+                (
+                    "$$<i>$$",
+                    vec![RawOrigin::Passthrough {
+                        subs: crate::content::SubstitutionGroup::Verbatim,
+                        source_text: None
+                    }]
+                ),
+                (
+                    "pass:[<b>]",
+                    vec![RawOrigin::Passthrough {
+                        subs: crate::content::SubstitutionGroup::None,
+                        source_text: None
+                    }]
+                ),
             ]
         );
 

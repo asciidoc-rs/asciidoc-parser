@@ -1,5 +1,6 @@
 use crate::{
     HasSpan, Span,
+    content::SubstitutionGroup,
     inlines::{Anchor, Callout, CharRef, Footnote, Image, IndexTerm, Ref, Stem, Styled, Ui},
     strings::CowStr,
 };
@@ -329,13 +330,46 @@ mod tests {
 /// [`Substitution`](Self::Substitution) node's bytes sees exactly what the
 /// replacer saw. Recording it on the node is what lets a recognition gate tell
 /// the two apart without having to know which pass it is running in.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+///
+/// A [`Passthrough`](Self::Passthrough) additionally carries the two facts the
+/// extraction pass resolved for it, which nothing else in the tree records: the
+/// substitution group its body is restored under, and — for the one form whose
+/// [`value`](InlineNode::Raw) is *not* the author's own bytes — that body. See
+/// the variant's own documentation.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum RawOrigin {
     /// An explicit passthrough the extraction pass pulled out before any step
     /// ran: `+++…+++`, `++…++`, `$$…$$`, `pass:[…]`, or an inline STEM body.
     ///
     /// The author asked for this text to be off limits.
-    Passthrough,
+    Passthrough {
+        /// The substitution group this body is restored under, as the
+        /// extraction pass resolved it — `None` for `+++…+++` and a bare
+        /// `pass:[…]`, `Verbatim` for `++…++` and `$$…$$`, and whatever list a
+        /// `pass:c,q[…]` spelled out.
+        ///
+        /// [`RawForm`] is the *fold's* two-valued view of this: a group that
+        /// applies nothing renders [`AsIs`](RawForm::AsIs), one that applies
+        /// special characters and nothing else renders
+        /// [`Escaped`](RawForm::Escaped). The two agree for every group the
+        /// fold can carry out by itself, and the group says more than the fold
+        /// needs precisely so that a consumer asking *what the author wrote*
+        /// does not have to infer it back from what the fold did.
+        subs: SubstitutionGroup,
+
+        /// The author's body **before** its group was applied, when
+        /// [`value`](InlineNode::Raw) is not it.
+        ///
+        /// For every form the fold can restore by itself, `value` *is* the
+        /// author's body and this is `None`. The exception is a `pass:` macro
+        /// carrying an explicit substitution list (`pass:c,q[…]`): an arbitrary
+        /// group needs the substitution pipeline, and a fold takes a renderer
+        /// and a [`RenderContext`](crate::parser::RenderContext) rather than a
+        /// `Parser`, so that body is substituted at **build** time and `value`
+        /// holds the result. Recording the input beside it is what keeps the
+        /// author's own text answerable from the tree.
+        source_text: Option<String>,
+    },
 
     /// Raw output a substitution produced **in place**, with no extraction
     /// involved: a literal `<`, `>`, or `&` from an expanded attribute value

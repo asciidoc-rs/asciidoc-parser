@@ -662,7 +662,16 @@ fn build_bare_unconstrained_match<'src>(
             node: Box::new(InlineNode::Raw {
                 value: CowStr::from(value),
                 form,
-                origin: RawOrigin::Passthrough,
+                // The bare `+…+` form is `Verbatim` like its delimited
+                // siblings; `substitute_and_restore` has already applied it,
+                // so `value` is the author's body (or, for a body enclosing an
+                // already-extracted construct, that body with each inner
+                // node's own fold bytes spliced in — which is what the string
+                // pipeline's own restore produces there too).
+                origin: RawOrigin::Passthrough {
+                    subs: SubstitutionGroup::Verbatim,
+                    source_text: None,
+                },
                 location,
             }),
         },
@@ -795,7 +804,10 @@ fn build_passthrough_node<'src>(
         return InlineNode::Raw {
             value: CowStr::from(content.data()),
             form: RawForm::AsIs,
-            origin: RawOrigin::Passthrough,
+            origin: RawOrigin::Passthrough {
+                subs: SubstitutionGroup::None,
+                source_text: None,
+            },
             location,
         };
     }
@@ -814,7 +826,10 @@ fn build_passthrough_node<'src>(
         return InlineNode::Raw {
             value: CowStr::from(content.data()),
             form: RawForm::Escaped,
-            origin: RawOrigin::Passthrough,
+            origin: RawOrigin::Passthrough {
+                subs: SubstitutionGroup::Verbatim,
+                source_text: None,
+            },
             location,
         };
     }
@@ -835,17 +850,24 @@ fn build_passthrough_node<'src>(
     let raw = content.data();
     let unescaped = raw.contains("\\]").then(|| raw.replace("\\]", "]"));
 
-    let value = if let Some(subs_list) = caps.get(14) {
+    // The explicit-list form is the one place `value` is not the author's own
+    // bytes, so it is also the one place the node records a `source_text`: an
+    // arbitrary group needs the substitution pipeline, which a fold has no
+    // `Parser` to reach, so the body is substituted here and the input kept
+    // beside the result.
+    let (value, subs, source_text) = if let Some(subs_list) = caps.get(14) {
         let text = unescaped.as_deref().unwrap_or(raw);
-        CowStr::from(build_pass_macro_subs_value(
-            text,
-            subs_list.as_str(),
-            parser,
-        ))
+        let (subs, _invalid) = SubstitutionGroup::from_custom_string(None, subs_list.as_str());
+
+        (
+            CowStr::from(passthrough_text(text, &subs, parser)),
+            subs,
+            Some(text.to_string()),
+        )
     } else if let Some(unescaped) = unescaped {
-        CowStr::from(unescaped)
+        (CowStr::from(unescaped), SubstitutionGroup::None, None)
     } else {
-        CowStr::from(raw)
+        (CowStr::from(raw), SubstitutionGroup::None, None)
     };
 
     // Either the body under `SubstitutionGroup::None` (nothing applied, so the
@@ -855,7 +877,7 @@ fn build_passthrough_node<'src>(
     InlineNode::Raw {
         value,
         form: RawForm::AsIs,
-        origin: RawOrigin::Passthrough,
+        origin: RawOrigin::Passthrough { subs, source_text },
         location,
     }
 }
@@ -979,7 +1001,18 @@ fn build_attrlisted_passthrough_node<'src>(
         vec![InlineNode::Raw {
             value: CowStr::from(body_span.data()),
             form,
-            origin: RawOrigin::Passthrough,
+            // This `Raw` is the *body* of an attribute-list-prefixed
+            // passthrough, whose `Styled` wrapper is what the extraction pass
+            // records as one entry; the group here is the body's own, read off
+            // the delimiters exactly as the unprefixed forms above read theirs.
+            origin: RawOrigin::Passthrough {
+                subs: if form == RawForm::AsIs {
+                    SubstitutionGroup::None
+                } else {
+                    SubstitutionGroup::Verbatim
+                },
+                source_text: None,
+            },
             location: body_span,
         }]
     };
@@ -1062,7 +1095,10 @@ fn build_bare_attrlisted_passthrough_node<'src>(
         vec![InlineNode::Raw {
             value: CowStr::from(body_span.data()),
             form: RawForm::Escaped,
-            origin: RawOrigin::Passthrough,
+            origin: RawOrigin::Passthrough {
+                subs: SubstitutionGroup::Verbatim,
+                source_text: None,
+            },
             location: body_span,
         }]
     };
@@ -1150,7 +1186,7 @@ mod tests {
 
     use super::{
         super::test_support::{
-            assert_raw, assert_styled, build_src, fold_html, golden_passthroughs, seed,
+            assert_raw, assert_styled, build_src, fold_html, golden_passthroughs, passthrough, seed,
         },
         apply_pass_macro_level, apply_passthroughs,
     };
@@ -1344,7 +1380,7 @@ mod tests {
     #[test]
     fn a_bare_plus_body_is_literal_text_unless_it_restores_something() {
         use super::super::test_support::assert_raw_form;
-        use crate::inlines::{RawForm, RawOrigin};
+        use crate::inlines::RawForm;
 
         // A bare `+…+` body is `SubstitutionGroup::Verbatim` like `++…++`, so
         // by rights it is the author's literal text too. It could not say so
@@ -1357,7 +1393,12 @@ mod tests {
         // detected rather than assumed: with nothing restorable inside the
         // body, the value is the author's bytes and the fold escapes them.
         let nodes = build_src(Span::new("+a < b+"));
-        assert_raw_form(&nodes[0], RawForm::Escaped, RawOrigin::Passthrough, "a < b");
+        assert_raw_form(
+            &nodes[0],
+            RawForm::Escaped,
+            passthrough(crate::content::SubstitutionGroup::Verbatim),
+            "a < b",
+        );
 
         // The mixture keeps `AsIs`, since part of its value is another node's
         // rendering rather than anything an escape could reproduce.
@@ -1365,7 +1406,7 @@ mod tests {
         assert_raw_form(
             &nodes[0],
             RawForm::AsIs,
-            RawOrigin::Passthrough,
+            passthrough(crate::content::SubstitutionGroup::Verbatim),
             "a &lt;b&gt; c",
         );
     }
@@ -1414,7 +1455,7 @@ mod tests {
     #[test]
     fn a_specialcharacters_body_is_literal_text_the_fold_escapes() {
         use super::super::test_support::assert_raw_form;
-        use crate::inlines::{RawForm, RawOrigin};
+        use crate::inlines::RawForm;
 
         // The shape this increment exists for. `SubstitutionGroup` decides
         // which form a passthrough body takes, and the two are not the same
@@ -1429,29 +1470,54 @@ mod tests {
         // Both stay opaque to every later step — that is what keeps them one
         // node kind — so this pins the distinction the kind alone cannot.
         let nodes = build_src(Span::new("+++<b>+++"));
-        assert_raw_form(&nodes[0], RawForm::AsIs, RawOrigin::Passthrough, "<b>");
+        assert_raw_form(
+            &nodes[0],
+            RawForm::AsIs,
+            passthrough(crate::content::SubstitutionGroup::None),
+            "<b>",
+        );
 
         let nodes = build_src(Span::new("pass:[<b>]"));
-        assert_raw_form(&nodes[0], RawForm::AsIs, RawOrigin::Passthrough, "<b>");
+        assert_raw_form(
+            &nodes[0],
+            RawForm::AsIs,
+            passthrough(crate::content::SubstitutionGroup::None),
+            "<b>",
+        );
 
         let nodes = build_src(Span::new("++<b>++"));
-        assert_raw_form(&nodes[0], RawForm::Escaped, RawOrigin::Passthrough, "<b>");
+        assert_raw_form(
+            &nodes[0],
+            RawForm::Escaped,
+            passthrough(crate::content::SubstitutionGroup::Verbatim),
+            "<b>",
+        );
 
         let nodes = build_src(Span::new("$$<b>$$"));
-        assert_raw_form(&nodes[0], RawForm::Escaped, RawOrigin::Passthrough, "<b>");
+        assert_raw_form(
+            &nodes[0],
+            RawForm::Escaped,
+            passthrough(crate::content::SubstitutionGroup::Verbatim),
+            "<b>",
+        );
 
         // The attribute-listed forms carry theirs as the `Styled` wrapper's
         // one child, and split the same way.
         let nodes = build_src(Span::new("[.role]+++<b>+++"));
         let children = assert_styled(&nodes[0], StyleVariant::Unquoted, SpanForm::Unconstrained);
-        assert_raw_form(&children[0], RawForm::AsIs, RawOrigin::Passthrough, "<b>");
+        assert_raw_form(
+            &children[0],
+            RawForm::AsIs,
+            passthrough(crate::content::SubstitutionGroup::None),
+            "<b>",
+        );
 
         let nodes = build_src(Span::new("[.role]++<b>++"));
         let children = assert_styled(&nodes[0], StyleVariant::Unquoted, SpanForm::Unconstrained);
         assert_raw_form(
             &children[0],
             RawForm::Escaped,
-            RawOrigin::Passthrough,
+            passthrough(crate::content::SubstitutionGroup::Verbatim),
             "<b>",
         );
     }
@@ -1588,7 +1654,7 @@ mod tests {
         }
 
         use super::super::test_support::assert_raw_form;
-        use crate::inlines::{RawForm, RawOrigin};
+        use crate::inlines::RawForm;
 
         let parser =
             Parser::default().with_inline_substitution_renderer(OrdinalRenderer::default());
@@ -1599,7 +1665,7 @@ mod tests {
         assert_raw_form(
             &nodes[0],
             RawForm::AsIs,
-            RawOrigin::Passthrough,
+            passthrough(crate::content::SubstitutionGroup::Verbatim),
             "a b [1] c d",
         );
         assert_eq!(nodes[0].span().data(), "+a $$b < c$$ d+");
