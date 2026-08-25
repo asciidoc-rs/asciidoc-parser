@@ -261,19 +261,21 @@ impl SubstitutionGroup {
                 attrlist,
             );
 
-            // The tree is now **authoritative** for the rendered string: what
+            // The tree is **authoritative** for the rendered string: what
             // `rendered_html()` returns is a fold of it, not the string
             // pipeline's own output (design §5.2 Phase 4, step 6).
             //
-            // Content carrying a *deferred cross-reference* is the one
-            // exception, and it is temporary. Such a content's rendered string
-            // is rebuilt from a placeholder template each time resolution runs
-            // (`Content::rebuild_rendered`), so making the fold authoritative
-            // there means teaching resolution to re-fold instead — which is the
-            // deferred-cross-reference sentinel system's own retirement (§4.2's
-            // second), and its own increment. Until then such a content keeps
-            // the template path end to end rather than having the two
-            // mechanisms interleave.
+            // Content carrying a *deferred cross-reference* is folded at a
+            // different time rather than a different way. Such a content's
+            // rendering is rebuilt from a placeholder template each time
+            // resolution runs (`Content::rebuild_rendered`), so a fold taken
+            // *here* would be overwritten by the next resolution pass — and
+            // before that pass the destinations are not known, so it would also
+            // be answering a question the document has not settled yet. It is
+            // folded at the **end of resolution** instead (`Content::refold`),
+            // which is the same answer one step later. Until then it keeps the
+            // template's answer, which is the honest one for an unresolved
+            // document.
             if content.deferred_parts().is_none() {
                 let folded = crate::content::inline_builder::fold_html(
                     &tree,
@@ -288,16 +290,11 @@ impl SubstitutionGroup {
 
             // Content carrying a deferred cross-reference is the only content
             // whose rendering is rebuilt after the parse, so it is the only
-            // content that will be *folded* after the parse — and a fold needs
-            // the document attributes this content was written under, which by
-            // then the parse has moved on from. Retain them here, where "now"
-            // is still that point in the document.
-            //
-            // Nothing reads them yet: the retirement of the
-            // deferred-cross-reference sentinel system (design §4.2's second)
-            // is the increment that re-folds instead of rebuilding from the
-            // template. Landing the retention first is what keeps that step
-            // checkable — this one changes no output at all.
+            // content that is *folded* after the parse — and a fold needs the
+            // document attributes this content was written under, which by then
+            // the parse has moved on from. Retain them here, where "now" is
+            // still that point in the document. `Content::refold` reads them
+            // back.
             if content.deferred_parts().is_some() {
                 content.set_render_attributes(parser.snapshot_attributes());
             }

@@ -6164,6 +6164,163 @@ Each phase is a reviewable unit with a clear exit gate.
 
   Coverage is diff-neutral (`fold.rs` 3/3, `xref.rs` 16/7, `ref_node.rs` 0/0 — identical to base).
 
+  *Step 6 landed as (each deferred content retains its own document attributes):* the second
+  prep, and the one that makes a later fold *possible* rather than merely correct. A fold running
+  after the parse needs the document state its content was written under, and by then the parse
+  has moved on — so a content carrying a deferred cross-reference now keeps its
+  [`ResolvedAttributes`](../../parser/src/parser/resolved_attributes.rs), snapshotted where "now"
+  is still that point in the document. Retention is narrow on purpose: deferred content is the
+  only content whose rendering is rebuilt after the parse, so it is the only content that will be
+  folded after it. Everything else — nearly everything — keeps `None`.
+
+  It retains the *attributes* rather than a whole `RenderContext`, and the difference is not
+  cosmetic. A `RenderContext` holds the path resolver and the two file handlers as `Rc<dyn …>`, so
+  retaining one would cost `Content` — and with it
+  [`Document`](../../parser/src/document/document.rs) — its `Send`/`Sync`. `Document` is both today
+  (`Parser`, holding six `Rc<dyn …>`, deliberately is not), nothing pinned it, and the regression
+  would have been silent;
+  `document_stays_send_and_sync` now pins it. Splitting the halves is also the more accurate model:
+  document attributes are **order-dependent** (a `:imagesdir:` line rebinds them for everything
+  after it) so they must be frozen per content, while the resolver and handlers are **parse-wide
+  configuration** that cannot change mid-parse, so freezing them buys nothing. The increment that
+  folds at resolution time assembles a context from this plus that configuration, which its caller
+  already holds. `ResolvedAttributes` is `Arc`-shared internally, so retention allocates nothing
+  beyond its box, and it is `Eq`, so `OwnedTitle` keeps its derived equality.
+
+  Nothing read it yet, which is the staging: landing the retention while it is a provable no-op is
+  what keeps the step that consumes it falsifiable. Audit: 54 divergences before and after, 0 new,
+  0 closed. Coverage diff-neutral.
+
+  *Step 6 landed as (the fold takes a `RenderContext`, not a `Parser`):* the third prep, and the
+  one that finishes what merging `main` started. `RenderContext` landed on `main` as *the document
+  state a renderer reads*; the merge wired the string pipeline's own call sites to it but left
+  [`fold_html`](../../parser/src/content/inline_builder/fold.rs) taking a `&Parser` and building a
+  context per rendered element. Faithful, but the wrong shape — a fold running later than its parse
+  cannot derive its context from the live parser, because the attributes have moved on. So the fold
+  takes the context, threaded from the one place that starts it, which is also strictly less work:
+  the per-element construction is gone, and with it the ~117ns per rendered element #1265 measured.
+
+  Two things had to move for that signature to exist. `fold_image` and `fold_link` parsed an
+  *empty* `Attrlist` for a hand-built node carrying none, which needs a parser;
+  [`Attrlist::empty`](../../parser/src/attributes/attrlist.rs) builds the zero-attribute list
+  directly, keeping the node's own zero-length location so lifetime and position still match (and
+  removing an attribute-reference substitution pass from that path). And the builder's own five
+  internal folds — a masked piece's body, an anchor's reference text, the pre-escape probe, the
+  restored-markup splice, the title's reference text — each take `parser.render_context()` at their
+  call site, where a parser is in hand. No behavior change: the context a fold now receives is the
+  one it was building for itself.
+
+  *Step 6 landed as (a `Raw` node records where its content came from):* the fourth prep, and the
+  first of the two builder preps the retirement's own audit turned up.
+  [`Raw`](../../parser/src/inlines/inline_node.rs) gains an
+  [`origin`](../../parser/src/inlines/inline_node.rs) orthogonal to its `form`: `Passthrough` for
+  content the extraction pass pulled out before any step ran (`+++…+++`, `++…++`, `$$…$$`,
+  `pass:[…]`, an inline STEM body), `Substitution` for raw output a substitution produced in place
+  — an expanded attribute value's literal special (which §3.4.1 leaves unescaped, the value having
+  expanded *after* `specialcharacters` ran), a special an effective order never escaped, or a slice
+  of an entity's own bytes.
+
+  It answers two questions. For a **consumer** it sharpens the security story §3.4 gives this node
+  kind: "this document emits raw HTML" is visible as `Raw` nodes, and whether that came from an
+  author writing an explicit passthrough or from a substitution expanding an attribute value is the
+  difference between a deliberate escape hatch and a value that may have arrived from elsewhere.
+  For the **builder** it is the difference between content the extraction pass is *holding* and
+  content that is simply there. A cross-reference's target is captured into its deferred segment
+  before the restore pass runs, so a computed value reading a `Passthrough` node's bytes sees the
+  extraction sentinel, while one reading a `Substitution` node's sees exactly what the string
+  replacer saw.
+
+  Recording it on the node is the point. A first attempt inferred the same distinction from the
+  `Masked` list the extraction pass builds, and it does not work: that list is keyed by location
+  identity and is empty on call paths where the identity is not in hand, so the same node was
+  classified differently depending on which pass asked. Provenance is a fact about the node, so it
+  belongs on the node — the same reasoning that put `form` there. Nothing read it yet.
+
+  *Step 6 landed as (a cross-reference whose target is attribute-expanded):* the fifth prep, the
+  first thing `RawOrigin` is *for*, and one of the two regressions the retirement's probe found.
+  `xref:{cpp}[{cpp}]` was left literal by the builder while the string pipeline recognized it:
+  `{cpp}` is `C&#43;&#43;`, §3.4.1 leaves an expanded value's `&` unescaped, so the target crosses
+  two `Raw` leaves that the match string stands in as placeholders — and the gate deferred on them.
+  Those leaves are `Substitution`: nothing extracted them and nothing restores them, so the string
+  replacer's own haystack held exactly these bytes, and filling the placeholders in **reaches**
+  parity rather than departing from it. `range_is_substitution_restorable` admits only such leaves;
+  a masked passthrough stays deferred, which is the distinction the whole thing rests on — it is
+  restored by a *later* pass, and a deferred cross-reference's target is captured before that pass
+  runs, so the string pipeline's own `href` holds the sentinel there.
+
+  Two things it turned up. The shorthand needs the replacer's `id.contains('<')` guard **for real**
+  now: `build_xref_shorthand_node` documented needing no counterpart, because markup in an id was
+  always an opaque piece and the gate refused the match before any id existed — but a
+  substitution-produced `<` is not opaque (`:markup: <b>x</b>`, then `<<{markup}>>`), and the check
+  has to be made against the *restored* id. And only the **id half** of a shorthand may be restored:
+  restoring the whole inner first shifts every offset the reference text is then sliced with, which
+  corrupted `<<sec,a +++<b>x</b>+++ text>>` into a trailing `&gt;&`. The text becomes structured
+  children in match-string coordinates and must stay there; only the id is read as a string. The new
+  test's golden comes from the *whole* `Normal` group rather than `golden_xref`, which drives the
+  macro-family steps only and would leave `{cpp}` unexpanded on the golden side.
+
+  *Step 6 landed as (the deferred-cross-reference sentinel system, retired — the second of the
+  three):* the fold becomes authoritative for the one content kind the cutover had to carve out.
+  Such a content's rendering is rebuilt from a placeholder template on **every** resolution pass
+  ([`Content::rebuild_rendered`](../../parser/src/content/content.rs)), so a fold taken at parse
+  time would be overwritten by the next pass — and would anyway be answering a question the
+  document has not settled, since the destinations are not known yet. It is folded at the **end of
+  resolution** instead ([`Content::refold`](../../parser/src/content/content.rs)), which is the
+  same answer one step later, assembled from the attributes the content retained (prep 2) paired
+  with the parser's own configuration through a `RenderContext` (prep 3).
+
+  The carve-out does not disappear so much as **narrow to something principled**. It was
+  `content.deferred_parts().is_none()` — *any* deferred cross-reference keeps the template. It is
+  now the count match
+  [`mirror_tree_xref_resolution`](../../parser/src/content/content.rs) already computes: the tree's
+  block-level cross-reference nodes against the segments whose placeholders are still in the
+  template. Where they agree, the tree holds every cross-reference the string pipeline deferred and
+  a fold of it *is* this content's rendering. Where they differ, the builder left one of its
+  documented forms unrecognized, so folding would **lose** the construct rather than render it
+  differently — and the template stays. That gate self-liquidates: each builder prep that teaches
+  one more form shrinks it, and it vanishes when none is left. The **footnote** half of the mirror
+  is deliberately not part of the gate — a footnote's text is extracted out of the block, so a fold
+  emits the marker and never descends into the subtree whose correlation was skipped.
+
+  Exactly **one** of the two renderings runs — the fold or the template, never one overwritten by
+  the other. That is not merely thrift: a renderer is a host-supplied trait object, so a stateful
+  one (a recorder, a numbering backend, anything counting its own callbacks) would see every
+  callback for a deferred content twice in a single resolution pass. A probe measuring the fold
+  against the template *inside* the pass showed exactly that as 11 rows of recorder counter drift
+  — the symptom, read at first as an artifact of the measurement.
+  `resolution_renders_a_deferred_content_once` pins the property with a counting renderer, which
+  `Document::resolve_references` takes as an ordinary argument.
+
+  Retiring the double render costs the whole-document parity harness its oracle for exactly the
+  content this step changed: `check_document` folds each location's tree and compares it against
+  `rendered_html()`, which for a deferred content now *is* that fold. So the template's answer
+  becomes reachable on its own — `Content::rendered_from_template`, test-only — and
+  `the_fold_reproduces_the_template_for_every_deferred_content` compares the two over a corpus of
+  fourteen cross-reference fixtures (both spellings, empty and absent reference texts, unresolved
+  targets, several in one content, a formatting span, an inter-document target, a footnote-embedded
+  reference, an attribute-styled one, a table cell, a block title). Both new tests fail if their
+  property is removed, checked by removing it.
+
+  Sizing the step took a probe over the whole suite (fold vs. template at every resolution):
+  **14** divergences, of which 11 were the recorder drift above, one is an *improvement* the code's
+  own comment predicted, and two were real regressions — both of which became preps 4/5 above. That
+  improvement is `a_post_replacement_in_a_cross_reference_text_is_now_at_parity`, a divergence
+  pinned since the cross-product sweep with a note saying it would close exactly here: a
+  `+`-line-break in a cross-reference's display text now gets its `<br>`, because a display text is
+  a subtree either way and the fold walks subtrees, where the string pipeline's step never saw
+  inside a template.
+
+  What still defers is the **shape** the second regression had: `xref:sec[*bold*,role=*hl*]` — a
+  rendered span reaching a value the macro families read as a *string* (`role=`, `window=`,
+  `xrefstyle=`). It is the last known member of the class, it is what keeps the narrowed gate from
+  being vacuous, and it is a builder prep like the five above rather than anything this system owes.
+  Also still deferred: a **section or block title's** deferred cross-references, which
+  [`title_refs`](../../parser/src/document/title_refs.rs) resolves in document order with
+  cross-title coordination the per-content pass cannot do, and which still take their rendering from
+  that pass's template. Retiring the template *itself* — the sentinel constants, `render_template`,
+  `DeferredContent::template` — waits on both, and on the whole-document parity harness no longer
+  needing the template as the oracle the fold is checked against.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -7371,6 +7528,68 @@ Each phase is a reviewable unit with a clear exit gate.
        style* rather than *ask the document*. Pinned by four whole-document fixtures that fail on
        base, not by the audit, which cannot see this class. See the step's own "landed as" note
        above.
+
+     - ✅ **prep (each deferred content retains its own document attributes).** A fold running
+       later than its parse needs the document state its content was written under, and the parse
+       has moved on; a content carrying a deferred cross-reference now keeps its
+       [`ResolvedAttributes`](../../parser/src/parser/resolved_attributes.rs), snapshotted where
+       "now" is still that point in the document. The *attributes* and not a whole `RenderContext`:
+       that holds `Rc<dyn …>` handlers, so retaining one would cost
+       [`Document`](../../parser/src/document/document.rs) its `Send`/`Sync` — which it has today,
+       nothing pinned, and `document_stays_send_and_sync` now does. Attributes are order-dependent
+       and must be frozen; the resolver and handlers are parse-wide and need not be. A provable
+       no-op: audit 54 rows either side, 0 new, 0 closed. See the step's own "landed as" note above.
+
+     - ✅ **prep (the fold takes a `RenderContext`, not a `Parser`).** Finishing what merging
+       `main` started: the merge left [`fold_html`](../../parser/src/content/inline_builder/fold.rs)
+       taking a `&Parser` and building a context *per rendered element*, which a later-than-parse
+       fold cannot do. The context is threaded from the one place that starts it — strictly less
+       work, and the ~117ns per rendered element #1265 measured goes with it.
+       [`Attrlist::empty`](../../parser/src/attributes/attrlist.rs) replaces the parser-needing
+       empty-list parse in `fold_image`/`fold_link`, and the builder's five internal folds take
+       `parser.render_context()` at their own call sites. No behavior change. See the step's own
+       "landed as" note above.
+
+     - ✅ **prep (a `Raw` node records where its content came from).**
+       [`Raw`](../../parser/src/inlines/inline_node.rs) gains an `origin` orthogonal to its `form`:
+       `Passthrough` for what the extraction pass pulled out before any step ran, `Substitution` for
+       raw output a substitution produced in place. For a consumer it sharpens §3.4's security story
+       (a deliberate escape hatch vs. a value that may have arrived from elsewhere); for the builder
+       it separates content the extraction pass is *holding* from content that is simply there —
+       which the prep below needs. Inferring it from the extraction pass's `Masked` list was tried
+       first and does not work: that list is keyed by location identity and empty on some call
+       paths, so the same node classified differently depending on who asked. Nothing read it yet.
+       See the step's own "landed as" note above.
+
+     - ✅ **prep (a cross-reference whose target is attribute-expanded).** The first thing
+       `RawOrigin` is for, and one of the two regressions the retirement's probe found.
+       `xref:{cpp}[{cpp}]` was left literal while the string pipeline recognized it — the target
+       crosses two `Raw` leaves the match string stands in as placeholders. They are `Substitution`
+       leaves, so the string replacer's own haystack held exactly those bytes and filling them in
+       *reaches* parity; a masked passthrough stays deferred, since it is restored by a later pass
+       than the one that captures a deferred target. Turned up two more things: the shorthand needs
+       the replacer's `id.contains('<')` guard for real (a substitution-produced `<` is not opaque),
+       and only the **id half** may be restored — restoring the whole inner shifts the offsets the
+       reference text is sliced with. See the step's own "landed as" note above.
+
+     - ✅ **the deferred-cross-reference sentinel system, retired (the second of the three).**
+       [`Content::refold`](../../parser/src/content/content.rs) folds a deferred content at the
+       **end of resolution** — the same answer one step later — from the attributes it retained
+       paired with the parser's configuration. The carve-out narrows rather than vanishing: from
+       *any* deferred cross-reference to the count match
+       [`mirror_tree_xref_resolution`](../../parser/src/content/content.rs) already computes, so the
+       fold is authoritative except where the builder is known not to recognize the construct, and
+       the gate self-liquidates as preps land. A whole-suite probe sized it: 14 divergences, 11 the
+       test-only recorder's counter, 1 an improvement its own comment predicted, 2 real regressions
+       — both closed as the two preps above. Exactly one of the two renderings runs: rendering both
+       and keeping the second would be *observable*, not merely wasteful, since a stateful host
+       renderer would see every callback twice in one pass
+       (`resolution_renders_a_deferred_content_once`). That costs the whole-document harness its oracle for this content, so the template's answer
+       becomes reachable test-only and a fourteen-fixture corpus compares the two directly. What
+       still defers is `xref:sec[*bold*,role=*hl*]` (a rendered span reaching a string-read value)
+       and a **title's** deferred cross-references, which `title_refs` still renders from the
+       template. See the step's own "landed as" note above. What remains of step 6 is the
+       passthrough sentinel system and the side effects wired for real.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

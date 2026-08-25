@@ -580,17 +580,34 @@ impl<'src> Document<'src> {
     /// [`warnings()`](Self::warnings) sees it alongside every other parse-time
     /// diagnostic. Because each sweep is independent, those warnings replace
     /// (rather than accumulate on top of) any left by an earlier sweep.
+    ///
+    /// # The `parser` argument
+    ///
+    /// Pass the [`Parser`] that produced this document. Resolving a
+    /// cross-reference changes what its content renders to, and re-rendering
+    /// needs the parse-wide configuration a renderer reads — the path resolver
+    /// and the image/SVG file handlers. A [`Document`] cannot retain those
+    /// itself: they are `Rc`-held, and holding them would cost it `Send` and
+    /// `Sync`. The order-dependent half — the document attributes in force
+    /// where each block was written — *is* retained per content, so only the
+    /// parse-wide half is supplied here.
+    ///
+    /// A parser configured differently from the one that parsed will therefore
+    /// resolve targets identically but may render an affected block's images or
+    /// paths differently. Multi-document pipelines that build one parser per
+    /// document should pass that document's own.
     pub fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
         renderer: &dyn InlineSubstitutionRenderer,
+        parser: &Parser,
     ) -> Vec<ReferenceWarning> {
         self.internal.with_dependent_mut(|_owner, dependent| {
             let source = dependent.source;
             let mut warnings = ReferenceWarnings::default();
 
             for block in dependent.blocks.iter_mut() {
-                block.resolve_references(resolver, renderer, &mut warnings);
+                block.resolve_references(resolver, renderer, &mut warnings, parser);
             }
 
             // Section titles are resolved separately, in document order, so
@@ -625,6 +642,7 @@ impl<'src> Document<'src> {
     pub(crate) fn resolve_against_own_catalog(
         &mut self,
         renderer: &dyn InlineSubstitutionRenderer,
+        parser: &Parser,
     ) -> Vec<ReferenceWarning> {
         self.internal.with_dependent_mut(|_owner, dependent| {
             let source = dependent.source;
@@ -638,7 +656,7 @@ impl<'src> Document<'src> {
 
             let resolver = CatalogResolver::new(&dependent.catalog);
             for block in dependent.blocks.iter_mut() {
-                block.resolve_references(&resolver, renderer, &mut warnings);
+                block.resolve_references(&resolver, renderer, &mut warnings, parser);
             }
 
             // Section titles are resolved separately, in document order, so

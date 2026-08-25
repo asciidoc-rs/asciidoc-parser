@@ -554,6 +554,7 @@ impl<'src> TableBlock<'src> {
         resolver: &dyn ReferenceResolver,
         renderer: &dyn InlineSubstitutionRenderer,
         warnings: &mut ReferenceWarnings<'src>,
+        parser: &Parser,
     ) {
         let rows = self
             .header_row
@@ -563,7 +564,7 @@ impl<'src> TableBlock<'src> {
 
         for row in rows {
             for cell in row.cells.iter_mut() {
-                cell.resolve_references(resolver, renderer, warnings);
+                cell.resolve_references(resolver, renderer, warnings, parser);
             }
         }
     }
@@ -2331,15 +2332,16 @@ impl<'src> TableCell<'src> {
         resolver: &dyn ReferenceResolver,
         renderer: &dyn InlineSubstitutionRenderer,
         warnings: &mut ReferenceWarnings<'src>,
+        parser: &Parser,
     ) {
         let source = self.source;
 
         match &mut self.content {
             TableCellContent::Simple(content) => {
-                content.resolve_references(resolver, renderer, warnings);
+                content.resolve_references(resolver, renderer, warnings, parser);
             }
             TableCellContent::AsciiDoc(cell) => {
-                cell.resolve_references(resolver, renderer, warnings, source);
+                cell.resolve_references(resolver, renderer, warnings, source, parser);
             }
         }
     }
@@ -2542,11 +2544,12 @@ impl<'src> AsciiDocCell<'src> {
         renderer: &dyn InlineSubstitutionRenderer,
         warnings: &mut ReferenceWarnings<'src>,
         source: Span<'src>,
+        parser: &Parser,
     ) {
         match self {
             Self::Borrowed(cell) => {
                 for block in &mut cell.blocks {
-                    block.resolve_references(resolver, renderer, warnings);
+                    block.resolve_references(resolver, renderer, warnings, parser);
                 }
 
                 // A cell footnote records no document location (it is defined in
@@ -2570,7 +2573,12 @@ impl<'src> AsciiDocCell<'src> {
                         let mut owned_warnings = ReferenceWarnings::default();
 
                         for block in &mut dependent.blocks {
-                            block.resolve_references(resolver, renderer, &mut owned_warnings);
+                            block.resolve_references(
+                                resolver,
+                                renderer,
+                                &mut owned_warnings,
+                                parser,
+                            );
                         }
 
                         // A cell footnote records no document location, so its
@@ -3393,6 +3401,7 @@ mod tests {
             &HtmlSubstitutionRenderer {},
             &mut warnings,
             Span::new(""),
+            &crate::Parser::default(),
         );
 
         // Resolution was skipped silently: no warnings, and the two references
