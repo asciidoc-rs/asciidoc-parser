@@ -1314,28 +1314,31 @@ fn inline_tree_for_a_listing_block_carries_callout_nodes() {
 
 #[test]
 fn xref_mirror_is_skipped_when_the_tree_defers_a_reference_form() {
-    // `xref:sec[*bold*,role=*hl*]` is a documented builder divergence (a
-    // rendered span reaching a value this family reads as a **string** — a
-    // `role=`, a `window=`, an `xrefstyle=` — is left unrecognized, since a
-    // span's markup exists only at fold time), so the tree holds *fewer*
-    // cross-reference nodes than the string pipeline deferred. The positional
-    // resolution mirror must detect the count mismatch and skip — leaving the
-    // tree in its honest unresolved state — rather than assign destinations to
-    // the wrong nodes (or panic).
+    // `xref:sec[a *b, c* d,role=hl]` is a documented builder divergence: the
+    // string replacer splits the attribute list over the span's **markup**,
+    // whose `<strong>b, c</strong>` hides a comma the split reads, so the two
+    // readings disagree about the match's own extent and the builder defers
+    // rather than claim a construct the rendered document contradicts. The
+    // tree therefore holds *fewer* cross-reference nodes than the string
+    // pipeline deferred. The positional resolution mirror must detect the
+    // count mismatch and skip — leaving the tree in its honest unresolved
+    // state — rather than assign destinations to the wrong nodes (or panic).
     let mut parser = Parser::default();
-    let doc = parser.parse("[[sec]]The target.\n\nSee xref:sec[*bold*,role=*hl*].");
+    let doc = parser.parse("[[sec]]The target.\n\nSee xref:sec[a *b, c* d,role=hl].");
 
-    // The rendered output is unaffected. That count mismatch is also what
-    // keeps this content on the **template** path: a deferred content is
-    // re-folded from its tree once resolution has installed its destinations
-    // (`Content::refold`), and the mirror's own success is the gate. Here the
-    // mirror skipped, so the tree is known not to describe this content and
-    // folding it would drop the cross-reference outright.
+    // The rendered output is the string pipeline's own — anchor cut short
+    // inside the span, which is precisely the reading the builder refused to
+    // claim. That count mismatch is also what keeps this content on the
+    // **template** path: a deferred content is re-folded from its tree once
+    // resolution has installed its destinations (`Content::refold`), and the
+    // mirror's own success is the gate. Here the mirror skipped, so the tree
+    // is known not to describe this content and folding it would drop the
+    // cross-reference outright.
     let rendered = collect_rendered(&doc);
     assert!(
         rendered
             .iter()
-            .any(|s| s.contains("href=\"#sec\"") && s.contains("<strong>bold</strong>")),
+            .any(|s| s.contains("href=\"#sec\"") && s.contains("<strong>b</a>")),
         "the rendered xref regressed: {rendered:?}"
     );
 
@@ -1344,6 +1347,36 @@ fn xref_mirror_is_skipped_when_the_tree_defers_a_reference_form() {
     assert!(
         refs.iter().all(|r| r.variant != RefVariant::Xref),
         "expected the deferred xref form to stay unrecognized in the tree: {refs:?}"
+    );
+}
+
+#[test]
+fn a_span_in_a_string_valued_xref_attribute_now_mirrors() {
+    // The counterpart the increment *moved*: a rendered span reaching one of
+    // the three values this family reads as a **string** used to defer for
+    // want of anywhere to put a node. It no longer does — the slot takes the
+    // author's own source for the piece — so the construct is recognized, the
+    // counts agree, and the mirror installs the destination.
+    let mut parser = Parser::default();
+    let doc = parser.parse("[[sec]]The target.\n\nSee xref:sec[*bold*,role=*hl*].");
+
+    let refs = collect_refs(&doc);
+
+    assert!(
+        refs.iter().any(|r| r.variant == RefVariant::Xref
+            && r.roles.iter().any(|role| role.as_ref() == "*hl*")
+            && r.resolved.as_ref().is_some_and(|res| res.href == "#sec")),
+        "expected a resolved xref carrying the untranslated role: {refs:?}"
+    );
+
+    // And the rendering follows the tree rather than the string pipeline's
+    // `class="&lt;strong&gt;hl&lt;/strong&gt;"` — the documented divergence.
+    let rendered = collect_rendered(&doc);
+    assert!(
+        rendered
+            .iter()
+            .any(|s| s.contains("class=\"*hl*\"") && s.contains("<strong>bold</strong>")),
+        "the rendered xref regressed: {rendered:?}"
     );
 }
 

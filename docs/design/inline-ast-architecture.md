@@ -6497,6 +6497,85 @@ Each phase is a reviewable unit with a clear exit gate.
   why a segment's `provided_text` cannot come from a node. Answering it once unblocks both; leaving
   it unanswered blocks both no matter how much else lands.
 
+  *Step 6 landed as (a computed string slot takes the author's untranslated source):* the survey
+  above named one question two of its six items turn on — whether a computed **string** slot
+  (`Ref::roles`, `window`, `xrefstyle`, and the link and image families' equivalents) can hold
+  markup that exists only at fold time — and observed that answering it once unblocks both. This
+  increment answers it, for the cross-reference family.
+
+  There were three answers available, and the first two are what the two systems had already picked.
+  The **string pipeline** spells the piece into the slot: a rendered span reaches `role=` as its own
+  markup (`class="&lt;strong&gt;hl&lt;/strong&gt;"`), and a masked passthrough reaches it as a bare
+  `\u{96}0\u{97}` sentinel, because the deferred cross-reference's template is captured before
+  passthroughs are restored. The **builder** refused the whole match, which is why
+  `xref:sec[*bold*,role=*hl*]` had stayed deferred since part 3c. Neither is what the author wrote.
+  What they wrote is the *source*, and a source is a value a string can hold, so that is the third
+  answer and the one taken:
+  [`untranslated_value`](../../parser/src/content/inline_builder/macros/mod.rs) walks a computed
+  value's [`tokened_text`](../../parser/src/content/inline_builder/macros/mod.rs) tokens the way
+  `restored_value_children` walks them and replaces each with the untranslated text of the node it
+  stands for.
+
+  "Untranslated" is per node kind, and the two cases differ for a reason. A
+  [`Raw`](../../parser/src/inlines/inline_node.rs) leaf contributes its **value**, not its source
+  span: a passthrough's `+++` / `++` / `$$` delimiters are syntax saying *do not substitute this*,
+  so the body is precisely the literal text the author asked for, and the delimiters have no
+  business in a class name. Every other node contributes its **source span**, so `role=*hl*` yields
+  `*hl*` rather than the `<strong>hl</strong>` the Quotes step made of it. Attribute references and
+  special characters are untouched by either rule — they are resolved before the value is read, so
+  `role={rolename}` still expands — and only markup the *Quotes* step produced is unwound.
+
+  With that, the per-**slot** boundary `attrlist_text_carries_its_opaque_pieces` drew disappears:
+  its three "no token may reach `window` / `xrefstyle` / a role" checks are gone and
+  `holds_carried_token` with them, so the family's gate is now the *split* question alone. That
+  question still has members — `xref:sec[a *b, c* d,role=hl]`, whose rendered `<strong>b,
+  c</strong>` hides a comma the attribute split reads, so the two readings disagree about the
+  match's own extent — which is what keeps the narrowed re-fold gate from becoming vacuous now that
+  the string-slot class has left it.
+
+  The rule also makes the fold **safer** than the string it is replacing, which is worth recording
+  because it is a deliberate divergence rather than a bug found. A slot's value is text, and the
+  renderer escapes text for the attribute it is building, so `role=+++x&y"z+++` lands as
+  `class="x&amp;y&quot;z"` — inert. The string pipeline cannot make that guarantee anywhere: a
+  passthrough is restored into the *rendered* string after every escape has already run, so a
+  crafted body can close an attribute and open another. That is Asciidoctor's behavior too
+  ([asciidoctor#2661](https://github.com/asciidoctor/asciidoctor/issues/2661), open since 2018 and
+  settled there as intended), and this crate keeps matching it on the string path; the tree simply
+  does not reproduce it. For a cross-reference the string path does not even reach the value — it
+  leaks the sentinel — so there is no output worth matching.
+
+  Two unit tests pin the rule (the three slots, the `Raw`-versus-span split via
+  `xrefstyle=+++full+++`, and `role={rn}` still expanding) and the escaping, and the recorder test
+  that pinned the old deferral is now two: one on the split disagreement that still defers, one on
+  the form that now resolves through the mirror. Audit: 48 rows before, 49 after, with three rows
+  moving and all three the same two fixtures — `xref:sec[*bold*,role=*hl*]` leaving the unrecognized
+  set for `class="*hl*"`, and the split-disagreement fixture appearing only because the rewritten
+  recorder test introduces that source at document scope for the first time.
+
+  One guard came out of review. The bytes a token is built from — `\u{96}` and `\u{97}` — are ones
+  an **author** can write, and `build_match_string` stands an opaque piece in as a private-use
+  codepoint, so every one reaching the gate is the author's own. They make the tokening ambiguous
+  exactly where a value is read as a *string*: the search for a token cannot tell them apart from
+  the pass's own, so it would splice a node's source into the author's text and leave the real token
+  standing. [`Passthroughs::restore_to`](../../parser/src/content/passthroughs.rs) has the same
+  blind spot — the wart the image bracket's own sibling test pins — but it reaches it over the
+  *finished* string, where a `role=` it never restores into simply keeps the author's bytes. So such
+  a text **defers**, which is precisely what the per-slot check this increment replaced did for the
+  same bytes, and the four shapes are byte-identical to the increment's own base.
+
+  *What this unblocks, and what it deliberately does not:* the survey's other blocked item goes with
+  it — a deferred cross-reference's segment holds its `provided_text` as a string where the node
+  holds children, and a display text is markup by nature, so that slot takes the fold of the
+  children rather than the rule above. The image and link families are **not** the mechanical
+  follow-on they look like, and the probe that established it is worth recording: applying the same
+  rule to the image bracket moves `image:pause.png[title=*Pause* and Resume]` — a fixture from the
+  AsciiDoc language docs — from `title="<strong>Pause</strong> and Resume"` to `title="*Pause* and
+  Resume"` (three tests in the suite, no more). That is a **parity break** rather than a closed
+  deferral, and the slot has a reading neither system offers — the span's plain text, `title="Pause
+  and Resume"`, which is the only one an HTML `title` can actually show. So it wants deciding on its
+  own rather than inheriting this increment's answer, and until it is decided the image family keeps
+  freezing the rendered markup and the link family keeps refusing the match.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -7816,6 +7895,31 @@ Each phase is a reviewable unit with a clear exit gate.
        in the suite warns. With this, **every** recognition side effect is performed from the tree,
        and what is left of step 6 is the string pipeline itself. See the step's own "landed as"
        note above.
+
+     - ✅ **a computed string slot takes the author's untranslated source.** The survey of what
+       `run_pipeline` still owns named one question two of its six items turn on: whether a
+       computed **string** slot — `Ref::roles`, `window`, `xrefstyle`, and the link and image
+       families' equivalents — can hold markup that exists only at fold time. It can, as the
+       author's *source* for the piece:
+       [`untranslated_value`](../../parser/src/content/inline_builder/macros/mod.rs) replaces each
+       token with the node's value (a `Raw` leaf — the passthrough delimiters are syntax, the body
+       is the literal text) or its source span (everything else), leaving attribute references and
+       special characters alone. The cross-reference family's per-slot gate and
+       `holds_carried_token` go with it, so `xref:sec[*bold*,role=*hl*]` is recognized and resolves
+       through the mirror, and what still defers is the *split* disagreement alone
+       (`xref:sec[a *b, c* d,role=hl]`) — which is what keeps the narrowed re-fold gate non-vacuous
+       — plus a text carrying **author-written** `\u{96}`/`\u{97}` bytes, which make every token
+       in it ambiguous.
+       The fold is also safer than the string it replaces: a slot's value is text the renderer
+       escapes, where a passthrough restored into the *rendered* string is not (asciidoctor#2661,
+       matched on the string path, not reproduced on the tree's). Audit: 48 rows before, 49 after,
+       all three moving rows the same two fixtures. This also unblocks the survey's other item (a
+       deferred segment's `provided_text` takes the fold of the node's children — a display text is
+       markup by nature). The image and link families do **not** follow automatically: the same
+       rule there is a *parity break* on an AsciiDoc-language-docs fixture
+       (`image:pause.png[title=*Pause* and Resume]`) rather than a closed deferral, and the slot has
+       a third reading neither system offers, so it wants deciding on its own. See the step's own
+       "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

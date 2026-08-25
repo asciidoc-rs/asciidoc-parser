@@ -6,11 +6,11 @@
 #[allow(unused_imports)]
 use super::computed_value_children;
 use super::{
-    ComputedSpecials, MacroMatch, MacroMatchKind, holds_carried_token,
+    ComputedSpecials, MacroMatch, MacroMatchKind,
     image::{range_has_no_opaque_piece, range_is_substitution_restorable},
     links::restore_masked_passthroughs,
     macro_text_children, rebuild_macro_level, restored_value_children, tokened_split_agrees,
-    tokened_text,
+    tokened_text, untranslated_value,
 };
 use crate::{
     Parser, Span,
@@ -415,6 +415,12 @@ fn attrlist_text_carries_its_opaque_pieces(
     pieces: &[Piece],
     parser: &Parser,
 ) -> bool {
+    // Author-written token bytes make every token in this text ambiguous — see
+    // `text_carries_author_written_token_bytes`.
+    if text_carries_author_written_token_bytes(raw_text) {
+        return false;
+    }
+
     let (tokened, carried) = tokened_text(&raw_text.replace('\n', " "), text_range, nodes, pieces);
 
     // The split must land where the string replacer's own parse of the markup
@@ -439,22 +445,38 @@ fn attrlist_text_carries_its_opaque_pieces(
         return true;
     }
 
-    // And no token may reach one of the three values this family reads as a
-    // **string**: a node has no bytes there.
-    let window_is_clean = attrlist
-        .named_attribute("window")
-        .is_none_or(|a| !holds_carried_token(a.value()));
+    // A token reaching one of the three values this family reads as a
+    // **string** — `window`, `xrefstyle`, a role — used to refuse the whole
+    // match here, because a node has no bytes to put in a string slot. It no
+    // longer does: `untranslated_value` gives the slot the author's *source*
+    // for the piece the token stands for, which is a value a string can hold.
+    // See its doc comment for the rules and for the divergence from the string
+    // pipeline that follows.
+    true
+}
 
-    let xrefstyle_is_clean = attrlist
-        .named_attribute("xrefstyle")
-        .is_none_or(|a| !holds_carried_token(a.value()));
-
-    let roles_are_clean = !attrlist
-        .roles()
-        .iter()
-        .any(|role| holds_carried_token(role));
-
-    window_is_clean && xrefstyle_is_clean && roles_are_clean
+/// Whether `raw_text` — a macro's own **match-string** bytes, before any
+/// tokening — carries a byte a [`tokened_text`] token is built from.
+///
+/// It should not: [`build_match_string`] stands an opaque piece in as
+/// [`SPAN_PLACEHOLDER`](super::super::quotes), a private-use codepoint, so
+/// every `\u{96}` / `\u{97}` reaching here is one the **author** wrote.
+///
+/// Those bytes make the whole tokening ambiguous, and the ambiguity bites
+/// precisely where a value is read as a *string*. A token is found by
+/// searching the parsed value for its bytes, and the search cannot tell an
+/// author's `\u{96}0\u{97}` from the one this pass emitted: it would splice a
+/// node's source into the author's text and leave the real token standing.
+/// (`Passthroughs::restore_to` has the same blind spot — the wart the image
+/// bracket's own sibling test pins — but the string pipeline reaches it over
+/// the *finished* string, where a `role=` it never restores into simply keeps
+/// the author's bytes.)
+///
+/// So a text carrying one defers, which is what the per-slot check this
+/// replaced did for the same bytes. It is a deferral, not a rewrite: the tree
+/// claims no construct, and the string pipeline's own reading stands.
+fn text_carries_author_written_token_bytes(raw_text: &str) -> bool {
+    raw_text.contains('\u{96}') || raw_text.contains('\u{97}')
 }
 
 /// The match-string range of a `<<…>>` shorthand's **id half**: its inner up to
@@ -619,19 +641,25 @@ fn xref_macro_text<'src>(
         let first = attrlist.nth_attribute(1).map(|a| a.value().to_string());
 
         if first.as_deref() != Some(normalized.as_str()) {
+            // The three values this family reads as **strings**. Each is read
+            // off the *tokened* parse, so a value enclosing a rendered span or
+            // a masked passthrough holds that piece's token rather than any
+            // bytes of its own; `untranslated_value` puts the author's source
+            // back in its place (see its own doc comment for the two rules and
+            // for the deliberate divergence from Asciidoctor that follows).
             let window = attrlist
                 .named_attribute("window")
-                .map(|a| CowStr::from(a.value().to_string()));
+                .map(|a| CowStr::from(untranslated_value(a.value(), &carried)));
 
             let roles = attrlist
                 .roles()
                 .iter()
-                .map(|r| CowStr::from(r.to_string()))
+                .map(|r| CowStr::from(untranslated_value(r, &carried)))
                 .collect();
 
             let xrefstyle = attrlist
                 .named_attribute("xrefstyle")
-                .map(|a| XrefStyle::parse(a.value()));
+                .map(|a| XrefStyle::parse(&untranslated_value(a.value(), &carried)));
 
             let children = match first.filter(|s| !s.is_empty()) {
                 None => vec![],
@@ -1993,27 +2021,124 @@ mod tests {
     }
 
     #[test]
-    fn a_span_in_a_computed_attribute_is_a_documented_divergence() {
-        // The boundary this increment does *not* move, drawn per **slot**: a
-        // `window=`, a `role=`, or an `xrefstyle=` is read as a **string**,
-        // and an enclosed span has no bytes to be read as — its markup exists
-        // only at fold time. The reference is therefore left unrecognized
-        // where the string pipeline builds one over the markup, with the
-        // span's own tags rendered verbatim into the attribute.
+    fn an_author_written_token_byte_defers_the_match() {
+        // The bytes a token is built from are `\u{96}` and `\u{97}`, and an
+        // **author** can write them: `build_match_string` stands an opaque
+        // piece in as a private-use codepoint, so every one reaching the gate
+        // is the author's own. They make the tokening ambiguous exactly where
+        // this increment reads a value as a *string* — the search for a token
+        // cannot tell the author's bytes from the pass's own, and would splice
+        // a node's source into the author's text while leaving the real token
+        // standing. Such a text defers, which is what the per-slot check this
+        // increment replaced did for the same bytes.
         for source in [
-            "xref:sec[*a*,role=*b*]",
-            "xref:sec[a,window=*b*]",
-            "xref:sec[a,xrefstyle=*b*]",
+            "xref:sec[*b*,role=\u{96}0\u{97}hl]",
+            "xref:sec[*b*,role=hl\u{96}0\u{97}]",
+            "xref:sec[+++p+++,role=\u{96}0\u{97}hl]",
         ] {
             let nodes = build_src(Span::new(source));
 
             assert!(
                 nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-                "a span in a computed attribute must be left unrecognized: {nodes:?}"
+                "an author-written token byte must defer the match: {nodes:?}"
             );
 
-            assert!(golden_xref(source).contains("<a href"));
+            // The string pipeline builds one, keeping the author's bytes: it
+            // reaches its own restore over the *finished* string, which never
+            // rewrites a `role=` it did not extract into.
+            assert!(golden_whole_pipeline(source).contains("<a href"));
         }
+
+        // A text with **no** opaque piece never reaches that gate, and needs
+        // not to: there is no token to confuse, so the author's bytes pass
+        // through to the slot exactly as the string pipeline passes them.
+        let source = "xref:sec[a,role=\u{96}0\u{97}hl]";
+        assert_eq!(
+            fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+            golden_whole_pipeline(source)
+        );
+    }
+
+    #[test]
+    fn a_computed_attribute_read_as_a_string_takes_the_untranslated_source() {
+        // The boundary this increment moved, drawn per **slot**: a `window=`,
+        // a `role=`, or an `xrefstyle=` is read as a **string**, and an
+        // enclosed span has no bytes to be read as — its markup exists only at
+        // fold time. That used to leave the whole reference unrecognized.
+        // Now the slot takes the *source* the author wrote for the piece,
+        // which is a value a string can hold, and the reference is recognized.
+        let nodes = build_src(Span::new("xref:sec[*a*,role=*b*]"));
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.roles.len(), 1);
+        assert_eq!(reference.roles[0].as_ref(), "*b*");
+
+        let nodes = build_src(Span::new("xref:sec[a,window=*b*]"));
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.window.as_deref(), Some("*b*"));
+
+        // A masked passthrough contributes its **body**, not its source span:
+        // the `+++` delimiters are syntax saying *do not substitute this*, so
+        // the body is exactly the literal text asked for — here a value the
+        // string pipeline cannot express at all (`full` reaches the slot as a
+        // sentinel, so it never selects a style).
+        let nodes = build_src(Span::new("xref:sec[a,xrefstyle=+++full+++]"));
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.xrefstyle, Some(XrefStyle::Full));
+
+        // An attribute reference is untouched by either rule — it is resolved
+        // before this value is read, and only markup the *Quotes* step made is
+        // unwound.
+        let mut parser = Parser::default();
+        parser = parser.with_intrinsic_attribute(
+            "rn",
+            "myrole",
+            crate::parser::ModificationContext::Anywhere,
+        );
+
+        let nodes = build(Span::new("xref:sec[a,role={rn}]"), &parser, None);
+
+        let reference = assert_xref(&nodes[0]);
+        assert_eq!(reference.roles.len(), 1);
+        assert_eq!(reference.roles[0].as_ref(), "myrole");
+    }
+
+    #[test]
+    fn an_untranslated_string_attribute_is_escaped_by_the_renderer() {
+        // What the slot holds is *text*, and the renderer escapes it for the
+        // attribute it is building — so a body carrying a `"` or an `&` lands
+        // inert rather than breaking out of the tag. The string pipeline
+        // cannot make this guarantee (a passthrough is restored into the
+        // rendered string after every escape has run), which is the whole
+        // reason the values differ; here it does not even reach the value,
+        // leaking the sentinel that stood for it instead.
+        for (source, expected) in [
+            (
+                "xref:sec[a,role=+++x&y\"z+++]",
+                "<a href=\"#sec\" class=\"x&amp;y&quot;z\">a</a>",
+            ),
+            (
+                "xref:sec[a,window=+++_bl\"ank+++]",
+                "<a href=\"#sec\" target=\"_bl&quot;ank\">a</a>",
+            ),
+        ] {
+            assert_eq!(
+                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                expected,
+                "the fold regressed for {source:?}"
+            );
+
+            assert!(
+                golden_whole_pipeline(source).contains('\u{96}'),
+                "the string pipeline is expected to leak its sentinel for {source:?}"
+            );
+        }
+
+        // A value with nothing opaque in it is at parity, as it always was.
+        let source = "xref:sec[a,role=hl]";
+        assert_eq!(
+            fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+            golden_xref(source)
+        );
     }
 
     #[test]

@@ -21,7 +21,7 @@ use super::{
     special_chars::{Masked, unescaped_value_children},
 };
 use crate::{
-    Parser, Span,
+    HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::restored_entity_pattern,
     inlines::{CharRef, InlineNode},
@@ -857,8 +857,8 @@ pub(super) fn restored_markup_text(
 /// It answers only the *split*, not what the caller then does with each value.
 /// A token reaching a value the caller reads as a **string** — a
 /// cross-reference's `window=` / `role=` / `xrefstyle=` — splits identically
-/// on both sides and still has no bytes the caller can use, so a caller with
-/// such a slot asks [`holds_carried_token`] about it as well.
+/// on both sides and still has no bytes of its own the caller can read, so
+/// such a slot takes [`untranslated_value`] of it instead.
 pub(super) fn tokened_split_agrees(
     tokened: &str,
     carried: &[InlineNode<'_>],
@@ -888,16 +888,62 @@ pub(super) fn tokened_split_agrees(
             })
 }
 
-/// Whether `value` — one attribute the parse handed back — still holds a
-/// [`tokened_text`] token, which means an opaque piece landed in a value the
-/// caller reads as a **string** rather than carrying structurally.
+/// Rebuilds a computed value a family reads as a **string** — an `xref`'s
+/// `role`, `window` or `xrefstyle`, and the link and image families'
+/// equivalents — replacing each [`tokened_text`] token with the *untranslated*
+/// text of the node it stands for.
 ///
-/// A node has no bytes there, so such a match is deferred. This is the same
-/// per-*slot* boundary [`text_attrlist`](links)'s own `pre_restore` draws,
-/// reached for the stronger reason: a masked construct at least has a body to
-/// splice.
-pub(super) fn holds_carried_token(value: &str) -> bool {
-    value.contains('\u{96}')
+/// A string slot has nowhere to put a node, so the alternative to this is
+/// refusing the whole match (which is what the gate used to do) or spelling the
+/// token into the output (which is what the string pipeline does, emitting
+/// either rendered markup or a raw `\u{96}0\u{97}` sentinel). Neither is what
+/// the author wrote. What they wrote is the source, so that is what the slot
+/// takes.
+///
+/// "Untranslated" is per node kind, and the two cases differ for a reason:
+///
+/// - a [`Raw`](InlineNode::Raw) leaf contributes its **value**, not its source
+///   span: a passthrough's `+++`/`++`/`$$` delimiters are syntax saying *do not
+///   substitute this*, so the body is precisely the literal text the author
+///   asked for, and the delimiters have no business in a class name;
+/// - every other node contributes its **source span**, so `role=*hl*` yields
+///   `*hl*` rather than the `<strong>hl</strong>` the Quotes step made of it.
+///
+/// Attribute references and special characters are untouched by either rule —
+/// they are resolved before this value is read (`role={rolename}` still
+/// expands), and only markup the *Quotes* step produced is unwound.
+///
+/// The renderer escapes what it receives for the attribute it is building, so a
+/// body carrying a `"` lands inert rather than breaking out. That is this
+/// crate's own guarantee: Asciidoctor splices such a body in raw (asciidoctor
+/// issue #2661, open since 2018 and settled there as intended behavior), which
+/// is a divergence this crate takes deliberately.
+///
+/// The walk is index-keyed and left to right, exactly like
+/// [`restored_value_children`]'s: each token is sought only in the bytes after
+/// the previous one, and a token the parse dropped is simply not found.
+pub(super) fn untranslated_value(text: &str, carried: &[InlineNode<'_>]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+
+    for (n, node) in carried.iter().enumerate() {
+        let token = format!("\u{96}{n}\u{97}");
+
+        if let Some(pos) = rest.find(&token) {
+            out.push_str(rest.get(..pos).unwrap_or_default());
+
+            match node {
+                InlineNode::Raw { value, .. } => out.push_str(value.as_ref()),
+                other => out.push_str(other.span().data()),
+            }
+
+            rest = rest.get(pos + token.len()..).unwrap_or_default();
+        }
+    }
+
+    out.push_str(rest);
+
+    out
 }
 
 /// Rebuilds a computed value that still holds [`tokened_text`] /
