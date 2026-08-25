@@ -1568,7 +1568,13 @@ impl LookaheadReplacer for CalloutReplacer<'_> {
 
         // Register this callout so the callout list that annotates this block
         // can be validated against the callouts it references.
-        if let Ok(n) = number.parse::<u32>() {
+        //
+        // Suppressed for content whose tree replays this — see
+        // `Parser::suppress_recognition_side_effects` and
+        // `inline_builder::apply_callout_side_effects`.
+        if let Ok(n) = number.parse::<u32>()
+            && !self.parser.suppress_recognition_side_effects.get()
+        {
             self.parser.register_callout(n);
         }
 

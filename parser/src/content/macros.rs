@@ -324,13 +324,13 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
             };
 
             // Suppressed for content whose tree replays this warning — see
-            // `Parser::suppress_macro_side_effects`. It is one of the four
+            // `Parser::suppress_recognition_side_effects`. It is one of the four
             // recognition side effects `apply_macro_side_effects` re-attaches,
             // unlike the *link* family's own dangerous-scheme warning below,
             // which the replay does not carry and which is therefore left to
             // this pass in every case.
             if let Some(rejected) = rejected
-                && !self.parser.suppress_macro_side_effects.get()
+                && !self.parser.suppress_recognition_side_effects.get()
             {
                 self.parser.record_substitution_warning(
                     self.source,
