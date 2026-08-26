@@ -454,8 +454,8 @@ impl<'src> Content<'src> {
         self.rendered.as_ref().is_empty()
     }
 
-    /// Returns the inline passthroughs extracted from this content during
-    /// substitution, in extraction order.
+    /// Returns the inline passthroughs this content holds, in **document
+    /// order**.
     ///
     /// An inline passthrough (`+++…+++`, `++…++`, `$$…$$`, `pass:[…]`, or an
     /// inline STEM macro) is pulled out of the text before the other
@@ -469,14 +469,24 @@ impl<'src> Content<'src> {
     /// groups that include the
     /// [macros](crate::content::SubstitutionStep::Macros) step, or the
     /// header group, do).
+    ///
+    /// # Order
+    ///
+    /// The entries are in the order the author wrote them. This is a view over
+    /// the [inline tree](Self::inlines) rather than the substitution
+    /// pipeline's own extraction list, and the two orders differ: the bare
+    /// `+…+` form is extracted in a second pass and STEM in a third, so
+    /// `+++A+++ and stem:[B] and [x-]++C++ and ++D++` extracts as `A, C, D, B`
+    /// where this returns `A, B, C, D`. Extraction order was an artifact of
+    /// that multi-pass implementation, never a documented property of this
+    /// method.
     pub fn passthroughs(&self) -> &[Passthrough] {
         &self.passthroughs
     }
 
-    /// Records the inline passthroughs extracted from this content during
-    /// substitution, so they remain observable via
-    /// [`passthroughs`](Self::passthroughs) after the restore pass has spliced
-    /// them back in.
+    /// Records the inline passthroughs read off this content's tree, so they
+    /// remain observable via [`passthroughs`](Self::passthroughs) after the
+    /// parse.
     pub(crate) fn set_passthroughs(&mut self, passthroughs: Vec<Passthrough>) {
         self.passthroughs = passthroughs;
     }

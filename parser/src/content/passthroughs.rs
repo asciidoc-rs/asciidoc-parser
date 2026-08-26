@@ -6,6 +6,7 @@ use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     content::{Content, SubstitutionGroup, substitution_step::substitute_attributes_in_text},
+    inlines::{InlineNode, RawOrigin},
     parser::{QuoteScope, QuoteType},
     warnings::WarningType,
 };
@@ -79,6 +80,103 @@ impl Passthrough {
     /// resolved `:subs` of an entry in Asciidoctor's `@passthroughs` array.
     pub fn subs(&self) -> &SubstitutionGroup {
         &self.subs
+    }
+}
+
+impl Passthrough {
+    /// Builds the collection [`Content::passthroughs`] returns by walking the
+    /// content's inline tree — the tree being authoritative for what the
+    /// content *is*, exactly as it already is for what the content renders to
+    /// (design §5.2 Phase 4, step 6).
+    ///
+    /// # Which nodes are entries
+    ///
+    /// Each of the seven passthrough forms records where the extraction pass
+    /// makes its one entry, which is not always a leaf:
+    ///
+    ///   * a [`Raw`](InlineNode::Raw) node of
+    ///     [`Passthrough`](RawOrigin::Passthrough) origin — `+++…+++`, `++…++`,
+    ///     `$$…$$`, `pass:[…]`, and the bare `+…+` form;
+    ///   * a [`Stem`](InlineNode::Stem) node, an *implicit* passthrough, plus
+    ///     whatever its body's own nodes hold;
+    ///   * a **marked** [`Styled`](InlineNode::Styled) span — the wrapper the
+    ///     pass builds for an attribute-list-prefixed passthrough
+    ///     (`[.role]++x++`, `` [x-]`x` ``). The wrapper *is* the entry, so this
+    ///     records it and does **not** descend: two of the three spellings also
+    ///     carry the same pair on a `Raw` leaf inside, and descending would
+    ///     report them twice where the pass records once.
+    ///
+    /// Everything else is a container to walk through.
+    ///
+    /// # Order
+    ///
+    /// **Document order** — the tree's own — where the extraction pass returns
+    /// *extraction* order. The two are not the same: the bare `+…+` form is
+    /// pulled out in a second pass and STEM in a third, so
+    /// `+++A+++ and stem:[B] and [x-]++C++ and ++D++` extracts as `A, C, D, B`
+    /// where the author wrote `A, B, C, D`. Document order is the deliberate
+    /// choice; extraction order is an artifact of the two-pass implementation
+    /// step 6 deletes.
+    pub(crate) fn from_tree(nodes: &[InlineNode<'_>]) -> Vec<Self> {
+        let mut out = vec![];
+        collect_from_tree(nodes, &mut out);
+        out
+    }
+}
+
+/// The recursive half of [`Passthrough::from_tree`].
+fn collect_from_tree(nodes: &[InlineNode<'_>], out: &mut Vec<Passthrough>) {
+    for node in nodes {
+        match node {
+            InlineNode::Raw {
+                value,
+                origin: RawOrigin::Passthrough { subs, source_text },
+                ..
+            } => {
+                out.push(Passthrough {
+                    // `value` is the author's body for every form but one: a
+                    // `pass:c,q[…]` body is substituted at build time, because
+                    // an arbitrary group needs the substitution pipeline and a
+                    // fold cannot reach it. `source_text` is the input that
+                    // produced it, and is `None` wherever the group changed
+                    // nothing.
+                    text: source_text
+                        .clone()
+                        .unwrap_or_else(|| value.as_ref().to_string()),
+                    subs: subs.clone(),
+                });
+            }
+
+            InlineNode::Stem(stem) => {
+                out.push(Passthrough {
+                    text: stem
+                        .source_text
+                        .clone()
+                        .unwrap_or_else(|| stem.value.as_ref().to_string()),
+                    subs: stem.subs.clone(),
+                });
+
+                // A STEM expression may *embed* an already-extracted
+                // passthrough (`stem:[x +++<b>+++ y]`), which the pass records
+                // as an entry of its own. Those nodes are `Stem::children`.
+                collect_from_tree(&stem.children, out);
+            }
+
+            InlineNode::Styled(styled) => match &styled.passthrough {
+                Some(wrapper) => out.push(Passthrough {
+                    text: wrapper.text.clone(),
+                    subs: wrapper.subs.clone(),
+                }),
+
+                None => collect_from_tree(&styled.children, out),
+            },
+
+            InlineNode::Ref(reference) => collect_from_tree(&reference.children, out),
+            InlineNode::Footnote(footnote) => collect_from_tree(&footnote.children, out),
+            InlineNode::IndexTerm(index_term) => collect_from_tree(&index_term.children, out),
+
+            _ => {}
+        }
     }
 }
 
@@ -172,8 +270,14 @@ impl Passthroughs {
         });
     }
 
-    /// The entries as [`Content::passthroughs`](Content::passthroughs) exposes
-    /// them: each entry's observable half, in extraction order.
+    /// Each entry's observable half, in **extraction** order.
+    ///
+    /// This is what [`Content::passthroughs`](Content::passthroughs) used to
+    /// return, kept for the differential corpus that compares the string
+    /// pipeline's own answer against the tree-built view
+    /// ([`Passthrough::from_tree`]) — the comparison being the whole point,
+    /// nothing outside a test should read the extraction pass's list.
+    #[cfg(test)]
     pub(crate) fn observable(&self) -> Vec<Passthrough> {
         self.0.iter().map(|entry| entry.pass.clone()).collect()
     }

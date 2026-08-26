@@ -1,46 +1,57 @@
-//! A differential harness for the passthrough facts a
-//! [`Raw`](crate::inlines::InlineNode::Raw) node records.
+//! A differential harness for [`Content::passthroughs`], which is now a **view
+//! over the inline tree** rather than the extraction pass's own list.
 //!
-//! Design §5.2's survey named [`Content::passthroughs`] as one of the six
-//! things `run_pipeline` still solely owns, and called it the one where
-//! *deleting* the API was as live an option as building a tree-backed view.
-//! The view is the chosen path, and this is its first prerequisite: the tree
-//! did not hold enough to answer either of the two things a
-//! [`Passthrough`](crate::content::Passthrough) exposes.
+//! Design §5.2's survey named this API as one of the six things `run_pipeline`
+//! still solely owned, and called it the one where *deleting* the API was as
+//! live an option as building a tree-backed view. The view is the chosen path,
+//! and this is the corpus that gates it: for every fixture, what the string
+//! pipeline extracted and what the tree holds must be the same facts.
 //!
-//! [`RawForm`](crate::inlines::RawForm) is the fold's *two-valued* view — emit
-//! or escape — and five of the seven passthrough forms are exactly recoverable
-//! from it. The two that are not are what
-//! [`RawOrigin::Passthrough`](crate::inlines::RawOrigin) now carries:
+//! Three increments were needed before the tree could answer at all, and each
+//! one is visible in what this corpus asserts:
 //!
-//!   * **`subs`.** A `pass:c,q[…]` body folds `AsIs` exactly as a `+++…+++`
-//!     body does, so the form cannot tell the two apart, and the group is what
-//!     [`Passthrough::subs`](crate::content::Passthrough::subs) returns.
-//!   * **`source_text`.** An arbitrary group needs the substitution pipeline,
-//!     which a fold — taking a renderer and a
-//!     [`RenderContext`](crate::parser::RenderContext), not a `Parser` — has no
-//!     way to reach. So a `pass:c,q[…]` body is substituted at *build* time and
-//!     `value` holds the result, where
-//!     [`Passthrough::text`](crate::content::Passthrough::text) returns the
-//!     input. Recording the input beside the result is what keeps the author's
-//!     own bytes answerable from the tree.
+//!   * [`RawOrigin::Passthrough`](crate::inlines::RawOrigin) carries the
+//!     resolved group and the author's pre-substitution body, because
+//!     [`RawForm`](crate::inlines::RawForm) — the fold's *two-valued* view — is
+//!     too coarse: a `pass:c,q[…]` body folds `AsIs` exactly as a `+++…+++`
+//!     body does, and its `value` is already-substituted where
+//!     [`Passthrough::text`] returns the input.
+//!   * [`Stem`](crate::inlines::Stem) carries the same pair, plus its body's
+//!     own nodes, so a passthrough *embedded* in an expression is still
+//!     reachable.
+//!   * `Passthrough` itself was narrowed to the two facts it exposes, so the
+//!     view is lossless rather than quietly supplying `None` for two fields
+//!     only the restore pass reads.
 //!
-//! Nothing reads either field yet — the view itself is a later increment — so
-//! this corpus is what pins them, by comparing every record the tree holds
-//! against the entry the string pipeline extracted for the same source.
+//! The **order** is the one deliberate difference, and
+//! [`the_view_returns_document_order`] pins it from both ends.
 
 use crate::{
     Parser, Span,
-    content::{Content, SubstitutionGroup},
-    inlines::{InlineNode, RawOrigin},
+    content::{Content, Passthroughs, SubstitutionGroup},
 };
 
 /// One passthrough as either side describes it: the author's body, and the
 /// group it is restored under.
 type Record = (String, SubstitutionGroup);
 
-/// What the string pipeline extracted, in extraction order.
-fn golden(content: &Content<'_>) -> Vec<Record> {
+/// What the **string pipeline** extracts, in extraction order.
+///
+/// Read from a throwaway [`Passthroughs::extract_from`] over the same source
+/// rather than from the content under test, whose own list is the view now —
+/// comparing that against itself would assert nothing.
+fn golden(source: &str, parser: &Parser) -> Vec<Record> {
+    let mut scratch = Content::from(Span::new(source));
+
+    Passthroughs::extract_from(&mut scratch, parser)
+        .observable()
+        .iter()
+        .map(|pt| (pt.text().to_string(), pt.subs().clone()))
+        .collect()
+}
+
+/// What the **view** returns, in document order.
+fn view(content: &Content<'_>) -> Vec<Record> {
     content
         .passthroughs()
         .iter()
@@ -48,64 +59,15 @@ fn golden(content: &Content<'_>) -> Vec<Record> {
         .collect()
 }
 
-/// What the tree records, in document order.
-///
-/// A [`Raw`](InlineNode::Raw) node of
-/// [`Passthrough`](RawOrigin::Passthrough) origin is one entry; its body is
-/// `source_text` where the build-time substitution moved `value` away from the
-/// author's bytes, and `value` itself everywhere else.
-fn derived(nodes: &[InlineNode<'_>], out: &mut Vec<Record>) {
-    for node in nodes {
-        match node {
-            InlineNode::Raw {
-                value,
-                origin: RawOrigin::Passthrough { subs, source_text },
-                ..
-            } => {
-                let text = source_text
-                    .clone()
-                    .unwrap_or_else(|| value.as_ref().to_string());
+/// Parses `source` under the normal substitutions and returns both sides.
+fn both(source: &str, parser: &Parser) -> (Vec<Record>, Vec<Record>) {
+    let mut content = Content::from(Span::new(source));
+    SubstitutionGroup::Normal.apply(&mut content, parser, None);
 
-                out.push((text, subs.clone()));
-            }
-
-            // A STEM expression is an *implicit* passthrough: one entry, whose
-            // body is `source_text` wherever the group changed it.
-            InlineNode::Stem(stem) => {
-                let text = stem
-                    .source_text
-                    .clone()
-                    .unwrap_or_else(|| stem.value.as_ref().to_string());
-
-                out.push((text, stem.subs.clone()));
-            }
-
-            // A **marked** span is an attribute-list-prefixed passthrough's
-            // wrapper, and the wrapper is what the extraction pass records as
-            // one entry — so it contributes its own record and the walk does
-            // **not** descend. Descending would double-count the two spellings
-            // whose body is also a `Raw` leaf carrying the same pair
-            // (`[.role]++x++`, `` [x-]`x` ``); see
-            // `a_marked_wrapper_is_one_entry_not_two`.
-            InlineNode::Styled(styled) => match &styled.passthrough {
-                Some(wrapper) => out.push((wrapper.text.clone(), wrapper.subs.clone())),
-                None => derived(&styled.children, out),
-            },
-            InlineNode::Ref(reference) => derived(&reference.children, out),
-            InlineNode::Footnote(footnote) => derived(&footnote.children, out),
-            InlineNode::IndexTerm(index_term) => derived(&index_term.children, out),
-
-            _ => {}
-        }
-    }
+    (golden(source, parser), view(&content))
 }
 
 /// The forms whose extraction entry and tree node correspond one-to-one.
-///
-/// Every form now records; what differs is the *order*, which
-/// [`the_view_returns_document_order`] pins on its own. The one shape still
-/// short of an entry is a STEM expression **embedding** another passthrough —
-/// see [`a_stem_expression_embedding_a_passthrough_records_one_entry_of_two`].
 const CORPUS: &[&str] = &[
     // `+++…+++` and a bare `pass:[…]` — group `None`, body verbatim.
     "a +++<b>raw</b>+++ x",
@@ -158,35 +120,31 @@ const CORPUS: &[&str] = &[
 ];
 
 #[test]
-fn a_raw_node_records_the_passthrough_it_came_from() {
+fn the_view_reports_the_same_facts_the_extraction_pass_does() {
     let parser = Parser::default();
     let mut seen = 0usize;
 
     for source in CORPUS {
-        let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+        let (golden, mut view) = both(source, &parser);
 
-        let mut tree = vec![];
-        derived(content.inlines(), &mut tree);
+        seen += view.len();
 
-        seen += tree.len();
-
-        // Compared as multisets: the *order* is deliberately different now (a
-        // tree walk is document order, the extraction pass is pass order), and
+        // Compared as multisets: the *order* is deliberately different (a tree
+        // walk is document order, the extraction pass is pass order), and
         // `the_view_returns_document_order` pins that difference on its own.
         // What this test is about is the facts — every entry the pass made, the
-        // tree records, with the same body and the same group.
+        // view reports, with the same body and the same group.
         // `SubstitutionGroup` is not `Ord`, so the key is the pair's own
-        // rendering — which is exactly what the comparison below reads.
+        // rendering, which is exactly what the comparison below reads.
         let key = |(text, subs): &Record| (text.clone(), format!("{subs:?}"));
 
-        let (mut tree, mut golden) = (tree, golden(&content));
-        tree.sort_by_key(key);
+        let mut golden = golden;
+        view.sort_by_key(key);
         golden.sort_by_key(key);
 
         assert_eq!(
-            tree, golden,
-            "the tree's passthrough records diverged from the extraction pass for {source:?}"
+            view, golden,
+            "the view diverged from the extraction pass for {source:?}"
         );
     }
 
@@ -199,15 +157,63 @@ fn a_raw_node_records_the_passthrough_it_came_from() {
 }
 
 #[test]
+fn a_group_that_does_not_extract_reports_nothing() {
+    // The gate moved, and the answer has to survive the move. Before the view,
+    // a group that does not include the macros step simply never ran the
+    // extraction pass, so there was nothing to retain; now the answer comes
+    // from the tree not *holding* a passthrough node under such a group. Same
+    // result, different reason — which is exactly the kind of substitution this
+    // branch has twice shipped a hole in, so it is asserted rather than assumed.
+    let parser = Parser::default();
+
+    for group in [
+        SubstitutionGroup::None,
+        SubstitutionGroup::Verbatim,
+        SubstitutionGroup::Stem,
+    ] {
+        for source in [
+            "a ++lit++ and +++raw+++ x",
+            "a pass:c,q[body] x",
+            "a stem:[p < q] x",
+            "a [x-]++attr++ x",
+        ] {
+            let mut content = Content::from(Span::new(source));
+            group.apply(&mut content, &parser, None);
+
+            assert!(
+                content.passthroughs().is_empty(),
+                "{group:?} reported {:?} for {source:?}",
+                view(&content)
+            );
+        }
+    }
+
+    // And the two groups that *do* extract still report, so the loop above is
+    // not passing because the fixtures stopped containing passthroughs.
+    for group in [SubstitutionGroup::Normal, SubstitutionGroup::Header] {
+        let mut content = Content::from(Span::new("a ++lit++ and +++raw+++ x"));
+        group.apply(&mut content, &parser, None);
+
+        assert_eq!(
+            view(&content),
+            [
+                ("lit".to_string(), SubstitutionGroup::Verbatim),
+                ("raw".to_string(), SubstitutionGroup::None),
+            ],
+            "{group:?}"
+        );
+    }
+}
+
+#[test]
 fn the_view_returns_document_order() {
-    // The order decision, pinned. `Content::passthroughs()` returns *extraction*
-    // order, and the bare `+…+` form is pulled out in a second pass while STEM
-    // is pulled out in its own — so a content mixing the forms lists them in an
-    // order that has nothing to do with where the author wrote them. A tree walk
-    // gives document order, which is what the view returns.
+    // The order decision, pinned. The extraction pass pulls the bare `+…+` form
+    // out in a second pass and STEM in a third, so a content mixing the forms
+    // lists them in an order that has nothing to do with where the author wrote
+    // them. The view walks the tree, which gives document order.
     //
     // This is a deliberate, documented difference rather than an accident, so it
-    // is asserted from both ends: the tree's order is exactly the source's, and
+    // is asserted from both ends: the view's order is exactly the source's, and
     // it is *not* the extraction pass's.
     let parser = Parser::default();
 
@@ -222,14 +228,10 @@ fn the_view_returns_document_order() {
             ["b1", "p", "b2", "d1"].as_slice(),
         ),
     ] {
-        let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+        let (golden, view) = both(source, &parser);
 
-        let mut tree = vec![];
-        derived(content.inlines(), &mut tree);
-
-        let document: Vec<&str> = tree.iter().map(|(text, _)| text.as_str()).collect();
-        let extraction: Vec<String> = golden(&content).into_iter().map(|(t, _)| t).collect();
+        let document: Vec<&str> = view.iter().map(|(text, _)| text.as_str()).collect();
+        let extraction: Vec<String> = golden.into_iter().map(|(t, _)| t).collect();
 
         assert_eq!(document, expected, "document order for {source:?}");
 
@@ -242,7 +244,7 @@ fn the_view_returns_document_order() {
 
 #[test]
 fn a_marked_wrapper_is_one_entry_not_two() {
-    // The invariant the wrapper marker creates, and the one a walk could get
+    // The invariant the wrapper marker creates, and the one the walk could get
     // wrong in a way no other test would catch. Two of the three
     // attribute-list-prefixed spellings put a `Raw` leaf *inside* the wrapper
     // carrying the same pair the wrapper does — so a walk that both read the
@@ -259,83 +261,90 @@ fn a_marked_wrapper_is_one_entry_not_two() {
         "a [x-]`dup` x",
         "a [x-]+++dup+++ x",
     ] {
-        let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply(&mut content, &parser, None);
-
-        let mut tree = vec![];
-        derived(content.inlines(), &mut tree);
+        let (golden, view) = both(source, &parser);
 
         assert_eq!(
-            tree.len(),
+            view.len(),
             1,
-            "{source:?} recorded {} entries where the pass records 1: {tree:?}",
-            tree.len()
+            "{source:?} reported {} entries where the pass records 1: {view:?}",
+            view.len()
         );
 
-        assert_eq!(tree, golden(&content), "{source:?}");
+        assert_eq!(view, golden, "{source:?}");
     }
 }
 
 #[test]
-fn a_stem_expression_embedding_a_passthrough_records_one_entry_of_two() {
-    // The limitation review found, and the one shape the corpus above cannot
-    // cover: a STEM expression that *embeds* an already-extracted passthrough.
+fn a_stem_expression_embedding_a_passthrough_reports_both_entries() {
+    // The shape that took the longest to close, and the one whose two sides
+    // still disagree on a *body* while agreeing on the count.
     //
-    // The extraction pass records **two** entries there — the inner
-    // passthrough, and the STEM itself, whose own text keeps the `\u{96}0\u{97}`
-    // sentinel where that body was lifted out. `stem_expression_value` splices
-    // each inner body back in while computing the expression, so the tree keeps
-    // one `Stem` node holding the *restored* text and the inner leaf is gone.
+    // The pass records **two** entries: the inner passthrough, and the STEM
+    // itself — whose own text keeps the `\u{96}0\u{97}` sentinel where that body
+    // was lifted out. The view reports two as well, reaching the inner one
+    // through `Stem::children`; but the STEM entry it reports holds the
+    // **restored** body, because `stem_expression_value` splices each inner
+    // body back in while computing the expression.
     //
-    // This is a limitation of the recording, not a regression: before this
-    // increment a `Stem` carried neither fact, so the tree recorded nothing for
-    // the outer entry either. What it means is that the claim "every form the
-    // pass makes an entry for has one in the tree" holds for every shape except
-    // this one, and the view's own increment owes it — most likely by keeping
-    // the inner nodes as the `Stem`'s children rather than folding them into
-    // its value, which is a structural change and not this increment's.
+    // Reporting the restored body is the decision, not an oversight: the
+    // sentinel is an artifact of the extraction pass's own bookkeeping, and a
+    // caller asking what the author wrote is better served by `x <b> y` than by
+    // a private control character. The sentinel disappears entirely when step 6
+    // deletes that pass.
     let parser = Parser::default();
 
-    let records = |source: &str| -> (Vec<Record>, Vec<Record>) {
-        let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply(&mut content, &parser, None);
-
-        let mut tree = vec![];
-        derived(content.inlines(), &mut tree);
-
-        (golden(&content), tree)
-    };
-
-    // The ordinary case: two entries out of the pass, one out of the tree, and
-    // the one it does record has the *restored* body where the pass keeps the
-    // sentinel — so neither the count nor the outer text matches.
-    for source in [
-        "a stem:[x +++<b>+++ y] z",
-        "a stem:[x $$lit$$ y] z",
-        "a latexmath:[x ++e++ y] z",
+    for (source, restored) in [
+        ("a stem:[x +++<b>+++ y] z", "x <b> y"),
+        ("a stem:[x $$lit$$ y] z", "x lit y"),
+        ("a latexmath:[x ++e++ y] z", "x e y"),
     ] {
-        let (golden_records, tree) = records(source);
+        let (golden, view) = both(source, &parser);
 
-        assert_eq!(golden_records.len(), 2, "{source:?}");
-        assert_eq!(tree.len(), 1, "{source:?}");
-        assert_eq!(tree[0].1, SubstitutionGroup::Stem, "{source:?}");
+        assert_eq!(golden.len(), 2, "{source:?}");
+        assert_eq!(view.len(), 2, "{source:?}");
 
-        // The pass's outer entry keeps the sentinel; the tree's does not.
-        assert!(golden_records[1].0.contains('\u{96}'), "{source:?}");
-        assert!(!tree[0].0.contains('\u{96}'), "{source:?}");
+        // Document order puts the STEM macro — which starts first — ahead of
+        // the body embedded inside it, where the pass extracts the inner one
+        // first and the STEM last.
+        assert_eq!(view[0].1, SubstitutionGroup::Stem, "{source:?}");
+        assert_eq!(view[0].0, restored, "{source:?}");
+
+        // The inner entry is the one both sides describe identically.
+        assert!(
+            golden.contains(&view[1]),
+            "{source:?}: the inner entry {:?} is not one the pass recorded: {golden:?}",
+            view[1]
+        );
+
+        // The pass's own outer entry keeps the sentinel; the view's does not.
+        assert!(golden[1].0.contains('\u{96}'), "{source:?}");
+        assert!(!view[0].0.contains('\u{96}'), "{source:?}");
     }
+}
 
-    // The sharper case, and the reason this test asserts shapes rather than
-    // just counts: under an explicit substitution list the expression is not
-    // *local* to each run, so `apply_stem` declines to build a node at all. The
-    // tree then records only the **inner** passthrough — the outer STEM entry
-    // has no node of any kind.
-    let (golden_records, tree) = records("a stem:c,q[x +++<b>+++ y] z");
+#[test]
+fn a_deferred_stem_macro_reports_only_its_inner_passthrough() {
+    // The one shape still short of an entry, and a documented limitation rather
+    // than a gap the view can close.
+    //
+    // Under an explicit **non-local** substitution list the expression is not
+    // local to each run, so `build_stem_node` declines the macro outright (see
+    // `subs_are_local`) and there is no `Stem` node at all — nothing to hold
+    // `children`, and nothing to report the outer entry from. The view reports
+    // only the inner passthrough where the pass reports both.
+    //
+    // Closing it means building the node anyway, which would risk a construct
+    // spanning the boundary going unrecognized — a rendering regression traded
+    // for a reporting one. It waits for the cutover that deletes the extraction
+    // pass and with it the question.
+    let parser = Parser::default();
 
-    assert_eq!(golden_records.len(), 2);
+    let (golden, view) = both("a stem:c,q[x +++<b>+++ y] z", &parser);
+
+    assert_eq!(golden.len(), 2);
     assert_eq!(
-        tree,
+        view,
         [("<b>".to_string(), SubstitutionGroup::None)],
-        "the deferred STEM should leave only its inner passthrough recorded"
+        "the deferred STEM should leave only its inner passthrough reported"
     );
 }
