@@ -14,6 +14,7 @@ use crate::{
     inlines::{InlineNode, RawForm, RawOrigin},
     parser::attribute_lookup_name,
     strings::CowStr,
+    warnings::WarningType,
 };
 
 /// The attribute-references substitution, as a node transducer: descends into
@@ -49,13 +50,25 @@ use crate::{
 /// [`MissingHandling`] and [`surviving_lines`] for how this transducer
 /// reproduces it, and for the two shapes it defers.
 ///
-/// The `DropLine` mode's own diagnostic (Asciidoctor's "dropping line
-/// containing reference to missing attribute", recorded as a
-/// [`SkippingReferenceToMissingAttribute`] warning) is **not** raised here: it
-/// does not change the fold's output bytes, so — like every macro family's own
-/// catalog/warning side effect — it is deferred to the cutover (design §5.2
-/// Phase 4, step 6). The same applies to `Warn` mode's warning, whose output
-/// this step already reproduces.
+/// Both diagnosing modes' own diagnostic — Asciidoctor's "skipping reference to
+/// missing attribute" under `Warn`, and "dropping line containing reference to
+/// missing attribute" under `DropLine`, each recorded as a
+/// [`SkippingReferenceToMissingAttribute`] warning — **is** raised here, by
+/// [`record_missing_reference_warnings`]. It is the fifth and last of the
+/// recognition diagnostics the tree-walk replay cannot carry (design §5.2 Phase
+/// 4, step 6): a dropped or warned-about reference leaves no node to hang a
+/// diagnostic on, so it is recorded where it is *recognized* and carried onto
+/// the real parser afterwards, with the string pipeline's own copy suppressed
+/// for the duration of that window.
+///
+/// Two things about it are easy to get wrong, and both have their reasons on
+/// [`record_missing_reference_warnings`]: the mode is read from
+/// [`AttributeMissing`] directly rather than through [`MissingHandling`] (which
+/// deliberately collapses `Skip` with `Warn`, and falls back to `Literal` for
+/// the two shapes above — deferrals about output *bytes*, which are no reason
+/// to stop diagnosing), and the diagnostics are ordered by source offset rather
+/// than raised where they are found (the splicing recursion visits a `Styled`
+/// child's content before its own level).
 ///
 /// A literal `<`, `>`, or `&` **in the expanded value** is classified by
 /// design §3.4.1 — "the kind a fragment becomes is decided by which
@@ -130,7 +143,12 @@ pub(super) fn apply_attribute_references<'src>(
         Vec::new()
     };
 
-    apply_attribute_references_recursive(
+    // The `attribute-missing` diagnostic, collected across every level and
+    // raised **after** the recursion — see `record_missing_reference_warnings`
+    // for why it cannot be raised where it is found.
+    let mut diagnostics: Vec<(Span<'src>, String)> = Vec::new();
+
+    let nodes = apply_attribute_references_recursive(
         nodes,
         root,
         parser,
@@ -138,7 +156,65 @@ pub(super) fn apply_attribute_references<'src>(
         missing,
         &span_drops,
         specials,
-    )
+        &mut diagnostics,
+    );
+
+    record_missing_reference_warnings(diagnostics, parser);
+
+    nodes
+}
+
+/// Raises the `attribute-missing` diagnostic — Asciidoctor's "skipping
+/// reference to missing attribute", and under `drop-line` its "dropping line
+/// containing reference to missing attribute" — for every missing reference
+/// the levels found, in **source order**.
+///
+/// # Why the mode is read here rather than from [`MissingHandling`]
+///
+/// [`MissingHandling`] answers what a missing reference *renders* as, and it
+/// deliberately collapses distinctions the diagnostic needs: `skip` and `warn`
+/// both become [`Literal`](MissingHandling::Literal) because they emit the same
+/// bytes, and [`for_content`](MissingHandling::for_content) and
+/// [`nested`](MissingHandling::nested) both fall back to `Literal` for the two
+/// shapes whose *line* correspondence this transducer cannot reproduce. None of
+/// that is a reason to stop diagnosing: the string pipeline scans a flat
+/// rendered string in which a span's contents are ordinary text, so it warns
+/// for a nested reference and for a line-straddling span alike. Reading
+/// [`AttributeMissing`] directly keeps the deferrals about output bytes, where
+/// they belong.
+///
+/// # Why the order is restored here rather than kept as found
+///
+/// The splicing recursion visits a [`Styled`](crate::inlines::Styled) child's
+/// content *before* its own level, so a reference nested in an earlier span is
+/// found before one that sits earlier still at the top level. That is the same
+/// hazard [`resolve_counters`] exists to correct for counter directives, and it
+/// matters here for the same reason: a warning list is compared in order (see
+/// `inline_builder_side_effect_parity`). Sorting by source offset restores the
+/// document order the string pipeline's own left-to-right line scan produces.
+/// The sort is **stable**, so two references that snap to one coarse span
+/// (design §4.4 — both inside a single expanded value) keep the order they were
+/// found in rather than being reordered arbitrarily.
+fn record_missing_reference_warnings(mut diagnostics: Vec<(Span<'_>, String)>, parser: &Parser) {
+    if diagnostics.is_empty() {
+        return;
+    }
+
+    if !matches!(
+        AttributeMissing::from_parser(parser),
+        AttributeMissing::Warn | AttributeMissing::DropLine
+    ) {
+        return;
+    }
+
+    diagnostics.sort_by_key(|(source, _)| source.byte_offset());
+
+    for (source, name) in diagnostics {
+        parser.record_builder_diagnostic(
+            source,
+            WarningType::SkippingReferenceToMissingAttribute(name),
+        );
+    }
 }
 
 /// Whether a
@@ -187,6 +263,7 @@ fn apply_attribute_references_recursive<'src>(
     missing: MissingHandling,
     span_drops: &[usize],
     specials: SplicedSpecials,
+    diagnostics: &mut Vec<(Span<'src>, String)>,
 ) -> Vec<InlineNode<'src>> {
     let nodes: Vec<InlineNode<'src>> = nodes
         .into_iter()
@@ -200,6 +277,7 @@ fn apply_attribute_references_recursive<'src>(
                     missing.nested(),
                     &[],
                     specials,
+                    diagnostics,
                 );
                 InlineNode::Styled(styled)
             }
@@ -208,7 +286,16 @@ fn apply_attribute_references_recursive<'src>(
         })
         .collect();
 
-    attribute_references_level(nodes, root, parser, counters, missing, span_drops, specials)
+    attribute_references_level(
+        nodes,
+        root,
+        parser,
+        counters,
+        missing,
+        span_drops,
+        specials,
+        diagnostics,
+    )
 }
 
 /// How a level treats a reference to a **missing** attribute — this module's
@@ -465,6 +552,7 @@ fn attribute_references_level<'src>(
     missing: MissingHandling,
     span_drops: &[usize],
     specials: SplicedSpecials,
+    diagnostics: &mut Vec<(Span<'src>, String)>,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
@@ -488,7 +576,23 @@ fn attribute_references_level<'src>(
     }
 
     let matches = if s.contains('{') {
-        find_attribute_matches(&s, parser, missing)
+        let scan = find_attribute_matches(&s, parser, missing);
+
+        // Each level's own missing references, located against `'src` exactly
+        // as every other node this step builds is (design §4.4's coarse
+        // fallback where a reference has no honest source of its own). Every
+        // reference is seen at exactly one level — a `Styled` span is a single
+        // opaque piece in its parent's match string, so its interior is only
+        // ever scanned by its own level's call — which is what keeps this from
+        // double-counting. `styled_drop_indices`' separate pre-scan reads
+        // `find_attribute_matches` too and deliberately reports nothing.
+        diagnostics.extend(
+            scan.missing
+                .into_iter()
+                .map(|m| (source_slice(&pieces, m.full, root), m.name)),
+        );
+
+        scan.matches
     } else {
         Vec::new()
     };
@@ -558,6 +662,7 @@ fn subtree_has_missing_reference(nodes: &[InlineNode<'_>], parser: &Parser) -> b
 
     if s.contains('{')
         && find_attribute_matches(&s, parser, MissingHandling::DropLine)
+            .matches
             .iter()
             .any(|m| matches!(m.kind, AttributeMatchKind::DropMissing))
     {
@@ -757,20 +862,47 @@ fn counter_value<'c>(
         .unwrap_or_default()
 }
 
+/// One reference to a **missing** attribute, as this level's match string
+/// holds it — the subject of the `attribute-missing` diagnostic, which is
+/// decided separately from what the reference *renders* as.
+///
+/// Kept apart from [`AttributeMatch`] on purpose. A match says what the
+/// rebuild emits, and under [`MissingHandling::Literal`] a missing reference
+/// emits nothing at all (the surrounding gap logic carries its source text
+/// through unchanged), so there is no match to hang a diagnostic on — while
+/// the string pipeline warns in exactly that case. The two questions have
+/// different answers and so travel separately.
+struct MissingReference {
+    /// The whole `{name}` match, in match-string offsets.
+    full: std::ops::Range<usize>,
+
+    /// The attribute's name **as written**, which is what the warning names
+    /// (the case-folded lookup name is an implementation detail).
+    name: String,
+}
+
+/// What one pass of [`find_attribute_matches`] found.
+struct AttributeScan {
+    matches: Vec<AttributeMatch>,
+
+    /// Every missing reference the level holds, whatever the handling —
+    /// see [`MissingReference`].
+    missing: Vec<MissingReference>,
+}
+
 /// Finds every non-overlapping [`ATTRIBUTE_REFERENCE`] match in the escaped
 /// match string `s`, left to right, exactly as the string pipeline's
 /// `replace_all` does. A `counter`/`counter2` directive is recorded as a
 /// match here but not yet resolved (see [`AttributeMatchKind::Counter`]); a
 /// reference to a missing attribute becomes a
 /// [`DropMissing`](AttributeMatchKind::DropMissing) match under a
-/// line-dropping `missing` handling, and is left out of the returned list
-/// entirely under [`MissingHandling::Literal`].
-fn find_attribute_matches(
-    s: &str,
-    parser: &Parser,
-    missing: MissingHandling,
-) -> Vec<AttributeMatch> {
+/// line-dropping `missing` handling, and is left out of the returned
+/// **matches** entirely under [`MissingHandling::Literal`] — but is reported
+/// either way in [`AttributeScan::missing`], which is what the diagnostic
+/// reads.
+fn find_attribute_matches(s: &str, parser: &Parser, missing: MissingHandling) -> AttributeScan {
     let mut matches = Vec::new();
+    let mut missing_refs = Vec::new();
 
     for caps in ATTRIBUTE_REFERENCE.captures_iter(s) {
         // `unwrap` on group 0 is safe: a capture always has an overall match.
@@ -825,6 +957,14 @@ fn find_attribute_matches(
         if !parser.has_attribute(&lookup_name)
             || matches!(interpreted_value, InterpretedValue::Unset)
         {
+            // Reported whatever the handling: whether the reference is dropped
+            // or left literal decides its *bytes*, not whether the document's
+            // `attribute-missing` mode diagnoses it.
+            missing_refs.push(MissingReference {
+                full: full.clone(),
+                name: attr_name.to_string(),
+            });
+
             if missing.drops_missing() {
                 matches.push(AttributeMatch {
                     full,
@@ -854,7 +994,10 @@ fn find_attribute_matches(
         });
     }
 
-    matches
+    AttributeScan {
+        matches,
+        missing: missing_refs,
+    }
 }
 
 /// Rebuilds a level's node list from its attribute-reference matches: each gap
