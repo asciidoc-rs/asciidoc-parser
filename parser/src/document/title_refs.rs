@@ -26,8 +26,8 @@ use crate::{
     HasSpan, Span,
     blocks::{Block, IsBlock},
     content::{
-        XrefSegment, block_tree_xrefs, fold_resolved_title, footnote_tree_xrefs,
-        render_xref_template,
+        XrefSegment, fold_resolved_title, render_xref_template, resolved_destinations,
+        template_partition,
     },
     document::Catalog,
     inlines::InlineNode,
@@ -52,23 +52,33 @@ struct Resolution {
     rendered: String,
 
     /// The resolved destination of each title-level cross-reference, in
-    /// placeholder order, ready for [`block_tree_xrefs`]-aligned mirroring.
+    /// document order, ready for mirroring into the title tree.
     block_ordered: Vec<Option<ResolvedReference>>,
 
     /// The resolved destination of each cross-reference embedded in a footnote
     /// the title carries, in segment order, ready for
-    /// [`footnote_tree_xrefs`]-aligned mirroring into the title tree's footnote
-    /// subtrees.
+    /// mirroring into the title tree's footnote subtrees.
     footnote_ordered: Vec<Option<ResolvedReference>>,
 }
 
 /// One title carrying cross-references, captured for the resolution pass.
 struct TitleNode<'src> {
-    /// The placeholder-bearing template captured when the title was finalized.
+    /// The title's **block-level** cross-references, in the document order its
+    /// own inline tree holds them.
+    block: Vec<XrefSegment>,
+
+    /// The cross-references the title's footnotes carry.
+    footnote: Vec<XrefSegment>,
+
+    /// The string pipeline's placeholder template, which a title renders from
+    /// when it cannot fold: one whose nodes did not survive the `'src`-erasing
+    /// hop a carried block title travels on, and one the carve-out keeps on the
+    /// string pipeline's own answer (`from_tree` false).
     template: String,
 
-    /// The title's cross-references, in placeholder order.
-    xrefs: Vec<XrefSegment>,
+    /// Whether [`block`](Self::block) and [`footnote`](Self::footnote) were
+    /// read off this title's inline tree.
+    from_tree: bool,
 
     /// The ID under which other cross-references reach this title's reference
     /// text — present only when the title *is* the target's reference text (no
@@ -155,19 +165,23 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
     for block in blocks.iter_mut() {
         if let Block::Section(section) = block {
             // A section's resolvable title is its heading.
-            if let Some((template, xrefs)) = section.section_title_deferred_parts() {
+            if let Some(deferred) = section.section_title_deferred_parts() {
                 let map_id = if section.has_explicit_reftext() {
                     None
                 } else {
                     section.reference_id()
                 };
 
-                let template = template.to_string();
-                let xrefs = xrefs.to_vec();
+                let block = deferred.block.to_vec();
+                let footnote = deferred.footnote.to_vec();
+                let template = deferred.template.to_string();
+                let from_tree = deferred.from_tree;
 
                 nodes.push(TitleNode {
+                    block,
+                    footnote,
                     template,
-                    xrefs,
+                    from_tree,
                     map_id,
                     source: section.section_title_source(),
                     inlines: section.section_title_inlines().to_vec(),
@@ -185,14 +199,18 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
             let source = block.span();
 
             if let Some(title) = block.block_title_content_mut()
-                && let Some((template, xrefs)) = title.deferred_parts()
+                && let Some(deferred) = title.deferred_parts()
             {
-                let template = template.to_string();
-                let xrefs = xrefs.to_vec();
+                let block = deferred.block.to_vec();
+                let footnote = deferred.footnote.to_vec();
+                let template = deferred.template.to_string();
+                let from_tree = deferred.from_tree;
 
                 nodes.push(TitleNode {
+                    block,
+                    footnote,
                     template,
-                    xrefs,
+                    from_tree,
                     map_id: None,
                     source,
                     inlines: title.inlines().to_vec(),
@@ -269,9 +287,15 @@ fn compute<'src>(
         *flag = true;
     }
 
-    let mut xrefs = node.xrefs.clone();
+    let mut block = node.block.clone();
+    let mut footnote = node.footnote.clone();
 
-    for xref in xrefs.iter_mut() {
+    // The block-level and footnote-embedded references are resolved by the same
+    // rules here — including the local-title recursion below — where
+    // `Content::resolve_references` reports only the block-level ones. That
+    // difference is pre-existing: a title reports every unresolved target it
+    // carries, wherever in the title it sits.
+    for xref in block.iter_mut().chain(footnote.iter_mut()) {
         let mut resolved = resolver.resolve(&ResolutionContext {
             target: &xref.target,
             provided_text: xref.provided_text.as_deref(),
@@ -343,18 +367,25 @@ fn compute<'src>(
         xref.resolved = resolved;
     }
 
-    // The resolved destinations, in placeholder order and filtered to those the
-    // template still splices, so they line up one-to-one with the title tree's
-    // cross-reference nodes when mirrored (see `write_back`). This reuses the
-    // very `xrefs` the rendering below is computed from, so the tree cannot
-    // disagree with the string.
-    let block_ordered = block_tree_xrefs(&node.template, &xrefs);
-
-    // The complementary set: a cross-reference the title's footnotes carry was
-    // re-homed out of the template when the footnote text was extracted, so it
-    // is absent from `block_ordered` and belongs to a footnote subtree of the
-    // title tree instead.
-    let footnote_ordered = footnote_tree_xrefs(&node.template, &xrefs);
+    // The resolved destinations, in the document order the title's own tree
+    // holds its cross-reference nodes in — which is the order the two lists
+    // were read off that tree in, so they line up one-to-one when mirrored
+    // (see `write_back`). These are the very segments the rendering below is
+    // computed from, so the tree cannot disagree with the string.
+    let (block_ordered, footnote_ordered) = if node.from_tree {
+        (
+            resolved_destinations(&block),
+            resolved_destinations(&footnote),
+        )
+    } else {
+        // A title the carve-out keeps on the string pipeline's answer: `block`
+        // is that flat list, split by which placeholders the template still
+        // splices, exactly as it always was.
+        (
+            template_partition(&node.template, &block, true),
+            template_partition(&node.template, &block, false),
+        )
+    };
 
     // The title's rendering is a **fold of its tree**, with the destinations
     // just resolved installed into it — the same answer `Content::refold` gives
@@ -363,16 +394,17 @@ fn compute<'src>(
     // link text. Rendering the template as well, and keeping only one, would
     // put every deferred title through a host renderer twice.
     //
-    // The template is the fallback for a title whose tree the builder left
-    // short of the cross-references the string pipeline deferred, and for one
-    // that retained no attributes to fold under.
+    // The template is the fallback for a title with no tree to fold: a block
+    // title carried across a section heading, whose inline nodes cannot cross
+    // the `'src`-erasing hop it travels on. Every other title folds.
     let rendered = node
         .render_attributes
         .as_ref()
+        .filter(|_| node.from_tree)
         .and_then(|attributes| {
             fold_resolved_title(&node.inlines, &block_ordered, attributes, renderer, parser)
         })
-        .unwrap_or_else(|| render_xref_template(&node.template, &xrefs, renderer));
+        .unwrap_or_else(|| render_xref_template(&node.template, &block, renderer));
 
     if let Some(flag) = in_progress.get_mut(index) {
         *flag = false;

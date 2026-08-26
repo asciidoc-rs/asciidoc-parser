@@ -324,30 +324,49 @@ impl SubstitutionGroup {
                 attrlist,
             );
 
+            // The deferred cross-references are the **tree's**, not the string
+            // pipeline's — design §5.2's survey item, wired. The two staged
+            // walks read them off the tree already partitioned into the
+            // block-level ones and the ones this content's footnotes carry,
+            // where the string pipeline produced one flat list that had to be
+            // split by asking which of its placeholders survived. What is kept
+            // from the pipeline's own answer is the placeholder template, and
+            // only for the one content that renders from one — see
+            // `Content::set_tree_xrefs`.
+            //
+            // The fold below reads `content.deferred_parts()` for nothing, so
+            // the order of these two is a matter of reading rather than of
+            // correctness; deriving first keeps `rendered` and `deferred`
+            // describing the same tree at every point in this function.
+            let render_context = parser.render_context();
+
+            content.set_tree_xrefs(
+                crate::content::block_tree_xref_segments(&tree, &*parser.renderer, &render_context),
+                crate::content::footnote_tree_xref_segments(
+                    &tree,
+                    &*parser.renderer,
+                    &render_context,
+                ),
+            );
+
             // The tree is **authoritative** for the rendered string: what
             // `rendered_html()` returns is a fold of it, not the string
             // pipeline's own output (design §5.2 Phase 4, step 6).
             //
-            // Content carrying a *deferred cross-reference* is folded at a
-            // different time rather than a different way. Such a content's
-            // rendering is rebuilt from a placeholder template each time
-            // resolution runs (`Content::rebuild_rendered`), so a fold taken
-            // *here* would be overwritten by the next resolution pass — and
-            // before that pass the destinations are not known, so it would also
-            // be answering a question the document has not settled yet. It is
-            // folded at the **end of resolution** instead (`Content::refold`),
-            // which is the same answer one step later. Until then it keeps the
-            // template's answer, which is the honest one for an unresolved
-            // document.
-            if content.deferred_parts().is_none() {
-                let folded = crate::content::inline_builder::fold_html(
-                    &tree,
-                    &*parser.renderer,
-                    &parser.render_context(),
-                );
+            // Unconditional now, including for content carrying a deferred
+            // cross-reference. Such a content's rendering is taken *again* at
+            // the end of resolution (`Content::refold`), once the destinations
+            // are known; what it holds until then is the fold of an unresolved
+            // tree, which is the same unresolved-fallback answer the template
+            // gave and is the honest one for a document that has not settled
+            // its references yet.
+            let folded = crate::content::inline_builder::fold_html(
+                &tree,
+                &*parser.renderer,
+                &render_context,
+            );
 
-                content.rendered = crate::strings::CowStr::from(folded);
-            }
+            content.rendered = crate::strings::CowStr::from(folded);
 
             // The recognition side effects the string pipeline just skipped,
             // replayed from the tree — design §5.2's step 6, "re-attach the
