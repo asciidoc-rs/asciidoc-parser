@@ -7178,6 +7178,71 @@ Each phase is a reviewable unit with a clear exit gate.
   title-fold increment counted, and it keeps the template path for that reason rather than for the
   carve-out's.
 
+  *Step 6 landed as (four recognition diagnostics, recorded where they are recognized):* the second
+  increment of step 6 proper, and the first to move a side effect the tree-walk **replay cannot
+  carry**. `apply_macro_side_effects` works because a registration has a node to hang on; these four
+  have none. A `link:` macro with a dangerous scheme stays *literal*, an invalid substitution name
+  in a `pass:`/`stem:` list is *skipped*, a `footnoteref:` builds the same node its modern spelling
+  does, and a reference to an undefined footnote looks exactly like a forward one mid-parse. So they
+  are recorded at the **recognition site** — the sites that already hold `parser` — and carried
+  across afterwards.
+
+  *Carrying them across is the mechanism, and it is where the increment's two real bugs were.* The
+  builder runs against the counter-safe clone, whose warning buffer is discarded with it, so the
+  obvious move is to drain that buffer after the build and push it onto the real parser
+  ([`push_substitution_warnings`](../../parser/src/parser/parser.rs)). That is wrong twice over, and
+  the suite caught both.
+
+  First, the clone's warning buffer also collects what the builder records **incidentally**, through
+  machinery it shares with the string pipeline: an
+  [`Attrlist`](../../parser/src/attributes/attrlist.rs) parse expands attribute references over the
+  list's own text, and where that text is a *match string* rather than document source, the
+  resulting `attribute-missing` warning carries an offset that cannot be mapped back. The string
+  pipeline discards exactly those at its own site; carrying the whole buffer surfaced them
+  mislocated against the document root, which
+  `passthrough_attrlist_drop_line_does_not_leak_a_mislocated_warning` fails on. The fix is to keep
+  the two apart at the source: a diagnostic the builder *means* to report goes to its own buffer
+  ([`record_builder_diagnostic`](../../parser/src/parser/parser.rs)), and only that buffer is
+  transplanted.
+
+  Second, a build **nests**. `passthrough_text` re-enters `SubstitutionGroup::apply` for a
+  passthrough body, and that call clones the parser it is given — copying the new buffer along with
+  everything else — so a nested drain that took the whole buffer carried the *outer* build's pending
+  diagnostics across a second time. `pass:bogus[…]` reported twice. So the drain takes a **mark**,
+  exactly as [`drain_substitution_warnings_since`](../../parser/src/parser/parser.rs) does, and each
+  build leaves with exactly its own.
+
+  *The string pipeline's four copies are suppressed*, not deleted — the same
+  [`suppress_recognition_side_effects`](../../parser/src/parser/parser.rs) window every registration
+  already rides, and deleting the replacers is what the increment that removes `run_pipeline` does.
+  The transplant happens **before** `apply_macro_side_effects`, because the string pipeline raised
+  these during its own pass and ahead of the registrations the replay performs, and that relative
+  order is what [`inline_builder_side_effect_parity`](../../parser/src/tests/inline_builder_side_effect_parity.rs)
+  compares.
+
+  *That harness had to be taught the new channel,* which is worth recording because it is the shape
+  a corpus goes quiet in: it drives the builder side directly rather than through `apply`, so
+  without its own transplant every fixture exercising one of these four would have compared a
+  warning against nothing and passed. Seven fixtures were added — one per class, one crossing two
+  classes to pin their order against each other, and one crossing a diagnostic with a registration
+  to pin the order between the two kinds.
+
+  Audit: 37 rows either side, 0 new and 0 closed. Coverage exactly diff-neutral on all **eight**
+  changed files (`parser.rs` 87/73, `links.rs` 18/9, `passthrough_step.rs` 32/14, `stem_step.rs`
+  13/6, `footnotes.rs` 5/3, `macros.rs` 2/1, `passthroughs.rs` 3/3, `substitution_group.rs` 0/0 —
+  missed regions / missed lines, identical on both sides). Three sabotages fail three distinct sets:
+  dropping the transplant fails five tests, one per class; un-suppressing the string pipeline's link
+  copy fails `rejected_scheme_records_a_warning` on the double; and draining without the mark fails
+  the parity harness on the nested re-transplant.
+
+  *What still defers is the fifth,* `SkippingReferenceToMissingAttribute` — the `attribute-missing`
+  `warn` and `drop-line` diagnostic — and it is held back for a reason rather than for room. It is
+  not a macro family: it belongs to the **attributes step**, it is located per *line* through
+  `Content::source_lines` rather than against the content's span, and it is the very diagnostic
+  whose incidental recording the first bug above is about. Giving it the same treatment means
+  deciding which of the two buffers each of its sites writes to, which is its own increment's
+  question.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -8712,6 +8777,26 @@ Each phase is a reviewable unit with a clear exit gate.
        whose nodes cannot cross the `'src`-erasing `pending_block_title` hop). Audit: 37 rows
        either side, 0 new and 0 closed; coverage exactly diff-neutral on all four changed
        production files. See the step's own "landed as" note above.
+
+     - ✅ **four recognition diagnostics, recorded where they are recognized.** The first side
+       effects the tree-walk replay **cannot** carry: a rejected `link:` macro stays literal, an
+       invalid substitution name in a `pass:`/`stem:` list is skipped, a `footnoteref:` builds the
+       same node its modern spelling does, and an undefined footnote reference looks exactly like a
+       forward one — so none of them leaves a node to replay from. Each is recorded at its own
+       recognition site and carried onto the real parser afterwards, with the string pipeline's copy
+       joining the existing
+       [`suppress_recognition_side_effects`](../../parser/src/parser/parser.rs) window. The
+       mechanism is where the work was: the builder's deliberate diagnostics need a buffer of their
+       own ([`record_builder_diagnostic`](../../parser/src/parser/parser.rs)), because the clone's
+       warning buffer also collects what an `Attrlist` parse records *incidentally* over a match
+       string — warnings the string pipeline discards and which would otherwise surface mislocated —
+       and the drain needs a **mark**, because `passthrough_text` re-enters `apply` and the nested
+       clone would carry the outer build's diagnostics across twice. Both were caught by the suite,
+       not by inspection. Audit: 37 rows either side, 0 new and 0 closed; coverage exactly
+       diff-neutral on all eight changed files. What still defers is the fifth diagnostic,
+       `SkippingReferenceToMissingAttribute`, which belongs to the attributes *step* rather than to
+       a macro family, is located per line, and is the very diagnostic the incidental-recording
+       hazard is about. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

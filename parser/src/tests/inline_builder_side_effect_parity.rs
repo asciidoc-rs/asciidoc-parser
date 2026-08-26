@@ -138,6 +138,15 @@ fn side_effects_with(source: &str, configure: impl Fn() -> Parser) -> (SideEffec
 
     let builder_parser = configure();
     let nodes = build(Span::new(source), &builder_parser, None);
+
+    // The recognition **diagnostics** the builder recorded while recognizing,
+    // moved onto the parser exactly as `SubstitutionGroup::apply` moves them:
+    // before the replay, since the string pipeline raises them during its own
+    // pass and ahead of the registrations. Without this the builder side would
+    // report no warnings for the four classes it now owns, and every fixture
+    // exercising one would compare something against nothing.
+    builder_parser.push_substitution_warnings(builder_parser.drain_builder_diagnostics_since(0));
+
     apply_macro_side_effects(&nodes, &builder_parser, Span::new(source), false);
 
     (snapshot(&golden_parser), snapshot(&builder_parser))
@@ -174,6 +183,28 @@ const CORPUS: &[&str] = &[
     //
     // The image family, alone and in company.
     "an image:photo.png[Alt Text] inline",
+    //
+    // The four recognition **diagnostics** the builder records at its own
+    // recognition site rather than replaying from the tree, because each
+    // leaves nothing on the tree to replay from: a rejected `link:` stays
+    // literal, an invalid substitution name is skipped, a `footnoteref:` builds
+    // the same node its modern spelling does, and an undefined reference looks
+    // exactly like a forward one.
+    "a pass:bogus[dangerous] macro",
+    "a stem:bogus,q[x + y] macro",
+    "a link:javascript:alert(1)[click me] macro",
+    "a footnoteref:[fnid,some text] macro",
+    "a footnote:never-defined[] macro",
+    //
+    // Two diagnostics in one content, which is what pins their **order**: the
+    // warnings ride in one list, so a builder that recognized these families in
+    // a different order from the string pipeline would still record both and
+    // only this fixture would notice.
+    "a pass:bogus[x] and a link:javascript:alert(1)[click] together",
+    // A diagnostic beside a registration, which pins the other order: the
+    // string pipeline raises its warnings during the pass, ahead of what the
+    // replay registers afterwards.
+    "a link:javascript:alert(1)[bad] and an image:photo.png[Alt] together",
     "image:a.png[] and image:b.png[] and image:c.png[]",
     "image:a&b.png[Query] with a special in the target",
     "image:{logo}[Logo] from an expanded target",

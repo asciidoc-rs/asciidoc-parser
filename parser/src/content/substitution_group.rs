@@ -316,12 +316,41 @@ impl SubstitutionGroup {
             // its own.
             tree_parser.build_inline_tree = false;
 
+            // Where this build's own diagnostics start — see
+            // `Parser::drain_builder_diagnostics_since` for why a mark rather
+            // than the whole buffer.
+            let diagnostics_before_build = tree_parser.builder_diagnostics_len();
+
             let tree = crate::content::inline_builder::build_for_group(
                 self,
                 value,
                 content.original(),
                 &tree_parser,
                 attrlist,
+            );
+
+            // The recognition **diagnostics** the string pipeline just skipped,
+            // moved onto the real parser — the warning half of "re-attach the
+            // recognition side effects" (design §5.2's step 6).
+            //
+            // A registration has a node to hang on, so it is replayed from the
+            // tree below. These five do not: `attribute-missing` drops a
+            // reference and leaves nothing behind, a `link:` macro with a
+            // dangerous scheme stays literal, and an invalid substitution name
+            // in a `pass:`/`stem:` list is simply skipped. So they are recorded
+            // where they are *recognized*, on the clone, and carried across
+            // here — which is what `Parser::record_builder_diagnostic` and
+            // `push_substitution_warnings` are for. The builder's own buffer is
+            // used rather than the clone's warning buffer, so a warning it
+            // records only *incidentally* (an `Attrlist` parse over a match
+            // string) is not swept up with them.
+            //
+            // Before `apply_macro_side_effects`, deliberately: the string
+            // pipeline raised these during its own pass, ahead of the
+            // registrations the replay performs, and that relative order is
+            // what `inline_builder_side_effect_parity` compares.
+            parser.push_substitution_warnings(
+                tree_parser.drain_builder_diagnostics_since(diagnostics_before_build),
             );
 
             // The deferred cross-references are the **tree's**, not the string
