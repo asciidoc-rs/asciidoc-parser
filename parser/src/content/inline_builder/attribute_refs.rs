@@ -50,13 +50,25 @@ use crate::{
 /// [`MissingHandling`] and [`surviving_lines`] for how this transducer
 /// reproduces it, and for the two shapes it defers.
 ///
-/// The `DropLine` mode's own diagnostic (Asciidoctor's "dropping line
-/// containing reference to missing attribute", recorded as a
-/// [`SkippingReferenceToMissingAttribute`] warning) is **not** raised here: it
-/// does not change the fold's output bytes, so — like every macro family's own
-/// catalog/warning side effect — it is deferred to the cutover (design §5.2
-/// Phase 4, step 6). The same applies to `Warn` mode's warning, whose output
-/// this step already reproduces.
+/// Both diagnosing modes' own diagnostic — Asciidoctor's "skipping reference to
+/// missing attribute" under `Warn`, and "dropping line containing reference to
+/// missing attribute" under `DropLine`, each recorded as a
+/// [`SkippingReferenceToMissingAttribute`] warning — **is** raised here, by
+/// [`record_missing_reference_warnings`]. It is the fifth and last of the
+/// recognition diagnostics the tree-walk replay cannot carry (design §5.2 Phase
+/// 4, step 6): a dropped or warned-about reference leaves no node to hang a
+/// diagnostic on, so it is recorded where it is *recognized* and carried onto
+/// the real parser afterwards, with the string pipeline's own copy suppressed
+/// for the duration of that window.
+///
+/// Two things about it are easy to get wrong, and both have their reasons on
+/// [`record_missing_reference_warnings`]: the mode is read from
+/// [`AttributeMissing`] directly rather than through [`MissingHandling`] (which
+/// deliberately collapses `Skip` with `Warn`, and falls back to `Literal` for
+/// the two shapes above — deferrals about output *bytes*, which are no reason
+/// to stop diagnosing), and the diagnostics are ordered by source offset rather
+/// than raised where they are found (the splicing recursion visits a `Styled`
+/// child's content before its own level).
 ///
 /// A literal `<`, `>`, or `&` **in the expanded value** is classified by
 /// design §3.4.1 — "the kind a fragment becomes is decided by which
