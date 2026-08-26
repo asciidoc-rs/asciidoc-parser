@@ -712,6 +712,33 @@ impl<'p> AttributeReplacer<'p> {
     /// retained source-line match at `index` exists *and* its text equals
     /// `matched` — the text check guards against a correlation that has
     /// drifted (see the type-level docs).
+    /// Records this step's `attribute-missing` diagnostic — unless the
+    /// single-pass builder is going to record it instead.
+    ///
+    /// The fifth and last of the recognition diagnostics the tree-walk replay
+    /// cannot carry (design §5.2 Phase 4, step 6): a dropped or warned-about
+    /// reference leaves no node to hang a diagnostic on, so the builder records
+    /// it at its own recognition site (see
+    /// [`apply_attribute_references`](crate::content::inline_builder)) and it
+    /// is carried onto the real parser afterwards. This copy is suppressed
+    /// for the duration of that window, exactly as the other four are, and
+    /// is deleted along with the string pipeline itself.
+    ///
+    /// Suppression is deliberately *not* applied to a direct
+    /// [`SubstitutionStep::AttributeReferences`] call, which never opens the
+    /// window and so keeps diagnosing on its own — which is what lets this
+    /// step go on being tested in isolation.
+    fn record_missing_reference(&self, index: usize, caps: &Captures<'_>, attr_name: &str) {
+        if self.parser.suppress_recognition_side_effects.get() {
+            return;
+        }
+
+        self.parser.record_substitution_warning(
+            self.warning_source(index, &caps[0]),
+            WarningType::SkippingReferenceToMissingAttribute(attr_name.to_string()),
+        );
+    }
+
     fn warning_source(&self, index: usize, matched: &str) -> Span<'p> {
         if let Some(line) = self.source_line
             && let Some(range) = self.source_matches.get(index)
@@ -810,17 +837,11 @@ impl Replacer for AttributeReplacer<'_> {
                     // attribute") for each reference that triggers a drop, so
                     // record the matching diagnostic here.
                     self.missing_on_line = true;
-                    self.parser.record_substitution_warning(
-                        self.warning_source(match_index, &caps[0]),
-                        WarningType::SkippingReferenceToMissingAttribute(attr_name.to_string()),
-                    );
+                    self.record_missing_reference(match_index, caps, attr_name);
                 }
                 AttributeMissing::Warn => {
                     dest.push_str(&caps[0]);
-                    self.parser.record_substitution_warning(
-                        self.warning_source(match_index, &caps[0]),
-                        WarningType::SkippingReferenceToMissingAttribute(attr_name.to_string()),
-                    );
+                    self.record_missing_reference(match_index, caps, attr_name);
                 }
             }
             return;

@@ -7313,6 +7313,80 @@ Each phase is a reviewable unit with a clear exit gate.
   genuinely needs freezing is the recorder-versus-builder structural cross-check, whose oracle is
   the Strategy-A recorder §5.4 retires. That is its own increment.
 
+  *Step 6 landed as (the fifth diagnostic, and the last one):* the increment that closes the set
+  the diagnostics increment opened, and it landed for a reason worth recording: **it is a
+  prerequisite for the cutover's remaining swap, not a tidy-up after it.**
+
+  The prompt for it was a throwaway probe of the *inversion* — giving the string pipeline the
+  counter-safe clone and the builder the real parser, which is what makes `run_pipeline` a pure
+  oracle and lets three sentinel systems go. That probe fails **27 tests of 5,474** (against 218 for
+  a naive `run_pipeline` removal), and they collapse into exactly **two** root causes: the footnote
+  catalog entry, and this diagnostic. Neither is unblocked *by* the inversion; both block it. The
+  order in the plan was backwards, and the probe is what said so. Worth noting too is what did
+  **not** appear: `{counter:}`, which had been carried as a blocker on the strength of an audit
+  measurement, is a non-issue — the counter-safe clone seeds both passes from the same
+  pre-substitution state whichever way round they run.
+
+  `SkippingReferenceToMissingAttribute` was held back from the diagnostics increment for three
+  stated reasons, and each turned out to be answerable rather than deep. *It belongs to the
+  attributes step, not to a macro family* — so it is recorded in
+  [`apply_attribute_references`](../../parser/src/content/inline_builder/attribute_refs.rs) rather
+  than at a macro's recognition site, which changes where the code lives and nothing else. *It is
+  located per line* — but only because that is how the string pipeline recovers a span it has
+  otherwise lost (`warning_source` matches a per-line byte range back against the line's text, and
+  degrades to the whole content when there are no source lines). The tree needs none of that:
+  [`source_slice`](../../parser/src/content/inline_builder/quotes.rs) maps the match's own range
+  back to `'src` directly, which is the same mapping every node's `location` already takes. *And it
+  is the very diagnostic whose incidental recording was that increment's first bug* — which is
+  precisely why it is landable now: the two-buffer split that fixed that bug is what keeps an
+  `Attrlist` parse's own `attribute-missing` warning (recorded through
+  `record_substitution_warning`, over a match string, unmappable) apart from this one (recorded
+  through `record_builder_diagnostic`, deliberately). The earlier increment paid for this one.
+
+  *Two things in the design are load-bearing, and both were found by sabotage rather than by
+  reading.*
+
+  **The diagnostic is decided by the document's mode, not by
+  [`MissingHandling`](../../parser/src/content/inline_builder/attribute_refs.rs).** That enum
+  answers what a missing reference *renders* as, and it collapses distinctions this needs: `skip`
+  and `warn` are both `Literal` because they emit the same bytes, and both `for_content` and
+  `nested` fall back to `Literal` for the two shapes whose line correspondence the transducer
+  cannot reproduce. None of that is a reason to stop diagnosing — the string pipeline scans a flat
+  rendered string in which a span's contents are ordinary text, so it warns for a nested reference
+  and for a line-straddling span alike. Reading `AttributeMissing` directly keeps the deferrals
+  about output bytes, where they belong. It also means the `drop-line` divergence this transducer
+  documents is a divergence in **bytes only**: the diagnostic agrees.
+
+  **The order has to be restored, not kept.** The splicing recursion visits a `Styled` child's
+  content *before* its own level, so `{alpha} *bold {beta}*` finds `beta` first while the string
+  pipeline's line scan sees `alpha` first — the same hazard `resolve_counters` exists to correct
+  for counter directives. A stable sort by source offset fixes it, and the sort is *the* thing
+  nothing pinned: removing it left the whole suite green. So the increment's real test is a new
+  configured pair in
+  [`inline_builder_side_effect_parity`](../../parser/src/tests/inline_builder_side_effect_parity.rs)
+  sweeping both diagnosing modes over ten fixtures, four of them straddling a span, with a
+  non-vacuity guard per fixture. That harness compares warnings **in order**, which is exactly the
+  question.
+
+  Audit: 37 rows either side, 0 new and 0 closed. Coverage exactly diff-neutral on both changed
+  production files (`attribute_refs.rs` 11/6, `substitution_step.rs` 2/0 — missed regions / missed
+  lines, identical on both sides). Three sabotages fail three distinct sets: dropping the builder's
+  recording fails the same **eight** tests the inversion probe named as this cause, un-suppressing
+  the string pipeline's copy fails the same eight on the double, and removing the sort fails only
+  the new parity sweep.
+
+  *What still defers is the footnote catalog entry* — the other root cause the probe named, and the
+  last thing between here and the inversion.
+  [`register_footnote_number`](../../parser/src/content/inline_builder/footnotes.rs) registers
+  `normalize_footnote_text(raw_content)`, the *unrendered* text, and threads no cross-reference
+  placeholders through, so `define_footnote` never builds a `FootnoteDeferred` for a tree-built
+  footnote. Both are invisible today because the registration lands on the discarded clone; invert,
+  and they become the catalog (`footnotes[0].text` empty where the string pipeline registers
+  `<a href="…">GitHub</a>`, and a footnote's own `<<tgt>>` no longer resolving). The entry's `text`
+  has to become a fold of the footnote's own subtree, and the entry has to carry the deferred
+  segments. It is testable ahead of the inversion through the same side-effect parity harness,
+  which drives the builder directly and so can see what the clone registers.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -8889,6 +8963,35 @@ Each phase is a reviewable unit with a clear exit gate.
        **structural** half: the three `parser/src/tests/` corpora that compare trees and records
        rather than HTML, which need an `InlineNode` serialization rather than a wider sweep of this
        mechanism. See the step's own "landed as" note above.
+
+     - ✅ **the fifth diagnostic, and the last one.** `SkippingReferenceToMissingAttribute` — the
+       `attribute-missing` `warn` and `drop-line` diagnostic — recorded at the builder's own
+       recognition site and carried across, with the string pipeline's copy joining the existing
+       [`suppress_recognition_side_effects`](../../parser/src/parser/parser.rs) window. It landed
+       **because a probe of the inversion said it had to**: giving the string pipeline the
+       counter-safe clone and the builder the real parser fails 27 tests of 5,474, collapsing into
+       exactly two root causes — this diagnostic and the footnote catalog entry. Neither is
+       unblocked by the inversion; both block it, which is the reverse of how the plan had them.
+       (`{counter:}`, carried as a third blocker, does not appear at all: the clone seeds both
+       passes from the same pre-substitution state whichever way round they run.) Each of the three
+       reasons this was held back turned out to be answerable: it lives in the attributes step
+       rather than a macro family, which only moves the code; its per-line location is the string
+       pipeline *recovering* a span the tree never loses
+       ([`source_slice`](../../parser/src/content/inline_builder/quotes.rs) maps the match's range
+       to `'src` directly); and the incidental-recording hazard it is the subject of is exactly what
+       the previous increment's two-buffer split already fixed. Two things are load-bearing: the
+       diagnostic reads [`AttributeMissing`](../../parser/src/content/substitution_step.rs) directly rather than
+       `MissingHandling`, which collapses `skip` with `warn` and falls back to `Literal` for shapes
+       whose *bytes* it cannot reproduce — so the `drop-line` divergence stays a divergence in bytes
+       only; and the order must be **restored** by a stable sort, since the splicing recursion
+       visits a span's content before its own level. The sort was the one thing nothing pinned
+       (removing it left the whole suite green), so the increment's real test is a new configured
+       pair in
+       [`inline_builder_side_effect_parity`](../../parser/src/tests/inline_builder_side_effect_parity.rs)
+       sweeping both diagnosing modes over ten fixtures, four straddling a span. Audit: 37 rows
+       either side, 0 new and 0 closed; coverage exactly diff-neutral on both changed production
+       files. What still defers is the footnote catalog entry — the probe's other root cause, and
+       the last thing before the inversion. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

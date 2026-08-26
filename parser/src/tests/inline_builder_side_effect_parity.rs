@@ -379,6 +379,75 @@ fn the_sweep_reaches_every_list_a_recognition_pass_writes_to() {
     assert!(warnings > 0, "no fixture recorded a warning");
 }
 
+/// The `attribute-missing` diagnostic's own configured pair: the mode is
+/// parser state rather than source text, and the default (`skip`) diagnoses
+/// nothing at all.
+fn missing_mode_side_effects(source: &str, mode: &str) -> (SideEffects, SideEffects) {
+    side_effects_with(source, || {
+        corpus_parser().with_intrinsic_attribute(
+            "attribute-missing",
+            mode,
+            ModificationContext::Anywhere,
+        )
+    })
+}
+
+#[test]
+fn the_attribute_missing_diagnostic_agrees_in_number_and_in_order() {
+    // The fifth recognition diagnostic, and the only one whose *order* is not
+    // already fixed by the pass that raises it. The splicing recursion visits a
+    // `Styled` child's content before its own level, so a reference nested in a
+    // span is found before one that sits earlier at the top level — while the
+    // string pipeline, scanning a flat rendered string in which the span is
+    // already `<strong>…</strong>`, sees them in source order. The straddling
+    // fixtures below are what pin the correction; without it they compare
+    // `[beta, alpha]` against `[alpha, beta]`.
+    //
+    // Both diagnosing modes are swept. `warn` leaves every reference literal,
+    // so the *only* thing it changes is the warning list; `drop-line` removes
+    // content as well, and still warns for each reference that triggered a
+    // drop — including one inside a span, whose enclosing line the tree
+    // deliberately does not drop (a documented divergence in output bytes that
+    // is **not** a divergence in the diagnostic).
+    for mode in ["warn", "drop-line"] {
+        for source in [
+            // One reference, the simplest possible case.
+            "Hello, {alpha}!",
+            // Several on one line, and across lines: source order either way.
+            "{alpha} and {beta}",
+            "first {alpha} line\nsecond {beta} line\nthird {gamma} here",
+            // A reference nested in a span, *after* a top-level one: the
+            // recursion finds it first and the sort has to put it back.
+            "{alpha} *bold {beta}* {gamma}",
+            "{alpha} _em {beta}_ and {gamma} then *{delta}*",
+            // The same shape with the span first, which is already in the
+            // order the recursion produces — the control that keeps the
+            // fixture above from passing for the wrong reason.
+            "*bold {alpha}* and {beta}",
+            // Two references inside one span, and spans nested in spans.
+            "{alpha} *a {beta} b {gamma}* c",
+            "{alpha} *outer _inner {beta}_ tail* {gamma}",
+            // An escaped reference is never a missing one, in either pipeline.
+            "\\{alpha} but {beta}",
+            // A *set* attribute beside a missing one: only the missing one is
+            // diagnosed, so this fails if recognition drifts.
+            "{logo} and {alpha}",
+        ] {
+            let (golden, builder) = missing_mode_side_effects(source, mode);
+
+            assert_eq!(
+                golden, builder,
+                "attribute-missing diagnostics diverged under {mode} for {source:?}"
+            );
+
+            assert!(
+                !golden.warnings.is_empty(),
+                "fixture diagnosed nothing under {mode}: {source:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn a_bibliography_entry_registers_the_same_way() {
     for source in [
