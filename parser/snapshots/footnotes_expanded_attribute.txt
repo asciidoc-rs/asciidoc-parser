@@ -1,0 +1,1 @@
+"The {product} is great, footnote:[x] right?"	"The Widget is great, <sup class=\"footnote\">[<a id=\"_footnoteref_1\" class=\"footnote\" href=\"#_footnotedef_1\" title=\"View footnote.\">1</a>]</sup> right?"

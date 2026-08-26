@@ -420,10 +420,29 @@ mod tests {
         parser: &Parser,
         attrlist: Option<&Attrlist<'_>>,
     ) -> String {
+        golden_callouts_in("callouts", source, parser, attrlist)
+    }
+
+    /// [`golden_callouts_with`], recording into a named corpus.
+    ///
+    /// One corpus is keyed by source alone, so a test whose parser makes a
+    /// shared source render differently — a non-default `icons` is the one
+    /// here — names its own.
+    fn golden_callouts_in(
+        corpus: &str,
+        source: &str,
+        parser: &Parser,
+        attrlist: Option<&Attrlist<'_>>,
+    ) -> String {
         let mut content = Content::from(Span::new(source));
         SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
         SubstitutionStep::Callouts.apply(&mut content, parser, attrlist);
-        content.rendered_str().to_string()
+
+        crate::content::inline_builder::snapshot::recorded_golden(
+            corpus,
+            source,
+            content.rendered_str(),
+        )
     }
 
     /// [`golden_callouts_with`] with a default parser and no attribute list.
@@ -502,7 +521,10 @@ mod tests {
         let image_parser =
             Parser::default().with_intrinsic_attribute("icons", "", ModificationContext::Anywhere);
 
-        for parser in [&font_parser, &image_parser] {
+        for (corpus, parser) in [
+            ("callouts_icons_font", &font_parser),
+            ("callouts_icons_image", &image_parser),
+        ] {
             let fixture = "puts x # <1>";
 
             let folded = crate::content::inline_builder::fold_html(
@@ -513,7 +535,7 @@ mod tests {
 
             assert_eq!(
                 folded,
-                golden_callouts_with(fixture, parser, None),
+                golden_callouts_in(corpus, fixture, parser, None),
                 "fold diverged from the string pipeline under a custom `icons` attribute"
             );
         }

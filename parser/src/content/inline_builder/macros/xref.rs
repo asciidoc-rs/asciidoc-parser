@@ -897,7 +897,12 @@ mod tests {
 
         SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
         content.finalize_deferred(&HtmlSubstitutionRenderer {});
-        content.rendered_str().to_string()
+
+        crate::content::inline_builder::snapshot::recorded_golden(
+            "xref_whole_pipeline",
+            source,
+            content.rendered_str(),
+        )
     }
 
     /// The string pipeline's output through the **macros** step for `source`,
@@ -918,7 +923,12 @@ mod tests {
         // Finalize as the real pipeline does after the last step, capturing the
         // placeholder template and rebuilding the unresolved fallback.
         content.finalize_deferred(&HtmlSubstitutionRenderer {});
-        content.rendered_str().to_string()
+
+        crate::content::inline_builder::snapshot::recorded_golden(
+            "xref_macros",
+            source,
+            content.rendered_str(),
+        )
     }
 
     /// [`golden_xref_with`] with a default parser.
@@ -2204,7 +2214,13 @@ mod tests {
         passthroughs.restore_to(&mut content, &parser);
         content.finalize_deferred(&HtmlSubstitutionRenderer {});
 
-        let golden = content.rendered_str().to_string();
+        // Recorded, so the leaked bytes this divergence is *about* outlive the
+        // string pipeline that leaks them (see [`snapshot`]).
+        let golden = crate::content::inline_builder::snapshot::recorded_golden(
+            "xref_passthrough_divergence",
+            source,
+            content.rendered_str(),
+        );
 
         assert!(
             golden.contains('\u{96}'),
@@ -2520,7 +2536,12 @@ mod tests {
         let mut content = Content::from(Span::new(source));
         SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, None);
         content.finalize_deferred(&HtmlSubstitutionRenderer {});
-        content.rendered_str().to_string()
+
+        crate::content::inline_builder::snapshot::recorded_golden(
+            "xref_normal",
+            source,
+            content.rendered_str(),
+        )
     }
 
     #[test]

@@ -392,7 +392,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::super::super::test_support::{
-        assert_styled, assert_text, build_src, fold_html, golden_macros, golden_macros_with,
+        assert_styled, assert_text, build_src, fold_html, golden_macros, golden_macros_in,
     };
     use crate::{
         Parser, Span,
@@ -497,7 +497,7 @@ mod tests {
 
             assert_eq!(
                 folded,
-                golden_macros_with(fixture, &parser),
+                golden_macros_in("macros_experimental", fixture, &parser),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
         }
@@ -651,7 +651,7 @@ mod tests {
                 &HtmlSubstitutionRenderer {},
                 &experimental_parser().render_context()
             ),
-            golden_macros_with("\\kbd:[X]", &experimental_parser())
+            golden_macros_in("macros_experimental", "\\kbd:[X]", &experimental_parser())
         );
     }
 
@@ -798,7 +798,7 @@ mod tests {
 
             assert_eq!(
                 folded,
-                golden_macros_with(fixture, &parser),
+                golden_macros_in("macros_experimental", fixture, &parser),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
         }
@@ -886,7 +886,7 @@ mod tests {
             // The string pipeline, by contrast, *does* build a UI macro here —
             // the divergence this test documents. (If a later increment lifts
             // it, fold these fixtures into the parity corpus above.)
-            let golden = golden_macros_with(source, &experimental_parser());
+            let golden = golden_macros_in("macros_experimental", source, &experimental_parser());
 
             assert!(
                 golden.contains("<kbd>")
@@ -918,7 +918,12 @@ mod tests {
 
         let mut content = Content::from(Span::new(source));
         SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, None);
-        content.rendered_str().to_string()
+
+        crate::content::inline_builder::snapshot::recorded_golden(
+            "ui_normal",
+            source,
+            content.rendered_str(),
+        )
     }
 
     #[test]

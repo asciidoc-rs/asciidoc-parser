@@ -1213,7 +1213,14 @@ mod tests {
                 &parser.render_context(),
             );
 
-            assert_eq!(folded, content.rendered_html());
+            assert_eq!(
+                folded,
+                crate::content::inline_builder::snapshot::recorded_golden(
+                    "build_for_group_escaped_reference",
+                    source,
+                    content.rendered_html(),
+                )
+            );
             assert!(!folded.contains('\\'));
         }
     }
@@ -1281,8 +1288,12 @@ mod tests {
                 //                                  spliced in untouched — the
                 //                                  cell that used to unwind
                 //                                  one level too far)
-                for (group, expected) in [
+                // A corpus per group: the two render the same source
+                // differently — which is the whole subject here — and one
+                // corpus is keyed by source alone.
+                for (corpus, group, expected) in [
                     (
+                        "group_order_escaping",
                         &escaping,
                         if text.contains('&') {
                             "Widget &amp;lt; y"
@@ -1291,6 +1302,7 @@ mod tests {
                         },
                     ),
                     (
+                        "group_order_verbatim",
                         &verbatim,
                         if text.contains('&') {
                             "Widget &lt; y"
@@ -1316,7 +1328,15 @@ mod tests {
                         &parser.render_context(),
                     );
 
-                    assert_eq!(folded, content.rendered_html(), "{source:?}");
+                    assert_eq!(
+                        folded,
+                        crate::content::inline_builder::snapshot::recorded_golden(
+                            corpus,
+                            &source,
+                            content.rendered_html()
+                        ),
+                        "{source:?}"
+                    );
                     assert!(folded.contains(expected), "{source:?}: {folded:?}");
                 }
             }
@@ -1458,7 +1478,11 @@ mod tests {
                     &HtmlSubstitutionRenderer {},
                     &parser.render_context()
                 ),
-                content.rendered_html(),
+                crate::content::inline_builder::snapshot::recorded_golden(
+                    "build_for_group_restored_entity",
+                    source,
+                    content.rendered_html(),
+                ),
                 "fold diverged from the string pipeline for {source:?}"
             );
         }
@@ -1514,7 +1538,11 @@ mod tests {
                     &HtmlSubstitutionRenderer {},
                     &built_parser.render_context()
                 ),
-                content.rendered_html(),
+                crate::content::inline_builder::snapshot::recorded_golden(
+                    "build_for_group_recoverable_piece",
+                    source,
+                    content.rendered_html(),
+                ),
                 "fold diverged from the string pipeline for {source:?}"
             );
         };

@@ -1658,7 +1658,11 @@ mod tests {
                     &HtmlSubstitutionRenderer {},
                     &parser.render_context()
                 ),
-                golden.rendered_str(),
+                crate::content::inline_builder::snapshot::recorded_golden(
+                    "indexterm_expanded",
+                    source,
+                    golden.rendered_str(),
+                ),
                 "fold diverged from the string pipeline for {source:?}"
             );
         }

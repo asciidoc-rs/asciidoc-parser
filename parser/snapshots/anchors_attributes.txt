@@ -1,0 +1,2 @@
+"before {myattr} after"	"before <a id=\"custom-id\"></a> after"
+"{entry} Gamma."	"<a id=\"gof\"></a>[GoF] Gamma."

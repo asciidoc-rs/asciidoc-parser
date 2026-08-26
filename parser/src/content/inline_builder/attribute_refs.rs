@@ -1068,6 +1068,16 @@ mod tests {
     /// steps [`build`] runs, in order (special characters, quotes, attribute
     /// references, character replacements, macros, post replacement).
     fn golden_attributes_with(source: &str, parser: &Parser) -> String {
+        golden_attributes_in("attribute_refs", source, parser)
+    }
+
+    /// [`golden_attributes_with`], recording into a named corpus.
+    ///
+    /// One corpus is keyed by source alone, so the
+    /// `attribute-missing=drop-line` corpus — which renders a shared source
+    /// to nothing where the default leaves the reference in place — names
+    /// its own.
+    fn golden_attributes_in(corpus: &str, source: &str, parser: &Parser) -> String {
         let mut content = Content::from(Span::new(source));
         SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
         SubstitutionStep::Quotes.apply(&mut content, parser, None);
@@ -1075,7 +1085,12 @@ mod tests {
         SubstitutionStep::CharacterReplacements.apply(&mut content, parser, None);
         SubstitutionStep::Macros.apply(&mut content, parser, None);
         SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
-        content.rendered_str().to_string()
+
+        crate::content::inline_builder::snapshot::recorded_golden(
+            corpus,
+            source,
+            content.rendered_str(),
+        )
     }
 
     #[test]
@@ -1652,7 +1667,11 @@ mod tests {
 
         assert_eq!(
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),
-            golden_attributes_with(source, &parser_with_missing_mode(mode)),
+            golden_attributes_in(
+                &format!("attribute_refs_missing_{mode}"),
+                source,
+                &parser_with_missing_mode(mode),
+            ),
             "fold diverged under attribute-missing={mode} for {source:?}"
         );
     }
@@ -1842,7 +1861,11 @@ mod tests {
         // advances the counter for real — design §5.3's two-independent-parsers
         // discipline), agrees.
         assert_eq!(
-            golden_attributes_with(source, &parser_with_missing_mode("drop-line")),
+            golden_attributes_in(
+                "attribute_refs_missing_drop-line",
+                source,
+                &parser_with_missing_mode("drop-line"),
+            ),
             folded
         );
     }
@@ -1955,7 +1978,10 @@ mod tests {
 
         // The string pipeline, by contrast, drops the line the reference sits
         // on — which here is the span's own second half.
-        assert_eq!(golden_attributes_with(source, &parser), "<em>a");
+        assert_eq!(
+            golden_attributes_in("attribute_refs_missing_drop-line", source, &parser),
+            "<em>a"
+        );
     }
 
     #[test]
@@ -1975,6 +2001,9 @@ mod tests {
 
         // The string pipeline drops the (now empty) middle line from inside
         // the span's rendered markup.
-        assert_eq!(golden_attributes_with(source, &parser), "<em>a\nb</em>");
+        assert_eq!(
+            golden_attributes_in("attribute_refs_missing_drop", source, &parser),
+            "<em>a\nb</em>"
+        );
     }
 }

@@ -2790,7 +2790,12 @@ mod tests {
         let mut content = Content::from(Span::new(source));
         SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
         SubstitutionStep::Quotes.apply(&mut content, &parser, None);
-        content.rendered_str().to_string()
+
+        crate::content::inline_builder::snapshot::recorded_golden(
+            "quotes",
+            source,
+            content.rendered_str(),
+        )
     }
 
     #[test]

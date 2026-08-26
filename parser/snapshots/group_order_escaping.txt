@@ -1,0 +1,6 @@
+"https://example.org[{product} &lt; y,role=hl] here"	"<a href=\"https://example.org\" class=\"hl\">Widget &amp;lt; y</a> here"
+"https://example.org[{product} < y,role=hl] here"	"<a href=\"https://example.org\" class=\"hl\">Widget &lt; y</a> here"
+"link:index.html[{product} &lt; y,role=hl] here"	"<a href=\"index.html\" class=\"hl\">Widget &amp;lt; y</a> here"
+"link:index.html[{product} < y,role=hl] here"	"<a href=\"index.html\" class=\"hl\">Widget &lt; y</a> here"
+"xref:sec[{product} &lt; y,role=hl] here"	"<a href=\"#sec\" class=\"hl\">Widget &amp;lt; y</a> here"
+"xref:sec[{product} < y,role=hl] here"	"<a href=\"#sec\" class=\"hl\">Widget &lt; y</a> here"
