@@ -334,7 +334,11 @@ mod tests {
 
         let mut content = Content::from(Span::new(source));
         SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
-        let golden = content.rendered_str().to_string();
+        let golden = crate::content::inline_builder::snapshot::recorded_golden(
+            "post_replacements",
+            source,
+            content.rendered_str(),
+        );
 
         let nodes = super::super::build(Span::new(source), &parser, None);
         let built = fold_html(&nodes, &HtmlSubstitutionRenderer {});
@@ -437,7 +441,21 @@ mod tests {
 
         let mut content = Content::from(Span::new(source));
         SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, attrlist.as_ref());
-        let golden = content.rendered_str().to_string();
+
+        // A corpus per shape: the block-attribute and document-attribute
+        // spellings render the same source differently from each other (and
+        // from neither being set), and one corpus is keyed by source alone.
+        let corpus = if attrlist_src.is_empty() {
+            "post_replacements_hardbreaks_document"
+        } else {
+            "post_replacements_hardbreaks_block"
+        };
+
+        let golden = crate::content::inline_builder::snapshot::recorded_golden(
+            corpus,
+            source,
+            content.rendered_str(),
+        );
 
         let nodes = super::super::build(Span::new(source), parser, attrlist.as_ref());
         let built = fold_html(&nodes, &HtmlSubstitutionRenderer {});

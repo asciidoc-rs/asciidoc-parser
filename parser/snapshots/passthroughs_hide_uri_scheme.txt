@@ -1,0 +1,6 @@
+"<https://++example.org/a++>"	"<a href=\"https://example.org/a\" class=\"bare\">example.org/a</a>"
+"https://++example.org/a++"	"<a href=\"https://example.org/a\" class=\"bare\">example.org/a</a>"
+"https://++example.org/a++[]"	"<a href=\"https://example.org/a\" class=\"bare\">example.org/a</a>"
+"https://example.org/++a++"	"<a href=\"https://example.org/a\" class=\"bare\">example.org/a</a>"
+"link:++https://example.org/a++[]"	"<a href=\"https://example.org/a\" class=\"bare\">https://example.org/a</a>"
+"link:https://++example.org/a++[]"	"<a href=\"https://example.org/a\" class=\"bare\">example.org/a</a>"

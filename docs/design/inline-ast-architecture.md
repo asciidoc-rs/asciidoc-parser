@@ -7243,6 +7243,76 @@ Each phase is a reviewable unit with a clear exit gate.
   deciding which of the two buffers each of its sites writes to, which is its own increment's
   question.
 
+  *Step 6 landed as (every corpus frozen, so deleting the string pipeline stays honest):* the
+  third increment of step 6 proper, and the one that pays down the debt the recording increment
+  named and deliberately left: "roughly twenty golden-producing helpers across `inline_builder`'s
+  per-family test modules … **the fold increment's prerequisite list, not this one's leftovers**".
+  This is that list, closed.
+
+  The hazard is one step further out than the recording increment's own. The fold landed and those
+  corpora stayed honest, because
+  [`apply_string_pipeline`](../../parser/src/content/substitution_group.rs) kept `run_pipeline`
+  callable with no tree and no fold — that increment's whole point. What they do not survive is
+  `run_pipeline` being **deleted**, which is step 6's last act: at that moment a corpus whose golden
+  is *computed* has nothing left to compute it from but the fold, and `assert_eq!(folded, golden)`
+  becomes `assert_eq!(x, x)`.
+
+  *Measured, not argued.* Simulating that world for one corpus — `golden_macros_in` computing its
+  golden from the tree, since after the deletion there is nothing else — leaves
+  `fold_matches_the_string_pipeline_through_link_macros` **green** with a stray byte appended to
+  every fold. Forty-eight fixtures asserting nothing. Routing the same helper's return value through
+  a recording fails it on the first fixture.
+
+  *The mechanism is [`assert_recorded`](../../parser/src/content/inline_builder/snapshot.rs) turned
+  inside out.* These corpora have no single assertion to wrap: a helper computes the golden once,
+  and its several dozen callers then compare a fold against it, compare it against a literal, assert
+  a documented **divergence** from it with `assert_ne!`, or merely test it with `contains`. So
+  [`recorded_golden`](../../parser/src/content/inline_builder/snapshot.rs) freezes the helper's
+  *return value* instead, keeping the same asymmetry — the golden is the only thing
+  `ASCIIDOC_UPDATE_SNAPSHOTS=1` writes; in a checking run it is verified against the recording (the
+  drift guard) and then the **recording**, not the freshly computed golden, is what the caller gets
+  back. Every call site is therefore already comparing against bytes settled before the fold ran,
+  and **not one of them was edited**: 28 recording sites — 16 golden helpers and 12 inline
+  comparisons — against the roughly 550 call sites they feed. It also makes the deletion local: a
+  helper's body becomes a lookup, and its callers do not move.
+
+  *A corpus is keyed by its source alone,* which is the one thing that needed care: two fixtures
+  sharing a source under different parser configurations are two conflicting recordings of one key.
+  `decide`'s existing `Conflict` refuses that rather than merging, loudly, so the policy is
+  self-enforcing rather than a convention — measuring turned up exactly seven such tests
+  (`hide-uri-scheme`, `imagesdir`+`icons`, `experimental`, two `icons` renderings,
+  `attribute-missing`'s modes, and `%hardbreaks` against the document attribute), each of which now
+  names its own corpus through an `_in` variant. The `build_for_group` corpus takes the same
+  question from the other side: the group is *the* variable, so it goes into the key rather than
+  into thirty file names.
+
+  **Thirty-nine corpora, 3,422 fixtures**, up from two and 378. What did **not** need one is worth
+  recording too: a comparison against a *literal* already has a checked-in oracle and survives the
+  deletion untouched (the string-pipeline half is simply deleted with it), which covers
+  `quotes.rs`'s two attribute-list divergence tests, `attribute_refs.rs`'s `subs=attributes+` fold,
+  and `macros/mod.rs`'s family-crossing table. The one computed golden left with no literal beside
+  it — the sentinel leak `a_deferred_xref_target_over_a_passthrough_is_a_documented_divergence`
+  asserts with `contains` — is recorded, so the leaked bytes the divergence is *about* outlive the
+  pipeline that leaks them.
+
+  Audit: 37 rows either side, 0 new and 0 closed — necessarily, since the whole increment is
+  `#[cfg(test)]`: every changed line in the fifteen production files falls after that file's own
+  `#[cfg(test)]` boundary, and the other two — `snapshot` and `test_support` — are themselves
+  declared under one. Coverage exactly
+  diff-neutral (595 missed regions / 332 missed lines / 43 missed functions, identical on both
+  sides), with `snapshot.rs` at 100%.
+
+  *What still defers is the structural half.* Three corpora in `parser/src/tests/` compare **trees
+  and records**, not HTML: [`inline_recorder`](../../parser/src/tests/inline_recorder.rs),
+  [`inline_builder_recorder_parity`](../../parser/src/tests/inline_builder_recorder_parity.rs), and
+  [`inline_builder_passthrough_record_parity`](../../parser/src/tests/inline_builder_passthrough_record_parity.rs).
+  Freezing those means designing a serialization for
+  [`InlineNode`](../../parser/src/inlines/inline_node.rs) — a different mechanism, not a wider
+  sweep of this one — and the first of the three retires
+  *with* the string pipeline in any case, since both of its sides come from it. The one that
+  genuinely needs freezing is the recorder-versus-builder structural cross-check, whose oracle is
+  the Strategy-A recorder §5.4 retires. That is its own increment.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -8797,6 +8867,28 @@ Each phase is a reviewable unit with a clear exit gate.
        `SkippingReferenceToMissingAttribute`, which belongs to the attributes *step* rather than to
        a macro family, is located per line, and is the very diagnostic the incidental-recording
        hazard is about. See the step's own "landed as" note above.
+
+     - ✅ **every corpus frozen, so deleting the string pipeline stays honest.** The prerequisite
+       list the recording increment named and left: roughly twenty golden-producing helpers whose
+       golden is *computed*, and which have nothing left to compute it from once `run_pipeline` is
+       deleted — at which point `assert_eq!(folded, golden)` is `assert_eq!(x, x)`. Simulating that
+       world for one corpus leaves `fold_matches_the_string_pipeline_through_link_macros` green with
+       a stray byte appended to every fold; routing the same helper through a recording fails it on
+       the first fixture. [`recorded_golden`](../../parser/src/content/inline_builder/snapshot.rs)
+       is [`assert_recorded`](../../parser/src/content/inline_builder/snapshot.rs) turned inside
+       out — it freezes the **helper's return value**, since these corpora have no single assertion
+       to wrap (a caller may compare a fold against the golden, compare it against a literal, assert
+       an `assert_ne!` divergence from it, or merely `contains` it). Same asymmetry, so every one of
+       roughly 550 call sites now compares against bytes settled before the fold ran without a
+       single one being edited, and the eventual deletion is local: a helper's body becomes a
+       lookup. **Thirty-nine corpora, 3,422 fixtures**, up from two and 378; seven tests whose
+       parser makes a shared source render differently name their own corpus, a policy `decide`'s
+       existing `Conflict` enforces rather than convention. A comparison against a *literal* needed
+       nothing and is left alone. Audit: 37 rows either side, 0 new and 0 closed — necessarily, the
+       whole increment being `#[cfg(test)]`; coverage exactly diff-neutral. What still defers is the
+       **structural** half: the three `parser/src/tests/` corpora that compare trees and records
+       rather than HTML, which need an `InlineNode` serialization rather than a wider sweep of this
+       mechanism. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

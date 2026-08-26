@@ -1,0 +1,4 @@
+"*line one\nline two*\nline three"	"<strong>line one<br>\nline two</strong><br>\nline three"
+"just one line"	"just one line"
+"line one\nline two\nline three"	"line one<br>\nline two<br>\nline three"
+"line one +\nline two"	"line one<br>\nline two"

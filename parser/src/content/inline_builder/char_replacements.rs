@@ -365,7 +365,12 @@ mod tests {
         SubstitutionStep::Quotes.apply(&mut content, &parser, None);
         SubstitutionStep::CharacterReplacements.apply(&mut content, &parser, None);
         SubstitutionStep::PostReplacement.apply(&mut content, &parser, None);
-        content.rendered_str().to_string()
+
+        crate::content::inline_builder::snapshot::recorded_golden(
+            "char_replacements",
+            source,
+            content.rendered_str(),
+        )
     }
 
     #[test]

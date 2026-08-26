@@ -217,13 +217,25 @@ pub(super) fn assert_styled<'a, 'src>(
 /// references are skipped — exactly as the additive builder skips them — so
 /// the fixtures deliberately contain none.
 pub(super) fn golden_macros_with(source: &str, parser: &Parser) -> String {
+    golden_macros_in("macros", source, parser)
+}
+
+/// [`golden_macros_with`], recording into a named corpus.
+///
+/// One corpus is keyed by source alone, so two fixtures sharing a source but
+/// not a parser configuration would be two conflicting recordings of the same
+/// key — which [`snapshot`](super::snapshot) refuses rather than merges. The
+/// handful of tests whose parser makes a shared source render differently name
+/// their own corpus here; everything else takes the default one.
+pub(super) fn golden_macros_in(corpus: &str, source: &str, parser: &Parser) -> String {
     let mut content = Content::from(Span::new(source));
     SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
     SubstitutionStep::Quotes.apply(&mut content, parser, None);
     SubstitutionStep::CharacterReplacements.apply(&mut content, parser, None);
     SubstitutionStep::Macros.apply(&mut content, parser, None);
     SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
-    content.rendered_str().to_string()
+
+    super::snapshot::recorded_golden(corpus, source, content.rendered_str())
 }
 
 /// [`golden_macros_with`] with a default parser.
@@ -265,6 +277,12 @@ pub(super) fn link_text_of(reference: &Ref<'_>) -> String {
 /// `run_pipeline` does for [`SubstitutionGroup::Normal`]. Attribute
 /// references are skipped, as elsewhere in this module's golden helpers.
 pub(super) fn golden_passthroughs_with(source: &str, parser: &Parser) -> String {
+    golden_passthroughs_in("passthroughs", source, parser)
+}
+
+/// [`golden_passthroughs_with`], recording into a named corpus (see
+/// [`golden_macros_in`] for why a caller would name one).
+pub(super) fn golden_passthroughs_in(corpus: &str, source: &str, parser: &Parser) -> String {
     let mut content = Content::from(Span::new(source));
     let passthroughs = Passthroughs::extract_from(&mut content, parser);
 
@@ -275,7 +293,8 @@ pub(super) fn golden_passthroughs_with(source: &str, parser: &Parser) -> String 
     SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
 
     passthroughs.restore_to(&mut content, parser);
-    content.rendered_str().to_string()
+
+    super::snapshot::recorded_golden(corpus, source, content.rendered_str())
 }
 
 /// [`golden_passthroughs_with`] with a default parser.

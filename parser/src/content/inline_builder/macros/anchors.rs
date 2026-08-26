@@ -1133,7 +1133,12 @@ mod tests {
         SubstitutionStep::CharacterReplacements.apply(&mut content, parser, None);
         SubstitutionStep::Macros.apply(&mut content, parser, None);
         SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
-        content.rendered_str().to_string()
+
+        crate::content::inline_builder::snapshot::recorded_golden(
+            "anchors_attributes",
+            source,
+            content.rendered_str(),
+        )
     }
 
     #[test]

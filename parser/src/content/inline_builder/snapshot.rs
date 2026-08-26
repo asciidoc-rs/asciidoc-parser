@@ -181,6 +181,12 @@ impl Store<'_> {
         }
     }
 
+    /// [`recorded_golden`], against this store.
+    fn recorded_golden(&self, corpus: &str, source: &str, golden: &str) -> String {
+        self.recorded_for(corpus, source, golden)
+            .unwrap_or_else(|| golden.to_string())
+    }
+
     /// [`matches_recording`], against this store.
     fn matches_recording(&self, corpus: &str, source: &str, golden: &str, folded: &str) -> bool {
         match self.recorded_for(corpus, source, golden) {
@@ -397,6 +403,38 @@ pub(super) fn assert_recorded(corpus: &str, source: &str, golden: &str, folded: 
 /// only the golden.
 pub(super) fn matches_recording(corpus: &str, source: &str, golden: &str, folded: &str) -> bool {
     Store::real().matches_recording(corpus, source, golden, folded)
+}
+
+/// Freezes a golden-producing helper's output into `corpus`, and hands back the
+/// **recorded** bytes for the caller to assert against.
+///
+/// This is [`assert_recorded`] turned inside out, for the corpora whose golden
+/// is produced by a helper that never sees the fold. Those helpers are the
+/// majority: a per-family test module computes its golden once, in a
+/// `golden_*` function, and each of its several dozen call sites then uses that
+/// string however it likes — comparing a fold against it, comparing it against
+/// a literal, asserting a *documented divergence* from it with `assert_ne!`, or
+/// merely testing it with `contains`. There is no single assertion to wrap.
+///
+/// Routing the helper's *return value* through the recording covers all of them
+/// at once, and keeps the same asymmetry: the golden is the only thing
+/// `ASCIIDOC_UPDATE_SNAPSHOTS=1` writes, and in a checking run it is verified
+/// against the recording (the drift guard) before the recording — not the
+/// freshly computed golden — is what the caller gets back. So every one of
+/// those call sites is already comparing against bytes settled before the fold
+/// ran, without a single one of them being edited.
+///
+/// It is also what makes the string pipeline's deletion a *local* change: a
+/// helper's body becomes a lookup, its callers do not move, and the corpus goes
+/// on asserting exactly what it asserted before.
+///
+/// In update mode there is nothing recorded to hand back, so the caller gets
+/// the golden and its own assertion compares the fold against it — which is the
+/// question a checking run will then ask of the recording, so a regeneration
+/// run stays as honest as the run that follows it (the same reasoning
+/// [`matches_recording`] documents).
+pub(super) fn recorded_golden(corpus: &str, source: &str, golden: &str) -> String {
+    Store::real().recorded_golden(corpus, source, golden)
 }
 
 #[cfg(test)]
@@ -656,6 +694,50 @@ mod tests {
             !dir.store(false)
                 .matches_recording("corpus", "src", "golden", "a divergent fold")
         );
+    }
+
+    #[test]
+    fn recorded_golden_hands_back_the_recording_and_still_guards_drift() {
+        let dir = TempDir::new("recorded-golden");
+
+        // Update mode has nothing recorded yet, so the caller gets its own
+        // golden back — and that is what lands in the file.
+        assert_eq!(
+            dir.store(true).recorded_golden("corpus", "src", "golden"),
+            "golden"
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(dir.0.join("corpus.txt")).unwrap(),
+            "\"src\"\t\"golden\"\n"
+        );
+
+        // A checking run hands back the *recording*, which is what makes a
+        // caller's `assert_eq!(folded, golden_x(source))` compare against bytes
+        // settled before the fold ran.
+        assert_eq!(
+            dir.store(false).recorded_golden("corpus", "src", "golden"),
+            "golden"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "the string pipeline no longer produces the recorded rendering")]
+    fn recorded_golden_rejects_a_golden_that_no_longer_matches() {
+        let dir = TempDir::new("recorded-golden-drift");
+
+        let _ = dir.store(true).recorded_golden("corpus", "src", "golden");
+        let _ = dir
+            .store(false)
+            .recorded_golden("corpus", "src", "a changed golden");
+    }
+
+    #[test]
+    #[should_panic(expected = "no recording for")]
+    fn recorded_golden_reports_a_missing_recording() {
+        let dir = TempDir::new("recorded-golden-missing");
+
+        let _ = dir.store(false).recorded_golden("corpus", "src", "golden");
     }
 
     #[test]

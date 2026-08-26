@@ -1,0 +1,6 @@
+"icon:heart[2x]"	"<span class=\"icon\"><i class=\"fa fa-heart fa-2x\"></i></span>"
+"icon:heart[]"	"<span class=\"icon\"><i class=\"fa fa-heart\"></i></span>"
+"icon:heart[size=lg,role=fav]"	"<span class=\"icon fav\"><i class=\"fa fa-heart fa-lg\"></i></span>"
+"image:sub/dir/pic.png[Pic,320]"	"<span class=\"image\"><img src=\"assets/img/sub/dir/pic.png\" alt=\"Pic\" width=\"320\"></span>"
+"image:sunset.jpg[Sunset]"	"<span class=\"image\"><img src=\"assets/img/sunset.jpg\" alt=\"Sunset\"></span>"
+"text with icon:star[] inline"	"text with <span class=\"icon\"><i class=\"fa fa-star\"></i></span> inline"

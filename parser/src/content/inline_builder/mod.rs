@@ -1963,7 +1963,11 @@ mod tests {
             let golden_parser = Parser::default();
             let built_parser = Parser::default();
 
-            let golden = golden(filtered, &golden_parser);
+            let golden = crate::content::inline_builder::snapshot::recorded_golden(
+                "build_from_value",
+                filtered,
+                &golden(filtered, &golden_parser),
+            );
 
             let nodes = build_from_value(
                 CowStr::from(filtered.to_string()),
@@ -2036,7 +2040,17 @@ mod tests {
             let golden_parser = parser_with_product();
             let mut content = Content::from(Span::new(source));
             group.apply_string_pipeline(&mut content, &golden_parser, None);
-            content.rendered_str().to_string()
+
+            // One corpus, keyed by the **group and** the source: a corpus is
+            // keyed by its source alone, and the whole subject here is that
+            // the same source renders differently under each group. (A corpus
+            // per group would be thirty files, most of them one line, named
+            // after a `Custom` step list.)
+            crate::content::inline_builder::snapshot::recorded_golden(
+                "build_for_group",
+                &format!("[{group:?}] {source}"),
+                content.rendered_str(),
+            )
         }
 
         /// Runs `source` through the real pipeline under `group` and asserts
@@ -2943,7 +2957,11 @@ mod tests {
         let source = "  see link:https://example.org[Example] here";
 
         let golden_parser = Parser::default();
-        let golden = golden(filtered, &golden_parser);
+        let golden = crate::content::inline_builder::snapshot::recorded_golden(
+            "build_from_value",
+            filtered,
+            &golden(filtered, &golden_parser),
+        );
         assert!(
             golden.contains(r#"href="https://example.org""#),
             "golden fixture stopped recognizing the link: {golden:?}"

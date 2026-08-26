@@ -836,7 +836,15 @@ mod tests {
         let mut golden = Content::from(Span::new(source));
         SubstitutionGroup::Normal.apply_string_pipeline(&mut golden, &configure(), None);
 
-        assert_eq!(folded, golden.rendered_str(), "{nodes:#?}");
+        assert_eq!(
+            folded,
+            crate::content::inline_builder::snapshot::recorded_golden(
+                "footnotes_expanded_attribute",
+                source,
+                golden.rendered_str(),
+            ),
+            "{nodes:#?}"
+        );
         assert!(folded.contains("Widget"), "{folded:?}");
     }
 
@@ -1500,7 +1508,12 @@ mod tests {
 
         let mut content = Content::from(Span::new(source));
         SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, None);
-        content.rendered_str().to_string()
+
+        crate::content::inline_builder::snapshot::recorded_golden(
+            "footnotes_normal",
+            source,
+            content.rendered_str(),
+        )
     }
 
     #[test]
@@ -1628,7 +1641,11 @@ and another.footnote:[note two]",
 
             assert_eq!(
                 folded,
-                golden.rendered_str(),
+                crate::content::inline_builder::snapshot::recorded_golden(
+                    "footnotes_build_from_value",
+                    filtered,
+                    golden.rendered_str(),
+                ),
                 "for {filtered:?}: {nodes:#?}"
             );
         }

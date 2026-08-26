@@ -2097,7 +2097,7 @@ mod tests {
 
     use super::super::super::test_support::{
         assert_entity, assert_link, assert_raw, assert_special_char, assert_styled, assert_text,
-        build_src, fold_html, golden_macros, golden_macros_with, link_text_of,
+        build_src, fold_html, golden_macros, golden_macros_in, golden_macros_with, link_text_of,
     };
     use crate::{
         HasSpan, Parser, Span,
@@ -2268,7 +2268,7 @@ mod tests {
 
             assert_eq!(
                 folded,
-                golden_macros_with(fixture, &parser),
+                golden_macros_in("macros_hide_uri_scheme", fixture, &parser),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
         }
@@ -2344,7 +2344,7 @@ mod tests {
         // passthrough is stripped — and the offset, a match of literal ASCII
         // the placeholder cannot take part in, indexes the restored bytes
         // identically.
-        use super::super::super::test_support::golden_passthroughs_with;
+        use super::super::super::test_support::golden_passthroughs_in;
         use crate::parser::ModificationContext;
 
         let parser = Parser::default().with_intrinsic_attribute_bool(
@@ -2371,7 +2371,7 @@ mod tests {
 
             assert_eq!(
                 folded,
-                golden_passthroughs_with(fixture, &parser),
+                golden_passthroughs_in("passthroughs_hide_uri_scheme", fixture, &parser),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
         }
@@ -2836,7 +2836,7 @@ mod tests {
                 &HtmlSubstitutionRenderer {},
                 &parser.render_context()
             ),
-            golden_macros_with(source, &parser)
+            golden_macros_in("macros_hide_uri_scheme", source, &parser)
         );
     }
 
@@ -3198,7 +3198,7 @@ mod tests {
 
             assert_eq!(
                 folded,
-                golden_macros_with(fixture, &parser),
+                golden_macros_in("macros_hide_uri_scheme", fixture, &parser),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
         }
@@ -3293,7 +3293,7 @@ mod tests {
         // restored spellings alike and the `^`-anchored strip covers exactly
         // them either way — leaving the offset a valid cut in the match
         // string, where the shown text's own children are recovered from.
-        use super::super::super::test_support::golden_passthroughs_with;
+        use super::super::super::test_support::golden_passthroughs_in;
         use crate::parser::ModificationContext;
 
         let parser = Parser::default().with_intrinsic_attribute_bool(
@@ -3322,7 +3322,7 @@ mod tests {
 
             assert_eq!(
                 folded,
-                golden_passthroughs_with(fixture, &parser),
+                golden_passthroughs_in("passthroughs_hide_uri_scheme", fixture, &parser),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
         }
@@ -4381,7 +4381,7 @@ mod tests {
 
             assert_eq!(
                 folded,
-                golden_macros_with(fixture, &parser),
+                golden_macros_in("macros_experimental", fixture, &parser),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
         }
@@ -6536,7 +6536,12 @@ mod tests {
 
         let mut content = Content::from(Span::new(source));
         SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, None);
-        content.rendered_str().to_string()
+
+        crate::content::inline_builder::snapshot::recorded_golden(
+            "links_normal",
+            source,
+            content.rendered_str(),
+        )
     }
 
     #[test]

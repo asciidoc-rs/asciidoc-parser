@@ -1305,7 +1305,7 @@ mod tests {
         super::{
             super::test_support::{
                 assert_styled, assert_text, build_src, build_through_quotes, fold_html,
-                golden_macros, golden_macros_with,
+                golden_macros, golden_macros_in, golden_macros_with,
             },
             ComputedSpecials,
         },
@@ -1412,7 +1412,7 @@ mod tests {
 
             assert_eq!(
                 folded,
-                golden_macros_with(fixture, &parser),
+                golden_macros_in("macros_imagesdir", fixture, &parser),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
         }
@@ -3059,7 +3059,12 @@ mod tests {
 
         let mut content = Content::from(Span::new(source));
         SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, None);
-        content.rendered_str().to_string()
+
+        crate::content::inline_builder::snapshot::recorded_golden(
+            "image_normal",
+            source,
+            content.rendered_str(),
+        )
     }
 
     #[test]
