@@ -6932,6 +6932,52 @@ Each phase is a reviewable unit with a clear exit gate.
   commit messages rather than hand-edited — that increment's own commit message is what has to carry
   the ordering change into the release notes.
 
+  *Step 6 landed as (a `Stem` keeps its body's own nodes):* the increment before this one closed six
+  of the seven passthrough forms and left one shape short of an entry — a STEM expression
+  **embedding** an already-extracted passthrough, where the pass records two entries and the tree
+  recorded one. This is the structural half of closing it, landed on its own so that the view's
+  increment can be purely about the walk.
+
+  The fix turned out narrower than the note predicting it. That note named the *outer* entry's text
+  as an obstacle — the pass keeps the `\u{96}0\u{97}` sentinel where the inner body was lifted out,
+  while [`stem_expression_value`](../../parser/src/content/inline_builder/stem_step.rs) splices it
+  back — and the decision taken was that the view should report the **restored** body. Probing the
+  tree said it already does: once a `Stem` carries its own group and source (the increment above),
+  the outer entry reads `("x <b> y", Stem)` on both sides. So only the **inner** entry was ever
+  missing, and the whole change is to stop folding the body's nodes away. Measuring before building
+  turned a structural redesign into one field.
+
+  [`Stem`](../../parser/src/inlines/stem.rs) gains `children`. `value` is the *rendering* of those
+  nodes, which is what the fold emits; `children` is what they **are**. The two are redundant for
+  the overwhelmingly common flat body — a single `Text` run — and differ exactly when the body
+  embeds a passthrough, which is the case the field exists for. Nothing reads it yet, so this moves
+  no rendered byte: the fold still reads `value`, and the suite is green with no expectation edited.
+
+  A second test pins the invariant that keeps the change from spreading. `apply_stem` runs
+  immediately after `apply_passthroughs`, whose output is `Text` / `Raw` only, so a STEM body can
+  never hold a cross-reference, a macro or a span — and therefore no *other* walk in the crate is
+  now obliged to descend into `Stem::children`. `a_stem_bodys_nodes_are_only_text_and_raw` asserts
+  it over five bodies that each try to smuggle one in. Asserted rather than assumed, because this
+  branch has twice shipped a walk that missed a container it should have descended into — the
+  `IndexTerm` children, and this same nested passthrough — and both times the corpus had covered the
+  construct and the container separately but never crossed. If a later step ever moves `apply_stem`
+  ahead of the extraction pass, that test fails and names the walks that then need revisiting.
+
+  Audit: 37 rows either side, 0 new and 0 closed. (One row more than the previous increment
+  reported, from this session's rebuild of the throwaway patch rather than from anything on the
+  branch — `origin/inline-ast` measures 37 under the same patch. What carries across increments is
+  the *difference*, never the absolute count.) Coverage diff-neutral outside the new tests' own
+  `panic!` arms. Two sabotages: dropping the body's nodes, and keeping only its `Text` runs. The
+  second is the one that matters, since it is the `Raw` leaf that carries the record and a corpus
+  that only counted children would have passed it.
+
+  *What the view still needs:* the walk, and one narrower shape than before. A STEM macro carrying
+  an **explicit non-local substitution list** over an embedded passthrough
+  (`stem:c,q[x +++<b>+++ y]`) is declined by `build_stem_node` outright — the list cannot be applied
+  run-by-run around the embedded body without risking a construct that spans the boundary — so
+  there is no `Stem` node at all to hold `children`, and the tree records only the inner
+  passthrough where the pass records both. That is the view increment's to answer, not this one's.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -8389,6 +8435,22 @@ Each phase is a reviewable unit with a clear exit gate.
        limitation rather than a regression, since a `Stem` carried neither fact before; pinned by
        its own test and owed to the view's increment. Audit: 36 rows either side, 0 new and 0
        closed; coverage diff-neutral on all three files. See the step's own "landed as" note above.
+
+     - ✅ **prep (a `Stem` keeps its body's own nodes).** The structural half of the one shape the
+       entry above left short of a record: a STEM expression **embedding** an already-extracted
+       passthrough, where the pass makes two entries and the tree made one.
+       [`Stem`](../../parser/src/inlines/stem.rs) gains `children` — the body's own nodes, where
+       `value` is their *rendering* — so the inner `Raw` leaf and the record it carries survive
+       instead of being folded into the value. Nothing reads the field yet, so no rendered byte
+       moves. Measuring first narrowed the increment to that one field: the outer entry, which the
+       note predicting this work named as the harder half, already agrees once a `Stem` carries its
+       own group and source. A second test pins the invariant that keeps the change from spreading —
+       `apply_stem` runs immediately after `apply_passthroughs`, so a STEM body holds only
+       `Text` / `Raw` and no *other* walk is obliged to descend into it. Still short of a record is
+       the explicit **non-local** substitution list (`stem:c,q[x +++<b>+++ y]`), which
+       `build_stem_node` declines outright, leaving no node to hold anything; that is the view
+       increment's to answer. Audit: 37 rows either side, 0 new and 0 closed; coverage diff-neutral
+       outside the new tests' own `panic!` arms. See the step's own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).

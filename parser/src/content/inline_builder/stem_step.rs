@@ -248,6 +248,10 @@ fn build_stem_node<'src>(
 
     Some(InlineNode::Stem(Stem {
         notation,
+        // The body's own nodes, kept rather than folded away: an embedded
+        // passthrough is its own extraction entry, and `value` alone gives a
+        // walk no way to reach it.
+        children: emitted,
         // The author's expression is recorded only where the group changed it,
         // the same rule `RawOrigin::Passthrough`'s own `source_text` follows.
         source_text: (source != value).then_some(source),
@@ -722,5 +726,88 @@ mod tests {
             fold_html(&nodes, &HtmlSubstitutionRenderer {}),
             golden_passthroughs(source)
         );
+    }
+
+    #[test]
+    fn a_stem_node_keeps_its_bodys_own_nodes() {
+        // `children` is the body as it *is*, where `value` is its rendering.
+        // They are redundant for a flat body and differ exactly when one
+        // embeds a passthrough — the case the field exists for, since an
+        // embedded passthrough is its own extraction entry and folding it into
+        // `value` left a walk no way to reach it.
+        use crate::inlines::{InlineNode, RawOrigin};
+
+        // A flat body: one `Text` run, and `value` says the same thing.
+        let nodes = build_src(Span::new("stem:[x^2]"));
+        let InlineNode::Stem(stem) = &nodes[0] else {
+            panic!("expected a Stem, got {:?}", nodes[0]);
+        };
+
+        assert_eq!(stem.children.len(), 1);
+        assert!(matches!(stem.children[0], InlineNode::Text { .. }));
+        assert_eq!(stem.value.as_ref(), "x^2");
+
+        // An embedded passthrough: three nodes, the middle one the `Raw` leaf
+        // carrying its own record — which is the whole point.
+        let nodes = build_src(Span::new("stem:[x +++<b>+++ y]"));
+        let InlineNode::Stem(stem) = &nodes[0] else {
+            panic!("expected a Stem, got {:?}", nodes[0]);
+        };
+
+        assert_eq!(stem.children.len(), 3, "{:?}", stem.children);
+
+        let InlineNode::Raw { value, origin, .. } = &stem.children[1] else {
+            panic!("expected a Raw, got {:?}", stem.children[1]);
+        };
+
+        assert_eq!(value.as_ref(), "<b>");
+        assert_eq!(
+            *origin,
+            RawOrigin::Passthrough {
+                subs: crate::content::SubstitutionGroup::None,
+                source_text: None,
+            }
+        );
+
+        // The rendering is unchanged by keeping them — this increment moves no
+        // byte, which is what lets the whole suite stay green.
+        assert_eq!(stem.value.as_ref(), "x <b> y");
+    }
+
+    #[test]
+    fn a_stem_bodys_nodes_are_only_text_and_raw() {
+        // The invariant every *other* walk in the crate relies on without
+        // saying so: `apply_stem` runs immediately after `apply_passthroughs`,
+        // whose output is `Text`/`Raw` only, so no cross-reference, macro or
+        // span can ever be nested inside a `Stem`'s body. That is why adding
+        // `children` here obliges no other walk to descend into it.
+        //
+        // Asserted rather than assumed, because this branch has twice shipped a
+        // walk that missed a container it should have descended into. If a
+        // later step ever moves ahead of this one, this fails and names the
+        // walks that then need revisiting.
+        use crate::inlines::InlineNode;
+
+        for source in [
+            "stem:[x +++<b>+++ y]",
+            "stem:[a $$lit$$ b]",
+            "stem:[see *bold* and <<ref>> and image:i.png[]]",
+            "stem:[{attr} and link:x.html[t]]",
+            "latexmath:[e ++f++ g]",
+        ] {
+            let nodes = build_src(Span::new(source));
+
+            let InlineNode::Stem(stem) = &nodes[0] else {
+                panic!("{source:?} did not build a Stem; got {:?}", nodes[0]);
+            };
+
+            for child in &stem.children {
+                assert!(
+                    matches!(child, InlineNode::Text { .. } | InlineNode::Raw { .. }),
+                    "{source:?} put a {child:?} in a STEM body; every walk that \
+                     skips `Stem::children` now needs revisiting"
+                );
+            }
+        }
     }
 }

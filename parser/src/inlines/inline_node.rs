@@ -232,6 +232,7 @@ mod tests {
                 value: CowStr::from("x^2"),
                 subs: crate::content::SubstitutionGroup::Stem,
                 source_text: None,
+                children: vec![],
                 location,
             }),
             InlineNode::LineBreak { location },

@@ -1,4 +1,4 @@
-use crate::{HasSpan, Span, content::SubstitutionGroup, strings::CowStr};
+use crate::{HasSpan, Span, content::SubstitutionGroup, inlines::InlineNode, strings::CowStr};
 
 /// Inline STEM content (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`).
 ///
@@ -46,6 +46,24 @@ pub struct Stem<'src> {
     /// `source_text` does for a `pass:c,q[…]` body, and is `None` when the
     /// group changed nothing.
     pub source_text: Option<String>,
+
+    /// The expression body's own nodes — the [`Text`](InlineNode::Text) runs it
+    /// is written from, and any [`Raw`](InlineNode::Raw) passthrough the
+    /// extraction pass had already pulled out of it before this macro was
+    /// recognized (`stem:[x +++<b>+++ y]`).
+    ///
+    /// [`value`](Self::value) is the *rendering* of these, which is what the
+    /// fold emits; this is what they **are**. The two are redundant for the
+    /// overwhelmingly common flat body — one `Text` run — and differ exactly
+    /// when the body embeds a passthrough, which is the case they exist for: an
+    /// embedded one is a [`Passthrough`](crate::content::Passthrough) entry in
+    /// its own right, and folding it into `value` (as this node used to) left a
+    /// walk no way to reach it.
+    ///
+    /// A body whose expression this module declined to recognize builds no
+    /// `Stem` at all, so there is no partial state here: a node either holds
+    /// its whole body or does not exist.
+    pub children: Vec<InlineNode<'src>>,
 
     /// The source location of the whole STEM macro.
     pub location: Span<'src>,

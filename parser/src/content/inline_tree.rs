@@ -895,6 +895,7 @@ fn node_of<'src>(rec: &Rec, span: Span<'src>) -> InlineNode<'src> {
                     value: CowStr::from(value),
                     subs: crate::content::SubstitutionGroup::Stem,
                     source_text: None,
+                    children: vec![],
                     location: span,
                 })
             }
