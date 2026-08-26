@@ -6,10 +6,16 @@
 mod content;
 pub use content::Content;
 pub(crate) use content::{
-    DeferredParts, FootnoteDeferred, OwnedTitle, XrefSegment, block_tree_xref_segments,
-    fold_resolved_title, footnote_tree_xref_segments, rehome_xref_placeholders,
-    render_xref_template, resolved_destinations, sanitize_title, template_partition,
+    DeferredParts, FootnoteDeferred, OwnedTitle, XrefSegment, fold_resolved_title,
+    rehome_xref_placeholders, render_xref_template, resolved_destinations, sanitize_title,
+    template_partition,
 };
+// The two tree walks behind `Content::set_tree_xrefs`, which calls them
+// directly. Re-exported for the differential corpus that compares what they
+// derive against the string pipeline's own answer; nothing else outside
+// `content` reaches them.
+#[cfg(test)]
+pub(crate) use content::{block_tree_xref_segments, footnote_tree_xref_segments};
 
 pub(crate) mod inline_builder;
 

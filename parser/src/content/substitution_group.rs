@@ -340,14 +340,7 @@ impl SubstitutionGroup {
             // describing the same tree at every point in this function.
             let render_context = parser.render_context();
 
-            content.set_tree_xrefs(
-                crate::content::block_tree_xref_segments(&tree, &*parser.renderer, &render_context),
-                crate::content::footnote_tree_xref_segments(
-                    &tree,
-                    &*parser.renderer,
-                    &render_context,
-                ),
-            );
+            content.set_tree_xrefs(&tree, &*parser.renderer, &render_context);
 
             // The tree is **authoritative** for the rendered string: what
             // `rendered_html()` returns is a fold of it, not the string

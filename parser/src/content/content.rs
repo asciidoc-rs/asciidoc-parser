@@ -722,23 +722,32 @@ impl<'src> Content<'src> {
     /// A content whose tree holds no cross-reference at all clears the deferred
     /// state outright: a construct the builder does not recognize is one this
     /// content no longer defers, and it renders as the fold leaves it.
-    pub(crate) fn set_tree_xrefs(&mut self, block: Vec<XrefSegment>, footnote: Vec<XrefSegment>) {
+    pub(crate) fn set_tree_xrefs(
+        &mut self,
+        tree: &[InlineNode<'src>],
+        renderer: &dyn InlineSubstitutionRenderer,
+        context: &crate::parser::RenderContext,
+    ) {
+        // The string pipeline deferring nothing here means this content defers
+        // nothing at all: the builder recognizes a *subset* of the forms
+        // `InlineXrefReplacer` does — that containment is the premise the
+        // carve-out below rests on — so a tree holding a cross-reference node
+        // the replacer did not defer cannot arise.
+        //
+        // This is why the two walks happen **after** this early return rather
+        // than at the call site: they traverse the whole tree, and every
+        // paragraph in every document would otherwise pay for two traversals
+        // that this invariant says could only ever come back empty. The saving
+        // is structural rather than measured — the repository's own benchmarks
+        // cannot resolve it, since a base-against-itself control run on the
+        // machine used here reported a significant 3% "improvement" on
+        // byte-identical code.
         let Some(previous) = self.deferred.take() else {
-            // The string pipeline deferred nothing here, so neither does this
-            // content: the builder recognizes a *subset* of the forms
-            // `InlineXrefReplacer` does — that containment is the premise the
-            // carve-out below rests on — so a tree holding a cross-reference
-            // node the replacer did not defer cannot arise. Asserted rather
-            // than handled, since handling it would mean a placeholder-free
-            // deferred state no caller is written for.
-            debug_assert!(
-                block.is_empty() && footnote.is_empty(),
-                "the tree deferred cross-references the string pipeline did not: \
-                 {block:?} / {footnote:?}"
-            );
-
             return;
         };
+
+        let block = block_tree_xref_segments(tree, renderer, context);
+        let footnote = footnote_tree_xref_segments(tree, renderer, context);
 
         // The carve-out: where the tree holds fewer cross-references than the
         // string pipeline deferred, it is known not to describe this content,
