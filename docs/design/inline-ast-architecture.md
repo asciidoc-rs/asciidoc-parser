@@ -7117,6 +7117,67 @@ Each phase is a reviewable unit with a clear exit gate.
   itself** — the footnote catalog's text, `{counter:}` advancement, and this warning. What is left
   before step 6 is step 6.
 
+  *Step 6 landed as (the deferred cross-references, read off the tree):* the first increment of
+  step 6 proper, and the one that takes the **first** of the six survey items from a staged
+  building block to the production answer.
+  [`block_tree_xref_segments`](../../parser/src/content/content.rs) and
+  [`footnote_tree_xref_segments`](../../parser/src/content/content.rs) have been written, corpused
+  and unwired since they landed; [`Content::set_tree_xrefs`](../../parser/src/content/content.rs)
+  installs what they return, so what a content carries for its deferred cross-references is what
+  its **tree** said, not what `InlineXrefReplacer` recorded.
+
+  *The partition is the substantive part, not the fields.* The string pipeline produces one flat
+  list indexed by placeholder, and tells a block-level reference from one re-homed into a footnote
+  by asking which placeholders its template still splices — so `block_tree_xrefs` /
+  `footnote_tree_xrefs` had to re-derive that split on every resolution. The two walks partition
+  **structurally**, so a [`DeferredContent`](../../parser/src/content/content.rs) now holds the two
+  lists it always wanted and the template-reading split is gone from the tree-sourced path. Both
+  halves then correlate positionally with the same walks that install destinations back, which is
+  what makes the mirror exact rather than merely safe.
+
+  *That exactness is the one behavior change, and it is an improvement.* A footnote subtree holding
+  fewer references than the string pipeline re-homed used to make the **footnote** mirror decline
+  outright — the flat list's footnote half could not be positionally correlated — leaving a
+  perfectly well-recognized `<<c>>` inside the footnote unresolved in the tree. Its own list is now
+  exactly the nodes it belongs to, so it resolves.
+  `a_footnote_subtree_that_defers_a_reference_form_still_mirrors_what_it_holds` (renamed from
+  `footnote_xref_mirror_is_skipped_…`) pins it from both ends. Nothing rendered moves: a fold emits
+  a footnote's marker without descending into its subtree, so this is what a consumer reading
+  `inlines()` sees, in the direction of being right.
+
+  *What did **not** happen here is the deletion,* and measuring says why. The carve-out
+  [`from_tree`](../../parser/src/content/content.rs) names — the tree holding fewer
+  cross-references than the string pipeline deferred — is not a formality: the builder's documented
+  unrecognized set is non-empty, and where it applies the string pipeline's answer is the *better*
+  one. Two shapes reach it. `xref:sec[a *b, c* d,role=hl]` was already pinned; instrumenting the
+  `rebuild_rendered` arm across the whole suite showed it is the **only** content in ~5,400 tests
+  that takes the template path under a resolved parse. The second, `indexterm2:[<<b>>]`, was pinned
+  only under `parse_deferred` — the construct and the *resolved* container had never been crossed —
+  and it takes a different branch (an **empty** derived list, where the first is short by one), the
+  branch that would otherwise clear the deferred state and render `&lt;&lt;b&gt;&gt;` where the
+  document says `<a href="#b">`. Both now have resolved-path tests, and a third crosses the
+  carve-out with the **title** container, which resolves through `title_refs::compute` rather than
+  `Content::resolve_references` and so splits the flat list on a path of its own.
+
+  So the sentinel system's *retirement* is complete and its *deletion* is gated on something no
+  cutover increment can supply: the builder recognizing every cross-reference form the replacer
+  does. That is a prep question, and naming it is this increment's other result.
+
+  Audit: 37 rows either side, 0 new and 0 closed — the divergent **source set** is byte-identical;
+  two rows move by a stateful test renderer's own callback counters, which the footnote-mirror
+  improvement shifts. Coverage exactly diff-neutral on all four changed production files (21 missed
+  regions / 8 missed lines on `content.rs`, 5 / 0 on `title_refs.rs`, 0 / 0 on
+  `substitution_group.rs`, unchanged on `section.rs`). Three sabotages fail three distinct sets: a
+  no-op wiring, a dropped `provided_text`, and a dropped footnote partition; removing the carve-out
+  fails exactly the two shapes above.
+
+  *What still defers* is the deletion itself, which now has a named prerequisite of its own — a
+  block title carried across a section heading arrives at the claiming block with its inline nodes
+  dropped, because `Parser::pending_block_title` has no `'src` lifetime to carry them, so it is the
+  one content whose rendering cannot be a fold at all. It is the 60th of the 60 deferred titles the
+  title-fold increment counted, and it keeps the template path for that reason rather than for the
+  carve-out's.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -8629,6 +8690,28 @@ Each phase is a reviewable unit with a clear exit gate.
        explicit subs list builds no node to report the outer entry from. Audit: 37 rows either
        side, 0 new and 0 closed; coverage exactly diff-neutral (3 missed regions and 3 missed lines
        before and after). See the step's own "landed as" note above.
+
+     - ✅ **the deferred cross-references, read off the tree.** The first of the survey's six items
+       to go from staged machinery to the production answer:
+       [`Content::set_tree_xrefs`](../../parser/src/content/content.rs) installs what
+       [`block_tree_xref_segments`](../../parser/src/content/content.rs) and
+       [`footnote_tree_xref_segments`](../../parser/src/content/content.rs) return, so a content's
+       deferred cross-references are its **tree's**. The substantive part is the *partition*: the
+       two walks split block-level from footnote-embedded structurally, where the string pipeline
+       produced one flat list and re-derived the split from which placeholders its template still
+       spliced. Both halves then correlate positionally with the walks that install destinations
+       back, which makes the footnote mirror exact rather than merely safe — the one behavior
+       change, and an improvement (a recognized reference inside a footnote whose sibling the
+       builder defers now resolves in the tree; nothing rendered moves). The sentinel system is
+       **not** deleted here, and measuring says why: the carve-out
+       [`from_tree`](../../parser/src/content/content.rs) names is reached by two real shapes, one
+       of which (`indexterm2:[<<b>>]`) had been pinned only under `parse_deferred` and would
+       otherwise have regressed a resolved document's output. Deleting it is gated on the builder
+       recognizing every cross-reference form the replacer does — a prep question — plus the one
+       content that has no tree to fold at all (a block title carried across a section heading,
+       whose nodes cannot cross the `'src`-erasing `pending_block_title` hop). Audit: 37 rows
+       either side, 0 new and 0 closed; coverage exactly diff-neutral on all four changed
+       production files. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

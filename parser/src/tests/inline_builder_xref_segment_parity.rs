@@ -14,12 +14,16 @@
 //!
 //! What this harness pins is that reading, over whole documents: for every
 //! content that deferred a cross-reference, the segments derived from the tree
-//! are field-for-field what `InlineXrefReplacer` itself produced. Nothing is
-//! wired — `block_tree_xref_segments` and `footnote_tree_xref_segments` are
-//! staged building blocks, exactly as every recognition side effect was before
-//! the cutover re-attached it — so this corpus is the only thing exercising
-//! them, and it is what a later increment stands on when it deletes the
-//! string pipeline's own construction.
+//! are field-for-field what `InlineXrefReplacer` itself produced.
+//!
+//! The two walks are **wired** as of the increment that closed this survey
+//! item: what a content carries is now what the tree said, and the string
+//! pipeline's own answer is retained beside it
+//! (`DeferredContent::string_xrefs`, `#[cfg(test)]`) purely so this corpus
+//! keeps a golden. Without that the comparison would be the tree against
+//! itself, which passes for the wrong reason — the failure design §5.2's frozen
+//! recordings exist to prevent. The golden goes when `run_pipeline` does, and
+//! the corpus with it.
 //!
 //! The documents are parsed with [`Parser::parse_deferred`], which does **not**
 //! resolve, so every segment's `resolved` is `None` on both sides: this
@@ -249,11 +253,15 @@ fn derived_segments_match_the_string_pipelines_own() {
         let renderer = HtmlSubstitutionRenderer {};
 
         for (what, content) in contents(&doc) {
-            let Some((template, xrefs)) = content.deferred_parts() else {
+            let Some(deferred) = content.deferred_parts() else {
                 continue;
             };
 
-            let (golden_block, golden_footnote) = partition(template, xrefs);
+            // The golden is the string pipeline's own flat list, split the way
+            // it always split: a placeholder still in the template is
+            // block-level, one that has left it was re-homed onto a footnote.
+            let (golden_block, golden_footnote) =
+                partition(deferred.template, deferred.string_xrefs);
 
             let derived_block = block_tree_xref_segments(content.inlines(), &renderer, &context);
 
@@ -319,8 +327,8 @@ fn a_rendered_span_in_a_string_read_slot_keeps_its_documented_divergence() {
         .find(|(_, content)| content.deferred_parts().is_some())
         .expect("the fixture must defer a cross-reference");
 
-    let (template, xrefs) = content.deferred_parts().unwrap();
-    let (golden, _) = partition(template, xrefs);
+    let deferred = content.deferred_parts().unwrap();
+    let (golden, _) = partition(deferred.template, deferred.string_xrefs);
     let derived = block_tree_xref_segments(content.inlines(), &renderer, &context);
 
     assert_eq!(derived.len(), 1);
@@ -377,8 +385,8 @@ fn a_reference_inside_an_index_term_macro_keeps_its_documented_divergence() {
         .find(|(_, content)| content.deferred_parts().is_some())
         .expect("the fixture must defer a cross-reference");
 
-    let (template, xrefs) = content.deferred_parts().unwrap();
-    let (golden, _) = partition(template, xrefs);
+    let deferred = content.deferred_parts().unwrap();
+    let (golden, _) = partition(deferred.template, deferred.string_xrefs);
     let derived = block_tree_xref_segments(content.inlines(), &renderer, &context);
 
     // The string pipeline defers one; the tree offers none to derive from.

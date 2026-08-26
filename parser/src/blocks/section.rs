@@ -10,7 +10,7 @@ use crate::{
         parse_utils::parse_blocks_until,
     },
     content::{
-        Content, SubstitutionGroup, XrefSegment, inline_builder::fold_reference_text,
+        Content, SubstitutionGroup, inline_builder::fold_reference_text,
         substitute_attributes_in_reftext,
     },
     document::{InterpretedValue, RefType},
@@ -492,14 +492,14 @@ impl<'src> SectionBlock<'src> {
         self.section_number.as_ref()
     }
 
-    /// Returns the section title's deferred cross-reference template and
-    /// segments, if the title contains any cross-references.
+    /// Returns the section title's deferred cross-references, if the title
+    /// contains any.
     ///
     /// Used by the document-order title resolution pass (see
     /// [`Document::resolve_references`]).
     ///
     /// [`Document::resolve_references`]: crate::Document::resolve_references
-    pub(crate) fn section_title_deferred_parts(&self) -> Option<(&str, &[XrefSegment])> {
+    pub(crate) fn section_title_deferred_parts(&self) -> Option<crate::content::DeferredParts<'_>> {
         self.section_title.deferred_parts()
     }
 

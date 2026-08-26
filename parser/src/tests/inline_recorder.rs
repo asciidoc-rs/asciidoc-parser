@@ -1351,6 +1351,93 @@ fn xref_mirror_is_skipped_when_the_tree_defers_a_reference_form() {
 }
 
 #[test]
+fn a_title_whose_tree_defers_a_reference_form_keeps_the_string_pipelines_rendering() {
+    // The carve-out crossed with the **title** container, which resolves on a
+    // path of its own: `title_refs::compute` coordinates cross-title references
+    // and so re-derives the ordered destinations itself, rather than going
+    // through `Content::resolve_references`. Both paths have to split the
+    // string pipeline's flat list the same way when the tree is short of it,
+    // and a corpus that covers the carve-out only on paragraphs (as this one
+    // did) would never say so.
+    //
+    // Same deferred form as `xref_mirror_is_skipped_when_the_tree_defers_a_
+    // reference_form`, written as a block title.
+    let mut parser = Parser::default();
+    let doc = parser.parse("[[sec]]The target.\n\n.See xref:sec[a *b, c* d,role=hl]\nA paragraph.");
+
+    // `collect_rendered` walks block titles as well as block content.
+    let titles = collect_rendered(&doc);
+
+    // The title keeps the string pipeline's own reading — the anchor cut short
+    // inside the span — exactly as the paragraph case does, and no placeholder
+    // sentinel escapes into it.
+    assert!(
+        titles
+            .iter()
+            .any(|t| t.contains(r##"href="#sec""##) && t.contains("<strong>b</a>")),
+        "the title's carve-out rendering regressed: {titles:?}"
+    );
+
+    assert!(
+        titles
+            .iter()
+            .all(|t| !t.contains('\u{E000}') && !t.contains('\u{E001}')),
+        "a placeholder sentinel reached a rendered title: {titles:?}"
+    );
+}
+
+#[test]
+fn an_index_term_macro_hiding_a_reference_keeps_the_string_pipelines_rendering() {
+    // The carve-out's **other** shape, and the one no test reached before the
+    // deferred cross-references were read off the tree.
+    //
+    // `xref_mirror_is_skipped_when_the_tree_defers_a_reference_form` above
+    // covers a content whose tree holds *fewer* cross-references than the
+    // string pipeline deferred by one; this covers the case where it holds
+    // **none**, which takes a different branch of `Content::set_tree_xrefs` (an
+    // empty derived list, where that one has a short-by-one list) and is the
+    // shape that would silently clear the deferred state altogether. Its own
+    // family pins the recognition gap under `parse_deferred`
+    // (`a_reference_inside_an_index_term_macro_keeps_its_documented_divergence`);
+    // what was never crossed with it is a **resolved** parse, which is where
+    // the rendering is decided.
+    //
+    // `indexterm2:[…]`'s shown term comes back from an attribute-list parse
+    // rather than from a range of the match string, so the builder keeps it as
+    // a string and builds no subtree — there is no node for the `<<b>>` inside
+    // it. The string pipeline's answer therefore stands, placeholders and all,
+    // and the reference still resolves.
+    let mut parser = Parser::default();
+    let doc = parser.parse("[[b]]B target.\n\nSee indexterm2:[<<b>>] here.");
+
+    let rendered = collect_rendered(&doc);
+
+    assert!(
+        rendered.iter().any(|s| s.contains(r##"<a href="#b">"##)),
+        "the carve-out must keep the string pipeline's resolved rendering: {rendered:?}"
+    );
+
+    // And nothing leaks: a cleared deferred state would leave the raw
+    // placeholder sentinels in the output instead.
+    assert!(
+        rendered
+            .iter()
+            .all(|s| !s.contains('\u{E000}') && !s.contains('\u{E001}')),
+        "a placeholder sentinel reached the rendered output: {rendered:?}"
+    );
+
+    // The tree holds no cross-reference node for it, which is *why* this
+    // content is on the carve-out path. Asserting it here keeps the test
+    // honest the day the builder learns the macro spelling: this fails, and
+    // the fixture graduates to the ordinary folded path.
+    let refs = collect_refs(&doc);
+    assert!(
+        refs.iter().all(|r| r.variant != RefVariant::Xref),
+        "the macro spelling now yields a node; this fixture should fold: {refs:?}"
+    );
+}
+
+#[test]
 fn a_span_in_a_string_valued_xref_attribute_now_mirrors() {
     // The counterpart the increment *moved*: a rendered span reaching one of
     // the three values this family reads as a **string** used to defer for
@@ -1381,12 +1468,27 @@ fn a_span_in_a_string_valued_xref_attribute_now_mirrors() {
 }
 
 #[test]
-fn footnote_xref_mirror_is_skipped_when_the_subtree_defers_a_reference_form() {
-    // The footnote-side counterpart: one of the footnote's two embedded
-    // cross-references is a documented builder divergence, so the footnote
-    // subtree's slot count (1) differs from the re-homed segment count (2)
-    // and the footnote mirror must skip rather than misassign. The block-side
-    // mirror is unaffected and still resolves the block-level reference.
+fn a_footnote_subtree_that_defers_a_reference_form_still_mirrors_what_it_holds() {
+    // The footnote-side counterpart, and the one place reading the deferred
+    // cross-references **off the tree** does more than reproduce the string
+    // pipeline's answer.
+    //
+    // One of the footnote's two embedded cross-references is a documented
+    // builder divergence, so the footnote subtree holds one node where the
+    // string pipeline re-homed two segments. That used to make the footnote
+    // mirror skip: its list came from the flat, placeholder-indexed list, whose
+    // footnote half (2) could not be correlated positionally against the
+    // subtree's nodes (1), so the recognized `<<c>>` was left honestly
+    // unresolved rather than misassigned.
+    //
+    // The tree's own walk partitions structurally, so the footnote list holds
+    // exactly the nodes it belongs to and the correlation is exact: the
+    // recognized `<<c>>` now carries its real destination, and the
+    // unrecognized sibling simply is not in either list. Nothing rendered
+    // changes — a fold emits a footnote's marker without descending into its
+    // subtree — so what moves is only what a consumer reading `inlines()`
+    // sees, in the direction of being right.
+    //
     // (The deferred form here is a shorthand whose *id* crosses an opaque
     // piece — a masked passthrough — since a footnote's own bracketed text
     // ends at the first `]`, which rules out the bracket-carrying spellings.)
@@ -1404,25 +1506,27 @@ fn footnote_xref_mirror_is_skipped_when_the_subtree_defers_a_reference_form() {
         "the block-level xref should still resolve: {refs:?}"
     );
 
-    // … while the footnote's recognized `<<c>>` is left unresolved (its
-    // sibling's deferred form broke the positional correlation for the
-    // subtree's list).
+    // … and the footnote's recognized `<<c>>` carries its own destination,
+    // where the flat list's un-correlatable footnote half used to leave it
+    // unresolved. The unrecognized sibling contributes no node, so there is
+    // exactly one to check.
     let footnote_refs = collect_footnote_refs(&doc);
-    assert!(
-        !footnote_refs.is_empty(),
-        "expected the footnote's recognized xref node: {footnote_refs:?}"
+    assert_eq!(
+        footnote_refs.len(),
+        1,
+        "expected exactly the footnote's recognized xref node: {footnote_refs:?}"
     );
-    assert!(
-        footnote_refs.iter().all(|r| r.resolved.is_none()),
-        "the footnote mirror must skip on a count mismatch: {footnote_refs:?}"
+    assert_eq!(
+        footnote_refs[0].resolved.as_ref().map(|r| r.href.as_str()),
+        Some("#c"),
+        "the footnote subtree's own reference should mirror: {footnote_refs:?}"
     );
 
-    // The block's own rendering is unaffected either way. `Content::refold`
-    // gates only on the **block** half of the mirror, which succeeded here, so
-    // this content *is* re-folded from its tree — and that is correct: a
+    // The block's own rendering is unaffected either way, which is what makes
+    // the change above a tree-fidelity one rather than an output one: a
     // footnote's text is extracted out of the block, so what the block renders
     // for it is the marker, which the fold emits without descending into the
-    // subtree whose correlation was skipped.
+    // subtree at all.
     let rendered = collect_rendered(&doc);
     assert!(
         rendered
