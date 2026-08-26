@@ -24,7 +24,37 @@ use crate::{
 pub struct Passthrough {
     pub(crate) text: String,
     pub(crate) subs: SubstitutionGroup,
+}
+
+/// One entry in the extraction pass's **own** list: the [`Passthrough`] a
+/// caller can observe, plus the two facts only the *restore* pass reads.
+///
+/// The two were fields of `Passthrough` itself until the tree-built view of
+/// [`Content::passthroughs`](crate::content::Content::passthroughs) needed
+/// them not to be. Neither is recoverable from the inline tree — the
+/// attribute-list-prefixed wrapper's `type_` distinguishes two spellings a
+/// [`Styled`](crate::inlines::Styled) node renders identically, and
+/// `attrlist` is the author's **unsubstituted** source where the node holds a
+/// parsed [`Attrlist`] built from the substituted one — so a view that had to
+/// supply them could only have supplied `None`, quietly making a `pub` type
+/// mean different things depending on where it came from.
+///
+/// Splitting them out instead makes the view lossless *by construction*: the
+/// `pub` type holds exactly what it documents and exposes, and the two facts
+/// only the restore pass reads stay inside the crate.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ExtractedPassthrough {
+    /// The entry as `Content::passthroughs` exposes it.
+    pub(crate) pass: Passthrough,
+
+    /// The quoted-text kind the restored body is re-rendered inside, for an
+    /// attribute-list-prefixed passthrough or an inline STEM macro; `None` for
+    /// every other form.
     pub(crate) type_: Option<QuoteType>,
+
+    /// The author's attribute list, as written — attribute references in it
+    /// are resolved on restore, not here — for the prefixed forms that carry
+    /// one.
     pub(crate) attrlist: Option<String>,
 }
 
@@ -55,7 +85,7 @@ impl Passthrough {
 /// Saves content of passthrough (`+++`-bracketed) passages for later
 /// re-expansion.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct Passthroughs(pub(crate) Vec<Passthrough>);
+pub(crate) struct Passthroughs(pub(crate) Vec<ExtractedPassthrough>);
 
 impl Passthroughs {
     pub(crate) fn extract_from(content: &mut Content<'_>, parser: &Parser) -> Self {
@@ -142,7 +172,13 @@ impl Passthroughs {
         });
     }
 
-    pub(super) fn push(&mut self, passthrough: Passthrough, dest: &mut String) {
+    /// The entries as [`Content::passthroughs`](Content::passthroughs) exposes
+    /// them: each entry's observable half, in extraction order.
+    pub(crate) fn observable(&self) -> Vec<Passthrough> {
+        self.0.iter().map(|entry| entry.pass.clone()).collect()
+    }
+
+    pub(super) fn push(&mut self, passthrough: ExtractedPassthrough, dest: &mut String) {
         let index = self.0.len();
         self.0.push(passthrough);
 
@@ -265,9 +301,8 @@ impl Replacer for InlinePassMacroReplacer<'_> {
             }
 
             self.passthroughs.push(
-                Passthrough {
-                    text,
-                    subs,
+                ExtractedPassthrough {
+                    pass: Passthrough { text, subs },
                     type_: None,
                     attrlist: None,
                 },
@@ -338,17 +373,37 @@ impl InlinePassMacroReplacer<'_> {
 
         let passthrough = if let Some(attrlist) = attrlist {
             if old_behavior {
-                Passthrough {
-                    text: caps
-                        .get(quoted_text_index)
-                        .map(|m| m.as_str().to_owned())
-                        .unwrap_or_default(),
-                    subs: SubstitutionGroup::Normal,
+                ExtractedPassthrough {
+                    pass: Passthrough {
+                        text: caps
+                            .get(quoted_text_index)
+                            .map(|m| m.as_str().to_owned())
+                            .unwrap_or_default(),
+                        subs: SubstitutionGroup::Normal,
+                    },
                     type_: Some(QuoteType::Monospaced),
                     attrlist: Some(attrlist),
                 }
             } else {
-                Passthrough {
+                ExtractedPassthrough {
+                    pass: Passthrough {
+                        text: caps
+                            .get(quoted_text_index)
+                            .map(|m| m.as_str().to_owned())
+                            .unwrap_or_default(),
+                        subs: if boundary == "+++" {
+                            SubstitutionGroup::None
+                        } else {
+                            SubstitutionGroup::Verbatim
+                        },
+                    },
+                    type_: Some(QuoteType::Unquoted),
+                    attrlist: Some(attrlist),
+                }
+            }
+        } else {
+            ExtractedPassthrough {
+                pass: Passthrough {
                     text: caps
                         .get(quoted_text_index)
                         .map(|m| m.as_str().to_owned())
@@ -358,20 +413,6 @@ impl InlinePassMacroReplacer<'_> {
                     } else {
                         SubstitutionGroup::Verbatim
                     },
-                    type_: Some(QuoteType::Unquoted),
-                    attrlist: Some(attrlist),
-                }
-            }
-        } else {
-            Passthrough {
-                text: caps
-                    .get(quoted_text_index)
-                    .map(|m| m.as_str().to_owned())
-                    .unwrap_or_default(),
-                subs: if boundary == "+++" {
-                    SubstitutionGroup::None
-                } else {
-                    SubstitutionGroup::Verbatim
                 },
                 type_: None,
                 attrlist: None,
@@ -519,9 +560,11 @@ impl Replacer for InlinePassReplacer<'_> {
         };
 
         self.0.push(
-            Passthrough {
-                text: quoted_text.to_string(),
-                subs,
+            ExtractedPassthrough {
+                pass: Passthrough {
+                    text: quoted_text.to_string(),
+                    subs,
+                },
                 type_,
                 attrlist: attrlist_body,
             },
@@ -620,9 +663,11 @@ impl Replacer for InlineStemMacroReplacer<'_> {
         };
 
         self.passthroughs.push(
-            Passthrough {
-                text: content,
-                subs,
+            ExtractedPassthrough {
+                pass: Passthrough {
+                    text: content,
+                    subs,
+                },
                 type_: Some(type_),
                 attrlist: None,
             },
@@ -655,10 +700,10 @@ impl Replacer for PassthroughRestoreReplacer<'_> {
             return;
         };
 
-        let span = Span::new(&pass.text);
+        let span = Span::new(&pass.pass.text);
 
         let mut subbed_text = Content::from(span);
-        pass.subs.apply(&mut subbed_text, self.1, None);
+        pass.pass.subs.apply(&mut subbed_text, self.1, None);
 
         if let Some(type_) = pass.type_ {
             // Resolve attribute references in the stored attrlist before parsing
@@ -725,7 +770,10 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use crate::{
-        content::{Passthroughs, SubstitutionStep, passthroughs::Passthrough},
+        content::{
+            Passthroughs, SubstitutionStep,
+            passthroughs::{ExtractedPassthrough, Passthrough},
+        },
         tests::prelude::*,
     };
 
@@ -800,6 +848,49 @@ mod tests {
     }
 
     #[test]
+    fn two_entries_with_the_same_body_and_group_are_equal() {
+        // What splitting the restore-only facts out actually changes for a
+        // caller, and the reason the split had to happen before the tree-built
+        // view: a `Passthrough` is now *exactly* its body and its group.
+        //
+        // These two spellings extract the same body under the same group and
+        // differ only in the attribute list the restore pass re-renders the
+        // result inside. They used to compare **unequal** — `Passthrough`
+        // derives `PartialEq` over its fields, and the prefixed one carried
+        // `type_: Some(Unquoted)` and `attrlist: Some("role")` where the bare
+        // one carried `None`. A tree-built view cannot reproduce either fact
+        // (the wrapper node holds a *parsed* attrlist built from the
+        // substituted source, not the author's bytes), so leaving them on the
+        // public type would have made equality depend on which side built the
+        // entry.
+        let entry = |source: &str| -> Passthrough {
+            let mut p = Parser::default();
+            let maw = crate::blocks::Block::parse(crate::Span::new(source), &mut p);
+
+            let crate::blocks::Block::Simple(block) = maw.item.unwrap().item else {
+                panic!("expected a simple block");
+            };
+
+            let passthroughs = block.content().passthroughs();
+            assert_eq!(passthroughs.len(), 1, "{source:?}");
+
+            passthroughs[0].clone()
+        };
+
+        let bare = entry("a ++dup++ x");
+        let prefixed = entry("a [.role]++dup++ x");
+
+        assert_eq!(bare.text(), "dup");
+        assert_eq!(bare, prefixed);
+
+        // Still unequal where the *documented* facts differ, so the assertion
+        // above is about the fields that left rather than about `PartialEq`
+        // having stopped discriminating.
+        assert_ne!(bare, entry("a +++dup+++ x"));
+        assert_ne!(bare, entry("a ++other++ x"));
+    }
+
+    #[test]
     fn passthrough_attrlist_drop_line_does_not_leak_a_mislocated_warning() {
         // A missing reference in a passthrough's stored attribute list is
         // substituted against temporary (owned) text, so any warning it records
@@ -855,12 +946,14 @@ mod tests {
 
         assert_eq!(
             pt,
-            Passthroughs(vec![Passthrough {
-                text: "*<{backend}>*".to_owned(),
-                subs: SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::AttributeReferences,
-                ]),
+            Passthroughs(vec![ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "*<{backend}>*".to_owned(),
+                    subs: SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::Quotes,
+                        SubstitutionStep::AttributeReferences,
+                    ]),
+                },
                 type_: None,
                 attrlist: None,
             },],)
@@ -872,7 +965,7 @@ mod tests {
             ModificationContext::ApiOnly,
         );
 
-        pt.0[0].subs.apply(&mut content, &parser, None);
+        pt.0[0].pass.subs.apply(&mut content, &parser, None);
 
         content.rendered = "\u{96}99\u{97}".into();
 

@@ -8707,7 +8707,10 @@ non_normative!(
 
 mod passthroughs {
     use crate::{
-        content::{Passthroughs, SubstitutionStep, passthroughs::Passthrough},
+        content::{
+            Passthroughs, SubstitutionStep,
+            passthroughs::{ExtractedPassthrough, Passthrough},
+        },
         parser::{ModificationContext, QuoteType},
         tests::prelude::*,
     };
@@ -8749,9 +8752,11 @@ mod passthroughs {
 
         assert_eq!(
             pt,
-            Passthroughs(vec![Passthrough {
-                text: "<code>inline code</code>".to_owned(),
-                subs: SubstitutionGroup::None,
+            Passthroughs(vec![ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "<code>inline code</code>".to_owned(),
+                    subs: SubstitutionGroup::None,
+                },
                 type_: None,
                 attrlist: None,
             },],)
@@ -8781,9 +8786,11 @@ mod passthroughs {
 
         assert_eq!(
             pt,
-            Passthroughs(vec![Passthrough {
-                text: "<code>inline code</code>".to_owned(),
-                subs: SubstitutionGroup::None,
+            Passthroughs(vec![ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "<code>inline code</code>".to_owned(),
+                    subs: SubstitutionGroup::None,
+                },
                 type_: Some(QuoteType::Unquoted,),
                 attrlist: Some("role".to_owned(),),
             },],)
@@ -8827,9 +8834,11 @@ mod passthroughs {
 
         assert_eq!(
             pt,
-            Passthroughs(vec![Passthrough {
-                text: "<code>inline\ncode</code>".to_owned(),
-                subs: SubstitutionGroup::None,
+            Passthroughs(vec![ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "<code>inline\ncode</code>".to_owned(),
+                    subs: SubstitutionGroup::None,
+                },
                 type_: None,
                 attrlist: None,
             },],)
@@ -8873,9 +8882,11 @@ mod passthroughs {
 
         assert_eq!(
             pt,
-            Passthroughs(vec![Passthrough {
-                text: "<code>{code}</code>".to_owned(),
-                subs: SubstitutionGroup::Verbatim,
+            Passthroughs(vec![ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "<code>{code}</code>".to_owned(),
+                    subs: SubstitutionGroup::Verbatim,
+                },
                 type_: None,
                 attrlist: None,
             },],)
@@ -8919,9 +8930,11 @@ mod passthroughs {
 
         assert_eq!(
             pt,
-            Passthroughs(vec![Passthrough {
-                text: "<code>{code}</code>".to_owned(),
-                subs: SubstitutionGroup::Verbatim,
+            Passthroughs(vec![ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "<code>{code}</code>".to_owned(),
+                    subs: SubstitutionGroup::Verbatim,
+                },
                 type_: None,
                 attrlist: None,
             },],)
@@ -9267,9 +9280,11 @@ mod passthroughs {
 
         assert_eq!(
             pt,
-            Passthroughs(vec![Passthrough {
-                text: "<code>\n{code}\n</code>".to_owned(),
-                subs: SubstitutionGroup::Verbatim,
+            Passthroughs(vec![ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "<code>\n{code}\n</code>".to_owned(),
+                    subs: SubstitutionGroup::Verbatim,
+                },
                 type_: None,
                 attrlist: None,
             },],)
@@ -9313,9 +9328,11 @@ mod passthroughs {
 
         assert_eq!(
             pt,
-            Passthroughs(vec![Passthrough {
-                text: "<code>\n{code}\n</code>".to_owned(),
-                subs: SubstitutionGroup::Verbatim,
+            Passthroughs(vec![ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "<code>\n{code}\n</code>".to_owned(),
+                    subs: SubstitutionGroup::Verbatim,
+                },
                 type_: None,
                 attrlist: None,
             },],)
@@ -9360,12 +9377,14 @@ mod passthroughs {
 
         assert_eq!(
             pt,
-            Passthroughs(vec![Passthrough {
-                text: "<code>['code']</code>".to_owned(),
-                subs: SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Quotes,
-                ]),
+            Passthroughs(vec![ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "<code>['code']</code>".to_owned(),
+                    subs: SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Quotes,
+                    ]),
+                },
                 type_: None,
                 attrlist: None,
             },],)
@@ -9410,12 +9429,14 @@ mod passthroughs {
 
         assert_eq!(
             pt,
-            Passthroughs(vec![Passthrough {
-                text: "<code>['more\ncode']</code>".to_owned(),
-                subs: SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Quotes,
-                ]),
+            Passthroughs(vec![ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "<code>['more\ncode']</code>".to_owned(),
+                    subs: SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Quotes,
+                    ]),
+                },
                 type_: None,
                 attrlist: None,
             },],)
@@ -9515,12 +9536,14 @@ mod passthroughs {
 
         assert_eq!(
             pt,
-            Passthroughs(vec![Passthrough {
-                text: "*<{backend}>*".to_owned(),
-                subs: SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::AttributeReferences,
-                ]),
+            Passthroughs(vec![ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "*<{backend}>*".to_owned(),
+                    subs: SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::Quotes,
+                        SubstitutionStep::AttributeReferences,
+                    ]),
+                },
                 type_: None,
                 attrlist: None,
             },],)
@@ -9532,7 +9555,7 @@ mod passthroughs {
             ModificationContext::ApiOnly,
         );
 
-        pt.0[0].subs.apply(&mut content, &parser, None);
+        pt.0[0].pass.subs.apply(&mut content, &parser, None);
 
         pt.restore_to(&mut content, &parser);
 
@@ -9586,15 +9609,17 @@ mod passthroughs {
 
         assert_eq!(
             pt,
-            Passthroughs(vec![Passthrough {
-                text: "<{backend}>".to_owned(),
-                subs: SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::SpecialCharacters,
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::CharacterReplacements,
-                    SubstitutionStep::Macros,
-                    SubstitutionStep::PostReplacement,
-                ]),
+            Passthroughs(vec![ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "<{backend}>".to_owned(),
+                    subs: SubstitutionGroup::Custom(vec![
+                        SubstitutionStep::SpecialCharacters,
+                        SubstitutionStep::Quotes,
+                        SubstitutionStep::CharacterReplacements,
+                        SubstitutionStep::Macros,
+                        SubstitutionStep::PostReplacement,
+                    ]),
+                },
                 type_: None,
                 attrlist: None,
             },],)
@@ -9606,7 +9631,7 @@ mod passthroughs {
             ModificationContext::ApiOnly,
         );
 
-        pt.0[0].subs.apply(&mut content, &parser, None);
+        pt.0[0].pass.subs.apply(&mut content, &parser, None);
 
         pt.restore_to(&mut content, &parser);
 
@@ -9813,9 +9838,11 @@ mod passthroughs {
         let mut content =
             crate::content::Content::from(crate::Span::new("some \u{96}0\u{97} to study"));
 
-        let pt = Passthroughs(vec![Passthrough {
-            text: "<code>inline code</code>".to_owned(),
-            subs: SubstitutionGroup::None,
+        let pt = Passthroughs(vec![ExtractedPassthrough {
+            pass: Passthrough {
+                text: "<code>inline code</code>".to_owned(),
+                subs: SubstitutionGroup::None,
+            },
             type_: None,
             attrlist: None,
         }]);
@@ -9867,15 +9894,19 @@ mod passthroughs {
         ));
 
         let pt = Passthroughs(vec![
-            Passthrough {
-                text: "<code>{code}</code>".to_owned(),
-                subs: SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters]),
+            ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "<code>{code}</code>".to_owned(),
+                    subs: SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters]),
+                },
                 type_: None,
                 attrlist: None,
             },
-            Passthrough {
-                text: "{language}".to_owned(),
-                subs: SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters]),
+            ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "{language}".to_owned(),
+                    subs: SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters]),
+                },
                 type_: None,
                 attrlist: None,
             },
@@ -10133,9 +10164,11 @@ mod passthroughs {
 
         assert_eq!(
             pt,
-            Passthroughs(vec![Passthrough {
-                text: "[(] <'basic form'> <'logical operator'> <'basic form'> [)]".to_owned(),
-                subs: SubstitutionGroup::Verbatim,
+            Passthroughs(vec![ExtractedPassthrough {
+                pass: Passthrough {
+                    text: "[(] <'basic form'> <'logical operator'> <'basic form'> [)]".to_owned(),
+                    subs: SubstitutionGroup::Verbatim,
+                },
                 type_: None,
                 attrlist: None,
             },],)
@@ -10165,9 +10198,12 @@ mod passthroughs {
 
         assert_eq!(
             pt,
-            Passthroughs(vec![Passthrough {
-                text: r#"[(] <'basic form'> <'logical operator'> <'basic form'> [)]"#.to_owned(),
-                subs: SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters,],),
+            Passthroughs(vec![ExtractedPassthrough {
+                pass: Passthrough {
+                    text: r#"[(] <'basic form'> <'logical operator'> <'basic form'> [)]"#
+                        .to_owned(),
+                    subs: SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters,],),
+                },
                 type_: None,
                 attrlist: None,
             },],)

@@ -522,7 +522,7 @@ impl SubstitutionGroup {
 
             // Retain the extracted passthroughs on the content so they remain
             // observable after restore (see `Content::passthroughs`).
-            content.set_passthroughs(passthroughs.0);
+            content.set_passthroughs(passthroughs.observable());
         }
 
         // Capture any deferred cross-references as a placeholder template and
