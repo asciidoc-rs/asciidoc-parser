@@ -6479,8 +6479,11 @@ Each phase is a reviewable unit with a clear exit gate.
     pipeline, not before it.
   - **The link family's dangerous-scheme warning** — the one side effect the replay does not carry.
     A dangerous scheme leaves the macro *literal*, so there is no
-    [`Ref`](../../parser/src/inlines/ref_node.rs) node to hang it on; recording it needs a
-    node-level fact, the way `RawOrigin` was one.
+    [`Ref`](../../parser/src/inlines/ref_node.rs) node to hang it on. This originally read
+    "recording it needs a node-level fact, the way `RawOrigin` was one"; measuring later showed it
+    does not — it is the one side effect that is never **suppressed**, so the string pass records it
+    until `run_pipeline` is deleted, and at the cutover the builder holds the real parser and can
+    record it inline. See the step's own "landed as" note below. **Cutover work, not prep.**
   - **[`Content::passthroughs()`](../../parser/src/content/content.rs).** §4.2 says it "can be
     retained as a filtered view over the tree", and the view needs more than exists: a
     `Passthrough` carries `subs`, `type_` and `attrlist`, and no
@@ -7076,6 +7079,43 @@ Each phase is a reviewable unit with a clear exit gate.
   replay does not carry: a dangerous scheme leaves the macro *literal*, so there is no
   [`Ref`](../../parser/src/inlines/ref_node.rs) node to hang it on, and recording it needs a
   node-level fact the way [`RawOrigin`](../../parser/src/inlines/inline_node.rs) was one.
+
+  *Step 6 landed as (the link family's dangerous-scheme warning is cutover work, not prep):* a
+  finding rather than a change. With
+  [`Content::passthroughs()`](../../parser/src/content/content.rs) closed, this was the survey's
+  last item that is not hard-blocked, and the obvious next increment was to give it the node-level
+  fact the survey said it needed. Measuring first said it needs no such thing.
+
+  *Why every other side effect needs one.* The builder runs against a **clone** of the parser
+  (`SubstitutionGroup::apply`'s `tree_seed`), so anything it records at build time is discarded with
+  that clone. A side effect therefore has to be written into the *tree* and replayed from it against
+  the real parser — which is what `apply_macro_side_effects` and `apply_callout_side_effects` do,
+  and why a fact with no node to live on (a `link:` macro rejected for a dangerous scheme leaves no
+  [`Ref`](../../parser/src/inlines/ref_node.rs) node; probing the tree shows the whole line collapse
+  into a single `Text` run) looked like it needed a new one.
+
+  *Why this one does not.* It is the single side effect that is **not suppressed** during the
+  authoritative string pass — see
+  [`suppress_recognition_side_effects`](../../parser/src/parser/parser.rs), whose own doc already
+  says so. The string pipeline records it, it works today, and it keeps working until
+  `run_pipeline` is deleted. At the cutover the clone is gone: the builder holds the real parser,
+  and its rejection site in
+  [`build_link_node`](../../parser/src/content/inline_builder/macros/links.rs) — which already takes
+  `parser` — becomes one `record_substitution_warning` call. Nothing has to survive a replay,
+  because there is no longer a replay.
+
+  So building the fact now would mean adding a `pub`
+  [`RawOrigin`](../../parser/src/inlines/inline_node.rs) variant, and a rejected macro emitting a
+  `Raw` node where it currently emits nothing, purely to bridge a gap that closes on its own —
+  with a real byte-parity hazard along the way, since the
+  level's match string is the **masked** haystack and the node's value would have to be the restored
+  text rather than the matched bytes. That is a public type widened for the duration of a transition
+  and narrowed again after it.
+
+  The survey's six items therefore resolve as **three landed** (the cross-reference segments, the
+  description-list term carve-out, and `Content::passthroughs()`) and **three that are the cutover
+  itself** — the footnote catalog's text, `{counter:}` advancement, and this warning. What is left
+  before step 6 is step 6.
 
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
@@ -8589,6 +8629,17 @@ Each phase is a reviewable unit with a clear exit gate.
        explicit subs list builds no node to report the outer entry from. Audit: 37 rows either
        side, 0 new and 0 closed; coverage exactly diff-neutral (3 missed regions and 3 missed lines
        before and after). See the step's own "landed as" note above.
+
+     - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
+       The last survey item that is not hard-blocked, and the one the survey said would need "a
+       node-level fact, the way `RawOrigin` was one". Measuring says otherwise: it is the single
+       side effect that is never **suppressed**, so the string pass records it right up to the
+       cutover, and at the cutover the builder holds the *real* parser rather than the clone whose
+       warnings are discarded — so its existing rejection site in
+       [`build_link_node`](../../parser/src/content/inline_builder/macros/links.rs), which already
+       takes `parser`, records it directly. No tree fact to replay, because there is no replay; and
+       no `pub` type widened for the duration of a transition and narrowed after it. See the step's
+       own "landed as" note above.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
