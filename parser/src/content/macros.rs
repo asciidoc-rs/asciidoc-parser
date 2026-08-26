@@ -1300,10 +1300,17 @@ impl Replacer for InlineLinkMacroReplacer<'_, '_> {
         // macro is handled elsewhere. `mailto:` targets carry their own safe
         // scheme and are exempt.
         if mailto.is_none() && has_dangerous_scheme(&target) {
-            self.parser.record_substitution_warning(
-                self.source,
-                WarningType::UnsafeLinkSchemeRejected(target),
-            );
+            // Suppressed for content whose tree raises this itself — see
+            // `Parser::suppress_recognition_side_effects`. This was the one
+            // recognition side effect the replay did not carry, because a
+            // rejected macro leaves no node; the builder records it at its own
+            // rejection site instead (`build_link_node`).
+            if !self.parser.suppress_recognition_side_effects.get() {
+                self.parser.record_substitution_warning(
+                    self.source,
+                    WarningType::UnsafeLinkSchemeRejected(target),
+                );
+            }
             dest.push_str(&caps[0]);
             return;
         }
@@ -2067,7 +2074,12 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
             };
 
             // The `footnoteref:` macro is deprecated outside compatibility mode.
-            if !parser.is_attribute_set("compat-mode") {
+            // Suppressed for content whose tree raises this itself — see
+            // `Parser::suppress_recognition_side_effects`; `build_footnoteref_node`
+            // records it at its own recognition site.
+            if !parser.is_attribute_set("compat-mode")
+                && !parser.suppress_recognition_side_effects.get()
+            {
                 parser.record_substitution_warning(
                     self.source,
                     WarningType::DeprecatedFootnoterefMacro(caps[0].to_string()),
@@ -2118,10 +2130,14 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
                 );
             } else {
                 // A reference to an ID that was never defined.
-                parser.record_substitution_warning(
-                    self.source,
-                    WarningType::InvalidFootnoteReference(id.clone()),
-                );
+                // Suppressed for the same reason the deprecation warning above
+                // is: the builder records it where it recognizes the reference.
+                if !parser.suppress_recognition_side_effects.get() {
+                    parser.record_substitution_warning(
+                        self.source,
+                        WarningType::InvalidFootnoteReference(id.clone()),
+                    );
+                }
                 parser.renderer.render_footnote(
                     &FootnoteRenderParams {
                         index: None,

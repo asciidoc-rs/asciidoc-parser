@@ -1265,6 +1265,17 @@ pub(super) fn build_link_node<'src>(
     // increment chooses the safe reading over byte parity — see
     // `a_dangerous_scheme_inside_a_passthrough_is_a_documented_divergence`.
     if !is_mailto && has_dangerous_scheme(&target) {
+        // Reported where `InlineLinkMacroReplacer` reports it. This is the
+        // recognition diagnostic design §5.2's survey singled out as needing "a
+        // node-level fact the way `RawOrigin` was one": a rejected macro stays
+        // literal, so there is no `Ref` node to hang it on and nothing for a
+        // tree walk to replay. Recording it at the rejection site — the site
+        // that already holds `parser` — is what that fact would have been for.
+        parser.record_builder_diagnostic(
+            root,
+            crate::warnings::WarningType::UnsafeLinkSchemeRejected(target),
+        );
+
         return None;
     }
 

@@ -857,7 +857,22 @@ fn build_passthrough_node<'src>(
     // beside the result.
     let (value, subs, source_text) = if let Some(subs_list) = caps.get(14) {
         let text = unescaped.as_deref().unwrap_or(raw);
-        let (subs, _invalid) = SubstitutionGroup::from_custom_string(None, subs_list.as_str());
+        let (subs, invalid) = SubstitutionGroup::from_custom_string(None, subs_list.as_str());
+
+        // An unrecognized name in the list (`pass:bogus[…]`) is skipped while
+        // the recognized ones are still honored — and reported, exactly as
+        // `InlinePassMacroReplacer` reports it, against the content's own span.
+        // Recorded here rather than replayed from the tree because the node
+        // carries no trace of it: an invalid name leaves the value it produces
+        // indistinguishable from a valid list's.
+        if !invalid.is_empty() {
+            parser.record_builder_diagnostic(
+                root,
+                crate::warnings::WarningType::InvalidSubstitutionTypeForPassthroughMacro(
+                    invalid.join(", "),
+                ),
+            );
+        }
 
         (
             CowStr::from(passthrough_text(text, &subs, parser)),

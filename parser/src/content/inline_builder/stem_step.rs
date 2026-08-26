@@ -26,10 +26,32 @@ use crate::{
 /// string pipeline's own `InvalidSubstitutionTypeForStemMacro` warning for
 /// an invalid name, deferring that side effect to the cutover (design §5.2
 /// Phase 4, step 6), since it does not change the fold's output bytes.
-fn resolve_stem_subs(subs_list: Option<&str>) -> SubstitutionGroup {
+fn resolve_stem_subs(
+    subs_list: Option<&str>,
+    root: Span<'_>,
+    parser: &Parser,
+) -> SubstitutionGroup {
     match subs_list {
         None => SubstitutionGroup::Stem,
-        Some(subs_list) => SubstitutionGroup::from_custom_string(None, subs_list).0,
+
+        Some(subs_list) => {
+            let (group, invalid) = SubstitutionGroup::from_custom_string(None, subs_list);
+
+            // Reported exactly where `InlineStemMacroReplacer` reports it, and
+            // recorded rather than replayed for the same reason its `pass:`
+            // sibling is: an invalid name is skipped, so the node it produces
+            // carries no trace of one.
+            if !invalid.is_empty() {
+                parser.record_builder_diagnostic(
+                    root,
+                    crate::warnings::WarningType::InvalidSubstitutionTypeForStemMacro(
+                        invalid.join(", "),
+                    ),
+                );
+            }
+
+            group
+        }
     }
 }
 
@@ -230,7 +252,7 @@ fn build_stem_node<'src>(
     let mut emitted = Vec::new();
     emit_range(nodes, pieces, expr_range, &mut emitted);
 
-    let subs = resolve_stem_subs(caps.get(3).map(|m| m.as_str()));
+    let subs = resolve_stem_subs(caps.get(3).map(|m| m.as_str()), root, parser);
 
     // An explicit substitution list naming a step that needs more than one
     // `Text` run of context (Quotes, AttributeReferences,

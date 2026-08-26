@@ -386,7 +386,13 @@ impl Replacer for InlinePassMacroReplacer<'_> {
                 Some(subs_list) => {
                     let (group, invalid) = SubstitutionGroup::from_custom_string(None, subs_list);
 
-                    if !invalid.is_empty() {
+                    // Suppressed for content whose tree raises this itself —
+                    // see `Parser::suppress_recognition_side_effects`. One of
+                    // the two diagnostics this pass owns that the builder now
+                    // records at its own recognition site
+                    // (`build_passthrough_node`), so recognizing the construct
+                    // twice would report it twice.
+                    if !invalid.is_empty() && !self.parser.suppress_recognition_side_effects.get() {
                         self.parser.record_substitution_warning(
                             self.source,
                             WarningType::InvalidSubstitutionTypeForPassthroughMacro(
@@ -755,7 +761,10 @@ impl Replacer for InlineStemMacroReplacer<'_> {
             Some(subs_list) => {
                 let (group, invalid) = SubstitutionGroup::from_custom_string(None, subs_list);
 
-                if !invalid.is_empty() {
+                // Suppressed for the same reason its `pass:` sibling above is:
+                // `resolve_stem_subs` records this at the builder's own
+                // recognition site.
+                if !invalid.is_empty() && !self.parser.suppress_recognition_side_effects.get() {
                     self.parser.record_substitution_warning(
                         self.source,
                         WarningType::InvalidSubstitutionTypeForStemMacro(invalid.join(", ")),

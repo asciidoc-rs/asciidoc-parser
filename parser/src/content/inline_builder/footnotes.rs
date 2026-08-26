@@ -474,17 +474,25 @@ fn build_footnote_node<'src>(
                 }))
             }
 
-            // A reference to an id that was never defined. The string replacer
-            // warns here (`InvalidFootnoteReference`); this pass, like every
-            // other diagnostic the additive builder skips, leaves that to the
-            // cutover.
-            None => Some(InlineNode::Footnote(Footnote {
-                id: Some(id),
-                number: None,
-                is_reference: true,
-                children: vec![],
-                location,
-            })),
+            // A reference to an id that was never defined, reported exactly
+            // where the string replacer reports it. Recorded rather than
+            // replayed: the node is a reference with no number, which is also
+            // what a *forward* reference looks like mid-parse, so the tree
+            // cannot tell the two apart after the fact.
+            None => {
+                parser.record_builder_diagnostic(
+                    root,
+                    crate::warnings::WarningType::InvalidFootnoteReference(id.to_string()),
+                );
+
+                Some(InlineNode::Footnote(Footnote {
+                    id: Some(id),
+                    number: None,
+                    is_reference: true,
+                    children: vec![],
+                    location,
+                }))
+            }
         };
     }
 
@@ -525,12 +533,9 @@ fn build_footnote_node<'src>(
 /// first comma and never normalizes what precedes it, so an id carrying a `\]`
 /// keeps its backslash — as the id [`footnote_id_text`] recovers does.
 ///
-/// The one thing this increment does **not** yet do is the deprecation
-/// warning `InlineFootnoteMacroReplacer` records outside `compat-mode`: like
-/// every other macro family's own catalog/warning side effect, that is a
-/// diagnostic that does not change the fold's output bytes, so — unlike the
-/// footnote number itself — it is left to the cutover (design §5.2 Phase 4,
-/// step 6) rather than performed here.
+/// The deprecation warning `InlineFootnoteMacroReplacer` records outside
+/// `compat-mode` is raised here too, from the whole match's own text, exactly
+/// as that replacer raises it.
 fn build_footnoteref_node<'src>(
     raw: regex::Match<'_>,
     full: &std::ops::Range<usize>,
@@ -541,6 +546,20 @@ fn build_footnoteref_node<'src>(
     parser: &Parser,
 ) -> Option<InlineNode<'src>> {
     let location = source_slice(pieces, full.clone(), root);
+
+    // The `footnoteref:` macro is deprecated outside compatibility mode.
+    // Recorded rather than replayed because the node this builds is an
+    // ordinary `Footnote`, indistinguishable from the `footnote:` spelling's —
+    // the deprecation is a fact about the *source*, which only the recognition
+    // site sees.
+    if !parser.is_attribute_set("compat-mode")
+        && let Some(matched) = s.get(full.clone())
+    {
+        parser.record_builder_diagnostic(
+            root,
+            crate::warnings::WarningType::DeprecatedFootnoterefMacro(matched.to_string()),
+        );
+    }
 
     // Split on the first comma: `id` is everything before it (the whole raw
     // text when there is no comma at all), `content` is everything after it
@@ -594,17 +613,23 @@ fn build_footnoteref_node<'src>(
             }))
         }
 
-        // A reference to an id that was never defined. The string replacer
-        // warns here (`InvalidFootnoteReference`); this pass, like every
-        // other diagnostic the additive builder skips, leaves that to the
-        // cutover.
-        None => Some(InlineNode::Footnote(Footnote {
-            id: Some(id),
-            number: None,
-            is_reference: true,
-            children: vec![],
-            location,
-        })),
+        // A reference to an id that was never defined — see the sibling site
+        // in `build_footnote_node` for why this is recorded rather than
+        // replayed.
+        None => {
+            parser.record_builder_diagnostic(
+                root,
+                crate::warnings::WarningType::InvalidFootnoteReference(id.to_string()),
+            );
+
+            Some(InlineNode::Footnote(Footnote {
+                id: Some(id),
+                number: None,
+                is_reference: true,
+                children: vec![],
+                location,
+            }))
+        }
     }
 }
 

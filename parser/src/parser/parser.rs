@@ -418,6 +418,13 @@ pub struct Parser {
     /// spanned [`Warning`]s once the document's owned source is available.
     substitution_warnings: RefCell<Vec<DeferredWarning>>,
 
+    /// Recognition diagnostics the single-pass builder raised, awaiting
+    /// transplant onto the real parser — see
+    /// [`record_builder_diagnostic`](Self::record_builder_diagnostic) for why
+    /// these are kept apart from
+    /// [`substitution_warnings`](Self::substitution_warnings).
+    builder_diagnostics: RefCell<Vec<DeferredWarning>>,
+
     /// An optional fixed reference time that pins the clock used to compute the
     /// time-dependent document attributes (`docdate`, `doctime`, `docdatetime`,
     /// `docyear`, and their `local*` siblings), for reproducible output.
@@ -617,6 +624,7 @@ impl Default for Parser {
             owned_cell_warnings: RefCell::new(vec![]),
             callouts: RefCell::new(CalloutCatalog::default()),
             substitution_warnings: RefCell::new(vec![]),
+            builder_diagnostics: RefCell::new(vec![]),
             reference_time: None,
             input_mtime: None,
             datetime_context: RefCell::new(None),
@@ -2036,6 +2044,80 @@ impl Parser {
     /// held `len` entries.
     pub(crate) fn drain_substitution_warnings_since(&self, len: usize) -> Vec<DeferredWarning> {
         self.substitution_warnings.borrow_mut().split_off(len)
+    }
+
+    /// Records a recognition **diagnostic** the single-pass builder raises,
+    /// into a buffer of its own.
+    ///
+    /// Deliberately *not*
+    /// [`record_substitution_warning`](Self::record_substitution_warning)'s
+    /// buffer. The builder runs against a counter-safe clone whose warning
+    /// buffer is discarded, so its diagnostics have to be carried across to the
+    /// real parser — but that clone's buffer also collects warnings the builder
+    /// records **incidentally**, through machinery it shares with the string
+    /// pipeline: an [`Attrlist`](crate::attributes::Attrlist) parse expands
+    /// attribute references over the list's own text, and where that text is a
+    /// match string rather than document source, the resulting
+    /// `attribute-missing` warning carries an offset that cannot be mapped
+    /// back. The string pipeline discards exactly those at its own site (see
+    /// `PassthroughRestoreReplacer`); carrying the clone's whole buffer across
+    /// would surface them mislocated against the document root
+    /// (`passthrough_attrlist_drop_line_does_not_leak_a_mislocated_warning`
+    /// catches it).
+    ///
+    /// So the two are kept apart at the source: this buffer holds only what the
+    /// builder means to report, and only it is transplanted.
+    pub(crate) fn record_builder_diagnostic(&self, source: crate::Span<'_>, warning: WarningType) {
+        self.builder_diagnostics.borrow_mut().push(DeferredWarning {
+            offset: source.byte_offset(),
+            len: source.len(),
+            warning,
+            origin: None,
+        });
+    }
+
+    /// The number of builder diagnostics recorded so far — the mark
+    /// [`drain_builder_diagnostics_since`](Self::drain_builder_diagnostics_since)
+    /// drains from.
+    pub(crate) fn builder_diagnostics_len(&self) -> usize {
+        self.builder_diagnostics.borrow().len()
+    }
+
+    /// Removes and returns the builder diagnostics recorded since the buffer
+    /// held `len` entries — see
+    /// [`record_builder_diagnostic`](Self::record_builder_diagnostic).
+    ///
+    /// Taken from a **mark** rather than wholesale, for the same reason
+    /// [`drain_substitution_warnings_since`](Self::drain_substitution_warnings_since)
+    /// is: a build can nest. `passthrough_text` re-enters
+    /// `SubstitutionGroup::apply` for a passthrough body, and that call clones
+    /// the parser it is given — copying this buffer along with everything else
+    /// — so a nested drain that took the whole buffer would carry the *outer*
+    /// build's pending diagnostics across a second time. Marking before each
+    /// build and draining back to that mark leaves each build with exactly its
+    /// own.
+    pub(crate) fn drain_builder_diagnostics_since(&self, len: usize) -> Vec<DeferredWarning> {
+        self.builder_diagnostics.borrow_mut().split_off(len)
+    }
+
+    /// Appends already-built warnings to this parser's buffer, in order.
+    ///
+    /// This is the counterpart to
+    /// [`drain_substitution_warnings_since`](Self::drain_substitution_warnings_since),
+    /// and it exists for one caller: the single-pass builder records its
+    /// diagnostics against the counter-safe *clone*
+    /// `SubstitutionGroup::apply` hands it, whose buffer is discarded with the
+    /// clone, so they are drained from there and pushed here to reach the real
+    /// parser. A [`DeferredWarning`] is plain data — an offset, a length, a
+    /// [`WarningType`] and an origin — so moving one between parsers loses
+    /// nothing.
+    ///
+    /// A recognition diagnostic that *has* a node to hang on is replayed from
+    /// the tree instead (see `apply_macro_side_effects`); this carries the ones
+    /// that do not, which is why they are recorded where they are recognized
+    /// rather than after the fact.
+    pub(crate) fn push_substitution_warnings(&self, warnings: Vec<DeferredWarning>) {
+        self.substitution_warnings.borrow_mut().extend(warnings);
     }
 
     /// Takes the substitution warnings recorded during parsing, leaving the
