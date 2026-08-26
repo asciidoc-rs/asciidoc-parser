@@ -2650,6 +2650,7 @@ mod tests {
                 value: CowStr::from("x"),
                 subs: crate::content::SubstitutionGroup::Stem,
                 source_text: None,
+                children: vec![],
                 location: root,
             }),
         ];
