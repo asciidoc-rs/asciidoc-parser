@@ -1,7 +1,7 @@
 use crate::{
     HasSpan, Parser,
     attributes::Attrlist,
-    content::{Content, Passthroughs, SubstitutionStep},
+    content::{Content, Passthrough, Passthroughs, SubstitutionStep},
     document::RefType,
     warnings::WarningType,
 };
@@ -377,6 +377,14 @@ impl SubstitutionGroup {
             // sibling call rather than part of the composition above.
             crate::content::inline_builder::apply_callout_side_effects(&tree, parser);
 
+            // `Content::passthroughs()` is a **view over the tree**, the last
+            // of design §5.2's six things `run_pipeline` solely owned. The
+            // extraction pass still builds its own list — the restore pass
+            // indexes into it by sentinel — but that list is now private to
+            // this one pipeline run, and what a caller observes is read back
+            // off the tree in document order. See `Passthrough::from_tree`.
+            content.set_passthroughs(Passthrough::from_tree(&tree));
+
             content.set_inlines(tree);
 
             // Content carrying a deferred cross-reference is the only content
@@ -519,10 +527,6 @@ impl SubstitutionGroup {
 
         if let Some(passthroughs) = passthroughs {
             passthroughs.restore_to(content, parser);
-
-            // Retain the extracted passthroughs on the content so they remain
-            // observable after restore (see `Content::passthroughs`).
-            content.set_passthroughs(passthroughs.observable());
         }
 
         // Capture any deferred cross-references as a placeholder template and
@@ -599,7 +603,7 @@ impl SubstitutionGroup {
     /// [`Normal`](Self::Normal) or [`Verbatim`](Self::Verbatim)) expands to its
     /// fixed step sequence, and a [`Custom`](Self::Custom) group returns its
     /// own steps. Useful for inspecting the substitutions in effect for a
-    /// block or an extracted [`Passthrough`](crate::content::Passthrough).
+    /// block or an extracted [`Passthrough`].
     pub fn steps(&self) -> &[SubstitutionStep] {
         match self {
             Self::Normal | Self::Title => NORMAL_STEPS,
