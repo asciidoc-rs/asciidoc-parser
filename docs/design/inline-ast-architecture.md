@@ -511,7 +511,19 @@ value would corrupt one that legitimately contains the escape introducer, which 
 confusion the escaping exists to end. So the producer is carried rather than guessed:
 `DeferredContent::from_tree` already said it for a content's segments (and `TitleNode` for a
 title's), `FootnoteDeferred::sentinels_escaped` says it for a footnote's entry, and
-`catalog_target` is the one place that asks. All three go with `run_pipeline` itself.
+`document_text` is the one place that asks. All three go with `run_pipeline` itself.
+
+**And the decode is per-piece, not per-rendering.** Rendering a template splices the
+**resolver's** answer — a destination, a reference text drawn from the catalog — into the
+pipeline's own escaped text. The resolver was handed the document's own text and answered in
+kind, so its bytes are not in escaped form; decoding the *finished* rendering in one pass
+decodes them too, and an id such as `#a\u{E004}b` comes out as `#a\u{E001}`. So
+`render_template` leaves escaped form run by run as it walks — the template's literal text
+and the four segment fields the substitution itself read back (`target`, `provided_text`,
+`window`, `roles`), never `resolved` or `derived` — and nothing decodes the result. That in
+turn makes `finalize_deferred`'s rebuild the *first* way out of escaped form, so
+`run_pipeline`'s own tail decode is gated on there being nothing deferred; otherwise a
+content that both defers a reference and types the escape introducer is decoded twice.
 
 The branch's reserved set is correspondingly **two** systems, not three: `\u{E002}` /
 `\u{E003}` are absent from `RESERVED_SENTINELS`, because the footnote-marker system is

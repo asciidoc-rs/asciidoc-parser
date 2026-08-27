@@ -652,8 +652,18 @@ impl SubstitutionGroup {
         // the way in are restored now that every pass that reads them has run.
         // The template `finalize_deferred` just captured stays escaped — it is
         // an internal representation, re-rendered each time references are
-        // resolved, and its reader unescapes the result.
-        content.unescape_sentinels();
+        // resolved.
+        //
+        // Gated, because that re-rendering is the *other* way out of escaped
+        // form: a content that deferred anything has already had `rendered`
+        // rebuilt by `finalize_deferred`, through a `render_template` that
+        // leaves escaped form run by run (so the resolver's own answer is never
+        // decoded with it — see `Content::render_template`). Decoding that
+        // result again would read one of the document's own restored escapes a
+        // second time.
+        if content.deferred_parts().is_none() {
+            content.unescape_sentinels();
+        }
     }
 
     /// Applies any block style masquerade and `subs` attribute override from
@@ -747,6 +757,47 @@ impl SubstitutionGroup {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
+
+    mod sentinel_escaping {
+        use super::super::SubstitutionGroup;
+        use crate::{Parser, Span, content::Content};
+
+        #[test]
+        fn a_deferred_content_leaves_escaped_form_exactly_once() {
+            // The string pipeline has two ways out of escaped form, and a
+            // content that defers a cross-reference takes the *first*:
+            // `finalize_deferred` rebuilds `rendered` through `render_template`,
+            // which leaves escaped form run by run. Decoding the result again at
+            // the end of the pipeline would read the document's own restored
+            // escape introducer a second time — here turning `\u{e004}b` into
+            // `\u{e001}` — so the tail decode is gated on there being nothing
+            // deferred.
+            //
+            // Driven through `apply_string_pipeline` because that pipeline's
+            // output is the differential corpora's oracle rather than the
+            // production rendering, which is a fold of the tree.
+            let mut content = Content::from(Span::new("x\u{e004}by <<a>>"));
+
+            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &Parser::default(), None);
+
+            assert_eq!(
+                content.rendered_html(),
+                "x\u{e004}by <a href=\"#a\">[a]</a>",
+                "the typed escape introducer was decoded twice"
+            );
+        }
+
+        #[test]
+        fn a_content_with_nothing_deferred_still_leaves_escaped_form() {
+            // The complement: no template was rebuilt, so the tail decode is
+            // the only one and must run.
+            let mut content = Content::from(Span::new("x\u{e004}by"));
+
+            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &Parser::default(), None);
+
+            assert_eq!(content.rendered_html(), "x\u{e004}by");
+        }
+    }
 
     mod stem {
         use crate::{content::Content, strings::CowStr, tests::prelude::*};

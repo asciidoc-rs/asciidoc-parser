@@ -237,3 +237,65 @@ fn a_typed_escape_introducer_round_trips() {
     let doc = Parser::default().parse("x\u{e004}ay\u{e004}gz\n");
     assert_eq!(last_paragraph(&doc), "x\u{e004}ay\u{e004}gz");
 }
+
+/// The one source shape that keeps a content on the **template** path after
+/// resolution: `xref:sec[a *b, c* d,role=hl]` is a documented builder
+/// divergence (see `xref_mirror_is_skipped_when_the_tree_defers_a_reference_
+/// form`), so the tree holds fewer cross-references than the string pipeline
+/// deferred and the rendering is spliced from the placeholder template rather
+/// than folded. `\u{e004}b` in the id is the sequence that path can corrupt:
+/// `\u{e004}` introduces an escaped sentinel and `b` is one of its tags.
+const CARVE_OUT_SOURCE: &str = concat!(
+    "[#a\u{e004}b]\n",
+    "The target.\n",
+    "\n",
+    "See <<a\u{e004}b>> and xref:a\u{e004}b[a *b, c* d,role=hl].\n",
+);
+
+#[test]
+fn a_resolved_destination_holding_a_sentinel_survives_the_template_path() {
+    // The destination comes back from the **resolver**, which was handed the
+    // document's own text and answered in kind — so it is not in escaped form
+    // and must not be decoded. Decoding the finished rendering in one pass did
+    // decode it, turning `#a\u{e004}b` into `#a\u{e001}`; the template's own
+    // literal runs leave escaped form as they are spliced instead.
+    let (rendered, warnings) = last_paragraph_and_warnings(CARVE_OUT_SOURCE);
+
+    assert_eq!(warnings, 0, "reference did not resolve: {rendered:?}");
+
+    assert_eq!(
+        rendered,
+        concat!(
+            "See <a href=\"#a\u{e004}b\">[a\u{e004}b]</a> and ",
+            "<a href=\"#a\u{e004}b\" class=\"hl\">a <strong>b</a>."
+        ),
+        "the id reaches the output as the document wrote it"
+    );
+}
+
+#[test]
+fn a_title_on_the_template_path_keeps_a_resolved_sentinel_too() {
+    // The same crossing with the **title** container, which renders its
+    // template through `render_xref_template` on a path of its own.
+    let mut parser = Parser::default();
+
+    let doc = parser.parse(concat!(
+        "[#a\u{e004}b]\n",
+        "The target.\n",
+        "\n",
+        ".See <<a\u{e004}b>> and xref:a\u{e004}b[a *b, c* d,role=hl]\n",
+        "A paragraph.\n",
+    ));
+
+    let titles: Vec<String> = doc
+        .descendant_blocks()
+        .filter_map(|block| block.title().map(str::to_string))
+        .collect();
+
+    assert!(
+        titles
+            .iter()
+            .any(|t| t.contains("href=\"#a\u{e004}b\"") && !t.contains('\u{e001}')),
+        "a resolved destination was decoded in a title: {titles:?}"
+    );
+}

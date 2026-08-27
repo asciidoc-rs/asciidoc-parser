@@ -26,8 +26,8 @@ use crate::{
     HasSpan, Span,
     blocks::{Block, IsBlock},
     content::{
-        XrefSegment, fold_resolved_title, render_xref_template, resolved_destinations,
-        template_partition, unescape_sentinels,
+        XrefSegment, document_text, fold_resolved_title, render_xref_template,
+        resolved_destinations, template_partition,
     },
     document::Catalog,
     inlines::InlineNode,
@@ -302,11 +302,7 @@ fn compute<'src>(
         // document's own and is left alone — unescaping it would corrupt one
         // that legitimately contains the escape introducer. Same question, and
         // same discriminator, as `Content::resolve_references`.
-        let target = if node.from_tree {
-            std::borrow::Cow::Borrowed(xref.target.as_str())
-        } else {
-            unescape_sentinels(&xref.target)
-        };
+        let target = document_text(&xref.target, !node.from_tree);
 
         let mut resolved = resolver.resolve(&ResolutionContext {
             target: &target,
@@ -416,7 +412,7 @@ fn compute<'src>(
         .and_then(|attributes| {
             fold_resolved_title(&node.inlines, &block_ordered, attributes, renderer, parser)
         })
-        .unwrap_or_else(|| render_xref_template(&node.template, &block, renderer));
+        .unwrap_or_else(|| render_xref_template(&node.template, &block, renderer, !node.from_tree));
 
     if let Some(flag) = in_progress.get_mut(index) {
         *flag = false;
