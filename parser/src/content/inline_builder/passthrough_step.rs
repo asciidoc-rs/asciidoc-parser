@@ -765,7 +765,15 @@ fn substitute_and_restore(
             .get(cursor.saturating_sub(range.start)..piece.s_start.saturating_sub(range.start))
             .unwrap_or_default();
 
-        out.push_str(&passthrough_text(run, &SubstitutionGroup::Verbatim, parser));
+        // `Verbatim` is `SpecialCharacters` alone, which records no warning,
+        // so this run needs no anchoring — and has none available: it is a
+        // slice of an interleaved body that may already be owned.
+        out.push_str(&passthrough_text(
+            Span::new(run),
+            &SubstitutionGroup::Verbatim,
+            parser,
+        ));
+
         out.push_str(body.as_ref());
         cursor = p_end;
     }
@@ -775,7 +783,7 @@ fn substitute_and_restore(
         .unwrap_or_default();
 
     out.push_str(&passthrough_text(
-        tail,
+        Span::new(tail),
         &SubstitutionGroup::Verbatim,
         parser,
     ));
@@ -907,8 +915,18 @@ fn build_passthrough_node<'src>(
             );
         }
 
+        // Anchored on the body's own span so a warning the substitution
+        // records points at the reference in the document (see
+        // `passthrough_text`). An escaped `\]` shifts every byte after it, so
+        // an unescaped copy has no anchor to offer and keeps the unlocated
+        // form this whole shape used to have.
+        let located = match &unescaped {
+            Some(_) => Span::new(text),
+            None => content,
+        };
+
         (
-            CowStr::from(passthrough_text(text, &subs, parser)),
+            CowStr::from(passthrough_text(located, &subs, parser)),
             subs,
             Some(text.to_string()),
         )
@@ -1192,8 +1210,42 @@ fn apply_normal_subs<'src>(text: Span<'src>, parser: &Parser) -> Vec<InlineNode<
 /// pipeline's restore step — so the result honors whatever
 /// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)
 /// `parser` carries rather than a hand-rolled, always-default escaping.
-pub(super) fn passthrough_text(text: &str, subs: &SubstitutionGroup, parser: &Parser) -> String {
-    let mut content = Content::from(Span::new(text));
+///
+/// `text` is a [`Span`] rather than a `&str` so that a warning this body's
+/// substitution records lands on the reference's **own** position in the
+/// document. A body carrying `AttributeReferences` (`pass:a[{missing}]`) is
+/// the case that matters: this call is that body's authoritative pass — no
+/// tree is seeded for it, so it is the one place its `attribute-missing`
+/// diagnostic is raised — and its warnings are carried out through
+/// `Parser::nested_authoritative_warnings` rather than discarded. Seeded from
+/// an unanchored `Span::new`, every one of them resolved to offset 0, however
+/// far into the document the passthrough sat.
+///
+/// The per-line spans are what make the location *precise* rather than merely
+/// in the right neighborhood: without them `apply_attributes` falls back to
+/// the whole-body span and every reference in the body reports at the body's
+/// start. They are built here the way block construction builds them (see
+/// [`Content::from_filtered_lines`](crate::content::Content::from_filtered_lines)),
+/// which is safe for a body that is not one: a retained span is only used when
+/// its text still equals the matched reference, so a body whose rendered lines
+/// have drifted from its source lines falls back rather than mislocating.
+pub(super) fn passthrough_text(
+    text: Span<'_>,
+    subs: &SubstitutionGroup,
+    parser: &Parser,
+) -> String {
+    let lines: Vec<&str> = text.data().split('\n').collect();
+    let mut line_spans = Vec::with_capacity(lines.len());
+    let mut offset = 0;
+
+    for line in &lines {
+        line_spans.push(text.slice(offset..offset + line.len()));
+
+        // Advance past the line and the '\n' that `split` consumed.
+        offset += line.len() + 1;
+    }
+
+    let mut content = Content::from_filtered_lines(text, &lines, line_spans);
     subs.apply(&mut content, parser, None);
     content.rendered_str().to_string()
 }

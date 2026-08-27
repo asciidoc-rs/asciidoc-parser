@@ -327,7 +327,11 @@ fn stem_expression_value(
             expr = expr[1..expr.len() - 1].to_string();
         }
 
-        return (passthrough_text(&expr, subs, parser), expr);
+        // Unanchored: `expr` is an owned copy the caller has already rewritten
+        // (unescaped `\]`, stripped `$` delimiters), so its bytes no longer
+        // line up with the document. A STEM body's substitution list records no
+        // warning to locate anyway — see `passthrough_text`.
+        return (passthrough_text(Span::new(&expr), subs, parser), expr);
     }
 
     let mut value = String::new();
@@ -342,7 +346,7 @@ fn stem_expression_value(
                     text = text.replace("\\]", "]");
                 }
 
-                value.push_str(&passthrough_text(&text, subs, parser));
+                value.push_str(&passthrough_text(Span::new(&text), subs, parser));
                 source.push_str(&text);
             }
 
