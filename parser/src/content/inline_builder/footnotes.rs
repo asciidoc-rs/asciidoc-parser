@@ -1,13 +1,14 @@
 //! The footnote substitution step.
 
 use super::{
+    fold_deferring_xrefs,
     macros::{emit_range_unescaping_brackets, image::range_has_no_opaque_piece},
     quotes::{Piece, build_match_string, source_slice, text_slice},
     special_chars::Masked,
 };
 use crate::{
     Parser, Span,
-    content::{INLINE_FOOTNOTE_MACRO, normalize_footnote_text},
+    content::INLINE_FOOTNOTE_MACRO,
     inlines::{Footnote, InlineNode},
     strings::CowStr,
 };
@@ -400,17 +401,16 @@ fn build_candidate_node<'src>(
 /// numbers footnotes over the same source in the same left-to-right order),
 /// so this never double-counts a registration; see the module's test helpers.
 ///
-/// The registered catalog `text` is a best-effort rendering of the raw
-/// bracket content (normalized, but not folded through a renderer — building
-/// the tree must not itself invoke one), so — like every other deferred
-/// registration in this module — a tree-built footnote's
-/// `Document::catalog().footnotes()` entry is not yet byte-faithful; only the
-/// returned *number*, this pass's one load-bearing side effect, is relied on.
+/// The registered catalog `text` is the footnote's **own subtree, folded** —
+/// see [`register_footnote_number`], which is where the entry a
+/// `Document::catalog().footnotes()` reader sees is now built, and why it can
+/// only be built here.
 ///
 /// # Content carrying an escaped closing bracket
 ///
 /// A content bracket may carry an escaped closing bracket (`\]`), which the
-/// string replacer unescapes to a literal `]` ([`normalize_footnote_text`]).
+/// string replacer unescapes to a literal `]`
+/// ([`normalize_footnote_text`](crate::content::macros::normalize_footnote_text)).
 /// The subtree carries it the same way: [`footnote_children`] emits the
 /// content through the reference-bearing families' own
 /// [`emit_range_unescaping_brackets`], which drops each backslash as a *gap*
@@ -458,12 +458,7 @@ fn build_footnote_node<'src>(
             Some(content) => {
                 // A defining occurrence that also carries an id.
                 let children = footnote_children(content.range(), s, pieces, nodes);
-                let number = register_footnote_number(
-                    parser,
-                    Some(id.as_ref()),
-                    &s[content.range()],
-                    location,
-                );
+                let number = register_footnote_number(parser, Some(id.as_ref()), &children, root);
 
                 Some(InlineNode::Footnote(Footnote {
                     id: Some(id),
@@ -500,7 +495,7 @@ fn build_footnote_node<'src>(
     let content = content_match?;
 
     let children = footnote_children(content.range(), s, pieces, nodes);
-    let number = register_footnote_number(parser, None, &s[content.range()], location);
+    let number = register_footnote_number(parser, None, &children, root);
 
     Some(InlineNode::Footnote(Footnote {
         id: None,
@@ -600,9 +595,8 @@ fn build_footnoteref_node<'src>(
     match content_range {
         Some(content_range) => {
             // A defining occurrence that also carries an id.
-            let children = footnote_children(content_range.clone(), s, pieces, nodes);
-            let number =
-                register_footnote_number(parser, Some(id.as_ref()), &s[content_range], location);
+            let children = footnote_children(content_range, s, pieces, nodes);
+            let number = register_footnote_number(parser, Some(id.as_ref()), &children, root);
 
             Some(InlineNode::Footnote(Footnote {
                 id: Some(id),
@@ -686,17 +680,17 @@ fn footnote_id_text<'src>(
 /// # The `\]` unescape
 ///
 /// A bracket's content may carry an **escaped closing bracket** (`\]`), which
-/// [`normalize_footnote_text`] — the string replacer's own normalization, and
-/// the one this pass registers the catalog `text` through — turns back into a
-/// literal `]`. The subtree must carry the same text, so the shared
-/// [`emit_range_unescaping_brackets`] drops each backslash as a *gap* in the
-/// ranges it emits: `footnote:[a \] b]` becomes the two `'src`-borrowing
-/// [`Text`](InlineNode::Text) children `a ` and `] b`, never an owned rebuild.
-/// Sharing the reference-bearing families' own helper is what keeps the two
-/// readings of "which backslashes pair off" from drifting; it is also why this
-/// form is no longer deferred (recognizing it once meant splicing a literal
-/// `]` into the middle of a `Text` piece, which nothing here could then
-/// express).
+/// [`normalize_footnote_text`](crate::content::macros::normalize_footnote_text)
+/// — the string replacer's own normalization, and the one this pass registers
+/// the catalog `text` through — turns back into a literal `]`. The subtree must
+/// carry the same text, so the shared [`emit_range_unescaping_brackets`] drops
+/// each backslash as a *gap* in the ranges it emits: `footnote:[a \] b]`
+/// becomes the two `'src`-borrowing [`Text`](InlineNode::Text) children `a `
+/// and `] b`, never an owned rebuild. Sharing the reference-bearing families'
+/// own helper is what keeps the two readings of "which backslashes pair off"
+/// from drifting; it is also why this form is no longer deferred (recognizing
+/// it once meant splicing a literal `]` into the middle of a `Text` piece,
+/// which nothing here could then express).
 fn footnote_children<'src>(
     range: std::ops::Range<usize>,
     s: &str,
@@ -713,21 +707,63 @@ fn footnote_children<'src>(
 /// Registers a footnote's defining occurrence with the parser, advancing the
 /// `footnote-number` counter and returning the assigned number — the one
 /// recognition side effect [`build_footnote_node`]'s doc comment explains this
-/// pass must perform. `raw_content` is normalized exactly as the string
-/// replacer normalizes it ([`normalize_footnote_text`]: trimmed, embedded
-/// newlines collapsed) before being registered as the catalog's best-effort
-/// `text`; no cross-reference placeholders are threaded through (the additive
-/// builder has none to give it — a `Ref{Xref}` is a node, not a placeholder),
-/// so `define_footnote` never builds a `FootnoteDeferred` for a tree-built
-/// footnote.
+/// pass must perform.
+///
+/// The catalog entry is built from the footnote's own `children`, folded
+/// through [`fold_deferring_xrefs`]: that fold yields, in one pass, the
+/// placeholder **template** the entry stores and the cross-reference
+/// **segments** that fill it, which is exactly the pair `define_footnote`
+/// turns into a
+/// [`FootnoteDeferred`](crate::content::FootnoteDeferred). The string
+/// replacer reaches the same pair from the other direction — it re-homes the
+/// block template's placeholders out of the already-substituted text it cut
+/// the footnote from
+/// ([`rehome_xref_placeholders`](crate::content::rehome_xref_placeholders)) —
+/// so a footnote's own `<<tgt>>` resolves on either side.
+///
+/// Folding the subtree is also what makes the entry's `text` byte-faithful at
+/// all: the raw bracket content this used to register is the *match string*,
+/// in which an already-recognized construct is one opaque `SPAN_PLACEHOLDER`
+/// codepoint, so `footnote:[see https://github.com[GitHub\]]` registered
+/// `"see \u{e0f0}"` where the string pipeline registers
+/// `"see <a href=\"https://github.com\">GitHub</a>"`.
+///
+/// # Why the anchor is `root`, not the macro's own span
+///
+/// `define_footnote` records where the *enclosing content* was written, not
+/// where the macro sits: the entry's location anchors an unresolved-reference
+/// warning raised much later, when the catalog resolves the footnote's own
+/// cross-references, and the string replacer passes its whole `self.source`
+/// there (paragraph granularity, matching how a non-footnote reference is
+/// anchored at its `Content` — see the field's own docs). `root` is that same
+/// span; it is what this pass already passes to
+/// [`Parser::record_builder_diagnostic`] for the two diagnostics it raises.
+/// The macro's own span is the *node's* `location`, a different question with
+/// a different answer.
+///
+/// # Normalization
+///
+/// [`normalize_footnote_text`](crate::content::macros::normalize_footnote_text)
+/// does three things to the string replacer's raw content: trims it, collapses
+/// each embedded newline to a space, and unescapes `\]` to `]`. The first two
+/// apply here unchanged — they are about the *text*, whichever pipeline
+/// produced it. The third does **not**: [`footnote_children`] already dropped
+/// each such backslash while emitting the subtree (see its doc comment), so
+/// re-applying the unescape here would be a second pass over an
+/// already-unescaped string.
 fn register_footnote_number(
     parser: &Parser,
     id: Option<&str>,
-    raw_content: &str,
-    location: Span<'_>,
+    children: &[InlineNode<'_>],
+    root: Span<'_>,
 ) -> String {
-    let text = normalize_footnote_text(raw_content);
-    parser.define_footnote(id, text, vec![], location)
+    let (template, xrefs) =
+        fold_deferring_xrefs(children, &*parser.renderer, &parser.render_context());
+
+    // Trim and collapse, but do not unescape — see the doc comment above.
+    let template = template.trim().replace('\n', " ");
+
+    parser.define_footnote(id, template, xrefs, root)
 }
 
 #[cfg(test)]
