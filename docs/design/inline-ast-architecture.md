@@ -1649,7 +1649,7 @@ Each phase is a reviewable unit with a clear exit gate.
 
   *Step 5d part 3 landed as (a `pass:` macro with an explicit substitution list → `Raw`, the last of 5d's
   four deferred forms):* the one form step 5a and part 4 both name as outstanding,
-  [`build_pass_macro_subs_value`](../../parser/src/content/inline_builder/passthrough_step.rs), is
+  [a `pass:` macro with an explicit substitution list](../../parser/src/content/inline_builder/passthrough_step.rs), is
   recognized — but not, in the end, via a richer node subtree. Prototyping that shape first (threading the
   resolved [`SubstitutionGroup::Custom`] steps through this module's own transducers, the way the legacy
   `x-` compatibility marker's body already does via [`apply_normal_subs`](../../parser/src/content/inline_builder/passthrough_step.rs))
