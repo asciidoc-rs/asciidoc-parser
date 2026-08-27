@@ -7539,10 +7539,10 @@ Each phase is a reviewable unit with a clear exit gate.
   byte-for-byte the same span for every fixture, so the rescue is behavior-preserving down to the
   offset — the bug is in how a body's warnings are located, and closing it means deciding whether such
   a warning should be *remapped* onto the body's position or *discarded* the way every other
-  owned-source substitution's is. That is its own change, and
-  [`a_rescued_passthrough_warning_keeps_the_location_it_always_had`](../../parser/src/content/passthroughs.rs)
-  pins the current answer (with a plain, non-passthrough control that *is* located exactly) so it stays
-  a decision rather than drifting.
+  owned-source substitution's is. That is its own change; the increment below takes it, and answers
+  *remap*. The "byte-for-byte the same span" claim held for every fixture reached for here but not
+  for all of them — the `pass:` macro whose own list includes `a` moves, which is what that increment
+  starts from.
 
   **A passthrough body's re-entry changed hands.** `passthrough_text` re-enters
   `SubstitutionGroup::apply` for a body carrying its own substitution list, and that re-entry now
@@ -7600,6 +7600,69 @@ Each phase is a reviewable unit with a clear exit gate.
   structural freeze — the three corpora that compare **trees and records** rather than HTML
   (`inline_recorder`, `inline_builder_recorder_parity`,
   `inline_builder_passthrough_record_parity`), which needs an `InlineNode` serialization.
+
+  *Step 6 landed as (a passthrough body's warnings, located):* the open question above, answered in
+  favor of **remapping**. A warning raised while substituting a passthrough body now points at the
+  reference the author wrote, not at the document start.
+
+  Review of the inversion filed this as an *escape*: the unguarded `Attrlist::parse` in
+  `PassthroughRestoreReplacer` sits inside the interval the nested authoritative pass drains, so
+  `pass:m[['{missing}']++x++]` under `attribute-missing=warn` should surface a mislocated
+  attribute-list diagnostic rescued as authoritative. Measuring against the inversion's parent said
+  otherwise, twice. That fixture raises no warning at all, on either side, under either mode. And
+  bracketing the `Attrlist::parse` the way its neighbour is bracketed changes no surfaced warning
+  anywhere: logging every warning that call records across the whole suite finds three, all with
+  `in_inline_build` false — recorded on the oracle's clone, discarded with it, never rescued. The
+  enclosing build's own discard already covers that site by construction, so the guard was left off
+  rather than added as unreachable defensive code with no test able to reach it.
+
+  The same measurement found a real divergence beside it. Adding `a` to a `pass:` macro's list is what
+  exposes it: `pass:m,a[['{alpha}']++x++ and {beta}]` reported `alpha` at offset 2 before the
+  inversion and at offset 0 after it, while the body's own `{beta}` stayed correctly at 30 on both
+  sides — and under `drop-line` the `alpha` warning was *absent* before and present after. Rendered
+  output is byte-identical either side; this is a diagnostics-only shift. Its cause is that the
+  warning changed which pass records it. Before the inversion the body's re-entry built a tree of its
+  own, and the builder's `attribute_refs` recorded the reference at its offset *within the body* (2 in
+  `['{alpha}'`) read as though it were a document offset. After it, `Parser::in_inline_build` stops
+  that nested build, so the body's string pass records instead — and, finding no source line to
+  correlate against, falls back to the whole-body span, i.e. offset 0.
+
+  **Both numbers were wrong**, which is what took restoring the older one off the table: `{alpha}`
+  sits at offset 11, and neither 2 nor 0 points at it. The single root cause is that
+  [`passthrough_text`](../../parser/src/content/inline_builder/passthrough_step.rs) seeded the body's
+  `Content` from an unanchored `Span::new`, so a body's references had no document position to be
+  located against by *either* pass. It now takes the body's own `Span` and carries per-line spans the
+  way block construction does, which is what makes the location precise rather than merely in the
+  right neighborhood — without them `apply_attributes` falls back to the whole-body span and every
+  reference in a body reports at the body's start. Retained spans are only used when the retained text
+  still equals the matched reference, so a body whose rendered lines have drifted from its source
+  lines falls back rather than mislocating; and a body reached through an unescaped `\]` copy, whose
+  bytes no longer line up with the document, keeps the unanchored form deliberately.
+
+  Every fixture now reports the reference's own offset: `alpha` at 11 and `beta` at 30 in the shape
+  above, `pass:a[{missing}]` at 7, and — the one that says the two paths agree rather than both merely
+  moving — `pass:a[{missing}]` on the third line of a document at `(3, 33)`, where the plain
+  non-passthrough control has always been `(3, 26)`.
+  [`a_rescued_passthrough_warning_points_at_the_reference_itself`](../../parser/src/content/passthroughs.rs)
+  pins that pair, replacing the test that pinned the old answer, and
+  [`a_nested_attributed_passthrough_locates_each_reference_separately`](../../parser/src/content/passthroughs.rs)
+  covers the nested-attributed shape nothing covered before — the gap the shift went unnoticed
+  through — with two references in one source so each is checked on its own rather than one offset
+  happening to be right.
+
+  Audit: **53 rows either side, 0 new and 0 closed**. The count does not match the 37 recorded for the
+  inversion because the audit patch is rebuilt by hand each time and this one's predicate differs; the
+  invariant it exists to check is the set comparison, and that was run twice with two independently
+  shaped patches (the canonical fold-before-`set_inlines`, and a fold-versus-`rendered` compare at the
+  assignment itself, 61 rows) with identical sets both times.
+
+  Coverage is diff-neutral in substance: missed **lines** are unchanged in all three touched files,
+  and the single added missed region sits on an already-uncovered line inside
+  `build_pass_macro_subs_value` — a function with no callers, kept alive only by the intra-doc links
+  that reference its rationale.
+
+  *What still defers* is unchanged from the note above: the deletion itself, and the structural
+  freeze.
 
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
@@ -9248,6 +9311,18 @@ Each phase is a reviewable unit with a clear exit gate.
        `suppress_recognition_side_effects` early returns, now unreachable because the seam was that
        window's only setter — it is vestigial as of here and goes whole with `run_pipeline`. See the
        step's own "landed as" note above.
+
+     - ✅ **a passthrough body's warnings are located against the body's own span.** The
+       follow-up the inversion's review opened, and the one place its swap moved a diagnostic:
+       `pass:m,a[['{alpha}']++x++ and {beta}]` reported `alpha` at offset 2 before and 0 after
+       (absent before, present after, under `drop-line`), while `{beta}` stayed at 30 on both sides.
+       Neither number pointed at `{alpha}`, which sits at 11 — the body was substituted from an
+       unanchored `Span::new`, so *both* passes had nothing to locate against. `passthrough_text`
+       now takes the body's own `Span` with per-line spans, and every reference reports where it is
+       written. The escape the review actually named — the unguarded `Attrlist::parse` — does not
+       reach the surfaced set: every warning it records across the suite lands on the oracle's
+       clone. Rendered output is unchanged; this is diagnostics only. See the step's own "landed as"
+       note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

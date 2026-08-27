@@ -1075,27 +1075,25 @@ mod tests {
     }
 
     #[test]
-    fn a_rescued_passthrough_warning_keeps_the_location_it_always_had() {
-        // The rescue above carries a warning across the build's discard
-        // *unchanged*, offset included — which is worth pinning, because the
-        // offset it carries is already wrong and has been all along.
+    fn a_rescued_passthrough_warning_points_at_the_reference_itself() {
+        // The rescue above carries a warning across the build's discard; this
+        // pins *where* the warning it carries points.
         //
-        // `passthrough_text` substitutes a body as **owned** text, so a warning
-        // the body raises is located against that text rather than against the
-        // document: it comes out at offset 0 however far into the document the
-        // passthrough sits. That is a bug in how a body's warnings are located,
-        // not in the rescue — `origin/inline-ast` reports byte-for-byte the
-        // same span for every fixture here — and closing it means deciding
-        // whether such a warning should be *remapped* onto the body's position
-        // or *discarded* the way every other owned-source substitution's is.
-        // That is its own change; this test exists so the answer is a decision
-        // rather than a drift, and so that the rescue's own claim
-        // (behavior-preserving, offsets and all) is checked rather than
-        // asserted.
+        // It used to point at offset 0 — anywhere the passthrough sat.
+        // `passthrough_text` seeded the body's `Content` from an unanchored
+        // `Span::new`, so a reference inside the body had no position in the
+        // document to be located against and every such warning collapsed onto
+        // the document start. `origin/inline-ast` before this branch's step 6
+        // inversion was mislocated too, differently: the body's warning came
+        // from the *builder* rather than from this authoritative string pass,
+        // and reported the reference's offset within the body (2 for
+        // `['{alpha}'`) read as though it were a document offset.
         //
-        // The plain, non-passthrough control is what says the mislocation
-        // belongs to the body path specifically: the same reference outside a
-        // passthrough is located exactly.
+        // Neither number pointed at the reference, so restoring the older one
+        // was not on the table; the body is now substituted against its own
+        // source span and the warning lands on the reference, exactly as the
+        // plain non-passthrough control below always has. That control is what
+        // says the two paths agree rather than merely both moving.
         let mut parser = Parser::default().with_intrinsic_attribute(
             "attribute-missing",
             "warn",
@@ -1111,8 +1109,8 @@ mod tests {
 
         assert_eq!(
             located,
-            [(1, 0)],
-            "a passthrough body's warning moved; it has always pointed at the document start"
+            [(3, 33)],
+            "a passthrough body's warning must point at the reference in the body"
         );
 
         let mut parser = Parser::default().with_intrinsic_attribute(
@@ -1133,6 +1131,52 @@ mod tests {
             [(3, 26)],
             "a plain missing reference must still be located exactly"
         );
+    }
+
+    #[test]
+    fn a_nested_attributed_passthrough_locates_each_reference_separately() {
+        // The shape nothing covered, and the gap the step 6 inversion's own
+        // offset shift went unnoticed through: a `pass:` macro whose list
+        // includes `a`, whose body is itself an attribute-listed inline
+        // passthrough. The macro's body stops at the first `]`, so the body
+        // substituted here is `['{alpha}'` — the inner passthrough's attribute
+        // list, reached through the body path rather than through
+        // `PassthroughRestoreReplacer`'s own stored-attrlist path.
+        //
+        // Two references, one inside that body and one after it, so the
+        // assertion says each is located on its own rather than that some
+        // single offset happens to be right. Byte offsets rather than a
+        // matched substring because the whole point is the position: 11 is
+        // `{alpha}` and 30 is `{beta}` in the source below.
+        for mode in ["warn", "drop-line"] {
+            let mut parser = Parser::default().with_intrinsic_attribute(
+                "attribute-missing",
+                mode,
+                ModificationContext::Anywhere,
+            );
+
+            let doc = parser.parse("pass:m,a[['{alpha}']++x++ and {beta}]");
+
+            let located: Vec<_> = doc
+                .warnings()
+                .map(|warning| (warning.warning.clone(), warning.source.byte_offset()))
+                .collect();
+
+            assert_eq!(
+                located,
+                [
+                    (
+                        WarningType::SkippingReferenceToMissingAttribute("alpha".to_string()),
+                        11
+                    ),
+                    (
+                        WarningType::SkippingReferenceToMissingAttribute("beta".to_string()),
+                        30
+                    ),
+                ],
+                "each reference must be located where it is written, under {mode}"
+            );
+        }
     }
 
     #[test]
