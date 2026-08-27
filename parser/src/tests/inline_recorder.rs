@@ -872,7 +872,9 @@ fn first_simple_rendered<'a>(doc: &'a crate::Document<'a>) -> &'a str {
 
 /// Every construct whose tree the builder can produce without consulting a
 /// renderer — which, after the two passthrough-form increments, is everything
-/// except the two shapes that run an arbitrary substitution list.
+/// except the two shapes that run an arbitrary substitution list and the
+/// footnote, whose catalog entry the build has to *render* to register (see
+/// [`a_footnotes_catalog_entry_is_rendered_while_building`]).
 const RENDERER_FREE_CONSTRUCTS: &[&str] = &[
     "a < b",
     "++a < b++",
@@ -885,7 +887,6 @@ const RENDERER_FREE_CONSTRUCTS: &[&str] = &[
     "[x-]++a < b++",
     "image:x.png[a < b]",
     "link:x.html[a < b]",
-    "footnote:[a < b]",
     "<<tgt,a < b>>",
     "kbd:[Ctrl+T] and a < b",
     "a < b -- c (C) d",
@@ -976,6 +977,44 @@ fn the_three_non_specialcharacters_bodies_still_consult_the_renderer() {
             "expected {source:?} to still consult the renderer while building, got {calls}"
         );
     }
+}
+
+#[test]
+fn a_footnotes_catalog_entry_is_rendered_while_building() {
+    // The fourth build-time renderer consumer, and the only one that is not a
+    // frozen-value debt: a footnote's *catalog entry*.
+    //
+    // Every other recognition side effect on this branch is staged and
+    // replayed after the build, which is what lets the build stay
+    // unobservable. A footnote's cannot be. Its entry is registered at
+    // recognition — that is where the `footnote-number` counter advances, and
+    // where a later `footnote:id[]` in the same content has to find the id
+    // already registered — and the entry's payload is a *rendered* string, so
+    // registering it and rendering it are one act. The string pipeline's
+    // replacer does the same thing at the same moment, cutting already-
+    // rendered bytes out of the string it is substituting.
+    //
+    // Pinned rather than merely allowed: a build that stopped rendering here
+    // would go back to registering the raw match string, in which an
+    // already-recognized construct is one opaque placeholder codepoint — the
+    // divergence `inline_builder_side_effect_parity`'s footnote sweep exists
+    // to catch.
+    let calls = renderer_calls_while_building("footnote:[a < b]");
+
+    assert!(
+        calls > 0,
+        "expected a footnote's entry to be rendered while building, got {calls} renderer calls"
+    );
+
+    // A footnote whose text needs no escaping needs no renderer either: the
+    // fold routes only `<`, `>` and `&` through it. Without this the assertion
+    // above would pass for any footnote at all, and would keep passing if the
+    // fold were replaced by something that merely touched the renderer once.
+    assert_eq!(
+        renderer_calls_while_building("footnote:[plain text]"),
+        0,
+        "a footnote with nothing to escape must not consult the renderer"
+    );
 }
 
 #[test]

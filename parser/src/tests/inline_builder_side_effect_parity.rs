@@ -1,16 +1,27 @@
 //! A corpus-wide differential harness for the builder's recognition **side
 //! effects**.
 //!
-//! Recognizing a construct is not only about the bytes it renders. Four
+//! Recognizing a construct is not only about the bytes it renders. Five
 //! passes of the string pipeline also *write down* what they saw: an
 //! `image:` macro records its target in the asset catalog, a `link:`/`mailto:`
 //! macro and every auto-linked URL or address record theirs, an inline anchor
-//! (and a bibliography entry) registers its id in the reference catalog, and
-//! an image whose `link=` names a dangerous scheme records a warning. Design
-//! §5.2's step 6 has to replay all four from the tree, exactly once per parse
-//! and in the string pipeline's own pass order, which is what
+//! (and a bibliography entry) registers its id in the reference catalog, an
+//! image whose `link=` names a dangerous scheme records a warning, and a
+//! `footnote:`/`footnoteref:` macro registers its numbered entry — text and
+//! deferred cross-references included — in the footnote catalog. Design
+//! §5.2's step 6 has to replay the first four from the tree, exactly once per
+//! parse and in the string pipeline's own pass order, which is what
 //! [`apply_macro_side_effects`](crate::content::inline_builder::apply_macro_side_effects)
 //! is staged to do.
+//!
+//! The **footnote** catalog is the one that cannot be staged, and the builder
+//! has always written it during the build: a footnote's number *is* its
+//! rendered marker, and a second `footnote:id[]` in the same content has to
+//! find the first one's id already registered. What the entry carried was
+//! another matter — until this increment it was the raw match string, in which
+//! an already-recognized construct is one opaque placeholder codepoint. It is
+//! compared here for the same reason the other four are (it is what the
+//! pipeline wrote down), but against the build itself rather than a replay.
 //!
 //! Until now it was pinned only by hand-written fixtures inside its own
 //! module — one per ordering rule it has to honor. The blast-radius
@@ -35,7 +46,7 @@ use crate::{
         Content, SubstitutionGroup,
         inline_builder::{apply_macro_side_effects, build},
     },
-    document::RefType,
+    document::{Footnote, RefType},
     parser::ModificationContext,
     warnings::WarningType,
 };
@@ -55,6 +66,11 @@ struct SideEffects {
 
     /// Substitution warnings, in the order the one shared list received them.
     warnings: Vec<WarningType>,
+
+    /// Footnote catalog entries, in registration (document) order. Compared
+    /// whole — index, id, text, deferred cross-references and location — since
+    /// every field of one is written by the recognizing pass.
+    footnotes: Vec<Footnote>,
 }
 
 /// Snapshots everything `parser` has had written into it, draining the
@@ -64,7 +80,7 @@ fn snapshot(parser: &Parser) -> SideEffects {
     // warnings buffer), so they do not conflict; the catalog's is scoped
     // anyway, since its `Ref` outliving the read would be a hazard for any
     // later caller.
-    let (images, links, refs) = {
+    let (images, links, refs, footnotes) = {
         let catalog = parser.catalog();
 
         (
@@ -84,6 +100,7 @@ fn snapshot(parser: &Parser) -> SideEffects {
                     )
                 })
                 .collect(),
+            catalog.footnotes().to_vec(),
         )
     };
 
@@ -91,6 +108,7 @@ fn snapshot(parser: &Parser) -> SideEffects {
         images,
         links,
         refs,
+        footnotes,
         warnings: parser
             .drain_substitution_warnings_since(0)
             .into_iter()
@@ -164,6 +182,7 @@ impl SideEffects {
             && self.links.is_empty()
             && self.refs.is_empty()
             && self.warnings.is_empty()
+            && self.footnotes.is_empty()
     }
 }
 
@@ -308,7 +327,183 @@ const CORPUS: &[&str] = &[
     "anchor:a[see image:t.png[T]] and image:u.png[U]",
     "anchor:a[see link:t.html[T]] and link:u.html[U]",
     "[[[b,see image:t.png[T]]]] and image:u.png[U]",
+    //
+    // The **footnote** catalog. Unlike the four staged lists, an entry here is
+    // written by the build itself, and it carries a *rendered* payload — the
+    // footnote's text, plus the placeholder template and cross-reference
+    // segments a `<<tgt>>` inside it defers. Every fixture below registers an
+    // entry, so a build that stopped rendering the subtree (registering the
+    // raw match string, in which an already-recognized construct is one opaque
+    // placeholder codepoint) fails on the first of them.
+    "A footnote:[a plain note] here.",
+    "A footnote:[  spaced\nover lines  ] here.",
+    "A footnote:[a \\] bracket] here.",
+    "A footnote:[a & b < c > d] here.",
+    "A footnote:[&copy; and \\&amp;] here.",
+    "A footnote:[a -- b (C) c] here.",
+    "A footnote:[{logo} expanded] here.",
+    // A construct already recognized when the footnote is: the whole reason
+    // the entry has to be folded rather than sliced out of the match string.
+    "A footnote:[see https://github.com[GitHub]] here.",
+    "A footnote:[an image:x.png[Alt] inline] here.",
+    "A footnote:[an icon:home[] inline] here.",
+    "A footnote:[mailto:a@b.com[write]] here.",
+    "A footnote:[bare https://example.org here] here.",
+    "A footnote:[`mono` and #hl# spans] here.",
+    "A footnote:[kbd:[Ctrl+T]] here.",
+    "A footnote:[btn:[OK] and menu:File[Save]] here.",
+    "A footnote:[an [[anchor]] inside] here.",
+    // The deferred half: a cross-reference inside a footnote is re-homed out
+    // of the block's template onto the footnote's own, so these pin the
+    // template *and* the segment list, in placeholder order.
+    "A footnote:[see <<tgt>>] here.",
+    "A footnote:[see <<tgt,the target>>] here.",
+    "A footnote:[see <<tgt,*bold* text>>] here.",
+    "A footnote:[<<a>> then <<b>> then <<c>>] here.",
+    "A footnote:[<<a>>\nand <<b>>] here.",
+    "A footnote:[*<<tgt>>*] here.",
+    "A footnote:[a ((term with <<tgt>>)) inside] here.",
+    "A footnote:[anchor:a[Ref <<tgt>>] inside] here.",
+    "A footnote:[xref:tgt[label]] here.",
+    "A footnote:[xref:doc.adoc#sec[]] here.",
+    "A footnote:[<<tgt,>>] here.",
+    "A footnote:[\\<<tgt>> escaped] here.",
+    // A footnote beside one that defers nothing, so a template spliced onto
+    // the wrong entry shows up as a mismatch rather than as a shifted index.
+    "One footnote:[<<a>>] and another footnote:[plain] here.",
+    // Ids: a defining occurrence, a later reference reusing its number, and
+    // the deprecated spelling that packs both into one bracket.
+    "First footnote:id2[<<b>>] then footnote:id2[] again.",
+    // The deprecated spelling. Its text stays plain here on purpose: outside
+    // compatibility mode this form also raises a deprecation warning quoting
+    // the *matched macro*, and the two pipelines quote two different
+    // placeholder alphabets for a construct inside it — a neighbouring gap in
+    // the warning's payload, not in the entry, which
+    // `a_compat_mode_footnoteref_registers_what_the_string_pipeline_does`
+    // steps around by turning the warning off.
+    "A footnoteref:[fid,text with a plain note] here.",
+    "A footnoteref:[fid] alone.",
 ];
+
+/// The deprecated `footnoteref:` form's own configured pair, with
+/// `compat-mode` set so the deprecation warning is not raised.
+///
+/// The warning is what keeps a construct-bearing `footnoteref:` out of
+/// [`CORPUS`]: it quotes the matched macro, and each pipeline quotes it out of
+/// its own haystack, in which an already-recognized construct is a placeholder
+/// — `\u{e000}0\u{e001}` (a deferred cross-reference) on the string side,
+/// `\u{e0f0}` (an opaque piece) on the tree's. That is a divergence in the
+/// *warning's payload*, and one the tree cannot close from its side: it has no
+/// string haystack to quote. Turning the warning off is what lets the
+/// registration underneath it be compared, which is this increment's subject.
+fn compat_mode_side_effects(source: &str) -> (SideEffects, SideEffects) {
+    side_effects_with(source, || {
+        corpus_parser().with_intrinsic_attribute("compat-mode", "", ModificationContext::Anywhere)
+    })
+}
+
+#[test]
+fn a_compat_mode_footnoteref_registers_what_the_string_pipeline_does() {
+    for source in [
+        "A footnoteref:[fid,text with <<tgt>>] here.",
+        "A footnoteref:[fid,see https://github.com[GitHub]] here.",
+        "A footnoteref:[fid,*bold* and <<a>> and <<b>>] here.",
+        // A trailing comma is an empty *defining* text, not the no-comma
+        // bare-reference shape (which registers nothing, and which `CORPUS`
+        // already covers).
+        "A footnoteref:[fid,] with an empty text.",
+        "First footnoteref:[fid,<<a>>] then footnoteref:[fid] again.",
+    ] {
+        let (golden, builder) = compat_mode_side_effects(source);
+
+        assert_eq!(
+            golden, builder,
+            "the deprecated footnote spelling diverged for {source:?}"
+        );
+
+        assert!(
+            !golden.footnotes.is_empty(),
+            "fixture registered no footnote: {source:?}"
+        );
+    }
+}
+
+#[test]
+fn two_shapes_where_a_tree_built_footnote_entry_still_diverges() {
+    // Pinned rather than left to be rediscovered. Neither is a gap this
+    // increment opened — the entry used to be the raw match string, which
+    // diverged for *every* fixture above — and neither is one it can close.
+
+    // 1. A passthrough (or a STEM expression) inside a footnote. The string
+    //    pipeline restores a passthrough *after* the macros step, over the whole
+    //    block string — by which time the footnote's text has already been cut out
+    //    of it, so the entry keeps a raw passthrough sentinel that no later pass
+    //    will ever replace. It is one of design §4.2's three sentinel systems
+    //    leaking into public API, and the tree simply has no sentinels: the
+    //    passthrough is a node, so folding the subtree yields the restored text.
+    //    The tree is *right* here and the string pipeline is wrong, which is why
+    //    this is pinned as a divergence rather than fixed on the tree's side to
+    //    match.
+    for (source, string_side, tree_side) in [
+        (
+            "A footnote:[a +++<b>raw</b>+++ passthrough] here.",
+            "a \u{96}0\u{97} passthrough",
+            "a <b>raw</b> passthrough",
+        ),
+        ("A footnote:[pass:[<x>]] here.", "\u{96}0\u{97}", "<x>"),
+        (
+            "A footnote:[stem:[x < y]] here.",
+            "\u{96}0\u{97}",
+            "\\$x &lt; y\\$",
+        ),
+    ] {
+        let (golden, builder) = side_effects(source);
+
+        assert_eq!(
+            golden.footnotes.first().map(|f| f.text.as_str()),
+            Some(string_side),
+            "the string pipeline stopped leaking a sentinel for {source:?}"
+        );
+
+        assert_eq!(
+            builder.footnotes.first().map(|f| f.text.as_str()),
+            Some(tree_side),
+            "the tree stopped restoring the passthrough for {source:?}"
+        );
+    }
+
+    // 2. A cross-reference inside a **link's display text**. The builder does not
+    //    recognize one there at all — the link family escapes its text rather than
+    //    substituting into it — so the tree holds `CharRef` leaves where the string
+    //    pipeline holds a deferred reference. That is a recognition gap in the
+    //    *link* family, which shows identically outside any footnote (`A
+    //    link:x.html[<<tgt>>] here.` renders `&lt;&lt;tgt&gt;&gt;` in the flow
+    //    either way it is reached); the footnote entry is only where it becomes
+    //    visible in a side effect.
+    let (golden, builder) = side_effects("A footnote:[link:x.html[<<tgt>>]] here.");
+
+    assert_eq!(
+        golden.footnotes.first().map(|f| f.text.as_str()),
+        Some("<a href=\"x.html\"><a href=\"#tgt\">[tgt]</a></a>")
+    );
+
+    assert_eq!(
+        builder.footnotes.first().map(|f| f.text.as_str()),
+        Some("<a href=\"x.html\">&lt;&lt;tgt&gt;&gt;</a>")
+    );
+
+    assert!(
+        golden
+            .footnotes
+            .first()
+            .is_some_and(|f| f.deferred.is_some())
+            && builder
+                .footnotes
+                .first()
+                .is_some_and(|f| f.deferred.is_none()),
+        "the link family started recognizing a cross-reference in its text"
+    );
+}
 
 /// A bibliography entry is not a plain fixture: the string pipeline recognizes
 /// `[[[id]]]` only inside a bibliography list item, which is parser state
@@ -359,9 +554,9 @@ fn the_sweep_reaches_every_list_a_recognition_pass_writes_to() {
     // that each of the four lists `apply_macro_side_effects` composes is
     // actually reached, so dropping a whole family from the corpus would fail
     // here rather than quietly narrow the sweep.
-    let (images, links, refs, warnings) = CORPUS.iter().fold(
-        (0usize, 0usize, 0usize, 0usize),
-        |(images, links, refs, warnings), source| {
+    let (images, links, refs, warnings, footnotes, deferred) = CORPUS.iter().fold(
+        (0usize, 0usize, 0usize, 0usize, 0usize, 0usize),
+        |(images, links, refs, warnings, footnotes, deferred), source| {
             let (golden, _) = side_effects(source);
 
             (
@@ -369,6 +564,13 @@ fn the_sweep_reaches_every_list_a_recognition_pass_writes_to() {
                 links + golden.links.len(),
                 refs + golden.refs.len(),
                 warnings + golden.warnings.len(),
+                footnotes + golden.footnotes.len(),
+                deferred
+                    + golden
+                        .footnotes
+                        .iter()
+                        .filter(|footnote| footnote.deferred.is_some())
+                        .count(),
             )
         },
     );
@@ -377,6 +579,16 @@ fn the_sweep_reaches_every_list_a_recognition_pass_writes_to() {
     assert!(links > 0, "no fixture registered a link");
     assert!(refs > 0, "no fixture registered an id");
     assert!(warnings > 0, "no fixture recorded a warning");
+    assert!(footnotes > 0, "no fixture registered a footnote");
+
+    // The deferred half of a footnote entry is its own reachability question:
+    // a corpus that registered footnotes but none carrying a cross-reference
+    // would compare `None` against `None` and never exercise the template or
+    // the segment list at all.
+    assert!(
+        deferred > 0,
+        "no fixture registered a footnote deferring a cross-reference"
+    );
 }
 
 /// The `attribute-missing` diagnostic's own configured pair: the mode is

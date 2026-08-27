@@ -8,7 +8,7 @@ pub use content::Content;
 pub(crate) use content::{
     DeferredParts, FootnoteDeferred, OwnedTitle, XrefSegment, fold_resolved_title,
     rehome_xref_placeholders, render_xref_template, resolved_destinations, sanitize_title,
-    template_partition,
+    template_partition, xref_segment_from_node,
 };
 // The two tree walks behind `Content::set_tree_xrefs`, which calls them
 // directly. Re-exported for the differential corpus that compares what they
@@ -33,8 +33,8 @@ pub(crate) use macros::{
     INLINE_ANCHOR, INLINE_BIBLIO_ANCHOR, INLINE_EMAIL, INLINE_FOOTNOTE_MACRO, INLINE_IMAGE_MACRO,
     INLINE_INDEXTERM, INLINE_KBD_BTN_MACRO, INLINE_LINK, INLINE_LINK_MACRO, INLINE_MENU_MACRO,
     INLINE_XREF, NormalizedCaps, URI_SNIFF, basename, document_xrefstyle, encode_uri_component,
-    extract_attributes_from_text, normalize_footnote_text, normalize_index_text,
-    normalize_text_lf_escaped_bracket, split_kbd_keys, strip_see_and_seealso,
+    extract_attributes_from_text, normalize_index_text, normalize_text_lf_escaped_bracket,
+    split_kbd_keys, strip_see_and_seealso,
 };
 
 mod xref_target;

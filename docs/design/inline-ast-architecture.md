@@ -1218,7 +1218,10 @@ Each phase is a reviewable unit with a clear exit gate.
     The registered catalog `text` is a best-effort normalized rendering of the raw bracket content, not
     a fold (building the tree must not itself invoke a renderer), so — like every other deferred
     registration in this module — a tree-built footnote's `Document::catalog().footnotes()` entry is
-    not yet byte-faithful; only the returned *number* is relied on.
+    not yet byte-faithful; only the returned *number* is relied on. Both halves of that — the
+    approximate `text` and the premise behind it — held at the time and were closed by a step 6 prep
+    below, which finds the entry is a *required* side effect whose payload is a rendered string, so
+    it is the one thing a build has to fold.
 
   Two forms are deferred, each documented and pinned by a divergence test: the deprecated
   `footnoteref:[id,text]` / `footnoteref:[id]` form (which packs its id and text into one bracket, split
@@ -7387,6 +7390,100 @@ Each phase is a reviewable unit with a clear exit gate.
   segments. It is testable ahead of the inversion through the same side-effect parity harness,
   which drives the builder directly and so can see what the clone registers.
 
+  *Step 6 landed as (the footnote catalog entry, folded from its own subtree):* the probe's other
+  root cause, and the last thing between here and the inversion.
+
+  [`register_footnote_number`](../../parser/src/content/inline_builder/footnotes.rs) now takes the
+  footnote's `children` instead of its raw bracket text, and builds the catalog entry by **folding
+  that subtree**. What it registered before was the *match string*, in which an already-recognized
+  construct is one opaque `SPAN_PLACEHOLDER` codepoint: `footnote:[see https://github.com[GitHub]]`
+  registered `"see \u{e0f0}"` where the string pipeline registers
+  `"see <a href=\"https://github.com\">GitHub</a>"`. Invisible today only because the registration
+  lands on the discarded clone.
+
+  **The mechanism is a second mode axis on the fold.** `fold.rs` already threads
+  `Footnotes::Marked`/`Stripped` — "does this fold write a footnote's in-flow marker?" — for the
+  same underlying reason: a tree is folded to more than one string, and which one is wanted is a
+  question about node kinds rather than about bytes. `Xrefs::Rendered`/`Deferred(&mut Vec<XrefSegment>)`
+  is the same shape for cross-references. Under `Deferred`, `fold_xref` writes
+  `Content::xref_placeholder(n)` and pushes `xref_segment_from_node(...)` instead of rendering, so
+  the new entry point [`fold_deferring_xrefs`](../../parser/src/content/inline_builder/fold.rs)
+  yields the placeholder **template** and the segment list **in one pass**, in matching order, which
+  is exactly the pair `define_footnote` turns into a `FootnoteDeferred`. The string replacer reaches
+  the same pair from the other direction — it re-homes the block template's placeholders out of the
+  already-substituted text it cut the footnote from — so a footnote's own `<<tgt>>` now resolves on
+  either side. Reusing `xref_segment_from_node`, which the block-level walk already uses, is what
+  keeps the two readings of "what does this node defer?" from drifting.
+
+  Refolding the subtree *after* resolution was considered and rejected: `Footnote::resolve_references`
+  runs on the **catalog entry**, driven from the catalog, with no access to the tree — it would need
+  whole new plumbing. Registration is also the last moment the subtree is final;
+  `apply_post_replacements` descends into a `Styled`/`Ref` child but not into a `Footnote`'s, and the
+  string pipeline agrees because the footnote's text is out of the flat string by then.
+
+  **The cost is a documented exception to an invariant, and it is not optional.** Building the tree
+  is otherwise unobservable — `inline_recorder`'s
+  `building_the_tree_does_not_consult_the_documents_renderer` measures that with a stateful
+  renderer — and this is the first fold that runs *during* a build. It cannot be avoided: a
+  footnote's catalog entry is a **required** recognition side effect (the same reason its number is;
+  a second `footnote:id[]` in the same content has to find the first one's id already registered),
+  and the entry's payload is a rendered string, so registering it and rendering it are one act. The
+  string pipeline does exactly the same thing at exactly the same moment. It adds no *second*
+  rendering: `fold_footnote` writes only the in-flow marker, never the children, so a footnote's
+  subtree is folded exactly once per parse either way. `footnote:[a < b]` moves out of
+  `RENDERER_FREE_CONSTRUCTS` into a new pinned test that also asserts the complement
+  (`footnote:[plain text]` still consults nothing), so the exception is a decision rather than a gap.
+
+  **The harness found a bug nothing else could see.** Extending `SideEffects` in
+  [`inline_builder_side_effect_parity`](../../parser/src/tests/inline_builder_side_effect_parity.rs)
+  to carry the footnote catalog — compared *whole*, including `location`, which `Footnote`'s own
+  `Debug` omits — failed immediately on a fixture whose text matched byte-for-byte: the builder was
+  anchoring the entry at the **macro's** span where the string replacer anchors it at the enclosing
+  **content's**. That location is what a footnote's unresolved-reference warning is reported
+  against, so it was inert only while tree-built footnotes never carried a `FootnoteDeferred`. It
+  now passes `root`, the same span this pass already hands
+  `record_builder_diagnostic`. The sweep adds 32 footnote fixtures plus a `compat-mode` pair for the
+  deprecated `footnoteref:` spelling, and guards reachability of the deferred half specifically (a
+  corpus registering footnotes but none carrying a cross-reference would compare `None` against
+  `None`).
+
+  **Two entry-level divergences survive, both pinned.** A passthrough or a STEM expression inside a
+  footnote: the string pipeline restores a passthrough *after* the macros step, over the whole block
+  string, by which time the footnote's text has been cut out of it — so its entry keeps a raw
+  passthrough sentinel that nothing will ever replace (`\u{96}0\u{97}` reaching public API, one of
+  §4.2's three sentinel systems leaking). The tree has no sentinels and folds the restored text, so
+  here the **tree is right and the string pipeline is wrong**, which is why it is pinned as a
+  divergence rather than matched. And a cross-reference inside a *link's display text*, which the
+  builder does not recognize at all — a pre-existing gap in the link family that shows identically
+  outside any footnote, and which the entry is merely where it becomes visible in a side effect. A
+  third, kept out of the corpus rather than pinned: outside compat mode a construct-bearing
+  `footnoteref:` raises a deprecation warning quoting the matched macro, and each pipeline quotes
+  its own placeholder alphabet — a divergence in the warning's payload that the tree cannot close
+  from its side, since it has no string haystack to quote.
+
+  Audit: 37 rows either side, 0 new and 0 closed. Five rows differ only in the test-only Strategy-A
+  recorder's PUA event-index digits, which shift because the build-time fold records events through
+  that renderer too; normalizing those digits away collapses both sets to the same 36 lines with
+  nothing added or removed. Coverage exactly diff-neutral on all three changed production files
+  (`content.rs` 21/8, `fold.rs` 3/3, `footnotes.rs` 5/3 — missed regions / missed lines, identical
+  on both sides). Six sabotages, each failing a distinct set: discarding the captured segments,
+  shifting the placeholder index by one (which reaches a `debug_assert!` in `render_template` and
+  fails twelve suites), dropping the `trim`, dropping the newline collapse, re-anchoring at the
+  macro span, and folding the deferred reference's children into the flow after its placeholder.
+  Removing the fold entirely fails all four new or extended tests at once. A seventh could not be
+  written: `fold_anchor` takes no sink at all, so an anchor's reference text — which reaches
+  `render_anchor` rather than `out`, and would therefore contribute a segment with no placeholder —
+  is structurally prevented from deferring rather than merely told not to.
+
+  *What still defers is the inversion itself* — giving the string pipeline the counter-safe clone
+  and the builder the real parser. Both of the probe's root causes are now closed, so re-running it
+  is the next increment's first act. After that: deleting `run_pipeline`, the three sentinel
+  systems, and the `with_inline_tree` flag; and the structural freeze the recording increment left
+  owed — the three corpora that compare **trees and records** rather than HTML
+  (`inline_recorder`, `inline_builder_recorder_parity`,
+  `inline_builder_passthrough_record_parity`), which needs an `InlineNode` serialization rather than
+  a wider sweep of the HTML recording mechanism.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -8992,6 +9089,29 @@ Each phase is a reviewable unit with a clear exit gate.
        either side, 0 new and 0 closed; coverage exactly diff-neutral on both changed production
        files. What still defers is the footnote catalog entry — the probe's other root cause, and
        the last thing before the inversion. See the step's own "landed as" note above.
+
+     - ✅ **the footnote catalog entry, folded from its own subtree.** The probe's other root
+       cause, and the last thing before the inversion.
+       [`register_footnote_number`](../../parser/src/content/inline_builder/footnotes.rs) takes the
+       footnote's `children` rather than its raw bracket text and folds them, so the entry stops
+       being the *match string* (in which an already-recognized construct is one opaque
+       `SPAN_PLACEHOLDER` codepoint) and becomes the same bytes the string replacer captures out of
+       its already-substituted haystack. The mechanism is a **second mode axis** on the fold —
+       `Xrefs::Rendered`/`Deferred`, alongside the existing `Footnotes::Marked`/`Stripped` — under
+       which `fold_xref` writes a placeholder and pushes `xref_segment_from_node(...)` instead of
+       rendering, so one pass yields the template *and* the segment list in matching order: exactly
+       the pair `define_footnote` turns into a `FootnoteDeferred`, which a tree-built footnote never
+       had. The cost is a documented exception to "building the tree consults no renderer": the
+       entry is a required recognition side effect whose payload is a rendered string, so
+       registering it and rendering it are one act (and `fold_footnote` never folds a footnote's
+       children into the flow, so nothing is rendered twice). Extending
+       [`inline_builder_side_effect_parity`](../../parser/src/tests/inline_builder_side_effect_parity.rs)
+       to compare the footnote catalog *whole* immediately caught a second bug — the entry was
+       anchored at the macro's span where the string pipeline anchors it at the enclosing content's,
+       which is where a footnote's unresolved-reference warning is reported. Audit: 37 rows either
+       side, 0 new and 0 closed (five rows shift only in the test-only recorder's PUA index digits);
+       coverage exactly diff-neutral on all three changed production files. What still defers is the
+       inversion itself. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

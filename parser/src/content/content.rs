@@ -1459,13 +1459,19 @@ fn collect_footnote_tree_xref_segments(
 /// Reads one [`XrefSegment`] off a cross-reference node — see
 /// [`block_tree_xref_segments`] for why each field reads the way it does.
 ///
+/// Shared with the placeholder-emitting fold
+/// ([`fold_deferring_xrefs`](crate::content::inline_builder::fold_deferring_xrefs)),
+/// which captures a footnote's own segments as it writes that footnote's
+/// template: both readings of "what does this node defer?" are this one
+/// function, so the block-level list and a footnote's own cannot drift.
+///
 /// [`resolved`](XrefSegment::resolved) is deliberately **not** carried across:
 /// it is resolution's *output*, filled in later by
 /// [`Content::resolve_references`] and mirrored back onto the node by
 /// [`Content::mirror_tree_xref_resolution`]. A node re-read after a resolution
 /// sweep therefore yields the same segment it yielded before one, which is what
 /// makes this derivation idempotent.
-fn xref_segment_from_node(
+pub(crate) fn xref_segment_from_node(
     reference: &crate::inlines::Ref<'_>,
     renderer: &dyn InlineSubstitutionRenderer,
     context: &crate::parser::RenderContext,

@@ -3,6 +3,7 @@
 use super::{callouts::replacement_type_of, quotes::quote_type_of};
 use crate::{
     attributes::Attrlist,
+    content::{Content, XrefSegment, xref_segment_from_node},
     inlines::{
         Anchor, Callout, CalloutGuard, CharRef, Footnote, Image, IndexTerm, InlineNode, RawForm,
         Ref, RefVariant, SpanForm, Stem, StemNotation, Ui, UiKind,
@@ -42,7 +43,14 @@ pub(crate) fn fold_html(
     context: &RenderContext,
 ) -> String {
     let mut out = String::new();
-    fold_into_html(nodes, renderer, context, Footnotes::Marked, &mut out);
+    fold_into_html(
+        nodes,
+        renderer,
+        context,
+        Footnotes::Marked,
+        &mut Xrefs::Rendered,
+        &mut out,
+    );
     out
 }
 
@@ -56,6 +64,100 @@ pub(crate) enum Footnotes {
     /// Omit it, marker and all, leaving the surrounding text as though the
     /// footnote had not been written — see [`fold_reference_text`].
     Stripped,
+}
+
+/// Whether a fold *renders* a cross-reference or *defers* it.
+///
+/// The fold's second mode axis, alongside [`Footnotes`]. Both exist for the
+/// same reason: a tree is folded to more than one string, and which string is
+/// wanted is a question about node kinds rather than about bytes.
+///
+/// [`Deferred`](Self::Deferred) is the placeholder-emitting mode — see
+/// [`fold_deferring_xrefs`], which is the only way to reach it.
+pub(crate) enum Xrefs<'a> {
+    /// Render each cross-reference in place, through `render_xref`: the
+    /// ordinary fold, which is what a block's flow shows.
+    Rendered,
+
+    /// Write a placeholder where each cross-reference stands, appending the
+    /// segment that will fill it to this list. The placeholder's index is the
+    /// segment's position in the list, so a template and its list are built in
+    /// one pass and cannot fall out of order.
+    Deferred(&'a mut Vec<XrefSegment>),
+}
+
+/// Folds `nodes` into a **placeholder template** plus the cross-reference
+/// segments that fill it, in placeholder order — the pair
+/// [`FootnoteDeferred`](crate::content::FootnoteDeferred) is built from.
+///
+/// A footnote's text is lifted out of the block it was written in, so a
+/// cross-reference inside it is never reached by the document-order pass that
+/// resolves the block's own references; the footnote has to carry its
+/// references itself, as a template plus a segment list, and resolve them from
+/// the catalog later ([`Footnote::resolve_references`]). The string pipeline
+/// reaches that pair by *re-homing* the block template's own placeholders,
+/// which are already sitting in the footnote's captured text
+/// ([`rehome_xref_placeholders`](crate::content::rehome_xref_placeholders)).
+/// The tree has no such placeholders to re-home — a cross-reference is a node
+/// — so it writes its own: this fold emits one per
+/// [`Xref`](RefVariant::Xref) node and records that node's segment as it goes.
+///
+/// # Why the template is built at *registration* time
+///
+/// A footnote's catalog entry is registered when the footnote is recognized,
+/// which is the same moment the string replacer registers its own. That is not
+/// a convenience: `Footnote::resolve_references` runs on the **catalog entry**,
+/// driven from the catalog, with no access to the tree the footnote came from,
+/// so nothing later in the parse can go back and derive the pair. Recognition
+/// is also the last moment the subtree is still final —
+/// [`apply_post_replacements`](super::apply_post_replacements) descends into a
+/// [`Styled`](crate::inlines::Styled)/[`Ref`](InlineNode::Ref) child but not
+/// into a [`Footnote`](InlineNode::Footnote)'s, exactly as the string pipeline
+/// has the footnote's text out of the flat string by then.
+///
+/// # This is a *build-time* fold, and the only one
+///
+/// Building the tree is otherwise unobservable — it consults no renderer, a
+/// property `inline_recorder`'s own
+/// `building_the_tree_does_not_consult_the_documents_renderer` measures with a
+/// stateful renderer. A footnote is the documented exception, and not by
+/// choice: its catalog entry is a **required** recognition side effect (the
+/// same reason its number is), and that entry's payload is a *rendered
+/// string*, so registering it and rendering it are one act. The string
+/// pipeline does exactly the same thing at exactly the same moment — its
+/// footnote replacer cuts already-rendered bytes out of the flat string it is
+/// substituting.
+///
+/// This adds no second rendering of the subtree. `fold_footnote` writes only
+/// the in-flow **marker**, never the footnote's children, so the block's own
+/// fold does not re-render what this one rendered: a footnote's subtree is
+/// folded exactly once per parse, here — the same once the string pipeline
+/// spends on it.
+///
+/// [`Footnote::resolve_references`]: crate::document::Footnote::resolve_references
+pub(crate) fn fold_deferring_xrefs(
+    nodes: &[InlineNode<'_>],
+    renderer: &dyn InlineSubstitutionRenderer,
+    context: &RenderContext,
+) -> (String, Vec<XrefSegment>) {
+    let mut out = String::new();
+    let mut segments = Vec::new();
+
+    // The footnote axis is inert here whichever way it is set: `nodes` is one
+    // footnote's own children, and footnotes do not nest (the string
+    // pipeline's lazy bracket match cannot recognize one inside another's
+    // content either), so no `Footnote` node can be reached. `Marked` is the
+    // ordinary fold, which is the honest default for a mode nothing consults.
+    fold_into_html(
+        nodes,
+        renderer,
+        context,
+        Footnotes::Marked,
+        &mut Xrefs::Deferred(&mut segments),
+        &mut out,
+    );
+
+    (out, segments)
 }
 
 /// The fold a **section title** contributes as its reference text and as the
@@ -92,7 +194,14 @@ pub(crate) fn fold_reference_text(
     context: &RenderContext,
 ) -> String {
     let mut out = String::new();
-    fold_into_html(nodes, renderer, context, Footnotes::Stripped, &mut out);
+    fold_into_html(
+        nodes,
+        renderer,
+        context,
+        Footnotes::Stripped,
+        &mut Xrefs::Rendered,
+        &mut out,
+    );
     out
 }
 
@@ -110,6 +219,7 @@ fn fold_into_html(
     renderer: &dyn InlineSubstitutionRenderer,
     context: &RenderContext,
     footnotes: Footnotes,
+    xrefs: &mut Xrefs<'_>,
     out: &mut String,
 ) {
     for node in nodes {
@@ -193,11 +303,11 @@ fn fold_into_html(
             }
 
             InlineNode::Ref(reference) if reference.variant == RefVariant::Link => {
-                fold_link(reference, renderer, context, footnotes, out);
+                fold_link(reference, renderer, context, footnotes, xrefs, out);
             }
 
             InlineNode::Ref(reference) if reference.variant == RefVariant::Xref => {
-                fold_xref(reference, renderer, context, footnotes, out);
+                fold_xref(reference, renderer, context, footnotes, xrefs, out);
             }
 
             InlineNode::Anchor(anchor) => {
@@ -205,7 +315,7 @@ fn fold_into_html(
             }
 
             InlineNode::IndexTerm(index_term) => {
-                fold_index_term(index_term, renderer, context, footnotes, out);
+                fold_index_term(index_term, renderer, context, footnotes, xrefs, out);
             }
 
             InlineNode::Footnote(footnote) => {
@@ -232,7 +342,14 @@ fn fold_into_html(
                 // string pipeline's quotes step did: the same `QuoteType`,
                 // attribute list, and id it recognized, so the bytes match.
                 let mut body = String::new();
-                fold_into_html(&styled.children, renderer, context, footnotes, &mut body);
+                fold_into_html(
+                    &styled.children,
+                    renderer,
+                    context,
+                    footnotes,
+                    xrefs,
+                    &mut body,
+                );
 
                 let scope = match styled.form {
                     SpanForm::Constrained => QuoteScope::Constrained,
@@ -405,6 +522,7 @@ fn fold_link(
     renderer: &dyn InlineSubstitutionRenderer,
     context: &RenderContext,
     footnotes: Footnotes,
+    xrefs: &mut Xrefs<'_>,
     out: &mut String,
 ) {
     let mut link_text = String::new();
@@ -413,6 +531,7 @@ fn fold_link(
         renderer,
         context,
         footnotes,
+        xrefs,
         &mut link_text,
     );
 
@@ -466,14 +585,28 @@ fn fold_xref(
     renderer: &dyn InlineSubstitutionRenderer,
     context: &RenderContext,
     footnotes: Footnotes,
+    xrefs: &mut Xrefs<'_>,
     out: &mut String,
 ) {
+    // A deferring fold writes a placeholder here instead of a rendering, and
+    // captures the segment that will fill it — see [`Xrefs::Deferred`]. The
+    // children are *not* folded into `out`: they are this reference's own
+    // display text, which the segment carries (rendered, by
+    // [`xref_segment_from_node`]) rather than the flow.
+    if let Xrefs::Deferred(segments) = xrefs {
+        let index = segments.len();
+        segments.push(xref_segment_from_node(reference, renderer, context));
+        out.push_str(&Content::xref_placeholder(index));
+        return;
+    }
+
     let mut provided = String::new();
     fold_into_html(
         &reference.children,
         renderer,
         context,
         footnotes,
+        xrefs,
         &mut provided,
     );
 
@@ -548,7 +681,23 @@ fn fold_anchor(
     } else {
         anchor.reftext.as_ref().map(|children| {
             let mut s = String::new();
-            fold_into_html(children, renderer, context, footnotes, &mut s);
+
+            // Always a *rendering*, even under a deferring fold, which is
+            // why this function takes no sink to pass along: an anchor's
+            // reference text reaches `render_anchor`, not `out`, so a
+            // placeholder written here would join the segment list without
+            // ever appearing in the template, shifting every later
+            // placeholder onto the wrong segment. Not descending is the same
+            // call `collect_tree_xref_segments` makes, for the same reason.
+            fold_into_html(
+                children,
+                renderer,
+                context,
+                footnotes,
+                &mut Xrefs::Rendered,
+                &mut s,
+            );
+
             s
         })
     };
@@ -588,6 +737,7 @@ fn fold_index_term(
     renderer: &dyn InlineSubstitutionRenderer,
     context: &RenderContext,
     footnotes: Footnotes,
+    xrefs: &mut Xrefs<'_>,
     out: &mut String,
 ) {
     let mut folded_children = String::new();
@@ -601,6 +751,7 @@ fn fold_index_term(
                 renderer,
                 context,
                 footnotes,
+                xrefs,
                 &mut folded_children,
             );
             Some(folded_children.as_str())

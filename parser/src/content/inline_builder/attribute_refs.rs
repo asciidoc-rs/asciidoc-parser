@@ -391,8 +391,11 @@ impl MissingHandling {
 ///
 /// The check is on the span's *source* span rather than on what it renders to,
 /// which is sound in the direction that matters: a span whose source carries
-/// no `\n` cannot render one, and building the tree must not invoke a renderer
-/// to find out.
+/// no `\n` cannot render one, and building the tree does not fold a span to
+/// find out. (The build runs exactly one fold, and it is not an inspection: a
+/// footnote's catalog entry, which is a required recognition side effect whose
+/// payload is a rendered string — see
+/// [`fold_deferring_xrefs`](super::fold_deferring_xrefs).)
 fn line_structure_is_faithful(nodes: &[InlineNode<'_>]) -> bool {
     !nodes.iter().any(|node| match node {
         InlineNode::Styled(styled) => styled.location.data().contains('\n'),

@@ -276,7 +276,7 @@
 //!   families' own
 //!   [`emit_range_unescaping_brackets`](macros::emit_range_unescaping_brackets),
 //!   so the subtree carries the literal `]` the string replacer's
-//!   [`normalize_footnote_text`](crate::content::normalize_footnote_text)
+//!   [`normalize_footnote_text`](crate::content::macros::normalize_footnote_text)
 //!   produces. The deprecated `footnoteref:[id,text]` / `footnoteref:[id]` form
 //!   (`build_footnoteref_node`) is recognized too, splitting its one bracket on
 //!   the first comma rather than taking an id from the macro target (an id, the
@@ -428,7 +428,7 @@ use char_replacements::apply_character_replacements;
 // Consumed only by `cfg(test)` callers and future external callers until the
 // authoritative-fold half of the cutover wires it into `Content`.
 #[allow(unused_imports)]
-pub(crate) use fold::{fold_html, fold_reference_text};
+pub(crate) use fold::{fold_deferring_xrefs, fold_html, fold_reference_text};
 use footnotes::apply_footnotes;
 pub(crate) use macros::apply_macro_side_effects;
 use macros::{ComputedSpecials, apply_macros};
