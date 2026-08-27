@@ -25,29 +25,151 @@
 //!
 //! The **order** is the one deliberate difference, and
 //! [`the_view_returns_document_order`] pins it from both ends.
+//!
+//! The golden side is **frozen** (`snapshots/passthrough_records.txt`). Its
+//! source is [`Passthroughs::extract_from`] — the passthrough sentinel system
+//! design §4.2 retires — so it is one of the corpora that would otherwise have
+//! nothing left to compare against once that system is deleted. See
+//! [`golden`] for why this one round-trips the recording rather than comparing
+//! rendered bytes, and why the sentinel it preserves is the point.
 
 use crate::{
     Parser, Span,
-    content::{Content, Passthroughs, SubstitutionGroup},
+    content::{
+        Content, Passthroughs, SubstitutionGroup, SubstitutionStep,
+        inline_builder::snapshot::{quote, recorded_golden, unquote},
+    },
 };
+
+/// The recording this corpus's golden is frozen into.
+const RECORDING: &str = "passthrough_records";
 
 /// One passthrough as either side describes it: the author's body, and the
 /// group it is restored under.
 type Record = (String, SubstitutionGroup);
 
-/// What the **string pipeline** extracts, in extraction order.
+/// What the **string pipeline** extracts, in extraction order — read back from
+/// the recording, having been frozen there while the extraction pass still ran.
 ///
 /// Read from a throwaway [`Passthroughs::extract_from`] over the same source
 /// rather than from the content under test, whose own list is the view now —
 /// comparing that against itself would assert nothing.
+///
+/// That independence is what the recording *keeps*. `Passthroughs` is the
+/// passthrough sentinel system (design §4.2), which this branch is about to
+/// delete: once it is gone the extraction pass cannot answer, and a golden
+/// computed from it would have nowhere left to come from but the view. So the
+/// answer is frozen now, exactly as design §5.2's own freeze did for the
+/// golden-HTML corpora — the helper's body becomes a lookup and none of this
+/// module's assertions move.
+///
+/// The freeze is a **round trip**, not a string comparison, because this
+/// corpus's assertions read the golden's *structure*: its length, whether it
+/// `contains` one of the view's entries, and — in
+/// [`a_stem_expression_embedding_a_passthrough_reports_both_entries`] — whether
+/// its outer STEM body still carries the `\u{96}` extraction sentinel. That
+/// last one is the reason to freeze this corpus rather than retire it with the
+/// pass: the recording preserves the exact artifact the deletion removes, so
+/// the documented difference between the two sides stays pinned to bytes
+/// afterwards rather than becoming untestable.
 fn golden(source: &str, parser: &Parser) -> Vec<Record> {
     let mut scratch = Content::from(Span::new(source));
 
-    Passthroughs::extract_from(&mut scratch, parser)
+    let extracted: Vec<Record> = Passthroughs::extract_from(&mut scratch, parser)
         .observable()
         .iter()
         .map(|pt| (pt.text().to_string(), pt.subs().clone()))
+        .collect();
+
+    decode(&recorded_golden(RECORDING, source, &encode(&extracted)))
+}
+
+/// Encodes a record list as one physical line, in the recording format's own
+/// idiom: each record is the body `Debug`-quoted followed by its group, and
+/// every field is tab-separated.
+///
+/// The body is quoted with the store's own [`quote`] rather than written raw
+/// because a passthrough body is arbitrary document text — it can hold tabs,
+/// newlines, and (for the outer entry of a STEM expression) the `\u{96}`
+/// sentinel itself. Quoting is what keeps a record from spilling across the
+/// line boundary the format rests on. The group needs none: every spelling of
+/// it is alphanumeric, `Custom` included.
+fn encode(records: &[Record]) -> String {
+    records
+        .iter()
+        .map(|(text, subs)| format!("{}\t{}", quote(text), encode_group(subs)))
+        .collect::<Vec<_>>()
+        .join("\t")
+}
+
+/// Reverses [`encode`].
+fn decode(encoded: &str) -> Vec<Record> {
+    // An empty recording is an empty list, not one malformed record: `split`
+    // yields a single empty field for the empty string, which the chunking
+    // below would otherwise read as a truncated pair.
+    if encoded.is_empty() {
+        return vec![];
+    }
+
+    encoded
+        .split('\t')
+        .collect::<Vec<_>>()
+        .chunks(2)
+        .map(|pair| match pair {
+            [text, subs] => (unquote(RECORDING, text), decode_group(subs)),
+            _ => panic!("truncated record in {RECORDING}.txt: {pair:?}"),
+        })
         .collect()
+}
+
+/// A group as one unquoted field.
+///
+/// `Debug` is the spelling on purpose: it is what the assertion messages in
+/// this module already print, so a recording diff reads the same as a failure.
+fn encode_group(subs: &SubstitutionGroup) -> String {
+    format!("{subs:?}")
+}
+
+/// Reverses [`encode_group`].
+fn decode_group(field: &str) -> SubstitutionGroup {
+    match field {
+        "Normal" => SubstitutionGroup::Normal,
+        "Title" => SubstitutionGroup::Title,
+        "Header" => SubstitutionGroup::Header,
+        "Verbatim" => SubstitutionGroup::Verbatim,
+        "Pass" => SubstitutionGroup::Pass,
+        "None" => SubstitutionGroup::None,
+        "AttributeEntryValue" => SubstitutionGroup::AttributeEntryValue,
+        "Stem" => SubstitutionGroup::Stem,
+
+        custom => {
+            let steps = custom
+                .strip_prefix("Custom([")
+                .and_then(|rest| rest.strip_suffix("])"))
+                .unwrap_or_else(|| panic!("unrecognized group in {RECORDING}.txt: {field:?}"));
+
+            SubstitutionGroup::Custom(
+                steps
+                    .split_terminator(", ")
+                    .map(decode_step)
+                    .collect::<Vec<_>>(),
+            )
+        }
+    }
+}
+
+/// One step of a [`SubstitutionGroup::Custom`] list.
+fn decode_step(field: &str) -> SubstitutionStep {
+    match field {
+        "SpecialCharacters" => SubstitutionStep::SpecialCharacters,
+        "Quotes" => SubstitutionStep::Quotes,
+        "AttributeReferences" => SubstitutionStep::AttributeReferences,
+        "CharacterReplacements" => SubstitutionStep::CharacterReplacements,
+        "Macros" => SubstitutionStep::Macros,
+        "PostReplacement" => SubstitutionStep::PostReplacement,
+        "Callouts" => SubstitutionStep::Callouts,
+        other => panic!("unrecognized step in {RECORDING}.txt: {other:?}"),
+    }
 }
 
 /// What the **view** returns, in document order.
@@ -347,4 +469,67 @@ fn a_deferred_stem_macro_reports_only_its_inner_passthrough() {
         [("<b>".to_string(), SubstitutionGroup::None)],
         "the deferred STEM should leave only its inner passthrough reported"
     );
+}
+
+#[test]
+fn the_record_codec_round_trips_every_spelling() {
+    // The codec is the only part of this module the corpus itself cannot
+    // exercise whole: the fixtures above produce four groups and two custom
+    // steps between them, so the remaining arms of `decode_group` and
+    // `decode_step` would be recorded as uncovered and — worse — a typo in one
+    // of them would sit undetected until some later fixture happened to
+    // extract under that group.
+    //
+    // The empty list is here for the same reason and one more: it is the arm
+    // `decode` special-cases, because `"".split('\t')` yields one empty field
+    // rather than none, which the pairwise chunking would read as a truncated
+    // record.
+    let every_group = [
+        SubstitutionGroup::Normal,
+        SubstitutionGroup::Title,
+        SubstitutionGroup::Header,
+        SubstitutionGroup::Verbatim,
+        SubstitutionGroup::Pass,
+        SubstitutionGroup::None,
+        SubstitutionGroup::AttributeEntryValue,
+        SubstitutionGroup::Stem,
+        SubstitutionGroup::Custom(vec![]),
+        SubstitutionGroup::Custom(vec![
+            SubstitutionStep::SpecialCharacters,
+            SubstitutionStep::Quotes,
+            SubstitutionStep::AttributeReferences,
+            SubstitutionStep::CharacterReplacements,
+            SubstitutionStep::Macros,
+            SubstitutionStep::PostReplacement,
+            SubstitutionStep::Callouts,
+        ]),
+    ];
+
+    assert_eq!(decode(&encode(&[])), Vec::<Record>::new());
+
+    // The bodies are the ones that would break a line-based format: the
+    // separator itself, a newline, a quote, a backslash, and the extraction
+    // sentinel a STEM expression's outer entry carries.
+    for body in [
+        "",
+        "plain",
+        "tab\there",
+        "newline\nhere",
+        "quote \" and backslash \\",
+        "sentinel \u{96}0\u{97} here",
+    ] {
+        let records: Vec<Record> = every_group
+            .iter()
+            .map(|subs| (body.to_string(), subs.clone()))
+            .collect();
+
+        let encoded = encode(&records);
+
+        assert_eq!(decode(&encoded), records, "round trip for {body:?}");
+
+        assert!(
+            !encoded.contains('\n'),
+            "a record spilled across lines for {body:?}: {encoded:?}"
+        );
+    }
 }

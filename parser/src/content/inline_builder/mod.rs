@@ -411,7 +411,7 @@ mod special_chars;
 mod stem_step;
 
 #[cfg(test)]
-mod snapshot;
+pub(crate) mod snapshot;
 
 #[cfg(test)]
 mod test_support;
