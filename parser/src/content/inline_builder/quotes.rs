@@ -2872,6 +2872,16 @@ mod tests {
             "['a<b&c']*bold*",
             "[.a&b.c<d]_x_",
             "[#i&d.r<le]*bold*",
+            // Shorthand names that name *nothing*. Both pipelines read a span's
+            // attribute list through the same `Attrlist`, so the rule that a
+            // whitespace-only name is dropped exactly as a missing one is
+            // reaches the tree with it: the first `#` item here no longer
+            // shadows the real id behind it.
+            "[x#\t#realid]#x#",
+            "[x% ]#x#",
+            "[x%\t]#x#",
+            "[.\t.role]#x#",
+            "[%%%%]#x#",
             "[.role]#a < b#",
             // The `"`-escaping the built-in backend adds on top (a quoted
             // positional role and a `role=` value alike) composes with it: the

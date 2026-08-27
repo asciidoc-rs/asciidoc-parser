@@ -484,6 +484,52 @@ flat string. In the node model they become ordinary nodes:
   "strip footnote markers from a section title's reftext/id" logic becomes a tree filter
   (drop `Footnote` nodes) instead of sentinel-span deletion.
 
+#### The escaping pass, and where escaped form stops
+
+`main` closed a defect in the sentinel systems while this branch was rewriting them: a
+document can *type* the codepoints the string pipeline reserves, so its own copies are
+escaped before substitution begins and restored on the way out (`escape_sentinels` /
+`unescape_sentinels`, [#1235](https://github.com/asciidoc-rs/asciidoc-parser/issues/1235)).
+Merging that fix here settled two things worth recording.
+
+**The tree needs no escaping, and gets none.** The single-pass builder recognizes
+constructs by *range over the source*, never by scanning a rendered string for its own
+marks, so a codepoint the document typed is never mistaken for one the parser wrote. The
+one private-use codepoint the builder does use — `SPAN_PLACEHOLDER` (`\u{E0F0}`), standing
+in for an already-recognized span inside a level's match string — is already handled the
+same way: `passthrough_step` walks by *piece* rather than by character precisely so a
+literal `+b\u{E0F0}c+` is not read as a placeholder. So the escaping is the string
+pipeline's alone, applied at the two ends of `run_pipeline`.
+
+**Escaped form is confined, and what leaves it is marked.** Three values outlive
+`run_pipeline` in escaped form: the deferred placeholder template, this pipeline's own
+cross-reference segments where the §4.2 carve-out keeps them, and a footnote catalog entry
+the string replacer registered. Each has a reader that must hand the document its own text
+back — a catalog lookup, an unresolved-reference warning, a template re-render — and *which
+pipeline produced the value* is not recoverable from the text: unescaping a tree-derived
+value would corrupt one that legitimately contains the escape introducer, which is the same
+confusion the escaping exists to end. So the producer is carried rather than guessed:
+`DeferredContent::from_tree` already said it for a content's segments (and `TitleNode` for a
+title's), `FootnoteDeferred::sentinels_escaped` says it for a footnote's entry, and
+`document_text` is the one place that asks. All three go with `run_pipeline` itself.
+
+**And the decode is per-piece, not per-rendering.** Rendering a template splices the
+**resolver's** answer — a destination, a reference text drawn from the catalog — into the
+pipeline's own escaped text. The resolver was handed the document's own text and answered in
+kind, so its bytes are not in escaped form; decoding the *finished* rendering in one pass
+decodes them too, and an id such as `#a\u{E004}b` comes out as `#a\u{E001}`. So
+`render_template` leaves escaped form run by run as it walks — the template's literal text
+and the four segment fields the substitution itself read back (`target`, `provided_text`,
+`window`, `roles`), never `resolved` or `derived` — and nothing decodes the result. That in
+turn makes `finalize_deferred`'s rebuild the *first* way out of escaped form, so
+`run_pipeline`'s own tail decode is gated on there being nothing deferred; otherwise a
+content that both defers a reference and types the escape introducer is decoded twice.
+
+The branch's reserved set is correspondingly **two** systems, not three: `\u{E002}` /
+`\u{E003}` are absent from `RESERVED_SENTINELS`, because the footnote-marker system is
+already gone — a heading's reference text is a second fold of its own tree
+(`fold_reference_text`), so nothing reserves those codepoints to escape a document out of.
+
 ### 4.3 Cross-reference and title resolution
 
 The two-phase parse (`parse_deferred` then `resolve_against_own_catalog`) is retained, but

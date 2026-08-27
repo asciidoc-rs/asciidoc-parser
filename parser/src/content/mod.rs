@@ -6,9 +6,10 @@
 mod content;
 pub use content::Content;
 pub(crate) use content::{
-    DeferredParts, FootnoteDeferred, OwnedTitle, XrefSegment, fold_resolved_title,
-    rehome_xref_placeholders, render_xref_template, resolved_destinations, sanitize_title,
-    template_partition, xref_segment_from_node,
+    DeferredParts, FootnoteDeferred, OwnedTitle, PASSTHROUGH_PLACEHOLDER_END,
+    PASSTHROUGH_PLACEHOLDER_START, XrefSegment, document_text, escape_sentinels,
+    fold_resolved_title, rehome_xref_placeholders, render_xref_template, resolved_destinations,
+    sanitize_title, template_partition, unescape_sentinels, xref_segment_from_node,
 };
 // The two tree walks behind `Content::set_tree_xrefs`, which calls them
 // directly. Re-exported for the differential corpus that compares what they

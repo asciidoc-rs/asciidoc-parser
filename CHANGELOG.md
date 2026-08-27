@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.30.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.20...v0.30.0)
+_24 August 2026_
+
+### Added
+
+* [**breaking**] Hand a renderer a `RenderContext` instead of the live `Parser` ([#1265](https://github.com/asciidoc-rs/asciidoc-parser/pull/1265))
+
+### Fixed
+
+* Escape sentinel codepoints a document types itself ([#1275](https://github.com/asciidoc-rs/asciidoc-parser/pull/1275))
+* Report a whitespace-only shorthand name and drop it ([#1274](https://github.com/asciidoc-rs/asciidoc-parser/pull/1274))
+* Terminate the parse for a line holding only a control character ([#1271](https://github.com/asciidoc-rs/asciidoc-parser/pull/1271))
+* Don't abort a debug build on two block attribute lines with empty shorthand names ([#1270](https://github.com/asciidoc-rs/asciidoc-parser/pull/1270))
+* Don't panic on an inline image macro with no target ([#1269](https://github.com/asciidoc-rs/asciidoc-parser/pull/1269))
+
+### Other
+
+* Share a snapshot's counter table by Arc rather than copying it ([#1264](https://github.com/asciidoc-rs/asciidoc-parser/pull/1264))
+
 ## [0.29.20](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.19...v0.29.20)
 _23 August 2026_
 

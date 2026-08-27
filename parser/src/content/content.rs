@@ -3,6 +3,8 @@
 //!
 //! [substitutions]: https://docs.asciidoctor.org/asciidoc/latest/subs/
 
+use std::borrow::Cow;
+
 use crate::{
     Parser, Span,
     content::Passthrough,
@@ -224,6 +226,21 @@ struct DeferredContent {
     string_xrefs: Vec<XrefSegment>,
 }
 
+impl DeferredContent {
+    /// Which halves of this content's template inputs are in escaped sentinel
+    /// form.
+    ///
+    /// The template is always the string pipeline's — it is the only pass that
+    /// writes one — while the segments are the tree's wherever the carve-out
+    /// did not fire, and the tree's are the document's own text already.
+    fn escaped_form(&self) -> EscapedForm {
+        EscapedForm {
+            template: true,
+            segments: !self.from_tree,
+        }
+    }
+}
+
 /// A read-only view of a [`Content`]'s deferred cross-references — the shape
 /// [`Content::deferred_parts`] hands out.
 #[derive(Clone, Copy, Debug)]
@@ -284,10 +301,197 @@ pub(crate) struct XrefSegment {
 }
 
 /// Sentinel codepoints (Unicode Private Use Area) bracketing a placeholder
-/// index in [`DeferredContent::template`]. These cannot collide with user text
-/// and are inert to the remaining substitution steps.
+/// index in [`DeferredContent::template`].
+///
+/// A document can type these codepoints — they are unassigned by Unicode, but
+/// perfectly valid in a `&str` — so they are *not* self-evidently the parser's
+/// own. What keeps them unambiguous is the escaping pass described on
+/// [`escape_sentinels`]: a document's own copies are replaced before
+/// substitution begins, so every occurrence the readers below see was written
+/// by the substitution pipeline itself.
 const XREF_PLACEHOLDER_START: char = '\u{E000}';
 const XREF_PLACEHOLDER_END: char = '\u{E001}';
+
+/// Sentinel codepoints (C1 control range) bracketing an extracted
+/// passthrough's index while the other substitutions run. Defined here so the
+/// escaping pass below covers them alongside the Private Use Area sentinels;
+/// they are emitted and consumed by
+/// [`passthroughs`](crate::content::passthroughs).
+pub(crate) const PASSTHROUGH_PLACEHOLDER_START: char = '\u{96}';
+pub(crate) const PASSTHROUGH_PLACEHOLDER_END: char = '\u{97}';
+
+/// Introduces the escaped form of a reserved sentinel (see
+/// [`escape_sentinels`]). A document's own copies of this codepoint are
+/// escaped too, so an occurrence in escaped text always introduces an escape.
+const SENTINEL_ESCAPE: char = '\u{E004}';
+
+/// Every codepoint the substitution pipeline reserves as an in-band control
+/// sentinel, paired with the ASCII tag that stands in for it in escaped text.
+///
+/// The tags are arbitrary; all that matters is that each is distinct and that
+/// the escape introducer itself is in the table, so escaping is reversible.
+const RESERVED_SENTINELS: [(char, char); 5] = [
+    (XREF_PLACEHOLDER_START, 'a'),
+    (XREF_PLACEHOLDER_END, 'b'),
+    (PASSTHROUGH_PLACEHOLDER_START, 'e'),
+    (PASSTHROUGH_PLACEHOLDER_END, 'f'),
+    (SENTINEL_ESCAPE, 'g'),
+];
+
+/// Replaces each reserved sentinel codepoint a *document* typed with an escaped
+/// form, so that the only unescaped sentinels in the text being substituted are
+/// the ones the substitution pipeline wrote itself.
+///
+/// The sentinels are in-band: they are spliced into the same string as the
+/// document's text, so the passes that read them back — [`render_template`],
+/// [`rehome_xref_placeholders`], and the passthrough restore — cannot otherwise
+/// tell a sentinel the parser wrote from one the document did. Without this
+/// pass, a document that types `U+E000 0 U+E001` alongside a real
+/// cross-reference has that text read back as a placeholder, forging a second
+/// cross-reference into the output.
+///
+/// This is the **string pipeline's** own protection, and it needs no
+/// counterpart in the single-pass builder: the builder recognizes constructs by
+/// range over the source rather than by scanning a rendered string for its own
+/// marks, so a codepoint the document typed is never read as one of the
+/// parser's. What escaped form still reaches past `run_pipeline` is marked as
+/// such — see [`document_text`].
+///
+/// Escaped text is an internal representation: every path that hands rendered
+/// text back to a caller reverses it with [`unescape_sentinels`], so a
+/// document's private-use characters survive to the output unchanged. The two
+/// passes are exact inverses, so applying them in matched pairs nests safely
+/// (a passthrough's text, for example, is substituted by a nested
+/// escape/unescape pair while it is itself held in escaped form).
+///
+/// Text with no reserved codepoint — the overwhelming majority — is borrowed
+/// through unchanged.
+pub(crate) fn escape_sentinels(text: &str) -> Cow<'_, str> {
+    if !text.contains(is_reserved_sentinel) {
+        return Cow::Borrowed(text);
+    }
+
+    let mut out = String::with_capacity(text.len());
+
+    for c in text.chars() {
+        match RESERVED_SENTINELS
+            .iter()
+            .find(|(sentinel, _)| *sentinel == c)
+        {
+            Some((_, tag)) => {
+                out.push(SENTINEL_ESCAPE);
+                out.push(*tag);
+            }
+            None => out.push(c),
+        }
+    }
+
+    Cow::Owned(out)
+}
+
+/// Restores the document's own sentinel codepoints, reversing
+/// [`escape_sentinels`].
+///
+/// Applied once to each string as it leaves the substitution machinery. A
+/// dangling escape introducer cannot occur in text this pass is given (escaping
+/// always emits a tag), but is passed through literally rather than dropped if
+/// it somehow does.
+pub(crate) fn unescape_sentinels(text: &str) -> Cow<'_, str> {
+    if !text.contains(SENTINEL_ESCAPE) {
+        return Cow::Borrowed(text);
+    }
+
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c != SENTINEL_ESCAPE {
+            out.push(c);
+            continue;
+        }
+
+        match chars
+            .peek()
+            .and_then(|tag| RESERVED_SENTINELS.iter().find(|(_, t)| t == tag))
+        {
+            Some((sentinel, _)) => {
+                out.push(*sentinel);
+                chars.next();
+            }
+            None => out.push(SENTINEL_ESCAPE),
+        }
+    }
+
+    Cow::Owned(out)
+}
+
+/// `text` as the document wrote it: reverses [`escape_sentinels`] when `text`
+/// is held in that form, and borrows it through untouched when it is not.
+///
+/// Which it is cannot be recovered from the text, and guessing is the whole
+/// hazard — unescaping something that was never escaped corrupts a value that
+/// legitimately contains the escape introducer, which is precisely the
+/// confusion the escaping exists to end. So every caller says.
+///
+/// The three answers in this module: a segment the **string pipeline** deferred
+/// is escaped and one read off the **tree** is not
+/// ([`DeferredContent::from_tree`]); a placeholder template's own literal text
+/// is escaped for a `DeferredContent` and follows its producer for a
+/// [`FootnoteDeferred`]; and a **resolved** or **derived** destination is never
+/// escaped, the resolver having been handed the document's own text and
+/// answering in kind. That last one is why the decoding happens here, piece by
+/// piece, rather than over a completed rendering: a rendering splices the
+/// resolver's answer into the template, and a pass over the result would decode
+/// bytes the resolver supplied.
+pub(crate) fn document_text(text: &str, escaped: bool) -> Cow<'_, str> {
+    if escaped {
+        unescape_sentinels(text)
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
+/// Which halves of a placeholder template's inputs are held in the string
+/// pipeline's escaped sentinel form (see [`escape_sentinels`]).
+///
+/// The two are independent: a `DeferredContent` always carries the string
+/// pipeline's own template — it is the only pass that writes one — while its
+/// *segments* are the tree's wherever the carve-out did not fire. A
+/// [`FootnoteDeferred`] has one producer for both halves.
+#[derive(Clone, Copy, Debug)]
+struct EscapedForm {
+    /// The template's own literal text — everything between the placeholders.
+    template: bool,
+
+    /// The segments' [`target`](XrefSegment::target),
+    /// [`provided_text`](XrefSegment::provided_text),
+    /// [`window`](XrefSegment::window) and [`roles`](XrefSegment::roles): the
+    /// fields read back out of the substituted text.
+    ///
+    /// Never [`resolved`](XrefSegment::resolved) or
+    /// [`derived`](XrefSegment::derived), which are the resolver's own answer
+    /// and are spliced verbatim.
+    segments: bool,
+}
+
+/// Returns `true` if `c` is one of the codepoints the substitution pipeline
+/// reserves for its own use.
+///
+/// Written as an inline match rather than a scan of [`RESERVED_SENTINELS`]:
+/// this runs over every character of every block's content, while the table
+/// itself is only consulted for text that has a sentinel in it. A unit test
+/// pins the two to the same set of codepoints.
+///
+/// `\u{E002}` and `\u{E003}` are deliberately absent: they were the
+/// footnote-marker sentinels, and this branch's section-title path derives a
+/// heading's reference text by folding its inline subtree instead, so nothing
+/// reserves them any more (design §4.2's first sentinel system).
+fn is_reserved_sentinel(c: char) -> bool {
+    matches!(
+        c,
+        '\u{96}' | '\u{97}' | '\u{E000}' | '\u{E001}' | '\u{E004}'
+    )
+}
 
 /// Strips markup down to plain text, mirroring Asciidoctor's
 /// `Document::Title` sanitize option (`XmlSanitizeRx = /<[^>]+>/`): every tag
@@ -620,6 +824,31 @@ impl<'src> Content<'src> {
         &self.inlines
     }
 
+    /// Escapes the reserved sentinel codepoints this content's *own text*
+    /// contains, so the substitution pipeline can tell its own in-band
+    /// sentinels from the document's text. See [`escape_sentinels`].
+    ///
+    /// Called once, before substitution begins; the matching
+    /// [`unescape_sentinels`](Self::unescape_sentinels) call restores them.
+    pub(crate) fn escape_sentinels(&mut self) {
+        if let Cow::Owned(escaped) = escape_sentinels(self.rendered.as_ref()) {
+            self.rendered = escaped.into();
+        }
+    }
+
+    /// Restores the document's own sentinel codepoints in
+    /// [`rendered`](Self::rendered), reversing
+    /// [`escape_sentinels`](Self::escape_sentinels).
+    ///
+    /// The deferred template is deliberately left escaped: it is an internal
+    /// representation that is re-rendered (through [`render_template`], whose
+    /// callers unescape the result) each time references are resolved.
+    pub(crate) fn unescape_sentinels(&mut self) {
+        if let Cow::Owned(unescaped) = unescape_sentinels(self.rendered.as_ref()) {
+            self.rendered = unescaped.into();
+        }
+    }
+
     /// Installs the inline AST built for this content by the single-pass
     /// builder (see [`inline_builder`](crate::content::inline_builder)).
     pub(crate) fn set_inlines(&mut self, inlines: Vec<InlineNode<'src>>) {
@@ -869,9 +1098,23 @@ impl<'src> Content<'src> {
             let from_tree = deferred.from_tree;
             let template = deferred.template.clone();
 
+            // A `deferred` block always holds at least one xref placeholder,
+            // so its finalized template is never empty. An empty template here
+            // means `finalize_deferred` was skipped (a future-refactor hazard);
+            // the `template.contains` guard below would then silently suppress
+            // every unresolved-ref warning, so catch that invariant break in
+            // debug builds.
+            debug_assert!(!template.is_empty());
+
             for (index, xref) in deferred.block.iter_mut().enumerate() {
-                xref.resolved = resolver.resolve(&ResolutionContext {
-                    target: &xref.target,
+                // The catalog holds the document's own text (an ID as it was
+                // written, a section's reference text), so the key handed to
+                // the resolver leaves the string pipeline's escaped sentinel
+                // form here. See `document_text`.
+                let target = document_text(&xref.target, !from_tree);
+
+                let resolved = resolver.resolve(&ResolutionContext {
+                    target: &target,
                     provided_text: xref.provided_text.as_deref(),
                     derived: xref.derived.as_ref(),
                 });
@@ -881,14 +1124,22 @@ impl<'src> Content<'src> {
 
                 // A target that names a document is never reported: it carries
                 // its own destination, so there was nothing here to resolve.
-                if xref.resolved.is_none() && xref.derived.is_none() && reports_unresolved {
-                    warnings.unresolved(&xref.target, source);
+                if resolved.is_none() && xref.derived.is_none() && reports_unresolved {
+                    warnings.unresolved(&target, source);
                 }
+
+                xref.resolved = resolved;
             }
 
             for xref in deferred.footnote.iter_mut() {
+                // The string pipeline produces one flat list, all of it
+                // block-level (`set_deferred_xrefs`), so this list is only ever
+                // the tree's — but it is read through `document_text` all the
+                // same, so the two loops say the same thing about their keys.
+                let target = document_text(&xref.target, !from_tree);
+
                 xref.resolved = resolver.resolve(&ResolutionContext {
-                    target: &xref.target,
+                    target: &target,
                     provided_text: xref.provided_text.as_deref(),
                     derived: xref.derived.as_ref(),
                 });
@@ -925,6 +1176,10 @@ impl<'src> Content<'src> {
         {
             self.refold(attributes, renderer, parser);
         } else {
+            // `rebuild_rendered` emits the document's own text directly — the
+            // template's literal runs leave escaped form as they are spliced,
+            // so the resolver's own answer is never decoded along with them.
+            // See `render_template`.
             self.rebuild_rendered(renderer);
         }
     }
@@ -1130,6 +1385,7 @@ impl<'src> Content<'src> {
             &deferred.template,
             &deferred.block,
             renderer,
+            deferred.escaped_form(),
         ))
     }
 
@@ -1147,7 +1403,13 @@ impl<'src> Content<'src> {
         // in debug builds rather than let it render.
         debug_assert!(!deferred.template.is_empty());
 
-        self.rendered = render_template(&deferred.template, &deferred.block, renderer).into();
+        self.rendered = render_template(
+            &deferred.template,
+            &deferred.block,
+            renderer,
+            deferred.escaped_form(),
+        )
+        .into();
     }
 }
 
@@ -1642,12 +1904,24 @@ pub(crate) fn rehome_xref_placeholders(
 /// in a title's captured template together with a set of [`XrefSegment`]s whose
 /// [`resolved`](XrefSegment::resolved) fields it has filled in with cross-title
 /// (including circular) coordination, and receives the final rendered title.
+///
+/// `segments_escaped` says whether those segments are the string pipeline's own
+/// (see [`EscapedForm`]); the template always is.
 pub(crate) fn render_xref_template(
     template: &str,
     xrefs: &[XrefSegment],
     renderer: &dyn InlineSubstitutionRenderer,
+    segments_escaped: bool,
 ) -> String {
-    render_template(template, xrefs, renderer)
+    render_template(
+        template,
+        xrefs,
+        renderer,
+        EscapedForm {
+            template: true,
+            segments: segments_escaped,
+        },
+    )
 }
 
 /// Splices resolved (or fallback) cross-reference renderings into a placeholder
@@ -1656,12 +1930,25 @@ fn render_template(
     template: &str,
     xrefs: &[XrefSegment],
     renderer: &dyn InlineSubstitutionRenderer,
+    form: EscapedForm,
 ) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
 
+    // The template's own literal text leaves escaped form as it is emitted,
+    // rather than the finished rendering being decoded in one pass at the end.
+    // That distinction is the whole point: the renderer splices the
+    // **resolver's** answer — a destination, a reference text — into this
+    // string, and the resolver was handed the document's own text and answered
+    // in kind. A pass over the result would decode those bytes too, turning a
+    // catalog id that happens to hold the escape introducer into some other
+    // sentinel entirely. See [`document_text`].
+    let push_literal = |out: &mut String, text: &str| {
+        out.push_str(&document_text(text, form.template));
+    };
+
     while let Some(start) = rest.find(XREF_PLACEHOLDER_START) {
-        out.push_str(&rest[..start]);
+        push_literal(&mut out, &rest[..start]);
         let after = &rest[start + XREF_PLACEHOLDER_START.len_utf8()..];
 
         let Some(end) = after.find(XREF_PLACEHOLDER_END) else {
@@ -1680,12 +1967,33 @@ fn render_template(
             .and_then(|index| xrefs.get(index))
         {
             Some(xref) => {
+                // The four fields the *substitution* read back out of its own
+                // text leave escaped form here; `derived` and `resolved` never
+                // entered it. Roles are rebuilt only when one actually carries
+                // an escape, which for the overwhelming majority is never.
+                let unescaped_roles: Option<Vec<String>> = (form.segments
+                    && xref.roles.iter().any(|role| role.contains(SENTINEL_ESCAPE)))
+                .then(|| {
+                    xref.roles
+                        .iter()
+                        .map(|role| unescape_sentinels(role).into_owned())
+                        .collect()
+                });
+
                 renderer.render_xref(
                     &XrefRenderParams {
-                        target: &xref.target,
-                        provided_text: xref.provided_text.as_deref(),
-                        window: xref.window.as_deref(),
-                        roles: &xref.roles,
+                        target: &document_text(&xref.target, form.segments),
+                        provided_text: xref
+                            .provided_text
+                            .as_deref()
+                            .map(|text| document_text(text, form.segments))
+                            .as_deref(),
+                        window: xref
+                            .window
+                            .as_deref()
+                            .map(|window| document_text(window, form.segments))
+                            .as_deref(),
+                        roles: unescaped_roles.as_deref().unwrap_or(&xref.roles),
                         xrefstyle: xref.xrefstyle,
                         derived: xref.derived.as_ref(),
                         resolved: xref.resolved.as_ref(),
@@ -1695,19 +2003,21 @@ fn render_template(
             }
 
             None => {
-                // Unreachable while `template` and `xrefs` come from the same
-                // `Content` (indices are assigned sequentially). If that
-                // invariant is ever broken, emit the raw placeholder rather than
-                // silently dropping the span, so the breakage is visible.
-                debug_assert!(false, "xref placeholder index {body:?} out of range");
+                // Not a placeholder this template owns: emit the text
+                // literally. Placeholder indices are assigned sequentially into
+                // the same `Content`'s `xrefs`, so this is unreachable for a
+                // placeholder the substitution wrote; text is never rejected
+                // here (nor asserted against) because a sequence that merely
+                // looks like a placeholder is content, and content is passed
+                // through.
                 out.push(XREF_PLACEHOLDER_START);
-                out.push_str(body);
+                push_literal(&mut out, body);
                 out.push(XREF_PLACEHOLDER_END);
             }
         }
     }
 
-    out.push_str(rest);
+    push_literal(&mut out, rest);
     out
 }
 
@@ -1730,19 +2040,58 @@ pub(crate) struct FootnoteDeferred {
 
     /// The cross-references, in placeholder order.
     xrefs: Vec<XrefSegment>,
+
+    /// Whether [`template`](Self::template) and the segments' targets are held
+    /// in the string pipeline's escaped sentinel form (see
+    /// [`escape_sentinels`]).
+    ///
+    /// A footnote registered by the string replacer is; one registered from its
+    /// own subtree by the single-pass builder is not, the builder having no
+    /// in-band sentinels to hide a document's own codepoints from. The
+    /// distinction cannot be recovered from the text, so it is carried — see
+    /// [`document_text`], which is the same question for a block's segments.
+    sentinels_escaped: bool,
 }
 
 impl FootnoteDeferred {
     /// Constructs a footnote's deferred cross-reference state from the
     /// placeholder-bearing `template` and its `xrefs` (in placeholder order).
-    pub(crate) fn new(template: String, xrefs: Vec<XrefSegment>) -> Self {
-        Self { template, xrefs }
+    ///
+    /// `sentinels_escaped` says which pipeline produced them — see the field.
+    pub(crate) fn new(template: String, xrefs: Vec<XrefSegment>, sentinels_escaped: bool) -> Self {
+        Self {
+            template,
+            xrefs,
+            sentinels_escaped,
+        }
+    }
+
+    /// Overrides [`sentinels_escaped`](Self::sentinels_escaped).
+    ///
+    /// For the side-effect differential harness alone, which compares the
+    /// footnote catalog entry the string pipeline registers against the one the
+    /// builder registers. The two encode their templates differently *by
+    /// construction* — that is what the flag records — so the encoding is
+    /// normalized away before the entries are compared, leaving the footnote
+    /// itself (index, id, rendered text, segments) as the subject.
+    #[cfg(test)]
+    pub(crate) fn set_sentinels_escaped(&mut self, sentinels_escaped: bool) {
+        self.sentinels_escaped = sentinels_escaped;
     }
 
     /// Renders the footnote text from the template and the current (resolved or
     /// unresolved) state of its cross-references.
     pub(crate) fn render(&self, renderer: &dyn InlineSubstitutionRenderer) -> String {
-        render_template(&self.template, &self.xrefs, renderer)
+        // One producer wrote both halves, so they are in the same form.
+        render_template(
+            &self.template,
+            &self.xrefs,
+            renderer,
+            EscapedForm {
+                template: self.sentinels_escaped,
+                segments: self.sentinels_escaped,
+            },
+        )
     }
 
     /// Resolves the footnote's cross-references using `resolver`, reporting any
@@ -1755,15 +2104,21 @@ impl FootnoteDeferred {
         source: Span<'src>,
     ) {
         for xref in self.xrefs.iter_mut() {
-            xref.resolved = resolver.resolve(&ResolutionContext {
-                target: &xref.target,
+            // The catalog holds the document's own text, so the lookup key
+            // leaves escaped form here (see `document_text`).
+            let target = document_text(&xref.target, self.sentinels_escaped);
+
+            let resolved = resolver.resolve(&ResolutionContext {
+                target: &target,
                 provided_text: xref.provided_text.as_deref(),
                 derived: xref.derived.as_ref(),
             });
 
-            if xref.resolved.is_none() && xref.derived.is_none() {
-                warnings.unresolved(&xref.target, source);
+            if resolved.is_none() && xref.derived.is_none() {
+                warnings.unresolved(&target, source);
             }
+
+            xref.resolved = resolved;
         }
     }
 }
@@ -1879,6 +2234,129 @@ mod tests {
         }
     }
 
+    mod impl_debug {
+        use crate::{
+            Span,
+            content::{Content, XrefSegment},
+        };
+
+        #[test]
+        fn shows_the_deferred_state_only_when_there_is_one() {
+            let mut content = Content::from(Span::new("see <<a>>"));
+
+            // The cross-reference-free case (the overwhelming majority) debugs
+            // as a plain `original` + `rendered` pair.
+            assert!(!format!("{content:?}").contains("deferred"));
+
+            content.set_deferred_xrefs(vec![XrefSegment {
+                target: "a".to_string(),
+                provided_text: None,
+                window: None,
+                roles: vec![],
+                xrefstyle: None,
+                derived: None,
+                resolved: None,
+            }]);
+
+            let debug = format!("{content:?}");
+            assert!(debug.contains("deferred"), "{debug:?}");
+            assert!(debug.contains("XrefSegment"), "{debug:?}");
+        }
+    }
+
+    mod escape_sentinels {
+        use std::borrow::Cow;
+
+        use super::super::{
+            PASSTHROUGH_PLACEHOLDER_END, PASSTHROUGH_PLACEHOLDER_START, RESERVED_SENTINELS,
+            SENTINEL_ESCAPE, XREF_PLACEHOLDER_END, XREF_PLACEHOLDER_START, escape_sentinels,
+            is_reserved_sentinel, unescape_sentinels,
+        };
+
+        #[test]
+        fn the_range_test_and_the_table_describe_the_same_codepoints() {
+            for (sentinel, _) in RESERVED_SENTINELS {
+                assert!(
+                    is_reserved_sentinel(sentinel),
+                    "{sentinel:?} is reserved but not covered by the inline match"
+                );
+            }
+
+            for c in '\u{0}'..=char::MAX {
+                assert_eq!(
+                    is_reserved_sentinel(c),
+                    RESERVED_SENTINELS
+                        .iter()
+                        .any(|(sentinel, _)| *sentinel == c),
+                    "the inline match and the table disagree about {c:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn borrows_text_with_no_reserved_codepoint() {
+            assert!(matches!(
+                escape_sentinels("plain text"),
+                Cow::Borrowed("plain text")
+            ));
+
+            assert!(matches!(
+                unescape_sentinels("plain text"),
+                Cow::Borrowed("plain text")
+            ));
+        }
+
+        #[test]
+        fn escaped_text_holds_no_reserved_codepoint() {
+            let typed = format!(
+                "a{XREF_PLACEHOLDER_START}0{XREF_PLACEHOLDER_END}b\
+                 {PASSTHROUGH_PLACEHOLDER_START}1{PASSTHROUGH_PLACEHOLDER_END}\
+                 e{SENTINEL_ESCAPE}f"
+            );
+
+            let escaped = escape_sentinels(&typed);
+
+            for reserved in [
+                XREF_PLACEHOLDER_START,
+                XREF_PLACEHOLDER_END,
+                PASSTHROUGH_PLACEHOLDER_START,
+                PASSTHROUGH_PLACEHOLDER_END,
+            ] {
+                assert!(
+                    !escaped.contains(reserved),
+                    "escaped text still contains {reserved:?}: {escaped:?}"
+                );
+            }
+
+            // The escape introducer is the one reserved codepoint that remains,
+            // and every occurrence of it is one the escaping wrote.
+            assert_eq!(escaped.matches(SENTINEL_ESCAPE).count(), 5, "{escaped:?}");
+
+            assert_eq!(unescape_sentinels(&escaped), typed);
+        }
+
+        #[test]
+        fn round_trips_an_escape_introducer_followed_by_a_tag() {
+            // The sequence a document is most likely to be mangled by: its own
+            // escape introducer followed by a character that is also an escape
+            // tag. Escaping the introducer keeps the pair distinguishable.
+            let typed = format!("x{SENTINEL_ESCAPE}ay");
+
+            assert_eq!(unescape_sentinels(&escape_sentinels(&typed)), typed);
+        }
+
+        #[test]
+        fn passes_a_dangling_escape_introducer_through() {
+            // Cannot arise from `escape_sentinels` (which always writes a tag),
+            // so this only pins down that a malformed sequence is content, not a
+            // dropped character.
+            let dangling = format!("x{SENTINEL_ESCAPE}");
+            assert_eq!(unescape_sentinels(&dangling), dangling);
+
+            let unknown_tag = format!("x{SENTINEL_ESCAPE}zy");
+            assert_eq!(unescape_sentinels(&unknown_tag), unknown_tag);
+        }
+    }
     mod sanitize_title {
         use super::super::sanitize_title;
 
@@ -1933,6 +2411,70 @@ mod tests {
                 sanitize_title("Title <dangling and more"),
                 "Title <dangling and more",
             );
+        }
+    }
+
+    mod render_template {
+        use super::super::{
+            EscapedForm, XREF_PLACEHOLDER_END, XREF_PLACEHOLDER_START, XrefSegment, render_template,
+        };
+        use crate::parser::HtmlSubstitutionRenderer;
+
+        fn segment(target: &str) -> XrefSegment {
+            XrefSegment {
+                target: target.to_string(),
+                provided_text: None,
+                window: None,
+                roles: vec![],
+                xrefstyle: None,
+                derived: None,
+                resolved: None,
+            }
+        }
+
+        fn render(template: &str, xrefs: &[XrefSegment]) -> String {
+            render_template(
+                template,
+                xrefs,
+                &HtmlSubstitutionRenderer {},
+                EscapedForm {
+                    template: true,
+                    segments: true,
+                },
+            )
+        }
+
+        #[test]
+        fn splices_a_reference_into_its_placeholder() {
+            let template = format!("see {XREF_PLACEHOLDER_START}0{XREF_PLACEHOLDER_END} here");
+
+            assert_eq!(
+                render(&template, &[segment("a")]),
+                r##"see <a href="#a">[a]</a> here"##
+            );
+        }
+
+        #[test]
+        fn passes_an_unterminated_placeholder_through_literally() {
+            // A start sentinel with no end cannot arise from the substitution
+            // (which always writes both), and a document's own copy is escaped
+            // before it gets here, so this only pins down that the text is
+            // emitted rather than swallowed.
+            let unterminated = format!("a{XREF_PLACEHOLDER_START}0 no end");
+
+            assert_eq!(render(&unterminated, &[segment("a")]), unterminated);
+        }
+
+        #[test]
+        fn passes_an_unmatched_placeholder_through_literally() {
+            // Likewise for a bracketed body that names no reference this
+            // template owns: a sequence that merely looks like a placeholder is
+            // content, and reaches the output as content.
+            let out_of_range = format!("x{XREF_PLACEHOLDER_START}9{XREF_PLACEHOLDER_END}y");
+            assert_eq!(render(&out_of_range, &[segment("a")]), out_of_range);
+
+            let non_numeric = format!("x{XREF_PLACEHOLDER_START}xyz{XREF_PLACEHOLDER_END}y");
+            assert_eq!(render(&non_numeric, &[segment("a")]), non_numeric);
         }
     }
 
@@ -2004,7 +2546,7 @@ mod tests {
 
         #[test]
         fn debug_includes_template_and_xrefs() {
-            let deferred = FootnoteDeferred::new("t".to_string(), vec![segment("a")]);
+            let deferred = FootnoteDeferred::new("t".to_string(), vec![segment("a")], true);
             let rendered = format!("{deferred:?}");
             assert!(rendered.contains("FootnoteDeferred"));
             assert!(rendered.contains("template"));
