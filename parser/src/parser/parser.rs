@@ -513,6 +513,23 @@ pub struct Parser {
     /// tree to replay from. It disappears when step 6 takes the string pipeline
     /// off the production path.
     pub(crate) suppress_recognition_side_effects: std::cell::Cell<bool>,
+
+    /// Whether an inline-tree build is already in progress on *this* parser —
+    /// the guard that keeps a build from recursing into building a tree of its
+    /// own.
+    ///
+    /// A passthrough carrying its own substitution list re-enters
+    /// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup) for its
+    /// body while the builder is running (via `passthrough_text`), and that
+    /// nested content needs no tree.
+    ///
+    /// This used to ride on [`build_inline_tree`](Self::build_inline_tree),
+    /// which the seam could clear because the parser driving the build was an
+    /// owned clone. It is the **real** parser now, held by shared reference, so
+    /// the guard needs a cell of its own — and the two questions it was
+    /// answering come apart cleanly: `build_inline_tree` is *configuration*
+    /// (does this parse build trees at all), this is *reentrancy*.
+    pub(crate) in_inline_build: std::cell::Cell<bool>,
 }
 
 /// A warning recorded in a form that does not borrow the source so it can live
@@ -630,6 +647,7 @@ impl Default for Parser {
             datetime_context: RefCell::new(None),
             build_inline_tree: true,
             suppress_recognition_side_effects: std::cell::Cell::new(false),
+            in_inline_build: std::cell::Cell::new(false),
         }
     }
 }

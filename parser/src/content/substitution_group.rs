@@ -264,93 +264,121 @@ impl SubstitutionGroup {
         attrlist: Option<&Attrlist<'src>>,
         term_warnings: Option<&mut Vec<crate::warnings::Warning<'src>>>,
     ) {
-        // Snapshot the pre-substitution value and the parser *before* the
-        // authoritative pass runs. The parser clone captures every document
-        // counter (footnote/callout numbers, `{counter:…}` values) at its
-        // pre-substitution value, so the single-pass builder below numbers
-        // constructs exactly as the authoritative pass does; the clone's
-        // mutations are then discarded, leaving the real parser advanced once.
+        // Snapshot the pre-substitution value *before* either pass runs: both
+        // are seeded from it, so the authoritative one sees exactly what the
+        // oracle does.
         //
         // `build_inline_tree` is no longer an opt-in switch — every parse
-        // builds the tree — but it is still the recursion guard the clone
-        // clears below, so a nested `apply` for a passthrough body skips the
-        // snapshot entirely rather than seeding a tree nothing reads.
-        let tree_seed = if parser.build_inline_tree {
-            Some((content.rendered.clone(), parser.clone()))
+        // builds the tree — but it is still the *configuration* half of "does
+        // this call build one". The reentrancy half moved to
+        // `Parser::in_inline_build`, because the parser the build runs on is
+        // the real one now and cannot have a field cleared on it.
+        let tree_seed = if parser.build_inline_tree && !parser.in_inline_build.get() {
+            Some(content.rendered.clone())
         } else {
             None
         };
 
-        // The string pipeline's own macro side effects — an image target, a link
-        // target, an anchor's or bibliography entry's id, and the image
-        // family's dangerous-`link=` warning — are suppressed for the duration
-        // of this pass, and replayed from the tree below. Both paths share one
-        // `Parser` now, so recognizing a construct twice would record it twice.
+        // **The inversion** (design §5.2 Phase 4, step 6). The string pipeline
+        // used to run on the real parser with its recognition side effects
+        // suppressed, while the builder ran on a counter-safe clone whose
+        // mutations were thrown away. The two have swapped places: the string
+        // pipeline runs on the clone — so its counters, its catalog
+        // registrations and its warnings are *all* discarded with it, and there
+        // is nothing left to suppress — and the builder runs on the real
+        // parser, where what it recognizes is simply kept.
         //
-        // Unconditional, rather than gated on a tree actually being built. The
-        // only content that reaches here without one is a passthrough body the
-        // *builder* re-enters `apply` for, and that call is handed the
-        // counter-safe clone — whose catalog is discarded with it — so nothing
-        // it records was ever going to be kept. The string pipeline's own
-        // re-entry for such a body carries the real parser and does build a
-        // tree, so it replays like any other content.
+        // That is what makes `run_pipeline` a pure oracle: it computes a string
+        // and writes nothing anyone reads. Deleting it — and with it the three
+        // sentinel systems and the now-vestigial
+        // `suppress_recognition_side_effects` window — is the next increment;
+        // this one only turns the seam around, so that deletion is a deletion
+        // rather than a rewrite.
         //
-        // Saved and restored rather than cleared. Either re-entry happens while
-        // this window is open and closes a window of its own, so clearing would
-        // leave the rest of *this* pass unsuppressed. No fixture currently
-        // distinguishes the two — the suite is green either way — because none
-        // puts a registering construct after a nested `apply` within one
-        // content; restoring is kept because it is correct by construction
-        // rather than by that absence.
-        let suppressed = parser.suppress_recognition_side_effects.replace(true);
+        // The clone is taken here, immediately before the pass it feeds, so it
+        // carries every document counter (footnote and callout numbers,
+        // `{counter:…}` values) at its pre-substitution value — the same value
+        // the builder then advances on the real parser, exactly once.
+        match &tree_seed {
+            Some(_) => self.run_pipeline(content, &parser.clone(), attrlist),
 
-        self.run_pipeline(content, parser, attrlist);
+            // No tree is built here, so there is no clone and no second pass:
+            // this *is* the authoritative one. The only content that reaches it
+            // is a passthrough body re-entered from inside a build, whose
+            // constructs the enclosing tree cannot hold (the body folds to one
+            // `Raw` value, not to nodes) and so cannot replay — leaving this
+            // pass as their one registrar, which is the net effect the
+            // suppressed arrangement had too.
+            None => self.run_pipeline(content, parser, attrlist),
+        }
 
-        parser.suppress_recognition_side_effects.set(suppressed);
-
-        if let Some((value, mut tree_parser)) = tree_seed {
+        if let Some(value) = tree_seed {
             // The builder must not recurse into tree building itself: a
             // passthrough with its own substitution list re-enters
             // `SubstitutionGroup::apply` for its body (via
             // `passthrough_text`), and that nested content needs no tree of
-            // its own.
-            tree_parser.build_inline_tree = false;
+            // its own. Saved and restored rather than cleared, so a build
+            // nested inside a build leaves the enclosing guard standing.
+            let in_build = parser.in_inline_build.replace(true);
 
             // Where this build's own diagnostics start — see
             // `Parser::drain_builder_diagnostics_since` for why a mark rather
             // than the whole buffer.
-            let diagnostics_before_build = tree_parser.builder_diagnostics_len();
+            let diagnostics_before_build = parser.builder_diagnostics_len();
+
+            // And where the *substitution* warning buffer stands, so anything
+            // the build records into it can be discarded below.
+            //
+            // The build's deliberate diagnostics go through
+            // `record_builder_diagnostic`, never here. What reaches this buffer
+            // during a build is incidental: an `Attrlist` parsed out of a match
+            // string records its own `attribute-missing` warning at an offset
+            // into that string, which is not a position in the document source
+            // — `['{missing}']++x++` is the shape, and surfacing it would
+            // anchor a warning nowhere. Before the inversion these were
+            // discarded by being recorded onto the clone; the build holds the
+            // real parser now, so the discard has to be said out loud. It is
+            // the same `substitution_warnings_len`/`truncate` idiom every other
+            // owned-source substitution in the crate already uses.
+            let warnings_before_build = parser.substitution_warnings_len();
 
             let tree = crate::content::inline_builder::build_for_group(
                 self,
                 value,
                 content.original(),
-                &tree_parser,
+                parser,
                 attrlist,
             );
 
-            // The recognition **diagnostics** the string pipeline just skipped,
-            // moved onto the real parser — the warning half of "re-attach the
-            // recognition side effects" (design §5.2's step 6).
+            parser.in_inline_build.set(in_build);
+            parser.truncate_substitution_warnings(warnings_before_build);
+
+            // The recognition **diagnostics** the string pipeline's copy of this
+            // content raised into the discarded clone, raised again here where
+            // they are kept — the warning half of "re-attach the recognition
+            // side effects" (design §5.2's step 6).
             //
             // A registration has a node to hang on, so it is replayed from the
             // tree below. These five do not: `attribute-missing` drops a
             // reference and leaves nothing behind, a `link:` macro with a
             // dangerous scheme stays literal, and an invalid substitution name
             // in a `pass:`/`stem:` list is simply skipped. So they are recorded
-            // where they are *recognized*, on the clone, and carried across
-            // here — which is what `Parser::record_builder_diagnostic` and
+            // where they are *recognized* and carried across here — which is
+            // what `Parser::record_builder_diagnostic` and
             // `push_substitution_warnings` are for. The builder's own buffer is
-            // used rather than the clone's warning buffer, so a warning it
-            // records only *incidentally* (an `Attrlist` parse over a match
-            // string) is not swept up with them.
+            // still used rather than the parser's warning buffer, and now for
+            // the only reason that was ever load-bearing: a warning the build
+            // records merely *incidentally* (an `Attrlist` parse over a match
+            // string) must not be swept up with them. Before the inversion that
+            // separation also fell out of the buffer sitting on a clone nobody
+            // read; it does not any more, so this buffer is the whole of it.
             //
             // Before `apply_macro_side_effects`, deliberately: the string
             // pipeline raised these during its own pass, ahead of the
             // registrations the replay performs, and that relative order is
             // what `inline_builder_side_effect_parity` compares.
             parser.push_substitution_warnings(
-                tree_parser.drain_builder_diagnostics_since(diagnostics_before_build),
+                parser.drain_builder_diagnostics_since(diagnostics_before_build),
             );
 
             // The deferred cross-references are the **tree's**, not the string
