@@ -835,10 +835,10 @@ const RECORDING: &str = "recorder_trees";
 /// What keeps that honest while the pipeline still exists is
 /// [`recorded_golden`]'s own drift guard: the live recorder is still built on
 /// every fixture and its normal form still has to equal the recorded bytes.
-/// What keeps it honest afterwards is
-/// [`the_normal_form_carries_everything_the_comparator_reads`], which is the
-/// guard against the one hazard a partial normal form has — the comparator
-/// growing a read of a field the recording does not carry.
+/// What keeps it honest afterwards is the `strip_unrecorded` assertion
+/// [`assert_shapes_with`] runs beside this call, on every fixture — the guard
+/// against the one hazard a partial normal form has, the comparator growing a
+/// read of a field the recording does not carry. See [`strip_unrecorded`].
 fn frozen_recorder_tree<'src>(source: &'src str, live: &[InlineNode<'_>]) -> Vec<InlineNode<'src>> {
     let encoded = encode_nodes(live);
     decode_nodes(
@@ -1352,10 +1352,10 @@ fn decode_stem_notation(field: &str) -> StemNotation {
 /// that the recording does not carry decodes as a default, and the comparison
 /// silently weakens with every test still green. Enumerating the dropped fields
 /// here — rather than reasoning about them — turns that into a **total** check:
-/// [`the_normal_form_carries_everything_the_comparator_reads`] asserts
-/// `strip(live) == decoded` for every fixture the corpus drives, so a field
-/// added to `InlineNode` (or newly populated by the recorder) fails loudly
-/// until someone decides whether the recording should carry it.
+/// [`assert_shapes_with`] asserts `strip(live) == decoded` for every fixture
+/// the corpus drives, so a field added to `InlineNode` (or newly populated by
+/// the recorder) fails loudly until someone decides whether the recording
+/// should carry it.
 ///
 /// Every field cleared here is one the module doc comment already documents as
 /// unobservable on the recorder side, or one no assertion reads:
