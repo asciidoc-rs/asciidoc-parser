@@ -7795,19 +7795,19 @@ Each phase is a reviewable unit with a clear exit gate.
   through — with two references in one source so each is checked on its own rather than one offset
   happening to be right.
 
-  Audit: **53 rows either side, 0 new and 0 closed**. The count does not match the 37 recorded for the
-  inversion because the audit patch is rebuilt by hand each time and this one's predicate differs; the
-  invariant it exists to check is the set comparison, and that was run twice with two independently
-  shaped patches (the canonical fold-before-`set_inlines`, and a fold-versus-`rendered` compare at the
-  assignment itself, 61 rows) with identical sets both times.
+  Audit: **63 rows either side, 0 new and 0 closed**, run with the corrected recipe the previous note
+  records (a fold-versus-`rendered` compare at the assignment itself, no forced seed) so the count is
+  directly comparable against that increment's own 63. The set comparison is the invariant either way,
+  and it was also run against the increment's original base with a second, independently shaped patch
+  (the canonical fold-before-`set_inlines`, 53 rows) with the same answer.
 
-  Coverage is diff-neutral in substance: missed **lines** are unchanged in all three touched files,
-  and the single added missed region sits on an already-uncovered line inside
-  `build_pass_macro_subs_value` — a function with no callers, kept alive only by the intra-doc links
-  that reference its rationale.
+  Coverage is diff-neutral: missed **regions** and missed **lines** are unchanged in all three touched
+  files (22/10, 13/6 and 3/3), and the missed lines are the same lines either side rather than merely
+  the same count.
 
-  *What still defers* is unchanged from the note above: the deletion itself, and the structural
-  freeze.
+  *What still defers* is unchanged from the note above: the survey's decomposition in its own order —
+  the second record-shaped corpus, the tree-shaped freeze, the authoritative-pass closure, and only
+  then the deletion itself.
 
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
