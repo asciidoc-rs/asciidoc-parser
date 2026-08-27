@@ -3385,6 +3385,7 @@ mod tests {
                     deferred: Some(Box::new(FootnoteDeferred::new(
                         "RESOLVED".to_string(),
                         vec![],
+                        false,
                     ))),
                     location: None,
                 }],

@@ -100,7 +100,26 @@ fn snapshot(parser: &Parser) -> SideEffects {
                     )
                 })
                 .collect(),
-            catalog.footnotes().to_vec(),
+            catalog
+                .footnotes()
+                .iter()
+                .cloned()
+                .map(|mut footnote| {
+                    // The one field of an entry that is *not* written by the
+                    // recognizing pass in the same form on both sides: it
+                    // records whether the entry's template is held in the
+                    // string pipeline's escaped sentinel form, which is true of
+                    // that pipeline's own entry and false of the builder's fold
+                    // of the footnote's subtree. Both render the same text —
+                    // which is compared — so the encoding is normalized away
+                    // here rather than counted as a divergence.
+                    if let Some(deferred) = footnote.deferred.as_mut() {
+                        deferred.set_sentinels_escaped(false);
+                    }
+
+                    footnote
+                })
+                .collect(),
         )
     };
 

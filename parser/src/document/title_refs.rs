@@ -27,7 +27,7 @@ use crate::{
     blocks::{Block, IsBlock},
     content::{
         XrefSegment, fold_resolved_title, render_xref_template, resolved_destinations,
-        template_partition,
+        template_partition, unescape_sentinels,
     },
     document::Catalog,
     inlines::InlineNode,
@@ -296,8 +296,20 @@ fn compute<'src>(
     // difference is pre-existing: a title reports every unresolved target it
     // carries, wherever in the title it sits.
     for xref in block.iter_mut().chain(footnote.iter_mut()) {
+        // The catalog holds the document's own text, so a target the *string
+        // pipeline* deferred leaves that pipeline's escaped sentinel form to be
+        // matched against it. A target read off the tree is already the
+        // document's own and is left alone — unescaping it would corrupt one
+        // that legitimately contains the escape introducer. Same question, and
+        // same discriminator, as `Content::resolve_references`.
+        let target = if node.from_tree {
+            std::borrow::Cow::Borrowed(xref.target.as_str())
+        } else {
+            unescape_sentinels(&xref.target)
+        };
+
         let mut resolved = resolver.resolve(&ResolutionContext {
-            target: &xref.target,
+            target: &target,
             provided_text: xref.provided_text.as_deref(),
             derived: xref.derived.as_ref(),
         });
@@ -321,7 +333,7 @@ fn compute<'src>(
         // correct.
         if !has_explicit_text
             && let Some(reference) = resolved.as_mut()
-            && let Some(target_id) = lookup_id(catalog, &xref.target)
+            && let Some(target_id) = lookup_id(catalog, &target)
             && let Some(&(target_index, target_node)) = id_to_node.get(target_id.as_str())
             && reference.href.strip_prefix('#') == Some(target_id.as_str())
         {
@@ -361,7 +373,7 @@ fn compute<'src>(
         // A target that resolved to nothing — and did not carry its own derived
         // destination — is an unresolved reference, reported against the title.
         if resolved.is_none() && xref.derived.is_none() {
-            warnings.unresolved(&xref.target, node.source);
+            warnings.unresolved(&target, node.source);
         }
 
         xref.resolved = resolved;

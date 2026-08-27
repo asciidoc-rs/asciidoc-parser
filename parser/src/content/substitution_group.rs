@@ -608,6 +608,23 @@ impl SubstitutionGroup {
         parser: &Parser,
         attrlist: Option<&Attrlist>,
     ) {
+        // The steps below mark their work **in band**, with sentinel codepoints
+        // spliced into the same string as the document's text. A document can
+        // type those codepoints itself, so its own copies are escaped out of
+        // the way first; otherwise they are read back as the parser's own
+        // control sequences (forging, for instance, a second cross-reference
+        // into the output).
+        //
+        // The escaping is this pipeline's alone. The single-pass builder needs
+        // none: it recognizes constructs by *range* over the source rather than
+        // by scanning a rendered string for its own marks, so a codepoint the
+        // document typed is never a mark. What escaped form still reaches past
+        // this call is the deferred placeholder template and, where the
+        // carve-out keeps them, this pipeline's own cross-reference segments —
+        // each unescaped by the reader that makes it user-facing (see
+        // `Content::resolve_references` and `catalog_target`).
+        content.escape_sentinels();
+
         let steps = self.steps();
 
         let passthroughs: Option<Passthroughs> =
@@ -630,6 +647,13 @@ impl SubstitutionGroup {
         // references are resolved. This is a no-op when no cross-references were
         // found.
         content.finalize_deferred(&*parser.renderer);
+
+        // Hand back the document's own text: the sentinel codepoints escaped on
+        // the way in are restored now that every pass that reads them has run.
+        // The template `finalize_deferred` just captured stays escaped — it is
+        // an internal representation, re-rendered each time references are
+        // resolved, and its reader unescapes the result.
+        content.unescape_sentinels();
     }
 
     /// Applies any block style masquerade and `subs` attribute override from

@@ -769,7 +769,9 @@ fn register_footnote_number(
     // Trim and collapse, but do not unescape — see the doc comment above.
     let template = template.trim().replace('\n', " ");
 
-    parser.define_footnote(id, template, xrefs, root)
+    // The builder folds this entry from the footnote's own subtree, which
+    // never enters the string pipeline's escaped sentinel form.
+    parser.define_footnote(id, template, xrefs, root, false)
 }
 
 #[cfg(test)]

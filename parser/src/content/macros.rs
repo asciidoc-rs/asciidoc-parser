@@ -212,13 +212,29 @@ pub(super) fn apply_macros(content: &mut Content<'_>, parser: &Parser) {
     content.set_deferred_xrefs(xrefs);
 }
 
-/// Matches an inline image (`image:target[…]`) or icon (`icon:target[…]`)
-/// macro.
+/// Matches an [inline image] (`image:target[…]`) or [inline icon]
+/// (`icon:target[…]`) macro.
+///
+/// ## Examples
+///
+/// * `image:sunset.jpg[]`
+/// * `image:sunset.jpg[Sunset,300,200]`
+/// * `icon:tags[]`
+/// * `icon:t[]` — a single-character target
+///
+/// The target is required; only its trailing portion is optional, so a
+/// one-character target matches but an empty one does not. A macro written
+/// without a target (`image:[]`) is thus left as literal text, matching
+/// Asciidoctor's `InlineImageMacroRx`.
 ///
 /// Shared `pub(crate)` so the single-pass
 /// [`inline_builder`](crate::content::inline_builder) recognizes image and icon
 /// macros with the *exact* same pattern this string step matches with, changing
-/// only the recognition *sink* (a node instead of rendered markup).
+/// only the recognition *sink* (a node instead of rendered markup) — which is
+/// what carries the target rule above onto the tree side unchanged.
+///
+/// [inline image]: https://docs.asciidoctor.org/asciidoc/latest/macros/images/
+/// [inline icon]: https://docs.asciidoctor.org/asciidoc/latest/macros/icons/
 pub(crate) static INLINE_IMAGE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
@@ -226,11 +242,14 @@ pub(crate) static INLINE_IMAGE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
             \\?                         # Optional escape: literal backslash
             i(?:mage|con):              # 'image:' or 'icon:' prefix
 
-            (                           # Group 1: the target
+            (                           # Group 1: the target (required)
                 [^:\s\[\n]                  # First char: not colon, whitespace, [, or newline
-                [^\[\n]*?                   # Middle chars: any except [ or newline, lazily
-                [^\s\[\n]                   # Last char: not whitespace, [, or newline
-            )?                          # Entire target group is optional
+                (?:                         # Remainder is optional: a target
+                                            # may be a single character
+                    [^\[\n]*?                   # Middle chars: any except [ or newline, lazily
+                    [^\s\[\n]                   # Last char: not whitespace, [, or newline
+                )?
+            )
 
             \[                          # Opening square bracket
 
@@ -2118,7 +2137,9 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
                     &normalize_footnote_text(&content),
                     self.all_xrefs,
                 );
-                let index = parser.define_footnote(Some(&id), template, xrefs, self.source);
+                // The string pipeline's own registration: its text is held in
+                // escaped sentinel form (see `escape_sentinels`).
+                let index = parser.define_footnote(Some(&id), template, xrefs, self.source, true);
                 parser.renderer.render_footnote(
                     &FootnoteRenderParams {
                         index: Some(index.as_str()),
@@ -2154,7 +2175,8 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
                 &normalize_footnote_text(&content),
                 self.all_xrefs,
             );
-            let index = parser.define_footnote(None, template, xrefs, self.source);
+            // Escaped, as above.
+            let index = parser.define_footnote(None, template, xrefs, self.source, true);
             parser.renderer.render_footnote(
                 &FootnoteRenderParams {
                     index: Some(index.as_str()),
@@ -2221,6 +2243,59 @@ mod tests {
         #[test]
         fn leaves_select_non_word_characters_unencoded() {
             assert_eq!(encode_uri_component("-.~"), "-.~");
+        }
+    }
+
+    mod inline_image_macro {
+        use crate::{
+            content::{Content, SubstitutionStep},
+            strings::CowStr,
+            tests::prelude::*,
+        };
+
+        fn apply_macros(source: &'static str) -> Content<'static> {
+            let mut content = Content::from(crate::Span::new(source));
+            SubstitutionStep::Macros.apply(&mut content, &Parser::default(), None);
+            content
+        }
+
+        // An `image:`/`icon:` macro written without a target is not an image
+        // macro (Asciidoctor's `InlineImageMacroRx` requires one), so the text
+        // is left exactly as the author typed it. This used to panic: the
+        // target capture group was optional but indexed unconditionally.
+        #[test]
+        fn image_macro_without_target_is_left_literal() {
+            let content = apply_macros("image:[]");
+            assert_eq!(content.rendered, CowStr::Borrowed("image:[]"));
+        }
+
+        #[test]
+        fn icon_macro_without_target_is_left_literal() {
+            let content = apply_macros("icon:[]");
+            assert_eq!(content.rendered, CowStr::Borrowed("icon:[]"));
+        }
+
+        // Same, with alt text in the brackets and surrounding text: the macro
+        // is not recognized, and no part of the line is consumed.
+        #[test]
+        fn image_macro_without_target_but_with_alt_text_is_left_literal() {
+            let content = apply_macros("See image:[alt] here.");
+            assert_eq!(content.rendered, CowStr::Borrowed("See image:[alt] here."));
+        }
+
+        // Only the *trailing* portion of the target is optional, so a
+        // one-character target is a valid macro.
+        #[test]
+        fn single_character_target_is_an_image() {
+            let content = apply_macros("image:a[Alt]");
+            assert_eq!(
+                content.rendered,
+                CowStr::Boxed(
+                    r#"<span class="image"><img src="a" alt="Alt"></span>"#
+                        .to_string()
+                        .into_boxed_str()
+                )
+            );
         }
     }
 

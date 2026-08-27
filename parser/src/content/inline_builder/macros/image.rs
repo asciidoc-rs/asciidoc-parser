@@ -591,11 +591,17 @@ fn build_image_node<'src>(
     // the coarse enclosing span for a macro reached through a synthesized run.
     let is_icon = !whole.starts_with("image:");
 
-    // Group 1 is the (optional) target; group 2 is the bracket text, which
-    // always participates (it may be empty).
-    let (target, restored_target_ranges) = match caps.get(1) {
-        None => (CowStr::from(""), Vec::new()),
-
+    // Group 1 is the target and group 2 the bracket text; both always
+    // participate. The target's own pattern requires a first character and
+    // makes only the *remainder* optional, so a target-less `image:[…]` is not
+    // a match at all — which is why the fallback here is a degenerate stand-in
+    // for the empty values an absent group would mean rather than a branch of
+    // its own that no input can take, exactly as group 2's below is. Both are
+    // written with `map_or` and an eagerly built default (neither allocates)
+    // so no unreachable arm is left for a reader — or a coverage run — to
+    // wonder about.
+    let (target, restored_target_ranges) = caps.get(1).map_or(
+        (CowStr::from(""), Vec::new()),
         // Borrowed from `'src` for a verbatim target (§4.5), the expansion's
         // own exact bytes for a synthesized one. A target crossing an escaped
         // special has no `'src` slice at all — the source holds one character
@@ -612,28 +618,23 @@ fn build_image_node<'src>(
         // restored target came from a masked body, so the fold-time
         // `web_path` can keep them out of its own way (see
         // [`Image::restored_target_ranges`](crate::inlines::Image)).
-        Some(m) => {
-            match restore_masked_passthroughs(
-                m.as_str(),
-                &(m.start()..m.end()),
-                nodes,
-                pieces,
-                parser.renderer.as_ref(),
-            ) {
-                Some((restored, ranges)) => (CowStr::from(restored), ranges),
-                None => (
-                    text_slice(nodes, pieces, m.start()..m.end())
-                        .unwrap_or_else(|| CowStr::from(m.as_str().to_string())),
-                    Vec::new(),
-                ),
-            }
-        }
-    };
+        |m| match restore_masked_passthroughs(
+            m.as_str(),
+            &(m.start()..m.end()),
+            nodes,
+            pieces,
+            parser.renderer.as_ref(),
+        ) {
+            Some((restored, ranges)) => (CowStr::from(restored), ranges),
 
-    // Group 2 always participates — its own pattern carries an empty
-    // alternative — so the degenerate fallback here is unreachable, and stands
-    // in for the same empty attribute list an absent group would mean rather
-    // than adding a branch of its own that no input can take.
+            None => (
+                text_slice(nodes, pieces, m.start()..m.end())
+                    .unwrap_or_else(|| CowStr::from(m.as_str().to_string())),
+                Vec::new(),
+            ),
+        },
+    );
+
     let (bracket_text, bracket_range) = caps.get(2).map_or(("", full.end..full.end), |m| {
         (m.as_str(), m.start()..m.end())
     });
@@ -1340,6 +1341,17 @@ mod tests {
             "image:photo.png[alt=Alt Text,width=200,height=100]",
             "image:a_b-c.png[]",
             "image:d/e/f.png[]",
+            // The two shapes `INLINE_IMAGE_MACRO`'s target group decides (both
+            // families share the pattern, so the rule reaches the tree
+            // unchanged): a one-character target is a macro, and a *missing*
+            // one is not a match at all and stays literal.
+            "image:a[]",
+            "image:a[Alt Text]",
+            "icon:t[]",
+            "image:[]",
+            "image:[Alt Text]",
+            "icon:[]",
+            "See image:[Alt Text] here.",
             "image:logo.png[Logo,role=thumb]",
             "image:logo.png[title=Hover text]",
             "image:logo.png[link=https://example.org]",
@@ -3294,28 +3306,38 @@ mod tests {
     }
 
     #[test]
-    fn a_targetless_macro_yields_an_empty_target() {
-        // `INLINE_IMAGE_MACRO`'s target group is optional, so `image:[…]`
-        // matches with it absent and the node's target is the empty string
-        // (its default alt deriving from that, exactly as `default_alt` does
-        // for any other target).
+    fn a_targetless_macro_is_not_recognized() {
+        // `INLINE_IMAGE_MACRO` requires a target and makes only its trailing
+        // portion optional, so `image:[…]` is not a match: the author's text
+        // stays on the page as literal text and no node is built.
         //
-        // This is a structural test rather than a differential one on purpose:
-        // the string pipeline's own `InlineImageMacroReplacer` reads that
-        // group as `&caps[1]`, which **panics** for this shape, so there is no
-        // golden to compare against. That panic is a pre-existing bug in the
-        // shared string pipeline (it reproduces on `main`, through an ordinary
-        // `Parser::parse`), independent of this module — so the builder's own
-        // handling of the shape is pinned here and the fix belongs in its own
-        // change against `main`.
+        // Until the target group was made mandatory this shape *did* match
+        // here, with an empty target — while the string pipeline's own
+        // `InlineImageMacroReplacer` panicked reading `&caps[1]`, so the two
+        // could not be compared at all. Both families read the one shared
+        // pattern, so the fix reached this side with it; the shape now sits in
+        // the differential corpus above, and what is pinned here is the
+        // *structure* the fold comes from.
         let nodes = build_src(Span::new("image:[Alt Text]"));
+
+        assert_eq!(nodes.len(), 1);
+        assert_text(&nodes[0], "image:[Alt Text]", 1, 1);
+    }
+
+    #[test]
+    fn a_one_character_target_is_recognized() {
+        // The complement of the shape above, and the other half of what making
+        // the target mandatory-with-an-optional-remainder changed: `image:a[]`
+        // needed two characters under the old pattern and was silently left
+        // literal.
+        let nodes = build_src(Span::new("image:a[Alt Text]"));
 
         assert_eq!(nodes.len(), 1);
         let image = assert_image(&nodes[0]);
 
         assert!(!image.is_icon);
-        assert_eq!(image.target.as_ref(), "");
+        assert_eq!(image.target.as_ref(), "a");
         assert_eq!(image.alt.as_deref(), Some("Alt Text"));
-        assert_eq!(image.location.data(), "image:[Alt Text]");
+        assert_eq!(image.location.data(), "image:a[Alt Text]");
     }
 }
