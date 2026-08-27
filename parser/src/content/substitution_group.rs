@@ -608,6 +608,23 @@ impl SubstitutionGroup {
         parser: &Parser,
         attrlist: Option<&Attrlist>,
     ) {
+        // The steps below mark their work **in band**, with sentinel codepoints
+        // spliced into the same string as the document's text. A document can
+        // type those codepoints itself, so its own copies are escaped out of
+        // the way first; otherwise they are read back as the parser's own
+        // control sequences (forging, for instance, a second cross-reference
+        // into the output).
+        //
+        // The escaping is this pipeline's alone. The single-pass builder needs
+        // none: it recognizes constructs by *range* over the source rather than
+        // by scanning a rendered string for its own marks, so a codepoint the
+        // document typed is never a mark. What escaped form still reaches past
+        // this call is the deferred placeholder template and, where the
+        // carve-out keeps them, this pipeline's own cross-reference segments —
+        // each unescaped by the reader that makes it user-facing (see
+        // `Content::resolve_references` and `catalog_target`).
+        content.escape_sentinels();
+
         let steps = self.steps();
 
         let passthroughs: Option<Passthroughs> =
@@ -630,6 +647,23 @@ impl SubstitutionGroup {
         // references are resolved. This is a no-op when no cross-references were
         // found.
         content.finalize_deferred(&*parser.renderer);
+
+        // Hand back the document's own text: the sentinel codepoints escaped on
+        // the way in are restored now that every pass that reads them has run.
+        // The template `finalize_deferred` just captured stays escaped — it is
+        // an internal representation, re-rendered each time references are
+        // resolved.
+        //
+        // Gated, because that re-rendering is the *other* way out of escaped
+        // form: a content that deferred anything has already had `rendered`
+        // rebuilt by `finalize_deferred`, through a `render_template` that
+        // leaves escaped form run by run (so the resolver's own answer is never
+        // decoded with it — see `Content::render_template`). Decoding that
+        // result again would read one of the document's own restored escapes a
+        // second time.
+        if content.deferred_parts().is_none() {
+            content.unescape_sentinels();
+        }
     }
 
     /// Applies any block style masquerade and `subs` attribute override from
@@ -723,6 +757,47 @@ impl SubstitutionGroup {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
+
+    mod sentinel_escaping {
+        use super::super::SubstitutionGroup;
+        use crate::{Parser, Span, content::Content};
+
+        #[test]
+        fn a_deferred_content_leaves_escaped_form_exactly_once() {
+            // The string pipeline has two ways out of escaped form, and a
+            // content that defers a cross-reference takes the *first*:
+            // `finalize_deferred` rebuilds `rendered` through `render_template`,
+            // which leaves escaped form run by run. Decoding the result again at
+            // the end of the pipeline would read the document's own restored
+            // escape introducer a second time — here turning `\u{e004}b` into
+            // `\u{e001}` — so the tail decode is gated on there being nothing
+            // deferred.
+            //
+            // Driven through `apply_string_pipeline` because that pipeline's
+            // output is the differential corpora's oracle rather than the
+            // production rendering, which is a fold of the tree.
+            let mut content = Content::from(Span::new("x\u{e004}by <<a>>"));
+
+            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &Parser::default(), None);
+
+            assert_eq!(
+                content.rendered_html(),
+                "x\u{e004}by <a href=\"#a\">[a]</a>",
+                "the typed escape introducer was decoded twice"
+            );
+        }
+
+        #[test]
+        fn a_content_with_nothing_deferred_still_leaves_escaped_form() {
+            // The complement: no template was rebuilt, so the tail decode is
+            // the only one and must run.
+            let mut content = Content::from(Span::new("x\u{e004}by"));
+
+            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &Parser::default(), None);
+
+            assert_eq!(content.rendered_html(), "x\u{e004}by");
+        }
+    }
 
     mod stem {
         use crate::{content::Content, strings::CowStr, tests::prelude::*};

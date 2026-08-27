@@ -118,14 +118,13 @@ use crate::{
 /// behind exactly the `\` this second pass declines.
 ///
 /// A **`pass:` macro carrying an explicit substitution list**
-/// (`pass:c,q[…]`) folds through [`build_pass_macro_subs_value`], the same
-/// [`Raw`](InlineNode::Raw) shape [`build_passthrough_node`] gives every
-/// other `pass:`/delimiter form: `text` runs through the real, string-based
-/// substitution pipeline under the resolved
-/// [`SubstitutionGroup::Custom`] list (mirroring
+/// (`pass:c,q[…]`) folds through the same [`Raw`](InlineNode::Raw) shape
+/// [`build_passthrough_node`] gives every other `pass:`/delimiter form:
+/// `text` runs through the real, string-based substitution pipeline under
+/// the resolved [`SubstitutionGroup::Custom`] list (mirroring
 /// `PassthroughRestoreReplacer`'s own `pass.subs.apply(…)` call), producing
 /// an already-final HTML string that becomes the leaf's `value` verbatim.
-/// See [`build_pass_macro_subs_value`]'s own doc comment for why a `Raw`
+/// See [`build_passthrough_node`]'s own explicit-list arm for why a `Raw`
 /// leaf — not a richer node subtree built from this module's own
 /// transducers — is the shape this increment needs: the resolved list can
 /// name any of the six steps in any order, and only an opaque leaf is immune
@@ -845,7 +844,7 @@ fn build_passthrough_node<'src>(
     // The `pass:` macro (no delimiters). With an **explicit substitution
     // list** (`pass:c,q[…]`, group 14), the body is rendered through the
     // real substitution pipeline under the resolved `SubstitutionGroup::
-    // Custom` list — see [`build_pass_macro_subs_value`] for why this (and
+    // Custom` list — see the explicit-list arm below for why this (and
     // not a richer node subtree) is the safe shape for this increment.
     // Without one (the bare `pass:[…]` form), `SubstitutionGroup::None`
     // applies nothing. Either way, an escaped closing bracket (`\]`)
@@ -858,11 +857,45 @@ fn build_passthrough_node<'src>(
     let raw = content.data();
     let unescaped = raw.contains("\\]").then(|| raw.replace("\\]", "]"));
 
-    // The explicit-list form is the one place `value` is not the author's own
-    // bytes, so it is also the one place the node records a `source_text`: an
-    // arbitrary group needs the substitution pipeline, which a fold has no
-    // `Parser` to reach, so the body is substituted here and the input kept
-    // beside the result.
+    // A `pass:` macro carrying an **explicit substitution list** is the one
+    // deferred form 5a documented that a bare `SubstitutionGroup::None`/
+    // `::Verbatim` treatment cannot cover, since the list can name *any* of the
+    // six named steps, in any order and combination the author writes.
+    //
+    // A naive extension would thread `text` through this module's own node
+    // transducers under the resolved step list, the way the legacy `x-`
+    // compatibility marker's body does (`apply_normal_subs`). That shape does
+    // not work here: `build` always runs its own fixed *normal* order over the
+    // level this passthrough is embedded in, so any structural node (`Styled`,
+    // `Ref`, …) this construct's own resolved subset produced would be visited
+    // *again* by whichever of `build`'s six steps come after this one — and
+    // unlike `Quotes` (whose delimiters are consumed, so a second pass finds
+    // nothing left to match) or `SpecialCharacters` (whose `CharRef` leaves are
+    // atomic), a macro's own display text is not idempotent under a second
+    // pass: a `Ref{Link}`'s display children are literal text that
+    // *looks* exactly like the source URL, so a second `Macros` pass would
+    // recognize it all over again and nest a nested link inside it. A resolved
+    // list omitting a step `build`'s own fixed order still runs (e.g.
+    // `pass:q[<b>]`, which never asks for `SpecialCharacters`) has the same
+    // problem in reverse: `build`'s own unconditional `SpecialCharacters` step
+    // would escape content the author's list deliberately left raw.
+    //
+    // `passthrough_text` — already used for `++…++`/`$$…$$`/the bare
+    // unconstrained form — sidesteps both failure modes: it renders `text`
+    // through the **real, string-based** substitution pipeline
+    // (`SubstitutionGroup::apply`, the same call `PassthroughRestoreReplacer`
+    // makes for a stored `Passthrough`), producing an already-final HTML string
+    // that this arm wraps in a single `Raw` leaf. A `Raw` leaf is *opaque* to
+    // every later step in this module (never descended into, never re-matched —
+    // design §4.2's passthrough-as-leaf convention), so it is immune to both
+    // failure modes above: nothing in `build`'s own remaining steps can touch
+    // it, whether or not the author's list included that step.
+    //
+    // That opacity is also why the explicit-list form is the one place `value`
+    // is not the author's own bytes, and so the one place the node records a
+    // `source_text`: an arbitrary group needs the substitution pipeline, which
+    // a fold has no `Parser` to reach, so the body is substituted here and the
+    // input kept beside the result.
     let (value, subs, source_text) = if let Some(subs_list) = caps.get(14) {
         let text = unescaped.as_deref().unwrap_or(raw);
         let (subs, invalid) = SubstitutionGroup::from_custom_string(None, subs_list.as_str());
@@ -905,64 +938,14 @@ fn build_passthrough_node<'src>(
 
     // Either the body under `SubstitutionGroup::None` (nothing applied, so the
     // author's bytes are the output bytes) or a value already rendered through
-    // an explicit substitution list — which stays a frozen value, the deferral
-    // `build_pass_macro_subs_value` documents for itself. Both are `AsIs`.
+    // an explicit substitution list — which stays a frozen value, the
+    // deferral the explicit-list arm above documents. Both are `AsIs`.
     InlineNode::Raw {
         value,
         form: RawForm::AsIs,
         origin: RawOrigin::Passthrough { subs, source_text },
         location,
     }
-}
-
-/// Computes the rendered `value` for a `pass:` macro carrying an **explicit
-/// substitution list** (`pass:c,q[…]`) — the one deferred form 5a documented
-/// that a bare `SubstitutionGroup::None`/`::Verbatim` treatment cannot cover,
-/// since the list can name *any* of the six named steps, in any order and
-/// combination the author writes.
-///
-/// A naive extension would thread `text` through this module's own node
-/// transducers under the resolved step list, the way the legacy `x-`
-/// compatibility marker's body does ([`apply_normal_subs`]). That shape does
-/// not work here: [`build`](super::build) always runs its own fixed *normal*
-/// order over the level this passthrough is embedded in, so any structural
-/// node (`Styled`, `Ref`, …) this construct's own resolved subset produced
-/// would be visited *again* by whichever of `build`'s six steps come after
-/// this one — and unlike `Quotes` (whose delimiters are consumed, so a
-/// second pass finds nothing left to match) or `SpecialCharacters` (whose
-/// `CharRef` leaves are atomic), a macro's own display text is not
-/// idempotent under a second pass: a `Ref{Link}`'s display children are
-/// literal text that *looks* exactly like the source URL, so a second
-/// `Macros` pass would recognize it all over again and nest a nested link
-/// inside it. A resolved list omitting a step `build`'s own fixed order
-/// still runs (e.g. `pass:q[<b>]`, which never asks for
-/// `SpecialCharacters`) has the same problem in reverse: `build`'s own
-/// unconditional `SpecialCharacters` step would escape content the author's
-/// list deliberately left raw.
-///
-/// [`passthrough_text`] — already used for `++…++`/`$$…$$`/the bare
-/// unconstrained form — sidesteps both failure modes: it renders `text`
-/// through the **real, string-based** substitution pipeline
-/// ([`SubstitutionGroup::apply`], the same call
-/// `PassthroughRestoreReplacer` makes for a stored `Passthrough`), producing
-/// an already-final HTML string, then this function's caller wraps it in a
-/// single [`Raw`](InlineNode::Raw) leaf. A `Raw` leaf is *opaque* to every
-/// later step in this module (never descended into, never re-matched —
-/// design §4.2's passthrough-as-leaf convention), so it is immune to both
-/// failure modes above: nothing in `build`'s own remaining steps can touch
-/// it, whether or not the author's list included that step.
-///
-/// An unrecognized substitution name in the list (e.g. `pass:bogus[…]`) is
-/// silently skipped — any recognized names are still honored — mirroring
-/// [`SubstitutionGroup::from_custom_string`]/`InlinePassMacroReplacer`'s own
-/// resolution. Unlike the string pipeline, this additive pass does not yet
-/// raise the `InvalidSubstitutionTypeForPassthroughMacro` warning for it,
-/// deferring that side effect to the cutover exactly as every other macro
-/// family defers its own catalog/warning side effect (design §5.2 Phase 4
-/// step 6), since it does not change the fold's output bytes.
-fn build_pass_macro_subs_value(text: &str, subs_list: &str, parser: &Parser) -> String {
-    let (subs, _invalid) = SubstitutionGroup::from_custom_string(None, subs_list);
-    passthrough_text(Span::new(text), &subs, parser)
 }
 
 /// Builds one [`Styled`] node from a verbatim, unescaped, attribute-listed
@@ -2535,10 +2518,10 @@ mod tests {
     fn a_pass_macro_with_a_special_characters_subs_list_is_a_raw_node() {
         // `pass:c[…]` resolves to `Custom([SpecialCharacters])`: the body is
         // rendered through the real pipeline under just that one step (see
-        // `build_pass_macro_subs_value`), so `<`/`>` are already escaped in
-        // the leaf's `value` — a single opaque `Raw` node, not `CharRef`
-        // leaves this builder's own `SpecialCharacters` transducer would
-        // produce.
+        // `build_passthrough_node`'s explicit-list arm), so `<`/`>` are
+        // already escaped in the leaf's `value` — a single opaque `Raw` node,
+        // not `CharRef` leaves this builder's own `SpecialCharacters`
+        // transducer would produce.
         let source = "pass:c[<b>]";
         let nodes = build_src(Span::new(source));
 

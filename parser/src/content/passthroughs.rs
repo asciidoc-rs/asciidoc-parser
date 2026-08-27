@@ -5,7 +5,10 @@ use regex::{Captures, Regex, Replacer};
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    content::{Content, SubstitutionGroup, substitution_step::substitute_attributes_in_text},
+    content::{
+        Content, PASSTHROUGH_PLACEHOLDER_END, PASSTHROUGH_PLACEHOLDER_START, SubstitutionGroup,
+        substitution_step::substitute_attributes_in_text,
+    },
     inlines::{InlineNode, RawOrigin},
     parser::{QuoteScope, QuoteType},
     warnings::WarningType,
@@ -286,13 +289,13 @@ impl Passthroughs {
         let index = self.0.len();
         self.0.push(passthrough);
 
-        dest.push('\u{96}');
+        dest.push(PASSTHROUGH_PLACEHOLDER_START);
 
         // Append the index in place with `write!`, avoiding the temporary
         // `String` a `push_str(&format!(...))` would allocate.
         let _ = write!(dest, "{index}");
 
-        dest.push('\u{97}');
+        dest.push(PASSTHROUGH_PLACEHOLDER_END);
     }
 }
 
@@ -535,7 +538,10 @@ impl InlinePassMacroReplacer<'_> {
 
 static PASS_WITH_INDEX: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
-    Regex::new("\u{96}(\\d+)\u{97}").unwrap()
+    Regex::new(&format!(
+        "{PASSTHROUGH_PLACEHOLDER_START}(\\d+){PASSTHROUGH_PLACEHOLDER_END}"
+    ))
+    .unwrap()
 });
 
 /// Matches an inline passthrough, which may span multiple lines.
@@ -862,7 +868,10 @@ impl Replacer for PassthroughRestoreReplacer<'_> {
             subbed_text.rendered = new_text.into();
         }
 
-        if subbed_text.rendered_html().contains('\u{96}') {
+        if subbed_text
+            .rendered_html()
+            .contains(PASSTHROUGH_PLACEHOLDER_START)
+        {
             // Recursively apply passthrough replacement and write the result.
             let replacer = PassthroughRestoreReplacer(self.0, self.1);
 

@@ -484,6 +484,52 @@ flat string. In the node model they become ordinary nodes:
   "strip footnote markers from a section title's reftext/id" logic becomes a tree filter
   (drop `Footnote` nodes) instead of sentinel-span deletion.
 
+#### The escaping pass, and where escaped form stops
+
+`main` closed a defect in the sentinel systems while this branch was rewriting them: a
+document can *type* the codepoints the string pipeline reserves, so its own copies are
+escaped before substitution begins and restored on the way out (`escape_sentinels` /
+`unescape_sentinels`, [#1235](https://github.com/asciidoc-rs/asciidoc-parser/issues/1235)).
+Merging that fix here settled two things worth recording.
+
+**The tree needs no escaping, and gets none.** The single-pass builder recognizes
+constructs by *range over the source*, never by scanning a rendered string for its own
+marks, so a codepoint the document typed is never mistaken for one the parser wrote. The
+one private-use codepoint the builder does use — `SPAN_PLACEHOLDER` (`\u{E0F0}`), standing
+in for an already-recognized span inside a level's match string — is already handled the
+same way: `passthrough_step` walks by *piece* rather than by character precisely so a
+literal `+b\u{E0F0}c+` is not read as a placeholder. So the escaping is the string
+pipeline's alone, applied at the two ends of `run_pipeline`.
+
+**Escaped form is confined, and what leaves it is marked.** Three values outlive
+`run_pipeline` in escaped form: the deferred placeholder template, this pipeline's own
+cross-reference segments where the §4.2 carve-out keeps them, and a footnote catalog entry
+the string replacer registered. Each has a reader that must hand the document its own text
+back — a catalog lookup, an unresolved-reference warning, a template re-render — and *which
+pipeline produced the value* is not recoverable from the text: unescaping a tree-derived
+value would corrupt one that legitimately contains the escape introducer, which is the same
+confusion the escaping exists to end. So the producer is carried rather than guessed:
+`DeferredContent::from_tree` already said it for a content's segments (and `TitleNode` for a
+title's), `FootnoteDeferred::sentinels_escaped` says it for a footnote's entry, and
+`document_text` is the one place that asks. All three go with `run_pipeline` itself.
+
+**And the decode is per-piece, not per-rendering.** Rendering a template splices the
+**resolver's** answer — a destination, a reference text drawn from the catalog — into the
+pipeline's own escaped text. The resolver was handed the document's own text and answered in
+kind, so its bytes are not in escaped form; decoding the *finished* rendering in one pass
+decodes them too, and an id such as `#a\u{E004}b` comes out as `#a\u{E001}`. So
+`render_template` leaves escaped form run by run as it walks — the template's literal text
+and the four segment fields the substitution itself read back (`target`, `provided_text`,
+`window`, `roles`), never `resolved` or `derived` — and nothing decodes the result. That in
+turn makes `finalize_deferred`'s rebuild the *first* way out of escaped form, so
+`run_pipeline`'s own tail decode is gated on there being nothing deferred; otherwise a
+content that both defers a reference and types the escape introducer is decoded twice.
+
+The branch's reserved set is correspondingly **two** systems, not three: `\u{E002}` /
+`\u{E003}` are absent from `RESERVED_SENTINELS`, because the footnote-marker system is
+already gone — a heading's reference text is a second fold of its own tree
+(`fold_reference_text`), so nothing reserves those codepoints to escape a document out of.
+
 ### 4.3 Cross-reference and title resolution
 
 The two-phase parse (`parse_deferred` then `resolve_against_own_catalog`) is retained, but
@@ -1603,7 +1649,7 @@ Each phase is a reviewable unit with a clear exit gate.
 
   *Step 5d part 3 landed as (a `pass:` macro with an explicit substitution list → `Raw`, the last of 5d's
   four deferred forms):* the one form step 5a and part 4 both name as outstanding,
-  [`build_pass_macro_subs_value`](../../parser/src/content/inline_builder/passthrough_step.rs), is
+  [a `pass:` macro with an explicit substitution list](../../parser/src/content/inline_builder/passthrough_step.rs), is
   recognized — but not, in the end, via a richer node subtree. Prototyping that shape first (threading the
   resolved [`SubstitutionGroup::Custom`] steps through this module's own transducers, the way the legacy
   `x-` compatibility marker's body already does via [`apply_normal_subs`](../../parser/src/content/inline_builder/passthrough_step.rs))
@@ -7601,6 +7647,105 @@ Each phase is a reviewable unit with a clear exit gate.
   (`inline_recorder`, `inline_builder_recorder_parity`,
   `inline_builder_passthrough_record_parity`), which needs an `InlineNode` serialization.
 
+  *Step 6 landed as (the passthrough record corpus, frozen):* the first slice of the deletion, and
+  a **scoping** increment as much as a code one. The menu the inversion left is four deletions and a
+  freeze; surveying the actual surface says it is not four-plus-one but a different shape, and this
+  increment lands the piece that survey puts first.
+
+  *What the survey found, since it revises the menu above.* `apply_string_pipeline` is `#[cfg(test)]`
+  and `run_pipeline` has exactly **two** production callers, both in `apply_inner`: the oracle pass
+  on the clone, whose output `content.rendered` is overwritten by the fold three statements later,
+  and the `tree_seed == None` pass, which is *authoritative*. So the deletion is not gated on the
+  oracle at all — it is gated on that second branch, which a passthrough body's re-entry reaches
+  from inside a build (the guard) and which nothing else can answer for while a body folds to one
+  `Raw` value rather than to nodes. That is production work, and it is the real blocker; the ~30
+  test call sites are the tractable half.
+
+  Those test call sites are also **not** homogeneous, which is what splits the freeze. Most are
+  already frozen — either through [`recorded_golden`](../../parser/src/content/inline_builder/snapshot.rs)
+  (the thirty-nine corpora of the freeze increment) or against a literal golden written into the
+  test, which is a freeze by another name; for both, deleting the pipeline is a mechanical drop of
+  an argument. What is left is the corpora that compare something other than HTML, and they divide
+  by the *shape of what they compare*, not by whether they are "structural":
+
+  - **record-shaped** — a flat list of plainly serializable facts.
+    `inline_builder_passthrough_record_parity` (a `(body, group)` pair per passthrough) and
+    `inline_builder_side_effect_parity` (a catalog-and-warnings snapshot). Neither needs an
+    `InlineNode` serialization; each needs a codec for its own record.
+  - **tree-shaped** — `inline_builder_recorder_parity` and `inline_recorder`, which do need one,
+    and whose comparison is not equality but
+    [`assert_trees_equivalent`](../../parser/src/tests/inline_builder_recorder_parity.rs) — a
+    pairwise normalization that deliberately ignores `location` and `attrs` and splits a recorder
+    `Text` run to meet a builder leaf boundary. Freezing those means choosing a per-side normal
+    form, which a pairwise diff is not, and is the harder half by a wide margin.
+
+  Two corrections to the menu fall out. `inline_builder_passthrough_record_parity` is filed above
+  with the corpora needing an `InlineNode` serialization and does not need one — its golden is
+  [`Passthroughs::extract_from`](../../parser/src/content/passthroughs.rs), a flat list. And
+  `inline_builder_side_effect_parity` is **missing** from the list entirely, though it is a live
+  differential calling `apply_string_pipeline` and dies with the same deletion. The freeze is four
+  corpora, not three.
+
+  *This increment freezes the first of the record-shaped pair*, in the shape the freeze increment
+  established: the golden helper's body becomes a lookup and not one of the module's six assertions
+  moves. The one design difference is that it is a **round trip** rather than a string comparison.
+  `recorded_golden` hands back bytes, which is all the golden-HTML corpora ever wanted; this
+  corpus's assertions read the golden's *structure* — its length, whether it `contains` one of the
+  view's entries, and whether its outer STEM entry still carries the `\u{96}` extraction sentinel —
+  so the recording is decoded back into `Vec<(String, SubstitutionGroup)>` and the tests go on
+  reading it exactly as they did. The codec is the increment's only new machinery: a body quoted
+  with the store's own [`quote`](../../parser/src/content/inline_builder/snapshot.rs), a group as
+  its `Debug` spelling, tab-separated, so a record stays one physical line the way the recording
+  format requires.
+
+  *That sentinel is the reason to freeze this corpus rather than retire it with the pass.*
+  `golden[1].0.contains('\u{96}')` asserts a byte that exists only while the extraction pass does,
+  and it pins a documented difference between the two sides — the pass keeps the sentinel where the
+  view reports the restored body. Retiring the corpus with the pass would make that difference
+  untestable at exactly the moment it stops being observable; freezing it keeps the artifact the
+  deletion removes, in bytes, on the other side of the deletion. The recording carries it
+  (`"x \u{96}0\u{97} y"`), which is what makes this a freeze worth doing rather than a formality.
+
+  The codec is the one part the corpus cannot exercise whole — its fixtures produce four groups and
+  two custom steps between them — so
+  [`the_record_codec_round_trips_every_spelling`](../../parser/src/tests/inline_builder_passthrough_record_parity.rs)
+  sweeps every group and step spelling, the empty list (the arm `decode` special-cases, since
+  `"".split('\t')` yields one empty field rather than none), and the bodies that would break a
+  line-based format. The drift guard was checked by corrupting a recorded body: two fixtures fail
+  with "the string pipeline no longer produces the recorded rendering", which is the guard doing the
+  job it will keep doing until the pipeline goes.
+
+  Nothing in production moved, so the audit is a formality rather than a measurement — **63 rows
+  either side, 0 new and 0 closed** — and coverage is diff-neutral by construction: the two changed
+  production files differ only in a visibility keyword, add no executable line, and both sit at
+  100% (0 missed regions, 0 missed lines) either side. The codec itself lives under `src/tests/`,
+  which the coverage report does not measure at all, so its round-trip test is what covers it rather
+  than a number.
+
+  *That 63 is not the 37 the previous increments reported, and the difference is the recipe rather
+  than the branch.* The audit as CLAUDE.md records it begins by forcing the tree seed on
+  (`if parser.build_inline_tree` → `if true`), which is now a **no-op** — every parse builds a tree
+  since the `with_inline_tree` opt-in retired — and forcing it breaks the one test that turns the
+  flag off deliberately. And the fold now *writes* `content.rendered`, so the string pipeline's own
+  output is no longer what sits there after `apply`; it is what sits there in the window between the
+  pipeline's return and the fold's assignment, which is where the comparison has to go.
+  `set_tree_xrefs` runs in that window but touches only `deferred`, so the value is still the
+  pipeline's. Both sides here were measured with that corrected recipe, which is what makes the
+  comparison like-for-like; the bar is unchanged (no **new** row), and the absolute count is only
+  comparable against a run of the same recipe.
+
+  *What still defers* is the rest of the decomposition this increment's survey drew, in the order
+  the survey puts it: (1) the second record-shaped corpus,
+  `inline_builder_side_effect_parity` — the same freeze over a richer record, and the one the menu
+  omitted; (2) the tree-shaped freeze, `InlineNode` serialization and a per-side normal form for
+  `inline_builder_recorder_parity` and `inline_recorder`, which is where the `InlineNode`
+  serialization the menu names actually belongs; (3) the **authoritative-pass closure** — the
+  `tree_seed == None` branch, which is the production blocker and the only one of these that is not
+  test-side; and only then (4) the deletion itself: `run_pipeline`, `apply_string_pipeline`, the
+  escaping pass, the three sentinel systems (§4.2), the `suppress_recognition_side_effects` window,
+  and `Parser::build_inline_tree`. The public `with_inline_tree` opt-in named in the menu is already
+  gone — only doc prose still mentions it — so what remains under that name is the field.
+
   *Step 6 landed as (a passthrough body's warnings, located):* the open question above, answered in
   favor of **remapping**. A warning raised while substituting a passthrough body now points at the
   reference the author wrote, not at the document start.
@@ -9311,6 +9456,31 @@ Each phase is a reviewable unit with a clear exit gate.
        `suppress_recognition_side_effects` early returns, now unreachable because the seam was that
        window's only setter — it is vestigial as of here and goes whole with `run_pipeline`. See the
        step's own "landed as" note above.
+
+     - ✅ **the passthrough record corpus, frozen — and the deletion, scoped.** The first slice
+       of the deletion, and a scoping increment as much as a code one. Surveying the surface revises
+       the menu twice. `apply_string_pipeline` is `#[cfg(test)]` and `run_pipeline` has two
+       production callers: the oracle pass, whose output the fold overwrites, and the
+       `tree_seed == None` pass, which is **authoritative** (a passthrough body's re-entry from
+       inside a build). So the deletion is gated on that second branch — production work — not on
+       the oracle. And the corpora still to freeze divide by the shape of what they compare:
+       *record-shaped* (`inline_builder_passthrough_record_parity`,
+       `inline_builder_side_effect_parity`), which need only a codec for their own record, and
+       *tree-shaped* (`inline_builder_recorder_parity`, `inline_recorder`), which need the
+       `InlineNode` serialization **and** a per-side normal form, since their comparison is a
+       pairwise normalization rather than equality. The list above misfiles the passthrough corpus
+       with the tree ones and omits the side-effect corpus, which is a live differential that dies
+       with the same deletion: the freeze is four corpora, not three. This increment lands the first
+       record-shaped one, as a **round trip** rather than a string comparison because its assertions
+       read the golden's structure — including whether the outer STEM entry still carries the
+       `\u{96}` extraction sentinel, the artifact the deletion removes and the reason to freeze this
+       corpus rather than retire it with the pass. Audit: 63 rows either side, 0 new and 0 closed
+       (nothing in production moved; 63 rather than the previous increments' 37 because the recipe
+       was corrected, not the branch — see the note above). Coverage diff-neutral: both changed
+       production files add no executable line and stay at 100%; the codec is under `src/tests/`,
+       which the report does not measure, and is covered by its own round-trip test. Coverage diff-neutral outside the new codec, which
+       `the_record_codec_round_trips_every_spelling` covers whole. See the step's own "landed as"
+       note above.
 
      - ✅ **a passthrough body's warnings are located against the body's own span.** The
        follow-up the inversion's review opened, and the one place its swap moved a diagnostic:

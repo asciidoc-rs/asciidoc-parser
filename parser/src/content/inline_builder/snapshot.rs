@@ -302,7 +302,7 @@ fn write_to(file: &Path, entries: &BTreeMap<String, String>) {
 /// non-printable), and a dependency in the dev graph for that is a poor trade.
 /// An apostrophe is deliberately *not* in that set: `{:?}` on a `&str` leaves
 /// it bare, so a `\'` branch here would be unreachable.
-fn unquote(corpus: &str, field: &str) -> String {
+pub(crate) fn unquote(corpus: &str, field: &str) -> String {
     let body = field
         .strip_prefix('"')
         .and_then(|f| f.strip_suffix('"'))
@@ -353,7 +353,7 @@ fn unquote(corpus: &str, field: &str) -> String {
     out
 }
 
-fn quote(s: &str) -> String {
+pub(crate) fn quote(s: &str) -> String {
     format!("{s:?}")
 }
 
@@ -433,7 +433,7 @@ pub(super) fn matches_recording(corpus: &str, source: &str, golden: &str, folded
 /// question a checking run will then ask of the recording, so a regeneration
 /// run stays as honest as the run that follows it (the same reasoning
 /// [`matches_recording`] documents).
-pub(super) fn recorded_golden(corpus: &str, source: &str, golden: &str) -> String {
+pub(crate) fn recorded_golden(corpus: &str, source: &str, golden: &str) -> String {
     Store::real().recorded_golden(corpus, source, golden)
 }
 
