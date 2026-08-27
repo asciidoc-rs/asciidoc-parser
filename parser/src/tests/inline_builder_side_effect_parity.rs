@@ -39,17 +39,34 @@
 //! staged replay, and everything either side wrote down must match — the
 //! catalog entries, in registration order, and the warnings, in the order one
 //! shared list received them.
+//!
+//! The golden side is **frozen** (`snapshots/side_effects.txt`). Its source is
+//! `SubstitutionGroup::apply_string_pipeline`, which design §5.2's step 6 is
+//! about to delete; without the freeze every assertion below would be left
+//! comparing the builder against itself the moment it went. The survey that
+//! scoped that deletion named this corpus as the second of the two
+//! *record-shaped* ones — a flat list of plainly serializable facts, needing a
+//! codec for its own record rather than the `InlineNode` serialization the
+//! tree-shaped corpora still owe. See [`frozen`] for why this one round-trips
+//! the recording rather than comparing bytes, and [`key`] for why it is the
+//! first corpus whose recording key is not the fixture source alone.
 
 use crate::{
     Parser, Span,
     content::{
         Content, SubstitutionGroup,
-        inline_builder::{apply_macro_side_effects, build},
+        inline_builder::{
+            apply_macro_side_effects, build,
+            snapshot::{quote, recorded_golden, unquote},
+        },
     },
-    document::{Footnote, RefType},
+    document::RefType,
     parser::ModificationContext,
     warnings::WarningType,
 };
+
+/// The recording this corpus's golden side is frozen into.
+const RECORDING: &str = "side_effects";
 
 /// Everything a recognition pass writes down *besides* the rendered string.
 #[derive(Debug, Eq, PartialEq)]
@@ -64,13 +81,50 @@ struct SideEffects {
     /// reference catalog's own deterministic order).
     refs: Vec<(String, Option<String>, RefType)>,
 
-    /// Substitution warnings, in the order the one shared list received them.
-    warnings: Vec<WarningType>,
+    /// Substitution warnings, in the order the one shared list received them,
+    /// each as its [`WarningType`] `Debug` spelling.
+    ///
+    /// A spelling rather than the value because the enum has fifty-odd
+    /// variants and a recording has to be able to reconstruct whichever of
+    /// them a fixture produced. `Debug` is total over the enum where a
+    /// hand-written decoder would be a fifty-arm match kept in sync by hand,
+    /// and it is injective for these payloads (a variant name plus `String`
+    /// fields), so equality over the spellings is equality over the values.
+    /// It is also what a failure message already prints, so a recording diff
+    /// reads the same as an assertion failure.
+    warnings: Vec<String>,
 
     /// Footnote catalog entries, in registration (document) order. Compared
     /// whole — index, id, text, deferred cross-references and location — since
     /// every field of one is written by the recognizing pass.
-    footnotes: Vec<Footnote>,
+    footnotes: Vec<FootnoteRecord>,
+}
+
+/// One footnote catalog entry as this corpus compares it.
+///
+/// Field-by-field rather than through [`Footnote`](crate::document::Footnote)'s
+/// own `Debug`, which omits `location` — and `location` is one of the five
+/// facts this corpus exists to compare. Reaching for the whole-struct spelling
+/// the way [`warnings`](SideEffects::warnings) does would have silently dropped
+/// it from the freeze, and nothing would have failed.
+#[derive(Debug, Eq, PartialEq)]
+struct FootnoteRecord {
+    index: String,
+    id: Option<String>,
+    text: String,
+
+    /// The entry's deferred cross-reference state, as `FootnoteDeferred`'s
+    /// `Debug` spelling — the template and the segments, in placeholder order.
+    ///
+    /// A spelling here for the same reason as `warnings`: an `XrefSegment`
+    /// carries seven fields, three of them resolver types of their own. That
+    /// `Debug` omits `sentinels_escaped` costs this corpus nothing, because
+    /// [`snapshot`] already normalizes that field away before comparing — it
+    /// records which *pipeline* built the entry, which is exactly what a
+    /// differential must not treat as a difference.
+    deferred: Option<String>,
+
+    location: Option<(usize, usize)>,
 }
 
 /// Snapshots everything `parser` has had written into it, draining the
@@ -113,11 +167,24 @@ fn snapshot(parser: &Parser) -> SideEffects {
                     // of the footnote's subtree. Both render the same text —
                     // which is compared — so the encoding is normalized away
                     // here rather than counted as a divergence.
+                    //
+                    // Kept even though `FootnoteDeferred`'s `Debug` — the
+                    // spelling `FootnoteRecord::deferred` records — does not
+                    // print the flag: the normalization is the statement that
+                    // the two sides' encodings are not a difference, and it
+                    // should not rest on which fields a `Debug` impl happens
+                    // to include.
                     if let Some(deferred) = footnote.deferred.as_mut() {
                         deferred.set_sentinels_escaped(false);
                     }
 
-                    footnote
+                    FootnoteRecord {
+                        index: footnote.index,
+                        id: footnote.id,
+                        text: footnote.text,
+                        deferred: footnote.deferred.map(|d| format!("{d:?}")),
+                        location: footnote.location,
+                    }
                 })
                 .collect(),
         )
@@ -131,9 +198,279 @@ fn snapshot(parser: &Parser) -> SideEffects {
         warnings: parser
             .drain_substitution_warnings_since(0)
             .into_iter()
-            .map(|warning| warning.warning)
+            .map(|warning| format!("{:?}", warning.warning))
             .collect(),
     }
+}
+
+/// What the **string pipeline** wrote down, read back from the recording — the
+/// frozen half of every comparison in this module.
+///
+/// The pipeline still runs, and `recorded_golden` still checks its answer
+/// against the recorded one on every call, so nothing here is taken on trust
+/// while the pipeline exists. What the freeze buys is the day it does not:
+/// `apply_string_pipeline` is this corpus's only golden source, so deleting it
+/// would otherwise leave every assertion below comparing the builder against
+/// itself. Design §5.2's survey named this corpus as the second of the two
+/// *record-shaped* ones — a flat list of plainly serializable facts, needing a
+/// codec for its own record rather than an `InlineNode` serialization — and
+/// this is that codec.
+///
+/// It is a **round trip** rather than a string comparison for the same reason
+/// the passthrough record corpus's is: the assertions below read the golden's
+/// structure, not its bytes. They ask each list's length
+/// ([`the_sweep_reaches_every_list_a_recognition_pass_writes_to`]), whether an
+/// entry's `deferred` is `Some`, what a footnote's `text` is
+/// ([`two_shapes_where_a_tree_built_footnote_entry_still_diverges`]), and what
+/// ids the reference catalog holds. So the recording is decoded back into a
+/// `SideEffects` and every one of those reads goes on working unchanged.
+fn frozen(config: &str, source: &str, computed: SideEffects) -> SideEffects {
+    decode(&recorded_golden(
+        RECORDING,
+        &key(config, source),
+        &encode(&computed),
+    ))
+}
+
+/// The recording key for one fixture under one parser configuration.
+///
+/// A plain `source` key is not enough here, and this corpus is the first to
+/// need more: unlike the golden-HTML corpora, it runs the *same* source under
+/// more than one configuration — `Hello, {alpha}!` is swept under both
+/// `attribute-missing=warn` and `attribute-missing=drop-line`, which write
+/// different warning lists. Keyed by source alone the two would collide, and
+/// the store would report a `Decision::Conflict` on the second of them.
+///
+/// `\u{1}` separates the two halves rather than a readable bracket: fixtures
+/// in [`CORPUS`] genuinely begin with `[` (`[[the-anchor]]…`), so a `[tag] `
+/// prefix would be ambiguous in principle. The store quotes a key before
+/// writing it, so the separator survives the file as `\u{1}` and reads
+/// unambiguously in a diff.
+fn key(config: &str, source: &str) -> String {
+    if config.is_empty() {
+        source.to_string()
+    } else {
+        format!("{config}\u{1}{source}")
+    }
+}
+
+/// Encodes a snapshot as one physical line: every list is a decimal count
+/// followed by its entries' fields, and every field is tab-separated.
+///
+/// A count rather than a delimiter because the record holds five
+/// variable-length lists in a row and a string field can hold anything,
+/// including whatever character a delimiter would have used. Counting is what
+/// lets [`decode`] know where one list ends without reserving a byte the
+/// document could type.
+///
+/// String fields go through the store's own [`quote`], which is what keeps a
+/// record on one physical line: a footnote's text spans lines, a warning's
+/// payload can hold a tab, and the string pipeline's own output carries
+/// Private-Use-Area sentinels. `Option<String>` writes a bare `-` for `None`,
+/// which cannot be mistaken for a value: a present one is always quoted, so it
+/// always begins with `"`.
+fn encode(effects: &SideEffects) -> String {
+    let mut fields: Vec<String> = vec![];
+
+    fields.push(effects.images.len().to_string());
+    for (target, imagesdir) in &effects.images {
+        fields.push(quote(target));
+        fields.push(encode_option(imagesdir.as_deref()));
+    }
+
+    fields.push(effects.links.len().to_string());
+    fields.extend(effects.links.iter().map(|link| quote(link)));
+
+    fields.push(effects.refs.len().to_string());
+    for (id, reftext, ref_type) in &effects.refs {
+        fields.push(quote(id));
+        fields.push(encode_option(reftext.as_deref()));
+        fields.push(format!("{ref_type:?}"));
+    }
+
+    fields.push(effects.warnings.len().to_string());
+    fields.extend(effects.warnings.iter().map(|warning| quote(warning)));
+
+    fields.push(effects.footnotes.len().to_string());
+    for footnote in &effects.footnotes {
+        fields.push(quote(&footnote.index));
+        fields.push(encode_option(footnote.id.as_deref()));
+        fields.push(quote(&footnote.text));
+        fields.push(encode_option(footnote.deferred.as_deref()));
+
+        fields.push(match footnote.location {
+            Some((offset, len)) => format!("{offset}:{len}"),
+            None => "-".to_string(),
+        });
+    }
+
+    fields.join("\t")
+}
+
+/// Reverses [`encode`].
+fn decode(encoded: &str) -> SideEffects {
+    let mut fields = Fields::new(encoded);
+
+    let images = (0..fields.count("images"))
+        .map(|_| {
+            (
+                decode_string(&fields.next("image target")),
+                decode_option(&fields.next("imagesdir")),
+            )
+        })
+        .collect();
+
+    let links = (0..fields.count("links"))
+        .map(|_| decode_string(&fields.next("link target")))
+        .collect();
+
+    let refs = (0..fields.count("refs"))
+        .map(|_| {
+            (
+                decode_string(&fields.next("ref id")),
+                decode_option(&fields.next("reftext")),
+                decode_ref_type(&fields.next("ref type")),
+            )
+        })
+        .collect();
+
+    let warnings = (0..fields.count("warnings"))
+        .map(|_| decode_string(&fields.next("warning")))
+        .collect();
+
+    let footnotes = (0..fields.count("footnotes"))
+        .map(|_| FootnoteRecord {
+            index: decode_string(&fields.next("footnote index")),
+            id: decode_option(&fields.next("footnote id")),
+            text: decode_string(&fields.next("footnote text")),
+            deferred: decode_option(&fields.next("footnote deferred")),
+            location: decode_location(&fields.next("footnote location")),
+        })
+        .collect();
+
+    assert!(
+        fields.exhausted(),
+        "trailing fields in {RECORDING}.txt: {encoded:?}"
+    );
+
+    SideEffects {
+        images,
+        links,
+        refs,
+        warnings,
+        footnotes,
+    }
+}
+
+/// A left-to-right cursor over one record's tab-separated fields.
+///
+/// A struct rather than a pair of closures because the five lists are read in
+/// sequence and each read advances the same position: two closures sharing one
+/// `&mut usize` cannot both be live, which is what the borrow checker says
+/// about the obvious spelling.
+struct Fields<'a> {
+    fields: Vec<&'a str>,
+    at: usize,
+}
+
+impl<'a> Fields<'a> {
+    fn new(encoded: &'a str) -> Self {
+        Self {
+            // `"".split('\t')` yields one empty field rather than none, which
+            // `count` would then read as a malformed count. An empty encoding
+            // is not reachable from `encode` — it always writes five counts —
+            // so this guards a corrupted recording rather than a normal case.
+            fields: if encoded.is_empty() {
+                vec![]
+            } else {
+                encoded.split('\t').collect()
+            },
+            at: 0,
+        }
+    }
+
+    /// The next field, named for the panic message if the record ran out.
+    fn next(&mut self, what: &str) -> String {
+        let field = self
+            .fields
+            .get(self.at)
+            .unwrap_or_else(|| panic!("truncated record in {RECORDING}.txt: missing {what}"));
+
+        self.at += 1;
+        (*field).to_string()
+    }
+
+    /// The next field as a list length.
+    fn count(&mut self, what: &str) -> usize {
+        let field = self.next(what);
+
+        field
+            .parse()
+            .unwrap_or_else(|_| panic!("bad {what} count in {RECORDING}.txt: {field:?}"))
+    }
+
+    /// Whether every field was consumed — a count that under-reads its own
+    /// list leaves fields behind rather than running out, so the truncation
+    /// guard above cannot catch it.
+    fn exhausted(&self) -> bool {
+        self.at == self.fields.len()
+    }
+}
+
+/// A present string as [`quote`] writes it, `None` as a bare `-`.
+fn encode_option(value: Option<&str>) -> String {
+    value.map_or_else(|| "-".to_string(), quote)
+}
+
+/// Reverses [`encode_option`].
+fn decode_option(field: &str) -> Option<String> {
+    (field != "-").then(|| decode_string(field))
+}
+
+/// One quoted field, back to its bytes.
+fn decode_string(field: &str) -> String {
+    unquote(RECORDING, field)
+}
+
+/// A [`RefType`] as one unquoted field. Only three spellings exist, so this one
+/// leaf keeps its real type rather than a `Debug` string — which is what lets
+/// [`the_replay_is_not_a_no_op_for_any_family`] go on asserting
+/// `RefType::Anchor` directly.
+fn decode_ref_type(field: &str) -> RefType {
+    match field {
+        "RefType::Anchor" => RefType::Anchor,
+        "RefType::Section" => RefType::Section,
+        "RefType::Bibliography" => RefType::Bibliography,
+        other => panic!("unrecognized ref type in {RECORDING}.txt: {other:?}"),
+    }
+}
+
+/// A footnote's `(offset, length)` pair, or `-` for an entry whose defining
+/// occurrence is not locatable in the document source.
+fn decode_location(field: &str) -> Option<(usize, usize)> {
+    if field == "-" {
+        return None;
+    }
+
+    let (offset, len) = field
+        .split_once(':')
+        .unwrap_or_else(|| panic!("bad location in {RECORDING}.txt: {field:?}"));
+
+    let parse = |part: &str| {
+        part.parse()
+            .unwrap_or_else(|_| panic!("bad location in {RECORDING}.txt: {field:?}"))
+    };
+
+    Some((parse(offset), parse(len)))
+}
+
+/// [`WarningType`] values in the spelling [`SideEffects::warnings`] records,
+/// for an assertion that names the values rather than their encoding.
+fn spellings(warnings: &[WarningType]) -> Vec<String> {
+    warnings
+        .iter()
+        .map(|warning| format!("{warning:?}"))
+        .collect()
 }
 
 /// The parser both sides of a comparison are built from, one instance each.
@@ -168,7 +505,11 @@ fn corpus_parser() -> Parser {
 /// every entry twice and every duplicate-id warning fire spuriously. The same
 /// two-independent-parsers discipline design §5.3 establishes for the fold's
 /// own corpora.
-fn side_effects_with(source: &str, configure: impl Fn() -> Parser) -> (SideEffects, SideEffects) {
+fn side_effects_with(
+    source: &str,
+    config: &str,
+    configure: impl Fn() -> Parser,
+) -> (SideEffects, SideEffects) {
     let golden_parser = configure();
     let mut content = Content::from(Span::new(source));
     SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &golden_parser, None);
@@ -186,11 +527,14 @@ fn side_effects_with(source: &str, configure: impl Fn() -> Parser) -> (SideEffec
 
     apply_macro_side_effects(&nodes, &builder_parser, Span::new(source), false);
 
-    (snapshot(&golden_parser), snapshot(&builder_parser))
+    (
+        frozen(config, source, snapshot(&golden_parser)),
+        snapshot(&builder_parser),
+    )
 }
 
 fn side_effects(source: &str) -> (SideEffects, SideEffects) {
-    side_effects_with(source, corpus_parser)
+    side_effects_with(source, "", corpus_parser)
 }
 
 impl SideEffects {
@@ -416,7 +760,7 @@ const CORPUS: &[&str] = &[
 /// string haystack to quote. Turning the warning off is what lets the
 /// registration underneath it be compared, which is this increment's subject.
 fn compat_mode_side_effects(source: &str) -> (SideEffects, SideEffects) {
-    side_effects_with(source, || {
+    side_effects_with(source, "compat-mode", || {
         corpus_parser().with_intrinsic_attribute("compat-mode", "", ModificationContext::Anywhere)
     })
 }
@@ -528,7 +872,7 @@ fn two_shapes_where_a_tree_built_footnote_entry_still_diverges() {
 /// `[[[id]]]` only inside a bibliography list item, which is parser state
 /// rather than source text. It gets its own configured pair.
 fn bibliography_side_effects(source: &str) -> (SideEffects, SideEffects) {
-    side_effects_with(source, || {
+    side_effects_with(source, "bibliography", || {
         let parser = corpus_parser();
         parser.in_bibliography_list_item.set(true);
         parser
@@ -614,7 +958,7 @@ fn the_sweep_reaches_every_list_a_recognition_pass_writes_to() {
 /// parser state rather than source text, and the default (`skip`) diagnoses
 /// nothing at all.
 fn missing_mode_side_effects(source: &str, mode: &str) -> (SideEffects, SideEffects) {
-    side_effects_with(source, || {
+    side_effects_with(source, &format!("attribute-missing={mode}"), || {
         corpus_parser().with_intrinsic_attribute(
             "attribute-missing",
             mode,
@@ -873,12 +1217,15 @@ fn the_replay_is_not_a_no_op_for_any_family() {
     assert_eq!(builder.images, [("x.png".to_string(), None)]);
     assert_eq!(builder.links, ["y.html"]);
     assert_eq!(builder.refs, [("dup".to_string(), None, RefType::Anchor)]);
+    // Through the same `Debug` spelling `SideEffects::warnings` records, so
+    // what is asserted stays the two `WarningType` values themselves rather
+    // than a pair of hand-written strings that could drift from them.
     assert_eq!(
         builder.warnings,
-        [
+        spellings(&[
             WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_string()),
             WarningType::DuplicateId("dup".to_string()),
-        ]
+        ])
     );
 }
 
@@ -1094,4 +1441,148 @@ fn an_auto_numbered_callout_registers_its_resolved_number() {
         callout_warnings.is_empty(),
         "auto-numbered callouts should register 1 and 2: {callout_warnings:?}"
     );
+}
+
+#[test]
+fn the_record_codec_round_trips_every_shape() {
+    // The codec is the one part of the freeze the corpus cannot exercise
+    // whole. Its fixtures produce a narrow slice of the record's shape space —
+    // no fixture registers an image *and* a footnote *and* a warning at once,
+    // none carries an `imagesdir` beside a `None` one in the same record, and
+    // `RefType::Section` never appears at all — so the sweep below drives the
+    // parts a recording has to survive rather than the parts one happens to
+    // hold.
+    //
+    // The bar is that `decode(encode(x)) == x` for each, since that equality
+    // is exactly what every assertion in this module rests on once the golden
+    // side is a lookup.
+    let empty = SideEffects {
+        images: vec![],
+        links: vec![],
+        refs: vec![],
+        warnings: vec![],
+        footnotes: vec![],
+    };
+
+    // Every list populated at once, every `Option` in both states, every
+    // `RefType`, and a footnote with and without each of its two optional
+    // fields.
+    let full = SideEffects {
+        images: vec![
+            ("a.png".to_string(), None),
+            ("b.png".to_string(), Some("img".to_string())),
+        ],
+        links: vec!["x.html".to_string(), "mailto:a@b.example".to_string()],
+        refs: vec![
+            ("anchor".to_string(), None, RefType::Anchor),
+            (
+                "sect".to_string(),
+                Some("Section One".to_string()),
+                RefType::Section,
+            ),
+            (
+                "gof".to_string(),
+                Some("GoF".to_string()),
+                RefType::Bibliography,
+            ),
+        ],
+        warnings: spellings(&[
+            WarningType::DuplicateId("dup".to_string()),
+            WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_string()),
+        ]),
+        footnotes: vec![
+            FootnoteRecord {
+                index: "1".to_string(),
+                id: None,
+                text: "plain".to_string(),
+                deferred: None,
+                location: None,
+            },
+            FootnoteRecord {
+                index: "2".to_string(),
+                id: Some("fid".to_string()),
+                text: "with a reference".to_string(),
+                deferred: Some("FootnoteDeferred { template: \"x\", xrefs: [] }".to_string()),
+                location: Some((12, 34)),
+            },
+        ],
+    };
+
+    // The bytes a line-based format has to survive, in every string position
+    // the record has: a tab and a newline (which would split one record across
+    // several lines), a quote and a backslash (which the quoting itself has to
+    // escape), the `-` that marks an absent `Option` (so a *present* value
+    // spelled `-` is not read back as `None`), and the Private-Use-Area
+    // sentinels the string pipeline's own output carries.
+    let tricky = SideEffects {
+        images: vec![("a\tb.png".to_string(), Some("-".to_string()))],
+        links: vec!["x\ny.html".to_string()],
+        refs: vec![(
+            "id\"quote".to_string(),
+            Some("back\\slash".to_string()),
+            RefType::Anchor,
+        )],
+        warnings: vec!["Warning(\"a\tb\")".to_string()],
+        footnotes: vec![FootnoteRecord {
+            index: "1".to_string(),
+            id: Some("-".to_string()),
+            text: "a \u{96}0\u{97} sentinel\nover lines".to_string(),
+            deferred: Some("\u{e000}1\u{e001}".to_string()),
+            location: Some((0, 0)),
+        }],
+    };
+
+    for effects in [empty, full, tricky] {
+        let encoded = encode(&effects);
+
+        assert!(
+            !encoded.contains('\n'),
+            "a record must stay one physical line: {encoded:?}"
+        );
+
+        assert_eq!(decode(&encoded), effects, "round trip for {effects:?}");
+    }
+}
+
+#[test]
+fn the_record_codec_rejects_a_corrupted_recording() {
+    // The panics the codec raises are its own failure surface, and each names
+    // a distinct way a hand-edited recording can go wrong. Asserted rather
+    // than left as unreachable defensive code: a recording *is* hand-editable,
+    // and a silent mis-parse would hand a wrong golden to every assertion in
+    // this module.
+    for (encoded, expected) in [
+        // Nothing at all, where five counts are required.
+        ("", "missing images"),
+        // A count that is not a number.
+        ("x", "bad images count"),
+        // A count that over-reads its list.
+        ("1", "missing image target"),
+        // A count that under-reads it, leaving fields behind.
+        ("0\t0\t0\t0\t0\t\"extra\"", "trailing fields"),
+        // A field that should be quoted and is not.
+        ("1\tbare\t-\t0\t0\t0\t0", "unquoted field"),
+        // A ref type spelling that does not exist.
+        (
+            "0\t0\t1\t\"id\"\t-\tRefType::Nope\t0\t0",
+            "unrecognized ref type",
+        ),
+        // A location that is not an `offset:length` pair.
+        ("0\t0\t0\t0\t1\t\"1\"\t-\t\"t\"\t-\tnope", "bad location"),
+        ("0\t0\t0\t0\t1\t\"1\"\t-\t\"t\"\t-\tx:1", "bad location"),
+    ] {
+        let message = std::panic::catch_unwind(|| decode(encoded))
+            .expect_err(&format!("{encoded:?} decoded without complaint"));
+
+        let message = message
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| message.downcast_ref::<&str>().copied())
+            .unwrap_or("");
+
+        assert!(
+            message.contains(expected),
+            "{encoded:?} panicked with {message:?}, expected it to mention {expected:?}"
+        );
+    }
 }
