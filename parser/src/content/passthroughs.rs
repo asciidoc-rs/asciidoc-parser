@@ -1075,6 +1075,67 @@ mod tests {
     }
 
     #[test]
+    fn a_rescued_passthrough_warning_keeps_the_location_it_always_had() {
+        // The rescue above carries a warning across the build's discard
+        // *unchanged*, offset included — which is worth pinning, because the
+        // offset it carries is already wrong and has been all along.
+        //
+        // `passthrough_text` substitutes a body as **owned** text, so a warning
+        // the body raises is located against that text rather than against the
+        // document: it comes out at offset 0 however far into the document the
+        // passthrough sits. That is a bug in how a body's warnings are located,
+        // not in the rescue — `origin/inline-ast` reports byte-for-byte the
+        // same span for every fixture here — and closing it means deciding
+        // whether such a warning should be *remapped* onto the body's position
+        // or *discarded* the way every other owned-source substitution's is.
+        // That is its own change; this test exists so the answer is a decision
+        // rather than a drift, and so that the rescue's own claim
+        // (behavior-preserving, offsets and all) is checked rather than
+        // asserted.
+        //
+        // The plain, non-passthrough control is what says the mislocation
+        // belongs to the body path specifically: the same reference outside a
+        // passthrough is located exactly.
+        let mut parser = Parser::default().with_intrinsic_attribute(
+            "attribute-missing",
+            "warn",
+            ModificationContext::Anywhere,
+        );
+
+        let doc = parser.parse("Intro.\n\nA later para with pass:a[{missing}] in it.");
+
+        let located: Vec<_> = doc
+            .warnings()
+            .map(|warning| (warning.source.line(), warning.source.byte_offset()))
+            .collect();
+
+        assert_eq!(
+            located,
+            [(1, 0)],
+            "a passthrough body's warning moved; it has always pointed at the document start"
+        );
+
+        let mut parser = Parser::default().with_intrinsic_attribute(
+            "attribute-missing",
+            "warn",
+            ModificationContext::Anywhere,
+        );
+
+        let doc = parser.parse("Intro.\n\nA later para with {missing} in it.");
+
+        let located: Vec<_> = doc
+            .warnings()
+            .map(|warning| (warning.source.line(), warning.source.byte_offset()))
+            .collect();
+
+        assert_eq!(
+            located,
+            [(3, 26)],
+            "a plain missing reference must still be located exactly"
+        );
+    }
+
+    #[test]
     fn content_without_passthroughs_exposes_an_empty_collection() {
         // Plain content — and content whose substitution group never extracts
         // passthroughs — exposes an empty collection rather than any sentinel.

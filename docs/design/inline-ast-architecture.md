@@ -7532,6 +7532,18 @@ Each phase is a reviewable unit with a clear exit gate.
   is the pin, and it is the complement of the mislocated-warning test above — the two together are the
   whole of the distinction.
 
+  A second review pass then asked what *location* those rescued warnings carry, which is worth
+  recording: the answer is "the wrong one, and always has been". `passthrough_text` substitutes a body
+  as **owned** text, so a warning the body raises is located against that text rather than against the
+  document and comes out at offset 0 however far in the passthrough sits. `origin/inline-ast` reports
+  byte-for-byte the same span for every fixture, so the rescue is behavior-preserving down to the
+  offset — the bug is in how a body's warnings are located, and closing it means deciding whether such
+  a warning should be *remapped* onto the body's position or *discarded* the way every other
+  owned-source substitution's is. That is its own change, and
+  [`a_rescued_passthrough_warning_keeps_the_location_it_always_had`](../../parser/src/content/passthroughs.rs)
+  pins the current answer (with a plain, non-passthrough control that *is* located exactly) so it stays
+  a decision rather than drifting.
+
   **A passthrough body's re-entry changed hands.** `passthrough_text` re-enters
   `SubstitutionGroup::apply` for a body carrying its own substitution list, and that re-entry now
   happens from inside the build, on the real parser. It takes no tree seed (the guard), so its string
