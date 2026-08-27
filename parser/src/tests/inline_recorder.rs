@@ -979,6 +979,69 @@ fn the_three_non_specialcharacters_bodies_still_consult_the_renderer() {
     }
 }
 
+/// Applies `source`'s whole substitution group — both passes and the fold —
+/// and returns how many times that consulted `parser`'s renderer.
+///
+/// The sibling of [`renderer_calls_while_building`], which counts the build
+/// alone. This one counts everything, which is the only way to see a body
+/// being substituted an extra *time* rather than an extra *way*.
+fn renderer_calls_while_applying(source: &str) -> usize {
+    let parser = Parser::default().with_inline_substitution_renderer(OrdinalRenderer::default());
+    let mut content = crate::content::Content::from(crate::Span::new(source));
+
+    crate::content::SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+
+    let mut probe = String::new();
+    parser
+        .renderer
+        .render_special_character(crate::parser::SpecialCharacter::Lt, &mut probe);
+
+    probe
+        .trim_matches(|c: char| !c.is_ascii_digit())
+        .parse::<usize>()
+        .expect("the probe reports its own ordinal")
+        - 1
+}
+
+#[test]
+fn a_passthrough_body_is_substituted_once_per_apply() {
+    // `Parser::in_inline_build`, pinned.
+    //
+    // A passthrough carrying its own substitution list re-enters
+    // `SubstitutionGroup::apply` for its body, and that re-entry happens from
+    // *inside* the build now that the build holds the real parser. Without the
+    // guard the nested call takes a tree seed of its own, so the body is
+    // substituted a second time — once by its own string pipeline and once by
+    // its own builder — where before the inversion the seam cleared
+    // `build_inline_tree` on the owned clone to stop exactly that.
+    //
+    // Nothing in the suite noticed: the extra pass produces the same bytes, so
+    // a stateless renderer cannot tell. A *stateful* one can, and that is the
+    // whole point — the branch already uses `OrdinalRenderer` to measure
+    // "unobservable" for the build itself. Removing the guard takes each count
+    // below from three to four, and shifts the ordinal that reaches the output
+    // (`a [3] b` becomes `a [4] b`) — a real output change for any backend
+    // whose renderer carries state.
+    //
+    // The exact number is not the claim; that the three agree, and that
+    // dropping the guard moves all three together, is.
+    for source in ["pass:c[a < b]", "pass:c,q[*a < b*]", "stem:[x < y]"] {
+        assert_eq!(
+            renderer_calls_while_applying(source),
+            3,
+            "{source:?} was substituted more times than the seam should ask for"
+        );
+    }
+
+    // The bare-`+` mixture body is the control: it reaches the renderer through
+    // a different path (its value interleaves escaped text with an extracted
+    // construct's own fold, rather than re-entering `apply`), so it is *not*
+    // moved by the guard. Without it, this fixture alone stays at three while
+    // the three above go to four — which is what says the three are measuring
+    // the re-entry rather than something ambient.
+    assert_eq!(renderer_calls_while_applying("+a $$b < c$$ d+"), 3);
+}
+
 #[test]
 fn a_footnotes_catalog_entry_is_rendered_while_building() {
     // The fourth build-time renderer consumer, and the only one that is not a
@@ -1027,6 +1090,55 @@ fn inline_tree_is_built_by_default() {
     assert!(
         !first_simple_inlines(&doc).is_empty(),
         "every parse must build the inline tree"
+    );
+}
+
+#[test]
+fn a_parse_that_builds_no_tree_keeps_the_string_pipelines_warnings() {
+    // The other half of `build_inline_tree`, and the branch the inversion made
+    // reachable in a second way.
+    //
+    // Since the inversion the seam sends `run_pipeline` to a *clone* whenever a
+    // tree is being built, and to the real parser otherwise. "Otherwise" now
+    // has two causes: a passthrough body re-entered from inside a build (the
+    // reentrancy guard), and a parse configured to build no tree at all —
+    // this one. The first runs inside a build whose blanket warning discard it
+    // has to be carried across; the second does not, and must not be, or the
+    // warnings would be stashed with nothing to hand them back.
+    //
+    // `with_inline_tree` is retired, so `build_inline_tree` is `true` for every
+    // parse the public API can produce and only a crate test reaches this. It
+    // is still the configuration the seam reads, and the branch it selects is
+    // real, so it is exercised here rather than left to be assumed.
+    let mut parser = Parser::default().with_intrinsic_attribute(
+        "attribute-missing",
+        "warn",
+        crate::parser::ModificationContext::Anywhere,
+    );
+
+    parser.build_inline_tree = false;
+
+    let doc = parser.parse("A paragraph with {missing} in it.");
+
+    let warnings: Vec<_> = doc
+        .warnings()
+        .map(|warning| warning.warning.clone())
+        .collect();
+
+    assert_eq!(
+        warnings,
+        [
+            crate::warnings::WarningType::SkippingReferenceToMissingAttribute(
+                "missing".to_string()
+            )
+        ],
+        "a tree-less parse lost the string pipeline's own warning"
+    );
+
+    // And no tree, which is what the configuration says.
+    assert!(
+        first_simple_inlines(&doc).is_empty(),
+        "a parse with `build_inline_tree` off must build no tree"
     );
 }
 

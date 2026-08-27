@@ -7484,6 +7484,123 @@ Each phase is a reviewable unit with a clear exit gate.
   `inline_builder_passthrough_record_parity`), which needs an `InlineNode` serialization rather than
   a wider sweep of the HTML recording mechanism.
 
+  *Step 6 landed as (the inversion):* the swap the last two increments were prep for. The string
+  pipeline and the builder have exchanged parsers.
+
+  Until now `apply_inner` ran `run_pipeline` on the **real** parser with its recognition side effects
+  suppressed, and built the tree on a **counter-safe clone** whose mutations were thrown away. That is
+  backwards for everything except history: the tree is authoritative for the rendered string, so the
+  pass that writes what the document keeps should be the one holding the parser that keeps it. Now
+  `run_pipeline` runs on the clone — its counters, its catalog registrations and its warnings are all
+  discarded with it — and `build_for_group` runs on the real parser.
+
+  **`run_pipeline` is now a pure oracle**: it computes a string and writes nothing anyone reads. That
+  is the whole point of doing this before deleting it — the deletion becomes a deletion rather than a
+  rewrite, and until then the differential corpora go on calling it through `apply_string_pipeline`
+  and go on differentiating for real.
+
+  *Three things had to move with it, and only three.*
+
+  **The recursion guard needed a cell.** `build_inline_tree` was doing two jobs: *configuration*
+  ("does this parse build trees") and *reentrancy* ("is one already building"). The seam could clear
+  the second because the parser driving the build was an owned clone; it is a shared reference now, so
+  reentrancy moved to [`Parser::in_inline_build`](../../parser/src/parser/parser.rs) and the two come
+  apart cleanly.
+
+  **The build's own warning buffer became the whole of the separation.** A build records its
+  deliberate diagnostics through `record_builder_diagnostic`. What it records *incidentally* through
+  `record_substitution_warning` — an `Attrlist` parsed out of a match string raising its own
+  `attribute-missing` warning at an offset into that string, which is not a position in the document
+  source — used to be discarded by sitting on the clone. It does not any more, so the seam discards it
+  out loud, with the same `substitution_warnings_len`/`truncate_substitution_warnings` idiom every
+  other owned-source substitution in the crate already uses. `['{missing}']++x++` is the shape, and
+  `passthrough_attrlist_drop_line_does_not_leak_a_mislocated_warning` is what caught it — the one test
+  that failed on the first green build of the inversion.
+
+  *That discard was too broad on the first pass, and review caught it.* One thing inside a build's
+  window is **not** incidental: the re-entrant `apply` a passthrough body gets, which takes no tree
+  seed and so is that body's authoritative pass. Its warnings are ordinary, located warnings — and the
+  blanket truncation ate every one of them, silently, with the whole suite green (`pass:a[{missing}]`
+  under `attribute-missing=warn` reported nothing where the base reports a
+  `SkippingReferenceToMissingAttribute`). A high-water mark cannot fix it: incidental and
+  authoritative warnings interleave within one build, so the range to discard is not a suffix. The
+  nested pass therefore moves its own warnings out of the window the moment it finishes
+  ([`Parser::nested_authoritative_warnings`](../../parser/src/parser/parser.rs)) and the seam hands
+  them back after truncating, which keeps the invariant ("a build's substitution-buffer output is
+  incidental") exactly as stated while making it true.
+  [`passthrough_body_warnings_survive_the_builds_own_discard`](../../parser/src/content/passthroughs.rs)
+  is the pin, and it is the complement of the mislocated-warning test above — the two together are the
+  whole of the distinction.
+
+  A second review pass then asked what *location* those rescued warnings carry, which is worth
+  recording: the answer is "the wrong one, and always has been". `passthrough_text` substitutes a body
+  as **owned** text, so a warning the body raises is located against that text rather than against the
+  document and comes out at offset 0 however far in the passthrough sits. `origin/inline-ast` reports
+  byte-for-byte the same span for every fixture, so the rescue is behavior-preserving down to the
+  offset — the bug is in how a body's warnings are located, and closing it means deciding whether such
+  a warning should be *remapped* onto the body's position or *discarded* the way every other
+  owned-source substitution's is. That is its own change, and
+  [`a_rescued_passthrough_warning_keeps_the_location_it_always_had`](../../parser/src/content/passthroughs.rs)
+  pins the current answer (with a plain, non-passthrough control that *is* located exactly) so it stays
+  a decision rather than drifting.
+
+  **A passthrough body's re-entry changed hands.** `passthrough_text` re-enters
+  `SubstitutionGroup::apply` for a body carrying its own substitution list, and that re-entry now
+  happens from inside the build, on the real parser. It takes no tree seed (the guard), so its string
+  pipeline *is* the authoritative pass for that body and registers directly — which is the same net
+  effect the suppressed arrangement had, reached the other way round: the enclosing tree cannot replay
+  a body's constructs, because a body folds to one `Raw` value rather than to nodes.
+
+  *That last one is where the increment's real test came from, and it took a sabotage to find.* With
+  the guard removed the whole suite stays green — the nested body is simply substituted twice, and the
+  two passes agree on every byte, so a stateless renderer cannot tell. A **stateful** one can: the
+  branch's own `OrdinalRenderer` (the device §4.2's observability tests already use) counts three
+  renderer calls for `pass:c[a < b]` with the guard and four without, and the ordinal that reaches the
+  output moves from `a [3] b` to `a [4] b` — a real output change for any backend whose renderer
+  carries state.
+  [`a_passthrough_body_is_substituted_once_per_apply`](../../parser/src/tests/inline_recorder.rs) pins
+  it, with the bare-`+` mixture body as the control that does *not* move (it reaches the renderer
+  through a different path), and it is the only test in the suite that catches either half of the
+  guard — the seed condition or the `replace(true)`.
+
+  Three further sabotages fail loudly rather than subtly, which is what says the inversion itself is
+  pinned by the existing suite: putting the string pipeline back on the real parser fails twenty-plus
+  tests (everything registers and counts twice), putting the builder back on a clone fails ten
+  (nothing advances the real counters at all), and keeping the build's incidental warnings fails the
+  mislocated-warning guard. Two more cover the correction: removing the nested pass's rescue, or
+  never handing the rescued warnings back, each fails only the new complement test.
+
+  One further branch the inversion made reachable is exercised rather than assumed. `run_pipeline`
+  goes to the real parser in two cases now — a passthrough body inside a build, and a parse that
+  builds no tree at all — and only the first must have its warnings carried across a pending
+  truncation. `with_inline_tree` is retired, so the second is reachable only from a crate test, and
+  [`a_parse_that_builds_no_tree_keeps_the_string_pipelines_warnings`](../../parser/src/tests/inline_recorder.rs)
+  is it: it is what keeps `build_inline_tree`'s remaining, configuration half from being a branch
+  nothing ever takes.
+
+  Audit: **37 rows either side, 0 new and 0 closed** — the inversion moves no divergence at all. The
+  raw count on the branch reads 43; all six extra rows belong to this increment's own new test, which
+  is the first in the suite to drive `SubstitutionGroup::apply` under a stateful renderer, and they
+  *are* the phenomenon it measures (the oracle and the fold reading successive ordinals off one shared
+  counter). Deleting just that test returns the count to 37 against an unchanged baseline, which is
+  how the attribution was checked rather than assumed.
+
+  Coverage is **not** diff-neutral here, and the exception is the point. `substitution_group.rs` stays
+  at 100% and `passthroughs.rs` at 3/3; `parser.rs` goes from 87/73 to 90/76 (missed regions / missed
+  lines), and the three added lines are exactly the `if self.suppress_recognition_side_effects.get() { return }` early returns in
+  `register_ref`, `register_image` and `register_link`. Nothing sets that window any more — the seam
+  was its only setter — so the mechanism is **vestigial** as of this increment. It is left standing on
+  purpose: removing three of its ten read sites while leaving the field and the other seven would be
+  worse than removing none, and the whole of it goes with `run_pipeline` in the increment that is
+  already scoped to take it.
+
+  *What still defers is the deletion itself* — `run_pipeline`, the three sentinel systems (design
+  §4.2), the `suppress_recognition_side_effects` window, and the `with_inline_tree` flag, whose
+  configuration half is now all that `build_inline_tree` carries. Separately still owed: the
+  structural freeze — the three corpora that compare **trees and records** rather than HTML
+  (`inline_recorder`, `inline_builder_recorder_parity`,
+  `inline_builder_passthrough_record_parity`), which needs an `InlineNode` serialization.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -9112,6 +9229,25 @@ Each phase is a reviewable unit with a clear exit gate.
        side, 0 new and 0 closed (five rows shift only in the test-only recorder's PUA index digits);
        coverage exactly diff-neutral on all three changed production files. What still defers is the
        inversion itself. See the step's own "landed as" note above.
+
+     - ✅ **the inversion.** `run_pipeline` moves onto the counter-safe clone and
+       `build_for_group` onto the real parser, so the pass that is authoritative for the rendered
+       string is the one holding the parser that keeps what it recognizes — and `run_pipeline`
+       becomes a pure oracle, which is what makes its deletion a deletion rather than a rewrite.
+       Three things move with it: the reentrancy half of `build_inline_tree` becomes
+       [`Parser::in_inline_build`](../../parser/src/parser/parser.rs) (a shared reference cannot have
+       a field cleared on it); the build's *incidental* `record_substitution_warning` calls, which
+       used to be discarded by sitting on the clone, are now truncated explicitly; and a passthrough
+       body's re-entry becomes the authoritative pass for that body, since the enclosing tree folds
+       it to one `Raw` value and cannot replay its constructs. The guard is the piece nothing pinned
+       — removing it leaves the suite green, the body merely substituted twice — so the increment's
+       real test measures it with the branch's own `OrdinalRenderer`, where three calls become four
+       and the ordinal reaching the output shifts. Audit: 37 rows either side, 0 new and 0 closed
+       (the branch's raw 43 is this increment's own new test, checked by deleting it). Coverage is
+       deliberately *not* diff-neutral: `parser.rs` gains three uncovered lines, the
+       `suppress_recognition_side_effects` early returns, now unreachable because the seam was that
+       window's only setter — it is vestigial as of here and goes whole with `run_pipeline`. See the
+       step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

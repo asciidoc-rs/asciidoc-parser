@@ -1023,6 +1023,119 @@ mod tests {
     }
 
     #[test]
+    fn passthrough_body_warnings_survive_the_builds_own_discard() {
+        // The complement of the test above, and the two together are the whole
+        // of the distinction.
+        //
+        // A passthrough carrying its own substitution list has its body
+        // substituted by a re-entrant `SubstitutionGroup::apply`, which — since
+        // the inversion — happens *inside* the enclosing inline-tree build, on
+        // the real parser. That nested pass takes no tree seed, so it is the
+        // body's authoritative pass and its warnings are real, located in the
+        // document source like any other.
+        //
+        // The enclosing build discards everything it records into the
+        // substitution-warning buffer, because a build's deliberate diagnostics
+        // go through `record_builder_diagnostic` and what lands in the other
+        // buffer is incidental — the mislocated `Attrlist` warning the test
+        // above pins. These warnings sit in that same range and are *not*
+        // incidental, so `Parser::nested_authoritative_warnings` carries them
+        // across it. Without that, every fixture here reports nothing at all.
+        for (source, mode) in [
+            ("pass:a[{missing}]", "warn"),
+            ("pass:a[{missing}]", "drop-line"),
+            ("pass:q,a[*{missing}*]", "warn"),
+            ("pass:c,a[{missing}]", "warn"),
+        ] {
+            let mut parser = Parser::default().with_intrinsic_attribute(
+                "attribute-missing",
+                mode,
+                ModificationContext::Anywhere,
+            );
+
+            let doc = parser.parse(source);
+
+            // The whole list, not a filtered count: these fixtures raise
+            // exactly this one warning, so comparing the list also says nothing
+            // *else* was surfaced — and leaves the test with no branch of its
+            // own that never runs.
+            let warnings: Vec<_> = doc
+                .warnings()
+                .map(|warning| warning.warning.clone())
+                .collect();
+
+            assert_eq!(
+                warnings,
+                [WarningType::SkippingReferenceToMissingAttribute(
+                    "missing".to_string()
+                )],
+                "the body's own missing-reference warning was lost for {source:?} under {mode}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_rescued_passthrough_warning_keeps_the_location_it_always_had() {
+        // The rescue above carries a warning across the build's discard
+        // *unchanged*, offset included — which is worth pinning, because the
+        // offset it carries is already wrong and has been all along.
+        //
+        // `passthrough_text` substitutes a body as **owned** text, so a warning
+        // the body raises is located against that text rather than against the
+        // document: it comes out at offset 0 however far into the document the
+        // passthrough sits. That is a bug in how a body's warnings are located,
+        // not in the rescue — `origin/inline-ast` reports byte-for-byte the
+        // same span for every fixture here — and closing it means deciding
+        // whether such a warning should be *remapped* onto the body's position
+        // or *discarded* the way every other owned-source substitution's is.
+        // That is its own change; this test exists so the answer is a decision
+        // rather than a drift, and so that the rescue's own claim
+        // (behavior-preserving, offsets and all) is checked rather than
+        // asserted.
+        //
+        // The plain, non-passthrough control is what says the mislocation
+        // belongs to the body path specifically: the same reference outside a
+        // passthrough is located exactly.
+        let mut parser = Parser::default().with_intrinsic_attribute(
+            "attribute-missing",
+            "warn",
+            ModificationContext::Anywhere,
+        );
+
+        let doc = parser.parse("Intro.\n\nA later para with pass:a[{missing}] in it.");
+
+        let located: Vec<_> = doc
+            .warnings()
+            .map(|warning| (warning.source.line(), warning.source.byte_offset()))
+            .collect();
+
+        assert_eq!(
+            located,
+            [(1, 0)],
+            "a passthrough body's warning moved; it has always pointed at the document start"
+        );
+
+        let mut parser = Parser::default().with_intrinsic_attribute(
+            "attribute-missing",
+            "warn",
+            ModificationContext::Anywhere,
+        );
+
+        let doc = parser.parse("Intro.\n\nA later para with {missing} in it.");
+
+        let located: Vec<_> = doc
+            .warnings()
+            .map(|warning| (warning.source.line(), warning.source.byte_offset()))
+            .collect();
+
+        assert_eq!(
+            located,
+            [(3, 26)],
+            "a plain missing reference must still be located exactly"
+        );
+    }
+
+    #[test]
     fn content_without_passthroughs_exposes_an_empty_collection() {
         // Plain content — and content whose substitution group never extracts
         // passthroughs — exposes an empty collection rather than any sentinel.
