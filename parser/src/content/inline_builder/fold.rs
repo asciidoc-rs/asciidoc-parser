@@ -143,6 +143,11 @@ pub(crate) fn fold_deferring_xrefs(
     let mut out = String::new();
     let mut segments = Vec::new();
 
+    // The footnote axis is inert here whichever way it is set: `nodes` is one
+    // footnote's own children, and footnotes do not nest (the string
+    // pipeline's lazy bracket match cannot recognize one inside another's
+    // content either), so no `Footnote` node can be reached. `Marked` is the
+    // ordinary fold, which is the honest default for a mode nothing consults.
     fold_into_html(
         nodes,
         renderer,
