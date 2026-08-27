@@ -7746,6 +7746,89 @@ Each phase is a reviewable unit with a clear exit gate.
   and `Parser::build_inline_tree`. The public `with_inline_tree` opt-in named in the menu is already
   gone — only doc prose still mentions it — so what remains under that name is the field.
 
+  *Step 6 landed as (the side-effect corpus, frozen — the record-shaped pair closed):* the second
+  item on the survey's own list, and the one the pre-survey menu had omitted entirely.
+  `inline_builder_side_effect_parity` is a live differential whose golden side is
+  `SubstitutionGroup::apply_string_pipeline`; without a freeze, deleting that pass would leave every
+  assertion in the module comparing the builder against itself, silently and with the suite green.
+
+  The shape is the freeze increment's: the helper computing the golden becomes a lookup, the pipeline
+  goes on being called and goes on being checked against the recording on every fixture (the drift
+  guard), and **not one of the module's assertions changes what it asserts**. It is a round trip
+  rather than a byte comparison for the same reason the passthrough corpus's is — the assertions read
+  the golden's *structure*: each of five list lengths, whether a footnote entry's `deferred` is
+  `Some`, a footnote's `text`, and the ids the reference catalog holds.
+
+  *Where this record is genuinely richer, and what that cost.* The passthrough record is a
+  `(body, group)` pair. This one is five lists, one of them `Vec<Footnote>` compared **whole** — index,
+  id, text, deferred cross-references and location. Three decisions fall out, and the middle one is
+  the increment's only real trap.
+
+  **`WarningType` is recorded as its `Debug` spelling, not decoded into the enum.** Fifty-odd
+  variants, and a recording has to reconstruct whichever a fixture produced; `Debug` is total over
+  the enum where a hand-written decoder is a fifty-arm match kept in sync by hand, and it is
+  injective for these payloads (a variant name plus `String` fields), so equality over spellings is
+  equality over values. `RefType` keeps its real type — three variants, a three-arm decoder — which
+  is what lets `the_replay_is_not_a_no_op_for_any_family` go on asserting `RefType::Anchor` directly.
+  Its `WarningType` literals go through the same spelling via a `spellings` helper, so that assertion
+  still names the two values rather than a pair of hand-written strings.
+
+  **A `Footnote` is recorded field by field, and reaching for its own `Debug` would have been a
+  silent loss.** `Footnote`'s `Debug` omits `location` — and `location` is one of the five facts this
+  corpus exists to compare. Encoding the struct whole the way `warnings` is encoded would have
+  dropped it from the freeze with nothing failing. `FootnoteDeferred`'s `Debug` omits
+  `sentinels_escaped` in the same way, and there it costs nothing: the harness already normalizes
+  that field away before comparing, because it records which *pipeline* built the entry, which is
+  precisely what a differential must not read as a difference. The normalization is kept rather than
+  dropped as now-redundant — the statement should not rest on which fields a `Debug` impl happens to
+  print.
+
+  **This is the first corpus whose recording key is not the fixture source alone.** It runs the
+  *same* source under more than one parser configuration — `Hello, {alpha}!` is swept under both
+  `attribute-missing=warn` and `attribute-missing=drop-line`, which write different warning lists —
+  so a source-only key collides and the store reports a `Decision::Conflict` on the second. The key
+  is `config\u{1}source`, with the separator chosen over a readable `[tag] ` prefix because fixtures
+  in the corpus genuinely begin with `[` (`[[the-anchor]]…`).
+
+  The format is counted rather than delimited: five variable-length lists in a row, each a decimal
+  count followed by its entries' fields, every string field through the store's own `quote` (a
+  footnote's text spans lines, and the string pipeline's own output carries Private-Use-Area
+  sentinels), and `-` for an absent `Option` — unambiguous because a present value is always quoted
+  and so always begins with `"`.
+
+  The codec gets two tests of its own, since the corpus drives only a narrow slice of the record's
+  shape space (no fixture registers an image *and* a footnote *and* a warning at once, and
+  `RefType::Section` never appears at all).
+  [`the_record_codec_round_trips_every_shape`](../../parser/src/tests/inline_builder_side_effect_parity.rs)
+  sweeps the empty record, one with every list populated and every `Option` in both states, and one
+  holding the bytes a line-based format has to survive — a tab, a newline, a quote, a backslash, a
+  literal `-` in a *present* field, and the sentinels.
+  [`the_record_codec_rejects_a_corrupted_recording`](../../parser/src/tests/inline_builder_side_effect_parity.rs)
+  covers the failure surface, which a hand-editable recording makes reachable rather than defensive:
+  a count that over-reads its list, one that under-reads it and leaves fields behind (which the
+  truncation guard cannot catch, hence the explicit exhaustion check), an unquoted field, an unknown
+  `RefType` spelling, and a malformed location.
+
+  The drift guard was checked by corrupting a recorded footnote text: two fixtures fail with "the
+  string pipeline no longer produces the recorded rendering", which is the guard doing the job it
+  will keep doing until the pipeline goes.
+
+  **Nothing in production moved** — the whole change is under `src/tests/` plus the new recording —
+  so the audit is a formality (**63 rows either side, 0 new and 0 closed**, the same corrected recipe
+  the previous note records) and coverage is diff-neutral by construction rather than by measurement:
+  the totals are byte-identical either side (85888 regions / 572 missed, 57210 lines / 323 missed).
+  The codec lives under `src/tests/`, which the coverage report does not measure at all, so its two
+  tests are what cover it rather than a number.
+
+  *What still defers* is the survey's list with its first item struck: (1) the tree-shaped freeze —
+  `InlineNode` serialization **and** a per-side normal form for `inline_builder_recorder_parity` and
+  `inline_recorder`, whose comparison is a pairwise normalization rather than equality, and which is
+  the harder half of the freeze by a wide margin; (2) the **authoritative-pass closure** — the
+  `tree_seed == None` branch, the production blocker and the only remaining item that is not
+  test-side; and only then (3) the deletion itself: `run_pipeline`, `apply_string_pipeline`, the
+  escaping pass, the three sentinel systems (§4.2), the `suppress_recognition_side_effects` window,
+  and `Parser::build_inline_tree`.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -9415,8 +9498,32 @@ Each phase is a reviewable unit with a clear exit gate.
        (nothing in production moved; 63 rather than the previous increments' 37 because the recipe
        was corrected, not the branch — see the note above). Coverage diff-neutral: both changed
        production files add no executable line and stay at 100%; the codec is under `src/tests/`,
-       which the report does not measure, and is covered by its own round-trip test. Coverage diff-neutral outside the new codec, which
-       `the_record_codec_round_trips_every_spelling` covers whole. See the step's own "landed as"
+       which the report does not measure, and is covered whole by its own
+       `the_record_codec_round_trips_every_spelling`. See the step's own "landed as" note above.
+
+     - ✅ **the side-effect corpus, frozen — the record-shaped pair closed.** The survey's own
+       next item, and the one the pre-survey menu omitted: `inline_builder_side_effect_parity` is a
+       live differential whose golden side is `apply_string_pipeline`, so without a freeze the
+       deletion would leave every assertion in it comparing the builder against itself, silently.
+       Same shape as the freeze above — the golden helper becomes a lookup, the pipeline goes on
+       being checked against the recording, and no assertion changes what it asserts — and a round
+       trip for the same reason, since the assertions read the golden's structure (five list
+       lengths, a footnote's `text`, whether its `deferred` is `Some`, the ids in the catalog).
+       The **richer** record is where this one differs, and it costs three decisions.
+       `WarningType` is recorded as its `Debug` spelling rather than decoded — fifty-odd variants,
+       injective for these payloads — while `RefType` keeps its real type, so the module's positive
+       assertions still name `RefType::Anchor` and (through a `spellings` helper) the two
+       `WarningType` values themselves. A `Footnote` is recorded **field by field**, because its
+       own `Debug` omits `location` and encoding the struct whole would have dropped one of the
+       five compared facts from the freeze with nothing failing; `FootnoteDeferred`'s `Debug` omits
+       `sentinels_escaped` in the same way, which costs nothing only because the harness already
+       normalizes that field away. And it is the first corpus whose recording key is not the
+       fixture source alone: the same source is swept under `attribute-missing=warn` and
+       `=drop-line`, which write different warning lists, so the key is `config\u{1}source`. The
+       format is counted rather than delimited (five variable-length lists in a row), and the codec
+       carries its own round-trip and corruption tests, the corpus driving only a narrow slice of
+       the record's shape space. Nothing in production moved: audit 63 rows either side, 0 new and
+       0 closed, and coverage byte-identical either side. See the step's own "landed as"
        note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
