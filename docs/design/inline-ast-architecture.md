@@ -1218,7 +1218,10 @@ Each phase is a reviewable unit with a clear exit gate.
     The registered catalog `text` is a best-effort normalized rendering of the raw bracket content, not
     a fold (building the tree must not itself invoke a renderer), so — like every other deferred
     registration in this module — a tree-built footnote's `Document::catalog().footnotes()` entry is
-    not yet byte-faithful; only the returned *number* is relied on.
+    not yet byte-faithful; only the returned *number* is relied on. Both halves of that — the
+    approximate `text` and the premise behind it — held at the time and were closed by a step 6 prep
+    below, which finds the entry is a *required* side effect whose payload is a rendered string, so
+    it is the one thing a build has to fold.
 
   Two forms are deferred, each documented and pinned by a divergence test: the deprecated
   `footnoteref:[id,text]` / `footnoteref:[id]` form (which packs its id and text into one bracket, split

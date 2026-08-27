@@ -681,9 +681,9 @@ fn footnote_id_text<'src>(
 ///
 /// A bracket's content may carry an **escaped closing bracket** (`\]`), which
 /// [`normalize_footnote_text`](crate::content::macros::normalize_footnote_text)
-/// — the string replacer's own normalization, and the one this pass registers
-/// the catalog `text` through — turns back into a literal `]`. The subtree must
-/// carry the same text, so the shared [`emit_range_unescaping_brackets`] drops
+/// — the string replacer's own normalization — turns back into a literal `]`.
+/// The subtree must carry the same text, so the shared
+/// [`emit_range_unescaping_brackets`] drops
 /// each backslash as a *gap* in the ranges it emits: `footnote:[a \] b]`
 /// becomes the two `'src`-borrowing [`Text`](InlineNode::Text) children `a `
 /// and `] b`, never an owned rebuild. Sharing the reference-bearing families'
@@ -691,6 +691,12 @@ fn footnote_id_text<'src>(
 /// from drifting; it is also why this form is no longer deferred (recognizing
 /// it once meant splicing a literal `]` into the middle of a `Text` piece,
 /// which nothing here could then express).
+///
+/// Unescaping *here* is also why [`register_footnote_number`] applies only the
+/// other two halves of that normalization (the trim and the newline collapse)
+/// to the template it folds out of these children: the backslash is already
+/// gone by then, and a second pass would unescape a string that was never
+/// escaped.
 fn footnote_children<'src>(
     range: std::ops::Range<usize>,
     s: &str,
