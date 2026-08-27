@@ -530,6 +530,27 @@ pub struct Parser {
     /// answering come apart cleanly: `build_inline_tree` is *configuration*
     /// (does this parse build trees at all), this is *reentrancy*.
     pub(crate) in_inline_build: std::cell::Cell<bool>,
+
+    /// Substitution warnings raised by an **authoritative** pass that ran
+    /// *inside* an inline-tree build, held aside so the build's own blanket
+    /// discard cannot eat them.
+    ///
+    /// A build discards everything it records into the substitution-warning
+    /// buffer, because a build's deliberate diagnostics go through
+    /// [`record_builder_diagnostic`](Self::record_builder_diagnostic) and what
+    /// reaches the other buffer is incidental — an `Attrlist` parsed out of a
+    /// match string, warning at an offset that is not a position in the
+    /// document source. One thing inside that window is *not* incidental: the
+    /// re-entrant `SubstitutionGroup::apply` a passthrough body gets, which
+    /// takes no tree seed and so is that body's authoritative pass. Its
+    /// warnings are real, and they are moved here the moment it finishes, out
+    /// of the range the enclosing build will truncate; the seam hands them back
+    /// afterwards.
+    ///
+    /// A single high-water mark could not do this: incidental and authoritative
+    /// warnings interleave within one build, so the range to discard is not a
+    /// suffix.
+    pub(crate) nested_authoritative_warnings: RefCell<Vec<DeferredWarning>>,
 }
 
 /// A warning recorded in a form that does not borrow the source so it can live
@@ -648,6 +669,7 @@ impl Default for Parser {
             build_inline_tree: true,
             suppress_recognition_side_effects: std::cell::Cell::new(false),
             in_inline_build: std::cell::Cell::new(false),
+            nested_authoritative_warnings: RefCell::new(vec![]),
         }
     }
 }

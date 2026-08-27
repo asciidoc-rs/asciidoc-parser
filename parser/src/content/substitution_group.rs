@@ -309,7 +309,27 @@ impl SubstitutionGroup {
             // `Raw` value, not to nodes) and so cannot replay — leaving this
             // pass as their one registrar, which is the net effect the
             // suppressed arrangement had too.
-            None => self.run_pipeline(content, parser, attrlist),
+            None => {
+                let before = parser.substitution_warnings_len();
+
+                self.run_pipeline(content, parser, attrlist);
+
+                // When this authoritative pass is itself running inside a
+                // build — which is exactly the passthrough-body case above —
+                // the warnings it just raised sit inside the range that build
+                // is about to discard as incidental. They are not incidental,
+                // so move them out of it now; the enclosing seam hands them
+                // back once its own discard has run. See
+                // `Parser::nested_authoritative_warnings`.
+                if parser.in_inline_build.get() {
+                    let mine = parser.drain_substitution_warnings_since(before);
+
+                    parser
+                        .nested_authoritative_warnings
+                        .borrow_mut()
+                        .extend(mine);
+                }
+            }
         }
 
         if let Some(value) = tree_seed {
@@ -351,7 +371,14 @@ impl SubstitutionGroup {
             );
 
             parser.in_inline_build.set(in_build);
+
+            // Everything this build recorded into the substitution-warning
+            // buffer is incidental (see `warnings_before_build`) — except what
+            // an authoritative nested pass moved aside, which is put back.
             parser.truncate_substitution_warnings(warnings_before_build);
+
+            let nested = std::mem::take(&mut *parser.nested_authoritative_warnings.borrow_mut());
+            parser.push_substitution_warnings(nested);
 
             // The recognition **diagnostics** the string pipeline's copy of this
             // content raised into the discarded clone, raised again here where

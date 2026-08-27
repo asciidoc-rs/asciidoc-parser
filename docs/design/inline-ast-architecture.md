@@ -7517,6 +7517,21 @@ Each phase is a reviewable unit with a clear exit gate.
   `passthrough_attrlist_drop_line_does_not_leak_a_mislocated_warning` is what caught it — the one test
   that failed on the first green build of the inversion.
 
+  *That discard was too broad on the first pass, and review caught it.* One thing inside a build's
+  window is **not** incidental: the re-entrant `apply` a passthrough body gets, which takes no tree
+  seed and so is that body's authoritative pass. Its warnings are ordinary, located warnings — and the
+  blanket truncation ate every one of them, silently, with the whole suite green (`pass:a[{missing}]`
+  under `attribute-missing=warn` reported nothing where the base reports a
+  `SkippingReferenceToMissingAttribute`). A high-water mark cannot fix it: incidental and
+  authoritative warnings interleave within one build, so the range to discard is not a suffix. The
+  nested pass therefore moves its own warnings out of the window the moment it finishes
+  ([`Parser::nested_authoritative_warnings`](../../parser/src/parser/parser.rs)) and the seam hands
+  them back after truncating, which keeps the invariant ("a build's substitution-buffer output is
+  incidental") exactly as stated while making it true.
+  [`passthrough_body_warnings_survive_the_builds_own_discard`](../../parser/src/content/passthroughs.rs)
+  is the pin, and it is the complement of the mislocated-warning test above — the two together are the
+  whole of the distinction.
+
   **A passthrough body's re-entry changed hands.** `passthrough_text` re-enters
   `SubstitutionGroup::apply` for a body carrying its own substitution list, and that re-entry now
   happens from inside the build, on the real parser. It takes no tree seed (the guard), so its string
@@ -7540,7 +7555,16 @@ Each phase is a reviewable unit with a clear exit gate.
   pinned by the existing suite: putting the string pipeline back on the real parser fails twenty-plus
   tests (everything registers and counts twice), putting the builder back on a clone fails ten
   (nothing advances the real counters at all), and keeping the build's incidental warnings fails the
-  mislocated-warning guard.
+  mislocated-warning guard. Two more cover the correction: removing the nested pass's rescue, or
+  never handing the rescued warnings back, each fails only the new complement test.
+
+  One further branch the inversion made reachable is exercised rather than assumed. `run_pipeline`
+  goes to the real parser in two cases now — a passthrough body inside a build, and a parse that
+  builds no tree at all — and only the first must have its warnings carried across a pending
+  truncation. `with_inline_tree` is retired, so the second is reachable only from a crate test, and
+  [`a_parse_that_builds_no_tree_keeps_the_string_pipelines_warnings`](../../parser/src/tests/inline_recorder.rs)
+  is it: it is what keeps `build_inline_tree`'s remaining, configuration half from being a branch
+  nothing ever takes.
 
   Audit: **37 rows either side, 0 new and 0 closed** — the inversion moves no divergence at all. The
   raw count on the branch reads 43; all six extra rows belong to this increment's own new test, which
@@ -7550,8 +7574,8 @@ Each phase is a reviewable unit with a clear exit gate.
   how the attribution was checked rather than assumed.
 
   Coverage is **not** diff-neutral here, and the exception is the point. `substitution_group.rs` stays
-  at 100%; `parser.rs` goes from 87/73 to 90/76 (missed regions / missed lines), and the three added
-  lines are exactly the `if self.suppress_recognition_side_effects.get() { return }` early returns in
+  at 100% and `passthroughs.rs` at 3/3; `parser.rs` goes from 87/73 to 90/76 (missed regions / missed
+  lines), and the three added lines are exactly the `if self.suppress_recognition_side_effects.get() { return }` early returns in
   `register_ref`, `register_image` and `register_link`. Nothing sets that window any more — the seam
   was its only setter — so the mechanism is **vestigial** as of this increment. It is left standing on
   purpose: removing three of its ten read sites while leaving the field and the other seven would be

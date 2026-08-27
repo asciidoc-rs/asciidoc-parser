@@ -1094,6 +1094,55 @@ fn inline_tree_is_built_by_default() {
 }
 
 #[test]
+fn a_parse_that_builds_no_tree_keeps_the_string_pipelines_warnings() {
+    // The other half of `build_inline_tree`, and the branch the inversion made
+    // reachable in a second way.
+    //
+    // Since the inversion the seam sends `run_pipeline` to a *clone* whenever a
+    // tree is being built, and to the real parser otherwise. "Otherwise" now
+    // has two causes: a passthrough body re-entered from inside a build (the
+    // reentrancy guard), and a parse configured to build no tree at all —
+    // this one. The first runs inside a build whose blanket warning discard it
+    // has to be carried across; the second does not, and must not be, or the
+    // warnings would be stashed with nothing to hand them back.
+    //
+    // `with_inline_tree` is retired, so `build_inline_tree` is `true` for every
+    // parse the public API can produce and only a crate test reaches this. It
+    // is still the configuration the seam reads, and the branch it selects is
+    // real, so it is exercised here rather than left to be assumed.
+    let mut parser = Parser::default().with_intrinsic_attribute(
+        "attribute-missing",
+        "warn",
+        crate::parser::ModificationContext::Anywhere,
+    );
+
+    parser.build_inline_tree = false;
+
+    let doc = parser.parse("A paragraph with {missing} in it.");
+
+    let warnings: Vec<_> = doc
+        .warnings()
+        .map(|warning| warning.warning.clone())
+        .collect();
+
+    assert_eq!(
+        warnings,
+        [
+            crate::warnings::WarningType::SkippingReferenceToMissingAttribute(
+                "missing".to_string()
+            )
+        ],
+        "a tree-less parse lost the string pipeline's own warning"
+    );
+
+    // And no tree, which is what the configuration says.
+    assert!(
+        first_simple_inlines(&doc).is_empty(),
+        "a parse with `build_inline_tree` off must build no tree"
+    );
+}
+
+#[test]
 fn inline_tree_is_built_for_a_default_parser() {
     let mut parser = Parser::default();
     let doc = parser.parse("One *word* is strong.");
