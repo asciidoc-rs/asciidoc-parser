@@ -268,17 +268,18 @@ impl SubstitutionGroup {
         // are seeded from it, so the authoritative one sees exactly what the
         // oracle does.
         //
-        // Every parse builds the tree, so the only question left is
-        // reentrancy: `Parser::in_inline_build` is set for the duration of a
-        // build, because the parser the build runs on is the real one now and
-        // cannot have a configuration field cleared on it. The `with_inline_tree`
-        // opt-in that used to gate this as well is retired, and so is the
-        // `build_inline_tree` field that outlived it.
-        let tree_seed = if !parser.in_inline_build.get() {
-            Some(content.rendered.clone())
-        } else {
-            None
-        };
+        // Unconditional. Every parse builds the tree — the `with_inline_tree`
+        // opt-in and the `build_inline_tree` field that outlived it are both
+        // retired — and the reentrancy guard that was the last remaining reason
+        // to skip one is retired here: nothing re-enters this seam during a
+        // build. A passthrough carrying its own substitution list was the only
+        // caller that ever did, and `passthrough_text` builds and folds its
+        // body's own tree directly through `build_for_group` now. No production
+        // code under `content::inline_builder` calls `SubstitutionGroup::apply`
+        // at all (every such call in that module is inside a `mod tests`), and
+        // the guard was observed set for 0 of the 13,299 parses the suite
+        // reaches this seam with.
+        let tree_seed = content.rendered.clone();
 
         // **The inversion** (design §5.2 Phase 4, step 6). The string pipeline
         // used to run on the real parser with its recognition side effects
@@ -300,66 +301,10 @@ impl SubstitutionGroup {
         // carries every document counter (footnote and callout numbers,
         // `{counter:…}` values) at its pre-substitution value — the same value
         // the builder then advances on the real parser, exactly once.
-        match &tree_seed {
-            Some(_) => self.run_pipeline(content, &parser.clone(), attrlist),
+        self.run_pipeline(content, &parser.clone(), attrlist);
 
-            // No tree is built here, so there is no clone and no second pass:
-            // this *is* the authoritative one.
-            //
-            // **Nothing in production reaches it any more** — the
-            // authoritative-pass closure (design §5.2's step 6). Until that
-            // increment the one content arriving here was a passthrough body
-            // re-entered from inside a build, whose own string pipeline was
-            // therefore that body's authoritative pass. `passthrough_text`
-            // builds and folds the body's own tree now, so the re-entry is
-            // gone. Measured across the suite, this branch went from 112 hits
-            // to 1, and the one that remains is the crate test that sets the
-            // reentrancy guard deliberately — `in_inline_build` is true for
-            // 0 of the 13,299 parses the suite reaches this seam with.
-            //
-            // That is what makes `run_pipeline` deletable: with the oracle
-            // above writing nothing anyone reads and this branch reaching only
-            // a test, the string pipeline has no production caller left.
-            None => {
-                let before = parser.substitution_warnings_len();
-
-                self.run_pipeline(content, parser, attrlist);
-
-                // Vestigial as of the authoritative-pass closure, and left
-                // standing on purpose — the same call the inversion made for
-                // `suppress_recognition_side_effects`, and for the same
-                // reason: this and its counterpart below go whole with
-                // `run_pipeline`, and removing one half of a two-ended
-                // mechanism while leaving the other would be worse than
-                // removing neither.
-                //
-                // What it was for: a nested authoritative pass running inside
-                // a build raised warnings that sat inside the range the build
-                // discards as incidental, so they had to be moved out and
-                // handed back. The passthrough body was the only content that
-                // ever reached it, and it no longer re-enters `apply` at all —
-                // its `attribute-missing` diagnostics are recorded by the
-                // build's own `record_builder_diagnostic` and carried across
-                // with the rest.
-                if parser.in_inline_build.get() {
-                    let mine = parser.drain_substitution_warnings_since(before);
-
-                    parser
-                        .nested_authoritative_warnings
-                        .borrow_mut()
-                        .extend(mine);
-                }
-            }
-        }
-
-        if let Some(value) = tree_seed {
-            // The builder must not recurse into tree building itself: a
-            // passthrough with its own substitution list re-enters
-            // `SubstitutionGroup::apply` for its body (via
-            // `passthrough_text`), and that nested content needs no tree of
-            // its own. Saved and restored rather than cleared, so a build
-            // nested inside a build leaves the enclosing guard standing.
-            let in_build = parser.in_inline_build.replace(true);
+        {
+            let value = tree_seed;
 
             // Where this build's own diagnostics start — see
             // `Parser::drain_builder_diagnostics_since` for why a mark rather
@@ -390,15 +335,13 @@ impl SubstitutionGroup {
                 attrlist,
             );
 
-            parser.in_inline_build.set(in_build);
-
             // Everything this build recorded into the substitution-warning
-            // buffer is incidental (see `warnings_before_build`) — except what
-            // an authoritative nested pass moved aside, which is put back.
+            // buffer is incidental (see `warnings_before_build`), and all of it
+            // is discarded. There is no longer an exception: the one that stood
+            // here put back what a *nested authoritative pass* had moved aside,
+            // and no pass runs nested any more — that mechanism's two ends went
+            // with the branch that fed it.
             parser.truncate_substitution_warnings(warnings_before_build);
-
-            let nested = std::mem::take(&mut *parser.nested_authoritative_warnings.borrow_mut());
-            parser.push_substitution_warnings(nested);
 
             // The recognition **diagnostics** the string pipeline's copy of this
             // content raised into the discarded clone, raised again here where

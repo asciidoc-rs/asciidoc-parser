@@ -1215,8 +1215,9 @@ fn apply_normal_subs<'src>(text: Span<'src>, parser: &Parser) -> Vec<InlineNode<
 /// **This is the authoritative-pass closure** (design §5.2's step 6). Until
 /// now this ran `subs.apply`, which re-entered
 /// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup) for the
-/// body; that re-entry took no tree seed (the `in_inline_build` guard), so its
-/// *string* pipeline was the body's authoritative pass. It was the last thing
+/// body; that re-entry took no tree seed (a reentrancy guard on the `Parser`,
+/// since retired along with the re-entry), so its *string* pipeline was the
+/// body's authoritative pass. It was the last thing
 /// in production keeping `run_pipeline` alive, and the survey named it the
 /// only remaining blocker to the deletion that is not test-side.
 ///
