@@ -277,14 +277,15 @@ fn a_typed_escape_introducer_round_trips() {
     assert_eq!(last_paragraph(&doc), "x\u{e004}ay\u{e004}gz");
 }
 
-/// The one source shape that keeps a content on the **template** path after
-/// resolution: `xref:sec[a *b, c* d,role=hl]` is a documented builder
-/// divergence (see `xref_mirror_is_skipped_when_the_tree_defers_a_reference_
-/// form`), so the tree holds fewer cross-references than the string pipeline
-/// deferred and the rendering is spliced from the placeholder template rather
-/// than folded. `\u{e004}b` in the id is the sequence that path can corrupt:
-/// `\u{e004}` introduces an escaped sentinel and `b` is one of its tags.
-const CARVE_OUT_SOURCE: &str = concat!(
+/// A source whose ids carry a typed escape introducer beside both
+/// cross-reference spellings. This began as the carve-out's one suite shape —
+/// a form the tree deferred and the string pipeline's template rendered — and
+/// each mechanism it exercised has since been retired under it (the deferral
+/// divergence took the form, the oracle deletion took the carve-out), with the
+/// expected bytes simply carrying the current reading. `\u{e004}b` in the id
+/// is the sequence a decode-once pass corrupts: `\u{e004}` introduces an
+/// escaped sentinel and `b` is one of its tags.
+const SENTINEL_ID_SOURCE: &str = concat!(
     "[#a\u{e004}b]\n",
     "The target.\n",
     "\n",
@@ -292,18 +293,19 @@ const CARVE_OUT_SOURCE: &str = concat!(
 );
 
 #[test]
-fn a_resolved_destination_holding_a_sentinel_survives_the_template_path() {
+fn a_resolved_destination_holding_a_sentinel_survives_resolution() {
     // The destination comes back from the **resolver**, which was handed the
     // document's own text and answered in kind — so it is not in escaped form
-    // and must not be decoded. Decoding the finished rendering in one pass did
-    // decode it, turning `#a\u{e004}b` into `#a\u{e001}`; the template's own
-    // literal runs leave escaped form as they are spliced instead.
+    // and must not be decoded on its way into the output. The paragraph's
+    // rendering is a fold of its tree at the end of resolution, whose text is
+    // the document's own; the historical hazard this pins was the template
+    // path's decode-once pass, which turned `#a\u{e004}b` into `#a\u{e001}`.
     //
     // The second anchor is whole rather than cut short inside its span since
     // the deferral divergence (design §5.2's step 6) — the sentinel handling
     // this test is about is unchanged by that, and the expected bytes simply
     // carry the tree's reading now.
-    let (rendered, warnings) = last_paragraph_and_warnings(CARVE_OUT_SOURCE);
+    let (rendered, warnings) = last_paragraph_and_warnings(SENTINEL_ID_SOURCE);
 
     assert_eq!(warnings, 0, "reference did not resolve: {rendered:?}");
 
@@ -318,9 +320,9 @@ fn a_resolved_destination_holding_a_sentinel_survives_the_template_path() {
 }
 
 #[test]
-fn a_title_on_the_template_path_keeps_a_resolved_sentinel_too() {
-    // The same crossing with the **title** container, which renders its
-    // template through `render_xref_template` on a path of its own.
+fn a_title_keeps_a_resolved_sentinel_too() {
+    // The same crossing with the **title** container, which resolves through
+    // the document-order title pass on a path of its own.
     let mut parser = Parser::default();
 
     let doc = parser.parse(concat!(

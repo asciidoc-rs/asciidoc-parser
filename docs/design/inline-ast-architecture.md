@@ -8597,6 +8597,63 @@ Each phase is a reviewable unit with a clear exit gate.
   Coverage diff-neutral: `content/content.rs` 30 missed regions and 20 missed lines,
   `blocks/section.rs` 40 and 39, workspace totals 605 and 348, all matching the base.
 
+  *Step 6 landed as (the oracle call deleted — the seam is single-pass):* the deletion the
+  survey enumerated as item (4), landed with the tail the carried-title increment left it.
+  `SubstitutionGroup::apply` no longer runs the string pipeline at all: the build is seeded
+  straight from the content's value, and `run_pipeline` survives only as the test oracle behind
+  `apply_string_pipeline` — where every differential corpus already takes its golden.
+
+  *The seam's other half is `set_tree_xrefs`, now the sole producer of deferred state.* It
+  derives both segment lists from the tree it is handed, keyed by a short-circuiting boolean walk
+  (`tree_defers_xrefs`) so the overwhelmingly common cross-reference-free content answers in one
+  cheap pass — the same structural economy the old early return bought by asking the string
+  pipeline. The **carve-out is deleted** with the pipeline it fell back to (`template_splices`
+  with it), on the measurement the `indexterm2:` increment recorded: zero hits across the suite,
+  both member kinds closed. A production `DeferredContent` now carries no template — the two
+  templates production still renders are the footnote entry's and the carried title's, each
+  synthesized from its own tree — and no `string_xrefs` snapshot: that field, and the test-only
+  `rendered_from_template`, went with the harnesses that read them.
+
+  *Two harnesses retired, each exactly as its own documentation promised.*
+  `inline_builder_xref_segment_parity` compared the tree's segment derivation against the
+  pipeline's own flat list ("the golden goes when `run_pipeline` does, and the corpus with it");
+  the document-parity harness's `the_fold_reproduces_the_template_for_every_deferred_content`
+  compared the fold against the pipeline's template render. With the pipeline off the production
+  path neither has a golden that is not the tree itself. What holds the byte-for-byte line is the
+  golden-HTML assertion suite, which pinned identical bytes on either side of this increment —
+  the deletion changed **no rendered output anywhere in the suite**.
+
+  *The stateful-renderer pins moved exactly as their own comments predicted*, which is the
+  increment's best evidence of what it removed: `inline_tree_build_tolerates_a_stateful_renderer`
+  went from `a [second] b` to `a [first] b` ("it becomes `[first]` again once the string pipeline
+  stops being run for output"), and `a_passthrough_body_is_substituted_once_per_apply`'s counts
+  dropped from three to one. That is the transitional double render — every content rendered once
+  by the pipeline for nobody and once by the fold for real — ending for all contents together, as
+  the fold-cost note in `fold_resolved_title` said it would.
+
+  *What is deliberately still here.* `run_pipeline` and the machinery only it reaches — the
+  `Passthroughs` extraction pass, its replacers, the sentinel escape/unescape pair, the
+  `substitute_attributes_in_text` helper — are twelve items now annotated
+  `#[allow(dead_code)]` as vestigial: they compile into production builds unused, because the
+  test-only oracle still calls them, and they are item (5)'s deletion, not this one's. The
+  `from_tree: false` machinery (the escaped-form reads, `template_partition`) is likewise the
+  oracle path's alone now.
+
+  *The audit needed a reconstructed oracle*, since the comparison it runs no longer exists at the
+  seam: the throwaway probe clones the content, runs `run_pipeline` on it against a parser clone
+  — the same position and the same inputs the deleted call had — and compares the fold against
+  that. **Zero new rows.** The set shrinks 63 → 56, every departure structural: rows contributed
+  by the retired corpus's own fixtures, and ordinal-renderer rows whose bytes existed only while
+  the pipeline consumed ordinals ahead of the fold. Coverage: `content.rs` *improves* to 28
+  missed regions / 18 missed lines (30 / 20 before), `substitution_group.rs` holds 100%, and the
+  vestigial `macros.rs` / `passthroughs.rs` gain 5 and 1 missed **regions** on unchanged
+  missed-line sets — sub-line paths only production parses reached, dying with the machinery.
+
+  *What still defers:* the `apply_string_pipeline` call sites, `run_pipeline`, and the vestigial
+  machinery it keeps compiled (item 5); the `suppress_recognition_side_effects` window (measured
+  dead), the `from_tree: false` paths and the `EscapedForm` split they justify (item 6); and the
+  Strategy-A recorder with `inline_recorder` (item 7).
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -10497,6 +10554,24 @@ Each phase is a reviewable unit with a clear exit gate.
        nowhere** — dead since the inversion, its retirement a pure deletion filed with the
        vestigial mechanisms. Audit 63 rows either side, 0 new and 0 closed; coverage
        diff-neutral. See the step's own "landed as" note above.
+
+     - ✅ **the oracle call deleted — the seam is single-pass.** `SubstitutionGroup::apply` no
+       longer runs the string pipeline; `run_pipeline` survives only as the test oracle behind
+       `apply_string_pipeline`, and the machinery only it reaches (the extraction pass, its
+       replacers, the sentinel escape pair — twelve items) is annotated vestigial and goes with
+       item (5). `set_tree_xrefs` is the sole producer of deferred state, deriving both lists
+       from the tree behind a short-circuiting `tree_defers_xrefs` walk; the **carve-out** and
+       `template_splices` are deleted on the measurement that emptied them, and a production
+       `DeferredContent` carries no template and no `string_xrefs` snapshot. Two harnesses
+       retired exactly as their own docs promised (`inline_builder_xref_segment_parity`, the
+       document-parity template comparison); the golden-HTML suite pinned identical bytes either
+       side — no rendered output moved anywhere. The stateful-renderer pins moved exactly as
+       their comments predicted (`a [second] b` → `a [first] b`; passthrough-body counts three →
+       one): the transitional double render ends for all contents together. Audit via a
+       reconstructed-oracle probe: zero new rows, 63 → 56 with every departure structural.
+       Coverage: `content.rs` improves to 28/18, `substitution_group.rs` holds 100%; the
+       vestigial files gain six sub-line regions that die with item (5). See the step's own
+       "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

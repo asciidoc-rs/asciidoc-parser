@@ -1037,6 +1037,9 @@ pub(crate) fn substitute_attributes_in_macro_target<'src>(
 ///
 /// [docinfo file]: https://docs.asciidoctor.org/asciidoc/latest/docinfo/
 /// [`attribute-missing`]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing
+// Vestigial: reachable only from the test-only `run_pipeline` oracle
+// (`apply_string_pipeline`); goes with it.
+#[allow(dead_code)]
 pub(crate) fn substitute_attributes_in_text(text: &str, parser: &Parser) -> String {
     if !text.contains('{') {
         return text.to_string();

@@ -1026,25 +1026,33 @@ fn a_passthrough_body_is_substituted_once_per_apply() {
     // Nothing stateless could see the difference either way: the extra pass
     // produced the same bytes. A *stateful* renderer can, which is what
     // `OrdinalRenderer` is for — under the old arrangement, dropping the guard
-    // took each count below from three to four and shifted the ordinal
-    // reaching the output (`a [3] b` became `a [4] b`).
+    // took each count from three to four and shifted the ordinal reaching the
+    // output.
+    //
+    // The counts here dropped from three to one at the oracle deletion: the
+    // string pipeline's own substitutions of the body ran on the shared
+    // renderer even though their output was discarded with the clone, and
+    // those renders ended when the pipeline stopped running at the seam —
+    // exactly the transitional double render the design doc said would end
+    // "for all of them together, when step 6 takes the string pipeline off
+    // the production path". What remains is the body's one authoritative
+    // render at build time (`passthrough_text`), whose `Raw` leaf the fold
+    // then emits verbatim.
     //
     // The exact number is not the claim; that the three agree is.
     for source in ["pass:c[a < b]", "pass:c,q[*a < b*]", "stem:[x < y]"] {
         assert_eq!(
             renderer_calls_while_applying(source),
-            3,
+            1,
             "{source:?} was substituted more times than the seam should ask for"
         );
     }
 
     // The bare-`+` mixture body is the control: it reaches the renderer through
     // a different path (its value interleaves escaped text with an extracted
-    // construct's own fold, rather than re-entering `apply`), so it is *not*
-    // moved by the guard. Without it, this fixture alone stays at three while
-    // the three above go to four — which is what says the three are measuring
-    // the re-entry rather than something ambient.
-    assert_eq!(renderer_calls_while_applying("+a $$b < c$$ d+"), 3);
+    // construct's own fold, rather than re-entering `apply`), so a change that
+    // quietly added a pass to the three above would move them away from it.
+    assert_eq!(renderer_calls_while_applying("+a $$b < c$$ d+"), 1);
 }
 
 #[test]
@@ -2009,15 +2017,15 @@ fn inline_tree_build_tolerates_a_stateful_renderer() {
     };
 
     // The authoritative rendered string reflects the stateful renderer's
-    // output — the *second* invocation's, for now. `rendered_html()` is the
-    // fold of the tree, and the string pipeline still runs ahead of it (it
-    // produces the deferred cross-reference segments and fills the catalogs),
-    // so this renderer is invoked twice per parse and the fold sees the later
-    // state. That is the interim double render, not a property of the fold: it
-    // becomes `[first]` again once the string pipeline stops being run for
-    // output. Pinned exactly rather than loosely so that change shows up here
-    // as a signal.
-    assert_eq!(content.rendered_html(), "a [second] b");
+    // *first* invocation: `rendered_html()` is the fold of the tree, and the
+    // fold is the only thing that consults the renderer for this content. The
+    // previous pin here was `[second]` — the string pipeline ran ahead of the
+    // fold and spent the first invocation on output nobody read — and its own
+    // comment predicted this exact change ("it becomes `[first]` again once
+    // the string pipeline stops being run for output"). The oracle deletion
+    // is that change; still pinned exactly, so a reintroduced extra render
+    // shows up here as a signal.
+    assert_eq!(content.rendered_html(), "a [first] b");
 
     // … while the tree carries the logical special character, unpolluted by
     // the renderer's state.

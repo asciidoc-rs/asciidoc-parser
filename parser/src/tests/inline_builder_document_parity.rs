@@ -552,143 +552,24 @@ fn each_content_retains_the_attributes_of_its_own_point_in_the_document() {
 // The retirement of the deferred-cross-reference sentinel system (design
 // §4.2's second): a deferred content's rendering is a fold of its tree, taken
 // at the end of resolution.
-
-#[test]
-fn the_fold_reproduces_the_template_for_every_deferred_content() {
-    use crate::blocks::Block;
-
-    // The differential the retirement rests on, and the one `check_document`
-    // above can no longer supply on its own. That harness folds each location's
-    // tree and compares it against `rendered_html()` — which, for a deferred
-    // content, *is* now that fold, so the comparison would pass by identity.
-    //
-    // `Content::rendered_from_template` renders the other answer: the
-    // placeholder template the string pipeline built, with each resolved
-    // destination substituted back in, exactly as `rebuild_rendered` would have
-    // installed it before this increment. Comparing the two is comparing the
-    // fold against an independent construction again.
-    //
-    // Every fixture here carries at least one cross-reference the builder
-    // recognizes, so the fold is authoritative for it and the comparison is not
-    // vacuous — `at_least_one_fold_was_authoritative` below pins that.
-    let fixtures = [
-        // The two spellings, resolved.
-        "[[tgt]]Target.\n\nSee <<tgt>>.",
-        "[[tgt]]Target.\n\nSee xref:tgt[the target].",
-        // A reference text, and one that is present but empty.
-        "[[tgt]]Target.\n\nSee <<tgt,the target>>.",
-        "[[tgt]]Target.\n\nSee <<tgt,>>.",
-        // Unresolved: the fallback both paths have to agree on.
-        "See <<missing>>.",
-        // Several in one content, so the positional correlation is exercised.
-        "[[a]]A.\n\n[[b]]B.\n\nSee <<a>>, <<b>>, and <<missing>>.",
-        // A reference sharing its content with rendered markup on either side.
-        "[[tgt]]Target.\n\n*Bold* then <<tgt>> then _italic_.",
-        // A reference inside a formatting span.
-        "[[tgt]]Target.\n\n*See <<tgt>> here.*",
-        // Attribute-dependent styling, which the retained attributes carry.
-        ":xrefstyle: full\n:sectnums:\n\n== Install\n\nSee <<_install>>.",
-        // A footnote-embedded reference: its segment is re-homed out of the
-        // block template, so the block's own correlation must still line up.
-        "[[tgt]]Target.\n\nA claim.footnote:[see <<tgt>> for details]",
-        // Inter-document form, whose destination is derived rather than looked
-        // up.
-        "See <<other.adoc#topic>>.",
-        // A macro-form reference carrying an attribute list.
-        "[[tgt]]Target.\n\nSee xref:tgt[the target,role=hl].",
-        // In a table cell, which reaches resolution by its own path.
-        "[[tgt]]Target.\n\n|===\n|See <<tgt>>.\n|===",
-    ];
-
-    let renderer = HtmlSubstitutionRenderer {};
-    let mut compared = 0;
-
-    for fixture in fixtures {
-        let mut parser = parser();
-        let doc = parser.parse(fixture);
-
-        fn check(
-            content: &crate::content::Content<'_>,
-            renderer: &HtmlSubstitutionRenderer,
-            fixture: &str,
-            compared: &mut usize,
-        ) {
-            let Some(template) = content.rendered_from_template(renderer) else {
-                return;
-            };
-
-            assert_eq!(
-                content.rendered_html(),
-                template,
-                "the fold diverged from the template for {fixture:?}"
-            );
-
-            *compared += 1;
-        }
-
-        fn walk<'src>(
-            block: &Block<'src>,
-            renderer: &HtmlSubstitutionRenderer,
-            fixture: &str,
-            compared: &mut usize,
-        ) {
-            // Every content-bearing shape this corpus reaches: a paragraph and
-            // a simple table cell (which is not a block at all).
-            //
-            // A **title** is deliberately not one of them, block or section.
-            // `rendered_from_template` renders a content's *own* deferred
-            // segments, and a title's are never resolved in place: the
-            // document-order pass resolves a clone of them (it has to — the
-            // coordination is cross-title) and installs only the result. So the
-            // template it would render here is the uncoordinated one, and
-            // comparing against it would report a divergence the title does not
-            // have. Titles are covered by
-            // `a_folded_heading_keeps_the_cross_title_coordination` instead,
-            // which pins the coordinated answer directly.
-            if let Block::Simple(simple) = block {
-                check(simple.content(), renderer, fixture, compared);
-            }
-
-            if let Block::Table(table) = block {
-                let rows = table
-                    .header_row()
-                    .into_iter()
-                    .chain(table.body_rows())
-                    .chain(table.footer_row());
-
-                for row in rows {
-                    for cell in row.cells() {
-                        if let TableCellContent::Simple(content) = cell.content() {
-                            check(content, renderer, fixture, compared);
-                        }
-                    }
-                }
-            }
-
-            for child in block.child_blocks() {
-                walk(child, renderer, fixture, compared);
-            }
-        }
-
-        for block in doc.child_blocks() {
-            walk(block, &renderer, fixture, &mut compared);
-        }
-    }
-
-    assert!(
-        compared >= fixtures.len(),
-        "expected at least one deferred content per fixture, compared {compared}"
-    );
-}
+//
+// The fold-against-template comparison that used to sit here
+// (`the_fold_reproduces_the_template_for_every_deferred_content`) retired with
+// the oracle pipeline: `rendered_from_template` rendered the placeholder
+// template the string pipeline captured on a production parse, and no
+// production content carries one any more. The golden-HTML assertions across
+// the suite are what hold that line now — they pinned the same bytes before
+// and after the pipeline stopped running, which is the byte-for-byte gate the
+// deletion increment itself was validated against.
 
 #[test]
 fn at_least_one_fold_was_authoritative() {
     use crate::blocks::Block;
-    // What keeps the comparison above from passing vacuously. A content whose
-    // tree the builder left short of the string pipeline's deferred count keeps
-    // the template path, and would match itself trivially; this pins that the
-    // ordinary case is not that case — the tree holds the cross-reference, so
-    // `Content::refold` really did produce the string compared above.
+    // The tree, not just the rendered string, carries resolution's answer: a
+    // resolved cross-reference is installed back into its own node, which is
+    // what `Content::refold` folds the rendering from. Pinned directly, since
+    // the fold-against-template comparison that used to make this observable
+    // retired with the oracle pipeline.
     use crate::inlines::{InlineNode, RefVariant};
 
     let mut parser = parser();

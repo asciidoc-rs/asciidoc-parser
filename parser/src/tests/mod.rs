@@ -13,7 +13,6 @@ mod inline_builder_document_parity;
 mod inline_builder_passthrough_record_parity;
 mod inline_builder_recorder_parity;
 mod inline_builder_side_effect_parity;
-mod inline_builder_xref_segment_parity;
 mod inline_recorder;
 mod inline_substitution_renderer;
 mod origin;
