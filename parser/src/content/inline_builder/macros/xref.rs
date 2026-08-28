@@ -868,7 +868,7 @@ mod tests {
     };
     use crate::{
         HasSpan, Parser, Span,
-        content::{Content, SubstitutionGroup, SubstitutionStep},
+        content::Content,
         inlines::{CharRef, InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
         parser::{HtmlSubstitutionRenderer, XrefStyle},
     };
@@ -883,17 +883,11 @@ mod tests {
     /// side while the builder expands it, and report the difference as a
     /// divergence the fixture does not have.
     fn golden_whole_pipeline(source: &str) -> String {
-        let parser = Parser::default();
         let mut content = Content::from(Span::new(source));
 
-        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
         content.finalize_deferred(&HtmlSubstitutionRenderer {});
 
-        crate::content::inline_builder::snapshot::recorded_golden(
-            "xref_whole_pipeline",
-            source,
-            content.rendered_str(),
-        )
+        crate::content::inline_builder::snapshot::recorded("xref_whole_pipeline", source)
     }
 
     /// The string pipeline's output through the **macros** step for `source`,
@@ -903,23 +897,8 @@ mod tests {
     /// placeholder must be finalized — no catalog resolution runs, so the
     /// result is the unresolved-fallback rendering the additive builder's
     /// fold (always unresolved) must reproduce.
-    fn golden_xref_with(source: &str, parser: &Parser) -> String {
-        let mut content = Content::from(Span::new(source));
-        SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
-        SubstitutionStep::Quotes.apply(&mut content, parser, None);
-        SubstitutionStep::CharacterReplacements.apply(&mut content, parser, None);
-        SubstitutionStep::Macros.apply(&mut content, parser, None);
-        SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
-
-        // Finalize as the real pipeline does after the last step, capturing the
-        // placeholder template and rebuilding the unresolved fallback.
-        content.finalize_deferred(&HtmlSubstitutionRenderer {});
-
-        crate::content::inline_builder::snapshot::recorded_golden(
-            "xref_macros",
-            source,
-            content.rendered_str(),
-        )
+    fn golden_xref_with(source: &str, _parser: &Parser) -> String {
+        crate::content::inline_builder::snapshot::recorded("xref_macros", source)
     }
 
     /// [`golden_xref_with`] with a default parser.
@@ -2222,29 +2201,13 @@ mod tests {
         // the golden output's own `href` and fallback text. The tree defers
         // instead and folds the restored literal — the well-formed reading
         // against the string pipeline's leaked one.
-        use crate::content::Passthroughs;
-
         let source = "xref:++someid++[]";
 
-        let parser = Parser::default();
-        let mut content = Content::from(Span::new(source));
-        let passthroughs = Passthroughs::extract_from(&mut content, &parser);
-
-        SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
-        SubstitutionStep::Quotes.apply(&mut content, &parser, None);
-        SubstitutionStep::CharacterReplacements.apply(&mut content, &parser, None);
-        SubstitutionStep::Macros.apply(&mut content, &parser, None);
-        SubstitutionStep::PostReplacement.apply(&mut content, &parser, None);
-
-        passthroughs.restore_to(&mut content, &parser);
-        content.finalize_deferred(&HtmlSubstitutionRenderer {});
-
         // Recorded, so the leaked bytes this divergence is *about* outlive the
-        // string pipeline that leaks them (see [`snapshot`]).
-        let golden = crate::content::inline_builder::snapshot::recorded_golden(
+        // string pipeline that leaked them (see [`snapshot`]).
+        let golden = crate::content::inline_builder::snapshot::recorded(
             "xref_passthrough_divergence",
             source,
-            content.rendered_str(),
         );
 
         assert!(
@@ -2555,18 +2518,11 @@ mod tests {
     /// expanded-value fixtures, which need the `AttributeReferences` step
     /// [`golden_xref_with`] deliberately omits (it also finalizes the deferred
     /// cross-references, which this does through the group's own pipeline).
-    fn golden_normal(source: &str, parser: &Parser) -> String {
-        use crate::content::SubstitutionGroup;
-
+    fn golden_normal(source: &str, _parser: &Parser) -> String {
         let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, None);
         content.finalize_deferred(&HtmlSubstitutionRenderer {});
 
-        crate::content::inline_builder::snapshot::recorded_golden(
-            "xref_normal",
-            source,
-            content.rendered_str(),
-        )
+        crate::content::inline_builder::snapshot::recorded("xref_normal", source)
     }
 
     #[test]

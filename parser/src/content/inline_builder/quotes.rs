@@ -1802,7 +1802,6 @@ mod tests {
     };
     use crate::{
         HasSpan, Span,
-        content::{Content, SubstitutionGroup, SubstitutionStep},
         inlines::{CharRef, InlineNode, SpanForm, StyleVariant},
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
@@ -2786,16 +2785,7 @@ mod tests {
     /// used as the golden oracle: `Content::from` then `SpecialCharacters` then
     /// `Quotes`, exactly the order [`build`] runs them.
     fn golden_quotes(source: &str) -> String {
-        let parser = crate::Parser::default();
-        let mut content = Content::from(Span::new(source));
-        SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
-        SubstitutionStep::Quotes.apply(&mut content, &parser, None);
-
-        crate::content::inline_builder::snapshot::recorded_golden(
-            "quotes",
-            source,
-            content.rendered_str(),
-        )
+        crate::content::inline_builder::snapshot::recorded("quotes", source)
     }
 
     #[test]
@@ -3997,18 +3987,16 @@ mod tests {
                 "<strong class=\"highlight\">bold</strong>",
             ),
         ] {
-            let mut content = Content::from(Span::new(source));
-            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
-
-            assert_eq!(content.rendered_str(), golden_html, "golden for {source:?}");
-
+            // `golden_html` is the string pipeline's recorded rendering,
+            // frozen in the fixture at the last differentially-verified
+            // parity.
             let folded = super::super::fold_html(
                 &super::super::build(Span::new(source), &parser, None),
                 &HtmlSubstitutionRenderer {},
                 &parser.render_context(),
             );
 
-            assert_eq!(folded, content.rendered_str(), "mismatch for {source:?}");
+            assert_eq!(folded, golden_html, "mismatch for {source:?}");
         }
     }
 
@@ -4049,22 +4037,16 @@ mod tests {
             ),
             ("[.a~b~c]#y#", "<span class=\"a<sub>b</sub>c\">y</span>"),
         ] {
-            let mut content = Content::from(Span::new(source));
-            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
-
-            assert_eq!(content.rendered_str(), golden_html);
-
+            // `golden_html` is what the string pipeline rendered — the
+            // recorded half of the divergence, frozen in the fixture now that
+            // the pipeline is gone.
             let folded = super::super::fold_html(
                 &super::super::build(Span::new(source), &parser, None),
                 &HtmlSubstitutionRenderer {},
                 &parser.render_context(),
             );
 
-            assert_ne!(
-                folded,
-                content.rendered_str(),
-                "expected a divergence for {source:?}"
-            );
+            assert_ne!(folded, golden_html, "expected a divergence for {source:?}");
         }
     }
 }

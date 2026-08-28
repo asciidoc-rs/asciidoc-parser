@@ -154,11 +154,11 @@ use crate::{
 /// the bare branch's trailing-character class admits the last byte of either
 /// spelling, so the two recognize the same extent — this family needs no
 /// widening of its own, unlike the `image:`/`icon:` one), and
-/// [`Passthroughs::restore_to`](crate::content::Passthroughs) then splices
-/// the extracted body's substituted text over every sentinel in the rendered
-/// string. A `Raw` node's `value` **is** that text, known at build time, so
-/// [`restore_masked_passthroughs`] substitutes it for the placeholder and the
-/// computed target finishes into exactly the restored string's bytes —
+/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)
+/// then splices the extracted body's substituted text over every sentinel in
+/// the rendered string. A `Raw` node's `value` **is** that text, known at build
+/// time, so [`restore_masked_passthroughs`] substitutes it for the placeholder
+/// and the computed target finishes into exactly the restored string's bytes —
 /// `https://++example.org/now_this__link_works.html++` and
 /// `https://example.orgpass:[/a b]`, the two documented idioms, and every
 /// partial mask around them.
@@ -1088,7 +1088,7 @@ fn find_link_macro_matches<'src>(
 /// range holds no masked construct (so a caller keeps the bytes it
 /// already has).
 ///
-/// This is [`Passthroughs::restore_to`](crate::content::Passthroughs)'s own
+/// This is [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)'s own
 /// rewrite, applied to a *computed value* instead of the rendered string: the
 /// string pipeline's replacer reads the `\u{96}`*n*`\u{97}` sentinel into the
 /// value (a `link:` macro's target, and with it the emitted `href` and a bare
@@ -1626,10 +1626,10 @@ struct TextAttrlist<'src> {
 /// second and third positionals become the `?subject=`/`&amp;body=` query
 /// through [`encode_uri_component`]. The string pipeline percent-encodes its
 /// own sentinel there (`%C2%960%C2%97`), which
-/// [`Passthroughs::restore_to`](crate::content::Passthroughs) then cannot find
-/// in the finished `href` — so its golden *leaks* the encoded sentinel, and no
-/// restore here can reproduce that. This is the same boundary the
-/// cross-reference family's own pre-restore target keeps, drawn per slot
+/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)
+/// then cannot find in the finished `href` — so its golden *leaks* the encoded
+/// sentinel, and no restore here can reproduce that. This is the same boundary
+/// the cross-reference family's own pre-restore target keeps, drawn per slot
 /// rather than per family so that a masked piece in the display text beside a
 /// plain subject still restores.
 ///
@@ -2095,7 +2095,7 @@ mod tests {
 
     use super::super::super::test_support::{
         assert_entity, assert_link, assert_raw, assert_special_char, assert_styled, assert_text,
-        build_src, fold_html, golden_macros, golden_macros_in, golden_macros_with, link_text_of,
+        build_src, fold_html, golden_macros, golden_macros_in, link_text_of,
     };
     use crate::{
         HasSpan, Parser, Span,
@@ -6347,11 +6347,6 @@ mod tests {
             parser.catalog().links(),
             ["https://a.example", "https://c.example", "b.html"]
         );
-
-        // The golden string pipeline agrees.
-        let golden_parser = Parser::default().with_catalog_assets(true);
-        golden_macros_with(source, &golden_parser);
-        assert_eq!(golden_parser.catalog().links(), parser.catalog().links());
     }
 
     #[test]
@@ -6372,11 +6367,6 @@ mod tests {
             parser.catalog().links(),
             ["https://a.example", "b.html", "c.html"]
         );
-
-        // The golden string pipeline agrees.
-        let golden_parser = Parser::default().with_catalog_assets(true);
-        golden_macros_with(source, &golden_parser);
-        assert_eq!(golden_parser.catalog().links(), parser.catalog().links());
     }
 
     #[test]
@@ -6407,11 +6397,6 @@ mod tests {
             parser.catalog().links(),
             ["https://a.example", "b.html", "mailto:first@example.org"]
         );
-
-        // The golden string pipeline agrees.
-        let golden_parser = Parser::default().with_catalog_assets(true);
-        golden_macros_with(source, &golden_parser);
-        assert_eq!(golden_parser.catalog().links(), parser.catalog().links());
     }
 
     #[test]
@@ -6450,7 +6435,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_golden_pipelines_registration_for_a_broad_fixture_set() {
+    fn registers_the_recorded_links_for_a_broad_fixture_set() {
         // Each fixture uses its own pair of *independent* parsers (design
         // §5.3's two-independent-parsers discipline, already established by
         // the image increment's own differential corpus): one that the
@@ -6468,54 +6453,87 @@ mod tests {
         // character, which `INLINE_LINK` rejects, while the builder sees the
         // expanded space and links it).
         let fixtures = [
-            "link:index.html[Docs]",
-            "link:[]",
-            "mailto:hello@example.org[Email us]",
-            "mailto:[]",
-            "https://example.org",
-            "https://example.org[Example]",
-            "link:https://example.org[Example]",
-            "\\link:index.html[Docs]",
-            "link:a.html[A] link:b.html[B]",
+            ("link:index.html[Docs]", r#"["index.html"]"#),
+            ("link:[]", r#"[""]"#),
+            (
+                "mailto:hello@example.org[Email us]",
+                r#"["mailto:hello@example.org"]"#,
+            ),
+            ("mailto:[]", r#"["mailto:"]"#),
+            ("https://example.org", r#"["https://example.org"]"#),
+            ("https://example.org[Example]", r#"["https://example.org"]"#),
+            (
+                "link:https://example.org[Example]",
+                r#"["https://example.org"]"#,
+            ),
+            ("\\link:index.html[Docs]", r#"[]"#),
+            ("link:a.html[A] link:b.html[B]", r#"["a.html", "b.html"]"#),
             // Interleaved forms, out of source order relative to the family
             // passes that register them (see `apply_link_side_effects`'s own
             // "Registration order" doc note).
-            "link:b.html[B] then https://a.example",
+            (
+                "link:b.html[B] then https://a.example",
+                r#"["https://a.example", "b.html"]"#,
+            ),
             // The bare e-mail form, alone and interleaved with both URL-link
             // forms — it registers last of the three, wherever it appears.
-            "doc@example.com",
-            "\\doc@example.com",
-            "doc@example.com then link:b.html[B]",
-            "a@example.org link:b.html[B] https://c.example d@example.org",
+            ("doc@example.com", r#"["mailto:doc@example.com"]"#),
+            ("\\doc@example.com", r#"[]"#),
+            (
+                "doc@example.com then link:b.html[B]",
+                r#"["b.html", "mailto:doc@example.com"]"#,
+            ),
+            (
+                "a@example.org link:b.html[B] https://c.example d@example.org",
+                r#"["https://c.example", "b.html", "mailto:a@example.org", "mailto:d@example.org"]"#,
+            ),
             // A macro whose target crosses an escaped special registers the
             // *escaped* target, exactly as the string replacer does.
-            "link:a&b.html[x]",
-            "mailto:a&b@example.org[]",
-            "link:a&b.html[x] then link:c.html[C]",
+            ("link:a&b.html[x]", r#"["a&amp;b.html"]"#),
+            (
+                "mailto:a&b@example.org[]",
+                r#"["mailto:a&amp;b@example.org"]"#,
+            ),
+            (
+                "link:a&b.html[x] then link:c.html[C]",
+                r#"["a&amp;b.html", "c.html"]"#,
+            ),
             // The same, for the auto-link / formal-URL family (whose own
             // registration pass runs first) and the ANGLE branch.
-            "https://example.org/?a=1&b=2",
-            "https://example.org/a&b[Example]",
-            "<https://example.org/a&b>",
-            "https://a.example/?x=1&y=2 then link:b&c.html[B]",
+            (
+                "https://example.org/?a=1&b=2",
+                r#"["https://example.org/?a=1&amp;b=2"]"#,
+            ),
+            (
+                "https://example.org/a&b[Example]",
+                r#"["https://example.org/a&amp;b"]"#,
+            ),
+            (
+                "<https://example.org/a&b>",
+                r#"["https://example.org/a&amp;b"]"#,
+            ),
+            (
+                "https://a.example/?x=1&y=2 then link:b&c.html[B]",
+                r#"["https://a.example/?x=1&amp;y=2", "b&amp;c.html"]"#,
+            ),
             // And for the bare-e-mail family, whose registration pass runs
             // last: the `mailto:` target it records carries the address's own
             // `&amp;`.
-            "a&b@example.com",
-            "a&b@example.com then link:c.html[C] then https://d.example",
+            ("a&b@example.com", r#"["mailto:a&amp;b@example.com"]"#),
+            (
+                "a&b@example.com then link:c.html[C] then https://d.example",
+                r#"["https://d.example", "c.html", "mailto:a&amp;b@example.com"]"#,
+            ),
         ];
 
-        for fixture in fixtures {
+        for (fixture, expected) in fixtures {
             let builder_parser = Parser::default().with_catalog_assets(true);
             let nodes = build_with(Span::new(fixture), &builder_parser);
             apply_link_side_effects(&nodes, &builder_parser);
 
-            let golden_parser = Parser::default().with_catalog_assets(true);
-            golden_macros_with(fixture, &golden_parser);
-
             assert_eq!(
-                builder_parser.catalog().links(),
-                golden_parser.catalog().links(),
+                format!("{:?}", builder_parser.catalog().links()),
+                expected,
                 "registered links diverged for {fixture:?}"
             );
         }
@@ -6548,17 +6566,8 @@ mod tests {
     /// The real, public pipeline's output for `source` — the golden for the
     /// expanded-value fixtures, which need the `AttributeReferences` step
     /// [`golden_macros_with`] deliberately omits.
-    fn golden_normal(source: &str, parser: &Parser) -> String {
-        use crate::content::{Content, SubstitutionGroup};
-
-        let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, None);
-
-        crate::content::inline_builder::snapshot::recorded_golden(
-            "links_normal",
-            source,
-            content.rendered_str(),
-        )
+    fn golden_normal(source: &str, _parser: &Parser) -> String {
+        crate::content::inline_builder::snapshot::recorded("links_normal", source)
     }
 
     #[test]
@@ -6716,30 +6725,39 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_golden_pipelines_registration_for_expanded_link_macros() {
+    fn registers_the_recorded_links_for_expanded_link_macros() {
         // The registration order that used to depend on the node's location:
         // an expanded macro registers in the *macro* pass, between the two URL
         // link forms' pass and the bare-e-mail one's, wherever it stands in
         // the source. Driven through the real pipeline on both sides, since
         // these fixtures need the `AttributeReferences` step.
-        for fixture in [
-            "{link-src}",
-            "see {link-src} now",
-            "see {link-src} and https://example.org now",
-            "https://a.example then {link-src} then doc@example.org",
-            "doc@example.org then {link-src}",
-            "{link-src} then link:b.html[B]",
+        for (fixture, expected) in [
+            ("{link-src}", r#"["index.html"]"#),
+            ("see {link-src} now", r#"["index.html"]"#),
+            (
+                "see {link-src} and https://example.org now",
+                r#"["https://example.org", "index.html"]"#,
+            ),
+            (
+                "https://a.example then {link-src} then doc@example.org",
+                r#"["https://a.example", "index.html", "mailto:doc@example.org"]"#,
+            ),
+            (
+                "doc@example.org then {link-src}",
+                r#"["index.html", "mailto:doc@example.org"]"#,
+            ),
+            (
+                "{link-src} then link:b.html[B]",
+                r#"["index.html", "b.html"]"#,
+            ),
         ] {
             let builder_parser = expanding_parser().with_catalog_assets(true);
             let nodes = build(Span::new(fixture), &builder_parser, None);
             apply_link_side_effects(&nodes, &builder_parser);
 
-            let golden_parser = expanding_parser().with_catalog_assets(true);
-            golden_normal(fixture, &golden_parser);
-
             assert_eq!(
-                builder_parser.catalog().links(),
-                golden_parser.catalog().links(),
+                format!("{:?}", builder_parser.catalog().links()),
+                expected,
                 "registered links diverged for {fixture:?}"
             );
         }
@@ -6775,7 +6793,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_golden_pipelines_registration_for_links_inside_expanded_values() {
+    fn registers_the_recorded_links_inside_expanded_values() {
         // The staged `register_link` side effect classifies each node by the
         // pass that built it, from the node's own `location` — which is exactly
         // why `link_macro_level` still requires its `link:`/`mailto:` marker to
@@ -6783,25 +6801,31 @@ mod tests {
         // over expanded values, in both relative orders, so a misclassification
         // would show up as the wrong catalog order.
         let fixtures = [
-            "link:{url}[Docs]",
-            "https://{host}",
-            "link:{url}[Docs] and https://{host}",
-            "https://{host} then link:{url}[Docs]",
-            "see {site} now",
-            "mailto:{addr}[Team] and https://{host}",
+            ("link:{url}[Docs]", r#"["index.html"]"#),
+            ("https://{host}", r#"["https://example.org"]"#),
+            (
+                "link:{url}[Docs] and https://{host}",
+                r#"["https://example.org", "index.html"]"#,
+            ),
+            (
+                "https://{host} then link:{url}[Docs]",
+                r#"["https://example.org", "index.html"]"#,
+            ),
+            ("see {site} now", r#"["https://example.org"]"#),
+            (
+                "mailto:{addr}[Team] and https://{host}",
+                r#"["https://example.org", "mailto:hello@example.org"]"#,
+            ),
         ];
 
-        for fixture in fixtures {
+        for (fixture, expected) in fixtures {
             let builder_parser = expanding_parser().with_catalog_assets(true);
             let nodes = build(Span::new(fixture), &builder_parser, None);
             apply_link_side_effects(&nodes, &builder_parser);
 
-            let golden_parser = expanding_parser().with_catalog_assets(true);
-            golden_normal(fixture, &golden_parser);
-
             assert_eq!(
-                builder_parser.catalog().links(),
-                golden_parser.catalog().links(),
+                format!("{:?}", builder_parser.catalog().links()),
+                expected,
                 "registered links diverged for {fixture:?}"
             );
         }

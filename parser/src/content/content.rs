@@ -170,10 +170,9 @@ struct DeferredContent {
     /// document-derived byte escaped, every raw `U+E000 <index> U+E001` a real
     /// placeholder.
     ///
-    /// Two producers write one, and only one of them reaches a production
-    /// reader. The string pipeline still captures its own through
-    /// [`Content::finalize_deferred`], as it always did — that copy is what the
-    /// test-only oracle path renders from, and it goes with `run_pipeline`.
+    /// Two producers wrote one, and only one still runs. The string pipeline
+    /// captured its own through [`Content::finalize_deferred`], which now runs
+    /// nowhere but the unit tests that pin that vestigial machinery directly.
     /// The one content that *renders* from a template in production — a block
     /// title carried across a section heading, which travels through
     /// `Parser::pending_block_title` as an [`OwnedTitle`] because the parser it
@@ -184,9 +183,7 @@ struct DeferredContent {
     /// a splice — see [`Content::rebuild_rendered`] — but the splice's inputs
     /// no longer come from the string pipeline.
     ///
-    /// Empty between [`Content::set_deferred_xrefs`] recording the list and
-    /// `finalize_deferred` capturing the template, which is within one
-    /// `run_pipeline` call and reaches no reader.
+    /// Empty for every production content but the carried title above.
     template: String,
 
     /// Whether [`block`](Self::block) and [`footnote`](Self::footnote) were
@@ -196,10 +193,10 @@ struct DeferredContent {
     /// Always `true` for a production content: [`Content::set_tree_xrefs`] is
     /// the only producer of deferred state at the seam now that the string
     /// pipeline no longer runs there. `false` arises only through
-    /// [`Content::set_deferred_xrefs`], on the test-only oracle path
-    /// (`apply_string_pipeline`), and the `!from_tree` branches this field
-    /// still gates — the escaped-form reads, the template partition — are that
-    /// path's and go with `run_pipeline`.
+    /// [`Content::set_deferred_xrefs`], which nothing but the vestigial
+    /// machinery's own unit tests can reach, and the `!from_tree` branches
+    /// this field still gates — the escaped-form reads, the template
+    /// partition — are that machinery's and go with it.
     from_tree: bool,
 }
 
@@ -844,8 +841,9 @@ impl<'src> Content<'src> {
     ///
     /// Called once, before substitution begins; the matching
     /// [`unescape_sentinels`](Self::unescape_sentinels) call restores them.
-    // Vestigial: reachable only from the test-only `run_pipeline` oracle
-    // (`apply_string_pipeline`); goes with it.
+    // Vestigial: the string pipeline's own machinery, unreachable from
+    // production since the oracle deletion and now exercised only by its own
+    // unit tests; the whole set goes together (design §5.2 step 6's tail).
     #[allow(dead_code)]
     pub(crate) fn escape_sentinels(&mut self) {
         if let Cow::Owned(escaped) = escape_sentinels(self.rendered.as_ref()) {
@@ -860,8 +858,9 @@ impl<'src> Content<'src> {
     /// The deferred template is deliberately left escaped: it is an internal
     /// representation that is re-rendered (through [`render_template`], whose
     /// callers unescape the result) each time references are resolved.
-    // Vestigial: reachable only from the test-only `run_pipeline` oracle
-    // (`apply_string_pipeline`); goes with it.
+    // Vestigial: the string pipeline's own machinery, unreachable from
+    // production since the oracle deletion and now exercised only by its own
+    // unit tests; the whole set goes together (design §5.2 step 6's tail).
     #[allow(dead_code)]
     pub(crate) fn unescape_sentinels(&mut self) {
         if let Cow::Owned(unescaped) = unescape_sentinels(self.rendered.as_ref()) {
@@ -918,11 +917,9 @@ impl<'src> Content<'src> {
     /// discovered, in placeholder order. The placeholder tokens must already
     /// have been written into [`Content::rendered`], in the same order.
     ///
-    /// Reached only through `run_pipeline`, which no longer runs in production:
-    /// what this records is the string pipeline's own answer — the golden every
-    /// differential corpus on this branch takes through
-    /// [`apply_string_pipeline`](crate::content::SubstitutionGroup) — and it
-    /// goes with `run_pipeline` itself. The production list is installed by
+    /// Reached only through the string pipeline's macros step, which runs
+    /// nowhere but that vestigial machinery's own unit tests now; it goes
+    /// with the machinery. The production list is installed by
     /// [`set_tree_xrefs`](Self::set_tree_xrefs), from the tree, on a content
     /// this was never called on.
     ///
@@ -1012,8 +1009,9 @@ impl<'src> Content<'src> {
     /// it is captured as the template and `rendered` is rebuilt as the
     /// unresolved fallback so it is immediately clean for callers that read it
     /// before resolution.
-    // Vestigial: reachable only from the test-only `run_pipeline` oracle
-    // (`apply_string_pipeline`); goes with it.
+    // Vestigial: the string pipeline's own machinery, unreachable from
+    // production since the oracle deletion and now exercised only by its own
+    // unit tests; the whole set goes together (design §5.2 step 6's tail).
     #[allow(dead_code)]
     pub(crate) fn finalize_deferred(&mut self, renderer: &dyn InlineSubstitutionRenderer) {
         let template = self.rendered.as_ref().to_string();
@@ -1035,8 +1033,9 @@ impl<'src> Content<'src> {
     /// A deferred reference's text is captured out of the main rendered string
     /// during macro substitution, so passthrough placeholders inside it are not
     /// reached by the ordinary restore pass. This lets that pass reach them.
-    // Vestigial: reachable only from the test-only `run_pipeline` oracle
-    // (`apply_string_pipeline`); goes with it.
+    // Vestigial: the string pipeline's own machinery, unreachable from
+    // production since the oracle deletion and now exercised only by its own
+    // unit tests; the whole set goes together (design §5.2 step 6's tail).
     #[allow(dead_code)]
     pub(crate) fn restore_deferred_xref_passthroughs(
         &mut self,

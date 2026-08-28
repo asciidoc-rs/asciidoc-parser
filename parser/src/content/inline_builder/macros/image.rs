@@ -358,7 +358,7 @@ pub(in crate::content::inline_builder) fn range_is_substitution_restorable(
 /// rather than reads: the placeholder's bytes are not the string pipeline's
 /// (its haystack holds the `\u{96}`*n*`\u{97}` sentinel there), but the
 /// masked construct's own rendered body **is** known at build time — it is
-/// what [`Passthroughs::restore_to`](crate::content::Passthroughs) splices
+/// what [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs) splices
 /// over the sentinel after the steps run — so a computed value that
 /// substitutes it for the placeholder (see
 /// [`restore_masked_passthroughs`](super::links))
@@ -427,14 +427,14 @@ pub(in crate::content::inline_builder) fn range_is_restorable(
 /// ([`Stem`](InlineNode::Stem)).
 ///
 /// These are exactly the two node kinds the *same* extraction pass
-/// ([`Passthroughs::extract_from`](crate::content::Passthroughs)) masks before
-/// any substitution step runs — STEM being an implicit passthrough, as
-/// [`Stem::value`](crate::inlines::Stem) documents — so each stands in the
-/// string pipeline's haystack as one `\u{96}`*n*`\u{97}` sentinel and in this
-/// module's match string as one [`SPAN_PLACEHOLDER`](super::super::quotes)
-/// character, and each has a body known at build time that
-/// `Passthroughs::restore_to` splices over that sentinel once the steps have
-/// run.
+/// ([`Passthroughs::extract_from`](crate::content::passthroughs::Passthroughs))
+/// masks before any substitution step runs — STEM being an implicit
+/// passthrough, as [`Stem::value`](crate::inlines::Stem) documents — so each
+/// stands in the string pipeline's haystack as one `\u{96}`*n*`\u{97}` sentinel
+/// and in this module's match string as one
+/// [`SPAN_PLACEHOLDER`](super::super::quotes) character, and each has a body
+/// known at build time that `Passthroughs::restore_to` splices over that
+/// sentinel once the steps have run.
 ///
 /// Every restoring family admits both kinds. The `image:`/`icon:` family's
 /// values are the only restored ones the **fold** re-processes —
@@ -459,8 +459,9 @@ pub(in crate::content::inline_builder) fn node_is_restorable(node: &InlineNode<'
 }
 
 /// The bytes a [`node_is_restorable`] node restores to — the very text
-/// [`Passthroughs::restore_to`](crate::content::Passthroughs) splices over
-/// the string pipeline's own sentinel — or `None` for any other node.
+/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)
+/// splices over the string pipeline's own sentinel — or `None` for any other
+/// node.
 ///
 /// The invariant both callers rest on is that this returns **exactly what the
 /// fold of that node emits**, so a value finished with these bytes reads the
@@ -772,11 +773,11 @@ fn widen_masked_pieces(
 /// [`node_is_restorable`] piece's placeholder becomes the same
 /// sentinel-shaped token, the arithmetic runs, and each *surviving* token is
 /// restored with its own node's body ([`restorable_body`]) — index-keyed, as
-/// [`Passthroughs::restore_to`](crate::content::Passthroughs) is, so a token
-/// the basename cut dropped (a masked construct wholly inside a directory
-/// prefix or an extension) does not shift the ones that survive. A token
-/// survives whole or is dropped whole: both of the cut points [`basename`]
-/// reads (the last `/`, the last `.`) are bytes no token contains.
+/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs) is,
+/// so a token the basename cut dropped (a masked construct wholly inside a
+/// directory prefix or an extension) does not shift the ones that survive. A
+/// token survives whole or is dropped whole: both of the cut points
+/// [`basename`] reads (the last `/`, the last `.`) are bytes no token contains.
 ///
 /// A range holding no masked construct takes the plain derivation over the
 /// match-string bytes — exactly what this family computed before the restore
@@ -983,8 +984,8 @@ pub(in crate::content::inline_builder) enum Tokened {
 /// on the way back out ([`Attrlist::into_owned_restoring`]) — the parse can
 /// drop a token (a blank slot, a value the split discards) without shifting
 /// the ones that survive, exactly as
-/// [`Passthroughs::restore_to`](crate::content::Passthroughs) is unshifted by
-/// a sentinel that never reached the rendered string.
+/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs) is
+/// unshifted by a sentinel that never reached the rendered string.
 ///
 /// Shared by the two families whose bracket comes back from a parse — the
 /// `image:`/`icon:` bracket here, and the link families' display-text list
@@ -1214,7 +1215,7 @@ mod tests {
         super::{
             super::test_support::{
                 assert_styled, assert_text, build_src, build_through_quotes, fold_html,
-                golden_macros, golden_macros_in, golden_macros_with,
+                golden_macros, golden_macros_in,
             },
             ComputedSpecials,
         },
@@ -2605,26 +2606,26 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_golden_pipelines_registration_for_a_target_crossing_an_escaped_special() {
+    fn registers_the_recorded_target_for_a_target_crossing_an_escaped_special() {
         // The staged `register_image` reads the node's own stored `target`,
-        // which is now the escaped one — so it must be byte-identical to the
-        // `caps[1]` the string replacer registers. Two independent parsers, as
-        // elsewhere in this module.
+        // which is the escaped one — byte-identical to the `caps[1]` the
+        // string replacer registered. Frozen at the last differentially-
+        // verified parity, like the broad set above.
         let fixtures = [
-            "image:a&b.png[]",
-            "image:a<b.png[Alt]",
-            "image:a&b.png[] image:c&d.png[]",
-            "icon:a&b[]",
-            "\\image:a&b.png[A]",
+            ("image:a&b.png[]", r#"["a&amp;b.png"]"#),
+            ("image:a<b.png[Alt]", r#"["a&lt;b.png"]"#),
+            (
+                "image:a&b.png[] image:c&d.png[]",
+                r#"["a&amp;b.png", "c&amp;d.png"]"#,
+            ),
+            ("icon:a&b[]", "[]"),
+            ("\\image:a&b.png[A]", "[]"),
         ];
 
-        for fixture in fixtures {
+        for (fixture, expected) in fixtures {
             let builder_parser = Parser::default().with_catalog_assets(true);
             let nodes = build_with(Span::new(fixture), &builder_parser);
             apply_image_side_effects(&nodes, &builder_parser, Span::new(fixture));
-
-            let golden_parser = Parser::default().with_catalog_assets(true);
-            golden_macros_with(fixture, &golden_parser);
 
             let got: Vec<_> = builder_parser
                 .catalog()
@@ -2633,14 +2634,11 @@ mod tests {
                 .map(|i| i.target.clone())
                 .collect();
 
-            let want: Vec<_> = golden_parser
-                .catalog()
-                .images()
-                .iter()
-                .map(|i| i.target.clone())
-                .collect();
-
-            assert_eq!(got, want, "registered images diverged for {fixture:?}");
+            assert_eq!(
+                format!("{got:?}"),
+                expected,
+                "registered images diverged for {fixture:?}"
+            );
         }
     }
 
@@ -2760,34 +2758,32 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_golden_pipelines_registration_for_a_broad_fixture_set() {
-        // Each fixture uses its own pair of *independent* parsers (design
-        // §5.3's two-independent-parsers discipline, already established by
-        // the footnote increment's own differential corpus): one that the
-        // additive builder builds against and this function then walks, one
-        // that the real string pipeline (`golden_macros_with`) runs against
-        // directly. Because neither path is wired into the other, comparing
-        // their two catalogs after the fact is the whole test.
+    fn registers_the_recorded_targets_for_a_broad_fixture_set() {
+        // Each expected set is **frozen at the last differentially-verified
+        // parity**: until the string pipeline's deletion this test registered
+        // each fixture through it on an independent parser and compared the
+        // two catalogs, green at the commit that deleted it — the literals are
+        // that pipeline's own answer.
         let fixtures = [
-            "image:sunset.jpg[Sunset]",
-            "icon:home[]",
-            "image:sunset.jpg[Sunset]{sp}image:other.png[]",
-            "image without a bracket image:foo.png stays literal",
-            "\\image:sunset.jpg[Sunset]",
+            ("image:sunset.jpg[Sunset]", r#"["sunset.jpg"]"#),
+            ("icon:home[]", "[]"),
+            (
+                "image:sunset.jpg[Sunset]{sp}image:other.png[]",
+                r#"["sunset.jpg", "other.png"]"#,
+            ),
+            ("image without a bracket image:foo.png stays literal", "[]"),
+            ("\\image:sunset.jpg[Sunset]", "[]"),
             // A bracket with no `'src` slice of its own: the attribute list
             // is parsed from the match string, but `register_image` reads the
-            // node's `target`, so the catalogs must still agree.
-            "image:sunset.jpg[a < b]",
-            "image:a&b.png[Tom &amp; Jerry,200]",
+            // node's `target`, so the recorded target is still the match's.
+            ("image:sunset.jpg[a < b]", r#"["sunset.jpg"]"#),
+            ("image:a&b.png[Tom &amp; Jerry,200]", r#"["a&amp;b.png"]"#),
         ];
 
-        for fixture in fixtures {
+        for (fixture, expected) in fixtures {
             let builder_parser = Parser::default().with_catalog_assets(true);
             let nodes = build_with(Span::new(fixture), &builder_parser);
             apply_image_side_effects(&nodes, &builder_parser, Span::new(fixture));
-
-            let golden_parser = Parser::default().with_catalog_assets(true);
-            golden_macros_with(fixture, &golden_parser);
 
             let got: Vec<_> = builder_parser
                 .catalog()
@@ -2795,14 +2791,12 @@ mod tests {
                 .iter()
                 .map(|i| i.target.clone())
                 .collect();
-            let want: Vec<_> = golden_parser
-                .catalog()
-                .images()
-                .iter()
-                .map(|i| i.target.clone())
-                .collect();
 
-            assert_eq!(got, want, "registered images diverged for {fixture:?}");
+            assert_eq!(
+                format!("{got:?}"),
+                expected,
+                "registered images diverged for {fixture:?}"
+            );
         }
     }
 
@@ -2974,17 +2968,8 @@ mod tests {
     /// The real, public pipeline's output for `source` — the golden for the
     /// expanded-value fixtures, which need the `AttributeReferences` step
     /// [`golden_macros_with`] deliberately omits.
-    fn golden_normal(source: &str, parser: &Parser) -> String {
-        use crate::content::{Content, SubstitutionGroup};
-
-        let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, None);
-
-        crate::content::inline_builder::snapshot::recorded_golden(
-            "image_normal",
-            source,
-            content.rendered_str(),
-        )
+    fn golden_normal(source: &str, _parser: &Parser) -> String {
+        crate::content::inline_builder::snapshot::recorded("image_normal", source)
     }
 
     #[test]
@@ -3174,26 +3159,26 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_golden_pipelines_registration_for_images_inside_expanded_values() {
+    fn registers_the_recorded_target_for_images_inside_expanded_values() {
         // The staged `register_image` side effect reads the node's own stored
-        // `target`, which is now the *expanded* one — so the catalog must match
-        // the golden pipeline's, which registers what its own expanded haystack
-        // matched. Two independent parsers, as elsewhere in this module.
+        // `target`, which is the *expanded* one — what the string pipeline's
+        // own expanded haystack matched and registered. Frozen at the last
+        // differentially-verified parity, like the broad set above.
         let fixtures = [
-            "image:{logo}[Logo]",
-            "image:{logo}[]",
-            "image:{dir}/{logo}[]",
-            "see {img-src} here",
-            "image:{logo}[A] then image:other.png[B]",
+            ("image:{logo}[Logo]", r#"["sunset.jpg"]"#),
+            ("image:{logo}[]", r#"["sunset.jpg"]"#),
+            ("image:{dir}/{logo}[]", r#"["assets/sunset.jpg"]"#),
+            ("see {img-src} here", r#"["sunset.jpg"]"#),
+            (
+                "image:{logo}[A] then image:other.png[B]",
+                r#"["sunset.jpg", "other.png"]"#,
+            ),
         ];
 
-        for fixture in fixtures {
+        for (fixture, expected) in fixtures {
             let builder_parser = expanding_parser().with_catalog_assets(true);
             let nodes = build(Span::new(fixture), &builder_parser, None);
             apply_image_side_effects(&nodes, &builder_parser, Span::new(fixture));
-
-            let golden_parser = expanding_parser().with_catalog_assets(true);
-            golden_normal(fixture, &golden_parser);
 
             let got: Vec<_> = builder_parser
                 .catalog()
@@ -3202,14 +3187,11 @@ mod tests {
                 .map(|i| i.target.clone())
                 .collect();
 
-            let want: Vec<_> = golden_parser
-                .catalog()
-                .images()
-                .iter()
-                .map(|i| i.target.clone())
-                .collect();
-
-            assert_eq!(got, want, "registered images diverged for {fixture:?}");
+            assert_eq!(
+                format!("{got:?}"),
+                expected,
+                "registered images diverged for {fixture:?}"
+            );
         }
     }
 

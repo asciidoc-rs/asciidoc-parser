@@ -645,9 +645,9 @@ impl HtmlSubstitutionRenderer {
     /// string substitution pipeline's own order: its `web_path` only ever
     /// sees the sentinel (no space to percent-encode, no backslash to
     /// posixify, no `/` or `.` for the segment arithmetic to read), and
-    /// [`Passthroughs::restore_to`](crate::content::Passthroughs) splices the
-    /// body into the finished `src` — so a fold over restored values
-    /// reproduces the same bytes, identically on every platform.
+    /// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)
+    /// splices the body into the finished `src` — so a fold over restored
+    /// values reproduces the same bytes, identically on every platform.
     ///
     /// [`image_uri`]: InlineSubstitutionRenderer::image_uri
     fn image_src(
@@ -739,10 +739,10 @@ fn mask_restored_ranges<'v>(
 /// token in `resolved`, one left-to-right pass, and returns the result.
 ///
 /// Index-keyed exactly as
-/// [`Passthroughs::restore_to`](crate::content::Passthroughs) is: each token
-/// is sought only in the bytes after the previous splice, so a body that
-/// itself carries sentinel-shaped bytes is never re-matched as a later token,
-/// and a token the resolution dropped (a segment its `..` arithmetic
+/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs) is:
+/// each token is sought only in the bytes after the previous splice, so a body
+/// that itself carries sentinel-shaped bytes is never re-matched as a later
+/// token, and a token the resolution dropped (a segment its `..` arithmetic
 /// consumed) is simply not found — the ones after it still restore, keyed by
 /// their own index.
 fn splice_restored_bodies(resolved: &str, bodies: &[&str]) -> String {

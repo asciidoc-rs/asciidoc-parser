@@ -1037,8 +1037,9 @@ pub(crate) fn substitute_attributes_in_macro_target<'src>(
 ///
 /// [docinfo file]: https://docs.asciidoctor.org/asciidoc/latest/docinfo/
 /// [`attribute-missing`]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing
-// Vestigial: reachable only from the test-only `run_pipeline` oracle
-// (`apply_string_pipeline`); goes with it.
+// Vestigial: the string pipeline's own machinery, unreachable from
+// production since the oracle deletion and now exercised only by its own
+// unit tests; the whole set goes together (design §5.2 step 6's tail).
 #[allow(dead_code)]
 pub(crate) fn substitute_attributes_in_text(text: &str, parser: &Parser) -> String {
     if !text.contains('{') {

@@ -1232,11 +1232,7 @@ mod tests {
         SubstitutionStep::Macros.apply(&mut content, parser, None);
         SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
 
-        crate::content::inline_builder::snapshot::recorded_golden(
-            corpus,
-            source,
-            content.rendered_str(),
-        )
+        crate::content::inline_builder::snapshot::recorded(corpus, source)
     }
 
     #[test]
@@ -1480,16 +1476,10 @@ mod tests {
         assert_special_char(&nodes[2], '>');
 
         // And the fold escapes the tag, byte-for-byte as the real pipeline
-        // does — the documented `subs=attributes+` trick for inspecting a
-        // stored attribute value.
-        let mut content = Content::from(Span::new(source));
-        group.apply_string_pipeline(&mut content, &parser_with_attribute("tag", "<b>"), None);
-
-        assert_eq!(content.rendered_str(), "&lt;b&gt;");
-        assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
-            content.rendered_str()
-        );
+        // did (`&lt;b&gt;`, its recorded rendering for this order) — the
+        // documented `subs=attributes+` trick for inspecting a stored
+        // attribute value.
+        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "&lt;b&gt;");
     }
 
     #[test]

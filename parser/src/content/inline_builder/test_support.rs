@@ -10,7 +10,6 @@
 use super::{build, quotes::apply_quotes, special_chars::apply_special_characters};
 use crate::{
     HasSpan, Parser, Span,
-    content::{Content, Passthroughs, SubstitutionStep},
     inlines::{CharRef, InlineNode, RawOrigin, Ref, RefVariant, SpanForm, StyleVariant},
     parser::HtmlSubstitutionRenderer,
     strings::CowStr,
@@ -210,32 +209,28 @@ pub(super) fn assert_styled<'a, 'src>(
     }
 }
 
-/// The string pipeline's output through the **macros** step for `source`,
-/// used as the golden oracle: the five steps [`build`] runs, in order
-/// (special characters, quotes, character replacements, macros, post
-/// replacement), with `parser` as the document context. Attribute
-/// references are skipped — exactly as the additive builder skips them — so
-/// the fixtures deliberately contain none.
-pub(super) fn golden_macros_with(source: &str, parser: &Parser) -> String {
-    golden_macros_in("macros", source, parser)
+/// The string pipeline's recorded output through the **macros** step for
+/// `source` — what that pipeline produced while it existed: the five steps
+/// [`build`] runs, in order, with attribute references skipped, frozen into
+/// `snapshots/macros.txt`.
+///
+/// The `_parser` no longer participates — a recording is keyed by source alone
+/// — but the parameter stays so the several dozen call sites that configured
+/// one do not churn; where a parser made a shared source render differently,
+/// the fixture already lives in its own named corpus (see
+/// [`golden_macros_in`]).
+pub(super) fn golden_macros_with(source: &str, _parser: &Parser) -> String {
+    golden_macros_in("macros", source, _parser)
 }
 
-/// [`golden_macros_with`], recording into a named corpus.
+/// [`golden_macros_with`], reading a named corpus.
 ///
 /// One corpus is keyed by source alone, so two fixtures sharing a source but
-/// not a parser configuration would be two conflicting recordings of the same
-/// key — which [`snapshot`](super::snapshot) refuses rather than merges. The
-/// handful of tests whose parser makes a shared source render differently name
-/// their own corpus here; everything else takes the default one.
-pub(super) fn golden_macros_in(corpus: &str, source: &str, parser: &Parser) -> String {
-    let mut content = Content::from(Span::new(source));
-    SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
-    SubstitutionStep::Quotes.apply(&mut content, parser, None);
-    SubstitutionStep::CharacterReplacements.apply(&mut content, parser, None);
-    SubstitutionStep::Macros.apply(&mut content, parser, None);
-    SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
-
-    super::snapshot::recorded_golden(corpus, source, content.rendered_str())
+/// not a rendering need separate corpora. The handful of tests whose parser
+/// made a shared source render differently name their own corpus here;
+/// everything else takes the default one.
+pub(super) fn golden_macros_in(corpus: &str, source: &str, _parser: &Parser) -> String {
+    super::snapshot::recorded(corpus, source)
 }
 
 /// [`golden_macros_with`] with a default parser.
@@ -267,34 +262,21 @@ pub(super) fn link_text_of(reference: &Ref<'_>) -> String {
     s
 }
 
-/// The string pipeline's output for `source`, used as the golden oracle for
-/// both the passthrough and STEM increments (their steps share one
-/// extraction pass, [`Passthroughs::extract_from`]): extract passthroughs
-/// (including inline STEM macros), run the five steps [`build`] runs
-/// (special characters, quotes, character replacements, macros, post
-/// replacement), then restore them — exactly what
-/// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup::apply)'s
-/// `run_pipeline` does for [`SubstitutionGroup::Normal`]. Attribute
-/// references are skipped, as elsewhere in this module's golden helpers.
-pub(super) fn golden_passthroughs_with(source: &str, parser: &Parser) -> String {
-    golden_passthroughs_in("passthroughs", source, parser)
+/// The string pipeline's recorded output for `source`, frozen for both the
+/// passthrough and STEM families (their steps shared one extraction pass):
+/// extraction, the five steps [`build`] runs, then the restore — what
+/// `run_pipeline` did for [`SubstitutionGroup::Normal`]
+/// while it existed, read back from `snapshots/passthroughs.txt`. The
+/// `_parser` stays for the same non-churn reason [`golden_macros_with`]'s
+/// does.
+pub(super) fn golden_passthroughs_with(source: &str, _parser: &Parser) -> String {
+    golden_passthroughs_in("passthroughs", source, _parser)
 }
 
-/// [`golden_passthroughs_with`], recording into a named corpus (see
+/// [`golden_passthroughs_with`], reading a named corpus (see
 /// [`golden_macros_in`] for why a caller would name one).
-pub(super) fn golden_passthroughs_in(corpus: &str, source: &str, parser: &Parser) -> String {
-    let mut content = Content::from(Span::new(source));
-    let passthroughs = Passthroughs::extract_from(&mut content, parser);
-
-    SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
-    SubstitutionStep::Quotes.apply(&mut content, parser, None);
-    SubstitutionStep::CharacterReplacements.apply(&mut content, parser, None);
-    SubstitutionStep::Macros.apply(&mut content, parser, None);
-    SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
-
-    passthroughs.restore_to(&mut content, parser);
-
-    super::snapshot::recorded_golden(corpus, source, content.rendered_str())
+pub(super) fn golden_passthroughs_in(corpus: &str, source: &str, _parser: &Parser) -> String {
+    super::snapshot::recorded(corpus, source)
 }
 
 /// [`golden_passthroughs_with`] with a default parser.

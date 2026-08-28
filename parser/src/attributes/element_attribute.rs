@@ -107,8 +107,9 @@ impl<'src> ElementAttribute<'src> {
     /// influence how the list divides (`image:x.png[++a,b++]` is one
     /// positional whose value is `a,b`, not two). Restoring per *parsed value*
     /// reproduces that, exactly as
-    /// [`Passthroughs::restore_to`](crate::content::Passthroughs) splices each
-    /// body over whatever sentinel reached the rendered string.
+    /// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)
+    /// splices each body over whatever sentinel reached the rendered
+    /// string.
     ///
     /// [`shorthand_item_indices`](Self::shorthand_item_indices) are byte
     /// offsets into `value`, so each is **shifted** past every substitution
@@ -791,10 +792,11 @@ fn is_shorthand_delimiter(c: char) -> bool {
 /// before it.
 ///
 /// The token spelling is the string pipeline's own passthrough sentinel (see
-/// [`Passthroughs`](crate::content::Passthroughs)), which is what makes this
-/// the faithful restore: a caller hands over the very text
+/// [`Passthroughs`](crate::content::passthroughs::Passthroughs)), which is what
+/// makes this the faithful restore: a caller hands over the very text
 /// `Attrlist::parse` would have seen there, and each body lands where
-/// [`Passthroughs::restore_to`](crate::content::Passthroughs) splices it.
+/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)
+/// splices it.
 ///
 /// A run that is not a well-formed token, or whose index `bodies` does not
 /// supply, is copied through verbatim — the same index-keyed leniency
