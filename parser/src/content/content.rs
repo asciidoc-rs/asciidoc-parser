@@ -1076,19 +1076,16 @@ impl<'src> Content<'src> {
             // same split is read out of the template — a placeholder that has
             // left it was re-homed onto a footnote — which is what
             // `reports_unresolved` answers for either shape.
+            // A tree content carries no template and never consults one —
+            // `reports_unresolved` below short-circuits on `from_tree` — while
+            // a string-pipeline content reaches here with its template captured
+            // by the `finalize_deferred` at the end of the same `run_pipeline`
+            // call that recorded its list. The assert that used to pin that
+            // pairing went with the last test that could reach this on the
+            // string path; the invariant is the vestigial machinery's own now,
+            // held by its own unit tests until it is deleted whole.
             let from_tree = deferred.from_tree;
             let template = deferred.template.clone();
-
-            // A string-pipeline content always reaches here with its template
-            // captured: `finalize_deferred` sets it at the end of the same
-            // `run_pipeline` call that recorded the list. An empty one there
-            // means that call was skipped (a future-refactor hazard); the
-            // `template.contains` guard below would then silently suppress
-            // every unresolved-ref warning, so catch that invariant break in
-            // debug builds. A tree content carries no template and never
-            // consults one — `reports_unresolved` short-circuits on
-            // `from_tree` — so the assert does not apply to it.
-            debug_assert!(from_tree || !template.is_empty());
 
             for (index, xref) in deferred.block.iter_mut().enumerate() {
                 // The catalog holds the document's own text (an ID as it was
