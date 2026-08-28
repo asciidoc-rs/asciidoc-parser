@@ -236,6 +236,14 @@ const CORPUS: &[&str] = &[
     // misalign the two after it rather than merely drop one.
     "See ((a term with <<b>> in it)) here.\n\n[[b]]B.",
     "See <<a>> and ((term <<b>>)) and <<c>>.\n\n[[a]]A.\n\n[[b]]B.\n\n[[c]]C.",
+    // The **macro** spelling, which used to have its own
+    // divergence test below: its shown term came back from an attribute-list
+    // parse and was kept as a string, so no node existed to derive a segment
+    // from. An argument holding no `=` is not a list, so the term is the whole
+    // shown range and its nodes are carried now — the same walk reaches it, and
+    // the straddling fixture pins the alignment the way the shorthand's does.
+    "See indexterm2:[<<b>>] here.\n\n[[b]]B.",
+    "See <<a>> and indexterm2:[term <<b>>] and <<c>>.\n\n[[a]]A.\n\n[[b]]B.\n\n[[c]]C.",
 ];
 
 #[test]
@@ -352,50 +360,6 @@ fn a_rendered_span_in_a_string_read_slot_keeps_its_documented_divergence() {
     assert_eq!(derived[0].window, golden[0].window);
     assert_eq!(derived[0].xrefstyle, golden[0].xrefstyle);
     assert_eq!(derived[0].derived, golden[0].derived);
-}
-
-#[test]
-fn a_reference_inside_an_index_term_macro_keeps_its_documented_divergence() {
-    // The index-term family's own remaining deferral, reached from this side.
-    // A *visible* term written in either shorthand carries its shown text as
-    // `children`, so a cross-reference inside it is a node the collectors walk
-    // — the parity corpus covers both spellings. The `indexterm2:[…]` **macro**
-    // spelling does not: its shown term comes back from an attribute-list parse
-    // rather than from a range of the match string, so the builder keeps it as
-    // a string and builds no subtree, and there is no node to derive a segment
-    // from.
-    //
-    // That is the builder's own documented limitation (see the index-term
-    // family's "landed as" note), not something the derivation can answer, and
-    // it is *safe* rather than merely known: the count guard
-    // `mirror_tree_xref_resolution` applies sees 0 tree slots against 1 deferred
-    // segment, so it declines to correlate and this content's tree is never
-    // treated as authoritative. This pins that the two sides really do differ
-    // here, so the day the builder learns the macro spelling this test fails and
-    // the fixture moves into the corpus above.
-    let source = "See indexterm2:[<<b>>] here.\n\n[[b]]B.";
-
-    let mut parser = parser();
-    let doc = parser.parse_deferred(source);
-    let context = parser.render_context();
-    let renderer = HtmlSubstitutionRenderer {};
-
-    let (_, content) = contents(&doc)
-        .into_iter()
-        .find(|(_, content)| content.deferred_parts().is_some())
-        .expect("the fixture must defer a cross-reference");
-
-    let deferred = content.deferred_parts().unwrap();
-    let (golden, _) = partition(deferred.template, deferred.string_xrefs);
-    let derived = block_tree_xref_segments(content.inlines(), &renderer, &context);
-
-    // The string pipeline defers one; the tree offers none to derive from.
-    assert_eq!(golden.len(), 1);
-    assert_eq!(golden[0].target, "b");
-    assert!(
-        derived.is_empty(),
-        "the macro spelling now yields a subtree; fold this into the parity corpus: {derived:?}"
-    );
 }
 
 #[test]
