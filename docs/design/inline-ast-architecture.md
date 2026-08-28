@@ -8076,32 +8076,49 @@ Each phase is a reviewable unit with a clear exit gate.
   | tree segments installed, `template` still the pipeline's | 436 | 3.3% |
   | **carve-out** — the pipeline's whole answer stands | 6 | 0.05% |
 
-  So the template is the real remaining debt (436 contents), and the carve-out is *not* a design
-  problem at all: six hits, five distinct sources, and they reduce to **two enumerable recognition
-  gaps**.
+  So the template is the larger debt by volume (436 contents). The carve-out is six hits over five
+  sources — and reading what each one *is* matters more than the count, because the five are **two
+  different kinds**, and only one of them is a gap.
 
-  - `xref:sec[a *b, c* d,role=hl]` (and the same shape with a trailing period, and paired with a
-    `<<a␄b>>` shorthand) — an `xref:` display text carrying a comma **inside a formatted span**
-    beside a `role=` attribute. The tree recognizes none where the replacer defers one, so this is a
-    recognition gap in the xref family's attribute-list splitting rather than anything about
-    deferral.
-  - `indexterm2:[<<b>>]` — a cross-reference inside an index term's argument, which the tree does not
-    recognize there.
+  - **A closable gap.** `indexterm2:[<<b>>]` — a cross-reference inside an index term's *macro*
+    spelling. The visible shorthands carry their shown text as `children`, so a reference inside them
+    is a node the collectors walk; the macro spelling's term comes back from an attribute-list parse
+    instead, so the builder keeps it as a string and there is no node to derive a segment from. It is
+    the index-term family's own documented limitation, and
+    [`a_reference_inside_an_index_term_macro_keeps_its_documented_divergence`](../../parser/src/tests/inline_builder_xref_segment_parity.rs)
+    already says in as many words that the day the builder learns the macro spelling, that test fails
+    and the fixture moves into the parity corpus. This one closes like any other prep.
 
-  That is a much better position than "the deletion is bundled work": the carve-out goes when those
-  two gaps close, each a prep of exactly the kind this branch has landed thirty times, and the
-  template is a single well-scoped question (can the tree produce its own placeholder template, or
-  does `refold` make the template unnecessary for a tree-backed content?).
+  - **A deliberate deferral, and not a gap at all.** The other four sources are the
+    `xref:sec[a *b, c* d,role=hl]` shape (with a trailing period, and paired with a `<<a␄b>>`
+    shorthand). The tree does not fail to recognize this — it **declines** to.
+    [`an_attribute_list_delimiter_inside_a_span_defers_the_match`](../../parser/src/content/inline_builder/macros/xref.rs)
+    is the rule: the string replacer splits the attribute list over the piece's own *markup*, and
+    `a *b, c* d` renders `a <strong>b, c</strong> d`, whose list splits at the comma **inside the
+    tag**, ending the anchor there. Where the two readings disagree about the match's own extent the
+    tree defers rather than claiming a construct the rendered document does not agree with.
 
-  *So the decomposition, in dependency order:* (1) the two recognition gaps above, closing the
-  carve-out; (2) the **template** — the one genuine design question left in the deletion, and the
-  thing to answer before touching `run_pipeline`; (3) the oracle call itself, which is a two-line
-  deletion once (1) and (2) hold; (4) the ~28 `apply_string_pipeline` test call sites and
-  `run_pipeline`'s own removal, mechanical; (5) the three sentinel systems (§4.2), the
-  `suppress_recognition_side_effects` window, `nested_authoritative_warnings`, `in_inline_build` and
-  `Parser::build_inline_tree`, all vestigial and all going together; (6) the Strategy-A recorder
-  (`content/inline_tree.rs`, `RecordingRenderer`) and the `inline_recorder` corpus that tests it,
-  which the tree-shaped freeze established retire with the pass rather than outliving it.
+  *That second kind is the finding, and it changes what the deletion has to decide.* The carve-out is
+  not a bug to be closed out from under `set_tree_xrefs`; for these four it is the mechanism by which
+  the string pipeline's answer — the one the tree deliberately refuses to reproduce — reaches the
+  output. **When `run_pipeline` goes there is no such answer left to fall back to.** So the deletion
+  has to make a *behavioral* choice for this shape, and it is the maintainer's rather than an
+  implementation detail: either the tree learns to reproduce a split that lands inside a tag (the
+  reading it rejects on purpose), or the rendered output for an attribute list whose delimiter hides
+  inside a span changes. Nothing in the branch's own bar decides that — the differential corpora are
+  frozen against the pipeline's current answer, so they will simply record whichever is chosen.
+
+  *So the decomposition, in dependency order:* (1) the `indexterm2:` gap, the one closable member of
+  the carve-out; (2) **the deferral decision above**, which is a question to put rather than work to
+  do, and which gates the oracle's deletion as firmly as the template does; (3) the **template** —
+  can the tree produce its own placeholder template, or does `refold` make one unnecessary for a
+  tree-backed content?; (4) the oracle call itself, a two-line deletion once (1)–(3) hold; (5) the
+  ~28 `apply_string_pipeline` test call sites and `run_pipeline`'s own removal, mechanical; (6) the
+  three sentinel systems (§4.2), the `suppress_recognition_side_effects` window,
+  `nested_authoritative_warnings`, `in_inline_build` and `Parser::build_inline_tree`, all vestigial
+  and all going together; (7) the Strategy-A recorder (`content/inline_tree.rs`,
+  `RecordingRenderer`) and the `inline_recorder` corpus that tests it, which the tree-shaped freeze
+  established retire with the pass rather than outliving it.
 
   Nothing in production moved in this increment — it is a measurement and a decomposition — so there
   is no audit or coverage claim to make beyond the suite staying green.
@@ -9865,12 +9882,18 @@ Each phase is a reviewable unit with a clear exit gate.
        its bytes: it keeps the placeholder `template`, which only that pipeline produces, and a
        carve-out where the tree defers fewer cross-references than the pipeline did. Measured across
        the suite it resolves 12,852 / 436 / 6 — nothing-deferred, tree-segments-with-the-pipeline's-
-       template, and carve-out. So the template (436 contents) is the real debt, and the carve-out is
-       not a design problem: six hits over five sources, reducing to two recognition gaps — an
-       `xref:` display text carrying a comma inside a formatted span beside `role=`, and a
-       cross-reference inside `indexterm2:[…]`. Decomposition in dependency order: the two gaps, then
-       the template, then the oracle call (two lines once those hold), then the test call sites and
-       `run_pipeline` itself, then the vestigial mechanisms, then the Strategy-A recorder with
+       template, and carve-out. The template (436 contents) is the larger debt by volume; the
+       carve-out is six hits over five sources, and reading what each *is* matters more than the
+       count, because they are **two different kinds and only one is a gap**. `indexterm2:[<<b>>]` is
+       the index-term family's own documented limitation and closes like any other prep. The other
+       four are the `xref:sec[a *b, c* d,role=hl]` shape, where the tree does not fail to recognize
+       but **declines** to: the replacer splits the attribute list over the piece's rendered markup
+       and lands the split *inside* a `<strong>` tag, and the tree defers rather than claim a
+       construct the rendered document does not agree with. So the carve-out is the mechanism by
+       which that answer reaches the output, and deleting `run_pipeline` leaves nothing to fall back
+       to — a **behavioral decision for the maintainer**, not an implementation detail. Decomposition:
+       the `indexterm2:` gap, the deferral decision, the template, the oracle call, the test call
+       sites and `run_pipeline`, the vestigial mechanisms, then the Strategy-A recorder with
        `inline_recorder`. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
