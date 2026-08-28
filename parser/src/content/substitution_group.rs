@@ -406,17 +406,6 @@ impl SubstitutionGroup {
                 &render_context,
             );
 
-            {
-                use std::io::Write as _;
-                let oracle = content.rendered.as_ref().to_string();
-                if oracle != folded {
-                    let mut f = std::fs::OpenOptions::new().create(true).append(true)
-                        .open("/tmp/claude-0/-home-user-asciidoc-parser/c706002a-42d0-57fe-b352-029c3842e3df/scratchpad/after2.raw").unwrap();
-                    let _ = writeln!(f, "{:?}\t{:?}\t{:?}",
-                        content.original().data(), oracle, folded);
-                }
-            }
-
             content.rendered = crate::strings::CowStr::from(folded);
 
             // The recognition side effects the string pipeline just skipped,
