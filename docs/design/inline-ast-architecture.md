@@ -8484,6 +8484,49 @@ Each phase is a reviewable unit with a clear exit gate.
   changed. Coverage diff-neutral (`content/content.rs` 30 missed regions and 20 missed lines, both
   unchanged).
 
+  *Step 6 landed as (the title pass folds its footnotes too — the footnote template is now unused):*
+  the small remainder of the increment before it, and the one that takes the count to all of them.
+
+  The footnote fold left 6 of 55 resolved footnotes on the placeholder template: those defined in a
+  **section heading**. A heading is not resolved by `Content::resolve_references` at all — the
+  document-order title pass (`document::title_refs`) owns it, because a cross-reference *between* two
+  titles needs coordination the per-content pass cannot do — so nothing collected a fold for it.
+
+  *Where the fold goes, and why not where the title's own fold happens.* The obvious site is
+  `compute`, beside `fold_resolved_title`. It is the wrong one. That fold runs on a **clone** of the
+  tree carrying only `block_ordered`, because the pass holds no `&mut` to the blocks while it is still
+  computing — and a footnote's rendering needs `footnote_ordered`, which reaches the real tree only in
+  `write_back`. So the collection happens in `write_back`, immediately after each
+  `mirror_*_tree_xrefs` call has installed the destinations.
+
+  That also answers the walker question the same way the increment before it did: `write_back`
+  already visits exactly the headings and block titles that matter, in document order, with the
+  access needed. Extending it beats a third walk beside `collect` and `write_back` that could drift
+  from both. It costs three parameters on a private function with one caller.
+
+  Both passes now ask for folds through one method,
+  [`Content::collect_own_folded_footnotes`](../../parser/src/content/content.rs), which folds under
+  the content's own retained attributes or does nothing if it has none. Neither pass re-derives
+  "which attributes, and is there anything to fold". `SectionBlock::section_title_content` loses its
+  `#[cfg(test)]` gate to serve it — the accessor's doc comment already described this caller
+  hypothetically.
+
+  *Measured: 55 of 55 folds, 0 templates.* Every footnote the crate resolves now renders from its own
+  subtree. `FootnoteDeferred::render` keeps exactly one caller, `Parser::define_footnote`'s
+  parse-time unresolved fallback, which belongs to the string pipeline and goes with the oracle.
+
+  *The fallback arm stays, and is now unit-tested rather than deleted.* It is unreachable by
+  **measurement**, not by construction: a footnote whose defining content retained no render
+  attributes would still land there, and rendering its template is the honest answer — better than
+  leaving the parse-time text standing as though resolution had never run. This branch keeps
+  confusing the two, so the arm is pinned directly by
+  `a_footnote_folds_when_given_one_and_renders_its_template_otherwise`, which drives both arms with an
+  empty cross-reference list so the choice itself is the only subject.
+
+  Fold-parity audit: 63 distinct divergences on the base and on this branch alike — zero new, zero
+  closed. Coverage diff-neutral (`document/catalog.rs` 2 missed regions and 0 missed lines, both
+  unchanged; workspace total unchanged at 605 / 348).
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -10351,6 +10394,19 @@ Each phase is a reviewable unit with a clear exit gate.
        55 fold. Pinned by a stateful-renderer test, since no output comparison can see the
        difference. Audit: one new row, this step's own fixture; no pre-existing source moved.
        Coverage diff-neutral. See the step's own "landed as" note above.
+
+     - ✅ **the title pass folds its footnotes too — 55 of 55, and the footnote template is unused.**
+       The 6 footnotes still on the template were those defined in a section heading, which
+       `document::title_refs` owns rather than `Content::resolve_references`. The fold belongs in
+       `write_back`, not beside `fold_resolved_title`: that fold runs on a *clone* carrying only
+       `block_ordered`, while a footnote's rendering needs `footnote_ordered`, which reaches the real
+       tree only when `write_back` mirrors it. Extending `write_back` also avoids a third walk beside
+       `collect` and `write_back` that could drift from both. Both passes now collect through one
+       `Content::collect_own_folded_footnotes`. `FootnoteDeferred::render` is left with a single
+       caller, the parse-time unresolved fallback, which goes with the oracle. The template arm of
+       `Footnote::resolve_references` stays — unreachable by measurement, not by construction — and is
+       pinned by a direct unit test rather than deleted. Audit zero-new/zero-closed; coverage
+       diff-neutral. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

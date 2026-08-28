@@ -560,6 +560,79 @@ mod tests {
 
     use super::*;
 
+    /// Both arms of the fold-or-template choice in
+    /// [`Footnote::resolve_references`], pinned directly.
+    ///
+    /// The fold arm is what every footnote in the crate takes — measured, 55 of
+    /// 55 across the suite once the document-order title pass began collecting
+    /// folds too. That leaves the template arm with no *parse* that reaches it,
+    /// which is exactly why it is worth a unit test rather than a deletion: it
+    /// is unreachable by measurement, not by construction. A footnote whose
+    /// defining content retained no render attributes would still land here,
+    /// and rendering its template is the honest answer to that — better than
+    /// leaving the parse-time fallback standing as though resolution had never
+    /// run.
+    ///
+    /// An empty cross-reference list keeps the subject to the choice itself:
+    /// `resolve` has nothing to do, so what `text` ends up holding is decided
+    /// by the arm and nothing else.
+    #[test]
+    fn a_footnote_folds_when_given_one_and_renders_its_template_otherwise() {
+        use crate::{
+            Span,
+            content::FootnoteDeferred,
+            parser::{CatalogResolver, HtmlSubstitutionRenderer, ReferenceWarnings},
+        };
+
+        fn footnote() -> Footnote {
+            Footnote {
+                index: "1".to_string(),
+                id: None,
+                text: "the parse-time fallback".to_string(),
+                deferred: Some(Box::new(FootnoteDeferred::new(
+                    "the template".to_string(),
+                    vec![],
+                    false,
+                ))),
+                location: None,
+            }
+        }
+
+        let renderer = HtmlSubstitutionRenderer {};
+        let source = Span::new("irrelevant");
+
+        // The crate's own resolver over an empty catalog, rather than a stub:
+        // the empty cross-reference list below means it is never consulted, and
+        // a stub written for that would be dead code of this test's own making.
+        let catalog = Catalog::new();
+        let resolver = CatalogResolver::new(&catalog);
+
+        let mut folded = footnote();
+        let mut warnings = ReferenceWarnings::default();
+        folded.resolve_references(
+            &resolver,
+            &renderer,
+            &mut warnings,
+            source,
+            Some("the tree's fold".to_string()),
+        );
+
+        assert_eq!(
+            folded.text, "the tree's fold",
+            "a footnote handed the tree's answer must render that, not its template"
+        );
+
+        let mut templated = footnote();
+        let mut warnings = ReferenceWarnings::default();
+        templated.resolve_references(&resolver, &renderer, &mut warnings, source, None);
+
+        assert_eq!(
+            templated.text, "the template",
+            "a footnote no pass folded must fall back to its placeholder template, \
+             not keep the parse-time text"
+        );
+    }
+
     #[test]
     fn new_catalog_is_empty() {
         let catalog = Catalog::new();

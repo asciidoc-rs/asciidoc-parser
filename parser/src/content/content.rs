@@ -1155,9 +1155,7 @@ impl<'src> Content<'src> {
         // while its footnotes are exactly the ones needing a fresh rendering.
         // Gating the fold on this content's own deferral would therefore miss
         // the footnotes that most need it.
-        if let Some(attributes) = self.render_attributes.as_deref() {
-            self.collect_folded_footnotes(attributes, renderer, parser, warnings);
-        }
+        self.collect_own_folded_footnotes(renderer, parser, warnings);
 
         // Exactly **one** of the two renderings runs, and which one is now a
         // question about the *tree* rather than about the cross-references in
@@ -1265,6 +1263,32 @@ impl<'src> Content<'src> {
     /// deliberately absent: the subtree's text left that form when it was
     /// built (see `footnote_children`), and applying it again would unescape a
     /// string that was never escaped.
+    /// Folds this content's defining footnotes under **its own** retained
+    /// render attributes, when it has any.
+    ///
+    /// Two passes resolve content and so two passes have to collect: the
+    /// per-content one below, and the document-order title pass
+    /// (`document::title_refs`), which owns section headings and block titles
+    /// and does not route them through
+    /// [`resolve_references`](Self::resolve_references) at all. Both want the
+    /// same thing of the same content, so they ask for it the same way rather
+    /// than each re-deriving "which attributes, and is there anything to fold".
+    ///
+    /// A content with no retained attributes folds nothing: it is one whose
+    /// rendering is never rebuilt after the parse, so no footnote of its can
+    /// need a fresh one either (see `SubstitutionGroup::apply`, which retains
+    /// them for exactly the contents that are rebuilt).
+    pub(crate) fn collect_own_folded_footnotes(
+        &self,
+        renderer: &dyn InlineSubstitutionRenderer,
+        parser: &Parser,
+        warnings: &mut ReferenceWarnings<'src>,
+    ) {
+        if let Some(attributes) = self.render_attributes.as_deref() {
+            self.collect_folded_footnotes(attributes, renderer, parser, warnings);
+        }
+    }
+
     fn collect_folded_footnotes(
         &self,
         attributes: &ResolvedAttributes,
