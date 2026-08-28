@@ -8102,15 +8102,37 @@ Each phase is a reviewable unit with a clear exit gate.
   not a bug to be closed out from under `set_tree_xrefs`; for these four it is the mechanism by which
   the string pipeline's answer — the one the tree deliberately refuses to reproduce — reaches the
   output. **When `run_pipeline` goes there is no such answer left to fall back to.** So the deletion
-  has to make a *behavioral* choice for this shape, and it is the maintainer's rather than an
-  implementation detail: either the tree learns to reproduce a split that lands inside a tag (the
-  reading it rejects on purpose), or the rendered output for an attribute list whose delimiter hides
-  inside a span changes. Nothing in the branch's own bar decides that — the differential corpora are
-  frozen against the pipeline's current answer, so they will simply record whichever is chosen.
+  has to make a *behavioral* choice for this shape: either the tree learns to reproduce a split that
+  lands inside a tag (the reading it rejects on purpose), or the rendered output for an attribute
+  list whose delimiter hides inside a span changes.
+
+  **Decided (maintainer, at the survey): *diverge*.** Emitting the replacer's `<strong>` split is
+  conceptually the wrong answer, so the tree's own reading stands and this branch accepts a
+  documented divergence from both the string pipeline and Asciidoctor here.
+
+  The two readings are worth stating precisely, because the divergence is not a near-miss — one of
+  them is simply malformed. The tree tokenises an already-built `Styled` node to an opaque
+  [`SPAN_PLACEHOLDER`](../../parser/src/content/inline_builder/quotes.rs) carrying none of the `,`
+  `=` `"` bytes a bracket split reads, so `xref:sec[a *b, c* d,role=hl]` splits into a display text
+  of `a ␖ d` and a `role=hl` — the reading the author obviously meant. The replacer splits over the
+  *rendered* markup `a <strong>b, c</strong> d,role=hl`, so the comma **inside**
+  `<strong>b, c</strong>` becomes a delimiter and the anchor's text ends at `a <strong>b`, with the
+  tag left unbalanced. Asciidoctor produces the same unbalanced output, which is why this is a
+  divergence from it too.
+
+  So the work this turns into is *removing* a deferral rather than adding a recognition:
+  [`tokened_split_agrees`](../../parser/src/content/inline_builder/macros/mod.rs) exists to make the
+  tree decline where the two parses disagree, and this class is exactly where declining is now the
+  wrong answer. What has to be settled when it lands is the **scope** of the divergence — whether
+  every disagreement between the two splits is now the tree's to win, or only the sub-class where the
+  replacer's own split produces unbalanced markup — and the audit's own divergence set is what sizes
+  that, since these four rows are already in it. The frozen corpora record the choice rather than
+  adjudicate it, so each is re-recorded to the tree's answer as the change lands.
 
   *So the decomposition, in dependency order:* (1) the `indexterm2:` gap, the one closable member of
-  the carve-out; (2) **the deferral decision above**, which is a question to put rather than work to
-  do, and which gates the oracle's deletion as firmly as the template does; (3) the **template** —
+  the carve-out; (2) **the deferral divergence above**, now decided and so ordinary work — narrowing
+  or lifting `tokened_split_agrees`'s decline for this class, with its scope settled against the
+  audit's own set; (3) the **template** —
   can the tree produce its own placeholder template, or does `refold` make one unnecessary for a
   tree-backed content?; (4) the oracle call itself, a two-line deletion once (1)–(3) hold; (5) the
   ~28 `apply_string_pipeline` test call sites and `run_pipeline`'s own removal, mechanical; (6) the
@@ -9891,10 +9913,14 @@ Each phase is a reviewable unit with a clear exit gate.
        and lands the split *inside* a `<strong>` tag, and the tree defers rather than claim a
        construct the rendered document does not agree with. So the carve-out is the mechanism by
        which that answer reaches the output, and deleting `run_pipeline` leaves nothing to fall back
-       to — a **behavioral decision for the maintainer**, not an implementation detail. Decomposition:
-       the `indexterm2:` gap, the deferral decision, the template, the oracle call, the test call
-       sites and `run_pipeline`, the vestigial mechanisms, then the Strategy-A recorder with
-       `inline_recorder`. See the step's own "landed as" note above.
+       to — a behavioral decision, **taken at the survey: diverge.** The replacer's split lands inside
+       `<strong>b, c</strong>` and leaves the anchor's text as `a <strong>b`, unbalanced; emitting
+       that is conceptually wrong, so the tree's own reading stands and the branch accepts a
+       documented divergence from the string pipeline and Asciidoctor. Decomposition: the
+       `indexterm2:` gap, the deferral divergence (now ordinary work — narrowing
+       `tokened_split_agrees`'s decline, scope settled against the audit's set), the template, the
+       oracle call, the test call sites and `run_pipeline`, the vestigial mechanisms, then the
+       Strategy-A recorder with `inline_recorder`. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a
