@@ -470,20 +470,6 @@ pub struct Parser {
     /// with only a shared reference).
     datetime_context: RefCell<Option<DatetimeContext>>,
 
-    /// Whether each [`Content`](crate::content::Content) built with this parser
-    /// also builds its inline AST (see `content::inline_builder`) and stores it
-    /// for [`Content::inlines`](crate::content::Content::inlines).
-    ///
-    /// `true` for every parser a caller can construct — the opt-in
-    /// `with_inline_tree` switch this used to carry is retired, and every parse
-    /// now builds the tree. What survives is the **recursion guard** that
-    /// switch's plumbing also served: `SubstitutionGroup::apply` clears it on
-    /// the clone it hands the builder, because building a tree re-enters
-    /// `apply` for a passthrough body whose own substitution list must run
-    /// (`passthrough_step::passthrough_text`), and that nested content needs no
-    /// tree of its own. Nothing else sets it, and no public API exposes it.
-    pub(crate) build_inline_tree: bool,
-
     /// Whether the **string pipeline's** recognition side effects — an image
     /// target, a link target, an inline anchor's or bibliography entry's id,
     /// the image family's dangerous-`link=`-scheme warning, and a callout
@@ -523,12 +509,13 @@ pub struct Parser {
     /// body while the builder is running (via `passthrough_text`), and that
     /// nested content needs no tree.
     ///
-    /// This used to ride on [`build_inline_tree`](Self::build_inline_tree),
-    /// which the seam could clear because the parser driving the build was an
-    /// owned clone. It is the **real** parser now, held by shared reference, so
-    /// the guard needs a cell of its own — and the two questions it was
-    /// answering come apart cleanly: `build_inline_tree` is *configuration*
-    /// (does this parse build trees at all), this is *reentrancy*.
+    /// This used to ride on a `build_inline_tree` configuration field, which
+    /// the seam could clear because the parser driving the build was an owned
+    /// clone. It is the **real** parser now, held by shared reference, so the
+    /// guard needs a cell of its own — and once the `with_inline_tree` opt-in
+    /// was retired, configuration had no question left to answer (every parse
+    /// builds the tree) while reentrancy still did. That field is gone; this
+    /// cell is the whole of what the seam reads.
     pub(crate) in_inline_build: std::cell::Cell<bool>,
 
     /// Substitution warnings raised by an **authoritative** pass that ran
@@ -666,7 +653,6 @@ impl Default for Parser {
             reference_time: None,
             input_mtime: None,
             datetime_context: RefCell::new(None),
-            build_inline_tree: true,
             suppress_recognition_side_effects: std::cell::Cell::new(false),
             in_inline_build: std::cell::Cell::new(false),
             nested_authoritative_warnings: RefCell::new(vec![]),

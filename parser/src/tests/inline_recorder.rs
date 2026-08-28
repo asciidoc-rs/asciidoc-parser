@@ -1098,51 +1098,38 @@ fn inline_tree_is_built_by_default() {
 }
 
 #[test]
-fn a_parse_that_builds_no_tree_keeps_the_string_pipelines_warnings() {
-    // The other half of `build_inline_tree`, and the branch the inversion made
-    // reachable in a second way.
+fn a_pass_under_the_reentrancy_guard_builds_no_tree() {
+    // The branch the inversion left behind, and the one reason it still exists.
     //
     // Since the inversion the seam sends `run_pipeline` to a *clone* whenever a
-    // tree is being built, and to the real parser otherwise. "Otherwise" now
-    // has two causes: a passthrough body re-entered from inside a build (the
-    // reentrancy guard), and a parse configured to build no tree at all —
-    // this one. The first runs inside a build whose blanket warning discard it
-    // has to be carried across; the second does not, and must not be, or the
-    // warnings would be stashed with nothing to hand them back.
+    // tree is being built, and to the real parser otherwise. "Otherwise" had two
+    // causes: a parse configured to build no tree at all, and a passthrough body
+    // re-entered from inside a build. The first is gone — `with_inline_tree` is
+    // retired, every parse builds the tree, and the `build_inline_tree` field
+    // that outlived that switch is retired with it. What is left is the
+    // reentrancy guard, and its contract is this: a pass reaching the seam under
+    // it builds no tree of its own.
     //
-    // `with_inline_tree` is retired, so `build_inline_tree` is `true` for every
-    // parse the public API can produce and only a crate test reaches this. It
-    // is still the configuration the seam reads, and the branch it selects is
-    // real, so it is exercised here rather than left to be assumed.
-    let mut parser = Parser::default().with_intrinsic_attribute(
-        "attribute-missing",
-        "warn",
-        crate::parser::ModificationContext::Anywhere,
-    );
+    // Only that half is asserted here. The warning half belonged to the cause
+    // that is gone: a *tree-less parse* had to keep the string pipeline's
+    // warnings where they were raised, because nothing would hand them back,
+    // whereas a pass under this guard stashes them in
+    // `nested_authoritative_warnings` for the enclosing build to restore. That
+    // is correct precisely because the guard is only ever set by a build — so
+    // pinning it from a test that sets the guard with no build around it would
+    // assert the behavior of a state production cannot construct. Setting the
+    // guard directly is still the only way in (`in_inline_build` is true for 0
+    // of the 13,299 parses the suite reaches this seam with), which is why the
+    // branch is worth pinning at all rather than leaving to be assumed.
+    let mut parser = Parser::default();
 
-    parser.build_inline_tree = false;
+    parser.in_inline_build.set(true);
 
-    let doc = parser.parse("A paragraph with {missing} in it.");
+    let doc = parser.parse("A paragraph with *bold* in it.");
 
-    let warnings: Vec<_> = doc
-        .warnings()
-        .map(|warning| warning.warning.clone())
-        .collect();
-
-    assert_eq!(
-        warnings,
-        [
-            crate::warnings::WarningType::SkippingReferenceToMissingAttribute(
-                "missing".to_string()
-            )
-        ],
-        "a tree-less parse lost the string pipeline's own warning"
-    );
-
-    // And no tree, which is what the configuration says.
     assert!(
         first_simple_inlines(&doc).is_empty(),
-        "a parse with `build_inline_tree` off must build no tree"
+        "a pass under the reentrancy guard must build no tree"
     );
 }
 

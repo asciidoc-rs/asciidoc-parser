@@ -268,12 +268,13 @@ impl SubstitutionGroup {
         // are seeded from it, so the authoritative one sees exactly what the
         // oracle does.
         //
-        // `build_inline_tree` is no longer an opt-in switch — every parse
-        // builds the tree — but it is still the *configuration* half of "does
-        // this call build one". The reentrancy half moved to
-        // `Parser::in_inline_build`, because the parser the build runs on is
-        // the real one now and cannot have a field cleared on it.
-        let tree_seed = if parser.build_inline_tree && !parser.in_inline_build.get() {
+        // Every parse builds the tree, so the only question left is
+        // reentrancy: `Parser::in_inline_build` is set for the duration of a
+        // build, because the parser the build runs on is the real one now and
+        // cannot have a configuration field cleared on it. The `with_inline_tree`
+        // opt-in that used to gate this as well is retired, and so is the
+        // `build_inline_tree` field that outlived it.
+        let tree_seed = if !parser.in_inline_build.get() {
             Some(content.rendered.clone())
         } else {
             None
@@ -312,8 +313,9 @@ impl SubstitutionGroup {
             // therefore that body's authoritative pass. `passthrough_text`
             // builds and folds the body's own tree now, so the re-entry is
             // gone. Measured across the suite, this branch went from 112 hits
-            // to 1, and the one that remains is the crate test that turns
-            // `build_inline_tree` off deliberately.
+            // to 1, and the one that remains is the crate test that sets the
+            // reentrancy guard deliberately — `in_inline_build` is true for
+            // 0 of the 13,299 parses the suite reaches this seam with.
             //
             // That is what makes `run_pipeline` deletable: with the oracle
             // above writing nothing anyone reads and this branch reaching only
