@@ -59,6 +59,19 @@
 //!   …>` markup, which is all the recorder has to recover from, so it is always
 //!   `None` there; the builder records which pass built the node.
 //!
+//! The recorder side is **frozen** (`snapshots/recorder_trees.txt`). It is the
+//! half of this differential that dies with
+//! `SubstitutionGroup::apply_string_pipeline`: [`RecordingRenderer`] recovers a
+//! tree out of what that pipeline *renders*, so once the pipeline goes there is
+//! no recorder tree left and this module would be comparing [`build`] to
+//! itself. Design §5.2's survey called this the **tree-shaped** freeze and the
+//! harder half by a wide margin, because — unlike the two record-shaped corpora
+//! — what the two sides hold is not equal and never was, so a freeze needs a
+//! *per-side normal form* where a pairwise diff is all this module has. See
+//! [`frozen_recorder_tree`] for the normal form that answers it (the restricted
+//! one the recorder already satisfies, enumerated field by field just below),
+//! and [`strip_unrecorded`] for the guard that keeps it total.
+//!
 //! Several more differences are structural rather than field-level, so they
 //! are handled by the comparator itself instead of being excluded outright.
 //! The common thread through all of them: the recorder can only recover a
@@ -175,13 +188,19 @@ use crate::{
     Parser, Span,
     content::{
         Content, SubstitutionGroup,
-        inline_builder::build,
+        inline_builder::{
+            build,
+            snapshot::{quote, recorded_golden, unquote},
+        },
         inline_tree::{
             CharRefKind, RecordingRenderer, attach_footnote_subtrees, build_inline_tree,
             classify_entity,
         },
     },
-    inlines::{CharRef, InlineNode, RawForm, RefVariant},
+    inlines::{
+        Anchor, Callout, CalloutGuard, CharRef, Footnote, Image, IndexTerm, InlineNode, RawForm,
+        Ref, RefVariant, SpanForm, Stem, StemNotation, StyleVariant, Styled, Ui, UiKind,
+    },
     parser::{HtmlSubstitutionRenderer, ModificationContext},
     strings::CowStr,
 };
@@ -236,6 +255,23 @@ fn assert_shapes_with(source: &str, configure: impl Fn() -> Parser) {
 
     let builder_parser = configure();
     let builder_tree = build(Span::new(source), &builder_parser, None);
+
+    // The recorder side, frozen: still built live above (so the drift guard
+    // has something to check), but what the comparison actually reads is the
+    // recording. See `frozen_recorder_tree`.
+    let decoded = frozen_recorder_tree(source, &recorder_tree);
+
+    // The freeze's own guard, run on every fixture rather than in a test of its
+    // own: the decoded tree must equal the live one field for field, once the
+    // fields the recording deliberately drops are cleared. See
+    // `strip_unrecorded` for why this is the whole of the risk surface.
+    assert_eq!(
+        strip_unrecorded(&recorder_tree, Span::new(source)),
+        decoded,
+        "the recording lost something the live recorder tree carries for {source:?}"
+    );
+
+    let recorder_tree = decoded;
 
     assert_trees_equivalent(&recorder_tree, &builder_tree, source);
 }
@@ -764,6 +800,664 @@ fn assert_node_equivalent(r: &InlineNode<'_>, b: &InlineNode<'_>, source: &str) 
     }
 }
 
+// ─── The freeze ─────────────────────────────────────────────────────────────
+
+/// The recording this corpus's recorder side is frozen into.
+const RECORDING: &str = "recorder_trees";
+
+/// The recorder's tree for `source`, read back from the recording.
+///
+/// The recorder side is the half of this differential that dies with
+/// `SubstitutionGroup::apply_string_pipeline`: [`RecordingRenderer`] recovers a
+/// tree out of what that pipeline *renders*, so once the pipeline goes there is
+/// no recorder tree to compare the builder's against, and the module would be
+/// comparing `build` to itself. Design §5.2's survey called this the
+/// **tree-shaped** freeze and the harder half by a wide margin — because,
+/// unlike the two record-shaped corpora, what the two sides hold is not equal
+/// and never was. [`assert_trees_equivalent`] is a *pairwise normalization*:
+/// it ignores `location` and `attrs`, resolves leaf-boundary differences by
+/// folding a builder leaf and consuming the recorder's rendered bytes, and can
+/// split a recorder `Text` run to meet a builder leaf's edge. A freeze needs a
+/// **per-side normal form**, which a pairwise diff is not.
+///
+/// The normal form this uses is the one the recorder itself already satisfies.
+/// The module doc comment above enumerates, field by field, everything a
+/// recorder-built node cannot carry — `attrs`, `derived`, `xrefstyle`,
+/// `resolved`, an anchor's `reftext`, an image's `is_icon`, a ref's
+/// `link_form` — and `location` is the whole-content span on every one of them.
+/// So a recorder tree is *already* in a restricted form, and the recording
+/// carries exactly the fields [`assert_node_equivalent`] and
+/// [`consume_rendered_prefix`] read. Decoding rebuilds real
+/// [`InlineNode`] values with those fields restored and every other field at
+/// the value the recorder always gives it — which is why **not one assertion in
+/// this module moves**, and why the comparator is untouched.
+///
+/// What keeps that honest while the pipeline still exists is
+/// [`recorded_golden`]'s own drift guard: the live recorder is still built on
+/// every fixture and its normal form still has to equal the recorded bytes.
+/// What keeps it honest afterwards is the `strip_unrecorded` assertion
+/// [`assert_shapes_with`] runs beside this call, on every fixture — the guard
+/// against the one hazard a partial normal form has, the comparator growing a
+/// read of a field the recording does not carry. See [`strip_unrecorded`].
+fn frozen_recorder_tree<'src>(source: &'src str, live: &[InlineNode<'_>]) -> Vec<InlineNode<'src>> {
+    let encoded = encode_nodes(live);
+    decode_nodes(
+        &recorded_golden(RECORDING, source, &encoded),
+        Span::new(source),
+    )
+}
+
+/// Encodes a node slice as one physical line: a decimal count, then each node
+/// depth-first, every field tab-separated.
+///
+/// Counted rather than delimited, the way the side-effect corpus's own record
+/// is, and for the same reason — a string field can hold any byte, including
+/// whatever a delimiter would have used. Here the count does double duty: it is
+/// also what nests, since a parent writes its child count and then its children
+/// inline, so one flat field stream carries a tree.
+fn encode_nodes(nodes: &[InlineNode<'_>]) -> String {
+    let mut fields: Vec<String> = vec![];
+    push_nodes(&mut fields, nodes);
+    fields.join("\t")
+}
+
+fn push_nodes(fields: &mut Vec<String>, nodes: &[InlineNode<'_>]) {
+    fields.push(nodes.len().to_string());
+
+    for node in nodes {
+        push_node(fields, node);
+    }
+}
+
+/// One node: a kind tag, the fields the comparator reads for that kind, and
+/// then — for a kind with children — its subtree.
+///
+/// A kind the recorder never builds is not written at all. `Raw` is the only
+/// one: it is a builder-side leaf (a passthrough), and the recorder recovers
+/// the same content as a mix of `Text` and `CharRef` out of the rendered bytes
+/// — which is exactly the leaf-boundary difference `consume_rendered_prefix`
+/// exists to resolve. Encoding it would be encoding a shape no recording can
+/// ever hold.
+fn push_node(fields: &mut Vec<String>, node: &InlineNode<'_>) {
+    match node {
+        InlineNode::Text { value, .. } => {
+            fields.push("Text".to_string());
+            fields.push(quote(value.as_ref()));
+        }
+
+        InlineNode::CharRef { value, .. } => {
+            fields.push("CharRef".to_string());
+
+            match value {
+                CharRef::Special(c) => {
+                    fields.push("Special".to_string());
+                    fields.push(quote(&c.to_string()));
+                }
+
+                CharRef::Replacement(s) => {
+                    fields.push("Replacement".to_string());
+                    fields.push(quote(s));
+                }
+
+                CharRef::Entity(name) => {
+                    fields.push("Entity".to_string());
+                    fields.push(quote(name.as_ref()));
+                }
+            }
+        }
+
+        InlineNode::Styled(styled) => {
+            fields.push("Styled".to_string());
+            fields.push(format!("{:?}", styled.variant));
+            fields.push(format!("{:?}", styled.form));
+            push_option(fields, styled.id.as_deref());
+            push_strings(fields, &styled.roles);
+            push_nodes(fields, &styled.children);
+        }
+
+        InlineNode::Ref(ref_) => {
+            fields.push("Ref".to_string());
+            fields.push(format!("{:?}", ref_.variant));
+            fields.push(quote(ref_.target.as_ref()));
+            push_option(fields, ref_.window.as_deref());
+            push_strings(fields, &ref_.roles);
+            push_nodes(fields, &ref_.children);
+        }
+
+        InlineNode::Image(image) => {
+            fields.push("Image".to_string());
+            fields.push(quote(image.target.as_ref()));
+            push_option(fields, image.alt.as_deref());
+            push_option(fields, image.width.as_deref());
+            push_option(fields, image.height.as_deref());
+        }
+
+        InlineNode::Footnote(footnote) => {
+            fields.push("Footnote".to_string());
+            push_option(fields, footnote.id.as_deref());
+            push_option(fields, footnote.number.as_deref());
+            fields.push(footnote.is_reference.to_string());
+            push_nodes(fields, &footnote.children);
+        }
+
+        InlineNode::Anchor(anchor) => {
+            fields.push("Anchor".to_string());
+            fields.push(quote(anchor.id.as_ref()));
+        }
+
+        InlineNode::Ui(ui) => {
+            fields.push("Ui".to_string());
+
+            match &ui.kind {
+                UiKind::Keyboard(keys) => {
+                    fields.push("Keyboard".to_string());
+                    push_strings(fields, keys);
+                }
+
+                UiKind::Button(label) => {
+                    fields.push("Button".to_string());
+                    fields.push(quote(label.as_ref()));
+                }
+
+                UiKind::Menu {
+                    menu,
+                    submenus,
+                    item,
+                } => {
+                    fields.push("Menu".to_string());
+                    fields.push(quote(menu.as_ref()));
+                    push_strings(fields, submenus);
+                    push_option(fields, item.as_deref());
+                }
+            }
+        }
+
+        InlineNode::IndexTerm(term) => {
+            fields.push("IndexTerm".to_string());
+            push_strings(fields, &term.terms);
+            fields.push(term.visible.to_string());
+        }
+
+        InlineNode::Callout(callout) => {
+            fields.push("Callout".to_string());
+            fields.push(quote(callout.number.as_ref()));
+
+            match &callout.guard {
+                CalloutGuard::LineComment(prefix) => {
+                    fields.push("LineComment".to_string());
+                    fields.push(quote(prefix.as_ref()));
+                }
+
+                CalloutGuard::Xml => fields.push("Xml".to_string()),
+            }
+        }
+
+        InlineNode::Stem(stem) => {
+            fields.push("Stem".to_string());
+            fields.push(format!("{:?}", stem.notation));
+            fields.push(quote(stem.value.as_ref()));
+        }
+
+        InlineNode::LineBreak { .. } => fields.push("LineBreak".to_string()),
+
+        InlineNode::Raw { .. } => panic!(
+            "the recorder cannot build a Raw node — see `push_node` — so one reached the \
+             recording that should not have: {node:?}"
+        ),
+    }
+}
+
+/// A string list as a count followed by its quoted items.
+fn push_strings(fields: &mut Vec<String>, items: &[CowStr<'_>]) {
+    fields.push(items.len().to_string());
+    fields.extend(items.iter().map(|item| quote(item.as_ref())));
+}
+
+/// A present string as [`quote`] writes it, `None` as a bare `-` — which a
+/// present value can never be mistaken for, since a quoted field always begins
+/// with `"`.
+fn push_option(fields: &mut Vec<String>, value: Option<&str>) {
+    fields.push(value.map_or_else(|| "-".to_string(), quote));
+}
+
+/// Reverses [`encode_nodes`], rebuilding real [`InlineNode`] values.
+///
+/// `location` is the whole-content span on every node, which is not an
+/// approximation: it is exactly what a recorder-built node carries (the design
+/// §4.4 "migration stage" fallback the module doc comment names), and the
+/// comparator excludes `location` from the comparison regardless. Every other
+/// field the recording does not carry is set to the value the recorder always
+/// gives it — `None`, `false`, or empty — for the reasons the module doc
+/// comment enumerates one by one.
+fn decode_nodes<'src>(encoded: &str, location: Span<'src>) -> Vec<InlineNode<'src>> {
+    let mut fields = TreeFields::new(encoded);
+    let nodes = fields.nodes(location);
+
+    assert!(
+        fields.exhausted(),
+        "trailing fields in {RECORDING}.txt: {encoded:?}"
+    );
+
+    nodes
+}
+
+/// A left-to-right cursor over one record's tab-separated fields.
+///
+/// A struct rather than closures because decoding is recursive and every level
+/// advances the same position.
+struct TreeFields<'a> {
+    fields: Vec<&'a str>,
+    at: usize,
+}
+
+impl<'a> TreeFields<'a> {
+    fn new(encoded: &'a str) -> Self {
+        Self {
+            // `"".split('\t')` yields one empty field rather than none, which
+            // `count` would read as a malformed count. `encode_nodes` always
+            // writes at least the top-level count, so an empty encoding guards
+            // a corrupted recording rather than an empty tree (which encodes
+            // as `"0"`).
+            fields: if encoded.is_empty() {
+                vec![]
+            } else {
+                encoded.split('\t').collect()
+            },
+            at: 0,
+        }
+    }
+
+    fn next(&mut self, what: &str) -> String {
+        let field = self
+            .fields
+            .get(self.at)
+            .unwrap_or_else(|| panic!("truncated record in {RECORDING}.txt: missing {what}"));
+
+        self.at += 1;
+        (*field).to_string()
+    }
+
+    fn count(&mut self, what: &str) -> usize {
+        let field = self.next(what);
+
+        field
+            .parse()
+            .unwrap_or_else(|_| panic!("bad {what} count in {RECORDING}.txt: {field:?}"))
+    }
+
+    fn string(&mut self, what: &str) -> CowStr<'static> {
+        CowStr::from(unquote(RECORDING, &self.next(what)))
+    }
+
+    fn option(&mut self, what: &str) -> Option<CowStr<'static>> {
+        let field = self.next(what);
+        (field != "-").then(|| CowStr::from(unquote(RECORDING, &field)))
+    }
+
+    fn strings(&mut self, what: &str) -> Vec<CowStr<'static>> {
+        (0..self.count(what)).map(|_| self.string(what)).collect()
+    }
+
+    fn bool(&mut self, what: &str) -> bool {
+        let field = self.next(what);
+
+        field
+            .parse()
+            .unwrap_or_else(|_| panic!("bad {what} flag in {RECORDING}.txt: {field:?}"))
+    }
+
+    fn exhausted(&self) -> bool {
+        self.at == self.fields.len()
+    }
+
+    fn nodes<'src>(&mut self, location: Span<'src>) -> Vec<InlineNode<'src>> {
+        (0..self.count("node"))
+            .map(|_| self.node(location))
+            .collect()
+    }
+
+    fn node<'src>(&mut self, location: Span<'src>) -> InlineNode<'src> {
+        let kind = self.next("node kind");
+
+        match kind.as_str() {
+            "Text" => InlineNode::Text {
+                value: self.string("Text value"),
+                location,
+            },
+
+            "CharRef" => InlineNode::CharRef {
+                value: self.char_ref(),
+                location,
+            },
+
+            "Styled" => InlineNode::Styled(Styled {
+                variant: decode_style_variant(&self.next("Styled variant")),
+                form: decode_span_form(&self.next("Styled form")),
+                id: self.option("Styled id"),
+                roles: self.strings("Styled role"),
+                attrs: None,
+                children: self.nodes(location),
+                passthrough: None,
+                location,
+            }),
+
+            "Ref" => InlineNode::Ref(Ref {
+                variant: decode_ref_variant(&self.next("Ref variant")),
+                target: self.string("Ref target"),
+                window: self.option("Ref window"),
+                roles: self.strings("Ref role"),
+                children: self.nodes(location),
+                resolved: None,
+                derived: None,
+                xrefstyle: None,
+                attrs: None,
+                link_form: None,
+                location,
+            }),
+
+            "Image" => InlineNode::Image(Image {
+                is_icon: false,
+                target: self.string("Image target"),
+                restored_target_ranges: vec![],
+                alt: self.option("Image alt"),
+                width: self.option("Image width"),
+                height: self.option("Image height"),
+                attrs: None,
+                location,
+            }),
+
+            "Footnote" => InlineNode::Footnote(Footnote {
+                id: self.option("Footnote id"),
+                number: self.option("Footnote number"),
+                is_reference: self.bool("Footnote is_reference"),
+                children: self.nodes(location),
+                location,
+            }),
+
+            "Anchor" => InlineNode::Anchor(Anchor {
+                id: self.string("Anchor id"),
+                reftext: None,
+                is_bibliography: false,
+                location,
+            }),
+
+            "Ui" => InlineNode::Ui(Ui {
+                kind: self.ui_kind(),
+                location,
+            }),
+
+            "IndexTerm" => InlineNode::IndexTerm(IndexTerm {
+                terms: self.strings("IndexTerm term"),
+                children: vec![],
+                visible: self.bool("IndexTerm visible"),
+                location,
+            }),
+
+            "Callout" => InlineNode::Callout(Callout {
+                number: self.string("Callout number"),
+                guard: self.callout_guard(),
+                location,
+            }),
+
+            "Stem" => InlineNode::Stem(Stem {
+                notation: decode_stem_notation(&self.next("Stem notation")),
+                value: self.string("Stem value"),
+                subs: SubstitutionGroup::Stem,
+                source_text: None,
+                children: vec![],
+                location,
+            }),
+
+            "LineBreak" => InlineNode::LineBreak { location },
+
+            other => panic!("unrecognized node kind in {RECORDING}.txt: {other:?}"),
+        }
+    }
+
+    /// A [`CharRef`], whose `Replacement` arm holds a `&'static str` and so
+    /// cannot simply be rebuilt from an owned decoded string.
+    ///
+    /// [`RECORDER_ENTITY_TABLE`] supplies the `'static` value, which is the
+    /// right source for it rather than a convenience: the table *is* the set of
+    /// replacements a recorder-built `CharRef` can hold, since the recorder
+    /// recovers every one of them by feeding an entity it found in the rendered
+    /// output through `classify_entity`. A multi-character replacement is not
+    /// reachable here for the same reason — the recorder recovers one leaf per
+    /// entity — and
+    /// [`recorder_entity_table_matches_production_classify_entity`] already
+    /// guards the table against drifting from that production function.
+    fn char_ref(&mut self) -> CharRef<'static> {
+        let kind = self.next("CharRef kind");
+
+        match kind.as_str() {
+            "Special" => {
+                let value = unquote(RECORDING, &self.next("CharRef special"));
+                let mut chars = value.chars();
+
+                let c = chars
+                    .next()
+                    .unwrap_or_else(|| panic!("empty CharRef::Special in {RECORDING}.txt"));
+
+                assert!(
+                    chars.next().is_none(),
+                    "multi-character CharRef::Special in {RECORDING}.txt: {value:?}"
+                );
+
+                CharRef::Special(c)
+            }
+
+            "Replacement" => {
+                let value = unquote(RECORDING, &self.next("CharRef replacement"));
+
+                RECORDER_ENTITY_TABLE
+                    .iter()
+                    .find_map(|(_, char_ref)| match char_ref {
+                        CharRef::Replacement(s) if *s == value => Some(CharRef::Replacement(s)),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "CharRef::Replacement {value:?} in {RECORDING}.txt is not one the \
+                             recorder can build — RECORDER_ENTITY_TABLE has no entry for it"
+                        )
+                    })
+            }
+
+            "Entity" => CharRef::Entity(self.string("CharRef entity")),
+
+            other => panic!("unrecognized CharRef kind in {RECORDING}.txt: {other:?}"),
+        }
+    }
+
+    fn ui_kind(&mut self) -> UiKind<'static> {
+        let kind = self.next("Ui kind");
+
+        match kind.as_str() {
+            "Keyboard" => UiKind::Keyboard(self.strings("Ui key")),
+            "Button" => UiKind::Button(self.string("Ui label")),
+
+            "Menu" => UiKind::Menu {
+                menu: self.string("Ui menu"),
+                submenus: self.strings("Ui submenu"),
+                item: self.option("Ui item"),
+            },
+
+            other => panic!("unrecognized Ui kind in {RECORDING}.txt: {other:?}"),
+        }
+    }
+
+    fn callout_guard(&mut self) -> CalloutGuard<'static> {
+        let kind = self.next("Callout guard");
+
+        match kind.as_str() {
+            "LineComment" => CalloutGuard::LineComment(self.string("Callout guard prefix")),
+            "Xml" => CalloutGuard::Xml,
+            other => panic!("unrecognized Callout guard in {RECORDING}.txt: {other:?}"),
+        }
+    }
+}
+
+/// The four small field enums, each recorded as its derived `Debug` spelling
+/// and decoded by an exhaustive match.
+///
+/// Exhaustive rather than a `Debug`-string comparison in the record itself:
+/// these are the fields [`assert_node_equivalent`] compares *by value*, so a
+/// decoded tree has to hold the real variant. Each `panic!` arm is the guard
+/// that a variant added to one of these enums cannot silently decode as
+/// something else — a recording naming it fails loudly instead.
+fn decode_style_variant(field: &str) -> StyleVariant {
+    match field {
+        "Strong" => StyleVariant::Strong,
+        "Emphasis" => StyleVariant::Emphasis,
+        "Code" => StyleVariant::Code,
+        "Mark" => StyleVariant::Mark,
+        "Superscript" => StyleVariant::Superscript,
+        "Subscript" => StyleVariant::Subscript,
+        "DoubleQuote" => StyleVariant::DoubleQuote,
+        "SingleQuote" => StyleVariant::SingleQuote,
+        "Unquoted" => StyleVariant::Unquoted,
+        other => panic!("unrecognized style variant in {RECORDING}.txt: {other:?}"),
+    }
+}
+
+fn decode_span_form(field: &str) -> SpanForm {
+    match field {
+        "Constrained" => SpanForm::Constrained,
+        "Unconstrained" => SpanForm::Unconstrained,
+        other => panic!("unrecognized span form in {RECORDING}.txt: {other:?}"),
+    }
+}
+
+fn decode_ref_variant(field: &str) -> RefVariant {
+    match field {
+        "Link" => RefVariant::Link,
+        "Xref" => RefVariant::Xref,
+        other => panic!("unrecognized ref variant in {RECORDING}.txt: {other:?}"),
+    }
+}
+
+fn decode_stem_notation(field: &str) -> StemNotation {
+    match field {
+        "AsciiMath" => StemNotation::AsciiMath,
+        "LatexMath" => StemNotation::LatexMath,
+        other => panic!("unrecognized stem notation in {RECORDING}.txt: {other:?}"),
+    }
+}
+
+/// Clears exactly the fields [`encode_nodes`] does **not** carry, so a live
+/// recorder tree can be compared to a decoded one by plain equality.
+///
+/// This is the whole of the freeze's risk surface, written down in one place.
+/// A partial normal form has exactly one hazard: a field the comparator reads
+/// that the recording does not carry decodes as a default, and the comparison
+/// silently weakens with every test still green. Enumerating the dropped fields
+/// here — rather than reasoning about them — turns that into a **total** check:
+/// [`assert_shapes_with`] asserts `strip(live) == decoded` for every fixture
+/// the corpus drives, so a field added to `InlineNode` (or newly populated by
+/// the recorder) fails loudly until someone decides whether the recording
+/// should carry it.
+///
+/// Every field cleared here is one the module doc comment already documents as
+/// unobservable on the recorder side, or one no assertion reads:
+/// `attrs`/`derived`/`xrefstyle`/`resolved`/`link_form`/`reftext`/`is_icon` are
+/// the documented always-`None`/`false` set; `location` is the whole-content
+/// span the design §4.4 migration stage gives every recorder node, and the
+/// comparator excludes it outright; and `Styled::passthrough`,
+/// `IndexTerm::children`, `Image::restored_target_ranges` and a `Stem`'s
+/// `subs`/`source_text`/`children` are builder-only structure the comparator
+/// never reads on either side.
+fn strip_unrecorded<'src>(
+    nodes: &[InlineNode<'src>],
+    location: Span<'src>,
+) -> Vec<InlineNode<'src>> {
+    nodes
+        .iter()
+        .map(|node| match node.clone() {
+            InlineNode::Text { value, .. } => InlineNode::Text { value, location },
+
+            InlineNode::CharRef { value, .. } => InlineNode::CharRef { value, location },
+
+            InlineNode::Raw {
+                value,
+                form,
+                origin,
+                ..
+            } => InlineNode::Raw {
+                value,
+                form,
+                origin,
+                location,
+            },
+
+            InlineNode::Styled(mut styled) => {
+                styled.attrs = None;
+                styled.passthrough = None;
+                styled.children = strip_unrecorded(&styled.children, location);
+                styled.location = location;
+                InlineNode::Styled(styled)
+            }
+
+            InlineNode::Ref(mut ref_) => {
+                ref_.resolved = None;
+                ref_.derived = None;
+                ref_.xrefstyle = None;
+                ref_.attrs = None;
+                ref_.link_form = None;
+                ref_.children = strip_unrecorded(&ref_.children, location);
+                ref_.location = location;
+                InlineNode::Ref(ref_)
+            }
+
+            InlineNode::Image(mut image) => {
+                image.is_icon = false;
+                image.restored_target_ranges = vec![];
+                image.attrs = None;
+                image.location = location;
+                InlineNode::Image(image)
+            }
+
+            InlineNode::Footnote(mut footnote) => {
+                footnote.children = strip_unrecorded(&footnote.children, location);
+                footnote.location = location;
+                InlineNode::Footnote(footnote)
+            }
+
+            InlineNode::Anchor(mut anchor) => {
+                anchor.reftext = None;
+                anchor.is_bibliography = false;
+                anchor.location = location;
+                InlineNode::Anchor(anchor)
+            }
+
+            InlineNode::Ui(mut ui) => {
+                ui.location = location;
+                InlineNode::Ui(ui)
+            }
+
+            InlineNode::IndexTerm(mut term) => {
+                term.children = vec![];
+                term.location = location;
+                InlineNode::IndexTerm(term)
+            }
+
+            InlineNode::Callout(mut callout) => {
+                callout.location = location;
+                InlineNode::Callout(callout)
+            }
+
+            InlineNode::Stem(mut stem) => {
+                stem.subs = SubstitutionGroup::Stem;
+                stem.source_text = None;
+                stem.children = vec![];
+                stem.location = location;
+                InlineNode::Stem(stem)
+            }
+
+            InlineNode::LineBreak { .. } => InlineNode::LineBreak { location },
+        })
+        .collect()
+}
+
 // ─── Corpus ─────────────────────────────────────────────────────────────────
 
 /// A broad, general-purpose sweep of inline fixtures under a default
@@ -1238,4 +1932,269 @@ fn shapes_match_across_combined_constructs() {
                 .with_intrinsic_attribute("id", "disc", ModificationContext::Anywhere)
         },
     );
+}
+
+#[test]
+fn the_tree_codec_round_trips_every_kind_the_recorder_builds() {
+    // The corpus drives the codec broadly but not exhaustively: several
+    // spellings never appear in it (a bare `menu:` with no item, an XML-guarded
+    // callout, `StyleVariant::SingleQuote`), and a recording has to be able to
+    // hold whichever the recorder produces. The bar is
+    // `decode(encode(x)) == x`, since that equality is what every assertion in
+    // this module rests on once the recorder side is a lookup.
+    let location = Span::new("x");
+
+    let leaf = |value: &'static str| InlineNode::Text {
+        value: CowStr::from(value),
+        location,
+    };
+
+    let nodes = vec![
+        // Every leaf kind, including each `CharRef` arm. `Replacement` is
+        // drawn from `RECORDER_ENTITY_TABLE`, which is the only set the
+        // decoder can rebuild a `&'static str` from — and the only set the
+        // recorder can produce.
+        leaf("plain text"),
+        InlineNode::CharRef {
+            value: CharRef::Special('<'),
+            location,
+        },
+        InlineNode::CharRef {
+            value: CharRef::Replacement("\u{2014}"),
+            location,
+        },
+        InlineNode::CharRef {
+            value: CharRef::Entity(CowStr::from("&hellip;")),
+            location,
+        },
+        InlineNode::LineBreak { location },
+        // Every `StyleVariant` and both `SpanForm`s, with an id, roles, and a
+        // nested subtree — the nesting is what exercises the counted format's
+        // one interesting property.
+        InlineNode::Styled(Styled {
+            variant: StyleVariant::SingleQuote,
+            form: SpanForm::Unconstrained,
+            id: Some(CowStr::from("the-id")),
+            roles: vec![CowStr::from("a"), CowStr::from("b")],
+            attrs: None,
+            children: vec![
+                leaf("nested"),
+                InlineNode::Styled(Styled {
+                    variant: StyleVariant::Mark,
+                    form: SpanForm::Constrained,
+                    id: None,
+                    roles: vec![],
+                    attrs: None,
+                    children: vec![leaf("deeper")],
+                    passthrough: None,
+                    location,
+                }),
+            ],
+            passthrough: None,
+            location,
+        }),
+        InlineNode::Ref(Ref {
+            variant: RefVariant::Xref,
+            target: CowStr::from("tgt"),
+            window: Some(CowStr::from("_blank")),
+            roles: vec![CowStr::from("external")],
+            children: vec![leaf("label")],
+            resolved: None,
+            derived: None,
+            xrefstyle: None,
+            attrs: None,
+            link_form: None,
+            location,
+        }),
+        InlineNode::Image(Image {
+            is_icon: false,
+            target: CowStr::from("x.png"),
+            restored_target_ranges: vec![],
+            alt: Some(CowStr::from("Alt")),
+            width: Some(CowStr::from("10")),
+            height: None,
+            attrs: None,
+            location,
+        }),
+        InlineNode::Footnote(Footnote {
+            id: Some(CowStr::from("fid")),
+            number: Some(CowStr::from("2")),
+            is_reference: true,
+            children: vec![leaf("note")],
+            location,
+        }),
+        InlineNode::Anchor(Anchor {
+            id: CowStr::from("anchor-id"),
+            reftext: None,
+            is_bibliography: false,
+            location,
+        }),
+        // All three `UiKind`s, including a bare menu (no item) and a menu with
+        // submenus — the corpus has the second but not the first.
+        InlineNode::Ui(Ui {
+            kind: UiKind::Keyboard(vec![CowStr::from("Ctrl"), CowStr::from("T")]),
+            location,
+        }),
+        InlineNode::Ui(Ui {
+            kind: UiKind::Button(CowStr::from("Save")),
+            location,
+        }),
+        InlineNode::Ui(Ui {
+            kind: UiKind::Menu {
+                menu: CowStr::from("File"),
+                submenus: vec![CowStr::from("Export")],
+                item: Some(CowStr::from("PDF")),
+            },
+            location,
+        }),
+        InlineNode::Ui(Ui {
+            kind: UiKind::Menu {
+                menu: CowStr::from("File"),
+                submenus: vec![],
+                item: None,
+            },
+            location,
+        }),
+        InlineNode::IndexTerm(IndexTerm {
+            terms: vec![CowStr::from("primary"), CowStr::from("secondary")],
+            children: vec![],
+            visible: true,
+            location,
+        }),
+        // Both `CalloutGuard`s — the corpus never produces the XML one.
+        InlineNode::Callout(Callout {
+            number: CowStr::from("1"),
+            guard: CalloutGuard::LineComment(CowStr::from("# ")),
+            location,
+        }),
+        InlineNode::Callout(Callout {
+            number: CowStr::from("2"),
+            guard: CalloutGuard::Xml,
+            location,
+        }),
+        InlineNode::Stem(Stem {
+            notation: StemNotation::LatexMath,
+            value: CowStr::from("x^2"),
+            subs: SubstitutionGroup::Stem,
+            source_text: None,
+            children: vec![],
+            location,
+        }),
+        // The bytes a line-based format has to survive, in a string position of
+        // every shape the record holds: a plain field, a quoted `Option`, a
+        // string-list item. A literal `-` in a *present* field is the one that
+        // would read back as `None` if `push_option` wrote values bare.
+        leaf("a\tb\nc \"d\" \\e"),
+        InlineNode::Styled(Styled {
+            variant: StyleVariant::Strong,
+            form: SpanForm::Constrained,
+            id: Some(CowStr::from("-")),
+            roles: vec![CowStr::from("a\tb"), CowStr::from("-")],
+            attrs: None,
+            children: vec![],
+            passthrough: None,
+            location,
+        }),
+    ];
+
+    for variant in [
+        StyleVariant::Strong,
+        StyleVariant::Emphasis,
+        StyleVariant::Code,
+        StyleVariant::Mark,
+        StyleVariant::Superscript,
+        StyleVariant::Subscript,
+        StyleVariant::DoubleQuote,
+        StyleVariant::SingleQuote,
+        StyleVariant::Unquoted,
+    ] {
+        let one = vec![InlineNode::Styled(Styled {
+            variant,
+            form: SpanForm::Constrained,
+            id: None,
+            roles: vec![],
+            attrs: None,
+            children: vec![],
+            passthrough: None,
+            location,
+        })];
+
+        assert_eq!(
+            decode_nodes(&encode_nodes(&one), location),
+            one,
+            "round trip for {variant:?}"
+        );
+    }
+
+    let encoded = encode_nodes(&nodes);
+
+    assert!(
+        !encoded.contains('\n'),
+        "a record must stay one physical line: {encoded:?}"
+    );
+
+    assert_eq!(decode_nodes(&encoded, location), nodes);
+
+    // The empty tree, which encodes as a bare count rather than as nothing.
+    assert_eq!(encode_nodes(&[]), "0");
+    assert_eq!(decode_nodes("0", location), vec![]);
+}
+
+#[test]
+fn the_tree_codec_rejects_a_corrupted_recording() {
+    // A recording is hand-editable, so the codec's panics are a reachable
+    // failure surface rather than defensive code. Each case below names a
+    // distinct way one can go wrong.
+    let location = Span::new("x");
+
+    for (encoded, expected) in [
+        // Nothing at all, where a top-level count is required.
+        ("", "missing node"),
+        // A count that is not a number.
+        ("x", "bad node count"),
+        // A count that over-reads its list.
+        ("1", "missing node kind"),
+        // A count that under-reads it, leaving fields behind.
+        ("0\tText", "trailing fields"),
+        // A node kind that does not exist.
+        ("1\tBogus", "unrecognized node kind"),
+        // Each small enum's own unknown spelling.
+        ("1\tStyled\tBogus", "unrecognized style variant"),
+        ("1\tStyled\tStrong\tBogus", "unrecognized span form"),
+        ("1\tRef\tBogus", "unrecognized ref variant"),
+        ("1\tStem\tBogus", "unrecognized stem notation"),
+        ("1\tCharRef\tBogus", "unrecognized CharRef kind"),
+        ("1\tUi\tBogus", "unrecognized Ui kind"),
+        ("1\tCallout\t\"1\"\tBogus", "unrecognized Callout guard"),
+        // A field that should be quoted and is not.
+        ("1\tText\tbare", "unquoted field"),
+        // A `bool` field that is neither.
+        (
+            "1\tFootnote\t-\t-\tmaybe\t0",
+            "bad Footnote is_reference flag",
+        ),
+        // A `CharRef::Special` holding more than one character.
+        ("1\tCharRef\tSpecial\t\"ab\"", "multi-character"),
+        ("1\tCharRef\tSpecial\t\"\"", "empty CharRef::Special"),
+        // A replacement the recorder could never have produced, so the decoder
+        // has no `'static` value to rebuild it from.
+        (
+            "1\tCharRef\tReplacement\t\"\u{2764}\"",
+            "RECORDER_ENTITY_TABLE has no entry for it",
+        ),
+    ] {
+        let message = std::panic::catch_unwind(|| decode_nodes(encoded, location))
+            .expect_err(&format!("{encoded:?} decoded without complaint"));
+
+        let message = message
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| message.downcast_ref::<&str>().copied())
+            .unwrap_or("");
+
+        assert!(
+            message.contains(expected),
+            "{encoded:?} panicked with {message:?}, expected it to mention {expected:?}"
+        );
+    }
 }

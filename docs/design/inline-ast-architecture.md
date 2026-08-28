@@ -7892,6 +7892,84 @@ Each phase is a reviewable unit with a clear exit gate.
   escaping pass, the three sentinel systems (§4.2), the `suppress_recognition_side_effects` window,
   and `Parser::build_inline_tree`.
 
+  *Step 6 landed as (the tree-shaped freeze — and one corpus that does not freeze):* the survey's
+  next item, and the half it called "harder by a wide margin". It is, though not quite where the
+  survey pointed: the item turns out to be **one** corpus rather than two, and finding that out is
+  half the increment.
+
+  *`inline_recorder` is not a freeze candidate at all.* The survey files it beside
+  `inline_builder_recorder_parity` as tree-shaped, both needing an `InlineNode` serialization.
+  Reading it says otherwise: its `oracle` runs the string pipeline **twice** — once under the HTML
+  renderer for the golden, once under `RecordingRenderer` for the tree — and every one of its
+  assertions (`folded == golden`, and `constructs <= markers <= events`) compares two products of
+  that same pipeline. There is no builder side anywhere in the module. Freezing it would record both
+  halves of `folded == golden` and then compare a recorded value against itself: vacuous, and
+  green forever. Its subject is the Strategy-A recorder machinery in `content/inline_tree.rs`, which
+  is already test-only, and which has exactly one other user — the corpus below. So it **retires with
+  the pass** rather than freezing, and the freeze is one corpus, not two.
+
+  *That is what makes freezing `inline_builder_recorder_parity` the whole of the item*, and it is
+  where the difficulty the survey named actually lives. This corpus does have two independent sides,
+  and the recorder's is the one that dies: `RecordingRenderer` recovers a tree out of what the string
+  pipeline *renders*, so with the pipeline gone the module would compare `build` to itself. But the
+  two sides are not equal and never were — `assert_trees_equivalent` is a **pairwise normalization**
+  that ignores `location` and `attrs`, folds a builder leaf to rendered bytes to consume the
+  recorder's, and will split a recorder `Text` run to meet a builder leaf's edge. A freeze needs a
+  per-side normal form, which a pairwise diff is not.
+
+  *The normal form is the one the recorder already satisfies*, which is why this cost far less than
+  the survey feared. The module's own doc comment already enumerates, field by field, everything a
+  recorder-built node cannot carry — `attrs`, `derived`, `xrefstyle`, `resolved`, an anchor's
+  `reftext`, an image's `is_icon`, a ref's `link_form` — and `location` is the whole-content span on
+  every one of them (design §4.4's migration stage). A recorder tree is therefore *already* in a
+  restricted form. The recording carries exactly the fields the comparator reads, and decoding
+  rebuilds real `InlineNode` values with every other field at the value the recorder always gives it.
+  **The comparator is untouched, and not one assertion in the module moves.**
+
+  *A partial normal form has exactly one hazard, and it is worth naming because nothing else in this
+  branch has had it:* a field the comparator reads that the recording does not carry decodes as a
+  default, and the comparison silently weakens with every test still green. Reasoning about that is
+  not enough, so
+  [`strip_unrecorded`](../../parser/src/tests/inline_builder_recorder_parity.rs) writes the dropped
+  set down in one place and the harness asserts `strip(live) == decoded` on **every fixture**, by
+  plain equality. That makes the check *total* rather than argued: a field added to `InlineNode`, or
+  newly populated by the recorder, fails it until someone decides whether the recording should carry
+  it. Both halves were sabotaged to confirm they bite — dropping `Styled::roles` or
+  `Footnote::number` from the encoder fails the guard on two fixtures each, and corrupting a recorded
+  `Styled` variant fails the drift guard with "the string pipeline no longer produces the recorded
+  rendering".
+
+  The format is the counted one the side-effect corpus established, with the count doing double duty:
+  it is also what nests, since a parent writes its child count and then its children inline, so one
+  flat field stream carries a tree. `Raw` is the one `InlineNode` kind the encoder refuses outright —
+  it is a builder-side leaf, and the recorder recovers the same content as a mix of `Text` and
+  `CharRef`, which is precisely the leaf-boundary difference `consume_rendered_prefix` exists to
+  resolve. A `CharRef::Replacement` holds a `&'static str` and so cannot be rebuilt from a decoded
+  `String`; the value comes from `RECORDER_ENTITY_TABLE`, which is the *right* source rather than a
+  convenience — that table is exactly the set a recorder-built `CharRef` can hold, and
+  `recorder_entity_table_matches_production_classify_entity` already guards it against drifting from
+  the production `classify_entity`.
+
+  The codec's two tests cover what the corpus does not drive: a bare `menu:` with no item, an
+  XML-guarded callout, `StyleVariant::SingleQuote`, and a literal `-` in a *present* optional field
+  (the one that would read back as `None` if the option encoding wrote values bare), plus the
+  corrupted-recording surface a hand-editable file makes reachable — an over-reading count, an
+  under-reading one that leaves fields behind, an unquoted field, each small enum's unknown spelling,
+  a multi-character `CharRef::Special`, and a replacement the table cannot rebuild.
+
+  **Nothing in production moved** — the whole change is under `src/tests/` plus the new recording — so
+  the audit is a formality (**63 rows either side, 0 new and 0 closed**) and coverage is byte-identical
+  either side (85945 regions / 572 missed, 57253 lines / 323 missed).
+
+  *What still defers* is two items, not three: (1) the **authoritative-pass closure** — the
+  `tree_seed == None` branch, the production blocker and the only remaining item that is not
+  test-side; and then (2) the deletion itself, which this increment has now enlarged and simplified at
+  once: `run_pipeline`, `apply_string_pipeline`, the escaping pass, the three sentinel systems (§4.2),
+  the `suppress_recognition_side_effects` window, `Parser::build_inline_tree` — **and** the whole
+  Strategy-A recorder (`content/inline_tree.rs`, `RecordingRenderer`) together with the
+  `inline_recorder` corpus that tests it, which the finding above says goes with the pass rather than
+  outliving it.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -9600,6 +9678,28 @@ Each phase is a reviewable unit with a clear exit gate.
        the record's shape space. Nothing in production moved: audit 63 rows either side, 0 new and
        0 closed, and coverage byte-identical either side. See the step's own "landed as"
        note above.
+
+     - ✅ **the tree-shaped freeze — and one corpus that does not freeze.** The survey's harder
+       half, and one place it was wrong about the shape. `inline_recorder` is filed as tree-shaped
+       and is not a freeze candidate at all: its `oracle` runs the string pipeline **twice** (once
+       for the golden, once under `RecordingRenderer`), so every assertion in it compares two
+       products of the same pipeline and freezing it would compare a recorded value against itself.
+       It retires with the pass. That leaves `inline_builder_recorder_parity` as the whole item —
+       and it is the one that genuinely needs a per-side normal form, since
+       `assert_trees_equivalent` is a pairwise normalization (it ignores `location`/`attrs`, folds a
+       builder leaf to consume the recorder's rendered bytes, and splits a recorder `Text` run at a
+       builder leaf's edge) rather than equality. The normal form is the one the recorder **already
+       satisfies**: the module doc comment's own list of fields a recorder-built node cannot carry
+       *is* the restriction, so the recording holds exactly the fields the comparator reads and
+       decoding rebuilds real `InlineNode` values — the comparator is untouched and no assertion
+       moves. A partial normal form's one hazard (the comparator growing a read of a field the
+       recording does not carry) is closed by `strip_unrecorded`, which writes the dropped set down
+       in one place so the harness can assert `strip(live) == decoded` by plain equality on every
+       fixture, making the check total rather than argued. `Raw` is refused outright (a builder-side
+       leaf the recorder recovers as `Text`/`CharRef`), and a `CharRef::Replacement`'s `&'static str`
+       comes from `RECORDER_ENTITY_TABLE`, already drift-guarded against production's
+       `classify_entity`. Nothing in production moved: audit 63 rows either side, 0 new and 0 closed,
+       and coverage byte-identical. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a
