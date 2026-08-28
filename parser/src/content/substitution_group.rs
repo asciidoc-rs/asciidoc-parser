@@ -453,7 +453,18 @@ impl SubstitutionGroup {
             // the parse has moved on from. Retain them here, where "now" is
             // still that point in the document. `Content::refold` reads them
             // back.
-            if content.deferred_parts().is_some() {
+            //
+            // A content that *defines a footnote* needs them for the same
+            // reason and is not covered by the test above: where the content's
+            // only cross-references sit inside a footnote, the replacer
+            // captures them onto the footnote's own deferred state and this
+            // content defers nothing at all — yet its footnote is re-rendered
+            // on every resolution pass, from this tree, under these attributes.
+            // See `Content::collect_folded_footnotes`.
+            let mut defines_footnote = vec![];
+            crate::content::defining_footnotes(content.inlines(), &mut defines_footnote);
+
+            if content.deferred_parts().is_some() || !defines_footnote.is_empty() {
                 content.set_render_attributes(parser.snapshot_attributes());
             }
         }

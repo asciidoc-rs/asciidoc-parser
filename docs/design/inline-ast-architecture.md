@@ -8419,6 +8419,71 @@ Each phase is a reviewable unit with a clear exit gate.
   closed. Coverage improves again rather than staying neutral: `content/substitution_group.rs` reaches
   **100% of regions and 100% of lines**, its last missed region being the arm just deleted.
 
+  *Step 6 landed as (a footnote folds its own subtree):* the first of the two template consumers
+  the survey named, closed — and closed without the lifetime work the survey assumed it needed.
+
+  The survey framed this as blocked on one fact: a footnote's catalog entry outlives the parse
+  borrow, `InlineNode` carries a `Span<'src>`, so the entry cannot hold a tree and holds a
+  placeholder template instead. Closing it looked like a choice between threading `'src` through
+  `Footnote`/`Catalog`/`Document` and building an owned inline-node representation. **Neither is
+  needed.** The entry does not have to *hold* a tree — the tree is already somewhere else, alive, at
+  exactly the moment the entry needs re-rendering. The defining
+  [`Footnote`](../../parser/src/inlines/footnote.rs) node in the enclosing content's own tree carries
+  the footnote's children, and `Document::resolve_references` holds the blocks and the catalog
+  together in one `with_dependent_mut` closure. So the fold happens where the tree is and only a
+  `String` travels to the catalog. Nothing gains a lifetime.
+
+  Threading `'src` would in fact have been the *worse* of the two: the catalog is assembled on the
+  `Parser`, which is deliberately lifetime-free and reused across documents, so `Footnote<'src>`
+  forces `Parser<'src>` and breaks that reuse. The public-API cost the survey worried about was the
+  smaller half of that option.
+
+  *Where the fold is collected, and why not in a walker of its own.* Each content folds its own
+  defining footnotes during `Content::resolve_references` and pushes `(index, text)` onto
+  `ReferenceWarnings` — an accumulator already threaded through **exactly** the traversal that
+  reaches every content. That matters more than it looks. A parallel walker has to rediscover two
+  sub-parses the generic `child_blocks_mut()` walk misses, a Markdown-style blockquote's blocks and
+  an AsciiDoc table cell's, and the scoping measurement for this step was itself written with a
+  walker that missed the first: it reported exactly one unreachable footnote across the suite, which
+  is small enough to look like a boundary and be mistaken for one. Riding the existing traversal
+  makes that class of miss unrepresentable.
+
+  *Crossing an owned sub-parse is deliberately not automatic.* `rehome_into` carries warnings out
+  and leaves the folded texts behind, because the right answer differs by sub-parse: a Markdown
+  blockquote's blocks register their footnotes on the **document's** catalog, so its site carries
+  them out; an AsciiDoc table cell keeps a footnote list of its own, so its site installs them there
+  and carries nothing. Getting this backwards is not a lost fold but a **wrong** one — footnote
+  indices restart per catalog, so a cell's footnote `1` would overwrite the document's footnote `1`.
+
+  *One retention change was needed.* A content whose only cross-references sit *inside* a footnote
+  defers nothing itself — the replacer captures those onto the footnote's own state — so it did not
+  retain the render attributes a later fold needs. `SubstitutionGroup::apply` now retains them for a
+  content that defines a footnote as well as for one that defers a cross-reference. Both are the same
+  rule: a content whose rendering is rebuilt after the parse needs the attributes it was written
+  under.
+
+  *What still uses the template, precisely.* A footnote defined in a **section heading**. Its content
+  is resolved by the document-order title pass rather than by `Content::resolve_references`, so no
+  fold is collected for it and `Footnote::resolve_references` falls back to its placeholder template.
+  Measured across the suite: **49 of 55** resolved footnotes fold; the 6 that do not are that case.
+  So the fallback arm is not speculative — it has a real, named user, which is a better position than
+  the survey's "no such footnote is known".
+
+  *What checks it.* Nothing in the differential corpora can: the fold and the template produce the
+  same bytes, which is the point of the step and why all 5,529 existing tests stayed green the moment
+  the fold was wired in. `a_footnotes_rendering_is_refolded_from_its_subtree_at_resolution` is the
+  test that can, and it uses the same instrument as the reentrancy step before it — a renderer with
+  *state*. `OrdinalRenderer` stamps an increasing ordinal into every special character, so a `<`
+  inside a footnote carries one ordinal if it was rendered once at parse time and spliced ever after,
+  and a higher one if the subtree was folded again at resolution. It caught a real gap on its first
+  run: the retention change above exists because that test failed without it, while every other test
+  passed.
+
+  Fold-parity audit: 62 distinct divergences on the base, 63 on this branch — the one new row is this
+  step's own new fixture, whose source does not exist in the base corpus; no pre-existing source
+  changed. Coverage diff-neutral (`content/content.rs` 30 missed regions and 20 missed lines, both
+  unchanged).
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -10271,6 +10336,21 @@ Each phase is a reviewable unit with a clear exit gate.
        `OrdinalRenderer` is what can see a doubled pass at all — is the check: its counts do not
        move. Audit zero-new/zero-closed; `substitution_group.rs` reaches 100% regions and lines. See
        the step's own "landed as" note above.
+
+     - ✅ **a footnote folds its own subtree — the first template consumer closed, and without the
+       lifetime work the survey assumed.** The catalog entry does not need to *hold* a tree: the
+       defining `Footnote` node in the enclosing content's tree carries the children, and
+       `Document::resolve_references` holds blocks and catalog in one closure, so only a `String`
+       travels. (Threading `'src` would have been the worse option anyway — the catalog is assembled
+       on the reuse-across-documents `Parser`, so `Footnote<'src>` forces `Parser<'src>`.) Folds ride
+       `ReferenceWarnings`, the accumulator already threaded through exactly the traversal that
+       reaches every content, so the two owned sub-parses a generic walk misses cannot be forgotten;
+       crossing them is explicit per site, because a table cell's footnote `1` must never overwrite
+       the document's. Contents that define a footnote now retain their render attributes too.
+       **Still on the template:** a footnote in a section heading, resolved by the title pass — 49 of
+       55 fold. Pinned by a stateful-renderer test, since no output comparison can see the
+       difference. Audit: one new row, this step's own fixture; no pre-existing source moved.
+       Coverage diff-neutral. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

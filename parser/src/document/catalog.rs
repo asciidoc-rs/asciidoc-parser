@@ -390,12 +390,32 @@ impl Footnote {
     /// `document_source` span.
     ///
     /// A footnote with no cross-references is left untouched.
+    ///
+    /// `folded` is the **tree's** rendering of this footnote, folded from the
+    /// defining occurrence's own subtree by the content that holds it (see
+    /// `Content::collect_folded_footnotes`) and handed here by the resolution
+    /// sweep. When it is present it *is* the rendering, and the placeholder
+    /// template is not rendered at all.
+    ///
+    /// Exactly one of the two runs, mirroring the same choice
+    /// `Content::resolve_references` makes between folding its tree and
+    /// rendering its template — and for the same reason, which is not
+    /// efficiency: a renderer is a host-supplied trait object, so a stateful
+    /// one would see every callback for this footnote twice if both ran and one
+    /// answer were discarded.
+    ///
+    /// `None` is the template path. One class of footnote still takes it: one
+    /// defined in a **section heading**, whose content is resolved by the
+    /// document-order title pass rather than by `Content::resolve_references`,
+    /// and so is not folded here yet. Measured across the suite, 49 of 55
+    /// resolved footnotes fold and the 6 that do not are that case.
     pub(crate) fn resolve_references<'src>(
         &mut self,
         resolver: &dyn crate::parser::ReferenceResolver,
         renderer: &dyn crate::parser::InlineSubstitutionRenderer,
         warnings: &mut crate::parser::ReferenceWarnings<'src>,
         document_source: crate::Span<'src>,
+        folded: Option<String>,
     ) {
         if let Some(deferred) = self.deferred.as_mut() {
             let source = match self.location {
@@ -403,9 +423,23 @@ impl Footnote {
                 None => document_source,
             };
             deferred.resolve(resolver, warnings, source);
-            self.text = deferred.render(renderer);
+
+            self.text = match folded {
+                Some(folded) => folded,
+                None => deferred.render(renderer),
+            };
         }
     }
+}
+
+/// Indexes folded footnote renderings by footnote index, for a resolution pass
+/// about to install them.
+///
+/// The pass collects `(index, text)` pairs from every content it walks (see
+/// `ReferenceWarnings::footnote_texts`) and then needs them keyed, because it
+/// installs while iterating footnotes rather than while iterating contents.
+pub(crate) fn folds_by_index(texts: Vec<(String, String)>) -> BTreeMap<String, String> {
+    texts.into_iter().collect()
 }
 
 impl std::fmt::Debug for Footnote {

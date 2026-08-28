@@ -1148,6 +1148,17 @@ impl<'src> Content<'src> {
 
         let from_tree = self.resolve_tree_references();
 
+        // Independent of the arm chosen below. A content whose *only*
+        // cross-references sit inside its footnotes defers nothing itself — the
+        // replacer captures those onto the footnote's own state — so it reaches
+        // here with no deferred cross-references and takes the template arm,
+        // while its footnotes are exactly the ones needing a fresh rendering.
+        // Gating the fold on this content's own deferral would therefore miss
+        // the footnotes that most need it.
+        if let Some(attributes) = self.render_attributes.as_deref() {
+            self.collect_folded_footnotes(attributes, renderer, parser, warnings);
+        }
+
         // Exactly **one** of the two renderings runs, and which one is now a
         // question about the *tree* rather than about the cross-references in
         // it: a content with a tree folds it, and a content without one — the
@@ -1223,6 +1234,62 @@ impl<'src> Content<'src> {
     /// observable rather than merely wasteful, since a stateful host renderer
     /// would see every callback for this content twice in a single resolution
     /// pass.
+    /// Folds each footnote this content **defines** from its own subtree, and
+    /// hands the results to `warnings` for the resolution pass to install into
+    /// the catalog.
+    ///
+    /// This is [`refold`](Self::refold) for the footnote catalog. A footnote's
+    /// entry is re-rendered on every resolution pass, for the same reason a
+    /// deferred content is: its text may embed a cross-reference whose
+    /// destination is only known once resolution has run. The entry could not
+    /// hold a tree to fold — it outlives the parse borrow, and
+    /// [`InlineNode`] carries a [`Span`] — so it held a
+    /// placeholder template instead. It does not need to hold one: **the tree
+    /// is already here.** The defining [`Footnote`](crate::inlines::Footnote)
+    /// node in this content's own tree carries the footnote's children, and by
+    /// this point they carry the destinations just resolved —
+    /// [`resolve_tree_references`](Self::resolve_tree_references) installs a
+    /// footnote's embedded cross-references into its subtree alongside the
+    /// block-level ones.
+    ///
+    /// So the fold happens where the tree is, and only the resulting `String`
+    /// travels to the catalog. Nothing gains a lifetime.
+    ///
+    /// Only *defining* occurrences are folded. A bare reference to an existing
+    /// footnote carries no children and re-uses the defining entry, so folding
+    /// it would install an empty rendering over a real one.
+    ///
+    /// The trim-and-collapse mirrors `register_footnote_number`'s
+    /// normalization of the template it registers, so the two producers agree
+    /// byte for byte. The `\]` unescape that normalization also performs is
+    /// deliberately absent: the subtree's text left that form when it was
+    /// built (see `footnote_children`), and applying it again would unescape a
+    /// string that was never escaped.
+    fn collect_folded_footnotes(
+        &self,
+        attributes: &ResolvedAttributes,
+        renderer: &dyn InlineSubstitutionRenderer,
+        parser: &Parser,
+        warnings: &mut ReferenceWarnings<'src>,
+    ) {
+        let mut found = vec![];
+        defining_footnotes(&self.inlines, &mut found);
+
+        if found.is_empty() {
+            return;
+        }
+
+        let context = parser.render_context_with(attributes.clone());
+
+        for (index, children) in found {
+            let rendered = crate::content::inline_builder::fold_html(children, renderer, &context);
+
+            warnings
+                .footnote_texts
+                .push((index.to_string(), rendered.trim().replace('\n', " ")));
+        }
+    }
+
     fn refold(
         &mut self,
         attributes: ResolvedAttributes,
@@ -2188,6 +2255,44 @@ impl std::fmt::Debug for Content<'_> {
         }
 
         s.finish()
+    }
+}
+
+/// Collects every **defining** footnote occurrence in `nodes`, in document
+/// order.
+///
+/// A defining occurrence carries the footnote's children; a bare reference to
+/// an existing footnote carries none and re-uses the defining entry. Both
+/// [`Content::collect_folded_footnotes`] — which folds these — and the
+/// retention of a content's render attributes at parse time ask the same
+/// question of the same tree, so they ask it through one function.
+pub(crate) fn defining_footnotes<'a, 'src>(
+    nodes: &'a [InlineNode<'src>],
+    out: &mut Vec<(&'a str, &'a [InlineNode<'src>])>,
+) {
+    for node in nodes {
+        match node {
+            InlineNode::Footnote(footnote) => {
+                // The number is part of what makes an occurrence *defining*:
+                // `Parser::define_footnote` assigns one to every footnote it
+                // registers, and only a reference that resolved to nothing is
+                // left without. Asking both questions in one condition is
+                // deliberate — asked separately, the second would have an arm
+                // no input can reach.
+                if !footnote.is_reference
+                    && let Some(number) = footnote.number.as_ref()
+                {
+                    out.push((number.as_ref(), &footnote.children));
+                }
+
+                defining_footnotes(&footnote.children, out);
+            }
+            InlineNode::Styled(styled) => defining_footnotes(&styled.children, out),
+            InlineNode::Ref(reference) => defining_footnotes(&reference.children, out),
+            InlineNode::IndexTerm(term) => defining_footnotes(&term.children, out),
+            InlineNode::Stem(stem) => defining_footnotes(&stem.children, out),
+            _ => {}
+        }
     }
 }
 

@@ -2548,16 +2548,29 @@ impl<'src> AsciiDocCell<'src> {
     ) {
         match self {
             Self::Borrowed(cell) => {
+                // This branch resolves into the *enclosing* accumulator, so the
+                // document's own folded footnote renderings are set aside first
+                // and restored afterwards. A cell keeps a footnote list of its
+                // own and footnote indices restart per list, so a cell's
+                // footnote `1` must never be installed onto the document's
+                // footnote `1` — see `ReferenceWarnings::footnote_texts`.
+                let enclosing = warnings.take_footnote_texts();
+
                 for block in &mut cell.blocks {
                     block.resolve_references(resolver, renderer, warnings, parser);
                 }
+
+                let mut folded = crate::document::folds_by_index(warnings.take_footnote_texts());
 
                 // A cell footnote records no document location (it is defined in
                 // an owned sub-source), so resolution falls back to `source`,
                 // the cell's span, for any unresolved-reference warning.
                 for footnote in &mut cell.footnotes {
-                    footnote.resolve_references(resolver, renderer, warnings, source);
+                    let mine = folded.remove(&footnote.index);
+                    footnote.resolve_references(resolver, renderer, warnings, source, mine);
                 }
+
+                warnings.footnote_texts = enclosing;
             }
 
             // The owned store is shared behind an `Arc`, but references are
@@ -2586,12 +2599,22 @@ impl<'src> AsciiDocCell<'src> {
                         // warning; those warnings are re-homed to the cell's span
                         // in the document below regardless.
                         let owned_root = Span::new(owned_source);
+
+                        // Consumed here and carried no further: this cell's
+                        // blocks registered their footnotes on the cell's own
+                        // list, not the document's, and `rehome_into` leaves
+                        // these behind for exactly that reason.
+                        let mut folded =
+                            crate::document::folds_by_index(owned_warnings.take_footnote_texts());
+
                         for footnote in &mut dependent.footnotes {
+                            let mine = folded.remove(&footnote.index);
                             footnote.resolve_references(
                                 resolver,
                                 renderer,
                                 &mut owned_warnings,
                                 owned_root,
+                                mine,
                             );
                         }
 

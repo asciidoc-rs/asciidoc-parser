@@ -626,8 +626,15 @@ impl<'src> Document<'src> {
             // cross-references are resolved here rather than by the block pass
             // above. The host resolver does not alias the catalog, so the
             // footnotes can be borrowed mutably in place.
+            // The tree's answer for each footnote, folded by the content that
+            // defines it during the block walk above. A footnote with an entry
+            // here renders from its subtree; one without falls back to its
+            // placeholder template. See `Footnote::resolve_references`.
+            let mut folded = crate::document::folds_by_index(warnings.take_footnote_texts());
+
             for footnote in dependent.catalog.footnotes.iter_mut() {
-                footnote.resolve_references(resolver, renderer, &mut warnings, source);
+                let mine = folded.remove(&footnote.index);
+                footnote.resolve_references(resolver, renderer, &mut warnings, source, mine);
             }
 
             replace_reference_warnings(&mut dependent.warnings, &mut warnings.doc);
@@ -675,8 +682,12 @@ impl<'src> Document<'src> {
             // Footnote text is extracted out of block content, so its
             // cross-references are resolved here rather than by the block pass
             // above.
+            // See the sibling pass in `resolve_references` for what these are.
+            let mut folded = crate::document::folds_by_index(warnings.take_footnote_texts());
+
             for footnote in footnotes.iter_mut() {
-                footnote.resolve_references(&resolver, renderer, &mut warnings, source);
+                let mine = folded.remove(&footnote.index);
+                footnote.resolve_references(&resolver, renderer, &mut warnings, source, mine);
             }
 
             dependent.catalog.restore_footnotes(footnotes);
