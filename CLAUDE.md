@@ -174,7 +174,11 @@ rather than an error:
   pop` brings *both* back — which is how the audit patch reached a commit and turned every CI job red.
   And once your work is committed, `git stash` has nothing to stash, so the "before" run silently
   measures your own branch and the two sets match for the wrong reason. `git checkout <base-sha>`,
-  patch, run, `git checkout -- <file>`, `git checkout <branch>` has neither failure mode.
+  patch, run, **take the probe back out with the same targeted edit that put it in**, then
+  `git checkout <branch>` has neither failure mode. Take it out that way on the base too, not with a
+  whole-file discard: a discard happens to be harmless *there* — the detached base holds nothing but
+  the probe — but the recipe is the thing that gets copied, and the fourth papercut below is what
+  happens when it is copied onto a branch where the file also holds your work.
 
 Revert the patch before committing, and verify it by grepping for what should be **absent**
 (`scratchpad`, `OpenOptions`, the log path) rather than for the changes you meant to keep. Confirming
