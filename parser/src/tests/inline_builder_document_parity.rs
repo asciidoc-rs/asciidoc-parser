@@ -4,11 +4,11 @@
 //! ([`inline_builder`](crate::content::inline_builder)'s test module) drive
 //! [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup)
 //! on a bare [`Content`](crate::content::Content), which has no document
-//! catalog and so **cannot resolve cross-references**. The whole-document sweep
-//! that does reach resolution ([`inline_recorder`](super::inline_recorder)'s
-//! `check_document`) drives the *Strategy-A recorder*, not the builder.
+//! catalog and so **cannot resolve cross-references**. (The whole-document
+//! sweep that used to sit beside this one drove the *Strategy-A recorder* and
+//! retired with it.)
 //!
-//! Between them they leave one thing unverified, and it is the thing the
+//! That leaves one thing unverified, and it is the thing the
 //! cutover rests on: **the tree the single-pass builder produces, folded
 //! *after* cross-reference resolution has run, reproduces the rendered string
 //! byte-for-byte.** Design §4.2 retires the deferred-cross-reference sentinel

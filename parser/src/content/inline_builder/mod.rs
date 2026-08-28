@@ -1025,10 +1025,10 @@ mod tests {
         );
     }
 
-    /// A broad, general-purpose sweep of inline fixtures — reusing the shape
-    /// of the Phase 1 byte-parity corpus
-    /// ([`NORMAL_CORPUS`](crate::tests::inline_recorder)) that pins the
-    /// Strategy-A recorder — run against `build` + `fold_html` instead. Unlike
+    /// A broad, general-purpose sweep of inline fixtures — originally reusing
+    /// the shape of the Phase 1 byte-parity corpus (`NORMAL_CORPUS`, retired
+    /// with the Strategy-A recorder it pinned) — run against `build` +
+    /// `fold_html`. Unlike
     /// the hand-picked combined-constructs corpus above, this one is not
     /// curated to stay inside `build`'s claimed vocabulary, so it is exactly
     /// the kind of audit that caught the `hardbreaks` cutover blocker (see the

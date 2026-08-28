@@ -118,7 +118,7 @@ pub(crate) enum Xrefs<'a> {
 /// # This is a *build-time* fold, and the only one
 ///
 /// Building the tree is otherwise unobservable — it consults no renderer, a
-/// property `inline_recorder`'s own
+/// property `tests::inline_tree`'s own
 /// `building_the_tree_does_not_consult_the_documents_renderer` measures with a
 /// stateful renderer. A footnote is the documented exception, and not by
 /// choice: its catalog entry is a **required** recognition side effect (the

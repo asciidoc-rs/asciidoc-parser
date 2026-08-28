@@ -8654,6 +8654,42 @@ Each phase is a reviewable unit with a clear exit gate.
   dead), the `from_tree: false` paths and the `EscapedForm` split they justify (item 6); and the
   Strategy-A recorder with `inline_recorder` (item 7).
 
+  *Step 6 landed as (the Strategy-A recorder retired — and the corpus split along its real
+  subject):* the survey's item (7), pulled ahead of item (5) by a dependency the enumeration had
+  backwards: `inline_recorder`'s oracle and the structural cross-check both *drive*
+  `apply_string_pipeline`, so the test-only pipeline callable cannot be deleted while the recorder
+  harnesses live. The recorder goes first.
+
+  Deleted whole: `content::inline_tree` (the `RecordingRenderer` and its marker-sentinel fold —
+  design §5.2's Strategy A, test-only since the tree-source swap),
+  `inline_builder_recorder_parity` (the structural cross-check, its due diligence long since
+  discharged at the swap), and `snapshots/recorder_trees.txt`, its frozen recording. The
+  tree-shaped-freeze note had already ruled `inline_recorder`'s corpus unfreezable — its oracle
+  runs the string pipeline twice, so every recording would compare the pipeline against itself —
+  and said it retires with the pass. It has.
+
+  *The file split along its real subject, which its name concealed.* Two thirds of
+  `tests/inline_recorder.rs` was never about the recorder: the `is_block_inlines` surface, the
+  resolution mirror, footnote subtrees, title-tree resolution, the description-list term, the
+  ordinal-renderer pins, and the passthrough-order sweep all drive the **production** tree through
+  ordinary parses. Those tests move whole to `tests/inline_tree.rs` (with `collect_rendered`, the
+  walk two divergence-mirror tests still need); what retired with the recorder is its oracle and
+  `check`/`check_document` machinery, the corpus tests comparing the recorder's tree against the
+  pipeline's bytes, the node-shape tests of the *recorder's* tree (the builder's shapes have their
+  own corpora), the reserved-sentinel rejection (a recorder-mechanism guard), and the
+  `attach_footnote_subtrees` unit tests, whose subject was recorder machinery.
+
+  Audit: **zero new rows**, and the set falls 56 → 12 — all 44 departures are rows whose
+  `rendered` carries the recorder's own `U+E010`/`U+E02x` marker codepoints, contributed by the
+  deleted harnesses' recorder-wrapped parses and gone with them. Coverage: every surviving file's
+  missed-region count is unchanged; the only movement in the report is `inline_tree.rs`'s own rows
+  leaving with the file (workspace total 609 → 606 missed regions).
+
+  *What still defers:* item (5), now genuinely unblocked — the `apply_string_pipeline` call sites
+  (the golden helpers go goldenless against their frozen recordings, per `snapshot`'s own
+  transition plan), `run_pipeline`, and the vestigial machinery it keeps compiled — then item (6)'s
+  window, `from_tree: false` paths, and `EscapedForm` collapse.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -10572,6 +10608,19 @@ Each phase is a reviewable unit with a clear exit gate.
        Coverage: `content.rs` improves to 28/18, `substitution_group.rs` holds 100%; the
        vestigial files gain six sub-line regions that die with item (5). See the step's own
        "landed as" note above.
+
+     - ✅ **the Strategy-A recorder retired — pulled ahead of the call-site deletion it
+       blocked.** `content::inline_tree` (the `RecordingRenderer` and marker-sentinel fold),
+       `inline_builder_recorder_parity`, and `snapshots/recorder_trees.txt` deleted whole; the
+       `inline_recorder` corpus retired exactly as the tree-shaped-freeze note said it must (its
+       oracle runs the string pipeline twice, so it can never be frozen). The dependency the
+       survey's ordering missed: both harnesses *drive* `apply_string_pipeline`, so item (5)
+       cannot delete it while they live. Two thirds of `tests/inline_recorder.rs` was production
+       -tree testing under a recorder's name and moves whole to `tests/inline_tree.rs`; what died
+       is the oracle machinery, the recorder-tree corpora and shape tests, and the
+       `attach_footnote_subtrees` units. Audit zero-new, 56 → 12 with all departures the deleted
+       harnesses' own marker-bearing rows; coverage unchanged on every surviving file. See the
+       step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a
