@@ -8050,6 +8050,62 @@ Each phase is a reviewable unit with a clear exit gate.
   test that still does — the `build_inline_tree=false` parse — is what the deletion has to decide
   about, and it is a decision about a flag rather than a blocker.
 
+  *Step 6 landed as (the deletion, surveyed — and it is not one increment):* the closure left
+  "the deletion, and only the deletion", which is true of the *blockers* and misleading about the
+  work. Surveying the actual surface says the deletion has a substantial sub-problem inside it, and
+  this increment measures it rather than discovering it mid-flight.
+
+  *The easy half is easier than it looks.* `run_pipeline` has **four references in the whole crate**,
+  all in `substitution_group.rs`: the oracle call, the `None` branch (test-only since the closure),
+  the call inside the `#[cfg(test)]` `apply_string_pipeline`, and its own definition. There is no
+  scattered call graph to unpick. `apply_string_pipeline`'s ~28 call sites are all `#[cfg(test)]`
+  golden helpers whose corpora are now frozen, so each is a mechanical drop of an argument.
+
+  *The hard half is one function, and it is not the rendered string.*
+  [`Content::set_tree_xrefs`](../../parser/src/content/content.rs) reads the string pipeline's own
+  **`deferred` state** — not its bytes — and keeps two things from it: the placeholder `template`,
+  which only that pipeline produces, and a carve-out where the tree holds fewer cross-references than
+  the pipeline deferred, in which case the pipeline's whole answer stands. Deleting the oracle
+  without answering both would silently break deferred cross-reference resolution.
+
+  *Measured across the suite*, `set_tree_xrefs` resolves three ways:
+
+  | outcome | hits | share |
+  |---|---|---|
+  | nothing deferred — the oracle's answer is irrelevant | 12,852 | 96.7% |
+  | tree segments installed, `template` still the pipeline's | 436 | 3.3% |
+  | **carve-out** — the pipeline's whole answer stands | 6 | 0.05% |
+
+  So the template is the real remaining debt (436 contents), and the carve-out is *not* a design
+  problem at all: six hits, five distinct sources, and they reduce to **two enumerable recognition
+  gaps**.
+
+  - `xref:sec[a *b, c* d,role=hl]` (and the same shape with a trailing period, and paired with a
+    `<<a␄b>>` shorthand) — an `xref:` display text carrying a comma **inside a formatted span**
+    beside a `role=` attribute. The tree recognizes none where the replacer defers one, so this is a
+    recognition gap in the xref family's attribute-list splitting rather than anything about
+    deferral.
+  - `indexterm2:[<<b>>]` — a cross-reference inside an index term's argument, which the tree does not
+    recognize there.
+
+  That is a much better position than "the deletion is bundled work": the carve-out goes when those
+  two gaps close, each a prep of exactly the kind this branch has landed thirty times, and the
+  template is a single well-scoped question (can the tree produce its own placeholder template, or
+  does `refold` make the template unnecessary for a tree-backed content?).
+
+  *So the decomposition, in dependency order:* (1) the two recognition gaps above, closing the
+  carve-out; (2) the **template** — the one genuine design question left in the deletion, and the
+  thing to answer before touching `run_pipeline`; (3) the oracle call itself, which is a two-line
+  deletion once (1) and (2) hold; (4) the ~28 `apply_string_pipeline` test call sites and
+  `run_pipeline`'s own removal, mechanical; (5) the three sentinel systems (§4.2), the
+  `suppress_recognition_side_effects` window, `nested_authoritative_warnings`, `in_inline_build` and
+  `Parser::build_inline_tree`, all vestigial and all going together; (6) the Strategy-A recorder
+  (`content/inline_tree.rs`, `RecordingRenderer`) and the `inline_recorder` corpus that tests it,
+  which the tree-shaped freeze established retire with the pass rather than outliving it.
+
+  Nothing in production moved in this increment — it is a measurement and a decomposition — so there
+  is no audit or coverage claim to make beyond the suite staying green.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -9800,6 +9856,22 @@ Each phase is a reviewable unit with a clear exit gate.
        `substitution_group.rs` gains six uncovered lines, exactly the `nested_authoritative_warnings`
        block this makes unreachable — vestigial as of here, and left standing to go whole with
        `run_pipeline`. See the step's own "landed as" note above.
+
+     - ℹ️ **the deletion is not one increment, and the hard half is `set_tree_xrefs`.** Surveying
+       the surface the closure left. `run_pipeline` has four references in the whole crate, all in
+       `substitution_group.rs`, and `apply_string_pipeline`'s ~28 call sites are `#[cfg(test)]`
+       helpers over frozen corpora — so the mechanical half really is mechanical. What is not is
+       `Content::set_tree_xrefs`, which reads the string pipeline's **`deferred` state** rather than
+       its bytes: it keeps the placeholder `template`, which only that pipeline produces, and a
+       carve-out where the tree defers fewer cross-references than the pipeline did. Measured across
+       the suite it resolves 12,852 / 436 / 6 — nothing-deferred, tree-segments-with-the-pipeline's-
+       template, and carve-out. So the template (436 contents) is the real debt, and the carve-out is
+       not a design problem: six hits over five sources, reducing to two recognition gaps — an
+       `xref:` display text carrying a comma inside a formatted span beside `role=`, and a
+       cross-reference inside `indexterm2:[…]`. Decomposition in dependency order: the two gaps, then
+       the template, then the oracle call (two lines once those hold), then the test call sites and
+       `run_pipeline` itself, then the vestigial mechanisms, then the Strategy-A recorder with
+       `inline_recorder`. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a
