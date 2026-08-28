@@ -326,15 +326,7 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
                 has_dangerous_scheme(link.value()).then_some(link.value())
             };
 
-            // Suppressed for content whose tree replays this warning — see
-            // `Parser::suppress_recognition_side_effects`. It is one of the four
-            // recognition side effects `apply_macro_side_effects` re-attaches,
-            // unlike the *link* family's own dangerous-scheme warning below,
-            // which the replay does not carry and which is therefore left to
-            // this pass in every case.
-            if let Some(rejected) = rejected
-                && !self.parser.suppress_recognition_side_effects.get()
-            {
+            if let Some(rejected) = rejected {
                 self.parser.record_substitution_warning(
                     self.source,
                     WarningType::UnsafeLinkSchemeRejected(rejected.to_owned()),
@@ -1319,17 +1311,10 @@ impl Replacer for InlineLinkMacroReplacer<'_, '_> {
         // macro is handled elsewhere. `mailto:` targets carry their own safe
         // scheme and are exempt.
         if mailto.is_none() && has_dangerous_scheme(&target) {
-            // Suppressed for content whose tree raises this itself — see
-            // `Parser::suppress_recognition_side_effects`. This was the one
-            // recognition side effect the replay did not carry, because a
-            // rejected macro leaves no node; the builder records it at its own
-            // rejection site instead (`build_link_node`).
-            if !self.parser.suppress_recognition_side_effects.get() {
-                self.parser.record_substitution_warning(
-                    self.source,
-                    WarningType::UnsafeLinkSchemeRejected(target),
-                );
-            }
+            self.parser.record_substitution_warning(
+                self.source,
+                WarningType::UnsafeLinkSchemeRejected(target),
+            );
             dest.push_str(&caps[0]);
             return;
         }
@@ -2093,12 +2078,7 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
             };
 
             // The `footnoteref:` macro is deprecated outside compatibility mode.
-            // Suppressed for content whose tree raises this itself — see
-            // `Parser::suppress_recognition_side_effects`; `build_footnoteref_node`
-            // records it at its own recognition site.
-            if !parser.is_attribute_set("compat-mode")
-                && !parser.suppress_recognition_side_effects.get()
-            {
+            if !parser.is_attribute_set("compat-mode") {
                 parser.record_substitution_warning(
                     self.source,
                     WarningType::DeprecatedFootnoterefMacro(caps[0].to_string()),
@@ -2151,14 +2131,10 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
                 );
             } else {
                 // A reference to an ID that was never defined.
-                // Suppressed for the same reason the deprecation warning above
-                // is: the builder records it where it recognizes the reference.
-                if !parser.suppress_recognition_side_effects.get() {
-                    parser.record_substitution_warning(
-                        self.source,
-                        WarningType::InvalidFootnoteReference(id.clone()),
-                    );
-                }
+                parser.record_substitution_warning(
+                    self.source,
+                    WarningType::InvalidFootnoteReference(id.clone()),
+                );
                 parser.renderer.render_footnote(
                     &FootnoteRenderParams {
                         index: None,
@@ -2243,6 +2219,62 @@ mod tests {
         #[test]
         fn leaves_select_non_word_characters_unencoded() {
             assert_eq!(encode_uri_component("-.~"), "-.~");
+        }
+    }
+
+    // The string macros step's own recognition warnings: the dangerous
+    // `link:` scheme rejection and the two `footnoteref:` diagnostics. The
+    // production parse raises each from the tree builder at its own
+    // recognition site; these pin the string twins — reachable only through a
+    // direct `SubstitutionStep::Macros` call now — until the tail deletion
+    // takes the step itself (design §5.2 step 6's tail).
+    mod string_step_warnings {
+        #![allow(clippy::indexing_slicing)]
+
+        use crate::{
+            content::{Content, SubstitutionStep},
+            tests::prelude::*,
+            warnings::WarningType,
+        };
+
+        #[test]
+        fn a_dangerous_link_macro_scheme_is_rejected_with_a_warning() {
+            let parser = Parser::default();
+            let mut content = Content::from(crate::Span::new("link:javascript:alert(1)[click]"));
+
+            SubstitutionStep::Macros.apply(&mut content, &parser, None);
+
+            // The macro is left as literal source text, not turned into a
+            // link.
+            assert_eq!(content.rendered.as_ref(), "link:javascript:alert(1)[click]");
+
+            let warnings = parser.take_substitution_warnings();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings[0].warning,
+                WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_owned())
+            );
+        }
+
+        #[test]
+        fn a_footnoteref_macro_warns_twice_when_deprecated_and_unresolved() {
+            let parser = Parser::default();
+            let mut content = Content::from(crate::Span::new("footnoteref:[note1]"));
+
+            SubstitutionStep::Macros.apply(&mut content, &parser, None);
+
+            // Outside compat-mode the macro itself is deprecated, and `note1`
+            // names a footnote this document never defined.
+            let warnings = parser.take_substitution_warnings();
+            assert_eq!(warnings.len(), 2);
+            assert_eq!(
+                warnings[0].warning,
+                WarningType::DeprecatedFootnoterefMacro("footnoteref:[note1]".to_owned())
+            );
+            assert_eq!(
+                warnings[1].warning,
+                WarningType::InvalidFootnoteReference("note1".to_owned())
+            );
         }
     }
 

@@ -8707,13 +8707,34 @@ non_normative!(
 
 mod passthroughs {
     use crate::{
-        content::{
-            Passthroughs, SubstitutionStep,
-            passthroughs::{ExtractedPassthrough, Passthrough},
-        },
-        parser::{ModificationContext, QuoteType},
+        content::{SubstitutionStep, passthroughs::Passthrough},
+        parser::ModificationContext,
         tests::prelude::*,
     };
+
+    /// The passthrough collection and rendered HTML the production parse
+    /// records for `source` — the tree-built view
+    /// ([`Content::passthroughs`](crate::content::Content::passthroughs))
+    /// that replaced the string pipeline's extraction pass, read off a parsed
+    /// simple block exactly as the upstream tests read `@passthroughs` off
+    /// `block_from_string`.
+    fn passthroughs_of(source: &str) -> (Vec<Passthrough>, String) {
+        passthroughs_with(source, Parser::default())
+    }
+
+    /// [`passthroughs_of`], parsing under a caller-configured parser.
+    fn passthroughs_with(source: &str, mut parser: Parser) -> (Vec<Passthrough>, String) {
+        let maw = crate::blocks::Block::parse(crate::Span::new(source), &mut parser);
+
+        let crate::blocks::Block::Simple(block) = maw.item.unwrap().item else {
+            panic!("expected a simple block for {source:?}");
+        };
+
+        (
+            block.content().passthroughs().to_vec(),
+            block.content().rendered_html().to_string(),
+        )
+    }
 
     #[test]
     fn collect_inline_triple_plus_passthroughs() {
@@ -8732,68 +8753,31 @@ mod passthroughs {
 "#
         );
 
-        let mut content =
-            crate::content::Content::from(crate::Span::new("+++<code>inline code</code>+++"));
-
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
+        let (passthroughs, _rendered) = passthroughs_of("+++<code>inline code</code>+++");
 
         assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "+++<code>inline code</code>+++",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "\u{96}0\u{97}",
-            }
-        );
-
-        assert_eq!(
-            pt,
-            Passthroughs(vec![ExtractedPassthrough {
-                pass: Passthrough {
-                    text: "<code>inline code</code>".to_owned(),
-                    subs: SubstitutionGroup::None,
-                },
-                type_: None,
-                attrlist: None,
-            },],)
+            passthroughs,
+            vec![Passthrough {
+                text: "<code>inline code</code>".to_owned(),
+                subs: SubstitutionGroup::None,
+            }]
         );
     }
 
     #[test]
     fn collect_inline_triple_plus_passthroughs_with_attrlist() {
         // NOTE: Not in the Ruby test suite.
-        let mut content =
-            crate::content::Content::from(crate::Span::new("[role]+++<code>inline code</code>+++"));
-
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
-
-        assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "[role]+++<code>inline code</code>+++",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "\u{96}0\u{97}",
-            }
-        );
+        // An attribute-list-prefixed passthrough is inline syntax, so it is
+        // embedded mid-line here: at the start of a line, `[role]` would parse
+        // as a *block* attribute list instead.
+        let (passthroughs, _rendered) = passthroughs_of("see [role]+++<code>inline code</code>+++");
 
         assert_eq!(
-            pt,
-            Passthroughs(vec![ExtractedPassthrough {
-                pass: Passthrough {
-                    text: "<code>inline code</code>".to_owned(),
-                    subs: SubstitutionGroup::None,
-                },
-                type_: Some(QuoteType::Unquoted,),
-                attrlist: Some("role".to_owned(),),
-            },],)
+            passthroughs,
+            vec![Passthrough {
+                text: "<code>inline code</code>".to_owned(),
+                subs: SubstitutionGroup::None,
+            }]
         );
     }
 
@@ -8814,34 +8798,14 @@ mod passthroughs {
 "#
         );
 
-        let mut content =
-            crate::content::Content::from(crate::Span::new("+++<code>inline\ncode</code>+++"));
-
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
+        let (passthroughs, _rendered) = passthroughs_of("+++<code>inline\ncode</code>+++");
 
         assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "+++<code>inline\ncode</code>+++",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "\u{96}0\u{97}",
-            }
-        );
-
-        assert_eq!(
-            pt,
-            Passthroughs(vec![ExtractedPassthrough {
-                pass: Passthrough {
-                    text: "<code>inline\ncode</code>".to_owned(),
-                    subs: SubstitutionGroup::None,
-                },
-                type_: None,
-                attrlist: None,
-            },],)
+            passthroughs,
+            vec![Passthrough {
+                text: "<code>inline\ncode</code>".to_owned(),
+                subs: SubstitutionGroup::None,
+            }]
         );
     }
 
@@ -8862,34 +8826,14 @@ mod passthroughs {
 "#
         );
 
-        let mut content =
-            crate::content::Content::from(crate::Span::new("$$<code>{code}</code>$$"));
-
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
+        let (passthroughs, _rendered) = passthroughs_of("$$<code>{code}</code>$$");
 
         assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "$$<code>{code}</code>$$",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "\u{96}0\u{97}",
-            }
-        );
-
-        assert_eq!(
-            pt,
-            Passthroughs(vec![ExtractedPassthrough {
-                pass: Passthrough {
-                    text: "<code>{code}</code>".to_owned(),
-                    subs: SubstitutionGroup::Verbatim,
-                },
-                type_: None,
-                attrlist: None,
-            },],)
+            passthroughs,
+            vec![Passthrough {
+                text: "<code>{code}</code>".to_owned(),
+                subs: SubstitutionGroup::Verbatim,
+            }]
         );
     }
 
@@ -8910,34 +8854,14 @@ mod passthroughs {
 "#
         );
 
-        let mut content =
-            crate::content::Content::from(crate::Span::new("++<code>{code}</code>++"));
-
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
+        let (passthroughs, _rendered) = passthroughs_of("++<code>{code}</code>++");
 
         assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "++<code>{code}</code>++",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "\u{96}0\u{97}",
-            }
-        );
-
-        assert_eq!(
-            pt,
-            Passthroughs(vec![ExtractedPassthrough {
-                pass: Passthrough {
-                    text: "<code>{code}</code>".to_owned(),
-                    subs: SubstitutionGroup::Verbatim,
-                },
-                type_: None,
-                attrlist: None,
-            },],)
+            passthroughs,
+            vec![Passthrough {
+                text: "<code>{code}</code>".to_owned(),
+                subs: SubstitutionGroup::Verbatim,
+            }]
         );
     }
 
@@ -9260,34 +9184,14 @@ mod passthroughs {
 "#
         );
 
-        let mut content =
-            crate::content::Content::from(crate::Span::new("$$<code>\n{code}\n</code>$$"));
-
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
+        let (passthroughs, _rendered) = passthroughs_of("$$<code>\n{code}\n</code>$$");
 
         assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "$$<code>\n{code}\n</code>$$",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "\u{96}0\u{97}",
-            }
-        );
-
-        assert_eq!(
-            pt,
-            Passthroughs(vec![ExtractedPassthrough {
-                pass: Passthrough {
-                    text: "<code>\n{code}\n</code>".to_owned(),
-                    subs: SubstitutionGroup::Verbatim,
-                },
-                type_: None,
-                attrlist: None,
-            },],)
+            passthroughs,
+            vec![Passthrough {
+                text: "<code>\n{code}\n</code>".to_owned(),
+                subs: SubstitutionGroup::Verbatim,
+            }]
         );
     }
 
@@ -9308,34 +9212,14 @@ mod passthroughs {
 "#
         );
 
-        let mut content =
-            crate::content::Content::from(crate::Span::new("++<code>\n{code}\n</code>++"));
-
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
+        let (passthroughs, _rendered) = passthroughs_of("++<code>\n{code}\n</code>++");
 
         assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "++<code>\n{code}\n</code>++",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "\u{96}0\u{97}",
-            }
-        );
-
-        assert_eq!(
-            pt,
-            Passthroughs(vec![ExtractedPassthrough {
-                pass: Passthrough {
-                    text: "<code>\n{code}\n</code>".to_owned(),
-                    subs: SubstitutionGroup::Verbatim,
-                },
-                type_: None,
-                attrlist: None,
-            },],)
+            passthroughs,
+            vec![Passthrough {
+                text: "<code>\n{code}\n</code>".to_owned(),
+                subs: SubstitutionGroup::Verbatim,
+            }]
         );
     }
 
@@ -9356,38 +9240,18 @@ mod passthroughs {
 "#
         );
 
-        let mut content = crate::content::Content::from(crate::Span::new(
-            "pass:specialcharacters,quotes[<code>['code'\\]</code>]",
-        ));
-
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
+        let (passthroughs, _rendered) =
+            passthroughs_of("pass:specialcharacters,quotes[<code>['code'\\]</code>]");
 
         assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "pass:specialcharacters,quotes[<code>['code'\\]</code>]",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "\u{96}0\u{97}",
-            }
-        );
-
-        assert_eq!(
-            pt,
-            Passthroughs(vec![ExtractedPassthrough {
-                pass: Passthrough {
-                    text: "<code>['code']</code>".to_owned(),
-                    subs: SubstitutionGroup::Custom(vec![
-                        SubstitutionStep::SpecialCharacters,
-                        SubstitutionStep::Quotes,
-                    ]),
-                },
-                type_: None,
-                attrlist: None,
-            },],)
+            passthroughs,
+            vec![Passthrough {
+                text: "<code>['code']</code>".to_owned(),
+                subs: SubstitutionGroup::Custom(vec![
+                    SubstitutionStep::SpecialCharacters,
+                    SubstitutionStep::Quotes,
+                ]),
+            }]
         );
     }
 
@@ -9408,38 +9272,18 @@ mod passthroughs {
 "#
         );
 
-        let mut content = crate::content::Content::from(crate::Span::new(
-            "pass:specialcharacters,quotes[<code>['more\ncode'\\]</code>]",
-        ));
-
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
+        let (passthroughs, _rendered) =
+            passthroughs_of("pass:specialcharacters,quotes[<code>['more\ncode'\\]</code>]");
 
         assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "pass:specialcharacters,quotes[<code>['more\ncode'\\]</code>]",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "\u{96}0\u{97}",
-            }
-        );
-
-        assert_eq!(
-            pt,
-            Passthroughs(vec![ExtractedPassthrough {
-                pass: Passthrough {
-                    text: "<code>['more\ncode']</code>".to_owned(),
-                    subs: SubstitutionGroup::Custom(vec![
-                        SubstitutionStep::SpecialCharacters,
-                        SubstitutionStep::Quotes,
-                    ]),
-                },
-                type_: None,
-                attrlist: None,
-            },],)
+            passthroughs,
+            vec![Passthrough {
+                text: "<code>['more\ncode']</code>".to_owned(),
+                subs: SubstitutionGroup::Custom(vec![
+                    SubstitutionStep::SpecialCharacters,
+                    SubstitutionStep::Quotes,
+                ]),
+            }]
         );
     }
 
@@ -9516,61 +9360,26 @@ mod passthroughs {
 "#
         );
 
-        let mut content =
-            crate::content::Content::from(crate::Span::new("pass:q,a[*<{backend}>*]"));
-
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
-
-        assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "pass:q,a[*<{backend}>*]",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "\u{96}0\u{97}",
-            }
-        );
-
-        assert_eq!(
-            pt,
-            Passthroughs(vec![ExtractedPassthrough {
-                pass: Passthrough {
-                    text: "*<{backend}>*".to_owned(),
-                    subs: SubstitutionGroup::Custom(vec![
-                        SubstitutionStep::Quotes,
-                        SubstitutionStep::AttributeReferences,
-                    ]),
-                },
-                type_: None,
-                attrlist: None,
-            },],)
-        );
-
         let parser = Parser::default().with_intrinsic_attribute(
             "backend",
             "html5",
             ModificationContext::ApiOnly,
         );
 
-        pt.0[0].pass.subs.apply(&mut content, &parser, None);
-
-        pt.restore_to(&mut content, &parser);
+        let (passthroughs, rendered) = passthroughs_with("pass:q,a[*<{backend}>*]", parser);
 
         assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "pass:q,a[*<{backend}>*]",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "<strong><html5></strong>",
-            }
+            passthroughs,
+            vec![Passthrough {
+                text: "*<{backend}>*".to_owned(),
+                subs: SubstitutionGroup::Custom(vec![
+                    SubstitutionStep::Quotes,
+                    SubstitutionStep::AttributeReferences,
+                ]),
+            }]
         );
+
+        assert_eq!(rendered, "<strong><html5></strong>");
     }
 
     #[ignore]
@@ -9590,63 +9399,12 @@ mod passthroughs {
 "#
         );
 
-        // TO DO: Restore this test once macro substitutions are implemented.
-        let mut content = crate::content::Content::from(crate::Span::new("pass:n,-a[<{backend}>]"));
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
+        // TO DO: Restore this test once incremental substitutions are
+        // implemented.
+        let (passthroughs, rendered) = passthroughs_of("pass:n,-a[<{backend}>]");
 
-        assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "pass:n,-a[<{backend}>]",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "\u{96}0\u{97}",
-            }
-        );
-
-        assert_eq!(
-            pt,
-            Passthroughs(vec![ExtractedPassthrough {
-                pass: Passthrough {
-                    text: "<{backend}>".to_owned(),
-                    subs: SubstitutionGroup::Custom(vec![
-                        SubstitutionStep::SpecialCharacters,
-                        SubstitutionStep::Quotes,
-                        SubstitutionStep::CharacterReplacements,
-                        SubstitutionStep::Macros,
-                        SubstitutionStep::PostReplacement,
-                    ]),
-                },
-                type_: None,
-                attrlist: None,
-            },],)
-        );
-
-        let parser = Parser::default().with_intrinsic_attribute(
-            "backend",
-            "html5",
-            ModificationContext::ApiOnly,
-        );
-
-        pt.0[0].pass.subs.apply(&mut content, &parser, None);
-
-        pt.restore_to(&mut content, &parser);
-
-        assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "pass:q,a[*<{backend}>*]",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "&lt;{backend}&gt;",
-            }
-        );
+        assert_eq!(passthroughs.len(), 1);
+        assert_eq!(rendered, "&lt;{backend}&gt;");
     }
 
     #[test]
@@ -9664,65 +9422,26 @@ mod passthroughs {
 "#
         );
 
-        let mut content = crate::content::Content::from(crate::Span::new("pass:,[foobar]"));
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
+        let (passthroughs, rendered) = passthroughs_of("pass:,[foobar]");
 
-        assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "pass:,[foobar]",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "pass:,[foobar]",
-            }
-        );
-
-        assert!(pt.0.is_empty());
+        assert!(passthroughs.is_empty());
+        assert_eq!(rendered, "pass:,[foobar]");
     }
 
     #[test]
     fn should_not_recognize_pass_macro_with_invalid_substitution_list_2() {
-        let mut content = crate::content::Content::from(crate::Span::new("pass:42[foobar]"));
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
+        let (passthroughs, rendered) = passthroughs_of("pass:42[foobar]");
 
-        assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "pass:42[foobar]",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "pass:42[foobar]",
-            }
-        );
-
-        assert!(pt.0.is_empty());
+        assert!(passthroughs.is_empty());
+        assert_eq!(rendered, "pass:42[foobar]");
     }
 
     #[test]
     fn should_not_recognize_pass_macro_with_invalid_substitution_list_3() {
-        let mut content = crate::content::Content::from(crate::Span::new("pass:a,[foobar]"));
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
+        let (passthroughs, rendered) = passthroughs_of("pass:a,[foobar]");
 
-        assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "pass:a,[foobar]",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "pass:a,[foobar]",
-            }
-        );
-
-        assert!(pt.0.is_empty());
+        assert!(passthroughs.is_empty());
+        assert_eq!(rendered, "pass:a,[foobar]");
     }
 
     #[test]
@@ -9817,10 +9536,13 @@ mod passthroughs {
 "#
     );
 
-    #[test]
-    fn restore_inline_passthroughs_without_subs() {
-        verifies!(
-            r##"
+    // The restore pass the next two upstream tests drive — re-expanding
+    // hand-planted placeholders over an extracted list — has no analog here:
+    // the tree is authoritative, and a passthrough body is folded in place
+    // rather than re-spliced into a placeholder-bearing string (design §5.2,
+    // Phase 4 step 6).
+    non_normative!(
+        r##"
     test 'restore inline passthroughs without subs' do
       para = block_from_string("some #{Asciidoctor::Substitutors::PASS_START}" + '0' + "#{Asciidoctor::Substitutors::PASS_END} to study")
       para.extract_passthroughs ''
@@ -9831,38 +9553,7 @@ mod passthroughs {
     end
 
 "##
-        );
-
-        // NOTE: Placeholder is surrounded by text to prevent reader from stripping
-        // trailing boundary char (unique to test scenario).
-        let mut content =
-            crate::content::Content::from(crate::Span::new("some \u{96}0\u{97} to study"));
-
-        let pt = Passthroughs(vec![ExtractedPassthrough {
-            pass: Passthrough {
-                text: "<code>inline code</code>".to_owned(),
-                subs: SubstitutionGroup::None,
-            },
-            type_: None,
-            attrlist: None,
-        }]);
-
-        let parser = Parser::default();
-        pt.restore_to(&mut content, &parser);
-
-        assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "some \u{96}0\u{97} to study",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "some <code>inline code</code> to study",
-            }
-        );
-    }
+    );
 
     non_normative!(
         r#"
@@ -9870,10 +9561,8 @@ mod passthroughs {
 "#
     );
 
-    #[test]
-    fn restore_inline_passthroughs_with_subs() {
-        verifies!(
-            r##"
+    non_normative!(
+        r##"
     test 'restore inline passthroughs with subs' do
       para = block_from_string("some #{Asciidoctor::Substitutors::PASS_START}" + '0' + "#{Asciidoctor::Substitutors::PASS_END} to study in the #{Asciidoctor::Substitutors::PASS_START}" + '1' + "#{Asciidoctor::Substitutors::PASS_END} programming language")
       para.extract_passthroughs ''
@@ -9885,49 +9574,7 @@ mod passthroughs {
     end
 
 "##
-        );
-
-        // NOTE: Placeholder is surrounded by text to prevent reader from stripping
-        // trailing boundary char (unique to test scenario).
-        let mut content = crate::content::Content::from(crate::Span::new(
-            "some \u{96}0\u{97} to study in the \u{96}1\u{97} programming language",
-        ));
-
-        let pt = Passthroughs(vec![
-            ExtractedPassthrough {
-                pass: Passthrough {
-                    text: "<code>{code}</code>".to_owned(),
-                    subs: SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters]),
-                },
-                type_: None,
-                attrlist: None,
-            },
-            ExtractedPassthrough {
-                pass: Passthrough {
-                    text: "{language}".to_owned(),
-                    subs: SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters]),
-                },
-                type_: None,
-                attrlist: None,
-            },
-        ]);
-
-        let parser = Parser::default();
-        pt.restore_to(&mut content, &parser);
-
-        assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "some \u{96}0\u{97} to study in the \u{96}1\u{97} programming language",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "some &lt;code&gt;{code}&lt;/code&gt; to study in the {language} programming language",
-            }
-        );
-    }
+    );
 
     #[test]
     fn should_restore_nested_passthroughs() {
@@ -10143,70 +9790,30 @@ mod passthroughs {
 "#
         );
 
-        let mut content = crate::content::Content::from(crate::Span::new(
-            "$$[(] <'basic form'> <'logical operator'> <'basic form'> [)]$$",
-        ));
-
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
+        let (passthroughs, _rendered) =
+            passthroughs_of("$$[(] <'basic form'> <'logical operator'> <'basic form'> [)]$$");
 
         assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "$$[(] <'basic form'> <'logical operator'> <'basic form'> [)]$$",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "\u{96}0\u{97}",
-            }
-        );
-
-        assert_eq!(
-            pt,
-            Passthroughs(vec![ExtractedPassthrough {
-                pass: Passthrough {
-                    text: "[(] <'basic form'> <'logical operator'> <'basic form'> [)]".to_owned(),
-                    subs: SubstitutionGroup::Verbatim,
-                },
-                type_: None,
-                attrlist: None,
-            },],)
+            passthroughs,
+            vec![Passthrough {
+                text: "[(] <'basic form'> <'logical operator'> <'basic form'> [)]".to_owned(),
+                subs: SubstitutionGroup::Verbatim,
+            }]
         );
     }
 
     #[test]
     fn complex_inline_passthrough_macro_2() {
-        let mut content = crate::content::Content::from(crate::Span::new(
+        let (passthroughs, _rendered) = passthroughs_of(
             r#"pass:specialcharacters[[(\] <'basic form'> <'logical operator'> <'basic form'> [)\]]"#,
-        ));
-
-        let pt = Passthroughs::extract_from(&mut content, &Parser::default());
-
-        assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: r#"pass:specialcharacters[[(\] <'basic form'> <'logical operator'> <'basic form'> [)\]]"#,
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "\u{96}0\u{97}",
-            }
         );
 
         assert_eq!(
-            pt,
-            Passthroughs(vec![ExtractedPassthrough {
-                pass: Passthrough {
-                    text: r#"[(] <'basic form'> <'logical operator'> <'basic form'> [)]"#
-                        .to_owned(),
-                    subs: SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters,],),
-                },
-                type_: None,
-                attrlist: None,
-            },],)
+            passthroughs,
+            vec![Passthrough {
+                text: r#"[(] <'basic form'> <'logical operator'> <'basic form'> [)]"#.to_owned(),
+                subs: SubstitutionGroup::Custom(vec![SubstitutionStep::SpecialCharacters]),
+            }]
         );
     }
 

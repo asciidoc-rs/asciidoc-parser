@@ -868,7 +868,6 @@ mod tests {
     };
     use crate::{
         HasSpan, Parser, Span,
-        content::Content,
         inlines::{CharRef, InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
         parser::{HtmlSubstitutionRenderer, XrefStyle},
     };
@@ -883,10 +882,6 @@ mod tests {
     /// side while the builder expands it, and report the difference as a
     /// divergence the fixture does not have.
     fn golden_whole_pipeline(source: &str) -> String {
-        let mut content = Content::from(Span::new(source));
-
-        content.finalize_deferred(&HtmlSubstitutionRenderer {});
-
         crate::content::inline_builder::snapshot::recorded("xref_whole_pipeline", source)
     }
 
@@ -2519,9 +2514,6 @@ mod tests {
     /// [`golden_xref_with`] deliberately omits (it also finalizes the deferred
     /// cross-references, which this does through the group's own pipeline).
     fn golden_normal(source: &str, _parser: &Parser) -> String {
-        let mut content = Content::from(Span::new(source));
-        content.finalize_deferred(&HtmlSubstitutionRenderer {});
-
         crate::content::inline_builder::snapshot::recorded("xref_normal", source)
     }
 

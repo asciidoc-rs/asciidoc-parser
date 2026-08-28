@@ -6,8 +6,7 @@
 mod content;
 pub use content::Content;
 pub(crate) use content::{
-    DeferredParts, FootnoteDeferred, OwnedTitle, PASSTHROUGH_PLACEHOLDER_END,
-    PASSTHROUGH_PLACEHOLDER_START, XrefSegment, defining_footnotes, document_text,
+    DeferredParts, FootnoteDeferred, OwnedTitle, XrefSegment, defining_footnotes, document_text,
     escape_sentinels, fold_resolved_title, rehome_xref_placeholders, render_xref_template,
     resolved_destinations, sanitize_title, template_partition, unescape_sentinels,
     xref_segment_from_node,
@@ -27,10 +26,6 @@ mod xref_target;
 
 pub(crate) mod passthroughs;
 pub use passthroughs::Passthrough;
-// Vestigial: the string pipeline's extraction pass, now reachable only from
-// its own unit tests; goes with the machinery (design §5.2 step 6's tail).
-#[cfg(test)]
-pub(crate) use passthroughs::Passthroughs;
 pub(crate) use passthroughs::{INLINE_PASS, INLINE_PASS_MACRO, INLINE_STEM_MACRO, stem_notation};
 
 mod substitution_group;

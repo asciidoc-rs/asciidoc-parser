@@ -154,7 +154,7 @@ use crate::{
 /// the bare branch's trailing-character class admits the last byte of either
 /// spelling, so the two recognize the same extent — this family needs no
 /// widening of its own, unlike the `image:`/`icon:` one), and
-/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)
+/// `Passthroughs::restore_to`
 /// then splices the extracted body's substituted text over every sentinel in
 /// the rendered string. A `Raw` node's `value` **is** that text, known at build
 /// time, so [`restore_masked_passthroughs`] substitutes it for the placeholder
@@ -1088,7 +1088,7 @@ fn find_link_macro_matches<'src>(
 /// range holds no masked construct (so a caller keeps the bytes it
 /// already has).
 ///
-/// This is [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)'s own
+/// This is `Passthroughs::restore_to`'s own
 /// rewrite, applied to a *computed value* instead of the rendered string: the
 /// string pipeline's replacer reads the `\u{96}`*n*`\u{97}` sentinel into the
 /// value (a `link:` macro's target, and with it the emitted `href` and a bare
@@ -1626,7 +1626,7 @@ struct TextAttrlist<'src> {
 /// second and third positionals become the `?subject=`/`&amp;body=` query
 /// through [`encode_uri_component`]. The string pipeline percent-encodes its
 /// own sentinel there (`%C2%960%C2%97`), which
-/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)
+/// `Passthroughs::restore_to`
 /// then cannot find in the finished `href` — so its golden *leaks* the encoded
 /// sentinel, and no restore here can reproduce that. This is the same boundary
 /// the cross-reference family's own pre-restore target keeps, drawn per slot

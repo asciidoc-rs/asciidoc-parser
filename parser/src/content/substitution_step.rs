@@ -744,19 +744,11 @@ impl<'p> AttributeReplacer<'p> {
     /// reference leaves no node to hang a diagnostic on, so the builder records
     /// it at its own recognition site (see
     /// [`apply_attribute_references`](crate::content::inline_builder)) and it
-    /// is carried onto the real parser afterwards. This copy is suppressed
-    /// for the duration of that window, exactly as the other four are, and
-    /// is deleted along with the string pipeline itself.
-    ///
-    /// Suppression is deliberately *not* applied to a direct
-    /// [`SubstitutionStep::AttributeReferences`] call, which never opens the
-    /// window and so keeps diagnosing on its own — which is what lets this
+    /// is carried onto the real parser afterwards. A direct
+    /// [`SubstitutionStep::AttributeReferences`] call never runs inside a
+    /// build, so this copy diagnoses unconditionally — which is what lets this
     /// step go on being tested in isolation.
     fn record_missing_reference(&self, index: usize, caps: &Captures<'_>, attr_name: &str) {
-        if self.parser.suppress_recognition_side_effects.get() {
-            return;
-        }
-
         self.parser.record_substitution_warning(
             self.warning_source(index, &caps[0]),
             WarningType::SkippingReferenceToMissingAttribute(attr_name.to_string()),
@@ -1019,75 +1011,6 @@ pub(crate) fn substitute_attributes_in_macro_target<'src>(
     }
 
     Some(replaced.into())
-}
-
-/// Applies the attribute-references substitution to free-standing text (such as
-/// the content of a [docinfo file]), honoring the [`attribute-missing`]
-/// document attribute, and returns the substituted result.
-///
-/// Unlike [`apply_attributes`], this operates on owned text that is not part of
-/// the document source. Substitution is performed line by line so that, in
-/// `drop-line` mode, an individual line carrying a missing reference can be
-/// removed without disturbing the lines around it.
-///
-/// Any `warn`-mode warnings it records on `parser` refer to offsets within
-/// `text` (not the document source); callers that do not want such warnings
-/// surfaced should discard them via
-/// [`Parser::truncate_substitution_warnings`](crate::Parser).
-///
-/// [docinfo file]: https://docs.asciidoctor.org/asciidoc/latest/docinfo/
-/// [`attribute-missing`]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing
-// Vestigial: the string pipeline's own machinery, unreachable from
-// production since the oracle deletion and now exercised only by its own
-// unit tests; the whole set goes together (design §5.2 step 6's tail).
-#[allow(dead_code)]
-pub(crate) fn substitute_attributes_in_text(text: &str, parser: &Parser) -> String {
-    if !text.contains('{') {
-        return text.to_string();
-    }
-
-    let mode = AttributeMissing::from_parser(parser);
-    let source = Span::new(text);
-
-    let mut out = String::with_capacity(text.len());
-    let mut wrote_line = false;
-
-    for line in text.split('\n') {
-        if !line.contains('{') {
-            if wrote_line {
-                out.push('\n');
-            }
-            out.push_str(line);
-            wrote_line = true;
-            continue;
-        }
-
-        // This text is not backed by the document source (offsets refer into
-        // `text`, and callers discard these warnings), so no precise per-line
-        // anchor is supplied: warnings fall back to the whole-text span.
-        let mut replacer = AttributeReplacer::new(parser, mode, source, None);
-
-        let replaced = ATTRIBUTE_REFERENCE.replace_all(line, replacer.by_ref());
-
-        if replacer.missing_on_line
-            && (mode == AttributeMissing::DropLine
-                || (mode == AttributeMissing::Drop && drop_emptied_line(&replaced)))
-        {
-            // Drop the entire line, including its line break: unconditionally
-            // in `drop-line` mode, or in `drop` mode when the dropped
-            // reference was all the line contained (Asciidoctor's
-            // `reject_if_empty`).
-            continue;
-        }
-
-        if wrote_line {
-            out.push('\n');
-        }
-        out.push_str(&replaced);
-        wrote_line = true;
-    }
-
-    out
 }
 
 /// Substitutes attribute references in a block anchor's reftext
@@ -1628,13 +1551,7 @@ impl LookaheadReplacer for CalloutReplacer<'_> {
 
         // Register this callout so the callout list that annotates this block
         // can be validated against the callouts it references.
-        //
-        // Suppressed for content whose tree replays this — see
-        // `Parser::suppress_recognition_side_effects` and
-        // `inline_builder::apply_callout_side_effects`.
-        if let Ok(n) = number.parse::<u32>()
-            && !self.parser.suppress_recognition_side_effects.get()
-        {
+        if let Ok(n) = number.parse::<u32>() {
             self.parser.register_callout(n);
         }
 
@@ -2233,93 +2150,6 @@ mod tests {
                 assert_eq!(warnings.len(), 1);
                 assert_eq!(warnings[0].offset, 0);
                 assert_eq!(warnings[0].len, text.len());
-            }
-
-            /// Exercises the free-standing text path (used for docinfo file
-            /// content), which applies the same `attribute-missing` handling as
-            /// [`render`] but through [`substitute_attributes_in_text`] rather
-            /// than the block substitution pipeline.
-            mod free_standing_text {
-                use super::parser_with_mode;
-                use crate::content::substitution_step::substitute_attributes_in_text;
-
-                #[test]
-                fn drop_removes_line_that_only_contained_the_reference() {
-                    let p = parser_with_mode("drop");
-                    assert_eq!(
-                        substitute_attributes_in_text("Line 1\n{missing}\nLine 2", &p),
-                        "Line 1\nLine 2"
-                    );
-                }
-
-                #[test]
-                fn drop_keeps_a_line_the_reference_did_not_empty() {
-                    let p = parser_with_mode("drop");
-                    assert_eq!(
-                        substitute_attributes_in_text("Line 1\ntext {missing}\nLine 2", &p),
-                        "Line 1\ntext \nLine 2"
-                    );
-                }
-
-                #[test]
-                fn drop_keeps_a_line_emptied_by_a_resolvable_reference() {
-                    let p = parser_with_mode("drop");
-                    assert_eq!(
-                        substitute_attributes_in_text("Line 1\n{empty}\nLine 2", &p),
-                        "Line 1\n\nLine 2"
-                    );
-                }
-
-                #[test]
-                fn drop_line_removes_the_whole_line() {
-                    let p = parser_with_mode("drop-line");
-                    assert_eq!(
-                        substitute_attributes_in_text("Line 1\n{missing} tail\nLine 2", &p),
-                        "Line 1\nLine 2"
-                    );
-                }
-
-                #[test]
-                fn drop_line_records_a_warning() {
-                    // The diagnostic is recorded on the parser even on the
-                    // free-standing text path; a docinfo caller separately
-                    // discards it via `truncate_substitution_warnings`.
-                    use crate::warnings::WarningType;
-
-                    let p = parser_with_mode("drop-line");
-                    assert_eq!(
-                        substitute_attributes_in_text("Line 1\n{missing} tail\nLine 2", &p),
-                        "Line 1\nLine 2"
-                    );
-
-                    let warnings = p.take_substitution_warnings();
-                    assert_eq!(warnings.len(), 1);
-                    assert_eq!(
-                        warnings[0].warning,
-                        WarningType::SkippingReferenceToMissingAttribute("missing".to_string())
-                    );
-                }
-
-                #[test]
-                fn drop_removes_a_crlf_reference_only_line() {
-                    // The `\r` left by a CRLF terminator does not keep the line
-                    // from counting as emptied by the dropped reference, so the
-                    // whole `\r\n` line is removed.
-                    let p = parser_with_mode("drop");
-                    assert_eq!(
-                        substitute_attributes_in_text("Line 1\r\n{missing}\r\nLine 2", &p),
-                        "Line 1\r\nLine 2"
-                    );
-                }
-
-                #[test]
-                fn drop_keeps_a_crlf_line_the_reference_did_not_empty() {
-                    let p = parser_with_mode("drop");
-                    assert_eq!(
-                        substitute_attributes_in_text("Line 1\r\ntext {missing}\r\nLine 2", &p),
-                        "Line 1\r\ntext \r\nLine 2"
-                    );
-                }
             }
 
             #[test]

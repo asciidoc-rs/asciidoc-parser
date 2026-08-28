@@ -875,7 +875,7 @@ pub(super) fn untranslated_value(text: &str, carried: &[InlineNode<'_>]) -> Stri
 /// honest reading.
 ///
 /// The walk is index-keyed and left to right, like
-/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)'s
+/// `Passthroughs::restore_to`'s
 /// own: each token is sought only in the bytes after the previous one, and a
 /// token the parse dropped (a value the split discarded) is simply not found,
 /// leaving the ones after it to splice by their own index.
