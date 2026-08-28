@@ -8076,7 +8076,10 @@ Each phase is a reviewable unit with a clear exit gate.
   | tree segments installed, `template` still the pipeline's | 436 | 3.3% |
   | **carve-out** — the pipeline's whole answer stands | 6 | 0.05% |
 
-  So the template is the larger debt by volume (436 contents). The carve-out is six hits over five
+  So the template looks like the larger debt by volume. (The 436 here is a count of `set_tree_xrefs`
+  calls that installed a tree answer, not of contents rendering from a template. A later note
+  measures `render_template` itself and finds the debt is *smaller* than this suggests, not larger.)
+  The carve-out is six hits over five
   sources — and reading what each one *is* matters more than the count, because the five are **two
   different kinds**, and only one of them is a gap.
 
@@ -8268,6 +8271,68 @@ Each phase is a reviewable unit with a clear exit gate.
   *What still defers:* the **template**, then the oracle call, the ~28 `apply_string_pipeline` test
   call sites and `run_pipeline` itself, the vestigial mechanisms (now including the carve-out), and
   the Strategy-A recorder with `inline_recorder`.
+
+  *Step 6 landed as (the template, measured — it is two named cases, not a majority path):* a
+  scoping note rather than a change, and it exists because the deletion survey's own number for this
+  item was measuring the wrong population.
+
+  That survey called the template "the larger debt by volume (436 contents)". **436 is a count of
+  calls to `set_tree_xrefs` that installed a tree answer, not a count of contents that render from a
+  template** — different populations. The first attempt to correct it made the same class of mistake
+  one step further in: it instrumented the *arm choice* in `Content::resolve_references` — `refold`,
+  which folds the tree, against `rebuild_rendered`, which renders a template — and read 330 calls
+  over 210 distinct sources for the fold against 5,944 over 2,437 for the template. That reads as a
+  template-majority path. It is not one. **`rebuild_rendered` opens with an early return on
+  `self.deferred.is_none()`, and every one of those 5,944 calls took it.** They are no-ops on
+  contents that never deferred anything. Counting an arm is not counting a render.
+
+  Instrumenting `render_template` itself — the single function every template render funnels through
+  — gives the population the item is actually about:
+
+  | production call site | calls | distinct templates |
+  |---|---|---|
+  | `finalize_deferred` → `rebuild_rendered` | 794 | 170 |
+  | `Footnote::render` | 225 | 24 |
+  | `title_refs`'s fold fallback | **1** | **1** |
+  | `resolve_references` → `rebuild_rendered` | **0** | — |
+
+  So the two headline claims inverted together. Not eight percent of deferring contents fold their
+  tree — **all of them do**: the 330 fold calls over 210 distinct sources are exactly the contents
+  carrying deferred state, and no content with deferred state reaches `resolve_references`'s template
+  arm at all. And the template is not the majority path; from the resolution pass it renders **zero
+  times**.
+
+  *What is left is therefore two named cases and one line of bookkeeping,* which is a much smaller
+  and much more specific item than either the survey or its first correction implied:
+
+  - **`finalize_deferred`'s render (794 calls, 170 templates) is not separate scope.** It runs at the
+    end of `run_pipeline`, rebuilding `rendered` as the *unresolved fallback* so the string is clean
+    for a caller that reads it before resolution. It is the string pipeline's own answer to its own
+    question, and it goes when `run_pipeline` goes — an increment already enumerated in the
+    decomposition, not a new one.
+  - **`Footnote::render` (225 calls, 24 distinct templates) is the one genuinely separate consumer.**
+    A footnote holds its own template and its own segment list and re-renders from them, on a path
+    `refold` never touches. This is the real remaining template work, and it is footnote-shaped
+    rather than content-shaped.
+  - **`title_refs`'s fallback fires exactly once in the whole suite.** One call, one template,
+    `"See \u{e000}0\u{e001}"` — and its shape is precisely what the code comment beside it predicts:
+    `from_tree` true and `render_attributes` present, but `inlines` **empty**. It is the carried block
+    title whose inline nodes cannot cross the `'src`-erasing hop across a section heading, so there is
+    no tree to fold and the template is the only answer available. One source is a boundary, not a
+    gap.
+
+  *What this does to the decomposition.* The item keeps its position — still gated behind nothing —
+  but it shrinks and splits. The question is not "can the tree produce a placeholder template", and
+  not "why does the tree's answer reach only one content in twelve" (it reaches all of them); it is
+  **"can a footnote fold its own tree, and can a carried block title keep one across the `'src` hop?"**
+  Two concrete questions with two concrete subjects, where there was one vague volume estimate.
+
+  *And the methodological point, which cost two rounds to learn.* Both wrong numbers were proxies
+  measured one seam away from the thing they were supposed to describe — first a `set_tree_xrefs`
+  call count standing in for a render, then an arm choice standing in for a render, when the arm's
+  `else` branch is overwhelmingly a no-op. The carve-out taught the same lesson at a smaller scale:
+  reading what each case *is* beats counting the cases. Here it took instrumenting the leaf function
+  and nothing above it.
 
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
@@ -10082,6 +10147,20 @@ Each phase is a reviewable unit with a clear exit gate.
        62 rows against 63, 0 new and 1 closed — the pipeline was right here and the tree caught up,
        the mirror image of the divergence increment before it. Coverage diff-neutral. See the step's
        own "landed as" note above.
+
+     - ℹ️ **the template is two named cases, not a majority path — and both prior figures were the
+       wrong population.** The deletion survey called it "the larger debt by volume (436 contents)";
+       436 counts `set_tree_xrefs` calls that installed a tree answer. Instrumenting the *arm choice*
+       in `resolve_references` corrected that with a worse number — 330 fold calls over 210 distinct
+       sources against 5,944 over 2,437 for `rebuild_rendered` — because `rebuild_rendered` early-
+       returns on `deferred.is_none()` and **all 5,944 took that return**. Instrumenting
+       `render_template` itself gives the real population: `finalize_deferred` 794 calls / 170
+       templates, `Footnote::render` 225 / 24, `title_refs`'s fallback **1 / 1**, and
+       `resolve_references` **0**. So every content that defers a cross-reference folds its tree (not
+       8% of them), the template renders zero times from the resolution pass, `finalize_deferred`'s
+       render goes with `run_pipeline`, and what remains is `Footnote::render` plus a single carried
+       block title whose `inlines` are empty because they cannot cross the `'src`-erasing hop. See
+       the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a
