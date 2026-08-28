@@ -166,17 +166,23 @@ struct DeferredContent {
     /// subtrees instead.
     footnote: Vec<XrefSegment>,
 
-    /// The string pipeline's own placeholder template, still captured by
-    /// [`Content::finalize_deferred`] as it always was.
+    /// The placeholder template, in escaped sentinel form: every
+    /// document-derived byte escaped, every raw `U+E000 <index> U+E001` a real
+    /// placeholder.
     ///
-    /// Nothing on the production path renders from it any more except the one
-    /// content that has no tree to fold: a block title carried across a section
-    /// heading, which travels through `Parser::pending_block_title` as an
-    /// [`OwnedTitle`] because the parser it rides on has no `'src` lifetime,
-    /// and so arrives at the claiming block with its inline nodes dropped. Its
-    /// rendering cannot be a fold, so it stays a splice — see
-    /// [`Content::rebuild_rendered`]. It goes when that title keeps its tree,
-    /// which is what deletes design §4.2's second sentinel system outright.
+    /// Two producers write one, and only one of them reaches a production
+    /// reader. The string pipeline still captures its own through
+    /// [`Content::finalize_deferred`], as it always did — that copy is what the
+    /// test-only oracle path renders from, and it goes with `run_pipeline`.
+    /// The one content that *renders* from a template in production — a block
+    /// title carried across a section heading, which travels through
+    /// `Parser::pending_block_title` as an [`OwnedTitle`] because the parser it
+    /// rides on has no `'src` lifetime, and so arrives at the claiming block
+    /// with its inline nodes dropped — carries a template synthesized **from
+    /// its own tree** at the hop instead (see [`Content::to_owned_title`] and
+    /// [`carried_title_template`]). Its rendering cannot be a fold, so it stays
+    /// a splice — see [`Content::rebuild_rendered`] — but the splice's inputs
+    /// no longer come from the string pipeline.
     ///
     /// Empty between [`Content::set_deferred_xrefs`] recording the list and
     /// `finalize_deferred` capturing the template, which is within one
@@ -634,10 +640,52 @@ impl<'src> Content<'src> {
     /// Returns a fully-owned snapshot of this content's rendered text and
     /// deferred cross-references, for a title that must outlive its source
     /// borrow (see [`OwnedTitle`]).
-    pub(crate) fn to_owned_title(&self) -> OwnedTitle {
+    ///
+    /// A title that defers a cross-reference and still holds its tree swaps its
+    /// placeholder template — and the segment list the template's indices point
+    /// into — for the **tree's own**, synthesized here by
+    /// [`carried_title_template`]. The snapshot travels across the
+    /// `'src`-erasing hop (`Parser::pending_block_title`) with its inline nodes
+    /// dropped, so the claiming block's title is the one content that renders
+    /// from a template rather than folding a tree; this is where that template
+    /// stops being the string pipeline's and becomes a product of the tree,
+    /// which is what lets the oracle pipeline be deleted without losing the
+    /// carried title's resolution.
+    ///
+    /// `parser` supplies the renderer; the fold runs under the title's own
+    /// retained render attributes, the same pairing [`refold`](Self::refold)
+    /// uses. A deferring content always retains them
+    /// (`set_render_attributes` is called for exactly that content), so the
+    /// binding below always takes for a title with a tree; it is written as a
+    /// binding rather than an unwrap because the invariant lives in that
+    /// pairing, not in the field's type. The condition's other exits are real:
+    /// a title **re-stashed** past an empty section body arrives here with its
+    /// nodes already dropped and keeps the template the first hop synthesized,
+    /// and a `from_tree` `false` snapshot keeps the string pipeline's own — the
+    /// only honest one where the tree is known not to describe the content.
+    pub(crate) fn to_owned_title(&self, parser: &Parser) -> OwnedTitle {
+        let deferred = self.deferred.as_ref().map(|d| {
+            let mut d = (**d).clone();
+
+            if d.from_tree
+                && !self.inlines.is_empty()
+                && let Some(attributes) = self.render_attributes.as_deref()
+            {
+                let context = parser.render_context_with(attributes.clone());
+
+                let (template, block) =
+                    carried_title_template(&self.inlines, &*parser.renderer, &context);
+
+                d.template = template;
+                d.block = block;
+            }
+
+            d
+        });
+
         OwnedTitle {
             rendered: self.rendered.as_ref().to_string(),
-            deferred: self.deferred.as_ref().map(|d| (**d).clone()),
+            deferred,
             render_attributes: self.render_attributes.clone(),
         }
     }
@@ -1841,6 +1889,69 @@ pub(crate) fn xref_segment_from_node(
         derived: reference.derived.clone(),
         resolved: None,
     }
+}
+
+/// Synthesizes the placeholder template — and the segment list its indices
+/// point into — that a **carried block title** takes across the `'src`-erasing
+/// hop (see [`Content::to_owned_title`]), from the title's own inline tree.
+///
+/// The construction is a walk over the tree's **top-level** nodes: a
+/// cross-reference node contributes a raw `U+E000 <index> U+E001` placeholder
+/// and its [`XrefSegment`] (via [`xref_segment_from_node`], the same reading
+/// every other segment derivation uses), and every other node contributes its
+/// own fold, passed through [`escape_sentinels`]. That escape is what makes the
+/// template's two byte populations distinguishable — the property the whole
+/// splice rests on, and the reason the template is *not* one
+/// [`fold_deferring_xrefs`](crate::content::inline_builder::fold_deferring_xrefs)
+/// call: in that fold's output a document-typed `U+E000 0 U+E001` (see the
+/// `sentinels` test module, issue #1235) is byte-identical to a real
+/// placeholder, and nothing downstream can tell them apart. Here every
+/// document-derived byte is escaped and every raw sentinel is the fold's own —
+/// exactly the escaped form the string pipeline's templates have always been
+/// in, so the render path ([`render_template`], `EscapedForm { template: true,
+/// … }`) needs no new case.
+///
+/// The price of reading only the top level is a cross-reference **nested**
+/// inside another top-level construct (a styled span's children, a visible
+/// index term's shown text): its enclosing node folds as a gap, so the
+/// reference is baked into the template as its unresolved fallback rendering
+/// rather than spliced — and, having no segment, it is neither resolved nor
+/// reported by the title pass. The string pipeline's template did splice those
+/// (its placeholders sat inside the rendered markup). That narrowing is
+/// accepted for the same reason the carried title renders from a template at
+/// all — no tree survives the hop to do better — and it is measured at zero:
+/// no golden source carries a nested cross-reference in a carried block title.
+/// `a_reference_nested_in_a_span_of_a_carried_title_stays_its_fallback` pins
+/// the boundary.
+fn carried_title_template(
+    nodes: &[InlineNode<'_>],
+    renderer: &dyn InlineSubstitutionRenderer,
+    context: &crate::parser::RenderContext,
+) -> (String, Vec<XrefSegment>) {
+    let mut template = String::new();
+    let mut segments = Vec::new();
+
+    for node in nodes {
+        match node {
+            InlineNode::Ref(reference) if reference.variant == RefVariant::Xref => {
+                let index = segments.len();
+                segments.push(xref_segment_from_node(reference, renderer, context));
+                template.push_str(&Content::xref_placeholder(index));
+            }
+
+            other => {
+                let folded = crate::content::inline_builder::fold_html(
+                    std::slice::from_ref(other),
+                    renderer,
+                    context,
+                );
+
+                template.push_str(&escape_sentinels(&folded));
+            }
+        }
+    }
+
+    (template, segments)
 }
 
 /// Walks an inline node slice in document order and installs each

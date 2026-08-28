@@ -8527,6 +8527,76 @@ Each phase is a reviewable unit with a clear exit gate.
   closed. Coverage diff-neutral (`document/catalog.rs` 2 missed regions and 0 missed lines, both
   unchanged; workspace total unchanged at 605 / 348).
 
+  *Step 6 landed as (the carried title's template is the tree's own — and the suppression window
+  measured dead):* the template item's last production consumer switched producers, which is the
+  increment that genuinely unblocks the oracle call's deletion: nothing on the production path
+  reads the string pipeline's placeholder template any more.
+
+  [`Content::to_owned_title`](../../parser/src/content/content.rs) now takes the parser and — for
+  a title that defers a cross-reference and still holds its tree — synthesizes the placeholder
+  template and the segment list its indices point into from that tree, at the stash site
+  (`SectionBlock::parse`), while the nodes are still alive. The `'src`-erasing hop across
+  `Parser::pending_block_title` is unchanged, and so is the render path: the snapshot arrives at
+  the claiming block node-less and renders by splicing, exactly as before, but the splice's inputs
+  are the tree's.
+
+  *Why the synthesis is a gap walk and not one `fold_deferring_xrefs` call.* The footnote template
+  is one such call, and inheriting it here was the obvious move — and the wrong one, for a reason
+  worth keeping: in that fold's output a document-typed `U+E000 0 U+E001` (the issue #1235 class
+  the `sentinels` suite pins) is **byte-identical** to a real placeholder, and nothing downstream
+  can tell them apart. The footnote template carries that ambiguity today and gets away with it
+  because resolution renders a footnote from its subtree and the template is a parse-time fallback;
+  a carried title's template is *rendered*, so it cannot. The string pipeline never had the problem
+  because it escaped the whole haystack before any step ran — so the synthesis reproduces exactly
+  that form: [`carried_title_template`](../../parser/src/content/content.rs) walks the tree's
+  top-level nodes, a cross-reference node contributing a raw placeholder plus its segment (through
+  `xref_segment_from_node`, the derivation every other segment shares) and every other node
+  contributing its own fold passed through `escape_sentinels`. Escaped bytes are the document's,
+  raw sentinels are the fold's own, and the template stays in the escaped form the render path
+  (`EscapedForm { template: true, … }`) already handles — no new case anywhere downstream.
+  Verified against the base byte-for-byte on the typed-sentinel and two-reference probes, and
+  pinned by `a_typed_placeholder_in_a_carried_title_cannot_forge_a_cross_reference`.
+
+  *The boundary the top-level walk draws*, pinned by
+  `a_reference_nested_in_a_span_of_a_carried_title_stays_its_fallback`: a cross-reference nested
+  inside another top-level construct (a styled span, a visible index term) folds with its
+  enclosing node as template text — baked as its unresolved fallback, neither resolved nor
+  reported — where the pipeline's template spliced it, its placeholder sitting inside the rendered
+  markup. Measured at zero: no golden source carries a nested cross-reference in a carried block
+  title (the suite's one carried deferring title is `.See <<goal>>`, whose reference is
+  top-level). Nothing survives the hop to do better; if the synthesis ever learns nested
+  placeholders, the test's own comment says where it moves.
+
+  *The condition's other exits are real, and one grew its own test.* A title re-stashed past an
+  empty section body reaches `to_owned_title` a second time, node-less, and must keep the template
+  the first hop synthesized rather than synthesize from the empty tree
+  (`a_title_restashed_past_an_empty_section_keeps_its_template`). The cost is one extra fold per
+  carried *deferring* title — population across the suite: one — on the transitional
+  double-render this branch already pays everywhere until the oracle goes.
+
+  *And the measurement the deletion survey asked for:* `Parser::suppress_recognition_side_effects`
+  documents itself as "set by `SubstitutionGroup::apply` around its authoritative string pass" and
+  slated to die with the oracle. By measurement it is dead **now**: the field is initialized
+  `false`, read at ten sites, and set nowhere — the inversion removed its only setter when the
+  string pass moved onto the discarded clone, and every remaining `.get()` guard is a branch that
+  cannot take. Its retirement is a pure deletion, independent of the call's, and stays with the
+  vestigial-mechanisms item where the survey filed it.
+
+  *What still defers*, more precisely than the survey could say: the oracle call itself — now a
+  deletion with no template question inside it — carrying the `set_tree_xrefs` rewrite (derive
+  the deferred state from the tree, which deletes the carve-out branch and `template_splices`
+  with it), the template-emptiness debug asserts, and the retirement of
+  `inline_builder_xref_segment_parity` and the document-parity harness's template comparison,
+  each of which already documents that it goes when `run_pipeline` does; then the
+  `apply_string_pipeline` call sites and `run_pipeline` itself; the vestigial mechanisms
+  (the suppression window above, the `from_tree: false` machinery, the sentinel escape/unescape
+  pair); and the Strategy-A recorder with `inline_recorder`.
+
+  Fold-parity audit: 63 distinct divergences on the base and on this branch alike — zero new,
+  zero closed (the seam this increment touches is behind the audit's comparison, not in it).
+  Coverage diff-neutral: `content/content.rs` 30 missed regions and 20 missed lines,
+  `blocks/section.rs` 40 and 39, workspace totals 605 and 348, all matching the base.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -10406,6 +10476,26 @@ Each phase is a reviewable unit with a clear exit gate.
        caller, the parse-time unresolved fallback, which goes with the oracle. The template arm of
        `Footnote::resolve_references` stays — unreachable by measurement, not by construction — and is
        pinned by a direct unit test rather than deleted. Audit zero-new/zero-closed; coverage
+       diff-neutral. See the step's own "landed as" note above.
+
+     - ✅ **the carried title's template is the tree's own — the template item closed, and the
+       suppression window measured dead.** `Content::to_owned_title` takes the parser and, for a
+       title deferring a cross-reference, synthesizes the placeholder template and its segment
+       list from the title's own tree at the stash site, while the nodes are alive; the
+       `'src`-erasing hop and the splice-rendering restored side are unchanged, so the one content
+       that renders from a template in production no longer reads anything the string pipeline
+       produced. The synthesis is a **top-level gap walk**, not one `fold_deferring_xrefs` call:
+       each gap's fold passes through `escape_sentinels` and each placeholder is emitted raw, so
+       the template keeps the escaped form the render path already handles and a document-typed
+       placeholder (issue #1235) stays distinguishable from a real one — the ambiguity the
+       footnote template carries but never renders, and a carried title would have. The price is a
+       cross-reference *nested* inside a top-level construct, which bakes as its unresolved
+       fallback (measured zero in the suite; pinned with its own test, as is the empty-section
+       re-stash that must keep the first hop's template). Byte-identical against the base on the
+       typed-sentinel and two-reference probes. Also measured here, as the deletion survey asked:
+       `suppress_recognition_side_effects` is initialized `false`, read at ten sites, and **set
+       nowhere** — dead since the inversion, its retirement a pure deletion filed with the
+       vestigial mechanisms. Audit 63 rows either side, 0 new and 0 closed; coverage
        diff-neutral. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**

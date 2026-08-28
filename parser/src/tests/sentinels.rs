@@ -140,6 +140,45 @@ fn a_typed_placeholder_inside_a_passthrough_cannot_forge_a_cross_reference() {
 }
 
 #[test]
+fn a_typed_placeholder_in_a_carried_title_cannot_forge_a_cross_reference() {
+    // A block title carried across a section heading is the one content that
+    // renders from a placeholder template in production, and that template is
+    // synthesized from the title's inline tree (`carried_title_template`)
+    // rather than captured from the escaped string pipeline. The synthesis must
+    // therefore do its own escaping: each gap between placeholders passes
+    // through `escape_sentinels`, or the typed sequence here would be
+    // byte-identical to the real placeholder beside it and the splice could not
+    // tell them apart.
+    let doc = Parser::default().parse(concat!(
+        "[[a]]anchor\n",
+        "\n",
+        ".x\u{e000}0\u{e001}y <<a>>\n",
+        "== Section\n",
+        "\n",
+        "para\n",
+    ));
+
+    let Some(Block::Section(section)) = doc.child_blocks().nth(1) else {
+        panic!("expected a section block");
+    };
+
+    let title = section
+        .child_blocks()
+        .next()
+        .expect("expected the section's first child block")
+        .title()
+        .expect("expected the carried title");
+
+    assert_eq!(
+        title.matches("<a href=").count(),
+        1,
+        "the title wrote one cross-reference; got {title:?}"
+    );
+
+    assert_eq!(title, "x\u{e000}0\u{e001}y <a href=\"#a\">[a]</a>");
+}
+
+#[test]
 fn a_typed_marker_sentinel_does_not_truncate_a_section_reftext() {
     // The footnote-marker sentinels bracket a marker so it can be excised from
     // a section's reference text and auto-generated ID. A typed start sentinel
