@@ -8373,6 +8373,52 @@ Each phase is a reviewable unit with a clear exit gate.
   between a re-entry and a nested tree build, so retiring it is a deliberate step rather than a
   side effect of this one.
 
+  *Step 6 landed as (the seam has one path — the reentrancy guard and its warning transport
+  retired):* the second vestigial mechanism, and the one that takes a whole branch with it.
+
+  `Parser::in_inline_build` was the guard that kept a tree build from recursing into one: a
+  passthrough carrying its own substitution list re-entered `SubstitutionGroup::apply` for its body,
+  and that nested call had to take no tree seed. The authoritative-pass closure removed the re-entry
+  rather than the double pass — `passthrough_text` builds and folds the body's own tree through
+  `build_for_group` directly — so the guard has had nothing to guard against since.
+
+  Two independent readings agree, which is what made this safe to remove rather than merely plausible:
+
+  - **Structural.** No production code under `content::inline_builder` calls
+    `SubstitutionGroup::apply` at all. Every such call in that module is inside a `mod tests`.
+  - **Measured.** The guard was observed set for **0 of the 13,299** parses the suite reaches this
+    seam with.
+
+  So `tree_seed` is now unconditional (`let tree_seed = content.rendered.clone()`), and with the
+  guard gone the `None` arm of the match it fed is unreachable and goes too — **taking the
+  authoritative `run_pipeline` call site with it.** `run_pipeline` survives with exactly one caller,
+  the oracle, which is the separate increment.
+
+  *The warning transport goes in the same motion, both ends together.* `nested_authoritative_warnings`
+  existed because a nested authoritative pass raised real warnings inside the range a build discards
+  as incidental, so they had to be moved aside and handed back: the stash lived in the `None` arm,
+  the restore after the build. The seam's own comment insisted these two go whole rather than one at
+  a time, and they do — the branch that fed the stash is the branch being deleted, so the restore has
+  nothing left to restore. What remains after the build is now an unqualified truncate, with no
+  exception to explain.
+
+  *What checks it.* `a_passthrough_body_is_substituted_once_per_apply` is the test this increment
+  rests on, and it was written for exactly this. A stateless renderer cannot see a doubled pass — the
+  extra pass produced the same bytes — so it drives an `OrdinalRenderer` whose output depends on how
+  many times it is called. Under the old arrangement, dropping the guard moved each of its counts
+  from three to four and shifted the ordinal reaching the output (`a [3] b` became `a [4] b`). The
+  guard is dropped here and **the counts do not move**, which is the property standing in for the
+  guard now that the guard is gone. Anyone tempted to change the seed condition again should read
+  that test first.
+
+  The crate test that pinned the guard directly (added one increment earlier, when the retirement of
+  `build_inline_tree` left the guard as the branch's only remaining cause) goes with it: its subject
+  no longer exists.
+
+  Fold-parity audit: 62 distinct divergences on this branch and on the base alike — zero new, zero
+  closed. Coverage improves again rather than staying neutral: `content/substitution_group.rs` reaches
+  **100% of regions and 100% of lines**, its last missed region being the arm just deleted.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -10212,6 +10258,19 @@ Each phase is a reviewable unit with a clear exit gate.
        `in_inline_build` and `nested_authoritative_warnings` stay: they are the two ends of one
        mechanism, dead by measurement (0 of 13,299) but not by construction. See the step's own
        "landed as" note above.
+
+     - ✅ **the reentrancy guard and its warning transport retired — the seam has one path.**
+       `Parser::in_inline_build` guarded against a re-entry the authoritative-pass closure already
+       removed; two independent readings agree it is dead (no production code under
+       `content::inline_builder` calls `SubstitutionGroup::apply` — every such call there is inside a
+       `mod tests` — and the guard was set for 0 of 13,299 parses at the seam). `tree_seed` is now
+       unconditional, so the `None` arm is unreachable and goes, **taking the authoritative
+       `run_pipeline` call site with it**; `run_pipeline` survives with one caller, the oracle.
+       `nested_authoritative_warnings` goes in the same motion, both ends, since the branch that fed
+       its stash is the branch deleted. `a_passthrough_body_is_substituted_once_per_apply` — whose
+       `OrdinalRenderer` is what can see a doubled pass at all — is the check: its counts do not
+       move. Audit zero-new/zero-closed; `substitution_group.rs` reaches 100% regions and lines. See
+       the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

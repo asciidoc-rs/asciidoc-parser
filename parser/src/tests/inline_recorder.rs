@@ -1019,8 +1019,9 @@ fn a_passthrough_body_is_substituted_once_per_apply() {
     // there is no nested `apply` left to seed. The property this measures is
     // unchanged and still worth pinning — it is what says the closure did not
     // quietly add a pass — but it now holds *structurally* rather than by a
-    // guard, which is why removing `in_inline_build`'s check no longer moves
-    // these counts.
+    // guard. That is what let the guard be retired: `in_inline_build` is gone,
+    // and these counts did not move. **This test is the check on that**, which
+    // is why it is worth reading before touching the seed condition again.
     //
     // Nothing stateless could see the difference either way: the extra pass
     // produced the same bytes. A *stateful* renderer can, which is what
@@ -1094,42 +1095,6 @@ fn inline_tree_is_built_by_default() {
     assert!(
         !first_simple_inlines(&doc).is_empty(),
         "every parse must build the inline tree"
-    );
-}
-
-#[test]
-fn a_pass_under_the_reentrancy_guard_builds_no_tree() {
-    // The branch the inversion left behind, and the one reason it still exists.
-    //
-    // Since the inversion the seam sends `run_pipeline` to a *clone* whenever a
-    // tree is being built, and to the real parser otherwise. "Otherwise" had two
-    // causes: a parse configured to build no tree at all, and a passthrough body
-    // re-entered from inside a build. The first is gone — `with_inline_tree` is
-    // retired, every parse builds the tree, and the `build_inline_tree` field
-    // that outlived that switch is retired with it. What is left is the
-    // reentrancy guard, and its contract is this: a pass reaching the seam under
-    // it builds no tree of its own.
-    //
-    // Only that half is asserted here. The warning half belonged to the cause
-    // that is gone: a *tree-less parse* had to keep the string pipeline's
-    // warnings where they were raised, because nothing would hand them back,
-    // whereas a pass under this guard stashes them in
-    // `nested_authoritative_warnings` for the enclosing build to restore. That
-    // is correct precisely because the guard is only ever set by a build — so
-    // pinning it from a test that sets the guard with no build around it would
-    // assert the behavior of a state production cannot construct. Setting the
-    // guard directly is still the only way in (`in_inline_build` is true for 0
-    // of the 13,299 parses the suite reaches this seam with), which is why the
-    // branch is worth pinning at all rather than leaving to be assumed.
-    let mut parser = Parser::default();
-
-    parser.in_inline_build.set(true);
-
-    let doc = parser.parse("A paragraph with *bold* in it.");
-
-    assert!(
-        first_simple_inlines(&doc).is_empty(),
-        "a pass under the reentrancy guard must build no tree"
     );
 }
 

@@ -499,45 +499,6 @@ pub struct Parser {
     /// tree to replay from. It disappears when step 6 takes the string pipeline
     /// off the production path.
     pub(crate) suppress_recognition_side_effects: std::cell::Cell<bool>,
-
-    /// Whether an inline-tree build is already in progress on *this* parser —
-    /// the guard that keeps a build from recursing into building a tree of its
-    /// own.
-    ///
-    /// A passthrough carrying its own substitution list re-enters
-    /// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup) for its
-    /// body while the builder is running (via `passthrough_text`), and that
-    /// nested content needs no tree.
-    ///
-    /// This used to ride on a `build_inline_tree` configuration field, which
-    /// the seam could clear because the parser driving the build was an owned
-    /// clone. It is the **real** parser now, held by shared reference, so the
-    /// guard needs a cell of its own — and once the `with_inline_tree` opt-in
-    /// was retired, configuration had no question left to answer (every parse
-    /// builds the tree) while reentrancy still did. That field is gone; this
-    /// cell is the whole of what the seam reads.
-    pub(crate) in_inline_build: std::cell::Cell<bool>,
-
-    /// Substitution warnings raised by an **authoritative** pass that ran
-    /// *inside* an inline-tree build, held aside so the build's own blanket
-    /// discard cannot eat them.
-    ///
-    /// A build discards everything it records into the substitution-warning
-    /// buffer, because a build's deliberate diagnostics go through
-    /// [`record_builder_diagnostic`](Self::record_builder_diagnostic) and what
-    /// reaches the other buffer is incidental — an `Attrlist` parsed out of a
-    /// match string, warning at an offset that is not a position in the
-    /// document source. One thing inside that window is *not* incidental: the
-    /// re-entrant `SubstitutionGroup::apply` a passthrough body gets, which
-    /// takes no tree seed and so is that body's authoritative pass. Its
-    /// warnings are real, and they are moved here the moment it finishes, out
-    /// of the range the enclosing build will truncate; the seam hands them back
-    /// afterwards.
-    ///
-    /// A single high-water mark could not do this: incidental and authoritative
-    /// warnings interleave within one build, so the range to discard is not a
-    /// suffix.
-    pub(crate) nested_authoritative_warnings: RefCell<Vec<DeferredWarning>>,
 }
 
 /// A warning recorded in a form that does not borrow the source so it can live
@@ -654,8 +615,6 @@ impl Default for Parser {
             input_mtime: None,
             datetime_context: RefCell::new(None),
             suppress_recognition_side_effects: std::cell::Cell::new(false),
-            in_inline_build: std::cell::Cell::new(false),
-            nested_authoritative_warnings: RefCell::new(vec![]),
         }
     }
 }

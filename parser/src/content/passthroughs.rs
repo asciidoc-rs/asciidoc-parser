@@ -1052,10 +1052,11 @@ mod tests {
         //
         // Before the authoritative-pass closure the route was different — the
         // body re-entered `SubstitutionGroup::apply`, whose string pipeline
-        // raised the warning into the discarded range, and
-        // `Parser::nested_authoritative_warnings` carried it back out. Both
-        // routes surface the same warning at the same location, which is what
-        // this test has always asserted and still does.
+        // raised the warning into the discarded range, and a
+        // `nested_authoritative_warnings` buffer on the `Parser` carried it
+        // back out. That buffer is retired along with the re-entry it existed
+        // for. Both routes surfaced the same warning at the same location,
+        // which is what this test has always asserted and still does.
         for (source, mode) in [
             ("pass:a[{missing}]", "warn"),
             ("pass:a[{missing}]", "drop-line"),
