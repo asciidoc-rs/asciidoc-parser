@@ -1005,26 +1005,30 @@ fn renderer_calls_while_applying(source: &str) -> usize {
 
 #[test]
 fn a_passthrough_body_is_substituted_once_per_apply() {
-    // `Parser::in_inline_build`, pinned.
+    // A passthrough body reaches the renderer exactly once per `apply`,
+    // pinned.
     //
-    // A passthrough carrying its own substitution list re-enters
-    // `SubstitutionGroup::apply` for its body, and that re-entry happens from
-    // *inside* the build now that the build holds the real parser. Without the
-    // guard the nested call takes a tree seed of its own, so the body is
-    // substituted a second time — once by its own string pipeline and once by
-    // its own builder — where before the inversion the seam cleared
-    // `build_inline_tree` on the owned clone to stop exactly that.
+    // This began as the guard on `Parser::in_inline_build`: a passthrough
+    // carrying its own substitution list re-entered `SubstitutionGroup::apply`
+    // for its body, and without the guard that nested call took a tree seed of
+    // its own, substituting the body twice — once by its string pipeline and
+    // once by its builder.
     //
-    // Nothing in the suite noticed: the extra pass produces the same bytes, so
-    // a stateless renderer cannot tell. A *stateful* one can, and that is the
-    // whole point — the branch already uses `OrdinalRenderer` to measure
-    // "unobservable" for the build itself. Removing the guard takes each count
-    // below from three to four, and shifts the ordinal that reaches the output
-    // (`a [3] b` becomes `a [4] b`) — a real output change for any backend
-    // whose renderer carries state.
+    // The authoritative-pass closure removed the re-entry rather than the
+    // double pass: `passthrough_text` builds and folds the body's own tree, so
+    // there is no nested `apply` left to seed. The property this measures is
+    // unchanged and still worth pinning — it is what says the closure did not
+    // quietly add a pass — but it now holds *structurally* rather than by a
+    // guard, which is why removing `in_inline_build`'s check no longer moves
+    // these counts.
     //
-    // The exact number is not the claim; that the three agree, and that
-    // dropping the guard moves all three together, is.
+    // Nothing stateless could see the difference either way: the extra pass
+    // produced the same bytes. A *stateful* renderer can, which is what
+    // `OrdinalRenderer` is for — under the old arrangement, dropping the guard
+    // took each count below from three to four and shifted the ordinal
+    // reaching the output (`a [3] b` became `a [4] b`).
+    //
+    // The exact number is not the claim; that the three agree is.
     for source in ["pass:c[a < b]", "pass:c,q[*a < b*]", "stem:[x < y]"] {
         assert_eq!(
             renderer_calls_while_applying(source),
@@ -3014,4 +3018,64 @@ fn resolved_href_in(nodes: &[InlineNode<'_>]) -> Option<String> {
         .find(|r| r.variant == RefVariant::Xref)
         .and_then(|r| r.resolved)
         .map(|resolved| resolved.href)
+}
+
+#[test]
+fn a_passthrough_body_renders_under_every_order_its_own_list_can_name() {
+    // The capability the authoritative-pass closure rests on, pinned directly.
+    //
+    // `passthrough_text` used to hand the body to the string pipeline, which
+    // runs a resolved step list in the author's own order. It builds the body's
+    // own tree now, so the claim that has to hold is that
+    // `build_for_group` honors that order too — including the orders no
+    // built-in group has, where the escaping step comes *after* a step that
+    // already produced markup.
+    //
+    // That is not hypothetical: sweeping the suite, a passthrough body reaches
+    // its rendering under fifteen distinct `Custom` spellings, and
+    // `Custom([Quotes, SpecialCharacters])` and
+    // `Custom([AttributeReferences, Quotes])` are among them. The fixtures
+    // below name both orders of each pair explicitly, so a builder that
+    // silently normalized to the *normal* order (specialcharacters first)
+    // would fail here rather than in whichever corpus happened to carry one.
+    let parser = Parser::default().with_intrinsic_attribute(
+        "tag",
+        "<b>bold</b>",
+        crate::parser::ModificationContext::Anywhere,
+    );
+
+    for (source, expected) in [
+        // `c` alone, and `q` alone — the single-step controls.
+        ("pass:c[a < b]", "a &lt; b"),
+        ("pass:q[*x* &]", "<strong>x</strong> &"),
+        // Both orders of the escaping/quotes pair. `c,q` escapes first, so the
+        // `<` the author wrote is an entity by the time quotes runs; `q,c`
+        // runs quotes first and then escapes what it produced, which is why
+        // the `<strong>` tags come out as entities.
+        ("pass:c,q[*x* < y]", "<strong>x</strong> &lt; y"),
+        ("pass:q,c[*x* < y]", "&lt;strong&gt;x&lt;/strong&gt; &lt; y"),
+        // Both orders of the attributes/quotes pair. With `a` first the
+        // expanded value is present when quotes runs; the expansion carries
+        // markup either way, and neither order escapes it since `c` is absent.
+        (
+            "pass:a,q[{tag} and *x*]",
+            "<b>bold</b> and <strong>x</strong>",
+        ),
+        (
+            "pass:q,a[*x* and {tag}]",
+            "<strong>x</strong> and <b>bold</b>",
+        ),
+        // Attributes with escaping after it: the spliced value is escaped like
+        // any other text, which is the case `SplicedSpecials` exists for.
+        ("pass:a,c[{tag}]", "&lt;b&gt;bold&lt;/b&gt;"),
+        // And escaping before it, where the spliced value is left alone.
+        ("pass:c,a[{tag} < x]", "<b>bold</b> &lt; x"),
+        // The empty list, which renders the body untouched.
+        ("pass:[]", ""),
+    ] {
+        let mut content = crate::content::Content::from(crate::Span::new(source));
+        crate::content::SubstitutionGroup::Normal.apply(&mut content, &parser, None);
+
+        assert_eq!(content.rendered_str(), expected, "for {source:?}");
+    }
 }

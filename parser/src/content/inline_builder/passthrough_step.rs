@@ -11,7 +11,7 @@ use super::{
 };
 use crate::{
     Parser, Span,
-    content::{Content, INLINE_PASS, INLINE_PASS_MACRO, SubstitutionGroup},
+    content::{INLINE_PASS, INLINE_PASS_MACRO, SubstitutionGroup},
     inlines::{InlineNode, PassthroughWrapper, RawForm, RawOrigin, SpanForm, StyleVariant, Styled},
     strings::CowStr,
 };
@@ -893,9 +893,10 @@ fn build_passthrough_node<'src>(
     //
     // That opacity is also why the explicit-list form is the one place `value`
     // is not the author's own bytes, and so the one place the node records a
-    // `source_text`: an arbitrary group needs the substitution pipeline, which
-    // a fold has no `Parser` to reach, so the body is substituted here and the
-    // input kept beside the result.
+    // `source_text`. Rendering an arbitrary group needs a `Parser` — to build
+    // the body's own tree under that group (`passthrough_text`) — and a fold
+    // takes a renderer and a `RenderContext` rather than a `Parser`, so the
+    // body is rendered here and the input kept beside the result.
     let (value, subs, source_text) = if let Some(subs_list) = caps.get(14) {
         let text = unescaped.as_deref().unwrap_or(raw);
         let (subs, invalid) = SubstitutionGroup::from_custom_string(None, subs_list.as_str());
@@ -1203,51 +1204,56 @@ fn apply_normal_subs<'src>(text: Span<'src>, parser: &Parser) -> Vec<InlineNode<
     super::build(text, parser, None)
 }
 
-/// Runs `text` through the real substitution pipeline under `subs`, returning
-/// the resulting owned string. Used to compute a [`Raw`](InlineNode::Raw)
-/// passthrough's `value` under [`SubstitutionGroup::Verbatim`] — mirroring
-/// `PassthroughRestoreReplacer`'s own `pass.subs.apply(…)` call in the string
-/// pipeline's restore step — so the result honors whatever
+/// Renders `text` under `subs` **through the tree**, returning the resulting
+/// owned string. Used to compute a [`Raw`](InlineNode::Raw) passthrough's
+/// `value` — for [`SubstitutionGroup::Verbatim`], for a `stem:` body, and for
+/// the explicit substitution list a `pass:c,q[…]` carries — so the result
+/// honors whatever
 /// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)
 /// `parser` carries rather than a hand-rolled, always-default escaping.
 ///
+/// **This is the authoritative-pass closure** (design §5.2's step 6). Until
+/// now this ran `subs.apply`, which re-entered
+/// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup) for the
+/// body; that re-entry took no tree seed (the `in_inline_build` guard), so its
+/// *string* pipeline was the body's authoritative pass. It was the last thing
+/// in production keeping `run_pipeline` alive, and the survey named it the
+/// only remaining blocker to the deletion that is not test-side.
+///
+/// It closes because [`build_for_group`](super::build_for_group) already runs
+/// **an arbitrary group's steps in that group's own order** — including a
+/// `Custom` order that puts the escaping step after a step that produced
+/// markup, which is what `flatten_prior_markup` and `SplicedSpecials` are for.
+/// So the body needs no string pipeline of its own: it is built as a tree and
+/// folded, exactly as every other content is, and the enclosing level goes on
+/// wrapping the result in one opaque `Raw` leaf.
+///
+/// *The obvious objection does not apply here, which is why this works.* A
+/// passthrough's body cannot be built as *nodes spliced into the enclosing
+/// level* — the enclosing [`build`](super::build) runs its own fixed normal
+/// order over that level, so any structural node the body's own resolved
+/// subset produced would be visited again by whichever steps come after, and
+/// a macro's display text is not idempotent under a second pass. That
+/// objection is about **splicing**, not about computing: folding the body's
+/// own tree to a string and wrapping it in a `Raw` leaf keeps it opaque to
+/// every later step, which is the same containment `subs.apply` bought.
+///
 /// `text` is a [`Span`] rather than a `&str` so that a warning this body's
 /// substitution records lands on the reference's **own** position in the
-/// document. A body carrying `AttributeReferences` (`pass:a[{missing}]`) is
-/// the case that matters: this call is that body's authoritative pass — no
-/// tree is seeded for it, so it is the one place its `attribute-missing`
-/// diagnostic is raised — and its warnings are carried out through
-/// `Parser::nested_authoritative_warnings` rather than discarded. Seeded from
-/// an unanchored `Span::new`, every one of them resolved to offset 0, however
-/// far into the document the passthrough sat.
-///
-/// The per-line spans are what make the location *precise* rather than merely
-/// in the right neighborhood: without them `apply_attributes` falls back to
-/// the whole-body span and every reference in the body reports at the body's
-/// start. They are built here the way block construction builds them (see
-/// [`Content::from_filtered_lines`](crate::content::Content::from_filtered_lines)),
-/// which is safe for a body that is not one: a retained span is only used when
-/// its text still equals the matched reference, so a body whose rendered lines
-/// have drifted from its source lines falls back rather than mislocating.
+/// document — the answer #1301 settled. It stays true through the tree: the
+/// span is the build's `location`, so the reference's node carries it and the
+/// diagnostic is raised against it. The per-line spans that call needed are
+/// gone with it; they existed because `apply_attributes` scanned a *string*
+/// and had only the whole-body span to fall back on, and a tree has each
+/// reference's own node instead.
 pub(super) fn passthrough_text(
     text: Span<'_>,
     subs: &SubstitutionGroup,
     parser: &Parser,
 ) -> String {
-    let lines: Vec<&str> = text.data().split('\n').collect();
-    let mut line_spans = Vec::with_capacity(lines.len());
-    let mut offset = 0;
+    let nodes = super::build_for_group(subs, CowStr::from(text.data()), text, parser, None);
 
-    for line in &lines {
-        line_spans.push(text.slice(offset..offset + line.len()));
-
-        // Advance past the line and the '\n' that `split` consumed.
-        offset += line.len() + 1;
-    }
-
-    let mut content = Content::from_filtered_lines(text, &lines, line_spans);
-    subs.apply(&mut content, parser, None);
-    content.rendered_str().to_string()
+    super::fold::fold_html(&nodes, &*parser.renderer, &parser.render_context())
 }
 
 /// Reports whether `c` is one of the three characters the special-characters
