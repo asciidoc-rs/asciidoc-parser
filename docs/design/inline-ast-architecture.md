@@ -8084,10 +8084,10 @@ Each phase is a reviewable unit with a clear exit gate.
     spelling. The visible shorthands carry their shown text as `children`, so a reference inside them
     is a node the collectors walk; the macro spelling's term comes back from an attribute-list parse
     instead, so the builder keeps it as a string and there is no node to derive a segment from. It is
-    the index-term family's own documented limitation, and
-    [`a_reference_inside_an_index_term_macro_keeps_its_documented_divergence`](../../parser/src/tests/inline_builder_xref_segment_parity.rs)
-    already says in as many words that the day the builder learns the macro spelling, that test fails
-    and the fixture moves into the parity corpus. This one closes like any other prep.
+    the index-term family's own documented limitation, and its own test said in as many words that the
+    day the builder learns the macro spelling, that test fails and the fixture moves into the parity
+    corpus. This one closes like any other prep — and did, in the increment that follows this survey,
+    exactly that way.
 
   - **A deliberate deferral, and not a gap at all.** The other four sources are the
     `xref:sec[a *b, c* d,role=hl]` shape (with a trailing period, and paired with a `<<a␄b>>`
@@ -8211,6 +8211,63 @@ Each phase is a reviewable unit with a clear exit gate.
   *What still defers* is the survey's list with items (1) and (2) struck: the `indexterm2:` gap, the
   **template**, then the oracle call, the test call sites and `run_pipeline`, the vestigial
   mechanisms, and the Strategy-A recorder with `inline_recorder`.
+
+  *Step 6 landed as (the `indexterm2:` gap — and the carve-out emptied):* the survey's item (1), the
+  last member of the `set_tree_xrefs` carve-out, and the increment that makes the carve-out itself
+  unreachable.
+
+  The gap was real and the family's own note had named it: an `indexterm2:[…]` shown term came back
+  from an attribute-list parse rather than from a range of the match string, so the builder kept it
+  as a **string** and built no subtree. A `<<b>>` inside it was never recognized at all — the term
+  computed to the escaped literal `&lt;&lt;b&gt;&gt;` — where the visible shorthand `((<<b>>))`
+  carries its shown text as `children` that the later macro families descend into.
+
+  *What made it closable is that the narrowing has a byte.* [`shown_macro_term`] already decides the
+  two cases by one test: an argument holding no `=` is not an attribute list, so it returns the
+  argument unchanged — the term *is* the whole shown range. Only with an `=` does it parse a list and
+  take the first positional attribute, `Coffee` out of `Coffee, region=Kona`, which is the value that
+  is not a range of the match string. The `None` arm beside it already tested the same byte. So the
+  fix is to carry `shown.children` exactly when the term was not narrowed by a list, and the family's
+  documented limitation narrows from "the macro spelling" to "the macro spelling *with an attribute
+  list*".
+
+  That distinction is not theoretical: passing the children through unconditionally was tried first
+  and `indexterm2:[Coffee, region=Kona]` folded to `Coffee, region=Kona` where the pipeline shows
+  `Coffee`. The original note was right about why, and the guard is what separates the halves.
+
+  *The carve-out is now empty.* Instrumenting `Content::set_tree_xrefs`'s carve-out branch across the
+  whole suite: it fired six times when the survey measured it, once after the deferral divergence
+  closed the four `xref:` rows, and **zero times now**. Both of its members are gone, so the branch
+  where "the tree holds fewer cross-references than the pipeline deferred, and the pipeline's whole
+  answer stands" is unreachable. Coverage does not flag it — `content.rs` sits at 4 missed regions and
+  0 missed lines either side — so this is recorded here rather than left for the deletion to
+  rediscover: the carve-out can go with `run_pipeline`, and the **template** is now the only thing
+  `set_tree_xrefs` still takes from the string pipeline's `deferred` state.
+
+  Audit: **62 rows against the baseline's 63, 0 new and 1 closed**, and the closed row is
+  `See indexterm2:[<<b>>] here.` — the tree now agreeing with the pipeline. The contrast with the
+  deferral divergence one increment earlier is the whole distinction between the two kinds of
+  carve-out member: there the pipeline was wrong and the divergence persisted while the tree's answer
+  went from absent to right; here the pipeline was right and the tree caught up, so the row simply
+  leaves. Coverage is diff-neutral (578 missed regions / 329 missed lines either side).
+
+  Three tests moved, each the one its own comment said would.
+  `a_reference_inside_an_index_term_macro_keeps_its_documented_divergence` failed with its own
+  message — "the macro spelling now yields a subtree; fold this into the parity corpus" — and its
+  fixture, plus a straddling one that pins the alignment, is now in
+  [`CORPUS`](../../parser/src/tests/inline_builder_xref_segment_parity.rs).
+  `a_later_family_inside_a_macro_spelling_term_is_a_documented_divergence` becomes
+  `…_is_parity_without_a_list`, with `a_macro_spelling_term_narrowed_by_a_list_keeps_its_documented_divergence`
+  holding the boundary the lift stops at. And
+  `an_index_term_macro_hiding_a_reference_keeps_the_string_pipelines_rendering` becomes
+  `…_folds_through_the_tree` — worth noting because it kept *passing* after the change while asserting
+  the carve-out was in effect: `collect_refs` does not walk an `IndexTerm`'s shown text, so its
+  "the tree holds no cross-reference node" check had gone vacuous. It now reads the term's own
+  `children`, which is where the node actually lives.
+
+  *What still defers:* the **template**, then the oracle call, the ~28 `apply_string_pipeline` test
+  call sites and `run_pipeline` itself, the vestigial mechanisms (now including the carve-out), and
+  the Strategy-A recorder with `inline_recorder`.
 
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
@@ -10006,6 +10063,25 @@ Each phase is a reviewable unit with a clear exit gate.
        went from absent to right, which is what an *intended* behavior change looks like under a bar
        written to catch unintended ones. Coverage neutral in total, improving where the dead code
        went. See the step's own "landed as" note above.
+
+     - ✅ **the `indexterm2:` gap — and the carve-out emptied.** The survey's item (1), the last
+       member of the `set_tree_xrefs` carve-out. An `indexterm2:[…]` shown term came back from an
+       attribute-list parse rather than a range of the match string, so the builder kept it as a
+       string and built no subtree — a `<<b>>` inside it computed to the escaped literal
+       `&lt;&lt;b&gt;&gt;` and was never recognized, where the shorthand `((<<b>>))` carries children
+       the later families descend into. What made it closable is that the narrowing has a byte:
+       `shown_macro_term` already returns its argument unchanged when it holds no `=`, so the term
+       *is* the whole shown range and the range's nodes describe the same text; only with an `=` does
+       a list narrow it to a first positional attribute. Carrying `shown.children` under exactly that
+       condition narrows the family's documented limitation from "the macro spelling" to "the macro
+       spelling with an attribute list" — and passing them through unconditionally was tried first,
+       folding `indexterm2:[Coffee, region=Kona]` to the whole bracket, which is what the original
+       note warned of. **The carve-out is now unreachable**: instrumented across the suite it fired
+       six times at the survey, once after the deferral divergence, and zero now, so it goes with
+       `run_pipeline` and the template is all `set_tree_xrefs` still takes from the pipeline. Audit:
+       62 rows against 63, 0 new and 1 closed — the pipeline was right here and the tree caught up,
+       the mirror image of the divergence increment before it. Coverage diff-neutral. See the step's
+       own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

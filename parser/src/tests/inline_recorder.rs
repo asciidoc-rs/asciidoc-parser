@@ -1546,26 +1546,22 @@ fn a_title_resolves_the_form_that_used_to_defer_on_its_own_path() {
     );
 }
 #[test]
-fn an_index_term_macro_hiding_a_reference_keeps_the_string_pipelines_rendering() {
-    // The carve-out's **other** shape, and the one no test reached before the
-    // deferred cross-references were read off the tree.
+fn an_index_term_macro_hiding_a_reference_folds_through_the_tree() {
+    // What used to be the carve-out's **other** shape, and is now the
+    // increment that emptied it.
     //
-    // `xref_mirror_is_skipped_when_the_tree_defers_a_reference_form` above
-    // covers a content whose tree holds *fewer* cross-references than the
-    // string pipeline deferred by one; this covers the case where it holds
-    // **none**, which takes a different branch of `Content::set_tree_xrefs` (an
-    // empty derived list, where that one has a short-by-one list) and is the
-    // shape that would silently clear the deferred state altogether. Its own
-    // family pins the recognition gap under `parse_deferred`
-    // (`a_reference_inside_an_index_term_macro_keeps_its_documented_divergence`);
-    // what was never crossed with it is a **resolved** parse, which is where
-    // the rendering is decided.
+    // `indexterm2:[…]`'s shown term came back from an attribute-list parse
+    // rather than from a range of the match string, so the builder kept it as a
+    // string and built no subtree — there was no node for the `<<b>>` inside
+    // it. The tree held *none* where the string pipeline deferred one, which
+    // took the empty-derived-list branch of `Content::set_tree_xrefs` and left
+    // the pipeline's whole answer standing.
     //
-    // `indexterm2:[…]`'s shown term comes back from an attribute-list parse
-    // rather than from a range of the match string, so the builder keeps it as
-    // a string and builds no subtree — there is no node for the `<<b>>` inside
-    // it. The string pipeline's answer therefore stands, placeholders and all,
-    // and the reference still resolves.
+    // An argument holding no `=` is not a list, so its term is the whole shown
+    // range and the range's nodes are carried now. The counts agree, the
+    // reference resolves through the fold, and this content is on the ordinary
+    // folded path — which is what the old test said would happen "the day the
+    // builder learns the macro spelling".
     let mut parser = Parser::default();
     let doc = parser.parse("[[b]]B target.\n\nSee indexterm2:[<<b>>] here.");
 
@@ -1573,7 +1569,7 @@ fn an_index_term_macro_hiding_a_reference_keeps_the_string_pipelines_rendering()
 
     assert!(
         rendered.iter().any(|s| s.contains(r##"<a href="#b">"##)),
-        "the carve-out must keep the string pipeline's resolved rendering: {rendered:?}"
+        "the reference did not resolve: {rendered:?}"
     );
 
     // And nothing leaks: a cleared deferred state would leave the raw
@@ -1585,17 +1581,32 @@ fn an_index_term_macro_hiding_a_reference_keeps_the_string_pipelines_rendering()
         "a placeholder sentinel reached the rendered output: {rendered:?}"
     );
 
-    // The tree holds no cross-reference node for it, which is *why* this
-    // content is on the carve-out path. Asserting it here keeps the test
-    // honest the day the builder learns the macro spelling: this fails, and
-    // the fixture graduates to the ordinary folded path.
-    let refs = collect_refs(&doc);
+    // The node the fold resolved against, asserted where it actually lives —
+    // inside the index term's own `children`. `collect_refs` walks the
+    // containers it knows, and an `IndexTerm`'s shown text is not one of them,
+    // so reading the tree through it here would pass whether or not the term
+    // carried anything.
+    let terms: Vec<_> = doc
+        .descendant_blocks()
+        .filter_map(|block| match block {
+            crate::blocks::Block::Simple(simple) => Some(simple.content()),
+            _ => None,
+        })
+        .flat_map(|content| content.inlines().to_vec())
+        .filter_map(|node| match node {
+            InlineNode::IndexTerm(term) => Some(term),
+            _ => None,
+        })
+        .collect();
+
     assert!(
-        refs.iter().all(|r| r.variant != RefVariant::Xref),
-        "the macro spelling now yields a node; this fixture should fold: {refs:?}"
+        terms.iter().any(|term| term
+            .children
+            .iter()
+            .any(|child| matches!(child, InlineNode::Ref(_)))),
+        "the macro spelling's term carries no reference node: {terms:?}"
     );
 }
-
 #[test]
 fn a_span_in_a_string_valued_xref_attribute_now_mirrors() {
     // The counterpart the increment *moved*: a rendered span reaching one of

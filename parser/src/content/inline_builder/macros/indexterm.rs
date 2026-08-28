@@ -564,19 +564,34 @@ fn build_indexterm_macro_match<'src>(
 
         let (terms, children, rendered_nonempty) = match shown.computed {
             Some(term) => {
+                // Whether an attribute list narrows the shown text is decided
+                // by the same byte [`shown_macro_term`] decides it by, and the
+                // same one the `None` arm below tests: an argument holding no
+                // `=` is not a list, so its term *is* the whole shown range.
+                //
+                // That is what makes the two forms separable, where this family
+                // used to keep the string alone for both. With a list, the
+                // shown term is the value [`Attrlist::parse`](Attrlist) returns
+                // for the first positional attribute — `Coffee` out of
+                // `Coffee, region=Kona` — which is not a range of this level's
+                // match string, so the nodes built from that range describe
+                // different text and must not be carried. Without one they
+                // describe exactly the same text, so they are carried and the
+                // later macro families descend into them as their own level,
+                // reaching what this spelling's shown text encloses just as the
+                // shorthand's does.
+                let narrowed_by_a_list = term.contains('=');
+
                 let term = shown_macro_term(term, parser);
                 let rendered_nonempty = !term.is_empty();
 
-                // The macro spelling keeps its shown text as a **string**
-                // alone. An attribute list's shown term is the value
-                // [`Attrlist::parse`](Attrlist) returns for its first
-                // positional attribute, which is not a range of this level's
-                // match string, so the nodes built from that range would not
-                // agree with it — and this family cannot tell the two cases
-                // apart before the list is parsed. So the later macro families
-                // still do not reach what *this* spelling's shown text
-                // encloses; the shorthand's own note records the boundary.
-                (vec![CowStr::from(term)], vec![], rendered_nonempty)
+                let children = if narrowed_by_a_list {
+                    vec![]
+                } else {
+                    shown.children
+                };
+
+                (vec![CowStr::from(term)], children, rendered_nonempty)
             }
 
             None => {
@@ -1539,29 +1554,55 @@ mod tests {
     }
 
     #[test]
-    fn a_later_family_inside_a_macro_spelling_term_is_a_documented_divergence() {
-        // The half the shorthand's lift does *not* reach. An
-        // `indexterm2:[…]` argument carrying an `=` shows only what
-        // [`Attrlist::parse`](Attrlist) returns for its first positional
-        // attribute, which is not a range of this level's match string — so
-        // the nodes built from that range would not agree with the shown
-        // string, and this family cannot tell the two cases apart before the
-        // list is parsed. It therefore keeps its shown text as a string alone,
-        // and the families that run after this one have no nodes to descend
-        // into.
+    fn a_later_family_inside_a_macro_spelling_term_is_parity_without_a_list() {
+        // The half the shorthand's lift did not reach, now reached — and the
+        // narrowing is what draws the line rather than the spelling.
         //
-        // Closing it needs the attribute-list narrowing itself expressed as a
-        // range of the match string, the way [`shown_term_range`] already
-        // expresses `trim` and the `see` strip — its own increment.
+        // An `indexterm2:[…]` argument holding no `=` is not an attribute list,
+        // so its shown term *is* the whole shown range and the nodes built from
+        // that range describe the same text. They are carried as `children`,
+        // and the families running after this one descend into them exactly as
+        // they do for the shorthand.
         for source in [
             r"indexterm2:[a term with a link:t.html[T\] inside] end",
             "indexterm2:[a term with https://t.example inside] end",
         ] {
             let nodes = build_src(Span::new(source));
-            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+
+            assert_eq!(
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                golden_macros(source),
+                "fold diverged from the string pipeline for {source:?}"
+            );
+
+            assert!(
+                nodes.iter().any(|n| matches!(n, InlineNode::IndexTerm(_))),
+                "expected the term to be recognized for {source:?}: {nodes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_macro_spelling_term_narrowed_by_a_list_keeps_its_documented_divergence() {
+        // The complement, and the boundary the lift above stops at. An argument
+        // holding an `=` *is* an attribute list, so the shown term is what
+        // [`Attrlist::parse`](Attrlist) returns for the first positional
+        // attribute — `Coffee` out of `Coffee, region=Kona`. That is not a
+        // range of this level's match string, so the range's nodes describe
+        // different text and cannot be carried; the term stays a string and the
+        // later families have nothing to descend into.
+        //
+        // Closing this needs the narrowing itself expressed as a range of the
+        // match string, the way [`shown_term_range`] already expresses `trim`
+        // and the `see` strip — its own increment.
+        for source in [
+            r"indexterm2:[a term with a link:t.html[T\] inside,region=Kona] end",
+            "indexterm2:[a term with https://t.example inside,region=Kona] end",
+        ] {
+            let nodes = build_src(Span::new(source));
 
             assert_ne!(
-                folded,
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
                 golden_macros(source),
                 "expected a divergence for {source:?}"
             );
@@ -1572,7 +1613,6 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn an_earlier_family_inside_a_visible_terms_shown_text_is_parity() {
         // The complement of the divergence above, and the reason it is drawn
