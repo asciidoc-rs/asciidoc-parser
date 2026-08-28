@@ -537,7 +537,11 @@ impl<'src> SectionBlock<'src> {
     /// and [`section_title_render_attributes`](Self::section_title_render_attributes)
     /// expose — the deferred cross-reference segments a heading carries, which
     /// the document-order title pass resolves.
-    #[cfg(test)]
+    ///
+    /// No longer test-only: that pass folds a heading's own defining footnotes
+    /// through [`Content::collect_own_folded_footnotes`], which wants the
+    /// content rather than the two halves, so that both passes which collect
+    /// folds ask for them the same way.
     pub(crate) fn section_title_content(&self) -> &Content<'src> {
         &self.section_title
     }

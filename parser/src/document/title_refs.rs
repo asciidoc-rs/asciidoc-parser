@@ -156,7 +156,7 @@ pub(crate) fn resolve_title_references<'src>(
     }
 
     let mut index = 0;
-    write_back(blocks, &memo, &mut index);
+    write_back(blocks, &memo, &mut index, renderer, warnings, parser);
 }
 
 /// Walks `blocks` in document order, collecting each section heading and block
@@ -228,7 +228,14 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
 /// this installs both views the resolution carries: the coordinated rendered
 /// string, and — mirrored into the title's inline tree — the resolved
 /// destinations of its cross-references.
-fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<Resolution>], index: &mut usize) {
+fn write_back<'src>(
+    blocks: &mut [Block<'src>],
+    memo: &[Option<Resolution>],
+    index: &mut usize,
+    renderer: &dyn InlineSubstitutionRenderer,
+    warnings: &mut ReferenceWarnings<'src>,
+    parser: &crate::Parser,
+) {
     for block in blocks.iter_mut() {
         if let Block::Section(section) = block {
             if section.section_title_deferred_parts().is_some() {
@@ -238,6 +245,17 @@ fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<Resolution>], ind
                         &resolution.block_ordered,
                         &resolution.footnote_ordered,
                     );
+
+                    // **After** the mirror, not before: a footnote defined in
+                    // this heading is folded from the heading's own subtree, and
+                    // that subtree only carries the destinations just resolved
+                    // once `mirror_section_title_tree_xrefs` has installed them.
+                    // The fold `compute` took above cannot serve — it ran on a
+                    // *clone* holding only the block-level list, because the real
+                    // tree is not reachable while the pass is still computing.
+                    section
+                        .section_title_content()
+                        .collect_own_folded_footnotes(renderer, parser, warnings);
                 }
                 *index += 1;
             }
@@ -250,11 +268,21 @@ fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<Resolution>], ind
                     &resolution.block_ordered,
                     &resolution.footnote_ordered,
                 );
+
+                // After the mirror, for the reason given in the section arm.
+                title.collect_own_folded_footnotes(renderer, parser, warnings);
             }
             *index += 1;
         }
 
-        write_back(block.child_blocks_mut(), memo, index);
+        write_back(
+            block.child_blocks_mut(),
+            memo,
+            index,
+            renderer,
+            warnings,
+            parser,
+        );
     }
 }
 
