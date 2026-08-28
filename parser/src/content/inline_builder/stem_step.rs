@@ -84,7 +84,7 @@ fn subs_are_local(subs: &SubstitutionGroup) -> bool {
 /// Recognizes inline STEM macros (`stem:[…]`, `asciimath:[…]`,
 /// `latexmath:[…]`), replacing each with a [`Stem`](InlineNode::Stem) leaf.
 ///
-/// STEM is an **implicit passthrough**: [`Passthroughs::extract_from`]
+/// STEM is an **implicit passthrough**: `Passthroughs::extract_from`
 /// extracts it last, after both passthrough-macro passes, *specifically so
 /// that a passthrough placeholder nested inside a STEM expression survives
 /// and is recursively restored* (its own doc comment). [`apply_stem`] mirrors
@@ -135,7 +135,6 @@ fn subs_are_local(subs: &SubstitutionGroup) -> bool {
 /// so no richer subtree is needed here. This step is **additive**: nothing
 /// is wired into the parse path.
 ///
-/// [`Passthroughs::extract_from`]: crate::content::passthroughs::Passthroughs::extract_from
 /// [`InlineStemMacroReplacer`]: crate::content::passthroughs
 pub(super) fn apply_stem<'src>(
     nodes: Vec<InlineNode<'src>>,

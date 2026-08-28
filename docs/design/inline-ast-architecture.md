@@ -8734,6 +8734,47 @@ Each phase is a reviewable unit with a clear exit gate.
   `finalize_deferred`), with the shared regexes and the two substitution steps the header/author
   machinery still runs in production (`SpecialCharacters`, `AttributeReferences`) staying behind.
 
+  *Step 6 landed as (the tail's first slice — the compiler-verified dead set, and the suppression
+  window closed):* item (6), cut where the compiler can vouch for every deletion: everything in
+  this slice was `#[allow(dead_code)]`-annotated vestigial or became unreachable the moment those
+  annotations came off, so stripping them and deleting what then failed to build *is* the
+  increment. Gone: the extraction/restore machinery (`Passthroughs`, `ExtractedPassthrough`, the
+  four replacers, `PASS_WITH_INDEX`); the sentinel escape window
+  (`Content::escape_sentinels`/`unescape_sentinels` — the module-level pair stays, the carried
+  title's template synthesis reads it); `finalize_deferred` and
+  `restore_deferred_xref_passthroughs`; the free-standing `substitute_attributes_in_text`; and
+  `suppress_recognition_side_effects` whole — measured again as a `Cell` nothing sets, so its
+  seven remaining guards were constant branches and their removal changes nothing by
+  construction. The `inline_builder` module's own crate-wide `#![allow(dead_code)]` goes too: the
+  fold and the side-effect replays it excused have been production since the cutover, and what
+  the allowance was actually hiding by the end was a leftover test helper.
+
+  *The upstream ports migrated rather than died.* Asciidoctor's `extract_passthroughs` tests
+  (`substitutions_test.rs`'s `passthroughs` mod) drove the extraction machinery directly.
+  Sixteen now read the production view instead — `Content::passthroughs()` off a parsed simple
+  block, exactly as the upstream tests read `@passthroughs` off `block_from_string` — and every
+  one passed on first run, because the view was already differentially pinned
+  (`inline_builder_passthrough_record_parity`). Two pin the restore pass itself, hand-planting
+  placeholder sentinels in source text; restoration has no analog — the tree folds a passthrough
+  body in place, it never re-splices a placeholder-bearing string — so they convert to
+  `non_normative!` with that reason recorded. The `free_standing_text` mod went whole with the
+  function it pinned.
+
+  *Coverage recovers on schedule.* Workspace missed regions 1,775 → 1,296 (`passthroughs.rs`
+  back to ~99%); the remaining mass is `macros.rs`'s replacers and the pipeline-only steps —
+  the tail's second slice. Two new tests pin the string macros step's now-unguarded warning
+  twins (the dangerous `link:` scheme rejection, `footnoteref:`'s deprecation and
+  invalid-reference pair) until that slice deletes the step they live in.
+
+  *What still defers:* the tail's second slice — the five pipeline-only `SubstitutionStep::apply`
+  arms and the string replacers behind them (`macros.rs`'s mass, `apply_quotes`,
+  `apply_character_replacements`, `apply_post_replacements`, `apply_callouts`), whose ~130
+  remaining direct-step test call sites (96 in `substitutions_test.rs` alone) migrate to the
+  tree the way this increment's sixteen did; the `from_tree: false` paths, the `EscapedForm`
+  split, and `set_deferred_xrefs` — reachable only from that machinery — go with it.
+  `SpecialCharacters` and `AttributeReferences` stay behind as before: `document/author.rs` runs
+  both in production through direct step calls.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -10677,6 +10718,20 @@ Each phase is a reviewable unit with a clear exit gate.
        unchanged. Coverage surfaces the vestigial machinery's uncovered mass (606 → 1,775 missed
        regions, all in the four files item (6) deletes). See the step's own "landed as" note
        above.
+
+     - ✅ **the tail's first slice: the compiler-verified dead set deleted, the suppression
+       window closed.** Item (6) cut along what the compiler can vouch for: the
+       `#[allow(dead_code)]` annotations came off and everything that then failed to build went —
+       the extraction/restore machinery (`Passthroughs`, `ExtractedPassthrough`, four replacers,
+       `PASS_WITH_INDEX`), the `Content` sentinel escape window, `finalize_deferred`,
+       `restore_deferred_xref_passthroughs`, `substitute_attributes_in_text`, and
+       `suppress_recognition_side_effects` whole (a `Cell` nothing sets; its seven guards were
+       constant branches). Sixteen upstream `extract_passthroughs` ports migrated to the
+       production `Content::passthroughs()` view and passed on first run; the two restore-pass
+       ports converted to `non_normative!` (restoration has no analog — the tree folds in
+       place). Coverage recovers 1,775 → 1,296 missed regions; what remains is the second
+       slice's (`macros.rs`'s replacers, the five pipeline-only step arms and their ~130
+       direct-step test call sites). See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

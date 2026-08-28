@@ -170,9 +170,9 @@ struct DeferredContent {
     /// document-derived byte escaped, every raw `U+E000 <index> U+E001` a real
     /// placeholder.
     ///
-    /// Two producers wrote one, and only one still runs. The string pipeline
-    /// captured its own through [`Content::finalize_deferred`], which now runs
-    /// nowhere but the unit tests that pin that vestigial machinery directly.
+    /// Two producers wrote one, and only one survives. The string pipeline
+    /// captured its own through its `finalize_deferred` step, deleted with the
+    /// pipeline (design §5.2 step 6's tail).
     /// The one content that *renders* from a template in production — a block
     /// title carried across a section heading, which travels through
     /// `Parser::pending_block_title` as an [`OwnedTitle`] because the parser it
@@ -580,11 +580,6 @@ impl<'src> Content<'src> {
     /// field).
     ///
     /// `Some` exactly for content carrying a deferred cross-reference.
-    // Consumed only by tests until the deferred-cross-reference sentinel
-    // system's retirement (design §4.2's second) folds at resolution time —
-    // the same staging the `inline_builder` module's fold and side effects
-    // are under.
-    #[allow(dead_code)]
     pub(crate) fn render_attributes(&self) -> Option<&ResolvedAttributes> {
         self.render_attributes.as_deref()
     }
@@ -835,39 +830,6 @@ impl<'src> Content<'src> {
         &self.inlines
     }
 
-    /// Escapes the reserved sentinel codepoints this content's *own text*
-    /// contains, so the substitution pipeline can tell its own in-band
-    /// sentinels from the document's text. See [`escape_sentinels`].
-    ///
-    /// Called once, before substitution begins; the matching
-    /// [`unescape_sentinels`](Self::unescape_sentinels) call restores them.
-    // Vestigial: the string pipeline's own machinery, unreachable from
-    // production since the oracle deletion and now exercised only by its own
-    // unit tests; the whole set goes together (design §5.2 step 6's tail).
-    #[allow(dead_code)]
-    pub(crate) fn escape_sentinels(&mut self) {
-        if let Cow::Owned(escaped) = escape_sentinels(self.rendered.as_ref()) {
-            self.rendered = escaped.into();
-        }
-    }
-
-    /// Restores the document's own sentinel codepoints in
-    /// [`rendered`](Self::rendered), reversing
-    /// [`escape_sentinels`](Self::escape_sentinels).
-    ///
-    /// The deferred template is deliberately left escaped: it is an internal
-    /// representation that is re-rendered (through [`render_template`], whose
-    /// callers unescape the result) each time references are resolved.
-    // Vestigial: the string pipeline's own machinery, unreachable from
-    // production since the oracle deletion and now exercised only by its own
-    // unit tests; the whole set goes together (design §5.2 step 6's tail).
-    #[allow(dead_code)]
-    pub(crate) fn unescape_sentinels(&mut self) {
-        if let Cow::Owned(unescaped) = unescape_sentinels(self.rendered.as_ref()) {
-            self.rendered = unescaped.into();
-        }
-    }
-
     /// Installs the inline AST built for this content by the single-pass
     /// builder (see [`inline_builder`](crate::content::inline_builder)).
     pub(crate) fn set_inlines(&mut self, inlines: Vec<InlineNode<'src>>) {
@@ -877,8 +839,9 @@ impl<'src> Content<'src> {
     /// Returns the deferred cross-reference template and segments, if this
     /// content carries any.
     ///
-    /// The template is the placeholder-bearing text captured by
-    /// [`finalize_deferred`](Self::finalize_deferred); the segments are the
+    /// The template is the placeholder-bearing text — synthesized from the
+    /// tree by [`carried_title_template`] for the one production content that
+    /// renders from one; the segments are the
     /// cross-references in placeholder order. Used by the document-order title
     /// resolution pass, which re-renders a title's cross-references with
     /// cross-title (including circular) coordination that the per-content
@@ -1003,53 +966,6 @@ impl<'src> Content<'src> {
         format!("{XREF_PLACEHOLDER_START}{index}{XREF_PLACEHOLDER_END}")
     }
 
-    /// Finalizes any deferred cross-references at the end of substitution.
-    ///
-    /// At this point [`Content::rendered`] holds the placeholder-bearing text;
-    /// it is captured as the template and `rendered` is rebuilt as the
-    /// unresolved fallback so it is immediately clean for callers that read it
-    /// before resolution.
-    // Vestigial: the string pipeline's own machinery, unreachable from
-    // production since the oracle deletion and now exercised only by its own
-    // unit tests; the whole set goes together (design §5.2 step 6's tail).
-    #[allow(dead_code)]
-    pub(crate) fn finalize_deferred(&mut self, renderer: &dyn InlineSubstitutionRenderer) {
-        let template = self.rendered.as_ref().to_string();
-
-        {
-            let Some(deferred) = self.deferred.as_mut() else {
-                return;
-            };
-
-            deferred.template = template;
-        }
-
-        self.rebuild_rendered(renderer);
-    }
-
-    /// Applies `restore` to the explicit text of every deferred
-    /// cross-reference.
-    ///
-    /// A deferred reference's text is captured out of the main rendered string
-    /// during macro substitution, so passthrough placeholders inside it are not
-    /// reached by the ordinary restore pass. This lets that pass reach them.
-    // Vestigial: the string pipeline's own machinery, unreachable from
-    // production since the oracle deletion and now exercised only by its own
-    // unit tests; the whole set goes together (design §5.2 step 6's tail).
-    #[allow(dead_code)]
-    pub(crate) fn restore_deferred_xref_passthroughs(
-        &mut self,
-        mut restore: impl FnMut(&mut String),
-    ) {
-        if let Some(deferred) = self.deferred.as_mut() {
-            for xref in &mut deferred.block {
-                if let Some(text) = xref.provided_text.as_mut() {
-                    restore(text);
-                }
-            }
-        }
-    }
-
     /// Resolves any deferred cross-references using `resolver`, then rebuilds
     /// the rendered text.
     ///
@@ -1077,12 +993,13 @@ impl<'src> Content<'src> {
             // `reports_unresolved` answers for either shape.
             // A tree content carries no template and never consults one —
             // `reports_unresolved` below short-circuits on `from_tree` — while
-            // a string-pipeline content reaches here with its template captured
-            // by the `finalize_deferred` at the end of the same `run_pipeline`
-            // call that recorded its list. The assert that used to pin that
-            // pairing went with the last test that could reach this on the
-            // string path; the invariant is the vestigial machinery's own now,
-            // held by its own unit tests until it is deleted whole.
+            // a string-pipeline content (a shape only `set_deferred_xrefs`'s
+            // remaining callers, the string macros step and its unit tests,
+            // can still build) reaches here with the template its producer
+            // captured. The assert that used to pin that pairing went with the
+            // last test that could reach this on the string path; the
+            // invariant is the vestigial machinery's own now, held by its own
+            // unit tests until it is deleted whole.
             let from_tree = deferred.from_tree;
             let template = deferred.template.clone();
 
@@ -1430,9 +1347,9 @@ impl<'src> Content<'src> {
             return;
         };
 
-        // A `deferred` content always reaches here with its template captured:
-        // `finalize_deferred` sets it at the end of the same `run_pipeline`
-        // call that recorded the list, and nothing reads it in between. An
+        // A `deferred` content always reaches here with its template captured
+        // — in production, the carried block title's, synthesized from its own
+        // tree at the hop (see `carried_title_template`). An
         // empty one here would blank the content, so catch that invariant break
         // in debug builds rather than let it render.
         debug_assert!(!deferred.template.is_empty());

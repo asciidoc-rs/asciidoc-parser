@@ -23,7 +23,7 @@ use crate::{
 /// and the later steps to refine.
 ///
 /// This is the **first** step [`build`](super::build) runs — mirroring
-/// [`Passthroughs::extract_from`](crate::content::passthroughs::Passthroughs::extract_from),
+/// `Passthroughs::extract_from`,
 /// which the string pipeline runs *before* its own step loop — so a
 /// passthrough's content is never touched by specialcharacters, quotes,
 /// replacements, or macros: it is a leaf, and every later step's

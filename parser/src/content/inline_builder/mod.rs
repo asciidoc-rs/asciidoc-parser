@@ -397,12 +397,6 @@
 //! [`Text`]: InlineNode::Text
 //! [`quote_subs`]: crate::content::quote_subs
 
-// The fold ([`fold_html`]) and the staged recognition side effects
-// ([`apply_macro_side_effects`] and its constituents) are consumed only by
-// tests until the authoritative-fold half of the cutover wires them into
-// `Content` (design §5.2, Phase 4 step 6).
-#![allow(dead_code)]
-
 mod attribute_refs;
 mod callouts;
 mod char_replacements;

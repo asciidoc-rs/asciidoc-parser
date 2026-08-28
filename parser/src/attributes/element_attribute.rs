@@ -107,7 +107,7 @@ impl<'src> ElementAttribute<'src> {
     /// influence how the list divides (`image:x.png[++a,b++]` is one
     /// positional whose value is `a,b`, not two). Restoring per *parsed value*
     /// reproduces that, exactly as
-    /// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)
+    /// `Passthroughs::restore_to`
     /// splices each body over whatever sentinel reached the rendered
     /// string.
     ///
@@ -792,10 +792,10 @@ fn is_shorthand_delimiter(c: char) -> bool {
 /// before it.
 ///
 /// The token spelling is the string pipeline's own passthrough sentinel (see
-/// [`Passthroughs`](crate::content::passthroughs::Passthroughs)), which is what
+/// `Passthroughs`), which is what
 /// makes this the faithful restore: a caller hands over the very text
 /// `Attrlist::parse` would have seen there, and each body lands where
-/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)
+/// `Passthroughs::restore_to`
 /// splices it.
 ///
 /// A run that is not a well-formed token, or whose index `bodies` does not

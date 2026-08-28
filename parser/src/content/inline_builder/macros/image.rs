@@ -358,7 +358,7 @@ pub(in crate::content::inline_builder) fn range_is_substitution_restorable(
 /// rather than reads: the placeholder's bytes are not the string pipeline's
 /// (its haystack holds the `\u{96}`*n*`\u{97}` sentinel there), but the
 /// masked construct's own rendered body **is** known at build time — it is
-/// what [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs) splices
+/// what `Passthroughs::restore_to` splices
 /// over the sentinel after the steps run — so a computed value that
 /// substitutes it for the placeholder (see
 /// [`restore_masked_passthroughs`](super::links))
@@ -427,7 +427,7 @@ pub(in crate::content::inline_builder) fn range_is_restorable(
 /// ([`Stem`](InlineNode::Stem)).
 ///
 /// These are exactly the two node kinds the *same* extraction pass
-/// ([`Passthroughs::extract_from`](crate::content::passthroughs::Passthroughs))
+/// (`Passthroughs::extract_from`)
 /// masks before any substitution step runs — STEM being an implicit
 /// passthrough, as [`Stem::value`](crate::inlines::Stem) documents — so each
 /// stands in the string pipeline's haystack as one `\u{96}`*n*`\u{97}` sentinel
@@ -459,7 +459,7 @@ pub(in crate::content::inline_builder) fn node_is_restorable(node: &InlineNode<'
 }
 
 /// The bytes a [`node_is_restorable`] node restores to — the very text
-/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)
+/// `Passthroughs::restore_to`
 /// splices over the string pipeline's own sentinel — or `None` for any other
 /// node.
 ///
@@ -773,7 +773,7 @@ fn widen_masked_pieces(
 /// [`node_is_restorable`] piece's placeholder becomes the same
 /// sentinel-shaped token, the arithmetic runs, and each *surviving* token is
 /// restored with its own node's body ([`restorable_body`]) — index-keyed, as
-/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs) is,
+/// `Passthroughs::restore_to` is,
 /// so a token the basename cut dropped (a masked construct wholly inside a
 /// directory prefix or an extension) does not shift the ones that survive. A
 /// token survives whole or is dropped whole: both of the cut points
@@ -984,7 +984,7 @@ pub(in crate::content::inline_builder) enum Tokened {
 /// on the way back out ([`Attrlist::into_owned_restoring`]) — the parse can
 /// drop a token (a blank slot, a value the split discards) without shifting
 /// the ones that survive, exactly as
-/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs) is
+/// `Passthroughs::restore_to` is
 /// unshifted by a sentinel that never reached the rendered string.
 ///
 /// Shared by the two families whose bracket comes back from a parse — the
