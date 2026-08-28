@@ -313,8 +313,13 @@ impl<'src> SectionBlock<'src> {
         if !discrete && let Some(title) = metadata.title.as_ref() {
             // The carried title travels as an owned snapshot, keeping any
             // deferred cross-references so an embedded `<<id>>` still resolves
-            // for the claiming block once the catalog is complete.
-            parser.pending_block_title = Some(title.to_owned_title());
+            // for the claiming block once the catalog is complete. The snapshot
+            // is taken here, while the title's inline tree is still alive: its
+            // placeholder template is synthesized from that tree (see
+            // `Content::to_owned_title`), which the restored content — whose
+            // nodes cannot cross this hop — renders from.
+            let owned_title = title.to_owned_title(parser);
+            parser.pending_block_title = Some(owned_title);
         }
 
         let mut maw_blocks = parse_blocks_until(

@@ -1354,6 +1354,95 @@ mod xrefs_in_titles {
     }
 
     #[test]
+    fn two_references_in_a_carried_title_resolve_in_order() {
+        // The carried title's placeholder template is synthesized from its own
+        // inline tree at the hop (see `Content::to_owned_title`), so the
+        // placeholder indices and the segment list are built in one walk and
+        // must line up: the first reference takes the first segment's
+        // destination, the second the second's.
+        let doc = Parser::default()
+            .parse(".See <<goal>> then <<par>>\n== Section\n\n[[par]]para\n\n[#goal]\n== Goal");
+
+        let section = crate::tests::prelude::first_section(&doc);
+        let para = section
+            .child_blocks()
+            .next()
+            .expect("expected the section's first child block");
+
+        assert_eq!(
+            para.title(),
+            Some(r##"See <a href="#goal">Goal</a> then <a href="#par">[par]</a>"##)
+        );
+    }
+
+    #[test]
+    fn a_title_restashed_past_an_empty_section_keeps_its_template() {
+        // A carried title that finds its section empty is re-stashed by the
+        // sibling section that follows, for that section's own first block. The
+        // re-stash runs `to_owned_title` on the *restored* content — inline
+        // nodes already dropped — so it must keep the template the first hop
+        // synthesized rather than synthesize from the empty tree, or the
+        // reference would be lost.
+        let doc = Parser::default().parse(".See <<goal>>\n== Empty\n\n[#goal]\n== Goal\n\npara");
+
+        let sections: Vec<_> = doc
+            .child_blocks()
+            .filter_map(|block| {
+                if let crate::blocks::Block::Section(section) = block {
+                    Some(section)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let para = sections[1]
+            .child_blocks()
+            .next()
+            .expect("expected the second section's first child block");
+
+        assert_eq!(para.title(), Some(r##"See <a href="#goal">Goal</a>"##));
+    }
+
+    #[test]
+    fn a_reference_nested_in_a_span_of_a_carried_title_stays_its_fallback() {
+        // A documented boundary of the tree-synthesized carried-title template
+        // (see `carried_title_template`): the synthesis reads the tree's
+        // top-level nodes, so a cross-reference *nested* inside another
+        // construct — here a styled span — folds with its enclosing node as
+        // template text rather than contributing a placeholder. It is baked as
+        // its unresolved fallback (the derived `#goal` destination with the
+        // bracketed text) instead of splicing the target's reference text, and
+        // — having no segment — an unresolvable one is not reported either.
+        //
+        // The string pipeline's template did splice these (its placeholders sat
+        // inside the rendered markup), so this narrows behavior for a shape no
+        // golden source exercises: nothing survives the `'src`-erasing hop to
+        // do better. If the synthesis ever learns nested placeholders, this
+        // fixture moves up to the resolved reading `See <strong>x
+        // <a href="#goal">Goal</a></strong> done`.
+        let doc = Parser::default()
+            .parse(".See *x <<goal>>* done\n== Section\n\npara\n\n[#goal]\n== Goal");
+
+        let section = crate::tests::prelude::first_section(&doc);
+        let para = section
+            .child_blocks()
+            .next()
+            .expect("expected the section's first child block");
+
+        assert_eq!(
+            para.title(),
+            Some(r##"See <strong>x <a href="#goal">[goal]</a></strong> done"##)
+        );
+
+        // The complement: an unresolvable nested target raises no warning,
+        // because the synthesis captured no segment for it.
+        let doc = Parser::default().parse(".See *x <<nowhere>>* done\n== Section\n\npara");
+
+        assert_eq!(doc.warnings().count(), 0);
+    }
+
+    #[test]
     fn resolver_chosen_text_wins_over_the_local_title() {
         // A caller-supplied resolver may resolve a target to its local `#id`
         // destination while choosing its own display text (e.g. a curated
