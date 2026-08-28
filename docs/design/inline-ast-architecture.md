@@ -8123,11 +8123,21 @@ Each phase is a reviewable unit with a clear exit gate.
   So the work this turns into is *removing* a deferral rather than adding a recognition:
   [`tokened_split_agrees`](../../parser/src/content/inline_builder/macros/mod.rs) exists to make the
   tree decline where the two parses disagree, and this class is exactly where declining is now the
-  wrong answer. What has to be settled when it lands is the **scope** of the divergence — whether
-  every disagreement between the two splits is now the tree's to win, or only the sub-class where the
-  replacer's own split produces unbalanced markup — and the audit's own divergence set is what sizes
-  that, since these four rows are already in it. The frozen corpora record the choice rather than
-  adjudicate it, so each is re-recorded to the tree's answer as the change lands.
+  wrong answer.
+
+  *The scope question that raises answers itself empirically.* Logging every decline
+  `tokened_split_agrees` makes across the whole suite finds **two distinct cases**, and they are the
+  same shape twice: `a ␖ d,role=hl` against `a <strong>b, c</strong> d,role=hl`, and the identical
+  pair with `` `b, c` `` in place of `*b, c*` — two attributes on the tokened side against three on
+  the restored one, every time. So "narrow the decline to the unbalanced-markup class" and "remove
+  the decline" are the same change against this suite; there is no second sub-class to preserve it
+  for.
+
+  That is evidence about the corpus rather than about the language, so the *principle* is what should
+  be written down when it lands: a bracket split must not read bytes that a markup-producing step
+  introduced. The tokened side is exactly the side that holds to it, which is why it is the reading
+  the divergence keeps. The frozen corpora record the choice rather than adjudicate it, so each is
+  re-recorded to the tree's answer as the change lands.
 
   *So the decomposition, in dependency order:* (1) the `indexterm2:` gap, the one closable member of
   the carve-out; (2) **the deferral divergence above**, now decided and so ordinary work — narrowing
