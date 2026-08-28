@@ -741,7 +741,7 @@ mod tests {
     use super::{build, build_from_value};
     use crate::{
         Parser, Span,
-        content::{Content, inline_builder::fold_html},
+        content::inline_builder::fold_html,
         inlines::{InlineNode, RawOrigin},
         parser::{HtmlSubstitutionRenderer, ModificationContext},
         strings::CowStr,
@@ -840,14 +840,6 @@ mod tests {
         );
     }
 
-    /// Runs `source` through the real, public `SubstitutionGroup::Normal`
-    /// pipeline, exactly as a real block's content is substituted in
-    /// production.
-    fn golden(source: &str, _parser: &Parser) -> String {
-        let content = Content::from(Span::new(source));
-        content.rendered_str().to_string()
-    }
-
     /// Builds and folds the single-pass tree for `source` — the same [`build`]
     /// a real cutover would call — through the built-in HTML renderer.
     fn built(source: &str, parser: &Parser) -> String {
@@ -859,31 +851,29 @@ mod tests {
         )
     }
 
-    /// Asserts that `source` folds identically whether taken through the real
-    /// production pipeline or through the single-pass builder, under a
+    /// Asserts that the single-pass builder's fold of `source` matches the
+    /// frozen recording of what the string pipeline rendered it as, under a
     /// document configured by `configure`.
     ///
-    /// `configure` is called once per side rather than sharing one `Parser`
-    /// between them: `golden`'s `SubstitutionGroup::apply` and `built`'s
-    /// `build` each advance document counters (footnote numbers,
-    /// `{counter:...}` values) for real, so sharing a parser would double
-    /// them. Two independently-built parsers, identically configured, see
-    /// the same fixture in the same left-to-right order and so stay in
-    /// lockstep — the same two-independent-parsers discipline this module's
-    /// other differential corpora already use (see e.g. `footnotes.rs`).
+    /// `configure` builds the parser here rather than the caller passing one
+    /// in — a signature kept from when this assertion also ran the string
+    /// pipeline and each side needed its own identically-configured document
+    /// (both sides advanced footnote numbers and `{counter:...}` values for
+    /// real, so sharing one parser would have doubled them). Only [`built`]'s
+    /// side runs today, but every call site passes a constructor, so the
+    /// shape stays.
     fn assert_parity_with(source: &str, configure: impl Fn() -> Parser) {
         assert_parity_in("whole_pipeline", source, configure);
     }
 
-    /// [`assert_parity_with`], recording into a named corpus.
+    /// [`assert_parity_with`], reading a named corpus.
     ///
-    /// The comparison is not `golden` against `built` directly: both are handed
-    /// to [`snapshot::assert_recorded`], which checks the **fold** against a
-    /// checked-in recording of the known-good bytes and the **golden** against
-    /// that same recording. The fold is never what a recording is written from,
-    /// which is what keeps this corpus honest once `rendered_html()` becomes a
-    /// fold of the tree and `golden` stops being an independent construction
-    /// (design §5.2 Phase 4, step 6 — see [`snapshot`](super::snapshot)).
+    /// The fold is handed to [`snapshot::assert_recorded`], which checks it
+    /// against a checked-in recording of the known-good bytes the string
+    /// pipeline produced while it existed. The fold is never what a recording
+    /// is written from, which is what keeps this corpus honest once
+    /// `rendered_html()` becomes a fold of the tree (design §5.2 Phase 4,
+    /// step 6 — see [`snapshot`](super::snapshot)).
     fn assert_parity_in(corpus: &str, source: &str, configure: impl Fn() -> Parser) {
         super::snapshot::assert_recorded(corpus, source, &built(source, &configure()));
     }
