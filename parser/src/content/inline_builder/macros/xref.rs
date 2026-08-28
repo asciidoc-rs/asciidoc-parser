@@ -9,8 +9,8 @@ use super::{
     ComputedSpecials, MacroMatch, MacroMatchKind,
     image::{range_has_no_opaque_piece, range_is_substitution_restorable},
     links::restore_masked_passthroughs,
-    macro_text_children, rebuild_macro_level, restored_value_children, tokened_split_agrees,
-    tokened_text, untranslated_value,
+    macro_text_children, rebuild_macro_level, restored_value_children, tokened_text,
+    untranslated_value,
 };
 use crate::{
     Parser, Span,
@@ -405,9 +405,6 @@ fn find_xref_matches<'src>(
 /// [`range_has_no_opaque_piece`] has already refused, so the tokening below
 /// always produces at least one token; a text carrying none would answer
 /// `true` here, which is what that caller already decided for itself.
-///
-/// It also refuses a match whose two readings disagree about its extent — see
-/// [`tokened_split_agrees`].
 fn attrlist_text_carries_its_opaque_pieces(
     raw_text: &str,
     text_range: &std::ops::Range<usize>,
@@ -421,13 +418,7 @@ fn attrlist_text_carries_its_opaque_pieces(
         return false;
     }
 
-    let (tokened, carried) = tokened_text(&raw_text.replace('\n', " "), text_range, nodes, pieces);
-
-    // The split must land where the string replacer's own parse of the markup
-    // lands — otherwise the two disagree about the match's very extent.
-    if !tokened_split_agrees(&tokened, &carried, parser) {
-        return false;
-    }
+    let (tokened, _carried) = tokened_text(&raw_text.replace('\n', " "), text_range, nodes, pieces);
 
     let attrlist = Attrlist::parse(Span::new(&tokened), parser, AttrlistContext::Inline)
         .item
@@ -1990,37 +1981,72 @@ mod tests {
     }
 
     #[test]
-    fn an_attribute_list_delimiter_inside_a_span_defers_the_match() {
-        // The token is what makes the split reproducible — a bracket's `,` /
-        // `=` / `"` are the only bytes it reads, and a placeholder carries
-        // none of them. But the string replacer splits over the piece's own
-        // **markup**, which may: `a *b, c* d` renders `a <strong>b, c</strong>
-        // d`, whose list splits at the comma *inside* the tag, ending the
-        // anchor there. Where the two readings differ about the match's own
-        // extent the match is **deferred** rather than recognized, so the tree
-        // never claims a construct the rendered document does not agree with.
-        for source in [
-            "xref:sec[a *b, c* d,role=hl]",
-            "xref:sec[a `b, c` d,role=hl]",
+    fn an_attribute_list_delimiter_inside_a_span_is_the_trees_to_read() {
+        // The deferral divergence (design §5.2's step 6), decided in favor of
+        // the tree.
+        //
+        // A token carries none of the `,` / `=` / `"` a bracket split reads, so
+        // the tree's split sees `a ␖ d,role=hl` — a display text and a role.
+        // The string replacer splits over the piece's own **markup**: `a *b, c*
+        // d` renders `a <strong>b, c</strong> d`, whose list splits at the
+        // comma *inside the tag*, ending the anchor at `a <strong>b` and
+        // leaving it unbalanced. Asciidoctor does the same.
+        //
+        // This used to defer where the two readings disagreed, which made the
+        // presence of a comma inside a span decide whether the macro was
+        // recognized **at all** — the fixtures below came out as literal text.
+        // Emitting the replacer's split is the wrong answer and reproducing it
+        // was never on the table, so the tree's reading stands and this crate
+        // diverges from both the replacer and Asciidoctor here.
+        for (source, expected) in [
+            (
+                "xref:sec[a *b, c* d,role=hl]",
+                "<a href=\"#sec\" class=\"hl\">a <strong>b, c</strong> d</a>",
+            ),
+            (
+                "xref:sec[a `b, c` d,role=hl]",
+                "<a href=\"#sec\" class=\"hl\">a <code>b, c</code> d</a>",
+            ),
         ] {
             let nodes = build_src(Span::new(source));
 
-            assert!(
-                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-                "a hidden attribute-list delimiter must defer the match: {nodes:?}"
+            let Some(InlineNode::Ref(ref_)) = nodes.first() else {
+                panic!("the tree must now recognize the macro: {nodes:?}");
+            };
+
+            // The role landed as a role rather than being swallowed into the
+            // display text, which is the half the replacer's split loses.
+            assert_eq!(
+                ref_.roles.iter().map(|r| r.as_ref()).collect::<Vec<_>>(),
+                ["hl"],
+                "for {source:?}"
             );
 
-            // The string pipeline does build one — cut short inside the span.
-            assert!(golden_xref(source).contains("<a href"));
+            // And the span survives whole inside the display text.
+            assert!(
+                ref_.children
+                    .iter()
+                    .any(|child| matches!(child, InlineNode::Styled(_))),
+                "the display text must keep its span: {:?}",
+                ref_.children
+            );
+
+            assert_eq!(
+                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                expected,
+                "for {source:?}"
+            );
+
+            // The divergence, stated as bytes: the replacer cuts the anchor
+            // short inside the tag it just wrote.
+            assert_ne!(golden_xref(source), expected, "for {source:?}");
         }
 
-        // The boundary of the class, from both sides. Without a *named*
-        // attribute to split off there is no attribute list at all, so the
-        // same comma is at parity through the plain-text path; and a span
-        // whose markup carries no delimiter is recognized however many
-        // quotes and equals signs its own rendering holds
-        // (`[.r]#x#` renders a `"` and an `=` the split reads harmlessly),
-        // which is why the test is the two parses rather than the bytes.
+        // The boundary of the class, unchanged: without a *named* attribute to
+        // split off there is no attribute list at all, so the same comma is at
+        // parity through the plain-text path, and a span whose markup carries
+        // no delimiter was never affected (`[.r]#x#` renders a `"` and an `=`
+        // the split reads harmlessly).
         for source in ["xref:sec[a *b, c* d]", "xref:sec[[.r]#x# here,role=hl]"] {
             assert_eq!(
                 fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
@@ -2029,7 +2055,6 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn an_author_written_token_byte_defers_the_match() {
         // The bytes a token is built from are `\u{96}` and `\u{97}`, and an

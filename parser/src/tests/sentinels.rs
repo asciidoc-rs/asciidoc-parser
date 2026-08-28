@@ -259,6 +259,11 @@ fn a_resolved_destination_holding_a_sentinel_survives_the_template_path() {
     // and must not be decoded. Decoding the finished rendering in one pass did
     // decode it, turning `#a\u{e004}b` into `#a\u{e001}`; the template's own
     // literal runs leave escaped form as they are spliced instead.
+    //
+    // The second anchor is whole rather than cut short inside its span since
+    // the deferral divergence (design §5.2's step 6) — the sentinel handling
+    // this test is about is unchanged by that, and the expected bytes simply
+    // carry the tree's reading now.
     let (rendered, warnings) = last_paragraph_and_warnings(CARVE_OUT_SOURCE);
 
     assert_eq!(warnings, 0, "reference did not resolve: {rendered:?}");
@@ -267,7 +272,7 @@ fn a_resolved_destination_holding_a_sentinel_survives_the_template_path() {
         rendered,
         concat!(
             "See <a href=\"#a\u{e004}b\">[a\u{e004}b]</a> and ",
-            "<a href=\"#a\u{e004}b\" class=\"hl\">a <strong>b</a>."
+            "<a href=\"#a\u{e004}b\" class=\"hl\">a <strong>b, c</strong> d</a>."
         ),
         "the id reaches the output as the document wrote it"
     );

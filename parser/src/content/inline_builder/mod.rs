@@ -204,14 +204,19 @@
 //!   reaching the `window=` / `role=` / `xrefstyle=` this family reads as a
 //!   *string* has no bytes to be read as, and that shape alone defers. The
 //!   token is what makes the *split* reproducible — a bracket's `,` / `=` / `"`
-//!   are the only bytes it read, and a placeholder carries none of them — but
-//!   the replacer splits over the piece's own **markup**, which may
-//!   (`xref:sec[a *b, c* d,role=hl]` renders `a <strong>b, c</strong> d`,
-//!   whose list splits at the comma inside the tag). So the gate asks the
-//!   parser rather than the bytes: it parses the tokened text *and* the
-//!   restored markup and compares them attribute by attribute
-//!   ([`tokened_split_agrees`](macros::tokened_split_agrees)), deferring the
-//!   match whenever the two readings differ about its extent. The two **link**
+//!   are the only bytes it reads, and a placeholder carries none of them. The
+//!   replacer, by contrast, splits over the piece's own **markup**, which may
+//!   carry them: `xref:sec[a *b, c* d,role=hl]` renders
+//!   `a <strong>b, c</strong> d`, whose list splits at the comma inside the tag
+//!   and leaves the anchor's text as `a <strong>b`, unbalanced. The two
+//!   readings therefore disagree about the match's own extent, and this used to
+//!   defer the match — which made a comma inside a span decide whether the
+//!   macro was recognized **at all**. Emitting the replacer's split is the
+//!   wrong answer, so **the tree's split is the one that stands** and this
+//!   crate diverges from both the replacer and Asciidoctor for that shape
+//!   (design §5.2's deferral divergence). The principle it rests on: a bracket
+//!   split must not read bytes that a markup-producing step introduced, and the
+//!   tokened side is exactly the side that holds to it. The two **link**
 //!   families take the same move through
 //!   [`tokened_bracket`](macros::image::tokened_bracket), which under
 //!   [`Tokened::MaskedOrRendered`](macros::image::Tokened) admits a rendered

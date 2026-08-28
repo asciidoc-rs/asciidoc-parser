@@ -8,7 +8,7 @@ use super::computed_value_children;
 use super::{
     ComputedSpecials, MacroMatch, MacroMatchKind,
     image::{Tokened, range_is_restorable, range_is_verbatim, restorable_body, tokened_bracket},
-    macro_text_children, rebuild_macro_level, restored_value_children, tokened_split_agrees,
+    macro_text_children, rebuild_macro_level, restored_value_children,
 };
 use crate::{
     Parser, Span,
@@ -1633,9 +1633,10 @@ struct TextAttrlist<'src> {
 /// rather than per family so that a masked piece in the display text beside a
 /// plain subject still restores.
 ///
-/// Returns `None` for those two shapes alone: a `pre_restore` slot holding a
-/// token, and a list whose two parses disagree about the match's own extent
-/// ([`tokened_split_agrees`]).
+/// Returns `None` for that one shape alone: a `pre_restore` slot holding a
+/// token. A list whose two parses disagree about the match's own extent used to
+/// return `None` here too; the tree's own split is what stands now (design
+/// §5.2's deferral divergence).
 fn text_attrlist<'src>(
     raw_text: &str,
     text_range: std::ops::Range<usize>,
@@ -1679,12 +1680,9 @@ fn text_attrlist<'src>(
     // the *split* must land where the string replacer's own parse of the
     // markup lands. A token carries none of the `,` / `=` / `"` the split
     // reads, and the replacer's markup may (`link:x[a *b, c* d,role=hl]`), so
-    // the two are compared parse against parse — see [`tokened_split_agrees`].
-    let carried: Vec<InlineNode<'src>> = masked.iter().map(|piece| piece.node.clone()).collect();
-
-    if !tokened_split_agrees(&tokened, &carried, parser) {
-        return None;
-    }
+    // the tree's own split is the one that stands (design §5.2's deferral
+    // divergence).
+    let _carried: Vec<InlineNode<'src>> = masked.iter().map(|piece| piece.node.clone()).collect();
 
     if masked.is_empty() {
         return Some(TextAttrlist {
@@ -5237,12 +5235,17 @@ mod tests {
     }
 
     #[test]
-    fn a_span_whose_markup_splits_the_attribute_list_defers_the_match() {
-        // The other half of the two checks the rendered-piece token used to
-        // face, and the one that stays: a span whose own markup carries a
-        // character the split reads, so the string replacer's list divides
-        // where the token cannot. The match's very extent differs, so it is
-        // deferred rather than recognized — `tokened_split_agrees`.
+    fn a_span_whose_markup_splits_the_attribute_list_is_the_trees_to_read() {
+        // The link family's half of the deferral divergence (design §5.2's
+        // step 6) — the same decision the xref family's own test records, for
+        // the same reason and by the same mechanism.
+        //
+        // A span whose markup carries a character the split reads used to make
+        // the two readings disagree about the match's extent, and the match was
+        // deferred. That made a comma inside a span decide whether the macro
+        // was recognized at all: these fixtures came out as literal text. The
+        // tree's split sees a token carrying no delimiter, reads a display text
+        // and a role, and is now the reading that stands.
         for source in [
             "link:index.html[a *b, c* d,role=hl]",
             "https://example.org[a *b, c* d,role=hl]",
@@ -5250,15 +5253,29 @@ mod tests {
             let nodes = build_src(Span::new(source));
 
             assert!(
-                nodes.iter().all(|n| !matches!(n, InlineNode::Ref(_))),
-                "a split the two readings disagree on must stay literal: {nodes:?}"
+                nodes.iter().any(|n| matches!(n, InlineNode::Ref(_))),
+                "the tree must now recognize the macro: {nodes:?}"
             );
 
-            // The string pipeline, by contrast, *does* build a link here.
-            assert!(golden_macros(source).contains("<a href"));
+            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+
+            // The role landed as a class rather than being swallowed into the
+            // display text, and the span survives whole inside it.
+            assert!(
+                folded.contains(r#"class="hl""#),
+                "{source:?} lost its role: {folded:?}"
+            );
+
+            assert!(
+                folded.contains("<strong>b, c</strong>"),
+                "{source:?} lost its span: {folded:?}"
+            );
+
+            // The divergence, stated as bytes: the replacer builds a link too,
+            // but cuts it short inside the tag it just wrote.
+            assert_ne!(folded, golden_macros(source), "{source:?}");
         }
     }
-
     #[test]
     fn a_span_whose_markup_perturbs_the_string_pipeline_is_a_documented_divergence() {
         // What the structural recovery cannot do is make the *recognition*
