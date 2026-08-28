@@ -303,24 +303,42 @@ impl SubstitutionGroup {
             Some(_) => self.run_pipeline(content, &parser.clone(), attrlist),
 
             // No tree is built here, so there is no clone and no second pass:
-            // this *is* the authoritative one. The only content that reaches it
-            // is a passthrough body re-entered from inside a build, whose
-            // constructs the enclosing tree cannot hold (the body folds to one
-            // `Raw` value, not to nodes) and so cannot replay — leaving this
-            // pass as their one registrar, which is the net effect the
-            // suppressed arrangement had too.
+            // this *is* the authoritative one.
+            //
+            // **Nothing in production reaches it any more** — the
+            // authoritative-pass closure (design §5.2's step 6). Until that
+            // increment the one content arriving here was a passthrough body
+            // re-entered from inside a build, whose own string pipeline was
+            // therefore that body's authoritative pass. `passthrough_text`
+            // builds and folds the body's own tree now, so the re-entry is
+            // gone. Measured across the suite, this branch went from 112 hits
+            // to 1, and the one that remains is the crate test that turns
+            // `build_inline_tree` off deliberately.
+            //
+            // That is what makes `run_pipeline` deletable: with the oracle
+            // above writing nothing anyone reads and this branch reaching only
+            // a test, the string pipeline has no production caller left.
             None => {
                 let before = parser.substitution_warnings_len();
 
                 self.run_pipeline(content, parser, attrlist);
 
-                // When this authoritative pass is itself running inside a
-                // build — which is exactly the passthrough-body case above —
-                // the warnings it just raised sit inside the range that build
-                // is about to discard as incidental. They are not incidental,
-                // so move them out of it now; the enclosing seam hands them
-                // back once its own discard has run. See
-                // `Parser::nested_authoritative_warnings`.
+                // Vestigial as of the authoritative-pass closure, and left
+                // standing on purpose — the same call the inversion made for
+                // `suppress_recognition_side_effects`, and for the same
+                // reason: this and its counterpart below go whole with
+                // `run_pipeline`, and removing one half of a two-ended
+                // mechanism while leaving the other would be worse than
+                // removing neither.
+                //
+                // What it was for: a nested authoritative pass running inside
+                // a build raised warnings that sat inside the range the build
+                // discards as incidental, so they had to be moved out and
+                // handed back. The passthrough body was the only content that
+                // ever reached it, and it no longer re-enters `apply` at all —
+                // its `attribute-missing` diagnostics are recorded by the
+                // build's own `record_builder_diagnostic` and carried across
+                // with the rest.
                 if parser.in_inline_build.get() {
                     let mine = parser.drain_substitution_warnings_since(before);
 

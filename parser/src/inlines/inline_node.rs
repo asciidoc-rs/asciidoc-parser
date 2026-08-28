@@ -366,12 +366,13 @@ pub enum RawOrigin {
         ///
         /// For every form the fold can restore by itself, `value` *is* the
         /// author's body and this is `None`. The exception is a `pass:` macro
-        /// carrying an explicit substitution list (`pass:c,q[…]`): an arbitrary
-        /// group needs the substitution pipeline, and a fold takes a renderer
-        /// and a [`RenderContext`](crate::parser::RenderContext) rather than a
-        /// `Parser`, so that body is substituted at **build** time and `value`
-        /// holds the result. Recording the input beside it is what keeps the
-        /// author's own text answerable from the tree.
+        /// carrying an explicit substitution list (`pass:c,q[…]`): rendering an
+        /// arbitrary group means building the body's own tree under that group,
+        /// which needs a `Parser`, and a fold takes a renderer and a
+        /// [`RenderContext`](crate::parser::RenderContext) instead — so that
+        /// body is rendered at **build** time and `value` holds the result.
+        /// Recording the input beside it is what keeps the author's own text
+        /// answerable from the tree.
         source_text: Option<String>,
     },
 

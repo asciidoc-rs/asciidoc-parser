@@ -7970,6 +7970,86 @@ Each phase is a reviewable unit with a clear exit gate.
   `inline_recorder` corpus that tests it, which the finding above says goes with the pass rather than
   outliving it.
 
+  *Step 6 landed as (the authoritative-pass closure):* the last item on the survey's list that is
+  not test-side, and the production blocker the deletion has been waiting on. It is a **four-line
+  change**, which is the surprise worth recording.
+
+  The blocker, as the survey stated it: `run_pipeline` has two production callers in `apply_inner`.
+  The first is the oracle, whose output the fold overwrites three statements later. The second is
+  the `tree_seed == None` branch, which is *authoritative* — a passthrough body re-entering
+  `SubstitutionGroup::apply` from inside a build takes no tree seed (the `in_inline_build` guard), so
+  its string pipeline is that body's real pass. Nothing could answer for it "while a body folds to
+  one `Raw` value rather than to nodes".
+
+  *The obstacle was misidentified, and the increment is mostly finding that out.* The reasoning above
+  descends from the deleted `build_pass_macro_subs_value` helper, whose doc comment argued that a
+  body cannot be threaded through this module's transducers because
+  [`build`](../../parser/src/content/inline_builder/mod.rs) runs a fixed *normal* order, so any
+  structural node the body's own resolved subset produced would be visited again by whichever steps
+  come after — and a macro's display text is not idempotent under a second pass. Every word of that
+  is true, and none of it applies: **it is an argument about splicing the body's nodes into the
+  enclosing level, not about computing the body's string.** Folding the body's own tree and wrapping
+  the result in one `Raw` leaf keeps it exactly as opaque as `subs.apply` did.
+
+  And the capability was already there. [`build_for_group`](../../parser/src/content/inline_builder/mod.rs)
+  has taken a `SubstitutionGroup` since the cutover began, runs `group.steps()` **in the group's own
+  order**, and already handles the orders no built-in group has — a `Custom` list that puts the
+  escaping step *after* a step that produced markup, which is what `flatten_prior_markup` and
+  `SplicedSpecials` exist for. So `passthrough_text` needed only to build and fold rather than
+  substitute.
+
+  *The measurement is the increment's evidence, and it is unambiguous.* Instrumenting the `None`
+  branch across the whole suite: **112 hits before, 1 after.** The 111 that went were all
+  `in_inline_build=true` — the passthrough-body re-entry, every one of them. The single hit that
+  remains is `build_inline_tree=false`, the crate test that turns the flag off deliberately
+  (`a_parse_that_builds_no_tree_keeps_the_string_pipelines_warnings`). Production no longer reaches
+  the string pipeline at all.
+
+  *What a body's rendering now costs, measured before the change:* `passthrough_text` is reached 378
+  times in the suite — `Stem` 218, `Verbatim` 63, `Normal` 2, and 95 across **fifteen distinct
+  `Custom` spellings**, among them `Custom([Quotes, SpecialCharacters])` and
+  `Custom([AttributeReferences, Quotes])`. The out-of-order pairs are the ones that say this is not a
+  fixed-order problem in disguise, and
+  [`a_passthrough_body_renders_under_every_order_its_own_list_can_name`](../../parser/src/tests/inline_recorder.rs)
+  pins both orders of both pairs — `pass:c,q[*x* < y]` renders `<strong>x</strong> &lt; y` where
+  `pass:q,c[*x* < y]` renders `&lt;strong&gt;x&lt;/strong&gt; &lt; y`, so the fixture discriminates
+  order rather than merely exercising it.
+
+  *Three explanations elsewhere in the crate became false and were corrected rather than left to rot.*
+  `Parser::in_inline_build`'s reentrancy guard no longer has a re-entry to guard: the property
+  [`a_passthrough_body_is_substituted_once_per_apply`](../../parser/src/tests/inline_recorder.rs)
+  measures still holds and is still worth pinning, but it holds *structurally* now rather than by the
+  guard, which is why removing the guard's check no longer moves those counts.
+  [`passthrough_body_warnings_survive_the_builds_own_discard`](../../parser/src/content/passthroughs.rs)
+  passes unchanged, but by a different route — the body's `attribute-missing` diagnostic goes through
+  the build's own `record_builder_diagnostic` and is carried across by the enclosing seam, instead of
+  being raised into the discarded range and rescued by `Parser::nested_authoritative_warnings`. And
+  the `Raw`/`source_text` notes that said "an arbitrary group needs the substitution pipeline" now
+  say what is actually true: it needs a `Parser`, which a fold does not have, so the body is rendered
+  at build time.
+
+  Audit: **63 rows either side, 0 new and 0 closed** — a production change that moves no divergence
+  at all, which is the strongest form the bar takes.
+
+  Coverage is **not** diff-neutral, and the exception is the point, exactly as it was for the
+  inversion. `passthrough_step.rs` stays at 22/10 (missed regions / missed lines) and `passthroughs.rs`
+  at 3/3; `substitution_group.rs` goes from 0/0 to 6/6, and those six lines are precisely the
+  `nested_authoritative_warnings` block inside the branch this increment just made unreachable.
+  `Parser::nested_authoritative_warnings` and `in_inline_build`'s reentrancy half are **vestigial** as
+  of here. Both are left standing on purpose — the same call the inversion made for
+  `suppress_recognition_side_effects`, and for the same reason: they are two-ended mechanisms that go
+  whole with `run_pipeline`, and removing one end while leaving the other would be worse than removing
+  neither.
+
+  *What still defers* is the deletion, and only the deletion: `run_pipeline`, `apply_string_pipeline`,
+  the escaping pass, the three sentinel systems (§4.2), the `suppress_recognition_side_effects`
+  window, `Parser::nested_authoritative_warnings`, `Parser::in_inline_build`,
+  `Parser::build_inline_tree`, and the Strategy-A recorder (`content/inline_tree.rs`,
+  `RecordingRenderer`) with the `inline_recorder` corpus that tests it. Every corpus that used to
+  depend on the string pipeline for its golden is frozen; nothing in production calls it. The one
+  test that still does — the `build_inline_tree=false` parse — is what the deletion has to decide
+  about, and it is a decision about a flag rather than a blocker.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -9700,6 +9780,26 @@ Each phase is a reviewable unit with a clear exit gate.
        comes from `RECORDER_ENTITY_TABLE`, already drift-guarded against production's
        `classify_entity`. Nothing in production moved: audit 63 rows either side, 0 new and 0 closed,
        and coverage byte-identical. See the step's own "landed as" note above.
+
+     - ✅ **the authoritative-pass closure — the last production blocker.** `run_pipeline`'s second
+       production caller, the `tree_seed == None` branch, was authoritative for one content: a
+       passthrough body re-entering `apply` from inside a build. It closes in four lines, because the
+       obstacle was misidentified. The argument inherited from the deleted `build_pass_macro_subs_value`
+       — that a body cannot be threaded through this module's transducers, since `build` runs a fixed
+       normal order and would revisit any structural node the body's own subset produced — is about
+       **splicing** the body's nodes into the enclosing level, not about computing its string; folding
+       the body's own tree and wrapping it in one `Raw` leaf keeps it exactly as opaque as
+       `subs.apply` did. And `build_for_group` already runs an arbitrary group's steps in that group's
+       own order, including the `Custom` orders that put the escaping step after a step that produced
+       markup. Measured: the branch goes from **112 hits to 1** across the suite, the 111 that went
+       all being the passthrough re-entry, the one that remains being the crate test that turns
+       `build_inline_tree` off. The body's rendering was reached 378 times under fifteen distinct
+       `Custom` spellings including out-of-order pairs, and
+       `a_passthrough_body_renders_under_every_order_its_own_list_can_name` pins both orders of two of
+       them. Audit: 63 rows either side, 0 new and 0 closed. Coverage deliberately *not* diff-neutral:
+       `substitution_group.rs` gains six uncovered lines, exactly the `nested_authoritative_warnings`
+       block this makes unreachable — vestigial as of here, and left standing to go whole with
+       `run_pipeline`. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

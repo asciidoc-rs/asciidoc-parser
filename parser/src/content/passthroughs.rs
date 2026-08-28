@@ -138,11 +138,11 @@ fn collect_from_tree(nodes: &[InlineNode<'_>], out: &mut Vec<Passthrough>) {
             } => {
                 out.push(Passthrough {
                     // `value` is the author's body for every form but one: a
-                    // `pass:c,q[…]` body is substituted at build time, because
-                    // an arbitrary group needs the substitution pipeline and a
-                    // fold cannot reach it. `source_text` is the input that
-                    // produced it, and is `None` wherever the group changed
-                    // nothing.
+                    // `pass:c,q[…]` body is substituted at build time, since
+                    // its group is resolved there and the resulting value is
+                    // what the enclosing level's `Raw` leaf carries.
+                    // `source_text` is the input that produced it, and is
+                    // `None` wherever the group changed nothing.
                     text: source_text
                         .clone()
                         .unwrap_or_else(|| value.as_ref().to_string()),
@@ -1037,19 +1037,25 @@ mod tests {
         // of the distinction.
         //
         // A passthrough carrying its own substitution list has its body
-        // substituted by a re-entrant `SubstitutionGroup::apply`, which — since
-        // the inversion — happens *inside* the enclosing inline-tree build, on
-        // the real parser. That nested pass takes no tree seed, so it is the
-        // body's authoritative pass and its warnings are real, located in the
-        // document source like any other.
+        // rendered by `passthrough_text`, which builds the body's own tree and
+        // folds it. A reference the body carries is therefore recognized by
+        // that build, and its `attribute-missing` diagnostic is recorded the
+        // way every build records one — through `record_builder_diagnostic`,
+        // which the enclosing seam drains and carries across.
         //
-        // The enclosing build discards everything it records into the
-        // substitution-warning buffer, because a build's deliberate diagnostics
-        // go through `record_builder_diagnostic` and what lands in the other
-        // buffer is incidental — the mislocated `Attrlist` warning the test
-        // above pins. These warnings sit in that same range and are *not*
-        // incidental, so `Parser::nested_authoritative_warnings` carries them
-        // across it. Without that, every fixture here reports nothing at all.
+        // The distinction this pins is against the test above: the enclosing
+        // build discards everything it records into the *substitution-warning*
+        // buffer, because what lands there during a build is incidental (the
+        // mislocated `Attrlist` warning). A body's own diagnostics are not
+        // incidental, and they survive because they never go into that buffer
+        // in the first place.
+        //
+        // Before the authoritative-pass closure the route was different — the
+        // body re-entered `SubstitutionGroup::apply`, whose string pipeline
+        // raised the warning into the discarded range, and
+        // `Parser::nested_authoritative_warnings` carried it back out. Both
+        // routes surface the same warning at the same location, which is what
+        // this test has always asserted and still does.
         for (source, mode) in [
             ("pass:a[{missing}]", "warn"),
             ("pass:a[{missing}]", "drop-line"),
