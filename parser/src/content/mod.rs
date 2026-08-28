@@ -12,13 +12,6 @@ pub(crate) use content::{
     resolved_destinations, sanitize_title, template_partition, unescape_sentinels,
     xref_segment_from_node,
 };
-// The two tree walks behind `Content::set_tree_xrefs`, which calls them
-// directly. Re-exported for the differential corpus that compares what they
-// derive against the string pipeline's own answer; nothing else outside
-// `content` reaches them.
-#[cfg(test)]
-pub(crate) use content::{block_tree_xref_segments, footnote_tree_xref_segments};
-
 pub(crate) mod inline_builder;
 
 // The Strategy-A recorder, retired from the production parse path when the

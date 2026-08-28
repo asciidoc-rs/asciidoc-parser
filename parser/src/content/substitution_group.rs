@@ -264,48 +264,28 @@ impl SubstitutionGroup {
         attrlist: Option<&Attrlist<'src>>,
         term_warnings: Option<&mut Vec<crate::warnings::Warning<'src>>>,
     ) {
-        // Snapshot the pre-substitution value *before* either pass runs: both
-        // are seeded from it, so the authoritative one sees exactly what the
-        // oracle does.
+        // The pre-substitution value the build is seeded from.
         //
         // Unconditional. Every parse builds the tree — the `with_inline_tree`
         // opt-in and the `build_inline_tree` field that outlived it are both
         // retired — and the reentrancy guard that was the last remaining reason
-        // to skip one is retired here: nothing re-enters this seam during a
+        // to skip one is retired too: nothing re-enters this seam during a
         // build. A passthrough carrying its own substitution list was the only
         // caller that ever did, and `passthrough_text` builds and folds its
-        // body's own tree directly through `build_for_group` now. No production
-        // code under `content::inline_builder` calls `SubstitutionGroup::apply`
-        // at all (every such call in that module is inside a `mod tests`), and
-        // the guard was observed set for 0 of the 13,299 parses the suite
-        // reaches this seam with.
-        let tree_seed = content.rendered.clone();
-
-        // **The inversion** (design §5.2 Phase 4, step 6). The string pipeline
-        // used to run on the real parser with its recognition side effects
-        // suppressed, while the builder ran on a counter-safe clone whose
-        // mutations were thrown away. The two have swapped places: the string
-        // pipeline runs on the clone — so its counters, its catalog
-        // registrations and its warnings are *all* discarded with it, and there
-        // is nothing left to suppress — and the builder runs on the real
-        // parser, where what it recognizes is simply kept.
+        // body's own tree directly through `build_for_group` now.
         //
-        // That is what makes `run_pipeline` a pure oracle: it computes a string
-        // and writes nothing anyone reads. Deleting it — and with it the three
-        // sentinel systems and the now-vestigial
-        // `suppress_recognition_side_effects` window — is the next increment;
-        // this one only turns the seam around, so that deletion is a deletion
-        // rather than a rewrite.
-        //
-        // The clone is taken here, immediately before the pass it feeds, so it
-        // carries every document counter (footnote and callout numbers,
-        // `{counter:…}` values) at its pre-substitution value — the same value
-        // the builder then advances on the real parser, exactly once.
-        self.run_pipeline(content, &parser.clone(), attrlist);
+        // The string pipeline no longer runs here at all (design §5.2 Phase 4,
+        // step 6). After the inversion it ran on a discarded clone — a pure
+        // oracle computing a string nobody read, kept only so the differential
+        // corpora could take a golden from the same seam — and the last
+        // production reader of its side products (the carried block title's
+        // placeholder template) now takes the tree's own instead. What remains
+        // of it is `run_pipeline` as a test-only callable behind
+        // `apply_string_pipeline`, which is where the corpora take their golden
+        // anyway; the seam itself is single-pass.
+        let value = content.rendered.clone();
 
         {
-            let value = tree_seed;
-
             // Where this build's own diagnostics start — see
             // `Parser::drain_builder_diagnostics_since` for why a mark rather
             // than the whole buffer.
@@ -576,6 +556,10 @@ impl SubstitutionGroup {
     /// Runs the substitution pipeline for this group over `content`: extract
     /// passthroughs (when the group includes them), apply each step in order,
     /// restore the passthroughs, and finalize any deferred cross-references.
+    // Vestigial: this *is* the test-only oracle, called only from
+    // `apply_string_pipeline` (`#[cfg(test)]`); it and everything only it
+    // reaches go together in the next increment.
+    #[allow(dead_code)]
     fn run_pipeline(
         &self,
         content: &mut Content<'_>,

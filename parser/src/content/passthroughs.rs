@@ -47,6 +47,9 @@ pub struct Passthrough {
 /// `pub` type holds exactly what it documents and exposes, and the two facts
 /// only the restore pass reads stay inside the crate.
 #[derive(Clone, Debug, Eq, PartialEq)]
+// Vestigial: reachable only from the test-only `run_pipeline` oracle
+// (`apply_string_pipeline`); goes with it.
+#[allow(dead_code)]
 pub(crate) struct ExtractedPassthrough {
     /// The entry as `Content::passthroughs` exposes it.
     pub(crate) pass: Passthrough,
@@ -186,9 +189,15 @@ fn collect_from_tree(nodes: &[InlineNode<'_>], out: &mut Vec<Passthrough>) {
 /// Saves content of passthrough (`+++`-bracketed) passages for later
 /// re-expansion.
 #[derive(Clone, Debug, Eq, PartialEq)]
+// Vestigial: reachable only from the test-only `run_pipeline` oracle
+// (`apply_string_pipeline`); goes with it.
+#[allow(dead_code)]
 pub(crate) struct Passthroughs(pub(crate) Vec<ExtractedPassthrough>);
 
 impl Passthroughs {
+    // Vestigial: reachable only from the test-only `run_pipeline` oracle
+    // (`apply_string_pipeline`); goes with it.
+    #[allow(dead_code)]
     pub(crate) fn extract_from(content: &mut Content<'_>, parser: &Parser) -> Self {
         let mut passthroughs = Self(vec![]);
 
@@ -248,6 +257,9 @@ impl Passthroughs {
         passthroughs
     }
 
+    // Vestigial: reachable only from the test-only `run_pipeline` oracle
+    // (`apply_string_pipeline`); goes with it.
+    #[allow(dead_code)]
     pub(crate) fn restore_to(&self, content: &mut Content<'_>, parser: &Parser) {
         if self.0.is_empty() {
             return;
@@ -285,6 +297,9 @@ impl Passthroughs {
         self.0.iter().map(|entry| entry.pass.clone()).collect()
     }
 
+    // Vestigial: reachable only from the test-only `run_pipeline` oracle
+    // (`apply_string_pipeline`); goes with it.
+    #[allow(dead_code)]
     pub(super) fn push(&mut self, passthrough: ExtractedPassthrough, dest: &mut String) {
         let index = self.0.len();
         self.0.push(passthrough);
@@ -348,6 +363,9 @@ pub(crate) static INLINE_PASS_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
+// Vestigial: reachable only from the test-only `run_pipeline` oracle
+// (`apply_string_pipeline`); goes with it.
+#[allow(dead_code)]
 struct InlinePassMacroReplacer<'p> {
     passthroughs: &'p mut Passthroughs,
     parser: &'p Parser,
@@ -426,6 +444,9 @@ impl Replacer for InlinePassMacroReplacer<'_> {
 }
 
 impl InlinePassMacroReplacer<'_> {
+    // Vestigial: reachable only from the test-only `run_pipeline` oracle
+    // (`apply_string_pipeline`); goes with it.
+    #[allow(dead_code)]
     fn handle_quoted_text(
         &mut self,
         caps: &Captures<'_>,
@@ -536,6 +557,9 @@ impl InlinePassMacroReplacer<'_> {
     }
 }
 
+// Vestigial: reachable only from the test-only `run_pipeline` oracle
+// (`apply_string_pipeline`); goes with it.
+#[allow(dead_code)]
 static PASS_WITH_INDEX: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(&format!(
@@ -587,6 +611,9 @@ pub(crate) static INLINE_PASS: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
+// Vestigial: reachable only from the test-only `run_pipeline` oracle
+// (`apply_string_pipeline`); goes with it.
+#[allow(dead_code)]
 struct InlinePassReplacer<'p>(&'p mut Passthroughs);
 
 impl Replacer for InlinePassReplacer<'_> {
@@ -717,6 +744,9 @@ pub(crate) static INLINE_STEM_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
+// Vestigial: reachable only from the test-only `run_pipeline` oracle
+// (`apply_string_pipeline`); goes with it.
+#[allow(dead_code)]
 struct InlineStemMacroReplacer<'p> {
     passthroughs: &'p mut Passthroughs,
     parser: &'p Parser,
@@ -806,6 +836,9 @@ pub(crate) fn stem_notation(parser: &Parser) -> QuoteType {
 }
 
 #[derive(Debug)]
+// Vestigial: reachable only from the test-only `run_pipeline` oracle
+// (`apply_string_pipeline`); goes with it.
+#[allow(dead_code)]
 struct PassthroughRestoreReplacer<'p>(&'p Passthroughs, &'p Parser);
 
 impl Replacer for PassthroughRestoreReplacer<'_> {

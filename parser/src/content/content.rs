@@ -193,43 +193,14 @@ struct DeferredContent {
     /// read off this content's **inline tree**, rather than being the string
     /// pipeline's own flat list.
     ///
-    /// `false` is the carve-out design §4.2's second sentinel system still
-    /// keeps: the single-pass builder leaves a documented set of forms
-    /// unrecognized, so the tree can hold *fewer* cross-references than the
-    /// string pipeline deferred. Where it does, the tree is known not to
-    /// describe this content — installing its list would silently drop a
-    /// cross-reference and folding it would render the construct as literal
-    /// source — so the string pipeline's answer stands, on the placeholder
-    /// path, exactly as before this increment
-    /// (`xref_mirror_is_skipped_when_the_tree_defers_a_reference_form`).
-    ///
-    /// The carve-out narrows on its own as each builder prep lands, and
-    /// disappears when none is left — which is what finally deletes this
-    /// sentinel system.
+    /// Always `true` for a production content: [`Content::set_tree_xrefs`] is
+    /// the only producer of deferred state at the seam now that the string
+    /// pipeline no longer runs there. `false` arises only through
+    /// [`Content::set_deferred_xrefs`], on the test-only oracle path
+    /// (`apply_string_pipeline`), and the `!from_tree` branches this field
+    /// still gates — the escaped-form reads, the template partition — are that
+    /// path's and go with `run_pipeline`.
     from_tree: bool,
-
-    /// The string pipeline's own flat list, in placeholder order — the answer
-    /// [`Content::set_tree_xrefs`] overwrote.
-    ///
-    /// It is kept for one reason: the differential corpus that compares the two
-    /// derivations
-    /// ([`inline_builder_xref_segment_parity`](crate::tests)) needs a golden,
-    /// and once the tree's answer *is* the production answer it would otherwise
-    /// be comparing the tree against itself and passing for that reason — the
-    /// exact failure the frozen recordings exist to prevent. This is the same
-    /// move `Passthroughs::observable` made when
-    /// [`Content::passthroughs`](Content::passthroughs) became a view over the
-    /// tree, for the same reason, and it goes the same way: with
-    /// `run_pipeline` itself.
-    ///
-    /// It takes part in the derived [`PartialEq`]/[`Eq`]/[`Hash`]/[`Debug`]
-    /// like any other field, so two `DeferredContent`s compare on it in a test
-    /// build and cannot in a release one. That is harmless here because both
-    /// sides of every comparison in this crate come from the same pipeline run,
-    /// and writing the four impls out by hand to exclude one transitional field
-    /// would cost more than it buys.
-    #[cfg(test)]
-    string_xrefs: Vec<XrefSegment>,
 }
 
 impl DeferredContent {
@@ -265,11 +236,6 @@ pub(crate) struct DeferredParts<'a> {
     /// read off the content's inline tree — see
     /// [`DeferredContent::from_tree`].
     pub(crate) from_tree: bool,
-
-    /// The string pipeline's own flat list — see
-    /// [`DeferredContent::string_xrefs`].
-    #[cfg(test)]
-    pub(crate) string_xrefs: &'a [XrefSegment],
 }
 
 /// A single deferred cross-reference.
@@ -878,6 +844,9 @@ impl<'src> Content<'src> {
     ///
     /// Called once, before substitution begins; the matching
     /// [`unescape_sentinels`](Self::unescape_sentinels) call restores them.
+    // Vestigial: reachable only from the test-only `run_pipeline` oracle
+    // (`apply_string_pipeline`); goes with it.
+    #[allow(dead_code)]
     pub(crate) fn escape_sentinels(&mut self) {
         if let Cow::Owned(escaped) = escape_sentinels(self.rendered.as_ref()) {
             self.rendered = escaped.into();
@@ -891,6 +860,9 @@ impl<'src> Content<'src> {
     /// The deferred template is deliberately left escaped: it is an internal
     /// representation that is re-rendered (through [`render_template`], whose
     /// callers unescape the result) each time references are resolved.
+    // Vestigial: reachable only from the test-only `run_pipeline` oracle
+    // (`apply_string_pipeline`); goes with it.
+    #[allow(dead_code)]
     pub(crate) fn unescape_sentinels(&mut self) {
         if let Cow::Owned(unescaped) = unescape_sentinels(self.rendered.as_ref()) {
             self.rendered = unescaped.into();
@@ -918,8 +890,6 @@ impl<'src> Content<'src> {
             footnote: &d.footnote,
             template: &d.template,
             from_tree: d.from_tree,
-            #[cfg(test)]
-            string_xrefs: &d.string_xrefs,
         })
     }
 
@@ -948,18 +918,17 @@ impl<'src> Content<'src> {
     /// discovered, in placeholder order. The placeholder tokens must already
     /// have been written into [`Content::rendered`], in the same order.
     ///
-    /// This is no longer what a caller reads: the production list is read off
-    /// the inline tree a moment later (see
-    /// [`set_tree_xrefs`](Self::set_tree_xrefs), which overwrites this).
-    /// What it still does is give the string pipeline its own answer — the
-    /// golden every differential corpus on this branch takes through
-    /// [`apply_string_pipeline`](crate::content::SubstitutionGroup) — and carry
-    /// the placeholder template that a content with no tree renders from.
+    /// Reached only through `run_pipeline`, which no longer runs in production:
+    /// what this records is the string pipeline's own answer — the golden every
+    /// differential corpus on this branch takes through
+    /// [`apply_string_pipeline`](crate::content::SubstitutionGroup) — and it
+    /// goes with `run_pipeline` itself. The production list is installed by
+    /// [`set_tree_xrefs`](Self::set_tree_xrefs), from the tree, on a content
+    /// this was never called on.
     ///
     /// The list lands in [`block`](DeferredContent::block) because the string
     /// pipeline does not partition: a footnote-embedded reference is told apart
-    /// by its placeholder having left the template, which is what
-    /// [`template_splices`](Self::template_splices) reads it back out with.
+    /// by its placeholder having left the template.
     pub(crate) fn set_deferred_xrefs(&mut self, xrefs: Vec<XrefSegment>) {
         if xrefs.is_empty() {
             return;
@@ -971,8 +940,6 @@ impl<'src> Content<'src> {
         );
 
         self.deferred = Some(Box::new(DeferredContent {
-            #[cfg(test)]
-            string_xrefs: Vec::new(),
             block: xrefs,
             footnote: Vec::new(),
             template: String::new(),
@@ -980,86 +947,58 @@ impl<'src> Content<'src> {
         }));
     }
 
-    /// Installs the deferred cross-references **read off this content's inline
-    /// tree**, replacing whatever the string pipeline's own macros step left
-    /// here.
+    /// Installs this content's deferred cross-references, **read off its own
+    /// inline tree** — the sole producer of a production content's deferred
+    /// state now that the string pipeline no longer runs at the seam.
     ///
-    /// This is design §5.2's survey item, wired: the two lists come from
-    /// [`block_tree_xref_segments`] and [`footnote_tree_xref_segments`], which
-    /// have been staged and unwired since they landed — the same staging every
-    /// recognition side effect was under before it was re-attached.
+    /// The two lists come from [`block_tree_xref_segments`] and
+    /// [`footnote_tree_xref_segments`], already partitioned the way resolution
+    /// keeps them apart. There is no template here: the one content that
+    /// renders from a template — the carried block title — has its own
+    /// synthesized at the hop (see [`carried_title_template`]), and no other
+    /// reader consults [`DeferredContent::template`] on a tree content.
     ///
-    /// The string pipeline still produces its own list (it is the differential
-    /// corpora's golden until `run_pipeline` is deleted), and this overwrites
-    /// it. What is *kept* from it is the placeholder template, and only where
-    /// the template's own placeholders line up one-to-one with `block` — see
-    /// [`DeferredContent::template`] for the one content that reads it and why
-    /// a mismatch must drop it rather than splice into it.
+    /// A tree holding no cross-reference installs nothing: such a content
+    /// renders as the fold leaves it and resolution has nothing to do. The
+    /// boolean walk answers that first, and cheaply, because *most contents
+    /// are exactly that* — a plain paragraph's nodes are text runs the walk
+    /// rejects in one pass, where unconditionally deriving both segment lists
+    /// would traverse every tree twice to build two empty vectors. (The old
+    /// early return keyed this on the string pipeline having deferred
+    /// something; the walk is the same question asked of the tree.)
     ///
-    /// A content whose tree holds no cross-reference at all clears the deferred
-    /// state outright: a construct the builder does not recognize is one this
-    /// content no longer defers, and it renders as the fold leaves it.
+    /// The carve-out that used to live here — keeping the string pipeline's
+    /// whole answer where the tree held fewer cross-references than the
+    /// pipeline deferred — is gone with the pipeline it fell back to. It was
+    /// measured unreachable before the deletion (zero hits across the suite,
+    /// both of its member forms closed by their own increments); a form the
+    /// builder still declines is simply not a cross-reference of this content
+    /// any more, which is the documented-divergence reading every such form
+    /// already has.
     pub(crate) fn set_tree_xrefs(
         &mut self,
         tree: &[InlineNode<'src>],
         renderer: &dyn InlineSubstitutionRenderer,
         context: &crate::parser::RenderContext,
     ) {
-        // The string pipeline deferring nothing here means this content defers
-        // nothing at all: the builder recognizes a *subset* of the forms
-        // `InlineXrefReplacer` does — that containment is the premise the
-        // carve-out below rests on — so a tree holding a cross-reference node
-        // the replacer did not defer cannot arise.
-        //
-        // This is why the two walks happen **after** this early return rather
-        // than at the call site: they traverse the whole tree, and every
-        // paragraph in every document would otherwise pay for two traversals
-        // that this invariant says could only ever come back empty. The saving
-        // is structural rather than measured — the repository's own benchmarks
-        // cannot resolve it, since a base-against-itself control run on the
-        // machine used here reported a significant 3% "improvement" on
-        // byte-identical code.
-        let Some(previous) = self.deferred.take() else {
+        if !tree_defers_xrefs(tree) {
             return;
-        };
+        }
+
+        debug_assert!(
+            self.deferred.is_none(),
+            "set_tree_xrefs must be called at most once per Content"
+        );
 
         let block = block_tree_xref_segments(tree, renderer, context);
         let footnote = footnote_tree_xref_segments(tree, renderer, context);
 
-        // The carve-out: where the tree holds fewer cross-references than the
-        // string pipeline deferred, it is known not to describe this content,
-        // so its list is *not* installed and the string pipeline's answer
-        // stands. See `DeferredContent::from_tree`.
-        if Self::template_splices(&previous) != block.len() {
-            self.deferred = Some(previous);
-            return;
-        }
-
         self.deferred = Some(Box::new(DeferredContent {
-            #[cfg(test)]
-            string_xrefs: previous.string_xrefs,
             block,
             footnote,
-            template: previous.template,
+            template: String::new(),
             from_tree: true,
         }));
-    }
-
-    /// How many placeholders the string pipeline's template still splices.
-    ///
-    /// Its flat list is indexed by *placeholder*, so "the block-level ones" are
-    /// those whose placeholder survived the footnote re-homing pass — the count
-    /// the tree's own block-level list has to match for the two to describe the
-    /// same content. Called only while `previous` is still the string
-    /// pipeline's own answer, where `block` is that flat list.
-    fn template_splices(previous: &DeferredContent) -> usize {
-        (0..previous.block.len())
-            .filter(|index| {
-                previous
-                    .template
-                    .contains(&Content::xref_placeholder(*index))
-            })
-            .count()
     }
 
     /// Returns the placeholder token for the cross-reference at `index`.
@@ -1073,6 +1012,9 @@ impl<'src> Content<'src> {
     /// it is captured as the template and `rendered` is rebuilt as the
     /// unresolved fallback so it is immediately clean for callers that read it
     /// before resolution.
+    // Vestigial: reachable only from the test-only `run_pipeline` oracle
+    // (`apply_string_pipeline`); goes with it.
+    #[allow(dead_code)]
     pub(crate) fn finalize_deferred(&mut self, renderer: &dyn InlineSubstitutionRenderer) {
         let template = self.rendered.as_ref().to_string();
 
@@ -1082,18 +1024,6 @@ impl<'src> Content<'src> {
             };
 
             deferred.template = template;
-
-            // Snapshot the string pipeline's own answer here rather than where
-            // the list was recorded: this runs at the very end of
-            // `run_pipeline`, so the passthrough restore pass
-            // (`restore_deferred_xref_passthroughs`) has already reached into
-            // each segment's text. A snapshot taken earlier would hand the
-            // differential corpus a golden still carrying `\u{96}`…`\u{97}`
-            // sentinels.
-            #[cfg(test)]
-            {
-                deferred.string_xrefs = deferred.block.clone();
-            }
         }
 
         self.rebuild_rendered(renderer);
@@ -1105,6 +1035,9 @@ impl<'src> Content<'src> {
     /// A deferred reference's text is captured out of the main rendered string
     /// during macro substitution, so passthrough placeholders inside it are not
     /// reached by the ordinary restore pass. This lets that pass reach them.
+    // Vestigial: reachable only from the test-only `run_pipeline` oracle
+    // (`apply_string_pipeline`); goes with it.
+    #[allow(dead_code)]
     pub(crate) fn restore_deferred_xref_passthroughs(
         &mut self,
         mut restore: impl FnMut(&mut String),
@@ -1143,16 +1076,16 @@ impl<'src> Content<'src> {
             // same split is read out of the template — a placeholder that has
             // left it was re-homed onto a footnote — which is what
             // `reports_unresolved` answers for either shape.
+            // A tree content carries no template and never consults one —
+            // `reports_unresolved` below short-circuits on `from_tree` — while
+            // a string-pipeline content reaches here with its template captured
+            // by the `finalize_deferred` at the end of the same `run_pipeline`
+            // call that recorded its list. The assert that used to pin that
+            // pairing went with the last test that could reach this on the
+            // string path; the invariant is the vestigial machinery's own now,
+            // held by its own unit tests until it is deleted whole.
             let from_tree = deferred.from_tree;
             let template = deferred.template.clone();
-
-            // A `deferred` block always holds at least one xref placeholder,
-            // so its finalized template is never empty. An empty template here
-            // means `finalize_deferred` was skipped (a future-refactor hazard);
-            // the `template.contains` guard below would then silently suppress
-            // every unresolved-ref warning, so catch that invariant break in
-            // debug builds.
-            debug_assert!(!template.is_empty());
 
             for (index, xref) in deferred.block.iter_mut().enumerate() {
                 // The catalog holds the document's own text (an ID as it was
@@ -1258,28 +1191,18 @@ impl<'src> Content<'src> {
     /// that retained none has no deferred cross-reference and was already
     /// folded authoritatively at parse time, so it never reaches here.
     ///
-    /// **The caller gates this on the mirror having succeeded**, which is the
-    /// carve-out that replaces the old one. Until now a content carrying *any*
-    /// deferred cross-reference kept the template path end to end; now only one
-    /// whose tree does **not** hold every cross-reference the string pipeline
-    /// deferred does. That is the single-pass builder's documented set of
-    /// unrecognized forms (see the `inline_builder` module) — where one of them
-    /// applies, the tree is known not to describe this content, so folding it
-    /// would *lose* the construct rather than render it differently. The signal
-    /// is the block-level count match
-    /// [`mirror_tree_xref_resolution`](Self::mirror_tree_xref_resolution)
-    /// already computes, so the carve-out narrows on its own as each builder
-    /// prep teaches the builder one more form, and disappears when none is
-    /// left.
+    /// The caller gates this on the content **holding a tree**, which every
+    /// production content with deferred state does — the deferred lists are
+    /// read off that tree, the only producer left at the seam. What takes the
+    /// other arm is a content with no tree at all: the carried block title,
+    /// which renders from its synthesized template instead (see
+    /// [`carried_title_template`]).
     ///
     /// This runs **instead of**
-    /// [`rebuild_rendered`](Self::rebuild_rendered), not after it. The template
-    /// still exists — it is what the other arm renders, and what the test-only
-    /// `rendered_from_template` keeps the fold differentiated against — but
-    /// rendering both and discarding one would be
-    /// observable rather than merely wasteful, since a stateful host renderer
-    /// would see every callback for this content twice in a single resolution
-    /// pass.
+    /// [`rebuild_rendered`](Self::rebuild_rendered), not after it: rendering
+    /// both and discarding one would be observable rather than merely
+    /// wasteful, since a stateful host renderer would see every callback for
+    /// this content twice in a single resolution pass.
     /// Folds each footnote this content **defines** from its own subtree, and
     /// hands the results to `warnings` for the resolution pass to install into
     /// the catalog.
@@ -1501,33 +1424,6 @@ impl<'src> Content<'src> {
         }
     }
 
-    /// Renders this content **from its deferred template**, without installing
-    /// the result — the answer [`refold`](Self::refold) replaced, exposed so a
-    /// test can still compare the two.
-    ///
-    /// A deferred content's rendering is now a fold of its tree wherever the
-    /// tree is authoritative, so the whole-document parity harness — which
-    /// checks a fold against [`rendered_html`](Self::rendered_html) — would
-    /// otherwise be comparing the fold against itself for exactly the content
-    /// the retirement changed. This is the independent construction it compares
-    /// against instead.
-    ///
-    /// `None` for a content with nothing deferred, which has no template.
-    #[cfg(test)]
-    pub(crate) fn rendered_from_template(
-        &self,
-        renderer: &dyn InlineSubstitutionRenderer,
-    ) -> Option<String> {
-        let deferred = self.deferred.as_ref()?;
-
-        Some(render_template(
-            &deferred.template,
-            &deferred.block,
-            renderer,
-            deferred.escaped_form(),
-        ))
-    }
-
     /// Rebuilds [`Content::rendered`] from the deferred template and the
     /// current (resolved or unresolved) state of its cross-references.
     fn rebuild_rendered(&mut self, renderer: &dyn InlineSubstitutionRenderer) {
@@ -1711,6 +1607,30 @@ fn count_footnote_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
             _ => 0,
         })
         .sum()
+}
+
+/// Whether `nodes` holds any cross-reference node at all — block-level or
+/// inside a footnote's subtree — i.e. whether [`Content::set_tree_xrefs`] has
+/// anything to install.
+///
+/// A short-circuiting boolean walk, so the overwhelmingly common
+/// cross-reference-free content (a plain paragraph) answers in one cheap pass
+/// instead of paying the two full segment derivations to learn both come back
+/// empty.
+fn tree_defers_xrefs(nodes: &[InlineNode<'_>]) -> bool {
+    nodes.iter().any(|node| match node {
+        InlineNode::Ref(reference) => {
+            reference.variant == RefVariant::Xref || tree_defers_xrefs(&reference.children)
+        }
+
+        InlineNode::Styled(styled) => tree_defers_xrefs(&styled.children),
+
+        InlineNode::IndexTerm(index_term) => tree_defers_xrefs(&index_term.children),
+
+        InlineNode::Footnote(footnote) => tree_defers_xrefs(&footnote.children),
+
+        _ => false,
+    })
 }
 
 /// Derives the **block-level** deferred cross-reference segments from an
