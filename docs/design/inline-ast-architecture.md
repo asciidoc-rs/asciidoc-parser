@@ -8334,6 +8334,45 @@ Each phase is a reviewable unit with a clear exit gate.
   reading what each case *is* beats counting the cases. Here it took instrumenting the leaf function
   and nothing above it.
 
+  *Step 6 landed as (`build_inline_tree` retired, and the seam's two "otherwise" causes told
+  apart):* the first of the vestigial mechanisms the deletion survey enumerated, removed on its own.
+
+  `Parser::build_inline_tree` is what remained of the `with_inline_tree` opt-in after that switch was
+  retired. It was `true` for every parser a caller can construct, and its only surviving consumer was
+  a crate test that set it to `false` in order to exercise the field. Measured across the suite it is
+  false for **1 of 13,299** parses reaching the seam — that one test.
+
+  So the field is gone, and `SubstitutionGroup::apply`'s seed condition drops from
+  `parser.build_inline_tree && !parser.in_inline_build.get()` to the reentrancy guard alone. No
+  production parse changes: the conjunct removed was true in every one of the other 13,298.
+
+  *What the increment actually turned up*, and the reason it is worth a note rather than a line in a
+  commit message: **the seam's two "otherwise" causes were never equivalent, and the retired one was
+  carrying the test.** The `None` branch is taken when no tree is built, which had two causes — a
+  parse configured to build none, and a pass re-entered under the reentrancy guard — and the obvious
+  move was to re-point the test from the first cause at the second. That fails, and the failure is
+  the interesting part:
+
+  - A **tree-less parse** must *keep* the string pipeline's warnings where they are raised. Nothing
+    encloses it, so there is nobody to hand them back.
+  - A pass under the **reentrancy guard** must *stash* them in `nested_authoritative_warnings`, for
+    the enclosing build to restore.
+
+  The `None` branch does the second (`if parser.in_inline_build.get()`), so a test that sets the
+  guard with no build around it sees the warnings stashed and dropped. That is not a bug — it is a
+  state production cannot construct — but it means the warning half of the old test belonged to the
+  cause being retired, and asserting it from the surviving cause would have pinned the behavior of an
+  impossible parser. The replacement asserts only what the guard actually contracts: **a pass under it
+  builds no tree.**
+
+  *What this does not do.* It leaves `in_inline_build` and `nested_authoritative_warnings` in place.
+  They are the two ends of one mechanism — the guard stashes, the enclosing build restores — and the
+  seam's own comment already says removing one end while leaving the other is worse than removing
+  neither. `in_inline_build` is true for **0 of 13,299** parses at this seam, so the pair is dead in
+  practice and is the next increment; but it is dead by *measurement*, and the guard is what stands
+  between a re-entry and a nested tree build, so retiring it is a deliberate step rather than a
+  side effect of this one.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -10161,6 +10200,18 @@ Each phase is a reviewable unit with a clear exit gate.
        render goes with `run_pipeline`, and what remains is `Footnote::render` plus a single carried
        block title whose `inlines` are empty because they cannot cross the `'src`-erasing hop. See
        the step's own "landed as" note above.
+
+     - ✅ **`build_inline_tree` retired — the last remnant of the `with_inline_tree` opt-in.** The
+       field was `true` for every parser the public API can construct (measured false for 1 of 13,299
+       parses reaching the seam: the one crate test that set it), so the seed condition drops to the
+       reentrancy guard alone and no production parse changes. The increment turned up that the
+       seam's two "otherwise" causes are **not** equivalent — a tree-less parse must *keep* the
+       string pipeline's warnings, a pass under the reentrancy guard must *stash* them for the
+       enclosing build — so the old test's warning assertion belonged to the retired cause and the
+       replacement pins what the guard actually contracts: a pass under it builds no tree.
+       `in_inline_build` and `nested_authoritative_warnings` stay: they are the two ends of one
+       mechanism, dead by measurement (0 of 13,299) but not by construction. See the step's own
+       "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a
