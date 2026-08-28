@@ -8076,7 +8076,9 @@ Each phase is a reviewable unit with a clear exit gate.
   | tree segments installed, `template` still the pipeline's | 436 | 3.3% |
   | **carve-out** — the pipeline's whole answer stands | 6 | 0.05% |
 
-  So the template is the larger debt by volume (436 contents). The carve-out is six hits over five
+  So the template is the larger debt by volume. (The 436 here is a count of `set_tree_xrefs` calls
+  that installed a tree answer, not of contents rendering from a template — a later note measures the
+  arm itself and corrects this.) The carve-out is six hits over five
   sources — and reading what each one *is* matters more than the count, because the five are **two
   different kinds**, and only one of them is a gap.
 
@@ -8268,6 +8270,45 @@ Each phase is a reviewable unit with a clear exit gate.
   *What still defers:* the **template**, then the oracle call, the ~28 `apply_string_pipeline` test
   call sites and `run_pipeline` itself, the vestigial mechanisms (now including the carve-out), and
   the Strategy-A recorder with `inline_recorder`.
+
+  *Step 6 landed as (the template, measured — and the survey's figure corrected):* a scoping note
+  rather than a change, and it exists because the deletion survey's own number for this item was
+  measuring the wrong population.
+
+  That survey called the template "the larger debt by volume (436 contents)". **436 is a count of
+  calls to `set_tree_xrefs` that installed a tree answer, not a count of contents that render from a
+  template** — different populations, and the smaller one. Measuring the arm that actually renders
+  says so directly. `Content::resolve_references` chooses between
+  [`refold`](../../parser/src/content/content.rs), which folds the tree and needs no template, and
+  `rebuild_rendered`, which renders one; instrumenting both across the suite:
+
+  | arm | calls | distinct sources |
+  |---|---|---|
+  | `refold` (tree-backed) | 330 | **210** |
+  | `rebuild_rendered` (template) | 5,944 | **2,437** |
+
+  The distinct counts are the ones that matter, and they rule out the obvious innocent explanation:
+  this is not one content re-resolved many times. Roughly **eight percent** of the contents that
+  defer a cross-reference are rendered from the tree; the rest still go through the template. The
+  template is not a residue to be tidied away after the oracle goes — on this measurement it is the
+  majority path.
+
+  *One thing the measurement settles, and one it opens.* Settled: the fold arm never falls through.
+  Every call with `from_tree` true took `refold` — 330 of 330 — so where the tree's answer is
+  installed it is always the one that renders. Open: why `from_tree` is false for ~2,227 distinct
+  contents that *do* carry deferred state by resolution time. The obvious orderings do not explain it
+  — `set_deferred_xrefs` is called from `apply_macros`, inside the string pipeline's own macros step,
+  which runs *before* `set_tree_xrefs` in `apply_inner`, so a content the oracle deferred on should
+  have its deferred state visible when the tree answer is offered. Whatever accounts for the gap
+  (titles resolving on `title_refs`'s separate path is the first candidate, since it has a template
+  reader of its own) is the question the template increment has to answer first.
+
+  *What this does to the decomposition.* The item is unchanged in its position — still gated behind
+  nothing, still the last thing `set_tree_xrefs` takes from the string pipeline's `deferred` state —
+  but it is bigger than the survey implied, and the question is now sharper: not "can the tree
+  produce a placeholder template" but **"why does the tree's answer reach only one content in twelve,
+  and is that a gap or a boundary?"** The carve-out taught the same lesson one scale down: what looked
+  like one number was two kinds, and reading what each case *is* mattered more than counting them.
 
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
@@ -10082,6 +10123,22 @@ Each phase is a reviewable unit with a clear exit gate.
        62 rows against 63, 0 new and 1 closed — the pipeline was right here and the tree caught up,
        the mirror image of the divergence increment before it. Coverage diff-neutral. See the step's
        own "landed as" note above.
+
+     - ℹ️ **the template is the majority path, not a residue — and the survey's figure was the
+       wrong population.** The deletion survey called it "the larger debt by volume (436 contents)";
+       436 counts `set_tree_xrefs` calls that installed a tree answer, not contents that render from
+       a template. Instrumenting the arm that actually renders — `refold` (folds the tree, no
+       template) against `rebuild_rendered` — gives 330 calls over **210 distinct sources** for the
+       fold and 5,944 over **2,437 distinct** for the template. The distinct counts rule out
+       re-resolution: roughly **8%** of contents that defer a cross-reference render from the tree.
+       The measurement settles that the fold arm never falls through (330 of 330 with `from_tree`
+       true took it), and opens why `from_tree` is false for ~2,227 distinct contents that do carry
+       deferred state by resolution — not an ordering problem on the face of it, since
+       `set_deferred_xrefs` runs in `apply_macros` ahead of `set_tree_xrefs`. `title_refs`'s separate
+       path, which has a template reader of its own, is the first candidate. So the question is not
+       "can the tree produce a placeholder template" but "why does the tree's answer reach one
+       content in twelve, and is that a gap or a boundary?" See the step's own "landed as" note
+       above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a
