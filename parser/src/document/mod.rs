@@ -12,8 +12,8 @@ mod author_line;
 pub use author_line::{AuthorLine, Authors};
 
 mod catalog;
-pub(crate) use catalog::DuplicateIdError;
 pub use catalog::{Catalog, Footnote, ImageReference, RefEntry, RefType};
+pub(crate) use catalog::{DuplicateIdError, folds_by_index};
 
 mod docinfo;
 pub(crate) use docinfo::Docinfo;

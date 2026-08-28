@@ -598,6 +598,17 @@ impl<'src> QuoteBlock<'src> {
                     block.resolve_references(resolver, renderer, &mut owned_warnings, parser);
                 }
 
+                // A Markdown-style blockquote's blocks register their
+                // footnotes on the *document's* catalog, not on a list of their
+                // own, so their folded renderings belong to the enclosing pass
+                // and are carried out explicitly — `rehome_into` deliberately
+                // leaves them behind, since an AsciiDoc table cell in the same
+                // position must do the opposite. See
+                // `ReferenceWarnings::footnote_texts`.
+                warnings
+                    .footnote_texts
+                    .extend(owned_warnings.take_footnote_texts());
+
                 owned_warnings.rehome_into(warnings, source);
             });
         }

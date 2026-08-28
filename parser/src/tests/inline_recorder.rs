@@ -2613,6 +2613,75 @@ fn re_resolving_clears_a_now_unresolved_footnote_tree_destination() {
 }
 
 #[test]
+fn a_footnotes_rendering_is_refolded_from_its_subtree_at_resolution() {
+    // The property this increment adds, and the only one that can distinguish
+    // it: a footnote's catalog text is a **fold of its own subtree**, taken
+    // when resolution runs, rather than a splice into the placeholder template
+    // the string pipeline captured at parse time.
+    //
+    // No output comparison can see the difference — the two produce the same
+    // bytes, which is the whole point of the step and exactly why the
+    // differential corpora stayed green when the fold was wired in. What can
+    // see it is a renderer with *state*: `OrdinalRenderer` stamps an
+    // increasing ordinal into every special character it renders, so a `<`
+    // inside the footnote carries one ordinal if it was rendered once, at
+    // parse time, and spliced verbatim thereafter, and a **higher** one if the
+    // subtree was folded again at resolution.
+    //
+    // If the fold were removed and every footnote fell back to its template,
+    // the two readings below would be equal and this test would fail.
+    struct FixedResolver(Option<&'static str>);
+
+    impl crate::parser::ReferenceResolver for FixedResolver {
+        fn resolve(
+            &self,
+            _context: &crate::parser::ResolutionContext<'_>,
+        ) -> Option<crate::parser::ResolvedReference> {
+            self.0
+                .map(|href| crate::parser::ResolvedReference::new(href.to_string(), None))
+        }
+    }
+
+    let mut parser =
+        Parser::default().with_inline_substitution_renderer(OrdinalRenderer::default());
+
+    let mut doc = parser.parse_deferred("A claim.footnote:[x < y, see <<tgt>>]\n\n[[tgt]]Target.");
+
+    let at_parse = doc
+        .catalog()
+        .footnotes()
+        .first()
+        .expect("the footnote is registered while parsing")
+        .text
+        .clone();
+
+    doc.resolve_references(&FixedResolver(Some("#tgt")), &*parser.renderer, &parser);
+
+    let at_resolution = doc
+        .catalog()
+        .footnotes()
+        .first()
+        .expect("the footnote survives resolution")
+        .text
+        .clone();
+
+    // Both readings render the same `<`, so both contain an ordinal; the
+    // question is whether the second one is a *fresh* render.
+    assert!(
+        at_parse.contains('['),
+        "the parse-time rendering should carry an ordinal: {at_parse:?}"
+    );
+
+    println!("AT_PARSE={at_parse:?}\nAT_RESOLUTION={at_resolution:?}");
+
+    assert_ne!(
+        at_parse, at_resolution,
+        "a footnote's rendering must be refolded from its subtree at resolution, \
+         not spliced from the parse-time template"
+    );
+}
+
+#[test]
 fn section_title_footnote_carries_its_subtree_and_resolved_xref() {
     // A footnote in a section heading is owned by the document-order title pass,
     // which resolves the heading's cross-references and now mirrors the
