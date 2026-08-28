@@ -875,10 +875,10 @@ pub(super) fn untranslated_value(text: &str, carried: &[InlineNode<'_>]) -> Stri
 /// honest reading.
 ///
 /// The walk is index-keyed and left to right, like
-/// [`Passthroughs::restore_to`](crate::content::Passthroughs)'s own: each
-/// token is sought only in the bytes after the previous one, and a token the
-/// parse dropped (a value the split discarded) is simply not found, leaving
-/// the ones after it to splice by their own index.
+/// [`Passthroughs::restore_to`](crate::content::passthroughs::Passthroughs)'s
+/// own: each token is sought only in the bytes after the previous one, and a
+/// token the parse dropped (a value the split discarded) is simply not found,
+/// leaving the ones after it to splice by their own index.
 pub(super) fn restored_value_children<'src>(
     text: &str,
     restores: &[InlineNode<'src>],
@@ -1067,8 +1067,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::{
-        super::{special_chars::Masked, test_support::golden_macros_with},
-        ComputedSpecials, apply_macro_side_effects, apply_macros, escaped_value_children,
+        super::special_chars::Masked, ComputedSpecials, apply_macro_side_effects, apply_macros,
+        escaped_value_children,
     };
     use crate::{
         Parser, Span,
@@ -1102,9 +1102,6 @@ mod tests {
             r"xref:target[\{name}]",
             r"<<target,a \{name} b>>",
         ] {
-            let mut content = Content::from(Span::new(source));
-            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
-
             let nodes = build_for_group(
                 &SubstitutionGroup::Normal,
                 CowStr::from(source),
@@ -1126,10 +1123,9 @@ mod tests {
 
             assert_eq!(
                 folded,
-                crate::content::inline_builder::snapshot::recorded_golden(
+                crate::content::inline_builder::snapshot::recorded(
                     "build_for_group_escaped_reference",
-                    source,
-                    content.rendered_html(),
+                    source
                 )
             );
             assert!(!folded.contains('\\'));
@@ -1222,9 +1218,6 @@ mod tests {
                         },
                     ),
                 ] {
-                    let mut content = Content::from(Span::new(&source));
-                    group.apply_string_pipeline(&mut content, &parser, None);
-
                     let nodes = build_for_group(
                         group,
                         CowStr::from(source.clone()),
@@ -1241,11 +1234,7 @@ mod tests {
 
                     assert_eq!(
                         folded,
-                        crate::content::inline_builder::snapshot::recorded_golden(
-                            corpus,
-                            &source,
-                            content.rendered_html()
-                        ),
+                        crate::content::inline_builder::snapshot::recorded(corpus, &source),
                         "{source:?}"
                     );
                     assert!(folded.contains(expected), "{source:?}: {folded:?}");
@@ -1372,9 +1361,6 @@ mod tests {
             // Inline STEM, whose expression is a passthrough.
             "stem:[a &copy; b]",
         ] {
-            let mut content = Content::from(Span::new(source));
-            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
-
             let nodes = build_for_group(
                 &SubstitutionGroup::Normal,
                 CowStr::from(source),
@@ -1389,10 +1375,9 @@ mod tests {
                     &HtmlSubstitutionRenderer {},
                     &parser.render_context()
                 ),
-                crate::content::inline_builder::snapshot::recorded_golden(
+                crate::content::inline_builder::snapshot::recorded(
                     "build_for_group_restored_entity",
-                    source,
-                    content.rendered_html(),
+                    source
                 ),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -1430,9 +1415,6 @@ mod tests {
         };
 
         let parity = |source: &str| {
-            let mut content = Content::from(Span::new(source));
-            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &configure(), None);
-
             let built_parser = configure();
 
             let nodes = build_for_group(
@@ -1449,10 +1431,9 @@ mod tests {
                     &HtmlSubstitutionRenderer {},
                     &built_parser.render_context()
                 ),
-                crate::content::inline_builder::snapshot::recorded_golden(
+                crate::content::inline_builder::snapshot::recorded(
                     "build_for_group_recoverable_piece",
-                    source,
-                    content.rendered_html(),
+                    source
                 ),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -1550,8 +1531,11 @@ mod tests {
         //
         // This is a **keep**: the tree's answer is the well-formed one, and
         // the string pipeline's is markup no backend would choose to emit.
-        let parser = Parser::default();
 
+        // `golden_html` is what the string pipeline rendered — kept in the
+        // fixture as the recorded half of the divergence now that the
+        // pipeline itself is gone, exactly as the divergence corpora keep
+        // theirs in `snapshots/`.
         for (source, golden_html, folded_html) in [
             (
                 "x link:t.html[pre xref:tgt[T] post] y",
@@ -1568,19 +1552,16 @@ mod tests {
                 r##"x <a href="t.html">pre footnote:[n</a> post] y"##,
             ),
         ] {
-            let mut content = Content::from(Span::new(source));
-            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
-
-            assert_eq!(content.rendered_str(), golden_html);
-
-            assert_eq!(
-                fold_html(
-                    &build(Span::new(source), &Parser::default(), None),
-                    &HtmlSubstitutionRenderer {},
-                    &Parser::default().render_context(),
-                ),
-                folded_html,
+            let folded = fold_html(
+                &build(Span::new(source), &Parser::default(), None),
+                &HtmlSubstitutionRenderer {},
+                &Parser::default().render_context(),
             );
+
+            assert_eq!(folded, folded_html);
+
+            // The divergence itself, pinned as bytes.
+            assert_ne!(folded, golden_html);
         }
     }
 
@@ -1607,7 +1588,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_golden_pipelines_registrations_and_warning_order_for_mixed_families() {
+    fn registers_the_recorded_order_and_warnings_for_mixed_families() {
         // A content that exercises every family this function composes in one
         // go: an image whose `link=` targets a dangerous scheme (a warning
         // from the image family) *before* a duplicate anchor id (a warning
@@ -1623,9 +1604,8 @@ mod tests {
         let nodes = build(Span::new(source), &builder_parser, None);
         apply_macro_side_effects(&nodes, &builder_parser, Span::new(source), false);
 
-        let golden_parser = Parser::default().with_catalog_assets(true);
-        golden_macros_with(source, &golden_parser);
-
+        // Frozen at the last differentially-verified parity, like every other
+        // registration expectation in this module.
         assert_eq!(
             builder_parser
                 .catalog()
@@ -1633,12 +1613,7 @@ mod tests {
                 .iter()
                 .map(|i| i.target.clone())
                 .collect::<Vec<_>>(),
-            golden_parser
-                .catalog()
-                .images()
-                .iter()
-                .map(|i| i.target.clone())
-                .collect::<Vec<_>>(),
+            ["x.png"],
         );
 
         let builder_warnings: Vec<_> = builder_parser
@@ -1646,13 +1621,7 @@ mod tests {
             .into_iter()
             .map(|w| w.warning)
             .collect();
-        let golden_warnings: Vec<_> = golden_parser
-            .drain_substitution_warnings_since(0)
-            .into_iter()
-            .map(|w| w.warning)
-            .collect();
 
-        assert_eq!(builder_warnings, golden_warnings);
         assert_eq!(
             builder_warnings,
             [
@@ -1681,25 +1650,15 @@ mod tests {
         let nodes = build(Span::new(source), &builder_parser, None);
         apply_macro_side_effects(&nodes, &builder_parser, Span::new(source), false);
 
-        let golden_parser = Parser::default().with_catalog_assets(true);
-        golden_parser.in_bibliography_list_item.set(true);
-        golden_parser
-            .register_ref("dup", None, crate::document::RefType::Bibliography)
-            .unwrap();
+        let builder_warnings = builder_parser
+            .drain_substitution_warnings_since(0)
+            .into_iter()
+            .map(|w| w.warning)
+            .collect::<Vec<_>>();
 
-        golden_macros_with(source, &golden_parser);
-
-        let warnings = |parser: &Parser| {
-            parser
-                .drain_substitution_warnings_since(0)
-                .into_iter()
-                .map(|w| w.warning)
-                .collect::<Vec<_>>()
-        };
-
-        let builder_warnings = warnings(&builder_parser);
-
-        assert_eq!(builder_warnings, warnings(&golden_parser));
+        // Frozen at the last differentially-verified parity: the string
+        // pipeline's own pass order landed the same two warnings in the same
+        // order until the commit that deleted it.
         assert_eq!(
             builder_warnings,
             [

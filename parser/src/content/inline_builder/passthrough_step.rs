@@ -23,7 +23,7 @@ use crate::{
 /// and the later steps to refine.
 ///
 /// This is the **first** step [`build`](super::build) runs — mirroring
-/// [`Passthroughs::extract_from`](crate::content::Passthroughs::extract_from),
+/// [`Passthroughs::extract_from`](crate::content::passthroughs::Passthroughs::extract_from),
 /// which the string pipeline runs *before* its own step loop — so a
 /// passthrough's content is never touched by specialcharacters, quotes,
 /// replacements, or macros: it is a leaf, and every later step's
@@ -1218,8 +1218,8 @@ fn apply_normal_subs<'src>(text: Span<'src>, parser: &Parser) -> Vec<InlineNode<
 /// body; that re-entry took no tree seed (a reentrancy guard on the `Parser`,
 /// since retired along with the re-entry), so its *string* pipeline was the
 /// body's authoritative pass. It was the last thing
-/// in production keeping `run_pipeline` alive, and the survey named it the
-/// only remaining blocker to the deletion that is not test-side.
+/// in production keeping `run_pipeline` alive — the survey named it the
+/// only non-test-side blocker to the deletion, which has since landed.
 ///
 /// It closes because [`build_for_group`](super::build_for_group) already runs
 /// **an arbitrary group's steps in that group's own order** — including a

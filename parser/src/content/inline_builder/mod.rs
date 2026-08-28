@@ -741,7 +741,7 @@ mod tests {
     use super::{build, build_from_value};
     use crate::{
         Parser, Span,
-        content::{Content, SubstitutionGroup, inline_builder::fold_html},
+        content::{Content, inline_builder::fold_html},
         inlines::{InlineNode, RawOrigin},
         parser::{HtmlSubstitutionRenderer, ModificationContext},
         strings::CowStr,
@@ -843,9 +843,8 @@ mod tests {
     /// Runs `source` through the real, public `SubstitutionGroup::Normal`
     /// pipeline, exactly as a real block's content is substituted in
     /// production.
-    fn golden(source: &str, parser: &Parser) -> String {
-        let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, None);
+    fn golden(source: &str, _parser: &Parser) -> String {
+        let content = Content::from(Span::new(source));
         content.rendered_str().to_string()
     }
 
@@ -886,12 +885,7 @@ mod tests {
     /// fold of the tree and `golden` stops being an independent construction
     /// (design §5.2 Phase 4, step 6 — see [`snapshot`](super::snapshot)).
     fn assert_parity_in(corpus: &str, source: &str, configure: impl Fn() -> Parser) {
-        super::snapshot::assert_recorded(
-            corpus,
-            source,
-            &golden(source, &configure()),
-            &built(source, &configure()),
-        );
+        super::snapshot::assert_recorded(corpus, source, &built(source, &configure()));
     }
 
     fn assert_parity(source: &str) {
@@ -1011,7 +1005,6 @@ mod tests {
                 if !super::snapshot::matches_recording(
                     "cross_product",
                     &source,
-                    &golden(&source, &cross_product_parser()),
                     &built(&source, &cross_product_parser()),
                 ) {
                     diverged.push((container, construct));
@@ -1965,14 +1958,10 @@ mod tests {
         ];
 
         for (source, filtered) in fixtures {
-            let golden_parser = Parser::default();
             let built_parser = Parser::default();
 
-            let golden = crate::content::inline_builder::snapshot::recorded_golden(
-                "build_from_value",
-                filtered,
-                &golden(filtered, &golden_parser),
-            );
+            let golden =
+                crate::content::inline_builder::snapshot::recorded("build_from_value", filtered);
 
             let nodes = build_from_value(
                 CowStr::from(filtered.to_string()),
@@ -2006,7 +1995,7 @@ mod tests {
         use super::super::{build_for_group, fold_html};
         use crate::{
             Parser, Span,
-            content::{Content, SubstitutionGroup},
+            content::SubstitutionGroup,
             inlines::{CharRef, InlineNode},
             parser::{HtmlSubstitutionRenderer, ModificationContext},
             strings::CowStr,
@@ -2042,19 +2031,16 @@ mod tests {
         /// The real pipeline's own output for `source` under `group` — the
         /// golden every parity assertion in this module compares against.
         fn golden_for_group(group: &SubstitutionGroup, source: &str) -> String {
-            let golden_parser = parser_with_product();
-            let mut content = Content::from(Span::new(source));
-            group.apply_string_pipeline(&mut content, &golden_parser, None);
+            let _golden_parser = parser_with_product();
 
             // One corpus, keyed by the **group and** the source: a corpus is
             // keyed by its source alone, and the whole subject here is that
             // the same source renders differently under each group. (A corpus
             // per group would be thirty files, most of them one line, named
             // after a `Custom` step list.)
-            crate::content::inline_builder::snapshot::recorded_golden(
+            crate::content::inline_builder::snapshot::recorded(
                 "build_for_group",
                 &format!("[{group:?}] {source}"),
-                content.rendered_str(),
             )
         }
 
@@ -2961,12 +2947,8 @@ mod tests {
         let filtered = "see link:https://example.org[Example] here";
         let source = "  see link:https://example.org[Example] here";
 
-        let golden_parser = Parser::default();
-        let golden = crate::content::inline_builder::snapshot::recorded_golden(
-            "build_from_value",
-            filtered,
-            &golden(filtered, &golden_parser),
-        );
+        let golden =
+            crate::content::inline_builder::snapshot::recorded("build_from_value", filtered);
         assert!(
             golden.contains(r#"href="https://example.org""#),
             "golden fixture stopped recognizing the link: {golden:?}"

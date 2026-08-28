@@ -1123,22 +1123,8 @@ mod tests {
     /// this exercises `AttributeReferences` too, so an attribute whose
     /// expanded value contains `[[id]]` is spliced in before `Macros` runs —
     /// the scenario the divergence test below needs.
-    fn golden_attributes_with(source: &str, parser: &Parser) -> String {
-        use crate::content::{Content, SubstitutionStep};
-
-        let mut content = Content::from(Span::new(source));
-        SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
-        SubstitutionStep::Quotes.apply(&mut content, parser, None);
-        SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
-        SubstitutionStep::CharacterReplacements.apply(&mut content, parser, None);
-        SubstitutionStep::Macros.apply(&mut content, parser, None);
-        SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
-
-        crate::content::inline_builder::snapshot::recorded_golden(
-            "anchors_attributes",
-            source,
-            content.rendered_str(),
-        )
+    fn golden_attributes_with(source: &str, _parser: &Parser) -> String {
+        crate::content::inline_builder::snapshot::recorded("anchors_attributes", source)
     }
 
     #[test]
@@ -1508,40 +1494,36 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_golden_pipelines_registration_for_a_broad_fixture_set() {
-        // Each fixture uses its own pair of *independent* parsers (design
-        // §5.3's two-independent-parsers discipline, already established by
-        // the image increment's own differential corpus): one that the
-        // additive builder builds against and this function then walks, one
-        // that the real string pipeline (`golden_macros_with`, which also
-        // runs the `Quotes` step and so exercises the attributed-span
-        // registration too) runs against directly.
+    fn registers_the_recorded_ids_for_a_broad_fixture_set() {
+        // Each expected set is **frozen at the last differentially-verified
+        // parity**: while the string pipeline existed this test registered
+        // each fixture through it on an independent parser and compared the
+        // two catalogs, and the suite was green at the commit that deleted
+        // it — so the literals below are the pipeline's own answer, recorded
+        // the same way every frozen corpus's bytes were.
         let fixtures = [
-            "[[install]]",
-            "[[install,Installation]]",
-            "anchor:install[Installation]",
-            "[#free_the_world]#free the world#",
-            // An id carrying a special character: both pipelines register the
-            // *escaped* id, since both parse the attribute list out of text
-            // the escaping step already ran over (see
+            ("[[install]]", r#"["install"]"#),
+            ("[[install,Installation]]", r#"["install"]"#),
+            ("anchor:install[Installation]", r#"["install"]"#),
+            ("[#free_the_world]#free the world#", r#"["free_the_world"]"#),
+            // An id carrying a special character: the *escaped* id is
+            // registered, since the attribute list is parsed out of text the
+            // escaping step already ran over (see
             // [`quote_attributes`](crate::content::inline_builder::quotes)).
-            "[#a&b]#x#",
-            "[[a]] [[a]]",
-            "[[[id]]]",
-            "*see [[x]]* and footnote:[see [[y]]]",
+            ("[#a&b]#x#", r#"["a&amp;b"]"#),
+            ("[[a]] [[a]]", r#"["a"]"#),
+            ("[[[id]]]", "[]"),
+            ("*see [[x]]* and footnote:[see [[y]]]", r#"["x", "y"]"#),
         ];
 
-        for fixture in fixtures {
+        for (fixture, expected) in fixtures {
             let builder_parser = Parser::default();
             let nodes = build_with(Span::new(fixture), &builder_parser);
             apply_ref_side_effects(&nodes, &builder_parser, Span::new(fixture), false);
 
-            let golden_parser = Parser::default();
-            golden_macros_with(fixture, &golden_parser);
-
             assert_eq!(
-                builder_parser.catalog().ids().collect::<Vec<_>>(),
-                golden_parser.catalog().ids().collect::<Vec<_>>(),
+                format!("{:?}", builder_parser.catalog().ids().collect::<Vec<_>>()),
+                expected,
                 "registered ids diverged for {fixture:?}"
             );
         }
@@ -1850,36 +1832,52 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_golden_pipelines_bibliography_registrations() {
-        // Each side registers against its own *independent* parser (design
-        // §5.3's two-independent-parsers discipline), so the staged side effect
-        // is compared with the real pipeline's own registrations — id, reference
-        // text, and `RefType` alike.
+    fn registers_the_recorded_bibliography_entries() {
+        // Frozen at the last differentially-verified parity — see
+        // `registers_the_recorded_ids_for_a_broad_fixture_set` for the
+        // provenance of these literals (id, reference text, and `RefType`
+        // alike were compared against the string pipeline's own registrations
+        // until the commit that deleted it).
         let fixtures = [
-            "[[[gof]]] Gamma.",
-            "[[[gof,GoF]]] Gamma.",
-            "[[[gof, GoF ]]] Gamma.",
-            "[[[gof,A & B]]] Gamma.",
-            "[[[1984]]] Orwell.",
-            "See [[[mid]]] inline.",
-            "[[[gof]]] and an inline [[extra]] anchor",
+            (
+                "[[[gof]]] Gamma.",
+                r#"[("gof", Some("[gof]"), RefType::Bibliography)]"#,
+            ),
+            (
+                "[[[gof,GoF]]] Gamma.",
+                r#"[("gof", Some("[GoF]"), RefType::Bibliography)]"#,
+            ),
+            (
+                "[[[gof, GoF ]]] Gamma.",
+                r#"[("gof", Some("[GoF ]"), RefType::Bibliography)]"#,
+            ),
+            (
+                "[[[gof,A & B]]] Gamma.",
+                r#"[("gof", Some("[A &amp; B]"), RefType::Bibliography)]"#,
+            ),
+            ("[[[1984]]] Orwell.", "[]"),
+            ("See [[[mid]]] inline.", "[]"),
+            (
+                "[[[gof]]] and an inline [[extra]] anchor",
+                r#"[("extra", None, RefType::Anchor), ("gof", Some("[gof]"), RefType::Bibliography)]"#,
+            ),
             // An ordinary anchor at the very start of the content: the
             // bibliography pass leaves it to `apply_ref_side_effects`, which
             // catalogs it under `RefType::Anchor`.
-            "[[plain]] leads an entry that has no bibliography anchor",
+            (
+                "[[plain]] leads an entry that has no bibliography anchor",
+                r#"[("plain", None, RefType::Anchor)]"#,
+            ),
         ];
 
-        for fixture in fixtures {
+        for (fixture, expected) in fixtures {
             let builder_parser = biblio_parser();
             let nodes = build_with(Span::new(fixture), &builder_parser);
             apply_biblio_side_effects(&nodes, &builder_parser, Span::new(fixture));
             apply_ref_side_effects(&nodes, &builder_parser, Span::new(fixture), false);
 
-            let golden_parser = biblio_parser();
-            golden_macros_with(fixture, &golden_parser);
-
-            let entries = |parser: &Parser| {
-                let catalog = parser.catalog();
+            let entries = {
+                let catalog = builder_parser.catalog();
 
                 catalog
                     .ids()
@@ -1895,8 +1893,8 @@ mod tests {
             };
 
             assert_eq!(
-                entries(&builder_parser),
-                entries(&golden_parser),
+                format!("{entries:?}"),
+                expected,
                 "registered references diverged for {fixture:?}"
             );
         }

@@ -1646,7 +1646,7 @@ mod tests {
         // and its `indexterm2:` twin used to pin.
         use crate::{
             Parser,
-            content::{Content, SubstitutionGroup, inline_builder::build},
+            content::inline_builder::build,
             parser::{HtmlSubstitutionRenderer, ModificationContext},
         };
 
@@ -1689,20 +1689,13 @@ mod tests {
         for source in fixtures {
             let nodes = build(Span::new(source), &parser, None);
 
-            let mut golden = Content::from(Span::new(source));
-            SubstitutionGroup::Normal.apply_string_pipeline(&mut golden, &parser, None);
-
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     &nodes,
                     &HtmlSubstitutionRenderer {},
                     &parser.render_context()
                 ),
-                crate::content::inline_builder::snapshot::recorded_golden(
-                    "indexterm_expanded",
-                    source,
-                    golden.rendered_str(),
-                ),
+                crate::content::inline_builder::snapshot::recorded("indexterm_expanded", source),
                 "fold diverged from the string pipeline for {source:?}"
             );
         }

@@ -913,17 +913,8 @@ mod tests {
     /// The real, public pipeline's output for `source` — the golden for the
     /// expanded-value fixtures, which need the `AttributeReferences` step the
     /// module's own [`golden_macros`] helper deliberately omits.
-    fn golden_normal(source: &str, parser: &Parser) -> String {
-        use crate::content::{Content, SubstitutionGroup};
-
-        let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, None);
-
-        crate::content::inline_builder::snapshot::recorded_golden(
-            "ui_normal",
-            source,
-            content.rendered_str(),
-        )
+    fn golden_normal(source: &str, _parser: &Parser) -> String {
+        crate::content::inline_builder::snapshot::recorded("ui_normal", source)
     }
 
     #[test]

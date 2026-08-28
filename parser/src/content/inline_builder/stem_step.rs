@@ -135,7 +135,7 @@ fn subs_are_local(subs: &SubstitutionGroup) -> bool {
 /// so no richer subtree is needed here. This step is **additive**: nothing
 /// is wired into the parse path.
 ///
-/// [`Passthroughs::extract_from`]: crate::content::Passthroughs::extract_from
+/// [`Passthroughs::extract_from`]: crate::content::passthroughs::Passthroughs::extract_from
 /// [`InlineStemMacroReplacer`]: crate::content::passthroughs
 pub(super) fn apply_stem<'src>(
     nodes: Vec<InlineNode<'src>>,

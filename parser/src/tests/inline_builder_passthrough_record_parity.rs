@@ -36,8 +36,8 @@
 use crate::{
     Parser, Span,
     content::{
-        Content, Passthroughs, SubstitutionGroup, SubstitutionStep,
-        inline_builder::snapshot::{quote, recorded_golden, unquote},
+        Content, SubstitutionGroup, SubstitutionStep,
+        inline_builder::snapshot::{quote, recorded, unquote},
     },
 };
 
@@ -72,16 +72,8 @@ type Record = (String, SubstitutionGroup);
 /// pass: the recording preserves the exact artifact the deletion removes, so
 /// the documented difference between the two sides stays pinned to bytes
 /// afterwards rather than becoming untestable.
-fn golden(source: &str, parser: &Parser) -> Vec<Record> {
-    let mut scratch = Content::from(Span::new(source));
-
-    let extracted: Vec<Record> = Passthroughs::extract_from(&mut scratch, parser)
-        .observable()
-        .iter()
-        .map(|pt| (pt.text().to_string(), pt.subs().clone()))
-        .collect();
-
-    decode(&recorded_golden(RECORDING, source, &encode(&extracted)))
+fn golden(source: &str, _parser: &Parser) -> Vec<Record> {
+    decode(&recorded(RECORDING, source))
 }
 
 /// Encodes a record list as one physical line, in the recording format's own

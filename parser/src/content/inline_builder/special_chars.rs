@@ -824,11 +824,7 @@ mod tests {
         let mut content = Content::from(Span::new(source));
         SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
 
-        crate::content::inline_builder::snapshot::recorded_golden(
-            "special_chars",
-            source,
-            content.rendered_str(),
-        )
+        crate::content::inline_builder::snapshot::recorded("special_chars", source)
     }
 
     /// Asserts that `node` is a [`Raw`](InlineNode::Raw) leaf holding `ch`,

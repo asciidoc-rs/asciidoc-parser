@@ -438,11 +438,7 @@ mod tests {
         SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
         SubstitutionStep::Callouts.apply(&mut content, parser, attrlist);
 
-        crate::content::inline_builder::snapshot::recorded_golden(
-            corpus,
-            source,
-            content.rendered_str(),
-        )
+        crate::content::inline_builder::snapshot::recorded(corpus, source)
     }
 
     /// [`golden_callouts_with`] with a default parser and no attribute list.

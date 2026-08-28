@@ -182,7 +182,6 @@ mod tests {
     use crate::{
         Parser, Span,
         attributes::{Attrlist, AttrlistContext},
-        content::{Content, SubstitutionGroup},
         inlines::{InlineNode, Ref, RefVariant},
         parser::{HtmlSubstitutionRenderer, ModificationContext},
         strings::CowStr,
@@ -332,13 +331,8 @@ mod tests {
     fn assert_parity(source: &str) {
         let parser = Parser::default();
 
-        let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &parser, None);
-        let golden = crate::content::inline_builder::snapshot::recorded_golden(
-            "post_replacements",
-            source,
-            content.rendered_str(),
-        );
+        let golden =
+            crate::content::inline_builder::snapshot::recorded("post_replacements", source);
 
         let nodes = super::super::build(Span::new(source), &parser, None);
         let built = fold_html(&nodes, &HtmlSubstitutionRenderer {});
@@ -439,9 +433,6 @@ mod tests {
             )
         };
 
-        let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, attrlist.as_ref());
-
         // A corpus per shape: the block-attribute and document-attribute
         // spellings render the same source differently from each other (and
         // from neither being set), and one corpus is keyed by source alone.
@@ -451,11 +442,7 @@ mod tests {
             "post_replacements_hardbreaks_block"
         };
 
-        let golden = crate::content::inline_builder::snapshot::recorded_golden(
-            corpus,
-            source,
-            content.rendered_str(),
-        );
+        let golden = crate::content::inline_builder::snapshot::recorded(corpus, source);
 
         let nodes = super::super::build(Span::new(source), parser, attrlist.as_ref());
         let built = fold_html(&nodes, &HtmlSubstitutionRenderer {});

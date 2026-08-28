@@ -53,12 +53,9 @@
 
 use crate::{
     Parser, Span,
-    content::{
-        Content, SubstitutionGroup,
-        inline_builder::{
-            apply_macro_side_effects, build,
-            snapshot::{quote, recorded_golden, unquote},
-        },
+    content::inline_builder::{
+        apply_macro_side_effects, build,
+        snapshot::{quote, recorded, unquote},
     },
     document::RefType,
     parser::ModificationContext,
@@ -206,7 +203,7 @@ fn snapshot(parser: &Parser) -> SideEffects {
 /// What the **string pipeline** wrote down, read back from the recording — the
 /// frozen half of every comparison in this module.
 ///
-/// The pipeline still runs, and `recorded_golden` still checks its answer
+/// The pipeline still runs, and `recorded` still checks its answer
 /// against the recorded one on every call, so nothing here is taken on trust
 /// while the pipeline exists. What the freeze buys is the day it does not:
 /// `apply_string_pipeline` is this corpus's only golden source, so deleting it
@@ -224,12 +221,8 @@ fn snapshot(parser: &Parser) -> SideEffects {
 /// ([`two_shapes_where_a_tree_built_footnote_entry_still_diverges`]), and what
 /// ids the reference catalog holds. So the recording is decoded back into a
 /// `SideEffects` and every one of those reads goes on working unchanged.
-fn frozen(config: &str, source: &str, computed: SideEffects) -> SideEffects {
-    decode(&recorded_golden(
-        RECORDING,
-        &key(config, source),
-        &encode(&computed),
-    ))
+fn frozen(config: &str, source: &str) -> SideEffects {
+    decode(&recorded(RECORDING, &key(config, source)))
 }
 
 /// The recording key for one fixture under one parser configuration.
@@ -510,10 +503,6 @@ fn side_effects_with(
     config: &str,
     configure: impl Fn() -> Parser,
 ) -> (SideEffects, SideEffects) {
-    let golden_parser = configure();
-    let mut content = Content::from(Span::new(source));
-    SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &golden_parser, None);
-
     let builder_parser = configure();
     let nodes = build(Span::new(source), &builder_parser, None);
 
@@ -527,10 +516,7 @@ fn side_effects_with(
 
     apply_macro_side_effects(&nodes, &builder_parser, Span::new(source), false);
 
-    (
-        frozen(config, source, snapshot(&golden_parser)),
-        snapshot(&builder_parser),
-    )
+    (frozen(config, source), snapshot(&builder_parser))
 }
 
 fn side_effects(source: &str) -> (SideEffects, SideEffects) {

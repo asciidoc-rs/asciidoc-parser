@@ -1,7 +1,7 @@
 use crate::{
     HasSpan, Parser,
     attributes::Attrlist,
-    content::{Content, Passthrough, Passthroughs, SubstitutionStep},
+    content::{Content, Passthrough, SubstitutionStep},
     document::RefType,
     warnings::WarningType,
 };
@@ -279,10 +279,11 @@ impl SubstitutionGroup {
         // oracle computing a string nobody read, kept only so the differential
         // corpora could take a golden from the same seam — and the last
         // production reader of its side products (the carried block title's
-        // placeholder template) now takes the tree's own instead. What remains
-        // of it is `run_pipeline` as a test-only callable behind
-        // `apply_string_pipeline`, which is where the corpora take their golden
-        // anyway; the seam itself is single-pass.
+        // placeholder template) now takes the tree's own instead. The callable
+        // itself is gone too: every corpus reads its golden from the frozen
+        // recordings (`inline_builder::snapshot`), and what machinery the
+        // pipeline leaves behind is exercised only by its own unit tests until
+        // the tail deletion takes it whole. The seam is single-pass.
         let value = content.rendered.clone();
 
         {
@@ -518,112 +519,6 @@ impl SubstitutionGroup {
         true
     }
 
-    /// Runs **only** the string pipeline over `content` — no inline tree, no
-    /// fold — which is the golden-HTML oracle (§5.3) as a callable.
-    ///
-    /// Every differential corpus on this branch takes its golden by rendering a
-    /// fixture through the string pipeline and comparing it against the tree's
-    /// fold. Taking that golden from [`apply`](Self::apply) works only while
-    /// `rendered` *is* the string pipeline's output. The step 6 cutover makes
-    /// `rendered` a fold of the tree, at which point such a corpus compares the
-    /// fold against itself and passes for that reason, with nothing failing to
-    /// say so — see
-    /// [`snapshot`](crate::content::inline_builder) for the demonstration.
-    ///
-    /// So the corpora take their golden from here instead, and go on
-    /// differentiating for real. It was landed one increment *before* the
-    /// cutover, while it was still byte-identical to `apply` — the tree being
-    /// additive then, the only difference was work the golden never reads — so
-    /// that the rewiring could be checked by the whole suite staying green,
-    /// which is a claim the cutover itself could no longer make. As of this
-    /// increment the two genuinely differ, and this is the only remaining way
-    /// to reach the string pipeline's own output.
-    ///
-    /// The ~277 golden-HTML assertions deliberately do **not** take it: their
-    /// subject is `rendered_html()` itself, so they must go on exercising the
-    /// production entry point, and after the cutover they are precisely what
-    /// validates the fold.
-    #[cfg(test)]
-    pub(crate) fn apply_string_pipeline<'src>(
-        &self,
-        content: &mut Content<'src>,
-        parser: &Parser,
-        attrlist: Option<&Attrlist<'src>>,
-    ) {
-        self.run_pipeline(content, parser, attrlist);
-    }
-
-    /// Runs the substitution pipeline for this group over `content`: extract
-    /// passthroughs (when the group includes them), apply each step in order,
-    /// restore the passthroughs, and finalize any deferred cross-references.
-    // Vestigial: this *is* the test-only oracle, called only from
-    // `apply_string_pipeline` (`#[cfg(test)]`); it and everything only it
-    // reaches go together in the next increment.
-    #[allow(dead_code)]
-    fn run_pipeline(
-        &self,
-        content: &mut Content<'_>,
-        parser: &Parser,
-        attrlist: Option<&Attrlist>,
-    ) {
-        // The steps below mark their work **in band**, with sentinel codepoints
-        // spliced into the same string as the document's text. A document can
-        // type those codepoints itself, so its own copies are escaped out of
-        // the way first; otherwise they are read back as the parser's own
-        // control sequences (forging, for instance, a second cross-reference
-        // into the output).
-        //
-        // The escaping is this pipeline's alone. The single-pass builder needs
-        // none: it recognizes constructs by *range* over the source rather than
-        // by scanning a rendered string for its own marks, so a codepoint the
-        // document typed is never a mark. What escaped form still reaches past
-        // this call is the deferred placeholder template and, where the
-        // carve-out keeps them, this pipeline's own cross-reference segments —
-        // each unescaped by the reader that makes it user-facing (see
-        // `Content::resolve_references` and `catalog_target`).
-        content.escape_sentinels();
-
-        let steps = self.steps();
-
-        let passthroughs: Option<Passthroughs> =
-            if steps.contains(&SubstitutionStep::Macros) || self == &Self::Header {
-                Some(Passthroughs::extract_from(content, parser))
-            } else {
-                None
-            };
-
-        for step in steps {
-            step.apply(content, parser, attrlist);
-        }
-
-        if let Some(passthroughs) = passthroughs {
-            passthroughs.restore_to(content, parser);
-        }
-
-        // Capture any deferred cross-references as a placeholder template and
-        // render the unresolved fallback, so `rendered_html()` is clean even before
-        // references are resolved. This is a no-op when no cross-references were
-        // found.
-        content.finalize_deferred(&*parser.renderer);
-
-        // Hand back the document's own text: the sentinel codepoints escaped on
-        // the way in are restored now that every pass that reads them has run.
-        // The template `finalize_deferred` just captured stays escaped — it is
-        // an internal representation, re-rendered each time references are
-        // resolved.
-        //
-        // Gated, because that re-rendering is the *other* way out of escaped
-        // form: a content that deferred anything has already had `rendered`
-        // rebuilt by `finalize_deferred`, through a `render_template` that
-        // leaves escaped form run by run (so the resolver's own answer is never
-        // decoded with it — see `Content::render_template`). Decoding that
-        // result again would read one of the document's own restored escapes a
-        // second time.
-        if content.deferred_parts().is_none() {
-            content.unescape_sentinels();
-        }
-    }
-
     /// Applies any block style masquerade and `subs` attribute override from
     /// the block's attribute list.
     ///
@@ -715,47 +610,6 @@ impl SubstitutionGroup {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
-
-    mod sentinel_escaping {
-        use super::super::SubstitutionGroup;
-        use crate::{Parser, Span, content::Content};
-
-        #[test]
-        fn a_deferred_content_leaves_escaped_form_exactly_once() {
-            // The string pipeline has two ways out of escaped form, and a
-            // content that defers a cross-reference takes the *first*:
-            // `finalize_deferred` rebuilds `rendered` through `render_template`,
-            // which leaves escaped form run by run. Decoding the result again at
-            // the end of the pipeline would read the document's own restored
-            // escape introducer a second time — here turning `\u{e004}b` into
-            // `\u{e001}` — so the tail decode is gated on there being nothing
-            // deferred.
-            //
-            // Driven through `apply_string_pipeline` because that pipeline's
-            // output is the differential corpora's oracle rather than the
-            // production rendering, which is a fold of the tree.
-            let mut content = Content::from(Span::new("x\u{e004}by <<a>>"));
-
-            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &Parser::default(), None);
-
-            assert_eq!(
-                content.rendered_html(),
-                "x\u{e004}by <a href=\"#a\">[a]</a>",
-                "the typed escape introducer was decoded twice"
-            );
-        }
-
-        #[test]
-        fn a_content_with_nothing_deferred_still_leaves_escaped_form() {
-            // The complement: no template was rebuilt, so the tail decode is
-            // the only one and must run.
-            let mut content = Content::from(Span::new("x\u{e004}by"));
-
-            SubstitutionGroup::Normal.apply_string_pipeline(&mut content, &Parser::default(), None);
-
-            assert_eq!(content.rendered_html(), "x\u{e004}by");
-        }
-    }
 
     mod stem {
         use crate::{content::Content, strings::CowStr, tests::prelude::*};

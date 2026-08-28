@@ -8690,6 +8690,50 @@ Each phase is a reviewable unit with a clear exit gate.
   transition plan), `run_pipeline`, and the vestigial machinery it keeps compiled — then item (6)'s
   window, `from_tree: false` paths, and `EscapedForm` collapse.
 
+  *Step 6 landed as (`run_pipeline` deleted, and every corpus goldenless):* the survey's item
+  (5), landed the increment after the recorder retirement unblocked it. `apply_string_pipeline`
+  and `run_pipeline` are gone; every golden helper's body is the lookup the freeze design promised
+  ("a helper's body becomes a lookup, its callers do not move"), reading `snapshots/<corpus>.txt`
+  through a [`snapshot`](../../parser/src/content/inline_builder/snapshot.rs) API that no longer
+  takes a golden at all. The drift guard and `ASCIIDOC_UPDATE_SNAPSHOTS` update mode went with the
+  pipeline that fed them: a recording is now edited by hand and reviewed as the behavior change it
+  records — the missing-fixture panic prints the ready-to-paste line where the caller holds the
+  fold — and a divergence corpus's rows are frozen pipeline bytes that must never be refreshed
+  from current behavior.
+
+  *The seventeen structural-golden tests the survey's "mechanical" count missed.* Not every golden
+  was a string: the per-family registration-parity tests read what the pipeline **registered** —
+  catalogs and warning lists off a golden parser the helpers ran the steps against as a side
+  effect. Each is now **frozen at the last differentially-verified parity**: the builder side is
+  untouched by this increment and the suite was green against the live pipeline one commit
+  earlier, so the literals baked into those tests are the pipeline's own answers, recorded the
+  same way every corpus's bytes were. The three link-order tests already asserted literals and
+  merely lost their trailing cross-checks; the two divergence tests among them
+  (`a_family_matching_across_an_earlier_familys_markup…`, the quotes attribute-list one) keep the
+  pipeline's rendering in the fixture as the recorded half and pin the divergence with
+  `assert_ne!`.
+
+  *Production is untouched by construction.* The seam's `apply_inner` did not change a line;
+  outside comments, the whole diff is deletions of `#[cfg(test)]` and dead items (the callable
+  pair, the sentinel-escaping tests that pinned `run_pipeline`'s own escape gating,
+  `Passthroughs::observable`) plus the test-side rework. The golden-HTML suite and every frozen
+  corpus pass unchanged, which is this increment's whole gate; the fold-parity audit's comparison
+  is no longer constructible — there is no pipeline left to reconstruct — and by the same fact
+  has nothing left to check here.
+
+  *Coverage moves, and honestly.* The vestigial string-pipeline machinery — `macros.rs`'s
+  replacers, `passthroughs.rs`'s extraction pass, the pipeline-only substitution steps — was
+  exercised almost entirely by the oracle runs the golden helpers performed; with those gone its
+  uncovered mass surfaces (workspace missed regions 606 → 1,775, all of it in the four files the
+  tail deletion removes). Changed lines are covered; the uncovered lines are the dead machinery
+  itself, and they leave with it.
+
+  *What still defers:* the tail — item (6): the vestigial machinery whole (the replacers, the
+  extraction pass, the sentinel escape window and `suppress_recognition_side_effects`, the
+  `from_tree: false` paths and the `EscapedForm` split, `set_deferred_xrefs`,
+  `finalize_deferred`), with the shared regexes and the two substitution steps the header/author
+  machinery still runs in production (`SpecialCharacters`, `AttributeReferences`) staying behind.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -10621,6 +10665,18 @@ Each phase is a reviewable unit with a clear exit gate.
        `attach_footnote_subtrees` units. Audit zero-new, 56 → 12 with all departures the deleted
        harnesses' own marker-bearing rows; coverage unchanged on every surviving file. See the
        step's own "landed as" note above.
+
+     - ✅ **`run_pipeline` deleted — every corpus goldenless.** `apply_string_pipeline` and
+       `run_pipeline` are gone; golden helpers read the frozen recordings through a `snapshot`
+       API with no golden parameter, and the drift guard and update mode went with the pipeline
+       that fed them (a recording is hand-edited and reviewed as the behavior change it records).
+       Seventeen structural-golden tests — registration catalogs and warning orders read off a
+       pipeline-run parser, which no string recording could freeze — are frozen as literals at
+       the last differentially-verified parity. Production untouched by construction (the seam's
+       `apply_inner` did not change a line); the golden-HTML suite and every frozen corpus pass
+       unchanged. Coverage surfaces the vestigial machinery's uncovered mass (606 → 1,775 missed
+       regions, all in the four files item (6) deletes). See the step's own "landed as" note
+       above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

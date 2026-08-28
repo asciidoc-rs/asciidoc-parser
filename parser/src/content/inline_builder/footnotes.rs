@@ -855,11 +855,7 @@ mod tests {
         // (9 source bytes) expanding to `"Widget"` (6 bytes) corrupted the gap
         // *before* a sibling footnote into a truncated slice of the raw
         // source (`"{produ"`) instead of the resolved value.
-        use crate::{
-            Parser,
-            content::{Content, SubstitutionGroup, inline_builder::build},
-            parser::ModificationContext,
-        };
+        use crate::{Parser, content::inline_builder::build, parser::ModificationContext};
 
         // Two *independent* parsers (design §5.3's discipline, established by
         // this module's own differential corpus below): `build` and the real
@@ -877,15 +873,11 @@ mod tests {
         let nodes = build(Span::new(source), &configure(), None);
         let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
 
-        let mut golden = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply_string_pipeline(&mut golden, &configure(), None);
-
         assert_eq!(
             folded,
-            crate::content::inline_builder::snapshot::recorded_golden(
+            crate::content::inline_builder::snapshot::recorded(
                 "footnotes_expanded_attribute",
-                source,
-                golden.rendered_str(),
+                source
             ),
             "{nodes:#?}"
         );
@@ -1547,17 +1539,8 @@ mod tests {
     /// The real, public pipeline's output for `source` — the golden for the
     /// expanded-value fixtures, which need the `AttributeReferences` step the
     /// module's own [`golden_macros`] helper deliberately omits.
-    fn golden_normal(source: &str, parser: &crate::Parser) -> String {
-        use crate::content::{Content, SubstitutionGroup};
-
-        let mut content = Content::from(Span::new(source));
-        SubstitutionGroup::Normal.apply_string_pipeline(&mut content, parser, None);
-
-        crate::content::inline_builder::snapshot::recorded_golden(
-            "footnotes_normal",
-            source,
-            content.rendered_str(),
-        )
+    fn golden_normal(source: &str, _parser: &crate::Parser) -> String {
+        crate::content::inline_builder::snapshot::recorded("footnotes_normal", source)
     }
 
     #[test]
@@ -1651,11 +1634,7 @@ mod tests {
         // `…_are_recognized_when_the_whole_seed_is_synthesized` tests. Before
         // this increment an id-carrying footnote reached this way took the
         // *whole seed* as its id.
-        use crate::{
-            Parser,
-            content::{Content, SubstitutionGroup, inline_builder::build_from_value},
-            strings::CowStr,
-        };
+        use crate::{Parser, content::inline_builder::build_from_value, strings::CowStr};
 
         for (filtered, source) in [
             (
@@ -1680,15 +1659,11 @@ and another.footnote:[note two]",
 
             let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
 
-            let mut golden = Content::from(Span::new(filtered));
-            SubstitutionGroup::Normal.apply_string_pipeline(&mut golden, &Parser::default(), None);
-
             assert_eq!(
                 folded,
-                crate::content::inline_builder::snapshot::recorded_golden(
+                crate::content::inline_builder::snapshot::recorded(
                     "footnotes_build_from_value",
-                    filtered,
-                    golden.rendered_str(),
+                    filtered
                 ),
                 "for {filtered:?}: {nodes:#?}"
             );
