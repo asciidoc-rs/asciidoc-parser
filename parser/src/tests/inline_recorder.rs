@@ -1468,69 +1468,74 @@ fn inline_tree_for_a_listing_block_carries_callout_nodes() {
 }
 
 #[test]
-fn xref_mirror_is_skipped_when_the_tree_defers_a_reference_form() {
-    // `xref:sec[a *b, c* d,role=hl]` is a documented builder divergence: the
-    // string replacer splits the attribute list over the span's **markup**,
-    // whose `<strong>b, c</strong>` hides a comma the split reads, so the two
-    // readings disagree about the match's own extent and the builder defers
-    // rather than claim a construct the rendered document contradicts. The
-    // tree therefore holds *fewer* cross-reference nodes than the string
-    // pipeline deferred. The positional resolution mirror must detect the
-    // count mismatch and skip — leaving the tree in its honest unresolved
-    // state — rather than assign destinations to the wrong nodes (or panic).
+fn the_xref_mirror_correlates_the_form_that_used_to_defer() {
+    // The counterpart of the deferral divergence (design §5.2's step 6), seen
+    // from resolution.
+    //
+    // `xref:sec[a *b, c* d,role=hl]` used to be deferred by the builder,
+    // because the string replacer splits the attribute list over the span's
+    // **markup** and the `<strong>b, c</strong>` it writes hides a comma the
+    // split reads. The tree then held *fewer* cross-reference nodes than the
+    // pipeline deferred, the positional mirror detected the count mismatch and
+    // skipped, and this content stayed on the template path carrying the
+    // replacer's own answer — an anchor cut short inside the tag.
+    //
+    // The tree's reading stands now, so the counts agree, the mirror
+    // correlates, and the rendering is the fold's: a whole anchor with the span
+    // intact inside it and the role where the author put it.
     let mut parser = Parser::default();
     let doc = parser.parse("[[sec]]The target.\n\nSee xref:sec[a *b, c* d,role=hl].");
 
-    // The rendered output is the string pipeline's own — anchor cut short
-    // inside the span, which is precisely the reading the builder refused to
-    // claim. That count mismatch is also what keeps this content on the
-    // **template** path: a deferred content is re-folded from its tree once
-    // resolution has installed its destinations (`Content::refold`), and the
-    // mirror's own success is the gate. Here the mirror skipped, so the tree
-    // is known not to describe this content and folding it would drop the
-    // cross-reference outright.
     let rendered = collect_rendered(&doc);
     assert!(
         rendered
             .iter()
-            .any(|s| s.contains("href=\"#sec\"") && s.contains("<strong>b</a>")),
-        "the rendered xref regressed: {rendered:?}"
+            .any(|s| s.contains(r##"<a href="#sec" class="hl">a <strong>b, c</strong> d</a>"##)),
+        "the xref did not resolve through the tree: {rendered:?}"
     );
 
-    // … and the tree simply carries no node for the deferred form.
+    // The malformed shape the replacer produces, pinned as *absent* — this is
+    // the divergence, and it is the whole reason the deferral went.
+    assert!(
+        !rendered.iter().any(|s| s.contains("<strong>b</a>")),
+        "the replacer's cut-short anchor came back: {rendered:?}"
+    );
+
+    // And the tree carries the node the mirror correlated against.
     let refs = collect_refs(&doc);
     assert!(
-        refs.iter().all(|r| r.variant != RefVariant::Xref),
-        "expected the deferred xref form to stay unrecognized in the tree: {refs:?}"
+        refs.iter().any(|r| r.variant == RefVariant::Xref),
+        "expected the form to be recognized in the tree: {refs:?}"
     );
 }
-
 #[test]
-fn a_title_whose_tree_defers_a_reference_form_keeps_the_string_pipelines_rendering() {
-    // The carve-out crossed with the **title** container, which resolves on a
-    // path of its own: `title_refs::compute` coordinates cross-title references
-    // and so re-derives the ordered destinations itself, rather than going
-    // through `Content::resolve_references`. Both paths have to split the
-    // string pipeline's flat list the same way when the tree is short of it,
-    // and a corpus that covers the carve-out only on paragraphs (as this one
-    // did) would never say so.
+fn a_title_resolves_the_form_that_used_to_defer_on_its_own_path() {
+    // The deferral divergence crossed with the **title** container, which
+    // resolves on a path of its own: `title_refs::compute` coordinates
+    // cross-title references and re-derives the ordered destinations itself,
+    // rather than going through `Content::resolve_references`. Both paths have
+    // to agree about this form, and a corpus covering it only on paragraphs (as
+    // this one did) would never say so.
     //
-    // Same deferred form as `xref_mirror_is_skipped_when_the_tree_defers_a_
-    // reference_form`, written as a block title.
+    // Same form as `the_xref_mirror_correlates_the_form_that_used_to_defer`,
+    // written as a block title. It used to keep the replacer's cut-short anchor
+    // through the carve-out; the tree's reading stands on this path too.
     let mut parser = Parser::default();
     let doc = parser.parse("[[sec]]The target.\n\n.See xref:sec[a *b, c* d,role=hl]\nA paragraph.");
 
     // `collect_rendered` walks block titles as well as block content.
     let titles = collect_rendered(&doc);
 
-    // The title keeps the string pipeline's own reading — the anchor cut short
-    // inside the span — exactly as the paragraph case does, and no placeholder
-    // sentinel escapes into it.
     assert!(
         titles
             .iter()
-            .any(|t| t.contains(r##"href="#sec""##) && t.contains("<strong>b</a>")),
-        "the title's carve-out rendering regressed: {titles:?}"
+            .any(|t| t.contains(r##"<a href="#sec" class="hl">a <strong>b, c</strong> d</a>"##)),
+        "the title did not resolve through the tree: {titles:?}"
+    );
+
+    assert!(
+        titles.iter().all(|t| !t.contains("<strong>b</a>")),
+        "the replacer's cut-short anchor came back in a title: {titles:?}"
     );
 
     assert!(
@@ -1540,7 +1545,6 @@ fn a_title_whose_tree_defers_a_reference_form_keeps_the_string_pipelines_renderi
         "a placeholder sentinel reached a rendered title: {titles:?}"
     );
 }
-
 #[test]
 fn an_index_term_macro_hiding_a_reference_keeps_the_string_pipelines_rendering() {
     // The carve-out's **other** shape, and the one no test reached before the

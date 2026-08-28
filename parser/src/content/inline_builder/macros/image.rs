@@ -2,10 +2,7 @@
 
 use std::borrow::Cow;
 
-use super::{
-    MacroMatch, MacroMatchKind, links::restore_masked_passthroughs, rebuild_macro_level,
-    tokened_split_agrees,
-};
+use super::{MacroMatch, MacroMatchKind, links::restore_masked_passthroughs, rebuild_macro_level};
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
@@ -128,20 +125,6 @@ fn find_image_matches<'src>(
         // macro name and the two square brackets need no gate of their own:
         // those bytes are literal, and no atomic piece — a placeholder, or an
         // entity delimited by `&` and `;` — can supply them.
-        let bracket = caps
-            .get(2)
-            .map_or(full.end..full.end, |m| m.start()..m.end());
-
-        if !bracket_is_recognizable(
-            caps.get(2).map_or("", |m| m.as_str()),
-            &bracket,
-            nodes,
-            pieces,
-            parser,
-        ) {
-            continue;
-        }
-
         if let Some(target) = caps.get(1)
             && !range_is_restorable(nodes, pieces, &(target.start()..target.end()))
         {
@@ -876,81 +859,6 @@ fn masked_default_alt(
 
     out.push_str(rest);
     out
-}
-
-/// Whether this family may recognize a macro whose bracket covers `range`.
-///
-/// A bracket comes back from a **parse** — [`bracket_attrlist`] reads its bytes
-/// as content — so an opaque piece there is read as literal text unless
-/// something puts the piece's own bytes back first. [`range_is_restorable`]
-/// names the pieces that always can: a masked passthrough or STEM expression,
-/// whose body [`Passthroughs::restore_to`](crate::content::Passthroughs)
-/// splices into the string pipeline's own finished string, so restoring one
-/// into a parsed value is faithful wherever that value goes.
-///
-/// A **rendered span** is admitted too, and this is where that rule was first
-/// drawn; [`text_attrlist`](super::links) now draws the same one, so the three
-/// [`Attrlist`]-bearing families agree.
-///
-/// *Necessary*, because it is the only way an image reaches parity at all.
-/// Every value an image's bracket holds is one `render_image` writes out — an
-/// `alt`, a `title`, a `width` — so a rule refusing a token in such a slot
-/// would defer *every* such bracket, and
-/// `image:pause.png[title=*Pause* and Resume]` (a fixture from the AsciiDoc
-/// language docs) would lose its whole macro. The link families had somewhere
-/// else to put a rendered span — a display text becomes the node's children —
-/// and drew that per-slot rule for a while; it cost them the same macro for
-/// `link:index.html[Docs,title=*Pause*]`, so they dropped it.
-///
-/// *Safe*, in two senses. The frozen bytes are the bytes: the string replacer
-/// reads its own bracket out of a haystack the quotes step has already
-/// rendered **with this same renderer**, so
-/// `title="<strong>Pause</strong> and Resume"` is what it writes too, and
-/// freezing the span's build-time fold here reproduces that exactly rather
-/// than approximating it. It is the same trade this very function's masked
-/// branch already makes for a [`Stem`](crate::inlines::Stem), whose "body" is
-/// likewise a build-time fold ([`restorable_body`]). And the markup cannot
-/// escape the attribute it is carried into: every value the image, icon and
-/// link renderers interpolate is escaped for the `"` delimiter where it lands
-/// (`encode_attribute_value`), so a span rendering a quote of its own —
-/// `[.r"z]#b#` — closes nothing.
-///
-/// What a frozen value cannot survive is being folded again through a
-/// *different* renderer — [`render_with`](crate::Parser) (design §3.3.1,
-/// step 7), which does not exist yet and which every other frozen value on
-/// this branch owes the same debt to. §4.6 reshapes the renderer seam in Phase
-/// 5 so a `*RenderParams` struct becomes the node type itself, which is where
-/// a fold-**materialized** attribute value belongs; until then this is parity,
-/// and parity is what the cutover needs.
-///
-/// The one thing a rendered piece must still satisfy is the *split*: a token
-/// carries none of the `,` / `=` / `"` an attribute list splits on and a
-/// span's markup may (`image:x.png[a *b, c* d,title=hl]`), so the two parses
-/// are compared attribute by attribute and a disagreement defers the whole
-/// match — the same check the link families make, for the same reason.
-fn bracket_is_recognizable(
-    bracket_text: &str,
-    range: &std::ops::Range<usize>,
-    nodes: &[InlineNode<'_>],
-    pieces: &[Piece],
-    parser: &Parser,
-) -> bool {
-    if range_is_restorable(nodes, pieces, range) {
-        return true;
-    }
-
-    let (tokened, masked) = tokened_bracket(
-        bracket_text,
-        range,
-        nodes,
-        pieces,
-        parser,
-        Tokened::MaskedOrRendered,
-    );
-
-    let carried: Vec<InlineNode<'_>> = masked.iter().map(|piece| piece.node.clone()).collect();
-
-    tokened_split_agrees(&tokened, &carried, parser)
 }
 
 /// Parses the macro's bracket into the [`Attrlist`]`<'src>` its node carries.

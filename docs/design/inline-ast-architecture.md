@@ -8155,6 +8155,63 @@ Each phase is a reviewable unit with a clear exit gate.
   Nothing in production moved in this increment — it is a measurement and a decomposition — so there
   is no audit or coverage claim to make beyond the suite staying green.
 
+  *Step 6 landed as (the deferral divergence, taken):* the survey's item (2), decided by the
+  maintainer and now implemented. `tokened_split_agrees` is gone, with `restored_markup_text` (its
+  only helper) and the image family's `bracket_is_recognizable` (which became always-`true`), and all
+  three call sites — xref, links, image — with them.
+
+  *What the gate actually cost is clearer from its removal than from its presence.* It deferred a
+  match whenever the tokened split and the replacer's markup split disagreed, which meant **a comma
+  inside a span decided whether the macro was recognized at all**. Before this increment
+  `xref:sec[a *b, c* d,role=hl]` folded to the literal text `xref:sec[a <strong>b, c</strong>
+  d,role=hl]`; the identical fixture without the comma, `xref:sec[a *b* d,role=hl]`, folded to a
+  proper anchor. The gate was not choosing between two readings of a construct — it was refusing the
+  construct.
+
+  Now all three families read it the way they already read the comma-free case:
+
+  | source | before | after |
+  |---|---|---|
+  | `xref:sec[a *b, c* d,role=hl]` | literal text | `<a href="#sec" class="hl">a <strong>b, c</strong> d</a>` |
+  | `link:index.html[a *b, c* d,role=hl]` | literal text | `<a href="index.html" class="hl">a <strong>b, c</strong> d</a>` |
+  | `image:x.png[a *b, c* d,title=hl]` | literal text | `alt="a <strong>b, c</strong> d" title="hl"` |
+
+  The image row is the one worth checking rather than assuming, and it was: the baseline already
+  renders `alt="a <strong>b</strong> d"` for the comma-free `image:x.png[a *b* d,title=hl]`, so
+  markup reaching an `alt` is this family's **existing** behavior and the change only stops the comma
+  from suppressing recognition. Nothing new leaks into an attribute.
+
+  *The audit reads differently here than on any previous increment, and the difference is the
+  increment.* **63 rows either side, 61 distinct sources either side, and the two source sets are
+  identical** — no divergent source appeared or disappeared. What moved is the *tree's* column on
+  exactly four rows: the `(source, rendered)` pairs are byte-identical either side (a set comparison
+  over those two columns differs in nothing at all), while `folded` goes from the literal text to the
+  anchor. The divergence against the string pipeline **persists** on those four, because the pipeline
+  still writes the cut-short `a <strong>b`; what changed is that the tree's answer went from *absent*
+  to *right*. Reporting this as "four rows closed" would have been wrong, and it is worth saying so:
+  the bar this branch uses ("no new row") is a proxy for "no unintended behavior change", and an
+  intended one shows up as a row whose fold moved rather than as a row that left.
+
+  Five tests asserted the deferral and now assert the reading; each keeps its own subject.
+  `an_attribute_list_delimiter_inside_a_span_is_the_trees_to_read` and
+  `a_span_whose_markup_splits_the_attribute_list_is_the_trees_to_read` pin the fold and, with
+  `assert_ne!` against the golden, pin the divergence itself as bytes.
+  `the_xref_mirror_correlates_the_form_that_used_to_defer` is the carve-out closing from resolution's
+  side — the counts agree, the positional mirror correlates instead of skipping, and the content
+  leaves the template path — with `a_title_resolves_the_form_that_used_to_defer_on_its_own_path`
+  saying the same for `title_refs::compute`'s separate path.
+  `a_resolved_destination_holding_a_sentinel_survives_the_template_path` keeps its sentinel subject
+  and simply carries the new bytes.
+
+  Coverage is neutral in total (578 missed regions / 329 missed lines either side) and improves where
+  the dead code went: `image.rs` drops from 5/2 to 4/1. `xref.rs` goes from 16/7 to 17/8, and the one
+  added line is the `let … else { panic!(…) }` in the rewritten test — the test-assertion fallback
+  this repository's conventions already exclude.
+
+  *What still defers* is the survey's list with items (1) and (2) struck: the `indexterm2:` gap, the
+  **template**, then the oracle call, the test call sites and `run_pipeline`, the vestigial
+  mechanisms, and the Strategy-A recorder with `inline_recorder`.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -9931,6 +9988,24 @@ Each phase is a reviewable unit with a clear exit gate.
        `tokened_split_agrees`'s decline, scope settled against the audit's set), the template, the
        oracle call, the test call sites and `run_pipeline`, the vestigial mechanisms, then the
        Strategy-A recorder with `inline_recorder`. See the step's own "landed as" note above.
+
+     - ✅ **the deferral divergence, taken.** The survey's item (2), decided by the maintainer and
+       implemented: `tokened_split_agrees` is gone, with `restored_markup_text` and the image
+       family's now-always-true `bracket_is_recognizable`, and all three call sites. What the gate
+       cost is clearer from its removal — it deferred whenever the tokened split and the replacer's
+       markup split disagreed, which meant **a comma inside a span decided whether the macro was
+       recognized at all**: `xref:sec[a *b, c* d,role=hl]` folded to literal text where
+       `xref:sec[a *b* d,role=hl]` folded to an anchor. All three families now read the comma case
+       the way they already read the comma-free one. The image row was checked rather than assumed —
+       the baseline already renders `alt="a <strong>b</strong> d"` without the comma, so markup in an
+       `alt` is pre-existing behavior and nothing new leaks into an attribute. The audit reads
+       differently here than anywhere else on this branch: 63 rows and 61 sources either side with
+       **identical source sets** and identical `(source, rendered)` pairs, while `folded` moves on
+       exactly four rows from the literal text to the anchor. The divergence persists — the pipeline
+       still writes the cut-short `a <strong>b` — so this is not "four rows closed"; the tree's answer
+       went from absent to right, which is what an *intended* behavior change looks like under a bar
+       written to catch unintended ones. Coverage neutral in total, improving where the dead code
+       went. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a
