@@ -27,7 +27,16 @@ Run all of the following for any change to `parser/` (or other Rust crates in th
    either add an explicit link-reference definition (``/// [`Foo`]: crate::path::to::module``, as
    sibling code in `parser/src/content/inline_builder/macros/links.rs` does) or drop the brackets and
    leave it as plain `code` text.
-5. **Code coverage** — check coverage for the lines/functions/branches actually touched by the change,
+5. **The PR title** must be a Conventional Commit whose *type* is one of the five
+   `.commitlintrc.no-scope.yml` allows: `fix`, `feat`, `chore`, `update`, `doc`. **`refactor` is not
+   among them** and CI's "Conventional commits validation" job rejects it — a pure deletion or a
+   mechanism retirement is `chore`. The description must also start with a capital letter or digit
+   and must not end with a period (both errors); over 70 characters is a warning, not a failure.
+   Only the *title* is checked — `.github/workflows/pr_title.yml` triggers on `edited`, so correcting
+   it re-runs the job on its own — and since the repo squash-merges, that title becomes the commit
+   subject on `inline-ast`. A commit message that used another type is therefore cosmetic, and not
+   worth a force-push.
+6. **Code coverage** — check coverage for the lines/functions/branches actually touched by the change,
    not just that tests pass. This repo tracks coverage via `cargo-llvm-cov` in CI (see
    `.github/workflows/ci.yml`) and reports diff coverage on PRs via Codecov (`codecov.yml`). Locally
    (install it first if needed: `cargo install cargo-llvm-cov --locked`):
@@ -146,7 +155,7 @@ comm -13 before.txt after.txt                  # must be empty: these are NEW di
 comm -23 before.txt after.txt                  # divergences this increment closed
 ```
 
-Three gotchas that will silently waste a run — each produces a plausible-looking but wrong answer
+Four gotchas that will silently waste a run — each produces a plausible-looking but wrong answer
 rather than an error:
 
 - **Log to a file, not `eprintln!`.** `cargo test` captures a passing test's output, so `eprintln!`
@@ -159,18 +168,34 @@ rather than an error:
   that: a multi-line block's content comes out as `\n` rather than as real newlines. Under `{}` such
   a record spills across lines that then get deduplicated against unrelated records' lines, and a
   genuinely new divergence can drop out of `comm -13` — the one output the audit exists to read.
+- **Revert the patch before *any* `git stash`, and get the baseline from a detached checkout of the
+  base rather than from a stash.** Both halves of this have bitten. Applying the patch to a tree that
+  already holds your real changes and then stashing sweeps *both* away together, and the later `stash
+  pop` brings *both* back — which is how the audit patch reached a commit and turned every CI job red.
+  And once your work is committed, `git stash` has nothing to stash, so the "before" run silently
+  measures your own branch and the two sets match for the wrong reason. `git checkout <base-sha>`,
+  patch, run, **take the probe back out with the same targeted edit that put it in**, then
+  `git checkout <branch>` has neither failure mode. Take it out that way on the base too, not with a
+  whole-file discard: a discard happens to be harmless *there* — the detached base holds nothing but
+  the probe — but the recipe is the thing that gets copied, and the fourth papercut below is what
+  happens when it is copied onto a branch where the file also holds your work.
 
-Revert the patch before committing.
+Revert the patch before committing, and verify it by grepping for what should be **absent**
+(`scratchpad`, `OpenOptions`, the log path) rather than for the changes you meant to keep. Confirming
+that your own edits survived says nothing about whether the probe went with them.
 
 ### Coverage on this branch
 
 Judge coverage on a **diff** basis, not an absolute one: `cargo llvm-cov report -p asciidoc-parser
---show-missing-lines` on your branch and on `origin/inline-ast` (`git stash` in between), then check
-that the changed file's missed-region and missed-line **counts** are unchanged. The files this branch
+--show-missing-lines` on your branch and on `origin/inline-ast`, then check that the changed file's
+missed-region and missed-line **counts** are unchanged. Get the baseline by checking out the base
+commit, not with `git stash` — a stash taken after you have committed is empty, and the "baseline"
+run then measures your own branch. (`cargo llvm-cov report` also reuses the last run's profile data,
+so re-run `cargo llvm-cov` itself after switching, not just `report`.) The files this branch
 touches already sit at ~99% with a handful of long-documented defensive branches, so the absolute
 number tells you nothing about what you added.
 
-### Two local papercuts
+### Three local papercuts
 
 - `cargo-llvm-cov` and the nightly `rustfmt` component are often absent from a fresh session; install
   both before the first preflight (`cargo install cargo-llvm-cov --locked`,
@@ -179,3 +204,8 @@ number tells you nothing about what you added.
   contain a `"` immediately followed by a `#` — which a smart-quote-then-mark fixture does — is
   terminated by that pair, producing a wall of unrelated syntax errors far from the real line. Use
   `r##"…"##` for those.
+- **Never remove a throwaway probe with `git checkout -- <file>`.** The instrumentation for an audit
+  or a measurement usually lands in a file you are also editing for real, and that command discards
+  the file's *whole* working state, not just the probe — it destroyed uncommitted work three times in
+  one session. Take the probe out with the same targeted edit that put it in, or commit a checkpoint
+  first and squash it away at the end.
