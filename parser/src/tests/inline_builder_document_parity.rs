@@ -601,10 +601,10 @@ fn resolution_renders_a_deferred_content_once() {
     // recorder, a numbering backend, anything counting its own callbacks) sees
     // whatever this pass does.
     //
-    // Both renderings exist: the template's (`rebuild_rendered`) and the
-    // tree's (`refold`). Exactly one of them runs for any given content —
-    // whichever is authoritative for it — rather than one running and then
-    // being overwritten by the other.
+    // Both renderings exist: the template's (`render_xref_template`, in the
+    // title pass) and the tree's (`refold`). Exactly one of them runs for any
+    // given content — whichever is authoritative for it — rather than one
+    // running and then being overwritten by the other.
     #[derive(Debug, Default)]
     struct CountingRenderer {
         xrefs: std::cell::Cell<usize>,

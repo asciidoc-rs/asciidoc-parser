@@ -592,7 +592,6 @@ mod tests {
                 deferred: Some(Box::new(FootnoteDeferred::new(
                     "the template".to_string(),
                     vec![],
-                    false,
                 ))),
                 location: None,
             }

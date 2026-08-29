@@ -985,6 +985,11 @@ impl<'src> Block<'src> {
     pub(crate) fn block_title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         match self {
             Self::Simple(b) => b.title_content_mut(),
+            // A section's `.Title` decoration, which only a *discrete* heading
+            // keeps (a non-discrete section's is carried into its first block);
+            // distinct from the section heading, which the title pass reaches
+            // through its own `section_title_*` accessors.
+            Self::Section(b) => b.title_content_mut(),
             Self::Media(b) => b.title_content_mut(),
             Self::List(b) => b.title_content_mut(),
             Self::RawDelimited(b) => b.title_content_mut(),
@@ -1010,6 +1015,7 @@ impl<'src> Block<'src> {
     pub(crate) fn block_title_content(&self) -> Option<&Content<'src>> {
         match self {
             Self::Simple(b) => b.title_content(),
+            Self::Section(b) => b.title_content(),
             Self::Media(b) => b.title_content(),
             Self::List(b) => b.title_content(),
             Self::RawDelimited(b) => b.title_content(),

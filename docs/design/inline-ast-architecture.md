@@ -8820,6 +8820,46 @@ Each phase is a reviewable unit with a clear exit gate.
   thread through the live resolve/refold path; then step 7 (`render_with`/`render_to`,
   `Document::to_asg()`, the `attribute-missing` per-line hack), Phase 5, and Landing.
 
+  *Step 6 landed as (the constant fold — item (6) closed):* the collapse the two slices set up,
+  now that every flag has exactly one producer left. `DeferredContent::from_tree` (always
+  `true`), `DeferredParts::from_tree` and `TitleNode::from_tree` (its copies),
+  `FootnoteDeferred::sentinels_escaped` (always `false`: the string replacer's `true` call died
+  with the replacer, and `define_footnote` loses the parameter with it) are gone, and every
+  branch they gated folds: the resolve loops read a segment's `target` directly — a tree read
+  *is* the document's own text — `template_partition` and its callers' else-arms are deleted,
+  and the `EscapedForm` pair reduces to `render_template`'s one honest bool
+  (`template_escaped`: `true` for a `DeferredContent`'s synthesized carried-title template,
+  `false` for a `FootnoteDeferred`'s fold). The side-effect parity harness drops its
+  `set_sentinels_escaped` normalization — there is no encoding difference left to normalize.
+
+  *The dead arm the fold exposed.* Collapsing `resolve_references`' template arm showed its body
+  was already unreachable: a deferring body content always has its tree installed and its
+  attributes retained (the fold arm always binds), and the one template-rendering content — the
+  carried block title — never enters the per-content resolution walk at all, because titles are
+  resolved by the document-order title pass (`title_refs`), which splices through
+  `render_xref_template`. Coverage agreed (the splice line had zero hits on the base too), so
+  `Content::rebuild_rendered` is deleted rather than kept as an untested arm, per the same
+  dead-defensive-branch doctrine every prior increment has applied.
+
+  *Coverage:* 639 → **582** missed regions — below the 606 the whole freeze-and-delete arc
+  started from. Every changed line covered.
+
+  *One pre-existing bug rode along, because the review of this increment found it.* A
+  **discrete** heading is the one section kind that keeps its own `.Title` decoration (every
+  other section's is carried into its first block), and no pass resolved it: the title pass's
+  `Section` arm reads only the heading, and `Block::block_title_content_mut` mapped `Section`
+  to `None`, so its else-branch never saw one either. A cross-reference in such a title stayed
+  at its unresolved fallback. This predates the whole deletion arc — the two probes render
+  byte-identically on the base — and `rebuild_rendered` was never its write-back, so the fold
+  above neither caused it nor could have fixed it by staying. `SectionBlock` now exposes the
+  same `title_content_mut` seam every other titled block does, and both title-pass walks run
+  their block-title branch for every block: heading first, decoration second, in the same order
+  on each side.
+
+  *What still defers:* step 7 (`render_with`/`render_to`, `Document::to_asg()`, the
+  `attribute-missing` per-line hack #564), Phase 5's renderer seam, and Landing. Item (6) — and
+  with it step 6's decomposition — is closed.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -10791,6 +10831,16 @@ Each phase is a reviewable unit with a clear exit gate.
        Coverage: 1,296 → 639 missed regions (`macros.rs` 617 → 3) — the freeze's debt paid.
        What remains of item (6) is the `from_tree`/`EscapedForm` constant-folding collapse, its
        own increment. See the step's own "landed as" note above.
+
+     - ✅ **the constant fold — item (6) closed.** Every flag with one producer left folds:
+       `from_tree` (always true) and `sentinels_escaped` (always false) deleted with every
+       branch they gated; `template_partition` gone; `EscapedForm` reduced to
+       `render_template`'s one honest `template_escaped` bool. The fold exposed
+       `Content::rebuild_rendered` as already unreachable — titles resolve through the
+       document-order title pass, never the per-content walk — and it is deleted per the
+       dead-defensive-branch doctrine, with coverage as the witness (zero hits on the base
+       too). Coverage: 639 → 582 missed regions, below the arc's 606 starting point. See the
+       step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

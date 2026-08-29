@@ -179,39 +179,13 @@ struct DeferredContent {
     /// rides on has no `'src` lifetime, and so arrives at the claiming block
     /// with its inline nodes dropped — carries a template synthesized **from
     /// its own tree** at the hop instead (see [`Content::to_owned_title`] and
-    /// [`carried_title_template`]). Its rendering cannot be a fold, so it stays
-    /// a splice — see [`Content::rebuild_rendered`] — but the splice's inputs
-    /// no longer come from the string pipeline.
+    /// [`carried_title_template`]). Its rendering cannot be a fold, so it
+    /// stays a splice — the document-order title pass renders it through
+    /// [`render_xref_template`] — but the splice's inputs no longer come from
+    /// the string pipeline.
     ///
     /// Empty for every production content but the carried title above.
     template: String,
-
-    /// Whether [`block`](Self::block) and [`footnote`](Self::footnote) were
-    /// read off this content's **inline tree**, rather than being the string
-    /// pipeline's own flat list.
-    ///
-    /// Always `true` now: [`Content::set_tree_xrefs`] is the only producer
-    /// left — the string macros step's `set_deferred_xrefs` went with the
-    /// pipeline. The field and the `!from_tree` branches it still gates — the
-    /// escaped-form reads, the template partition — are a constant-folding
-    /// collapse deferred to its own increment (design §5.2 step 6's tail),
-    /// since they thread through the live resolve/refold path.
-    from_tree: bool,
-}
-
-impl DeferredContent {
-    /// Which halves of this content's template inputs are in escaped sentinel
-    /// form.
-    ///
-    /// The template is always the string pipeline's — it is the only pass that
-    /// writes one — while the segments are the tree's wherever the carve-out
-    /// did not fire, and the tree's are the document's own text already.
-    fn escaped_form(&self) -> EscapedForm {
-        EscapedForm {
-            template: true,
-            segments: !self.from_tree,
-        }
-    }
 }
 
 /// A read-only view of a [`Content`]'s deferred cross-references — the shape
@@ -227,11 +201,6 @@ pub(crate) struct DeferredParts<'a> {
     /// The placeholder template, for a content that renders from one — see
     /// [`DeferredContent::template`].
     pub(crate) template: &'a str,
-
-    /// Whether [`block`](Self::block) and [`footnote`](Self::footnote) were
-    /// read off the content's inline tree — see
-    /// [`DeferredContent::from_tree`].
-    pub(crate) from_tree: bool,
 }
 
 /// A single deferred cross-reference.
@@ -402,13 +371,13 @@ pub(crate) fn unescape_sentinels(text: &str) -> Cow<'_, str> {
 /// legitimately contains the escape introducer, which is precisely the
 /// confusion the escaping exists to end. So every caller says.
 ///
-/// The three answers in this module: a segment the **string pipeline** deferred
-/// is escaped and one read off the **tree** is not
-/// ([`DeferredContent::from_tree`]); a placeholder template's own literal text
-/// is escaped for a `DeferredContent` and follows its producer for a
-/// [`FootnoteDeferred`]; and a **resolved** or **derived** destination is never
-/// escaped, the resolver having been handed the document's own text and
-/// answering in kind. That last one is why the decoding happens here, piece by
+/// The two answers in this module: a placeholder template's own literal text
+/// is escaped for a `DeferredContent` (see [`carried_title_template`]) and not
+/// for a [`FootnoteDeferred`], whose fold never enters escaped form; and a
+/// segment's fields, a **resolved** and a **derived** destination are never
+/// escaped — the tree reads carry the document's own text, and the resolver
+/// was handed that text and answered in kind. The latter is why the decoding
+/// happens here, piece by
 /// piece, rather than over a completed rendering: a rendering splices the
 /// resolver's answer into the template, and a pass over the result would decode
 /// bytes the resolver supplied.
@@ -418,29 +387,6 @@ pub(crate) fn document_text(text: &str, escaped: bool) -> Cow<'_, str> {
     } else {
         Cow::Borrowed(text)
     }
-}
-
-/// Which halves of a placeholder template's inputs are held in the string
-/// pipeline's escaped sentinel form (see [`escape_sentinels`]).
-///
-/// The two are independent: a `DeferredContent` always carries the string
-/// pipeline's own template — it is the only pass that writes one — while its
-/// *segments* are the tree's wherever the carve-out did not fire. A
-/// [`FootnoteDeferred`] has one producer for both halves.
-#[derive(Clone, Copy, Debug)]
-struct EscapedForm {
-    /// The template's own literal text — everything between the placeholders.
-    template: bool,
-
-    /// The segments' [`target`](XrefSegment::target),
-    /// [`provided_text`](XrefSegment::provided_text),
-    /// [`window`](XrefSegment::window) and [`roles`](XrefSegment::roles): the
-    /// fields read back out of the substituted text.
-    ///
-    /// Never [`resolved`](XrefSegment::resolved) or
-    /// [`derived`](XrefSegment::derived), which are the resolver's own answer
-    /// and are spliced verbatim.
-    segments: bool,
 }
 
 /// Returns `true` if `c` is one of the codepoints the substitution pipeline
@@ -616,17 +562,14 @@ impl<'src> Content<'src> {
     /// (`set_render_attributes` is called for exactly that content), so the
     /// binding below always takes for a title with a tree; it is written as a
     /// binding rather than an unwrap because the invariant lives in that
-    /// pairing, not in the field's type. The condition's other exits are real:
+    /// pairing, not in the field's type. The condition's other exit is real:
     /// a title **re-stashed** past an empty section body arrives here with its
-    /// nodes already dropped and keeps the template the first hop synthesized,
-    /// and a `from_tree` `false` snapshot keeps the string pipeline's own — the
-    /// only honest one where the tree is known not to describe the content.
+    /// nodes already dropped and keeps the template the first hop synthesized.
     pub(crate) fn to_owned_title(&self, parser: &Parser) -> OwnedTitle {
         let deferred = self.deferred.as_ref().map(|d| {
             let mut d = (**d).clone();
 
-            if d.from_tree
-                && !self.inlines.is_empty()
+            if !self.inlines.is_empty()
                 && let Some(attributes) = self.render_attributes.as_deref()
             {
                 let context = parser.render_context_with(attributes.clone());
@@ -851,7 +794,6 @@ impl<'src> Content<'src> {
             block: &d.block,
             footnote: &d.footnote,
             template: &d.template,
-            from_tree: d.from_tree,
         })
     }
 
@@ -926,7 +868,6 @@ impl<'src> Content<'src> {
             block,
             footnote,
             template: String::new(),
-            from_tree: true,
         }));
     }
 
@@ -953,66 +894,38 @@ impl<'src> Content<'src> {
         let source = self.original;
 
         if let Some(deferred) = self.deferred.as_mut() {
-            // Where the two lists were read off the tree they arrive already
-            // partitioned, and only the block-level ones are reported here: a
-            // footnote's own copy of an embedded reference resolves and reports
-            // it. Where they are still the string pipeline's flat list, that
-            // same split is read out of the template — a placeholder that has
-            // left it was re-homed onto a footnote — which is what
-            // `reports_unresolved` answers for either shape.
-            // A tree content carries no template and never consults one —
-            // `reports_unresolved` below short-circuits on `from_tree` — while
-            // a string-pipeline content (a shape only `set_deferred_xrefs`'s
-            // remaining callers, the string macros step and its unit tests,
-            // can still build) reaches here with the template its producer
-            // captured. The assert that used to pin that pairing went with the
-            // last test that could reach this on the string path; the
-            // invariant is the vestigial machinery's own now, held by its own
-            // unit tests until it is deleted whole.
-            let from_tree = deferred.from_tree;
-            let template = deferred.template.clone();
-
-            for (index, xref) in deferred.block.iter_mut().enumerate() {
+            // The two lists arrive off the tree already partitioned, and only
+            // the block-level ones are reported here: a footnote's own copy of
+            // an embedded reference resolves and reports it.
+            for xref in deferred.block.iter_mut() {
                 // The catalog holds the document's own text (an ID as it was
-                // written, a section's reference text), so the key handed to
-                // the resolver leaves the string pipeline's escaped sentinel
-                // form here. See `document_text`.
-                let target = document_text(&xref.target, !from_tree);
-
+                // written, a section's reference text), which is exactly what
+                // a tree-read segment carries.
                 let resolved = resolver.resolve(&ResolutionContext {
-                    target: &target,
+                    target: &xref.target,
                     provided_text: xref.provided_text.as_deref(),
                     derived: xref.derived.as_ref(),
                 });
 
-                let reports_unresolved =
-                    from_tree || template.contains(&Content::xref_placeholder(index));
-
                 // A target that names a document is never reported: it carries
                 // its own destination, so there was nothing here to resolve.
-                if resolved.is_none() && xref.derived.is_none() && reports_unresolved {
-                    warnings.unresolved(&target, source);
+                if resolved.is_none() && xref.derived.is_none() {
+                    warnings.unresolved(&xref.target, source);
                 }
 
                 xref.resolved = resolved;
             }
 
             for xref in deferred.footnote.iter_mut() {
-                // The string pipeline produces one flat list, all of it
-                // block-level (`set_deferred_xrefs`), so this list is only ever
-                // the tree's — but it is read through `document_text` all the
-                // same, so the two loops say the same thing about their keys.
-                let target = document_text(&xref.target, !from_tree);
-
                 xref.resolved = resolver.resolve(&ResolutionContext {
-                    target: &target,
+                    target: &xref.target,
                     provided_text: xref.provided_text.as_deref(),
                     derived: xref.derived.as_ref(),
                 });
             }
         }
 
-        let from_tree = self.resolve_tree_references();
+        let resolved_tree = self.resolve_tree_references();
 
         // Independent of the arm chosen below. A content whose *only*
         // cross-references sit inside its footnotes defers nothing itself — the
@@ -1023,39 +936,27 @@ impl<'src> Content<'src> {
         // the footnotes that most need it.
         self.collect_own_folded_footnotes(renderer, parser, warnings);
 
-        // Exactly **one** of the two renderings runs, and which one is now a
-        // question about the *tree* rather than about the cross-references in
-        // it: a content with a tree folds it, and a content without one — the
-        // carried block title, the only content in that position — renders its
-        // template. Running both and keeping the second would be observable,
-        // not merely wasteful: a renderer is a host-supplied trait object, so a
-        // stateful one (a recorder, a numbering backend, anything counting its
-        // own callbacks) would see every callback for this content twice in one
-        // pass.
+        // A deferring content is re-rendered by folding its tree; a content
+        // with nothing deferred keeps the rendering it has. The one content
+        // that renders from a *template* — a block title carried across a
+        // section heading, whose inline nodes cannot cross the `'src`-erasing
+        // hop — never reaches this per-content pass at all: titles are
+        // resolved by the document-order title pass
+        // (`title_refs::resolve_title_references`), which splices its
+        // template through `render_xref_template`.
         //
-        // The carve-out this replaces was narrower on paper and wider in fact:
-        // it kept the template wherever the tree did not hold *every*
-        // cross-reference the string pipeline deferred. Reading the
-        // cross-references off the tree makes that condition unstatable — the
-        // tree holds all of its own — so what is left is only the content that
-        // has no tree at all.
-        //
-        // A content with deferred cross-references retains its own attributes
-        // (`set_render_attributes` is called for exactly that content — see
-        // `only_deferred_content_retains_its_render_attributes`), so the fold
-        // arm always binds. It is written as a binding rather than an unwrap
-        // because the invariant lives in that pairing, not in the field's type.
-        if from_tree
+        // A content with deferred cross-references always has its tree
+        // installed and retains its own attributes (`set_render_attributes`
+        // is called for exactly that content — see
+        // `only_deferred_content_retains_its_render_attributes`), so the
+        // bindings below always take with `resolved_tree`; they are written
+        // as bindings rather than unwraps because the invariant lives in that
+        // pairing, not in the fields' types.
+        if resolved_tree
             && !self.inlines.is_empty()
             && let Some(attributes) = self.render_attributes.as_deref().cloned()
         {
             self.refold(attributes, renderer, parser);
-        } else {
-            // `rebuild_rendered` emits the document's own text directly — the
-            // template's literal runs leave escaped form as they are spliced,
-            // so the resolver's own answer is never decoded along with them.
-            // See `render_template`.
-            self.rebuild_rendered(renderer);
         }
     }
 
@@ -1078,16 +979,10 @@ impl<'src> Content<'src> {
     ///
     /// The caller gates this on the content **holding a tree**, which every
     /// production content with deferred state does — the deferred lists are
-    /// read off that tree, the only producer left at the seam. What takes the
-    /// other arm is a content with no tree at all: the carried block title,
-    /// which renders from its synthesized template instead (see
-    /// [`carried_title_template`]).
-    ///
-    /// This runs **instead of**
-    /// [`rebuild_rendered`](Self::rebuild_rendered), not after it: rendering
-    /// both and discarding one would be observable rather than merely
-    /// wasteful, since a stateful host renderer would see every callback for
-    /// this content twice in a single resolution pass.
+    /// read off that tree, the only producer left at the seam. The one
+    /// content that renders from a *template* instead — the carried block
+    /// title (see [`carried_title_template`]) — is resolved by the
+    /// document-order title pass, never here.
     /// Folds each footnote this content **defines** from its own subtree, and
     /// hands the results to `warnings` for the resolution pass to install into
     /// the catalog.
@@ -1208,38 +1103,19 @@ impl<'src> Content<'src> {
     /// the block correlation above and correlated instead with the tree's
     /// footnote subtrees (see [`resolved_destinations`]).
     ///
-    /// Returns what
-    /// [`mirror_tree_xref_resolution`](Self::mirror_tree_xref_resolution)
-    /// returns — whether the tree holds exactly the block-level
-    /// cross-references the string pipeline deferred — and `false` for a
-    /// content with no tree or nothing deferred, neither of which is re-folded.
+    /// Returns whether there was deferred state to install — `false` for a
+    /// content with nothing deferred, which is not re-folded.
     fn resolve_tree_references(&mut self) -> bool {
         let Some(deferred) = self.deferred.as_ref() else {
             return false;
         };
 
-        let (block_ordered, footnote_ordered) = if deferred.from_tree {
-            (
-                resolved_destinations(&deferred.block),
-                resolved_destinations(&deferred.footnote),
-            )
-        } else {
-            // The string pipeline's flat list, split the way it has always been
-            // split: a placeholder still in the template is block-level, one
-            // that has left it was re-homed onto a footnote. The block half
-            // will not correlate (that count mismatch is why this content is on
-            // this path at all), but the footnote half still can, and does.
-            (
-                template_partition(&deferred.template, &deferred.block, true),
-                template_partition(&deferred.template, &deferred.block, false),
-            )
-        };
-
-        let from_tree = deferred.from_tree;
+        let block_ordered = resolved_destinations(&deferred.block);
+        let footnote_ordered = resolved_destinations(&deferred.footnote);
 
         self.mirror_tree_xref_resolution(&block_ordered, &footnote_ordered);
 
-        from_tree
+        true
     }
 
     /// Installs a pre-computed list of resolved cross-reference destinations —
@@ -1307,29 +1183,6 @@ impl<'src> Content<'src> {
             let mut next = 0;
             assign_footnote_tree_xrefs(&mut self.inlines, footnote_ordered, &mut next);
         }
-    }
-
-    /// Rebuilds [`Content::rendered`] from the deferred template and the
-    /// current (resolved or unresolved) state of its cross-references.
-    fn rebuild_rendered(&mut self, renderer: &dyn InlineSubstitutionRenderer) {
-        let Some(deferred) = self.deferred.as_ref() else {
-            return;
-        };
-
-        // A `deferred` content always reaches here with its template captured
-        // — in production, the carried block title's, synthesized from its own
-        // tree at the hop (see `carried_title_template`). An
-        // empty one here would blank the content, so catch that invariant break
-        // in debug builds rather than let it render.
-        debug_assert!(!deferred.template.is_empty());
-
-        self.rendered = render_template(
-            &deferred.template,
-            &deferred.block,
-            renderer,
-            deferred.escaped_form(),
-        )
-        .into();
     }
 }
 
@@ -1425,27 +1278,6 @@ pub(crate) fn resolved_destinations(xrefs: &[XrefSegment]) -> Vec<Option<Resolve
     xrefs.iter().map(|xref| xref.resolved.clone()).collect()
 }
 
-/// The resolved destinations of the string pipeline's own flat list, filtered
-/// to the half `template` still splices (`spliced`) or to the half it no longer
-/// does — the block-level and footnote-embedded partitions respectively.
-///
-/// This is the split the tree performs structurally, done the only way a flat
-/// placeholder-indexed list allows. It is reached only for a content the
-/// carve-out keeps on the string pipeline's answer — see
-/// [`DeferredContent::from_tree`] — and goes with it.
-pub(crate) fn template_partition(
-    template: &str,
-    xrefs: &[XrefSegment],
-    spliced: bool,
-) -> Vec<Option<ResolvedReference>> {
-    xrefs
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| template.contains(&Content::xref_placeholder(*index)) == spliced)
-        .map(|(_, xref)| xref.resolved.clone())
-        .collect()
-}
-
 /// Counts the [`Xref`](RefVariant::Xref) nodes an [`assign_tree_xrefs`] walk
 /// over `nodes` would visit — i.e. the block-level cross-reference slots of the
 /// tree, excluding footnote subtrees (which [`count_footnote_tree_xrefs`]
@@ -1527,9 +1359,7 @@ fn tree_defers_xrefs(nodes: &[InlineNode<'_>]) -> bool {
 /// still solely owning — the first of them the survey called *blocked* rather
 /// than merely unbuilt. It is **wired**: [`Content::set_tree_xrefs`] installs
 /// what this returns, so what a content carries for its deferred
-/// cross-references is what its tree said — everywhere the tree describes the
-/// same cross-references the string pipeline deferred, which is the carve-out
-/// [`DeferredContent::from_tree`] names.
+/// cross-references is what its tree said.
 ///
 /// A [`Ref`](InlineNode::Ref)`{`[`Xref`](RefVariant::Xref)`}` node already
 /// carries every field an [`XrefSegment`] holds but one — `target`, `window`,
@@ -1713,8 +1543,8 @@ pub(crate) fn xref_segment_from_node(
 /// placeholder, and nothing downstream can tell them apart. Here every
 /// document-derived byte is escaped and every raw sentinel is the fold's own —
 /// exactly the escaped form the string pipeline's templates have always been
-/// in, so the render path ([`render_template`], `EscapedForm { template: true,
-/// … }`) needs no new case.
+/// in, so the render path ([`render_template`] with `template_escaped`) needs
+/// no new case.
 ///
 /// The price of reading only the top level is a cross-reference **nested**
 /// inside another top-level construct (a styled span's children, a visible
@@ -1855,23 +1685,14 @@ fn assign_footnote_tree_xrefs(
 /// [`resolved`](XrefSegment::resolved) fields it has filled in with cross-title
 /// (including circular) coordination, and receives the final rendered title.
 ///
-/// `segments_escaped` says whether those segments are the string pipeline's own
-/// (see [`EscapedForm`]); the template always is.
+/// A [`DeferredContent`] template's literal text is in escaped sentinel form
+/// (see [`carried_title_template`]), so it is rendered `template_escaped`.
 pub(crate) fn render_xref_template(
     template: &str,
     xrefs: &[XrefSegment],
     renderer: &dyn InlineSubstitutionRenderer,
-    segments_escaped: bool,
 ) -> String {
-    render_template(
-        template,
-        xrefs,
-        renderer,
-        EscapedForm {
-            template: true,
-            segments: segments_escaped,
-        },
-    )
+    render_template(template, xrefs, renderer, true)
 }
 
 /// Splices resolved (or fallback) cross-reference renderings into a placeholder
@@ -1880,7 +1701,7 @@ fn render_template(
     template: &str,
     xrefs: &[XrefSegment],
     renderer: &dyn InlineSubstitutionRenderer,
-    form: EscapedForm,
+    template_escaped: bool,
 ) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
@@ -1894,7 +1715,7 @@ fn render_template(
     // catalog id that happens to hold the escape introducer into some other
     // sentinel entirely. See [`document_text`].
     let push_literal = |out: &mut String, text: &str| {
-        out.push_str(&document_text(text, form.template));
+        out.push_str(&document_text(text, template_escaped));
     };
 
     while let Some(start) = rest.find(XREF_PLACEHOLDER_START) {
@@ -1917,33 +1738,15 @@ fn render_template(
             .and_then(|index| xrefs.get(index))
         {
             Some(xref) => {
-                // The four fields the *substitution* read back out of its own
-                // text leave escaped form here; `derived` and `resolved` never
-                // entered it. Roles are rebuilt only when one actually carries
-                // an escape, which for the overwhelming majority is never.
-                let unescaped_roles: Option<Vec<String>> = (form.segments
-                    && xref.roles.iter().any(|role| role.contains(SENTINEL_ESCAPE)))
-                .then(|| {
-                    xref.roles
-                        .iter()
-                        .map(|role| unescape_sentinels(role).into_owned())
-                        .collect()
-                });
-
+                // A segment's fields are the tree's reads — the document's
+                // own text, never in escaped form; `derived` and `resolved`
+                // never entered it either.
                 renderer.render_xref(
                     &XrefRenderParams {
-                        target: &document_text(&xref.target, form.segments),
-                        provided_text: xref
-                            .provided_text
-                            .as_deref()
-                            .map(|text| document_text(text, form.segments))
-                            .as_deref(),
-                        window: xref
-                            .window
-                            .as_deref()
-                            .map(|window| document_text(window, form.segments))
-                            .as_deref(),
-                        roles: unescaped_roles.as_deref().unwrap_or(&xref.roles),
+                        target: &xref.target,
+                        provided_text: xref.provided_text.as_deref(),
+                        window: xref.window.as_deref(),
+                        roles: &xref.roles,
                         xrefstyle: xref.xrefstyle,
                         derived: xref.derived.as_ref(),
                         resolved: xref.resolved.as_ref(),
@@ -1990,58 +1793,23 @@ pub(crate) struct FootnoteDeferred {
 
     /// The cross-references, in placeholder order.
     xrefs: Vec<XrefSegment>,
-
-    /// Whether [`template`](Self::template) and the segments' targets are held
-    /// in the string pipeline's escaped sentinel form (see
-    /// [`escape_sentinels`]).
-    ///
-    /// A footnote registered by the string replacer is; one registered from its
-    /// own subtree by the single-pass builder is not, the builder having no
-    /// in-band sentinels to hide a document's own codepoints from. The
-    /// distinction cannot be recovered from the text, so it is carried — see
-    /// [`document_text`], which is the same question for a block's segments.
-    sentinels_escaped: bool,
 }
 
 impl FootnoteDeferred {
     /// Constructs a footnote's deferred cross-reference state from the
     /// placeholder-bearing `template` and its `xrefs` (in placeholder order).
-    ///
-    /// `sentinels_escaped` says which pipeline produced them — see the field.
-    pub(crate) fn new(template: String, xrefs: Vec<XrefSegment>, sentinels_escaped: bool) -> Self {
-        Self {
-            template,
-            xrefs,
-            sentinels_escaped,
-        }
-    }
-
-    /// Overrides [`sentinels_escaped`](Self::sentinels_escaped).
-    ///
-    /// For the side-effect differential harness alone, which compares the
-    /// footnote catalog entry the string pipeline registers against the one the
-    /// builder registers. The two encode their templates differently *by
-    /// construction* — that is what the flag records — so the encoding is
-    /// normalized away before the entries are compared, leaving the footnote
-    /// itself (index, id, rendered text, segments) as the subject.
-    #[cfg(test)]
-    pub(crate) fn set_sentinels_escaped(&mut self, sentinels_escaped: bool) {
-        self.sentinels_escaped = sentinels_escaped;
+    pub(crate) fn new(template: String, xrefs: Vec<XrefSegment>) -> Self {
+        Self { template, xrefs }
     }
 
     /// Renders the footnote text from the template and the current (resolved or
     /// unresolved) state of its cross-references.
+    ///
+    /// The template is the builder's fold of the footnote's subtree, which
+    /// never enters escaped sentinel form — unlike a [`DeferredContent`]'s
+    /// synthesized carried-title template.
     pub(crate) fn render(&self, renderer: &dyn InlineSubstitutionRenderer) -> String {
-        // One producer wrote both halves, so they are in the same form.
-        render_template(
-            &self.template,
-            &self.xrefs,
-            renderer,
-            EscapedForm {
-                template: self.sentinels_escaped,
-                segments: self.sentinels_escaped,
-            },
-        )
+        render_template(&self.template, &self.xrefs, renderer, false)
     }
 
     /// Resolves the footnote's cross-references using `resolver`, reporting any
@@ -2054,18 +1822,16 @@ impl FootnoteDeferred {
         source: Span<'src>,
     ) {
         for xref in self.xrefs.iter_mut() {
-            // The catalog holds the document's own text, so the lookup key
-            // leaves escaped form here (see `document_text`).
-            let target = document_text(&xref.target, self.sentinels_escaped);
-
+            // The catalog holds the document's own text, which is exactly
+            // what a tree-read segment's target carries.
             let resolved = resolver.resolve(&ResolutionContext {
-                target: &target,
+                target: &xref.target,
                 provided_text: xref.provided_text.as_deref(),
                 derived: xref.derived.as_ref(),
             });
 
             if resolved.is_none() && xref.derived.is_none() {
-                warnings.unresolved(&target, source);
+                warnings.unresolved(&xref.target, source);
             }
 
             xref.resolved = resolved;
@@ -2399,7 +2165,7 @@ mod tests {
 
     mod render_template {
         use super::super::{
-            EscapedForm, XREF_PLACEHOLDER_END, XREF_PLACEHOLDER_START, XrefSegment, render_template,
+            XREF_PLACEHOLDER_END, XREF_PLACEHOLDER_START, XrefSegment, render_template,
         };
         use crate::parser::HtmlSubstitutionRenderer;
 
@@ -2416,15 +2182,7 @@ mod tests {
         }
 
         fn render(template: &str, xrefs: &[XrefSegment]) -> String {
-            render_template(
-                template,
-                xrefs,
-                &HtmlSubstitutionRenderer {},
-                EscapedForm {
-                    template: true,
-                    segments: true,
-                },
-            )
+            render_template(template, xrefs, &HtmlSubstitutionRenderer {}, true)
         }
 
         #[test]
@@ -2478,7 +2236,7 @@ mod tests {
 
         #[test]
         fn debug_includes_template_and_xrefs() {
-            let deferred = FootnoteDeferred::new("t".to_string(), vec![segment("a")], true);
+            let deferred = FootnoteDeferred::new("t".to_string(), vec![segment("a")]);
             let rendered = format!("{deferred:?}");
             assert!(rendered.contains("FootnoteDeferred"));
             assert!(rendered.contains("template"));

@@ -784,7 +784,7 @@ fn register_footnote_number(
 
     // The builder folds this entry from the footnote's own subtree, which
     // never enters the string pipeline's escaped sentinel form.
-    parser.define_footnote(id, template, xrefs, root, false)
+    parser.define_footnote(id, template, xrefs, root)
 }
 
 #[cfg(test)]
