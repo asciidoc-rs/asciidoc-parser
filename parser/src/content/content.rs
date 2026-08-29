@@ -631,6 +631,55 @@ impl<'src> Content<'src> {
         self.rendered.as_ref()
     }
 
+    /// Renders this content to a caller-supplied backend: a pure fold over the
+    /// same [`inlines`](Self::inlines) tree
+    /// [`rendered_html`](Self::rendered_html) is the built-in HTML answer for.
+    /// Returns an owned `String`, and caches nothing — the crate memoizes only
+    /// the default HTML rendering (design §3.3.1).
+    ///
+    /// One parse feeds any number of renders: the tree is built once, with
+    /// every order-dependent fact (footnote numbers, counters, expanded
+    /// attribute values, resolved cross-reference destinations) already
+    /// resolved into node values, so a render is a pure
+    /// `(tree, renderer, context) → String` with no document traversal left to
+    /// do.
+    ///
+    /// # Why this takes `parser`
+    ///
+    /// A fold needs a [`RenderContext`](crate::parser::RenderContext), which
+    /// pairs two things from different places. The **document attributes** are
+    /// order-dependent — a `:imagesdir:` or `:icons:` line rebinds them for
+    /// everything after it — so they must be the ones *this content* was
+    /// parsed under, and the content retains them for exactly that reason. The
+    /// **path resolver and file handlers** are parse-wide configuration that
+    /// cannot change mid-parse, so they are not frozen per content: they are
+    /// `Rc<dyn …>`, and holding them here would cost [`Content`] — and with it
+    /// [`Document`](crate::Document) — its [`Send`]/[`Sync`]. Supplying the
+    /// parser the caller already holds is the cheaper half of that trade.
+    ///
+    /// # Content with no tree
+    ///
+    /// A content whose substitution group is never applied at all — a
+    /// `[comment]`-styled paragraph, whose text is retained but deliberately
+    /// not interpreted — carries no inline tree and no retained attributes.
+    /// There is nothing to fold, so its literal text is returned unchanged,
+    /// which is also what [`rendered_html`](Self::rendered_html) gives.
+    pub fn render_with(
+        &self,
+        renderer: &dyn InlineSubstitutionRenderer,
+        parser: &Parser,
+    ) -> String {
+        let Some(attributes) = self.render_attributes.as_deref() else {
+            return self.rendered.to_string();
+        };
+
+        crate::content::inline_builder::fold_html(
+            &self.inlines,
+            renderer,
+            &parser.render_context_with(attributes.clone()),
+        )
+    }
+
     /// Returns the final rendered text, borrowed for the duration of `&self`
     /// rather than for `'src`.
     ///
@@ -1867,7 +1916,7 @@ impl std::fmt::Debug for Content<'_> {
 /// [`Content::collect_folded_footnotes`] — which folds these — and the
 /// retention of a content's render attributes at parse time ask the same
 /// question of the same tree, so they ask it through one function.
-pub(crate) fn defining_footnotes<'a, 'src>(
+fn defining_footnotes<'a, 'src>(
     nodes: &'a [InlineNode<'src>],
     out: &mut Vec<(&'a str, &'a [InlineNode<'src>])>,
 ) {

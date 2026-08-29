@@ -427,27 +427,23 @@ impl SubstitutionGroup {
 
             content.set_inlines(tree);
 
-            // Content carrying a deferred cross-reference is the only content
-            // whose rendering is rebuilt after the parse, so it is the only
-            // content that is *folded* after the parse — and a fold needs the
-            // document attributes this content was written under, which by then
-            // the parse has moved on from. Retain them here, where "now" is
-            // still that point in the document. `Content::refold` reads them
-            // back.
+            // A fold running later than this parse needs the document
+            // attributes this content was written under, which by then the
+            // parse has moved on from (`:imagesdir:`, `:icons:` and
+            // `:data-uri:` all rebind for everything after them). Retain them
+            // here, where "now" is still this point in the document.
             //
-            // A content that *defines a footnote* needs them for the same
-            // reason and is not covered by the test above: where the content's
-            // only cross-references sit inside a footnote, the replacer
-            // captures them onto the footnote's own deferred state and this
-            // content defers nothing at all — yet its footnote is re-rendered
-            // on every resolution pass, from this tree, under these attributes.
-            // See `Content::collect_folded_footnotes`.
-            let mut defines_footnote = vec![];
-            crate::content::defining_footnotes(content.inlines(), &mut defines_footnote);
-
-            if content.deferred_parts().is_some() || !defines_footnote.is_empty() {
-                content.set_render_attributes(parser.snapshot_attributes());
-            }
+            // Retained for **every** content, not just the ones the crate
+            // itself re-renders (a deferred cross-reference, via
+            // `Content::refold`; a defined footnote, via
+            // `Content::collect_folded_footnotes`). `Content::render_with` is
+            // public and folds *any* content through a caller's renderer, so
+            // narrowing this would make that API silently wrong — and wrong
+            // only for the documents that rebind an attribute mid-flight,
+            // which is the least forgivable shape for a bug to take. The
+            // snapshot is `Arc`-shared internally, so retaining one allocates
+            // nothing beyond its box.
+            content.set_render_attributes(parser.snapshot_attributes());
         }
     }
 
