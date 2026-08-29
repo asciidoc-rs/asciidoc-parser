@@ -329,10 +329,13 @@ today's `rendered()`) to signal the shift. Three points resolve it:
    `rendered_html()`?"* is unambiguous: **always the built-in HTML one.**
 
 3. **A custom (non-HTML) backend is a render-time argument, not a parse-time global.** The
-   consumer never gets it invoked *through* `rendered_html()`; they call `render_with(&their_
-   renderer)` (or `Document::render_to(&their_renderer)`, or walk `inlines()` themselves) —
-   a pure fold they drive over the already-parsed tree. They can render the same document to
-   several backends without reparsing.
+   consumer never gets it invoked *through* `rendered_html()`; they call
+   `render_with(&their_renderer, &parser)`, or walk `inlines()` themselves — a pure fold they
+   drive over the already-parsed tree. They can render the same document to several backends
+   without reparsing.
+
+   *A `Document::render_to` was sketched here alongside it and is **not** being built; see
+   step 7's note.*
 
 **What caching means here.** The crate memoizes exactly **one** artifact — the default HTML
 fold — lazily on `Content`, which is what lets `rendered_html()` return `&str`. That single
@@ -360,7 +363,7 @@ responsibility.
 
 > **Decision:** rename `rendered()` → **`rendered_html()`** (and `rendered_content()` →
 > `rendered_html_content()`), defined as the cached default-HTML fold; all other backends go
-> through an explicit `render_with`/`render_to` fold and are the caller's to cache.
+> through an explicit `render_with` fold and are the caller's to cache.
 > Parse-time renderer configuration on `Parser` is **dropped** — the renderer moves to render
 > time. *(This is the clean pre-1.0 break; the alternative — keep one `rendered()` whose
 > meaning is configurable — was
@@ -766,7 +769,7 @@ Each phase is a reviewable unit with a clear exit gate.
   The opt-in flag retires with it.
 
 - **Phase 3 — expose the public inline API.** 🔶 **In progress.** `Content::inlines()`,
-  `IsBlock::inlines()`, the public node types, and `render_with`/`render_to`. Rename
+  `IsBlock::inlines()`, the public node types, and `render_with`. Rename
   `rendered()` → `rendered_html()` and `rendered_content()` → `rendered_html_content()`
   (§3.3.1) — a mechanical sweep of the ~277 golden assertions that leaves every *asserted
   string* untouched. Resolution reports at node granularity.
@@ -784,8 +787,8 @@ Each phase is a reviewable unit with a clear exit gate.
   content the tree simply was not built for — and a block with no directly-contained inline
   content (a compound/section block) returns `None`. The node types were already public
   (Phase 0); this step opens the accessor that reaches them, the core of #943. The larger
-  pieces of the phase — the `rendered()` → `rendered_html()` rename and the
-  `render_with`/`render_to` fold — remain as later steps.
+  pieces of the phase — the `rendered()` → `rendered_html()` rename and the `render_with`
+  fold — remain as later steps.
 
   *Step 2 landed as (rename the rendered-string accessors for HTML-specificity):* the
   public string accessors are renamed to state their backend —
@@ -10938,8 +10941,24 @@ Each phase is a reviewable unit with a clear exit gate.
        no `pub` type widened for the duration of a transition and narrowed after it. See the step's
        own "landed as" note above.
 
-  7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
-     nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
+  7. `render_with` (the Phase 3 remainder) and `Document::to_asg()`, now that nodes are
+     self-describing; retire the `attribute-missing` per-line hack (#564).
+     - ℹ️ **`Document::render_to` is not being built.** It appears in §3.3.1 only as an
+       unspecified parenthetical beside `render_with` — no return type, no account of what it
+       would assemble — and it does not survive being specified. The renderer it would take is
+       an [`InlineSubstitutionRenderer`](../../parser/src/parser/inline_substitution_renderer.rs),
+       whose fifteen methods are *inline* constructs to the last one: there is no
+       `render_paragraph`, no `render_section`, no `render_list`. A document-level fold through
+       it could only concatenate inline renderings with no block structure around them, which
+       is not a document in any backend. Assembling one is the **converter's** job — the
+       Ruby-to-Rust `asciidoctor` port is the consumer that does it (§6's question 6), and this
+       crate deliberately exposes a *model*: `Document` has accessors for the header, authors,
+       attributes, TOC, catalog and blocks, and has never had a rendering surface. The
+       capability that was genuinely missing is per-content folding through a caller's backend,
+       and `render_with` is that; a caller who wants every content rendered writes the walk,
+       which is three lines and theirs to shape. Building `render_to` would commit the crate to
+       an opinion about document assembly it has spent its whole design avoiding.
+
      - ✅ **`Content::render_with`.** A public pure fold of a content's own tree through a
        caller-supplied backend — one parse, any number of renders. Takes `parser` rather than
        the doc's original zero-argument sketch: a `RenderContext`'s resolver and file handlers
@@ -11033,7 +11052,7 @@ implementation.
    (§4.4). Avoids a breaking reshape later.
 5. **Retain the rendered-string accessor?** → **Yes**, renamed to `rendered_html()`, as a
    cached **default-HTML** fold, with custom backends routed through an explicit
-   `render_with`/`render_to` and the parse-time renderer config dropped (§3.3.1) — this is
+   `render_with` and the parse-time renderer config dropped (§3.3.1) — this is
    the "approximate the existing rendered-content model" bonus, achieved for free.
 6. **Which downstream tool pins the API?** → the **Ruby-to-Rust `asciidoctor` port** — the
    only consumer actually underway. It reproduces Asciidoctor's HTML exactly, so it walks
