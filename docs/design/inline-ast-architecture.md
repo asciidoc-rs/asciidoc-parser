@@ -11186,11 +11186,22 @@ Each phase is a reviewable unit with a clear exit gate.
     a per-render result, not a parse-time fact. This is the one method the whole "how does a
     backend get its children" question turned out to be about.
   - `render_index_term(&IndexTerm, Option<&str>, …)` — the `Option` is *meaningful* here and
-    stays: `None` is a concealed term, which renders nothing. Passing the node is a capability
-    gain rather than a tidy-up: `IndexTermRenderParams` carried a single `visible_term` string
-    and gave a backend **nothing** to build an index *from*, which is plausibly why the
-    built-in HTML one is the only one that ever existed. A backend can now read the `terms`
-    levels and the `visible` flag.
+    stays: `None` is a concealed term, which renders nothing. Passing the node gives an
+    index-building backend somewhere to read the term from, which
+    `IndexTermRenderParams`' single `visible_term` string did not.
+
+    **How much that is worth today was overstated in review, and the review was right.** The
+    first version of this note claimed a backend "can now read the `terms` levels", which is
+    false for the case that matters: a *concealed* term is built with `terms` and `children`
+    both **empty** (see [`indexterm.rs`](../../parser/src/content/inline_builder/macros/indexterm.rs)
+    — "its argument, which never reaches the flow, is not reconstructed"), so exactly the terms
+    that exist *only* to build an index carry nothing. A flow term carries its shown text as a
+    single string, and even that is empty when the shown text needs fold-time markup
+    (`((*tiger*))`). The seam is now the right shape for the capability; the **builder** has to
+    record the authored primary/secondary/tertiary levels before the capability is real, and
+    that is a change to what is parsed rather than to this seam — which is why
+    [`IndexTerm`](../../parser/src/inlines/index_term.rs)'s field set is still marked
+    provisional.
 
   *A second dead field, found the same way as the first.* `LinkRenderParams::context` was
   never read — not by the built-in renderer, not by anything. `render_link` therefore takes no

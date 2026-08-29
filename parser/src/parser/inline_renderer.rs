@@ -236,15 +236,30 @@ pub trait InlineRenderer: Debug {
     ///
     /// `visible_term` is the term's shown text *rendered* — the fold of
     /// [`IndexTerm::children`](crate::inlines::IndexTerm), which is why it
-    /// arrives alongside the node rather than on it. The node carries what the
-    /// term **is**: its [`terms`](crate::inlines::IndexTerm) levels and its
-    /// [`visible`](crate::inlines::IndexTerm) flag, which a backend that
-    /// actually builds an index needs and which this method previously had no
-    /// way to reach.
+    /// arrives alongside the node rather than on it.
     ///
     /// Note that the built-in HTML5 converter never builds an index catalog;
     /// index terms only contribute markup in output formats (such as DocBook or
     /// PDF) that generate an index.
+    ///
+    /// # What the node can and cannot tell you yet
+    ///
+    /// The node is passed so that a backend which *does* build an index has
+    /// somewhere to read the term from. Be aware of what it currently holds:
+    /// for a **flow** term, [`terms`](crate::inlines::IndexTerm) is the shown
+    /// term as a single already-substituted string (empty when the shown text
+    /// contains markup only the fold can produce, such as `((*tiger*))`); for
+    /// a **concealed** term it is **empty**, along with `children` — the
+    /// builder does not reconstruct a concealed term's argument, because
+    /// nothing in it reaches the flow.
+    ///
+    /// So an index-building backend cannot yet get the authored
+    /// primary/secondary/tertiary levels out of a concealed
+    /// `indexterm:[p, s, t]` or `(((p, s, t)))`, which are exactly the terms
+    /// that exist only to build an index. Populating them is a change to what
+    /// the builder records, not to this seam, and the field is marked
+    /// provisional for that reason (see
+    /// [`IndexTerm`]'s own Phase-0 note).
     ///
     /// [index term]: https://docs.asciidoctor.org/asciidoc/latest/sections/user-index/
     fn render_index_term(
@@ -1296,9 +1311,9 @@ impl InlineRenderer for HtmlInlineRenderer {
         // The HTML5 converter does not generate an index, so a concealed index
         // term produces no output and a flow index term renders only its
         // visible term text. The node itself is unused *here* — it is passed
-        // because a backend that does build an index (DocBook, PDF) needs the
-        // `terms` levels and `visible` flag this method was previously given
-        // no way to reach.
+        // so that a backend which does build an index has somewhere to read
+        // the term from; see the trait method's own docs for what that node
+        // does and does not carry today.
         if let Some(term) = visible_term {
             dest.push_str(term);
         }
