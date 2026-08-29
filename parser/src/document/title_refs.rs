@@ -178,14 +178,19 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
                     render_attributes: section.section_title_render_attributes().cloned(),
                 });
             }
-        } else {
-            // A non-section block's `.Title` decoration. A block title is not
-            // treated as a recomputable reference target (`map_id` is `None`):
-            // its own cross-references are resolved, but a reference *to* the
-            // block still uses the block's parse-time reference text.
-            //
-            // The span is taken before the title borrow: `block` stays
-            // mutably borrowed while the template is in scope.
+        }
+
+        // A block's `.Title` decoration — a *discrete* heading's included,
+        // which is the one section kind that keeps its own (a non-discrete
+        // section's is carried into its first block; its heading was collected
+        // above). A block title is not treated as a recomputable reference
+        // target (`map_id` is `None`): its own cross-references are resolved,
+        // but a reference *to* the block still uses the block's parse-time
+        // reference text.
+        //
+        // The span is taken before the title borrow: `block` stays mutably
+        // borrowed while the template is in scope.
+        {
             let source = block.span();
 
             if let Some(title) = block.block_title_content_mut()
@@ -225,29 +230,34 @@ fn write_back<'src>(
     parser: &crate::Parser,
 ) {
     for block in blocks.iter_mut() {
-        if let Block::Section(section) = block {
-            if section.section_title_deferred_parts().is_some() {
-                if let Some(resolution) = memo.get(*index).and_then(Option::as_ref) {
-                    section.set_section_title_rendered(resolution.rendered.clone());
-                    section.mirror_section_title_tree_xrefs(
-                        &resolution.block_ordered,
-                        &resolution.footnote_ordered,
-                    );
+        if let Block::Section(section) = block
+            && section.section_title_deferred_parts().is_some()
+        {
+            if let Some(resolution) = memo.get(*index).and_then(Option::as_ref) {
+                section.set_section_title_rendered(resolution.rendered.clone());
+                section.mirror_section_title_tree_xrefs(
+                    &resolution.block_ordered,
+                    &resolution.footnote_ordered,
+                );
 
-                    // **After** the mirror, not before: a footnote defined in
-                    // this heading is folded from the heading's own subtree, and
-                    // that subtree only carries the destinations just resolved
-                    // once `mirror_section_title_tree_xrefs` has installed them.
-                    // The fold `compute` took above cannot serve — it ran on a
-                    // *clone* holding only the block-level list, because the real
-                    // tree is not reachable while the pass is still computing.
-                    section
-                        .section_title_content()
-                        .collect_own_folded_footnotes(renderer, parser, warnings);
-                }
-                *index += 1;
+                // **After** the mirror, not before: a footnote defined in
+                // this heading is folded from the heading's own subtree, and
+                // that subtree only carries the destinations just resolved
+                // once `mirror_section_title_tree_xrefs` has installed them.
+                // The fold `compute` took above cannot serve — it ran on a
+                // *clone* holding only the block-level list, because the real
+                // tree is not reachable while the pass is still computing.
+                section
+                    .section_title_content()
+                    .collect_own_folded_footnotes(renderer, parser, warnings);
             }
-        } else if let Some(title) = block.block_title_content_mut()
+            *index += 1;
+        }
+
+        // The block-title decoration's write-back — the same order [`collect`]
+        // pushed them in: a section's heading first, then any block's own
+        // `.Title`, a discrete heading's included.
+        if let Some(title) = block.block_title_content_mut()
             && title.deferred_parts().is_some()
         {
             if let Some(resolution) = memo.get(*index).and_then(Option::as_ref) {

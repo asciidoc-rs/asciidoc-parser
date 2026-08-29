@@ -1596,4 +1596,24 @@ mod xrefs_in_titles {
             r##"See <a href="other.html#b">B [c]</a>"##
         );
     }
+
+    #[test]
+    fn a_discrete_headings_own_title_resolves_its_xref() {
+        // A discrete heading is the one section kind that *keeps* its `.Title`
+        // decoration (a non-discrete section's is carried into its first
+        // block), and its title's cross-references resolve like any other
+        // block title's: the reference text below is the target section's
+        // title, not the unresolved `[real]` fallback.
+        let doc = Parser::default().parse(
+            ".See <<real>> here\n[discrete]\n== Discrete heading\n\nbody\n\n[[real]]\n== Real Section\n",
+        );
+
+        let block = doc.child_blocks().next().unwrap();
+        assert_eq!(block.raw_context().as_ref(), "floating_title");
+
+        assert_eq!(
+            block.title().unwrap(),
+            r##"See <a href="#real">Real Section</a> here"##
+        );
+    }
 }

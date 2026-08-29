@@ -551,6 +551,30 @@ impl<'src> SectionBlock<'src> {
         &self.section_title
     }
 
+    /// Returns the section's `.Title` decoration as a mutable [`Content`], if
+    /// it has one — a **discrete heading** keeps its own (see
+    /// [`parse`](Self::parse)'s carried-title hop, which every non-discrete
+    /// section takes instead).
+    ///
+    /// The same narrow seam every other titled block exposes, and for the same
+    /// caller: the document-order title resolution pass
+    /// (`document::title_refs`), which installs the re-rendered title after
+    /// resolving any cross-references embedded in it. Distinct from the
+    /// section *heading*, which that pass reaches through
+    /// [`section_title_content`](Self::section_title_content).
+    pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
+        self.title.as_mut()
+    }
+
+    /// Returns the section's `.Title` decoration as a read-only [`Content`],
+    /// if it has one — the counterpart of
+    /// [`title_content_mut`](Self::title_content_mut), for the inline-tree
+    /// tests that inspect a block title's mirrored cross-reference resolution.
+    #[cfg(test)]
+    pub(crate) fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
+    }
+
     /// The document attributes in force where this heading was written, when
     /// they were retained — the order-dependent half of the render context a
     /// fold of the tree above needs. See
