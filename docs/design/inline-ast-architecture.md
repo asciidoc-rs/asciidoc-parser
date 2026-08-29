@@ -11591,7 +11591,7 @@ failed**, 68 ignored.
 
 | Phase | Criterion | Verdict | Evidence |
 | ----- | --------- | ------- | -------- |
-| 2 | ~277 golden `.rendered()` assertions pass unchanged | ✅ | Suite green; 324 `rendered_html()` and 173 `rendered_html_content()` call sites, asserted strings untouched by the §5.3 rename. |
+| 2 | ~277 golden `.rendered()` assertions pass unchanged | ✅ | Suite green, and the §5.3 rename left every asserted string untouched. The renamed accessors have 324 `.rendered_html()` and 173 `.rendered_html_content()` call sites (`git grep -cF` at `25ad4070`). Those are *accessor call sites*, not a recount of §5.3's ~277 golden assertions — most are ordinary reads rather than golden string comparisons — so they evidence the rename's reach, not the size of the oracle. |
 | 2 | sentinels deleted | ⚠️ **2 of 3** | See below. |
 | 2 | benchmarks within an agreed budget of `main` | ❓ **no budget on record** | CodSpeed reports no alteration across 5 benchmarks, but no *agreed budget* is written down anywhere in this document, so the criterion cannot be checked as stated. |
 | 3 | node vocabulary reviewed against the `asciidoctor` port's needs (§6.6) | ❌ **not started, and gated on Landing** | See below. |
