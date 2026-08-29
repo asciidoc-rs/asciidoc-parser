@@ -1791,7 +1791,7 @@ fn text_attrlist<'src>(
 /// [`range_has_no_opaque_piece`](super::image::range_has_no_opaque_piece)
 /// gate to express that lift: an address
 /// **cannot** cross an opaque piece in the first place. Every such piece is
-/// exactly one [`SPAN_PLACEHOLDER`] (U+E0F0, Unicode category `Co`), which
+/// exactly one [`SPAN_PLACEHOLDER`] (U+0010, an ASCII control character), which
 /// none of the pattern's character classes admit — not the local part's
 /// `[\w_]` / `[\w\-.%+]`, not the domain's `[\p{L}\p{Nd}_\-.]`, not the TLD's
 /// `[a-zA-Z]` — so a match can never contain one. Nor can a match *begin* or

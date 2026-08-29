@@ -1,12 +1,15 @@
 //! The character-replacements substitution step.
 
 use super::{
-    quotes::{LevelContext, Piece, build_match_string, emit_range, source_slice},
+    quotes::{
+        LevelContext, Piece, build_match_string, emit_range, level_may_have_replacements,
+        source_slice,
+    },
     special_chars::Masked,
 };
 use crate::{
     Span,
-    content::{CharacterReplacement, character_replacements, maybe_has_replacements},
+    content::{CharacterReplacement, character_replacements},
     inlines::{CharRef, InlineNode},
     parser::CharacterReplacementType,
     strings::CowStr,
@@ -65,24 +68,38 @@ fn apply_one_replacement<'src>(
     root: Span<'src>,
     ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
-    let nodes: Vec<InlineNode<'src>> = nodes
-        .into_iter()
-        .map(|node| match node {
-            InlineNode::Styled(mut styled) => {
-                let inner = LevelContext::inside_styled(&styled, ctx);
-                styled.children = apply_one_replacement(repl, styled.children, root, inner);
-                InlineNode::Styled(styled)
-            }
+    // A level with no parent node to descend into — the common leaf-only
+    // case, visited once per rule — skips the rebuild of its node vector
+    // entirely.
+    let nodes = if nodes
+        .iter()
+        .any(|node| matches!(node, InlineNode::Styled(_) | InlineNode::Ref(_)))
+    {
+        nodes
+            .into_iter()
+            .map(|node| match node {
+                InlineNode::Styled(mut styled) => {
+                    let inner = LevelContext::inside_styled(&styled, ctx);
+                    styled.children = apply_one_replacement(repl, styled.children, root, inner);
+                    InlineNode::Styled(styled)
+                }
 
-            InlineNode::Ref(mut reference) => {
-                reference.children =
-                    apply_one_replacement(repl, reference.children, root, LevelContext::INSIDE_REF);
-                InlineNode::Ref(reference)
-            }
+                InlineNode::Ref(mut reference) => {
+                    reference.children = apply_one_replacement(
+                        repl,
+                        reference.children,
+                        root,
+                        LevelContext::INSIDE_REF,
+                    );
+                    InlineNode::Ref(reference)
+                }
 
-            other => other,
-        })
-        .collect();
+                other => other,
+            })
+            .collect()
+    } else {
+        nodes
+    };
 
     replace_level(repl, nodes, root, ctx)
 }
@@ -153,13 +170,16 @@ fn replace_level<'src>(
     root: Span<'src>,
     ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
-
-    // Cheap pre-filter: skip the pattern sweep when nothing replaceable is
-    // present at this level.
-    if !maybe_has_replacements(&s) {
+    // Cheap pre-filter, taken *before* the match string is materialized: skip
+    // the pattern sweep (and the build's allocations) when nothing replaceable
+    // can be present at this level. Conservative — see
+    // [`level_may_have_replacements`] — so a level it passes still sniffs
+    // nothing more than the built string would.
+    if !level_may_have_replacements(&nodes) {
         return nodes;
     }
+
+    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // The rule runs over the level wrapped in its enclosing construct's own
     // boundary characters, and every offset it reports is mapped back into the
