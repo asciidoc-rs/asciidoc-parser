@@ -4,9 +4,11 @@ use regex::Regex;
 
 use crate::{
     attributes::Attrlist,
+    inlines::{Callout, CalloutGuard, Footnote},
     parser::{
         DerivedReference, RenderContext, ResolvedReference, SafeMode, XrefSignifier, XrefStyle,
     },
+    strings::CowStr,
 };
 
 /// An implementation of `InlineRenderer` converts the inline content of a
@@ -212,13 +214,17 @@ pub trait InlineRenderer: Debug {
 
     /// Renders a [callout] number that annotates a line in a verbatim block.
     ///
-    /// The renderer should write an appropriate rendering of the callout number
-    /// to `dest`. The rendering typically depends on whether font-based or
-    /// image-based icons are enabled (via the `icons` document attribute).
+    /// The renderer should write an appropriate rendering of the callout's
+    /// [`number`](crate::inlines::Callout::number) to `dest`. The rendering
+    /// typically depends on whether font-based or image-based icons are
+    /// enabled (via the `icons` document attribute, read off `context`); when
+    /// they are not, the node's [`guard`](crate::inlines::Callout::guard) says
+    /// which comment characters hid the callout in the raw source and should
+    /// be preserved around it.
     ///
     /// [callout]: https://docs.asciidoctor.org/asciidoc/latest/verbatim/callouts/
-    fn render_callout(&self, params: &CalloutRenderParams, dest: &mut String) {
-        DEFAULT_HTML_RENDERER.render_callout(params, dest);
+    fn render_callout(&self, callout: &Callout<'_>, context: &RenderContext, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_callout(callout, context, dest);
     }
 
     /// Renders an [index term].
@@ -251,24 +257,39 @@ pub trait InlineRenderer: Debug {
 
     /// Renders a [keyboard] UI macro (`kbd:[keys]`).
     ///
-    /// `keys` holds one entry per key in the shortcut. A single-element slice
-    /// is a lone key; multiple entries form a key sequence. The renderer
-    /// should write an appropriate rendering (e.g. a lone `<kbd>` element,
-    /// or a `<span class="keyseq">` wrapping several `<kbd>` elements) to
-    /// `dest`.
+    /// `keys` holds one entry per key in the shortcut, exactly as
+    /// [`UiKind::Keyboard`](crate::inlines::UiKind) carries them. A
+    /// single-element slice is a lone key; multiple entries form a key
+    /// sequence. The renderer should write an appropriate rendering (e.g. a
+    /// lone `<kbd>` element, or a `<span class="keyseq">` wrapping several
+    /// `<kbd>` elements) to `dest`.
     ///
     /// [keyboard]: https://docs.asciidoctor.org/asciidoc/latest/macros/keyboard-macro/
-    fn render_keyboard(&self, keys: &[String], dest: &mut String) {
+    fn render_keyboard(&self, keys: &[CowStr<'_>], dest: &mut String) {
         DEFAULT_HTML_RENDERER.render_keyboard(keys, dest);
     }
 
     /// Renders a [menu] UI macro (`menu:menu[submenu > … > item]`).
     ///
+    /// The arguments are [`UiKind::Menu`](crate::inlines::UiKind)'s own
+    /// fields: `menu` is the top-level name, `submenus` holds zero or more
+    /// intermediate names outermost-first, and `menuitem` is the final item
+    /// (`None` renders a bare menu reference such as `menu:File[]`).
+    /// `context` is where the renderer reads the `icons` document attribute
+    /// to choose the caret between menu levels.
+    ///
     /// The renderer should write an appropriate rendering to `dest`.
     ///
     /// [menu]: https://docs.asciidoctor.org/asciidoc/latest/macros/ui-macros/
-    fn render_menu(&self, params: &MenuRenderParams, dest: &mut String) {
-        DEFAULT_HTML_RENDERER.render_menu(params, dest);
+    fn render_menu(
+        &self,
+        menu: &str,
+        submenus: &[CowStr<'_>],
+        menuitem: Option<&str>,
+        context: &RenderContext,
+        dest: &mut String,
+    ) {
+        DEFAULT_HTML_RENDERER.render_menu(menu, submenus, menuitem, context, dest);
     }
 
     /// Renders the inline reference produced by a [`footnote`] macro.
@@ -277,13 +298,26 @@ pub trait InlineRenderer: Debug {
     /// document's footnote list); this method renders only the superscript
     /// marker that appears in the flow of text and links to the footnote.
     ///
-    /// See [`FootnoteRenderParams`] for the three cases the renderer must
-    /// handle (a defining occurrence, a reference to an earlier footnote, and
-    /// an unresolved reference).
+    /// There are three cases the renderer must distinguish, all readable off
+    /// the node:
+    ///
+    /// * A *defining* occurrence ([`is_reference`] is `false`): the footnote
+    ///   introduces new text. It always carries its
+    ///   [`number`](crate::inlines::Footnote::number), and when it was given an
+    ///   [`id`](crate::inlines::Footnote::id) the marker takes an anchor of its
+    ///   own.
+    /// * A *reference* to an earlier footnote ([`is_reference`] is `true`,
+    ///   `number` is `Some`): a later occurrence (`footnote:id[]`) reusing an
+    ///   existing footnote's number, with no anchor of its own.
+    /// * An *unresolved* reference ([`is_reference`] is `true`, `number` is
+    ///   `None`): the ID was never defined, and the renderer should emit a
+    ///   visible error marker built from the node's own `id`.
+    ///
+    /// [`is_reference`]: crate::inlines::Footnote::is_reference
     ///
     /// [`footnote`]: https://docs.asciidoctor.org/asciidoc/latest/macros/footnote/
-    fn render_footnote(&self, params: &FootnoteRenderParams, dest: &mut String) {
-        DEFAULT_HTML_RENDERER.render_footnote(params, dest);
+    fn render_footnote(&self, footnote: &Footnote<'_>, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_footnote(footnote, dest);
     }
 }
 
@@ -481,43 +515,6 @@ pub struct LinkRenderParams<'a> {
     pub context: &'a RenderContext,
 }
 
-/// Provides parameters for rendering a [callout] number.
-///
-/// [callout]: https://docs.asciidoctor.org/asciidoc/latest/verbatim/callouts/
-#[derive(Clone, Debug)]
-pub struct CalloutRenderParams<'a> {
-    /// The callout number to display. For automatically-numbered callouts
-    /// (`<.>`), this is the resolved sequential number.
-    pub number: &'a str,
-
-    /// The guard surrounding the callout in the source. This controls whether
-    /// (and how) the line-comment or XML-comment characters that hide the
-    /// callout in the raw source are preserved in the output when icons are not
-    /// enabled.
-    pub guard: CalloutGuard<'a>,
-
-    /// The document state as of the point in the document this callout came
-    /// from. The renderer reads the `icons`, `iconsdir`, and `icontype`
-    /// document attributes from it to decide how to render the callout. See
-    /// [`RenderContext`].
-    pub context: &'a RenderContext,
-}
-
-/// Describes the characters that guard (hide) a callout number in verbatim
-/// source.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum CalloutGuard<'a> {
-    /// A line-comment (or absent) guard. Holds the line-comment prefix that
-    /// precedes the callout in the source (e.g. `# `), or an empty string when
-    /// the callout is not tucked behind a line comment. When icons are not
-    /// enabled, the prefix is preserved ahead of the rendered callout number.
-    LineComment(&'a str),
-
-    /// An XML comment guard (`<!--N-->`). When icons are not enabled, the XML
-    /// comment delimiters are preserved around the rendered callout number.
-    Xml,
-}
-
 /// Provides parameters for rendering a cross-reference.
 #[derive(Clone, Debug)]
 pub struct XrefRenderParams<'a> {
@@ -567,61 +564,20 @@ pub struct IndexTermRenderParams<'a> {
     pub visible_term: Option<&'a str>,
 }
 
-/// Provides parameters for rendering a [menu] UI macro.
+/// Joins a slice of [`CowStr`]s with `sep`.
 ///
-/// [menu]: https://docs.asciidoctor.org/asciidoc/latest/macros/ui-macros/
-#[derive(Clone, Debug)]
-pub struct MenuRenderParams<'a> {
-    /// The top-level menu name.
-    pub menu: &'a str,
-
-    /// Zero or more intermediate submenu names, in order from outermost to
-    /// innermost.
-    pub submenus: &'a [String],
-
-    /// The final menu item, if any. `None` renders a bare menu reference (a
-    /// `menu:File[]` with no items).
-    pub menuitem: Option<&'a str>,
-
-    /// The document state as of the point in the document this menu reference
-    /// came from, used to read the `icons` document attribute when choosing
-    /// how to render the caret between menu levels. See [`RenderContext`].
-    pub context: &'a RenderContext,
-}
-
-/// Provides parameters for rendering the inline marker of a [`footnote`] macro.
-///
-/// There are three cases the renderer must distinguish:
-///
-/// * A *defining* occurrence (`index` is `Some`, `is_reference` is `false`):
-///   the footnote introduces new text. The marker carries the footnote number
-///   and, when the footnote was given an ID, an `id` of its own.
-/// * A *reference* to an earlier footnote (`index` is `Some`, `is_reference` is
-///   `true`): a later occurrence (`footnote:id[]`) that reuses an existing
-///   footnote's number.
-/// * An *unresolved* reference (`index` is `None`, `is_reference` is `true`): a
-///   reference whose ID was never defined; the renderer emits a visible error
-///   marker built from [`text`](Self::text).
-///
-/// [`footnote`]: https://docs.asciidoctor.org/asciidoc/latest/macros/footnote/
-#[derive(Clone, Debug)]
-pub struct FootnoteRenderParams<'a> {
-    /// The footnote's number, or `None` for an unresolved reference. Normally a
-    /// consecutive integer, but the `footnote-number` counter honors any seed
-    /// the document sets, so it is passed through as text.
-    pub index: Option<&'a str>,
-
-    /// The footnote's own ID, used only on a defining occurrence to produce the
-    /// `id="_footnote_<id>"` attribute on the marker.
-    pub id: Option<&'a str>,
-
-    /// `true` when this occurrence references an existing footnote (or fails to
-    /// resolve one); `false` for the defining occurrence.
-    pub is_reference: bool,
-
-    /// For an unresolved reference, the text to show inside the error marker
-    /// (the unresolved ID). Ignored in the other cases.
-    pub text: &'a str,
+/// The node fields this renderer receives (a keyboard macro's keys, a menu's
+/// submenu path) are `CowStr` slices rather than `String` ones, so that the
+/// fold hands them over exactly as the node holds them instead of
+/// materializing a `Vec<String>` for every such node. `[T]::join` needs
+/// `Borrow<str>`, which `CowStr` does not implement, so the borrow is taken
+/// explicitly here.
+fn join_cow_strs(parts: &[CowStr<'_>], sep: &str) -> String {
+    parts
+        .iter()
+        .map(CowStr::as_ref)
+        .collect::<Vec<&str>>()
+        .join(sep)
 }
 
 /// Implementation of [`InlineRenderer`] that renders substitutions
@@ -1383,9 +1339,8 @@ impl InlineRenderer for HtmlInlineRenderer {
         }
     }
 
-    fn render_callout(&self, params: &CalloutRenderParams, dest: &mut String) {
-        let n = params.number;
-        let context = params.context;
+    fn render_callout(&self, callout: &Callout<'_>, context: &RenderContext, dest: &mut String) {
+        let n = callout.number.as_ref();
 
         if context.attribute_value("icons").as_maybe_str() == Some("font") {
             dest.push_str(&format!(
@@ -1403,13 +1358,13 @@ impl InlineRenderer for HtmlInlineRenderer {
 
             dest.push_str(&format!(r#"<img src="{src}" alt="{n}">"#));
         } else {
-            match params.guard {
+            match &callout.guard {
                 CalloutGuard::Xml => {
                     dest.push_str(&format!(r#"&lt;!--<b class="conum">({n})</b>--&gt;"#));
                 }
 
                 CalloutGuard::LineComment(prefix) => {
-                    dest.push_str(prefix);
+                    dest.push_str(prefix.as_ref());
                     dest.push_str(&format!(r#"<b class="conum">({n})</b>"#));
                 }
             }
@@ -1429,7 +1384,7 @@ impl InlineRenderer for HtmlInlineRenderer {
         dest.push_str(&format!(r#"<b class="button">{text}</b>"#));
     }
 
-    fn render_keyboard(&self, keys: &[String], dest: &mut String) {
+    fn render_keyboard(&self, keys: &[CowStr<'_>], dest: &mut String) {
         if let [key] = keys {
             dest.push_str(&format!("<kbd>{key}</kbd>"));
         } else {
@@ -1439,22 +1394,27 @@ impl InlineRenderer for HtmlInlineRenderer {
             // not how the sequence is displayed.
             dest.push_str(&format!(
                 r#"<span class="keyseq"><kbd>{keys}</kbd></span>"#,
-                keys = keys.join("</kbd>+<kbd>")
+                keys = join_cow_strs(keys, "</kbd>+<kbd>")
             ));
         }
     }
 
-    fn render_menu(&self, params: &MenuRenderParams, dest: &mut String) {
-        let caret = if params.context.attribute_value("icons").as_maybe_str() == Some("font") {
+    fn render_menu(
+        &self,
+        menu: &str,
+        submenus: &[CowStr<'_>],
+        menuitem: Option<&str>,
+        context: &RenderContext,
+        dest: &mut String,
+    ) {
+        let caret = if context.attribute_value("icons").as_maybe_str() == Some("font") {
             r#"&#160;<i class="fa fa-angle-right caret"></i> "#
         } else {
             r#"&#160;<b class="caret">&#8250;</b> "#
         };
 
-        let menu = params.menu;
-
-        if params.submenus.is_empty() {
-            if let Some(menuitem) = params.menuitem {
+        if submenus.is_empty() {
+            if let Some(menuitem) = menuitem {
                 dest.push_str(&format!(
                     r#"<span class="menuseq"><b class="menu">{menu}</b>{caret}<b class="menuitem">{menuitem}</b></span>"#
                 ));
@@ -1465,15 +1425,31 @@ impl InlineRenderer for HtmlInlineRenderer {
             let submenu_joiner = format!(r#"</b>{caret}<b class="submenu">"#);
             dest.push_str(&format!(
                 r#"<span class="menuseq"><b class="menu">{menu}</b>{caret}<b class="submenu">{submenus}</b>{caret}<b class="menuitem">{menuitem}</b></span>"#,
-                submenus = params.submenus.join(&submenu_joiner),
-                menuitem = params.menuitem.unwrap_or_default(),
+                submenus = join_cow_strs(submenus, &submenu_joiner),
+                menuitem = menuitem.unwrap_or_default(),
             ));
         }
     }
 
-    fn render_footnote(&self, params: &FootnoteRenderParams, dest: &mut String) {
-        match params.index {
-            Some(index) if params.is_reference => {
+    fn render_footnote(&self, footnote: &Footnote<'_>, dest: &mut String) {
+        // The three cases `render_footnote`'s own documentation names, read
+        // off the node. A defining occurrence always carries its number (see
+        // `build_footnote_node`) and folds its own id into the marker's
+        // anchor; a reference either reuses an existing footnote's number —
+        // never folding an id, matching the string replacer, which rendered a
+        // reference's id attribute only for the *defining* occurrence — or,
+        // unresolved, displays its own id in an error marker.
+        let (index, id, text): (Option<&str>, Option<&str>, &str) = if footnote.is_reference {
+            match footnote.number.as_deref() {
+                Some(number) => (Some(number), None, ""),
+                None => (None, None, footnote.id.as_deref().unwrap_or("")),
+            }
+        } else {
+            (footnote.number.as_deref(), footnote.id.as_deref(), "")
+        };
+
+        match index {
+            Some(index) if footnote.is_reference => {
                 // A reference to an already-defined footnote reuses its number
                 // but gets no anchor of its own.
                 dest.push_str(&format!(
@@ -1484,8 +1460,7 @@ impl InlineRenderer for HtmlInlineRenderer {
             Some(index) => {
                 // A defining occurrence. When the footnote carries an ID, the
                 // marker is given a matching anchor so it can be linked to.
-                let id_attr = params
-                    .id
+                let id_attr = id
                     .map(|id| format!(r#" id="_footnote_{id}""#))
                     .unwrap_or_default();
 
@@ -1497,8 +1472,7 @@ impl InlineRenderer for HtmlInlineRenderer {
             None => {
                 // An unresolved reference: the ID was never defined.
                 dest.push_str(&format!(
-                    r#"<sup class="footnoteref red" title="Unresolved footnote reference.">[{text}]</sup>"#,
-                    text = params.text
+                    r#"<sup class="footnoteref red" title="Unresolved footnote reference.">[{text}]</sup>"#
                 ));
             }
         }

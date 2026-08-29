@@ -609,8 +609,9 @@ below); the signature reshape has not.
 > - The one substitution-named method, `render_quoted_substitution`, is renamed to match its
 >   node kind: **`render_styled`**. ✅
 > - The `*RenderParams` structs fold into the node types (e.g. `XrefRenderParams` → the
->   `Ref` node), so most are removed rather than renamed. ⬜ *Not yet* — this is the
->   signature reshape, and it is the remaining Phase 5 slice.
+>   `Ref` node), so most are removed rather than renamed. 🔶 *In progress* — three of the
+>   eight are gone (see Phase 5's slice 2 note); the five that remain are the ones whose
+>   params carry a value no node holds.
 >
 > Considered and set aside: `InlineBackend` (introduces a "backend" noun not used elsewhere),
 > `InlineNodeRenderer` ("node" is redundant with "inline"), `InlineConverter` (the crate has
@@ -1514,7 +1515,10 @@ Each phase is a reviewable unit with a clear exit gate.
   which characters hide the callout in the raw source, decoupled from the render-seam's own
   `CalloutGuard` the same way every other node is decoupled from its `*RenderParams` counterpart (§4.6):
   the fold reconstructs `CalloutRenderParams` fresh from the node's `number` and `guard`, rather than the
-  node carrying a render-params type directly. The Phase 1/2 recorder
+  node carrying a render-params type directly. (That decoupling was right about the *direction* and
+  wrong about needing two types to express it: Phase 5's slice 2 has since retired both
+  `CalloutRenderParams` and the render-seam `CalloutGuard`, and `render_callout` takes the node. See
+  that note.) The Phase 1/2 recorder
   ([`inline_tree.rs`](../../parser/src/content/inline_tree.rs)), which had never captured a callout's
   guard (its differential corpus fixtures happened not to need it), now captures it too, so the two
   construction strategies agree on the node's shape.
@@ -11029,7 +11033,7 @@ Each phase is a reviewable unit with a clear exit gate.
   substitution pipeline. So an alternate renderer already walks the tree; what Phase 5 still
   owes it is a seam whose *shape* says so.
 
-  *What still defers:* the signature reshape — folding the eight `*RenderParams` structs into
+  *What slice 1 left:* the signature reshape — folding the eight `*RenderParams` structs into
   the node types they each shadow, so a method receives the node itself. Note that §4.6's
   framing of that reshape ("instead of being called mid-regex") no longer describes what is
   left of it: the string replacers went in step 6, so the trait is *already* called only by
@@ -11037,8 +11041,58 @@ Each phase is a reviewable unit with a clear exit gate.
   than the framing suggests — eight structs with **nine** construction sites between them,
   eight in [`fold.rs`](../../parser/src/content/inline_builder/fold.rs) and one in
   [`content.rs`](../../parser/src/content/content.rs)'s deferred-cross-reference re-render,
-  because the fold is now their sole constructor. Then Landing. (Step 7's
-  `Document::to_asg()` also remains, blocked on reading the Eclipse ASG schema.)
+  because the fold is now their sole constructor.
+
+  *Slice 2 landed as (the three params structs that were pure node projections):*
+  `CalloutRenderParams`, `FootnoteRenderParams` and `MenuRenderParams` are gone, and with the
+  first of them the render-seam's own `CalloutGuard` — a second enum that said exactly what
+  [`inlines::CalloutGuard`](../../parser/src/inlines/callout.rs) says, differing only in
+  holding a `&str` where the node holds a `CowStr`, and existing only to be converted into.
+  [`render_callout`](../../parser/src/parser/inline_renderer.rs) now takes
+  `(&Callout, &RenderContext)`, `render_footnote` takes `&Footnote`, and `render_menu` takes
+  [`UiKind::Menu`](../../parser/src/inlines/ui.rs)'s own fields.
+
+  *Why these three and not all eight.* The survey that sized the reshape also split it. Five
+  of the eight params carry a value **no node holds**: `LinkRenderParams::link_text`,
+  `XrefRenderParams::provided_text` and `IndexTermRenderParams::visible_term` are each the
+  *fold of the node's children*, and `Image`/`IconRenderParams` derive `alt` and `size` from
+  the node's attribute list. A parent's rendered children cannot live on the node — it is a
+  fold result, computed per render — so retiring those five is not a substitution but a
+  decision about how a method receives children it did not fold itself. That decision is the
+  next slice's, and it deserves a diff with nothing else in it. These three needed no such
+  decision: the fold's own doc comments already described two of them as "reconstructed
+  entirely from the node… no build-time state is needed", which is the definition of a struct
+  that should not exist.
+
+  *`render_keyboard` came along, and should have.* It is not a `*RenderParams` struct, but it
+  is the third method of the `Ui` family and took `&[String]` where the node holds
+  `&[CowStr]`, so the fold materialized a `Vec<String>` per keyboard macro purely to satisfy
+  the seam. Leaving it would have made `render_menu` and `render_keyboard` disagree about
+  their own node's field types one line apart. Both now take `&[CowStr]`; the two
+  per-node allocations are gone, and the one `join` that needed `Borrow<str>` is a
+  four-line helper in the renderer.
+
+  *The footnote derivation moved rather than vanished.* `fold_footnote`'s three-way
+  `(index, id, text)` match now lives in `HtmlInlineRenderer::render_footnote`, verbatim, and
+  the three cases it distinguishes are documented on the trait method where an alternate
+  backend will read them. Moving it kept the same match arms in the same shape deliberately:
+  splitting it into a four-arm match on `(is_reference, number)` would have exposed a
+  `(false, None)` arm that `build_footnote_node` never produces, trading a real conversion for
+  an untested branch.
+
+  *Verification.* No expected-output string changed and all 5,474 tests pass, so §5.3's oracle
+  pins the same bytes across the reshape. Coverage **improved**: 582 → 561 missed regions.
+  The cause is worth recording, because it started as a regression — moving code into
+  `TestRenderer`'s overrides pushed `parser.rs` from 87 to 95, since those overrides are
+  *longer* now and nothing exercised them. The `with_inline_renderer` test parses one
+  paragraph of specials and a footnote; every UI, callout, image, link and xref override on
+  that renderer was dead. A second test parsing `kbd:`/`btn:`/`menu:` and a callout list
+  closed that pre-existing hole along with the new one, taking `parser.rs` to 66.
+
+  *What still defers:* the five remaining params structs — `Link`, `Xref`, `IndexTerm`,
+  `Image` and `Icon`, the ones whose values are folds of children or derivations from an
+  attribute list — then Landing. (Step 7's `Document::to_asg()` also remains, blocked on
+  reading the Eclipse ASG schema.)
 
 - **Landing — preflight + merge to `main`.** Preflight the whole branch against the
   `asciidoctor` port (§5.1) to confirm the public API and reshaped seam serve a real
