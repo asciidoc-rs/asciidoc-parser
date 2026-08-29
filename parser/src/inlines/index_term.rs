@@ -24,7 +24,8 @@ pub struct IndexTerm<'src> {
     ///
     /// [`terms`](Self::terms) carries the same text as the single
     /// already-substituted string
-    /// [`IndexTermRenderParams`](crate::parser::IndexTermRenderParams) takes,
+    /// [`render_index_term`](crate::parser::InlineRenderer::render_index_term)
+    /// takes as its `visible_term`,
     /// whenever one can express it. One cannot when the term encloses a
     /// construct whose rendering exists only at fold time — `((*tiger*))`,
     /// whose primary term is a bold span — and `terms` is then empty. The two

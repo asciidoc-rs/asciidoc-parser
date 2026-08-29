@@ -609,9 +609,9 @@ below); the signature reshape has not.
 > - The one substitution-named method, `render_quoted_substitution`, is renamed to match its
 >   node kind: **`render_styled`**. ✅
 > - The `*RenderParams` structs fold into the node types (e.g. `XrefRenderParams` → the
->   `Ref` node), so most are removed rather than renamed. 🔶 *In progress* — five of the
->   eight are gone (see Phase 5's slice 2 and slice 3 notes); the three that remain are the
->   ones whose params carry the fold of the node's children.
+>   `Ref` node), so most are removed rather than renamed. ✅ **Landed** — seven of the eight are
+>   gone (slices 2, 3 and 4). `XrefRenderParams` stays on purpose: it has two producers, and one
+>   of them (the deferred-cross-reference re-render) holds no node to pass. See slice 4's note.
 >
 > Considered and set aside: `InlineBackend` (introduces a "backend" noun not used elsewhere),
 > `InlineNodeRenderer` ("node" is redundant with "inline"), `InlineConverter` (the crate has
@@ -11163,12 +11163,55 @@ Each phase is a reviewable unit with a clear exit gate.
   which is why `inline_renderer.rs` fell to 12 rather than the 16 the `Option` removal alone
   would have given.
 
-  *What still defers:* the last three — `Link`, `Xref` and `IndexTerm`, whose params carry the
-  **fold of the node's children**. That one is not a substitution and should not be taken
-  without deciding first whether a method receives the folded children as a `&str` beside its
-  node (which §4.6's "or node fields" sanctions) or a handle it can fold them with itself (the
-  more genuinely AST-walking seam, and the larger commitment). Then Landing. (Step 7's
-  `Document::to_asg()` also remains, blocked on reading the Eclipse ASG schema.)
+  *What slice 3a left:* the last three — `Link`, `Xref` and `IndexTerm`, whose params carry the
+  **fold of the node's children**, and the choice of how a method receives children it did not
+  fold itself.
+
+  *Slice 4 landed as (`Link` and `IndexTerm` retired; `Xref` kept, deliberately):* the
+  maintainer took the `&str`-beside-the-node reading, and surveying it first shrank the
+  question — because **`XrefRenderParams` has two producers, not one**. Besides
+  [`fold_xref`](../../parser/src/content/inline_builder/fold.rs) it is built by `Content`'s
+  deferred-cross-reference re-render, from an
+  [`XrefSegment`](../../parser/src/content/content.rs) — an owned struct of `String`s that has
+  to outlive the parse, because a cross-reference cannot resolve until the whole document is
+  read. That segment cannot become a `Ref`: since slice 3a, `Ref::attrs` is an `Attrlist<'src>`
+  carrying a `Span<'src>`, so there is no `Ref<'static>` to store. §4.6's assumption that
+  `XrefRenderParams` folds into the `Ref` node does not survive the deferred path, and the
+  struct stays as what it actually is — the shape two unlike producers meet at.
+
+  So seven of the eight structs are gone and one remains on purpose:
+
+  - `render_link(&Ref, &str, …)` — the node, plus its display text, which is the fold of
+    [`Ref::children`](../../parser/src/inlines/ref_node.rs) and so cannot live on a node: it is
+    a per-render result, not a parse-time fact. This is the one method the whole "how does a
+    backend get its children" question turned out to be about.
+  - `render_index_term(&IndexTerm, Option<&str>, …)` — the `Option` is *meaningful* here and
+    stays: `None` is a concealed term, which renders nothing. Passing the node is a capability
+    gain rather than a tidy-up: `IndexTermRenderParams` carried a single `visible_term` string
+    and gave a backend **nothing** to build an index *from*, which is plausibly why the
+    built-in HTML one is the only one that ever existed. A backend can now read the `terms`
+    levels and the `visible` flag.
+
+  *A second dead field, found the same way as the first.* `LinkRenderParams::context` was
+  never read — not by the built-in renderer, not by anything. `render_link` therefore takes no
+  [`RenderContext`](../../parser/src/parser/render_context.rs) at all, which is honest: unlike
+  an image or a callout, a link consults no document state (its dangerous-scheme check happens
+  at *build* time, in `build_link_node`). Re-adding a parameter is cheap if a backend ever
+  wants one. This is `IconRenderParams::size` in slice 3 all over again, and two for two says
+  the params structs had drifted from what the renderer actually reads.
+
+  *Verification, and a method fixed after #1329 caught it out.* No expected-output string
+  changed and all 5,476 tests pass. Coverage was this time checked the way codecov checks it —
+  **changed lines intersected with uncovered lines**, not just the total, which is the lesson
+  slice 3a learned the hard way when a total that *improved* still hid an uncovered changed
+  line. The intersection found four: `TestRenderer`'s `render_link` and `render_index_term`
+  overrides, dead for the same reason #1327's UI overrides were. A test covering a link, a flow
+  index term and a concealed one closed them, and the only overlap left is a `panic!` in that
+  test's own `else` arm — the fallback arm §5.4's style treats as expected rather than a gap.
+  `parser.rs` 66 → 52 missed regions, total 551 → 537.
+
+  *What still defers:* nothing in Phase 5's reshape — its exit gate is met. Then Landing.
+  (Step 7's `Document::to_asg()` also remains, blocked on reading the Eclipse ASG schema.)
 
 - **Landing — preflight + merge to `main`.** Preflight the whole branch against the
   `asciidoctor` port (§5.1) to confirm the public API and reshaped seam serve a real

@@ -495,7 +495,7 @@ pub(crate) static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 /// [`inline_builder`](crate::content::inline_builder) can parse a link's
 /// attribute-list-bearing display text with the *exact* same interpretation
 /// this string step uses, changing only the recognition *sink* (a node field
-/// instead of a `LinkRenderParams::attrlist` borrow).
+/// instead of a borrow of the node's own attribute list).
 pub(crate) fn extract_attributes_from_text<'src>(
     text: Span<'src>,
     parser: &Parser,

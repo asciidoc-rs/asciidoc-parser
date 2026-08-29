@@ -3460,8 +3460,7 @@ mod tests {
         attributes::Attrlist,
         blocks::Block,
         parser::{
-            CharacterReplacementType, InlineRenderer, LinkRenderParams, QuoteScope, QuoteType,
-            SpecialCharacter,
+            CharacterReplacementType, InlineRenderer, QuoteScope, QuoteType, SpecialCharacter,
         },
         tests::prelude::*,
     };
@@ -4564,7 +4563,7 @@ mod tests {
             dest.push_str("[ICON]");
         }
 
-        fn render_link(&self, _params: &LinkRenderParams, dest: &mut String) {
+        fn render_link(&self, _link: &crate::inlines::Ref<'_>, _text: &str, dest: &mut String) {
             dest.push_str("[LINK]");
         }
 
@@ -4587,10 +4586,11 @@ mod tests {
 
         fn render_index_term(
             &self,
-            params: &crate::parser::IndexTermRenderParams,
+            _index_term: &crate::inlines::IndexTerm<'_>,
+            visible_term: Option<&str>,
             dest: &mut String,
         ) {
-            match params.visible_term {
+            match visible_term {
                 Some(term) => dest.push_str(&format!("[INDEXTERM:{term}]")),
                 None => dest.push_str("[INDEXTERM]"),
             }
@@ -4669,6 +4669,28 @@ mod tests {
         assert_eq!(
             simple_block.content().rendered_html(),
             "test.[FOOTNOTE:missing]"
+        );
+    }
+
+    #[test]
+    fn custom_renderer_renders_links_and_index_terms() {
+        // `render_link` takes the node plus its folded display text, and
+        // `render_index_term` the node plus its folded visible term, so this
+        // pins that both overrides are reached and that a concealed term
+        // (no visible text) is distinguishable from a flow one.
+        let mut parser = Parser::default().with_inline_renderer(TestRenderer);
+
+        let doc =
+            parser.parse("See https://example.org[Docs] for ((tigers)) and indexterm:[bears].");
+
+        let block = doc.child_blocks().next().unwrap();
+        let Block::Simple(simple_block) = block else {
+            panic!("Expected simple block, got: {block:?}");
+        };
+
+        assert_eq!(
+            simple_block.content().rendered_html(),
+            "See [LINK] for [INDEXTERM:tigers] and [INDEXTERM]."
         );
     }
 
