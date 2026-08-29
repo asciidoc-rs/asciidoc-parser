@@ -114,12 +114,16 @@ The branch has been running long enough that "how much further?" is a standing q
 that has just surveyed §5.2 is the cheapest place to answer it. Ground the estimate in four things
 rather than guessing:
 
-1. **The unchecked items in the Phase 4 checklist**, plus Phase 5 and Landing. Step 7 is now
-   closed: `render_with` and the `attribute-missing` retirement landed, and both
-   `Document::render_to` and `Document::to_asg()` are recorded as *not being built* (the
-   latter by §6's decision 7 — the ASG schema is a parked 2023 draft that cannot express the
-   crate's inline vocabulary; see §3.5). Phase 4's checklist is likewise fully checked and
-   Phase 5's exit gate is met, so Landing is what remains.
+1. **The unchecked items in the Phase 4 checklist**, plus the phase *exit gates*, Phase 5, and
+   Landing. Phase 4's step list is now fully ticked — step 7 is closed: `render_with` and the
+   `attribute-missing` retirement landed, and both `Document::render_to` and
+   `Document::to_asg()` are recorded as *not being built* (the latter by §6's decision 7 — the
+   ASG schema is a parked 2023 draft that cannot express the crate's inline vocabulary; see
+   §3.5). **A ticked step list is not a met exit gate**, though, and the two are easy to
+   conflate: Phases 2, 3 and 4 are all still marked 🔶 *In progress*, and at least one gate
+   item is demonstrably outstanding — Phase 3's *Exit:* requires the README's security section
+   to gain its `Raw`-node anchor, and `README.md` does not mention `Raw` at all. Read each
+   phase's own *Exit:* line; do not infer a phase is done from its step ticks.
 2. **The "what still defers" sentence** in the newest landed-as note — those are the increments
    already named and sized.
 3. **The observed rate.** Every increment so far is one branch, one PR, one session, so an increment
