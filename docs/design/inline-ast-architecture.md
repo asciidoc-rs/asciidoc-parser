@@ -10947,17 +10947,19 @@ Each phase is a reviewable unit with a clear exit gate.
        unspecified parenthetical beside `render_with` — no return type, no account of what it
        would assemble — and it does not survive being specified. The renderer it would take is
        an [`InlineSubstitutionRenderer`](../../parser/src/parser/inline_substitution_renderer.rs),
-       whose fifteen methods are *inline* constructs to the last one: there is no
-       `render_paragraph`, no `render_section`, no `render_list`. A document-level fold through
-       it could only concatenate inline renderings with no block structure around them, which
-       is not a document in any backend. Assembling one is the **converter's** job — the
-       Ruby-to-Rust `asciidoctor` port is the consumer that does it (§6's question 6), and this
-       crate deliberately exposes a *model*: `Document` has accessors for the header, authors,
-       attributes, TOC, catalog and blocks, and has never had a rendering surface. The
-       capability that was genuinely missing is per-content folding through a caller's backend,
-       and `render_with` is that; a caller who wants every content rendered writes the walk,
-       which is three lines and theirs to shape. Building `render_to` would commit the crate to
-       an opinion about document assembly it has spent its whole design avoiding.
+       whose seventeen methods are *inline*-scoped to the last one: fifteen `render_*` for
+       inline constructs, plus the two URI resolvers an inline image and an inline icon need
+       (`image_uri`, `icon_uri`). There is no `render_paragraph`, no `render_section`, no
+       `render_list`. A document-level fold through it could only concatenate inline renderings
+       with no block structure around them, which is not a document in any backend.
+       Assembling one is the **converter's** job — the Ruby-to-Rust `asciidoctor` port is the
+       consumer that does it (§6's question 6), and this crate deliberately exposes a *model*:
+       `Document` has accessors for the header, authors, attributes, TOC, catalog and blocks,
+       and has never had a rendering surface. The capability that was genuinely missing is
+       per-content folding through a caller's backend, and `render_with` is that; a caller who
+       wants every content rendered writes the walk, which is three lines and theirs to shape.
+       Building `render_to` would commit the crate to an opinion about document assembly it
+       has spent its whole design avoiding.
 
      - ✅ **`Content::render_with`.** A public pure fold of a content's own tree through a
        caller-supplied backend — one parse, any number of renders. Takes `parser` rather than
