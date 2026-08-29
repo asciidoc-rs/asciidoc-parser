@@ -346,26 +346,19 @@ mod tests {
     };
     use crate::{
         Span,
-        content::{Content, SubstitutionStep},
         inlines::{CharRef, InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
     };
 
-    /// The string pipeline's output through the **post-replacement** step for
-    /// `source`, used as the golden oracle: the four steps [`build`] runs, in
-    /// order (special characters, quotes, character replacements, post
-    /// replacement). Attribute references and macros are skipped — exactly as
-    /// the additive builder skips them — so the fixtures deliberately contain
-    /// neither.
+    /// The string pipeline's recorded output through the **post-replacement**
+    /// step for `source` — what that pipeline produced while it existed: the
+    /// four steps [`build`] runs, in order (special characters, quotes,
+    /// character replacements, post replacement), frozen into
+    /// `snapshots/char_replacements.txt`. Attribute references and macros were
+    /// skipped — exactly as the additive builder skips them — so the fixtures
+    /// deliberately contain neither.
     fn golden_replacements(source: &str) -> String {
-        let parser = crate::Parser::default();
-        let mut content = Content::from(Span::new(source));
-        SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
-        SubstitutionStep::Quotes.apply(&mut content, &parser, None);
-        SubstitutionStep::CharacterReplacements.apply(&mut content, &parser, None);
-        SubstitutionStep::PostReplacement.apply(&mut content, &parser, None);
-
         crate::content::inline_builder::snapshot::recorded("char_replacements", source)
     }
 

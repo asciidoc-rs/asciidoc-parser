@@ -7,9 +7,8 @@ mod content;
 pub use content::Content;
 pub(crate) use content::{
     DeferredParts, FootnoteDeferred, OwnedTitle, XrefSegment, defining_footnotes, document_text,
-    escape_sentinels, fold_resolved_title, rehome_xref_placeholders, render_xref_template,
-    resolved_destinations, sanitize_title, template_partition, unescape_sentinels,
-    xref_segment_from_node,
+    escape_sentinels, fold_resolved_title, render_xref_template, resolved_destinations,
+    sanitize_title, template_partition, unescape_sentinels, xref_segment_from_node,
 };
 pub(crate) mod inline_builder;
 
@@ -19,7 +18,7 @@ pub(crate) use macros::{
     INLINE_INDEXTERM, INLINE_KBD_BTN_MACRO, INLINE_LINK, INLINE_LINK_MACRO, INLINE_MENU_MACRO,
     INLINE_XREF, NormalizedCaps, URI_SNIFF, basename, document_xrefstyle, encode_uri_component,
     extract_attributes_from_text, normalize_index_text, normalize_text_lf_escaped_bracket,
-    split_kbd_keys, strip_see_and_seealso,
+    split_kbd_keys,
 };
 
 mod xref_target;

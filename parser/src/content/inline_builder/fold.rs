@@ -97,7 +97,7 @@ pub(crate) enum Xrefs<'a> {
 /// the catalog later ([`Footnote::resolve_references`]). The string pipeline
 /// reaches that pair by *re-homing* the block template's own placeholders,
 /// which are already sitting in the footnote's captured text
-/// ([`rehome_xref_placeholders`](crate::content::rehome_xref_placeholders)).
+/// (its `rehome_xref_placeholders`).
 /// The tree has no such placeholders to re-home — a cross-reference is a node
 /// — so it writes its own: this fold emits one per
 /// [`Xref`](RefVariant::Xref) node and records that node's segment as it goes.

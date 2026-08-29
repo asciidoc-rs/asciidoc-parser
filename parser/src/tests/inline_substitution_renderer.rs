@@ -210,7 +210,7 @@ fn assert_inherits_html(
 ) {
     let render = |parser: &Parser| {
         let mut content = Content::from(Span::new(source));
-        step.apply(&mut content, parser, None);
+        crate::content::SubstitutionGroup::Custom(vec![step]).apply(&mut content, parser, None);
         content.rendered_html().to_string()
     };
 

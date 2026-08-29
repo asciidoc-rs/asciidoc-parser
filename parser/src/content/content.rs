@@ -190,13 +190,12 @@ struct DeferredContent {
     /// read off this content's **inline tree**, rather than being the string
     /// pipeline's own flat list.
     ///
-    /// Always `true` for a production content: [`Content::set_tree_xrefs`] is
-    /// the only producer of deferred state at the seam now that the string
-    /// pipeline no longer runs there. `false` arises only through
-    /// [`Content::set_deferred_xrefs`], which nothing but the vestigial
-    /// machinery's own unit tests can reach, and the `!from_tree` branches
-    /// this field still gates — the escaped-form reads, the template
-    /// partition — are that machinery's and go with it.
+    /// Always `true` now: [`Content::set_tree_xrefs`] is the only producer
+    /// left — the string macros step's `set_deferred_xrefs` went with the
+    /// pipeline. The field and the `!from_tree` branches it still gates — the
+    /// escaped-form reads, the template partition — are a constant-folding
+    /// collapse deferred to its own increment (design §5.2 step 6's tail),
+    /// since they thread through the live resolve/refold path.
     from_tree: bool,
 }
 
@@ -313,7 +312,8 @@ const RESERVED_SENTINELS: [(char, char); 5] = [
 ///
 /// The sentinels are in-band: they are spliced into the same string as the
 /// document's text, so the passes that read them back — [`render_template`],
-/// [`rehome_xref_placeholders`], and the passthrough restore — cannot otherwise
+/// the string pipeline's `rehome_xref_placeholders`, and the passthrough
+/// restore — cannot otherwise
 /// tell a sentinel the parser wrote from one the document did. Without this
 /// pass, a document that types `U+E000 0 U+E001` alongside a real
 /// cross-reference has that text read back as a placeholder, forging a second
@@ -874,37 +874,6 @@ impl<'src> Content<'src> {
                 .chain(d.footnote.iter())
                 .any(|x| x.resolved.is_none())
         })
-    }
-
-    /// Records the cross-references the **string pipeline's** macros step
-    /// discovered, in placeholder order. The placeholder tokens must already
-    /// have been written into [`Content::rendered`], in the same order.
-    ///
-    /// Reached only through the string pipeline's macros step, which runs
-    /// nowhere but that vestigial machinery's own unit tests now; it goes
-    /// with the machinery. The production list is installed by
-    /// [`set_tree_xrefs`](Self::set_tree_xrefs), from the tree, on a content
-    /// this was never called on.
-    ///
-    /// The list lands in [`block`](DeferredContent::block) because the string
-    /// pipeline does not partition: a footnote-embedded reference is told apart
-    /// by its placeholder having left the template.
-    pub(crate) fn set_deferred_xrefs(&mut self, xrefs: Vec<XrefSegment>) {
-        if xrefs.is_empty() {
-            return;
-        }
-
-        debug_assert!(
-            self.deferred.is_none(),
-            "set_deferred_xrefs must be called at most once per Content"
-        );
-
-        self.deferred = Some(Box::new(DeferredContent {
-            block: xrefs,
-            footnote: Vec::new(),
-            template: String::new(),
-            from_tree: false,
-        }));
     }
 
     /// Installs this content's deferred cross-references, **read off its own
@@ -1551,8 +1520,8 @@ fn tree_defers_xrefs(nodes: &[InlineNode<'_>]) -> bool {
 
 /// Derives the **block-level** deferred cross-reference segments from an
 /// already-built inline tree — the list `run_pipeline`'s own
-/// [`InlineXrefReplacer`](crate::content::macros) produces and
-/// [`Content::set_deferred_xrefs`] installs, read off the nodes instead.
+/// `InlineXrefReplacer` produced and its `set_deferred_xrefs` installed,
+/// read off the nodes instead.
 ///
 /// This is one of the six things design §5.2's survey found the string pipeline
 /// still solely owning — the first of them the survey called *blocked* rather
@@ -1876,63 +1845,6 @@ fn assign_footnote_tree_xrefs(
             _ => {}
         }
     }
-}
-
-/// Re-homes the cross-reference placeholders found in `text` into a
-/// self-contained (template, xrefs) pair.
-///
-/// When the cross-reference substitution runs before footnotes, a footnote's
-/// text may carry placeholder tokens whose [`XrefSegment`]s live in the
-/// enclosing block's cross-reference list (`all`). Because a footnote's text is
-/// extracted out of the block, it needs its own copy of just those segments,
-/// renumbered so its template is independent. This scans `text` for placeholder
-/// tokens, clones the referenced segments into a fresh vector (in first-seen
-/// order), and rewrites the tokens to the new local indices.
-///
-/// Text with no placeholders returns unchanged alongside an empty vector.
-pub(crate) fn rehome_xref_placeholders(
-    text: &str,
-    all: &[XrefSegment],
-) -> (String, Vec<XrefSegment>) {
-    let mut local: Vec<XrefSegment> = vec![];
-
-    if !text.contains(XREF_PLACEHOLDER_START) {
-        return (text.to_string(), local);
-    }
-
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-
-    while let Some(start) = rest.find(XREF_PLACEHOLDER_START) {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + XREF_PLACEHOLDER_START.len_utf8()..];
-
-        let Some(end) = after.find(XREF_PLACEHOLDER_END) else {
-            out.push(XREF_PLACEHOLDER_START);
-            rest = after;
-            continue;
-        };
-
-        let body = &after[..end];
-        rest = &after[end + XREF_PLACEHOLDER_END.len_utf8()..];
-
-        match body.parse::<usize>().ok().and_then(|index| all.get(index)) {
-            Some(segment) => {
-                let local_index = local.len();
-                local.push(segment.clone());
-                out.push_str(&Content::xref_placeholder(local_index));
-            }
-
-            None => {
-                out.push(XREF_PLACEHOLDER_START);
-                out.push_str(body);
-                out.push(XREF_PLACEHOLDER_END);
-            }
-        }
-    }
-
-    out.push_str(rest);
-    (out, local)
 }
 
 /// Splices resolved (or fallback) cross-reference renderings into a placeholder
@@ -2311,10 +2223,7 @@ mod tests {
     }
 
     mod impl_debug {
-        use crate::{
-            Span,
-            content::{Content, XrefSegment},
-        };
+        use crate::{Span, content::Content};
 
         #[test]
         fn shows_the_deferred_state_only_when_there_is_one() {
@@ -2324,15 +2233,13 @@ mod tests {
             // as a plain `original` + `rendered` pair.
             assert!(!format!("{content:?}").contains("deferred"));
 
-            content.set_deferred_xrefs(vec![XrefSegment {
-                target: "a".to_string(),
-                provided_text: None,
-                window: None,
-                roles: vec![],
-                xrefstyle: None,
-                derived: None,
-                resolved: None,
-            }]);
+            // Installing the deferred state the way production does: the
+            // group apply derives it from the tree (`set_tree_xrefs`).
+            crate::content::SubstitutionGroup::Normal.apply(
+                &mut content,
+                &crate::Parser::default(),
+                None,
+            );
 
             let debug = format!("{content:?}");
             assert!(debug.contains("deferred"), "{debug:?}");
@@ -2555,10 +2462,7 @@ mod tests {
     }
 
     mod footnote_deferred {
-        use super::super::{
-            FootnoteDeferred, XREF_PLACEHOLDER_END, XREF_PLACEHOLDER_START, XrefSegment,
-            rehome_xref_placeholders,
-        };
+        use super::super::{FootnoteDeferred, XrefSegment};
 
         fn segment(target: &str) -> XrefSegment {
             XrefSegment {
@@ -2570,54 +2474,6 @@ mod tests {
                 derived: None,
                 resolved: None,
             }
-        }
-
-        #[test]
-        fn rehomes_a_placeholder_into_a_local_segment() {
-            let all = vec![segment("a"), segment("b")];
-
-            // Reference only the second segment; it becomes local index 0.
-            let text = format!("see {XREF_PLACEHOLDER_START}1{XREF_PLACEHOLDER_END} here");
-
-            let (template, local) = rehome_xref_placeholders(&text, &all);
-
-            assert_eq!(local.len(), 1);
-            assert_eq!(local.first().unwrap().target, "b");
-            assert_eq!(
-                template,
-                format!("see {XREF_PLACEHOLDER_START}0{XREF_PLACEHOLDER_END} here")
-            );
-        }
-
-        #[test]
-        fn text_without_placeholders_is_returned_unchanged() {
-            let (template, local) = rehome_xref_placeholders("plain text", &[segment("a")]);
-            assert_eq!(template, "plain text");
-            assert!(local.is_empty());
-        }
-
-        #[test]
-        fn malformed_placeholders_are_passed_through_literally() {
-            // A non-numeric index and an unterminated placeholder are both left
-            // as-is (these cannot arise in practice, but the fallback is exercised).
-            let bad_index = format!("a{XREF_PLACEHOLDER_START}xyz{XREF_PLACEHOLDER_END}b");
-            let (template, local) = rehome_xref_placeholders(&bad_index, &[]);
-            assert_eq!(template, bad_index);
-            assert!(local.is_empty());
-
-            let unterminated = format!("a{XREF_PLACEHOLDER_START}0 no end");
-            let (template, local) = rehome_xref_placeholders(&unterminated, &[]);
-            assert_eq!(template, unterminated);
-            assert!(local.is_empty());
-        }
-
-        #[test]
-        fn out_of_range_placeholder_index_is_passed_through() {
-            // An index with no matching segment in `all` is left literal.
-            let text = format!("x{XREF_PLACEHOLDER_START}9{XREF_PLACEHOLDER_END}y");
-            let (template, local) = rehome_xref_placeholders(&text, &[segment("a")]);
-            assert_eq!(template, text);
-            assert!(local.is_empty());
         }
 
         #[test]

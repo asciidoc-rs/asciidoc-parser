@@ -4,13 +4,12 @@ use regex::{Captures, Regex, RegexBuilder, Replacer};
 
 use crate::{
     Parser, Span,
-    attributes::{Attrlist, AttrlistContext},
-    content::{Content, escape_sentinels, unescape_sentinels},
-    document::{InterpretedValue, RefType},
-    internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
+    attributes::Attrlist,
+    content::{Content, escape_sentinels},
+    document::InterpretedValue,
     parser::{
-        CalloutGuard, CalloutRenderParams, CharacterReplacementType, InlineSubstitutionRenderer,
-        QuoteScope, QuoteType, SpecialCharacter, attribute_lookup_name,
+        CharacterReplacementType, InlineSubstitutionRenderer, QuoteScope, QuoteType,
+        SpecialCharacter, attribute_lookup_name,
     },
     strings::CowStr,
     warnings::WarningType,
@@ -54,30 +53,26 @@ impl SubstitutionStep {
         &self,
         content: &mut Content<'_>,
         parser: &Parser,
-        attrlist: Option<&Attrlist<'_>>,
+        _attrlist: Option<&Attrlist<'_>>,
     ) {
         match self {
             Self::SpecialCharacters => {
                 apply_special_characters(content, &*parser.renderer);
             }
-            Self::Quotes => {
-                apply_quotes(content, parser);
-            }
             Self::AttributeReferences => {
                 apply_attributes(content, parser);
             }
-            Self::CharacterReplacements => {
-                apply_character_replacements(content, &*parser.renderer);
-            }
-            Self::Macros => {
-                super::macros::apply_macros(content, parser);
-            }
-            Self::PostReplacement => {
-                apply_post_replacements(content, parser, attrlist);
-            }
-            Self::Callouts => {
-                apply_callouts(content, parser, attrlist);
-            }
+            // The five steps whose string implementations went with the
+            // pipeline (design §5.2 step 6's tail). Their tree
+            // implementations live in
+            // [`inline_builder`](crate::content::inline_builder) and run
+            // through [`SubstitutionGroup::apply`](super::SubstitutionGroup);
+            // nothing applies one directly any more, so this arm exists only
+            // to satisfy match exhaustiveness.
+            step => unreachable!(
+                "the string implementation of {step:?} is deleted; apply the step through a \
+                 SubstitutionGroup"
+            ),
         }
     }
 }
@@ -320,216 +315,6 @@ static QUOTE_SUBS: LazyLock<Vec<QuoteSub>> = LazyLock::new(|| {
         },
     ]
 });
-
-#[derive(Debug)]
-struct QuoteReplacer<'r> {
-    type_: QuoteType,
-    scope: QuoteScope,
-    parser: &'r Parser,
-}
-
-impl LookaheadReplacer for QuoteReplacer<'_> {
-    fn replace_append(
-        &mut self,
-        caps: &Captures<'_>,
-        dest: &mut String,
-        after: &str,
-    ) -> LookaheadResult {
-        // Adapted from Asciidoctor#convert_quoted_text, found in
-        // https://github.com/asciidoctor/asciidoctor/blob/main/lib/asciidoctor/substitutors.rb#L1419-L1445.
-
-        // The regex crate doesn't have a sophisticated lookahead mode, so we patch
-        // it up here.
-
-        if self.type_ == QuoteType::Monospaced
-            && self.scope == QuoteScope::Constrained
-            && after.starts_with(['"', '\'', '`'])
-        {
-            // The leading boundary group `[^\w&;:"'`}]` matches any non-word
-            // Unicode scalar, so it can be a multi-byte character. Skip the full
-            // width of that leading character rather than assuming one byte;
-            // otherwise the slice below (and the matching offset in
-            // `SkipAheadAndRetry`) would land inside the character and panic.
-            let skip_ahead = if caps[0].starts_with('\\') {
-                // Escape case: skip the backslash plus the following byte, which
-                // is always an ASCII `[` or `` ` ``.
-                2
-            } else {
-                caps[0].chars().next().map_or(1, char::len_utf8)
-            };
-
-            dest.push_str(&caps[0][0..skip_ahead]);
-            return LookaheadResult::SkipAheadAndRetry(skip_ahead);
-        }
-
-        let unescaped_attrs: Option<String> = if caps[0].starts_with('\\') {
-            let maybe_attrs = caps.get(2).map(|a| a.as_str());
-            if self.scope == QuoteScope::Constrained && maybe_attrs.is_some() {
-                Some(format!(
-                    "[{attrs}]",
-                    attrs = maybe_attrs.unwrap_or_default()
-                ))
-            } else {
-                dest.push_str(&caps[0][1..]);
-                return LookaheadResult::Continue;
-            }
-        } else {
-            None
-        };
-
-        match self.scope {
-            QuoteScope::Constrained => {
-                if let Some(attrs) = unescaped_attrs {
-                    dest.push_str(&attrs);
-                    self.parser.renderer.render_quoted_substitution(
-                        self.type_, self.scope, None, None, &caps[3], dest,
-                    );
-                } else {
-                    let (attrlist, type_): (Option<Attrlist<'_>>, QuoteType) =
-                        if let Some(attrlist) = caps.get(2) {
-                            let type_ = if self.type_ == QuoteType::Mark {
-                                QuoteType::Unquoted
-                            } else {
-                                self.type_
-                            };
-
-                            (
-                                Some(
-                                    Attrlist::parse(
-                                        crate::Span::new(attrlist.as_str()),
-                                        self.parser,
-                                        AttrlistContext::Inline,
-                                    )
-                                    .item
-                                    .item,
-                                ),
-                                type_,
-                            )
-                        } else {
-                            (None, self.type_)
-                        };
-
-                    if let Some(prefix) = caps.get(1) {
-                        dest.push_str(prefix.as_str());
-                    }
-
-                    let id = attrlist
-                        .as_ref()
-                        .and_then(|a| a.id().map(|s| s.to_string()));
-
-                    // Assigning an ID to inline quoted text (e.g.,
-                    // `[#free_the_world]#free the world#`) makes that phrase
-                    // referenceable, so register it in the catalog. A duplicate
-                    // ID here is non-fatal (first registration wins). The ID is
-                    // read out of escaped text, and the catalog holds the
-                    // document's own (see `escape_sentinels`), so it leaves
-                    // escaped form on the way in.
-                    if let Some(id) = &id {
-                        let _ = self.parser.register_ref(
-                            &unescape_sentinels(id),
-                            None,
-                            RefType::Anchor,
-                        );
-                    }
-
-                    self.parser.renderer.render_quoted_substitution(
-                        type_, self.scope, attrlist, id, &caps[3], dest,
-                    );
-                }
-            }
-
-            QuoteScope::Unconstrained => {
-                let (attrlist, type_): (Option<Attrlist<'_>>, QuoteType) =
-                    if let Some(attrlist) = caps.get(1) {
-                        let type_ = if self.type_ == QuoteType::Mark {
-                            QuoteType::Unquoted
-                        } else {
-                            self.type_
-                        };
-
-                        (
-                            Some(
-                                Attrlist::parse(
-                                    crate::Span::new(attrlist.as_str()),
-                                    self.parser,
-                                    AttrlistContext::Inline,
-                                )
-                                .item
-                                .item,
-                            ),
-                            type_,
-                        )
-                    } else {
-                        (None, self.type_)
-                    };
-
-                let id = attrlist
-                    .as_ref()
-                    .and_then(|a| a.id().map(|s| s.to_string()));
-
-                // Assigning an ID to inline quoted text (e.g.,
-                // `[#free_the_world]#free the world#`) makes that phrase
-                // referenceable, so register it in the catalog. A duplicate ID
-                // here is non-fatal (first registration wins). The ID leaves
-                // escaped form on the way in, as above.
-                if let Some(id) = &id {
-                    let _ =
-                        self.parser
-                            .register_ref(&unescape_sentinels(id), None, RefType::Anchor);
-                }
-
-                self.parser
-                    .renderer
-                    .render_quoted_substitution(type_, self.scope, attrlist, id, &caps[2], dest);
-            }
-        }
-
-        LookaheadResult::Continue
-    }
-}
-
-fn apply_quotes(content: &mut Content<'_>, parser: &Parser) {
-    if !QUOTED_TEXT_SNIFF.is_match(content.rendered.as_ref()) {
-        return;
-    }
-
-    // Start borrowed: the sniff above only proves a quote-like character is
-    // present, not that any pattern actually matches, so seeding an owned
-    // working buffer up front would allocate even when nothing is rewritten
-    // (a false-positive sniff). `owned` is materialized only once a pattern
-    // first produces `Cow::Owned`, and reused thereafter.
-    let mut owned: Option<String> = None;
-
-    for sub in &*QUOTE_SUBS {
-        let replacer = QuoteReplacer {
-            type_: sub.type_,
-            scope: sub.scope,
-            parser,
-        };
-
-        let replaced = {
-            let haystack = owned
-                .as_deref()
-                .unwrap_or_else(|| content.rendered.as_ref());
-
-            match replace_with_lookahead(&sub.pattern, haystack, replacer) {
-                Cow::Owned(new_result) => Some(new_result),
-
-                // A borrowed result means this pattern did not match, so no need
-                // to pay for a new string allocation.
-                Cow::Borrowed(_) => None,
-            }
-        };
-
-        if let Some(new_result) = replaced {
-            owned = Some(new_result);
-        }
-    }
-
-    if let Some(rendered) = owned {
-        content.rendered = rendered.into();
-    }
-}
 
 pub(crate) static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     // Either a `counter`/`counter2` directive (group 2) with its `name[:seed]`
@@ -1036,51 +821,6 @@ pub(crate) fn substitute_attributes_in_reftext<'src>(
     CowStr::from(content.rendered.to_string())
 }
 
-fn apply_character_replacements(
-    content: &mut Content<'_>,
-    renderer: &dyn InlineSubstitutionRenderer,
-) {
-    if !REPLACEABLE_TEXT_SNIFF.is_match(content.rendered.as_ref()) {
-        return;
-    }
-
-    // Start borrowed: the sniff above only proves a replaceable character is
-    // present, not that any pattern actually matches, so seeding an owned
-    // working buffer up front would allocate even when nothing is rewritten
-    // (a false-positive sniff). `owned` is materialized only once a pattern
-    // first produces `Cow::Owned`, and reused thereafter.
-    let mut owned: Option<String> = None;
-
-    for repl in &*REPLACEMENTS {
-        let replacer = CharacterReplacer {
-            type_: repl.type_.clone(),
-            renderer,
-        };
-
-        let replaced = {
-            let haystack = owned
-                .as_deref()
-                .unwrap_or_else(|| content.rendered.as_ref());
-
-            match repl.pattern.replace_all(haystack, replacer) {
-                Cow::Owned(new_result) => Some(new_result),
-
-                // A borrowed result means this pattern did not match, so no need
-                // to pay for a new string allocation.
-                Cow::Borrowed(_) => None,
-            }
-        };
-
-        if let Some(new_result) = replaced {
-            owned = Some(new_result);
-        }
-    }
-
-    if let Some(rendered) = owned {
-        content.rendered = rendered.into();
-    }
-}
-
 /// One character-replacement recognition rule: a
 /// [`CharacterReplacementType`] and the [`Regex`] that recognizes it.
 ///
@@ -1239,203 +979,10 @@ static RESTORED_ENTITY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(r#"^&{ENTITY_NAME};"#)).unwrap()
 });
 
-#[derive(Debug)]
-struct CharacterReplacer<'r> {
-    type_: CharacterReplacementType,
-    renderer: &'r dyn InlineSubstitutionRenderer,
-}
-
-impl Replacer for CharacterReplacer<'_> {
-    fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        if caps[0].contains('\\') {
-            // We have to replace since we aren't sure the backslash is the first char.
-            let unescaped = &caps[0].replace("\\", "");
-            dest.push_str(unescaped);
-            return;
-        }
-
-        match self.type_ {
-            CharacterReplacementType::Copyright
-            | CharacterReplacementType::Registered
-            | CharacterReplacementType::Trademark
-            | CharacterReplacementType::EmDashSurroundedBySpaces
-            | CharacterReplacementType::Ellipsis
-            | CharacterReplacementType::SingleLeftArrow
-            | CharacterReplacementType::DoubleLeftArrow
-            | CharacterReplacementType::SingleRightArrow
-            | CharacterReplacementType::DoubleRightArrow => {
-                self.renderer
-                    .render_character_replacement(self.type_.clone(), dest);
-            }
-
-            CharacterReplacementType::EmDashWithoutSpace => {
-                dest.push_str(&caps[1]);
-                self.renderer.render_character_replacement(
-                    CharacterReplacementType::EmDashWithoutSpace,
-                    dest,
-                );
-            }
-
-            CharacterReplacementType::TypographicApostrophe => {
-                if let Some(before) = caps.get(1) {
-                    dest.push_str(before.as_str());
-                }
-
-                self.renderer.render_character_replacement(
-                    CharacterReplacementType::TypographicApostrophe,
-                    dest,
-                );
-
-                if let Some(after) = caps.get(2) {
-                    dest.push_str(after.as_str());
-                }
-            }
-
-            CharacterReplacementType::CharacterReference(_) => {
-                self.renderer.render_character_replacement(
-                    CharacterReplacementType::CharacterReference(caps[1].to_string()),
-                    dest,
-                );
-            }
-        }
-    }
-}
-
-fn apply_post_replacements(
-    content: &mut Content<'_>,
-    parser: &Parser,
-    attrlist: Option<&Attrlist<'_>>,
-) {
-    if parser.is_attribute_set("hardbreaks-option")
-        || attrlist.is_some_and(|attrlist| attrlist.has_option("hardbreaks"))
-    {
-        let text = content.rendered.as_ref();
-        if !text.contains('\n') {
-            return;
-        }
-
-        let mut lines: Vec<&str> = content.rendered.as_ref().lines().collect();
-        let last = lines.pop().unwrap_or_default();
-
-        let mut lines: Vec<String> = lines
-            .iter()
-            .map(|line| {
-                let line = if line.ends_with(" +") {
-                    &line[0..line.len() - 2]
-                } else {
-                    *line
-                };
-
-                let mut line = line.to_owned();
-                parser.renderer.render_line_break(&mut line);
-                line
-            })
-            .collect();
-
-        lines.push(last.to_owned());
-
-        let new_result = lines.join("\n");
-        content.rendered = new_result.into();
-    } else {
-        let rendered = content.rendered.as_ref();
-
-        // A hard line break is a ` +` at the end of a line. Because the
-        // `HARD_LINE_BREAK` regex anchors on `$` in multiline mode — which
-        // matches at the end of the haystack as well as before each `\n` — the
-        // final line of the content is eligible too, even when it is not
-        // followed by a newline (e.g. a one-line paragraph, a block title, or a
-        // section title ending in ` +`). So the cheap pre-check requires only a
-        // `+`, not also a `\n`.
-        if !rendered.contains('+') {
-            return;
-        }
-
-        let replacer = PostReplacementReplacer(&*parser.renderer);
-
-        if let Cow::Owned(new_result) = HARD_LINE_BREAK.replace_all(rendered, replacer) {
-            content.rendered = new_result.into();
-        }
-    }
-}
-
-#[derive(Debug)]
-struct PostReplacementReplacer<'r>(&'r dyn InlineSubstitutionRenderer);
-
-impl Replacer for PostReplacementReplacer<'_> {
-    fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        dest.push_str(&caps[1]);
-        self.0.render_line_break(dest);
-    }
-}
-
 static HARD_LINE_BREAK: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(r#"(?m)^(.*) \+$"#).unwrap()
 });
-
-/// Processes [callouts] in literal, listing, and source blocks.
-///
-/// Callout numbers (`<1>`, `<.>`, or `<!--1-->` for XML) that appear at the end
-/// of a line are replaced with the renderer's callout markup. Callouts may be
-/// tucked behind a line comment (`//`, `#`, `--`, or `;;` by default, or a
-/// custom prefix specified by the `line-comment` attribute), and a callout may
-/// be escaped with a leading backslash to render it literally.
-///
-/// This substitution runs after [special characters] have been replaced, so the
-/// angle brackets that delimit a callout appear in `content.rendered` as
-/// `&lt;` and `&gt;`. This mirrors Asciidoctor's `sub_callouts` /
-/// `CalloutSourceRx`.
-///
-/// [callouts]: https://docs.asciidoctor.org/asciidoc/latest/verbatim/callouts/
-/// [special characters]: https://docs.asciidoctor.org/asciidoc/latest/subs/special-characters/
-fn apply_callouts(content: &mut Content<'_>, parser: &Parser, attrlist: Option<&Attrlist<'_>>) {
-    // A callout's opening bracket is always rendered as `&lt;` by the special
-    // characters substitution, so we can cheaply skip content without any.
-    if !content.rendered.contains("&lt;") {
-        return;
-    }
-
-    // The `line-comment` attribute (block-level, falling back to document-level)
-    // customizes or disables line-comment recognition:
-    //
-    // * absent -> default prefixes (`//`, `#`, `--`, `;;`) and XML callouts are
-    //   recognized.
-    // * present (custom) -> only the given prefix is recognized; XML callouts are
-    //   not.
-    // * present but empty -> no line-comment prefix is recognized; XML callouts are
-    //   not.
-    let line_comment: Option<String> = attrlist
-        .and_then(|a| a.named_attribute("line-comment"))
-        .map(|a| a.value().to_string())
-        .or_else(|| {
-            if parser.has_attribute("line-comment") {
-                Some(
-                    parser
-                        .attribute_value("line-comment")
-                        .as_maybe_str()
-                        .unwrap_or("")
-                        .to_string(),
-                )
-            } else {
-                None
-            }
-        });
-
-    let (callout_rx, tail_rx) = build_callout_regexes(line_comment.as_deref());
-
-    let replacer = CalloutReplacer {
-        renderer: &*parser.renderer,
-        parser,
-        autonum: 0,
-        tail: tail_rx,
-    };
-
-    if let Cow::Owned(new_result) =
-        replace_with_lookahead(&callout_rx, content.rendered.as_ref(), replacer)
-    {
-        content.rendered = new_result.into();
-    }
-}
 
 /// Callout regex for the default `line-comment` mode: recognizes the common
 /// line-comment prefixes and XML callouts.
@@ -1499,89 +1046,24 @@ pub(crate) fn build_callout_regexes(
     }
 }
 
-/// Replacer that renders each trailing callout token, emulating Asciidoctor's
-/// `sub_callouts`.
-struct CalloutReplacer<'r> {
-    renderer: &'r dyn InlineSubstitutionRenderer,
-    parser: &'r Parser,
-
-    /// Running counter for automatically-numbered (`<.>`) callouts, scoped to a
-    /// single block.
-    autonum: u32,
-
-    /// Trailing-position lookahead regex (see [`build_callout_regexes`]).
-    tail: &'r Regex,
-}
-
-impl LookaheadReplacer for CalloutReplacer<'_> {
-    fn replace_append(
-        &mut self,
-        caps: &Captures<'_>,
-        dest: &mut String,
-        after: &str,
-    ) -> LookaheadResult {
-        // Honor the trailing-position requirement: a callout is only recognized
-        // when nothing but further callouts follows it on the line.
-        if !self.tail.is_match(after) {
-            dest.push_str(&caps[0]);
-            return LookaheadResult::Continue;
-        }
-
-        // Honor the escape: emit the matched text with the escaping backslash
-        // removed so the callout renders literally.
-        if caps.name("esc").is_some() {
-            dest.push_str(&caps[0].replacen('\\', "", 1));
-            return LookaheadResult::Continue;
-        }
-
-        let (number_raw, is_xml) = if let Some(xnum) = caps.name("xnum") {
-            (xnum.as_str(), true)
-        } else {
-            // The regex guarantees one of `xnum` or `num` is present.
-            #[allow(clippy::unwrap_used)]
-            (caps.name("num").unwrap().as_str(), false)
-        };
-
-        let number = if number_raw == "." {
-            self.autonum += 1;
-            self.autonum.to_string()
-        } else {
-            number_raw.to_string()
-        };
-
-        // Register this callout so the callout list that annotates this block
-        // can be validated against the callouts it references.
-        if let Ok(n) = number.parse::<u32>() {
-            self.parser.register_callout(n);
-        }
-
-        // Mirror Asciidoctor's guard resolution: a captured line-comment prefix
-        // takes precedence; otherwise an XML callout uses the XML guard; failing
-        // both, there is no guard.
-        let guard = match caps.name("prefix") {
-            Some(prefix) => CalloutGuard::LineComment(prefix.as_str()),
-            None if is_xml => CalloutGuard::Xml,
-            None => CalloutGuard::LineComment(""),
-        };
-
-        let context = self.parser.render_context();
-
-        self.renderer.render_callout(
-            &CalloutRenderParams {
-                number: &number,
-                guard,
-                context: &context,
-            },
-            dest,
-        );
-
-        LookaheadResult::Continue
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
+
+    // Pins (and covers) the exhaustiveness arm in `SubstitutionStep::apply`:
+    // the five steps whose string implementations went with the pipeline
+    // refuse direct application rather than silently doing nothing.
+    #[test]
+    #[should_panic(expected = "the string implementation of Quotes is deleted")]
+    fn a_deleted_steps_direct_application_is_refused() {
+        let mut content = crate::content::Content::from(crate::Span::new("x"));
+
+        crate::content::SubstitutionStep::Quotes.apply(
+            &mut content,
+            &crate::Parser::default(),
+            None,
+        );
+    }
 
     mod special_characters {
         use crate::{
@@ -1644,7 +1126,7 @@ mod tests {
         fn empty() {
             let mut content = Content::from(crate::Span::default());
             let p = Parser::default();
-            SubstitutionStep::Quotes.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
             assert!(content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed(""));
         }
@@ -1653,7 +1135,7 @@ mod tests {
         fn basic_non_empty_span() {
             let mut content = Content::from(crate::Span::new("blah"));
             let p = Parser::default();
-            SubstitutionStep::Quotes.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
             assert!(!content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed("blah"));
         }
@@ -1662,7 +1144,7 @@ mod tests {
         fn ignore_lt_and_gt() {
             let mut content = Content::from(crate::Span::new("bl<ah>"));
             let p = Parser::default();
-            SubstitutionStep::Quotes.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1674,7 +1156,7 @@ mod tests {
         fn strong_word() {
             let mut content = Content::from(crate::Span::new("One *word* is strong."));
             let p = Parser::default();
-            SubstitutionStep::Quotes.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1690,7 +1172,7 @@ mod tests {
         fn marked_string_with_id() {
             let mut content = Content::from(crate::Span::new(r#"[#id]#a few words#"#));
             let p = Parser::default();
-            SubstitutionStep::Quotes.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1730,7 +1212,11 @@ mod tests {
                 let p = Parser::default();
 
                 // Must not panic on the multi-byte leading character.
-                SubstitutionStep::Quotes.apply(&mut content, &p, None);
+                SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(
+                    &mut content,
+                    &p,
+                    None,
+                );
 
                 assert!(content.rendered.starts_with(leading));
             }
@@ -1745,7 +1231,7 @@ mod tests {
             let mut content = Content::from(crate::Span::new(r"\`code``"));
             let p = Parser::default();
 
-            SubstitutionStep::Quotes.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
 
             assert_eq!(
                 content.rendered,
@@ -2325,7 +1811,11 @@ mod tests {
 
             // `Content::from` copies the source verbatim into `rendered`, which
             // is exactly the post-special-characters state we want to exercise.
-            SubstitutionStep::Callouts.apply(&mut content, parser, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Callouts]).apply(
+                &mut content,
+                parser,
+                None,
+            );
             content.rendered.to_string()
         }
 
@@ -2333,7 +1823,11 @@ mod tests {
         fn empty() {
             let mut content = Content::from(crate::Span::default());
             let p = Parser::default();
-            SubstitutionStep::Callouts.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Callouts]).apply(
+                &mut content,
+                &p,
+                None,
+            );
             assert!(content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed(""));
         }
@@ -2470,7 +1964,11 @@ mod tests {
             .item
             .item;
             let p = Parser::default();
-            SubstitutionStep::Callouts.apply(&mut content, &p, Some(&attrlist));
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Callouts]).apply(
+                &mut content,
+                &p,
+                Some(&attrlist),
+            );
             assert_eq!(
                 content.rendered.to_string(),
                 r#"hello() -> % <b class="conum">(1)</b>"#
@@ -2490,7 +1988,11 @@ mod tests {
             .item
             .item;
             let p = Parser::default();
-            SubstitutionStep::Callouts.apply(&mut content, &p, Some(&attrlist));
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Callouts]).apply(
+                &mut content,
+                &p,
+                Some(&attrlist),
+            );
             assert_eq!(
                 content.rendered.to_string(),
                 r#"-- <b class="conum">(1)</b>"#

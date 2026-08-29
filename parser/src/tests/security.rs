@@ -22,7 +22,7 @@
 use crate::{
     Parser,
     blocks::{Block, FindBlocks, SimpleBlock},
-    content::{Content, SubstitutionStep},
+    content::{Content, SubstitutionGroup, SubstitutionStep},
     parser::ModificationContext,
     warnings::WarningType,
 };
@@ -58,8 +58,11 @@ fn render_icon(src: &str, icons: &str) -> String {
     let parser =
         Parser::default().with_intrinsic_attribute("icons", icons, ModificationContext::ApiOnly);
 
-    SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
-    SubstitutionStep::Macros.apply(&mut content, &parser, None);
+    SubstitutionGroup::Custom(vec![
+        SubstitutionStep::SpecialCharacters,
+        SubstitutionStep::Macros,
+    ])
+    .apply(&mut content, &parser, None);
 
     content.rendered_html().to_string()
 }
@@ -72,8 +75,11 @@ fn render_macros(src: &str) -> String {
     let mut content = Content::from(crate::Span::new(src));
     let parser = Parser::default();
 
-    SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
-    SubstitutionStep::Macros.apply(&mut content, &parser, None);
+    SubstitutionGroup::Custom(vec![
+        SubstitutionStep::SpecialCharacters,
+        SubstitutionStep::Macros,
+    ])
+    .apply(&mut content, &parser, None);
 
     content.rendered_html().to_string()
 }
