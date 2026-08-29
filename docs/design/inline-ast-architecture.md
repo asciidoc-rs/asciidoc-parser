@@ -11030,9 +11030,15 @@ Each phase is a reviewable unit with a clear exit gate.
   owes it is a seam whose *shape* says so.
 
   *What still defers:* the signature reshape — folding the eight `*RenderParams` structs into
-  the node types, so a method receives a node instead of a `&mut String` mid-regex — and then
-  Landing. (Step 7's `Document::to_asg()` also remains, blocked on reading the Eclipse ASG
-  schema.)
+  the node types they each shadow, so a method receives the node itself. Note that §4.6's
+  framing of that reshape ("instead of being called mid-regex") no longer describes what is
+  left of it: the string replacers went in step 6, so the trait is *already* called only by
+  the fold. What remains is purely the argument types, and the survey says that is smaller
+  than the framing suggests — eight structs with **nine** construction sites between them,
+  eight in [`fold.rs`](../../parser/src/content/inline_builder/fold.rs) and one in
+  [`content.rs`](../../parser/src/content/content.rs)'s deferred-cross-reference re-render,
+  because the fold is now their sole constructor. Then Landing. (Step 7's
+  `Document::to_asg()` also remains, blocked on reading the Eclipse ASG schema.)
 
 - **Landing — preflight + merge to `main`.** Preflight the whole branch against the
   `asciidoctor` port (§5.1) to confirm the public API and reshaped seam serve a real
