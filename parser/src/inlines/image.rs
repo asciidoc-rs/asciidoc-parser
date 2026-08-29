@@ -29,11 +29,9 @@ pub struct Image<'src> {
     /// `web_path` would percent-encode, a backslash it would posixify, a `/`
     /// or `.` its segment arithmetic would read — ever reaches the resolver.
     /// The built-in renderer reproduces that order by masking these ranges
-    /// around its own `web_path` call (see
-    /// [`ImageRenderParams::restored_target_ranges`]).
-    ///
-    /// [`ImageRenderParams::restored_target_ranges`]:
-    ///     crate::parser::ImageRenderParams::restored_target_ranges
+    /// around its own `web_path` call — see
+    /// [`image_uri`](crate::parser::InlineRenderer::image_uri), which receives
+    /// them off this node.
     pub restored_target_ranges: Vec<std::ops::Range<usize>>,
 
     /// The alt text, explicit or defaulted.

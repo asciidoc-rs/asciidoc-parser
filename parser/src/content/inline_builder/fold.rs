@@ -9,8 +9,8 @@ use crate::{
         SpanForm, Stem, StemNotation, Ui, UiKind,
     },
     parser::{
-        IconRenderParams, ImageRenderParams, IndexTermRenderParams, InlineRenderer,
-        LinkRenderParams, QuoteScope, QuoteType, RenderContext, SpecialCharacter, XrefRenderParams,
+        IndexTermRenderParams, InlineRenderer, LinkRenderParams, QuoteScope, QuoteType,
+        RenderContext, SpecialCharacter, XrefRenderParams,
     },
     strings::CowStr,
 };
@@ -403,14 +403,17 @@ pub(super) fn render_char(ch: char, renderer: &dyn InlineRenderer, out: &mut Str
     renderer.render_special_character(type_, out);
 }
 
-/// Folds an [`Image`](InlineNode::Image) node, reconstructing the
-/// [`ImageRenderParams`]/[`IconRenderParams`] the string pipeline built and
-/// calling the same `render_image`/`render_icon`, so the output is
-/// byte-for-byte identical. The pre-extracted `alt` (and, for an image,
-/// `width`/`height`) come straight off the node; an icon's `size` and every
-/// other rendered attribute (`title`, `link`, `format`, roles, …) are read back
-/// from the node's own [`Attrlist`] — which is why the macro step
-/// captured it.
+/// Folds an [`Image`](InlineNode::Image) node through the same
+/// `render_image`/`render_icon` the string pipeline's macros step calls, so the
+/// output is byte-for-byte identical — handing over the node itself, since
+/// `target`, `alt`, `width`/`height` and the restored-range list are all on it.
+///
+/// The one thing that is *not* on the node is a resolved attribute list: a
+/// macro-built image always carries one, but a hand-built node need not, and a
+/// renderer reading `title`, `link`, `format`, roles or an icon's `size` should
+/// not have to write that fallback itself. So this fold resolves it once — the
+/// node's own [`Attrlist`] when it has one, an empty list sliced from the
+/// node's location when it does not — and passes it alongside.
 fn fold_image(
     image: &Image<'_>,
     renderer: &dyn InlineRenderer,
@@ -431,37 +434,10 @@ fn fold_image(
         }
     };
 
-    let alt = image
-        .alt
-        .as_ref()
-        .map(|a| a.to_string())
-        .unwrap_or_default();
-
     if image.is_icon {
-        let params = IconRenderParams {
-            target: image.target.as_ref(),
-            restored_target_ranges: &image.restored_target_ranges,
-            alt,
-            size: attrlist
-                .named_or_positional_attribute("size", 1)
-                .map(|a| a.value()),
-            attrlist,
-            context,
-        };
-
-        renderer.render_icon(&params, out);
+        renderer.render_icon(image, attrlist, context, out);
     } else {
-        let params = ImageRenderParams {
-            target: image.target.as_ref(),
-            restored_target_ranges: &image.restored_target_ranges,
-            alt,
-            width: image.width.as_deref(),
-            height: image.height.as_deref(),
-            attrlist,
-            context,
-        };
-
-        renderer.render_image(&params, out);
+        renderer.render_image(image, attrlist, context, out);
     }
 }
 

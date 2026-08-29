@@ -4,7 +4,7 @@ use regex::Regex;
 
 use crate::{
     attributes::Attrlist,
-    inlines::{Callout, CalloutGuard, Footnote},
+    inlines::{Callout, CalloutGuard, Footnote, Image},
     parser::{
         DerivedReference, RenderContext, ResolvedReference, SafeMode, XrefSignifier, XrefStyle,
     },
@@ -106,8 +106,14 @@ pub trait InlineRenderer: Debug {
     ///
     /// The renderer should write an appropriate rendering of the specified
     /// image to `dest`.
-    fn render_image(&self, params: &ImageRenderParams, dest: &mut String) {
-        DEFAULT_HTML_RENDERER.render_image(params, dest);
+    fn render_image(
+        &self,
+        image: &Image<'_>,
+        attrlist: &Attrlist<'_>,
+        context: &RenderContext,
+        dest: &mut String,
+    ) {
+        DEFAULT_HTML_RENDERER.render_image(image, attrlist, context, dest);
     }
 
     /// Construct a URI reference or data URI to the target image.
@@ -150,8 +156,14 @@ pub trait InlineRenderer: Debug {
     ///
     /// The renderer should write an appropriate rendering of the specified
     /// icon to `dest`.
-    fn render_icon(&self, params: &IconRenderParams, dest: &mut String) {
-        DEFAULT_HTML_RENDERER.render_icon(params, dest);
+    fn render_icon(
+        &self,
+        icon: &Image<'_>,
+        attrlist: &Attrlist<'_>,
+        context: &RenderContext,
+        dest: &mut String,
+    ) {
+        DEFAULT_HTML_RENDERER.render_icon(icon, attrlist, context, dest);
     }
 
     /// Construct a reference or data URI to an icon image for the specified
@@ -427,71 +439,7 @@ pub enum CharacterReplacementType {
     CharacterReference(String),
 }
 
-/// Provides parsed parameters for an image to be rendered.
-#[derive(Clone, Debug)]
-pub struct ImageRenderParams<'a> {
-    /// Target (the reference to the image).
-    pub target: &'a str,
-
-    /// Byte ranges of [`target`](Self::target) restored from a masked
-    /// passthrough or STEM expression, in ascending order; empty otherwise
-    /// (the string substitution pipeline always passes an empty list — its
-    /// target still carries the sentinel here, and its restore pass runs over
-    /// the rendered string afterwards). The built-in renderer resolves the
-    /// image's `src` with these ranges masked and splices them back in
-    /// afterwards, so path resolution treats each as one opaque run — the
-    /// same order the string pipeline itself applies (`web_path` over the
-    /// sentinel, the restore after). See
-    /// [`Image::restored_target_ranges`](crate::inlines::Image).
-    pub restored_target_ranges: &'a [std::ops::Range<usize>],
-
-    /// Alt text (either explicitly set or defaulted).
-    pub alt: String,
-
-    /// Width. The data type is not checked; this may be any string.
-    pub width: Option<&'a str>,
-
-    /// Height. The data type is not checked; this may be any string.
-    pub height: Option<&'a str>,
-
-    /// Attribute list.
-    pub attrlist: &'a Attrlist<'a>,
-
-    /// The document state as of the point in the document this element came
-    /// from — where a renderer finds document settings such as an image
-    /// directory. See [`RenderContext`].
-    pub context: &'a RenderContext,
-}
-
-/// Provides parsed parameters for an icon to be rendered.
-#[derive(Clone, Debug)]
-pub struct IconRenderParams<'a> {
-    /// Target (the reference to the image).
-    pub target: &'a str,
-
-    /// Byte ranges of [`target`](Self::target) restored from a masked
-    /// passthrough or STEM expression, in ascending order; empty otherwise.
-    /// See [`ImageRenderParams::restored_target_ranges`] — the built-in
-    /// renderer resolves the icon URI with these ranges masked and splices
-    /// them back in afterwards.
-    pub restored_target_ranges: &'a [std::ops::Range<usize>],
-
-    /// Alt text (either explicitly set or defaulted).
-    pub alt: String,
-
-    /// Size. The data type is not checked; this may be any string.
-    pub size: Option<&'a str>,
-
-    /// Attribute list.
-    pub attrlist: &'a Attrlist<'a>,
-
-    /// The document state as of the point in the document this element came
-    /// from — where a renderer finds document settings such as an image
-    /// directory. See [`RenderContext`].
-    pub context: &'a RenderContext,
-}
-
-/// Provides parsed parameters for an icon to be rendered.
+/// Provides parsed parameters for a link to be rendered.
 #[derive(Clone, Debug)]
 pub struct LinkRenderParams<'a> {
     /// Target (the target of this link).
@@ -602,7 +550,8 @@ impl HtmlInlineRenderer {
     ///
     /// `restored_target_ranges` names the byte ranges of `target` restored
     /// from a masked passthrough or STEM expression (see
-    /// [`ImageRenderParams::restored_target_ranges`]). Resolution runs with
+    /// [`Image::restored_target_ranges`](crate::inlines::Image)). Resolution
+    /// runs with
     /// each of them — and each restored range of the macro-level `imagesdir`
     /// value — replaced by an index-keyed `\u{96}`*n*`\u{97}` token, the
     /// bodies spliced back into the resolved path afterwards. This is the
@@ -903,14 +852,18 @@ impl InlineRenderer for HtmlInlineRenderer {
         dest.push_str("<br>");
     }
 
-    fn render_image(&self, params: &ImageRenderParams, dest: &mut String) {
-        let src = self.image_src(
-            params.target,
-            params.restored_target_ranges,
-            params.attrlist,
-            params.context,
-        );
-        let alt_encoded = encode_attribute_value(params.alt.clone());
+    fn render_image(
+        &self,
+        image: &Image<'_>,
+        attrlist: &Attrlist<'_>,
+        context: &RenderContext,
+        dest: &mut String,
+    ) {
+        let target = image.target.as_ref();
+        let alt = image.alt.as_deref().unwrap_or_default();
+
+        let src = self.image_src(target, &image.restored_target_ranges, attrlist, context);
+        let alt_encoded = encode_attribute_value(alt.to_owned());
 
         // The dimension attributes (width, height, and title) are shared by the
         // plain `<img>`, the interactive `<object>`, and the `<object>`'s image
@@ -918,29 +871,28 @@ impl InlineRenderer for HtmlInlineRenderer {
         // concatenate cleanly after `src`/`alt` (or the `data` attribute).
         let mut dimension_attrs = String::new();
 
-        if let Some(width) = params.width {
+        if let Some(width) = image.width.as_deref() {
             dimension_attrs.push_str(&format!(
                 r#" width="{width}""#,
                 width = encode_attribute_value(width.to_owned())
             ));
         }
 
-        if let Some(height) = params.height {
+        if let Some(height) = image.height.as_deref() {
             dimension_attrs.push_str(&format!(
                 r#" height="{height}""#,
                 height = encode_attribute_value(height.to_owned())
             ));
         }
 
-        if let Some(title) = params.attrlist.named_attribute("title") {
+        if let Some(title) = attrlist.named_attribute("title") {
             dimension_attrs.push_str(&format!(
                 r#" title="{title}""#,
                 title = encode_attribute_value(title.value().to_owned())
             ));
         }
 
-        let format = params
-            .attrlist
+        let format = attrlist
             .named_attribute("format")
             .map(|format| format.value());
 
@@ -948,27 +900,32 @@ impl InlineRenderer for HtmlInlineRenderer {
         // (they embed file contents or a live `<object>`), so they only take
         // effect below the `Secure` safe mode. In `Secure` mode an SVG image
         // renders as an ordinary `<img>`, matching Ruby Asciidoctor.
-        let svg_active = (format == Some("svg") || params.target.contains(".svg"))
-            && params.context.safe_mode() < SafeMode::Secure;
+        let svg_active = (format == Some("svg") || target.contains(".svg"))
+            && context.safe_mode() < SafeMode::Secure;
 
         // An inline SVG is embedded verbatim and has no meaningful `src`, so a
         // `link=self` on it is left as the literal `self` rather than resolved
         // to a URI (see `render_icon_or_image`). Every other image form does
         // have a `src` (a data URI or web path) that `link=self` resolves to.
-        let inline_svg = svg_active && params.attrlist.has_option("inline");
+        let inline_svg = svg_active && attrlist.has_option("inline");
 
         let img = if inline_svg {
             // Embed the SVG contents directly. When the contents cannot be read
             // (no handler is registered, or it cannot find the file), fall back
             // to the alt text, mirroring Ruby Asciidoctor.
-            read_svg_contents(&src, params.width, params.height, params.context)
-                .unwrap_or_else(|| format!(r#"<span class="alt">{alt}</span>"#, alt = params.alt))
-        } else if svg_active && params.attrlist.has_option("interactive") {
+            read_svg_contents(
+                &src,
+                image.width.as_deref(),
+                image.height.as_deref(),
+                context,
+            )
+            .unwrap_or_else(|| format!(r#"<span class="alt">{alt}</span>"#, alt = alt))
+        } else if svg_active && attrlist.has_option("interactive") {
             // Render an interactive SVG as an `<object>` element so its embedded
             // scripting and links remain live. A `fallback` image (or, failing
             // that, the alt text) is nested inside for user agents that can't
             // display the object.
-            let fallback = if let Some(fallback) = params.attrlist.named_attribute("fallback") {
+            let fallback = if let Some(fallback) = attrlist.named_attribute("fallback") {
                 // A `fallback=` value restored from a masked construct
                 // resolves over its restored ranges masked, exactly as the
                 // target does — the one other value this renderer runs
@@ -976,15 +933,15 @@ impl InlineRenderer for HtmlInlineRenderer {
                 let fallback_src = self.image_src(
                     fallback.value(),
                     fallback.restored_value_ranges(),
-                    params.attrlist,
-                    params.context,
+                    attrlist,
+                    context,
                 );
                 format!(
                     r#"<img src="{fallback_src}" alt="{alt_encoded}"{dimension_attrs}>"#,
                     fallback_src = encode_attribute_value(fallback_src)
                 )
             } else {
-                format!(r#"<span class="alt">{alt}</span>"#, alt = params.alt)
+                format!(r#"<span class="alt">{alt}</span>"#, alt = alt)
             };
 
             format!(
@@ -1004,10 +961,10 @@ impl InlineRenderer for HtmlInlineRenderer {
         // embedded), so a `link=self` resolving to it is author-supplied and
         // subject to the stricter SVG-data-URI check; a plain path target is
         // resolved to a web path or a trusted embedded `data-uri`.
-        let self_href_from_uri_target = is_uri_ish(params.target);
+        let self_href_from_uri_target = is_uri_ish(target);
 
         render_icon_or_image(
-            params.attrlist,
+            attrlist,
             &img,
             "image",
             link_self_href,
@@ -1058,26 +1015,32 @@ impl InlineRenderer for HtmlInlineRenderer {
         normalized
     }
 
-    fn render_icon(&self, params: &IconRenderParams, dest: &mut String) {
+    fn render_icon(
+        &self,
+        icon: &Image<'_>,
+        attrlist: &Attrlist<'_>,
+        context: &RenderContext,
+        dest: &mut String,
+    ) {
+        let target = icon.target.as_ref();
+        let alt = icon.alt.as_deref().unwrap_or_default();
+
         // As in `render_image`, a target restored from a masked construct
         // resolves with its restored ranges masked — the whole `icon_uri`
         // computation included, since its extension probe (`has_extname`)
         // must read the sentinel-shaped bytes the string pipeline's own
         // probe reads — and the bodies splice back in afterwards.
-        let src = if params.restored_target_ranges.is_empty() {
-            self.icon_uri(params.target, params.attrlist, params.context)
+        let src = if icon.restored_target_ranges.is_empty() {
+            self.icon_uri(target, attrlist, context)
         } else {
             let (masked_target, bodies) =
-                mask_restored_ranges(params.target, params.restored_target_ranges, 0);
+                mask_restored_ranges(target, &icon.restored_target_ranges, 0);
 
-            splice_restored_bodies(
-                &self.icon_uri(&masked_target, params.attrlist, params.context),
-                &bodies,
-            )
+            splice_restored_bodies(&self.icon_uri(&masked_target, attrlist, context), &bodies)
         };
 
-        let img = if params.context.is_attribute_set("icons") {
-            let icons = params.context.attribute_value("icons");
+        let img = if context.is_attribute_set("icons") {
+            let icons = context.attribute_value("icons");
             if let Some(icons) = icons.as_maybe_str()
                 && icons == "font"
             {
@@ -1092,23 +1055,23 @@ impl InlineRenderer for HtmlInlineRenderer {
                     "fa".to_owned(),
                     format!(
                         "fa-{target}",
-                        target = encode_attribute_value(params.target.to_owned())
+                        target = encode_attribute_value(target.to_owned())
                     ),
                 ];
 
-                if let Some(size) = params.attrlist.named_or_positional_attribute("size", 1) {
+                if let Some(size) = attrlist.named_or_positional_attribute("size", 1) {
                     i_class_attrs.push(format!(
                         "fa-{size}",
                         size = encode_attribute_value(size.value().to_owned())
                     ));
                 }
 
-                if let Some(flip) = params.attrlist.named_attribute("flip") {
+                if let Some(flip) = attrlist.named_attribute("flip") {
                     i_class_attrs.push(format!(
                         "fa-flip-{flip}",
                         flip = encode_attribute_value(flip.value().to_owned())
                     ));
-                } else if let Some(rotate) = params.attrlist.named_attribute("rotate") {
+                } else if let Some(rotate) = attrlist.named_attribute("rotate") {
                     i_class_attrs.push(format!(
                         "fa-rotate-{rotate}",
                         rotate = encode_attribute_value(rotate.value().to_owned())
@@ -1118,7 +1081,7 @@ impl InlineRenderer for HtmlInlineRenderer {
                 format!(
                     r##"<i class="{i_class_attr_val}"{title_attr}></i>"##,
                     i_class_attr_val = i_class_attrs.join(" "),
-                    title_attr = if let Some(title) = params.attrlist.named_attribute("title") {
+                    title_attr = if let Some(title) = attrlist.named_attribute("title") {
                         format!(
                             r#" title="{title}""#,
                             title = encode_attribute_value(title.value().to_owned())
@@ -1132,25 +1095,25 @@ impl InlineRenderer for HtmlInlineRenderer {
                     format!(r#"src="{src}""#, src = encode_attribute_value(src.clone())),
                     format!(
                         r#"alt="{alt}""#,
-                        alt = encode_attribute_value(params.alt.to_string())
+                        alt = encode_attribute_value(alt.to_string())
                     ),
                 ];
 
-                if let Some(width) = params.attrlist.named_attribute("width") {
+                if let Some(width) = attrlist.named_attribute("width") {
                     attrs.push(format!(
                         r#"width="{width}""#,
                         width = encode_attribute_value(width.value().to_owned())
                     ));
                 }
 
-                if let Some(height) = params.attrlist.named_attribute("height") {
+                if let Some(height) = attrlist.named_attribute("height") {
                     attrs.push(format!(
                         r#"height="{height}""#,
                         height = encode_attribute_value(height.value().to_owned())
                     ));
                 }
 
-                if let Some(title) = params.attrlist.named_attribute("title") {
+                if let Some(title) = attrlist.named_attribute("title") {
                     attrs.push(format!(
                         r#"title="{title}""#,
                         title = encode_attribute_value(title.value().to_owned())
@@ -1164,15 +1127,15 @@ impl InlineRenderer for HtmlInlineRenderer {
                 )
             }
         } else {
-            format!("[{alt}&#93;", alt = params.alt)
+            format!("[{alt}&#93;", alt = alt)
         };
 
         // `src` is only a real image URI in the image-icon branch (icons enabled
         // and not font-based); the font (`<i>`) and text (`[alt]`) branches have
         // no `src`, so a `link=self` on them stays literal (see
         // `render_icon_or_image`).
-        let link_self_href = if params.context.is_attribute_set("icons")
-            && params.context.attribute_value("icons").as_maybe_str() != Some("font")
+        let link_self_href = if context.is_attribute_set("icons")
+            && context.attribute_value("icons").as_maybe_str() != Some("font")
         {
             Some(src.as_str())
         } else {
@@ -1182,10 +1145,10 @@ impl InlineRenderer for HtmlInlineRenderer {
         // As in `render_image`: a URI-ish target passes through to the icon
         // `src` verbatim, so a `link=self` resolving to it is author-supplied
         // and gets the stricter SVG-data-URI check.
-        let self_href_from_uri_target = is_uri_ish(params.target);
+        let self_href_from_uri_target = is_uri_ish(target);
 
         render_icon_or_image(
-            params.attrlist,
+            attrlist,
             &img,
             "icon",
             link_self_href,
