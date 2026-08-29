@@ -25,10 +25,7 @@ use std::collections::HashMap;
 use crate::{
     HasSpan, Span,
     blocks::{Block, IsBlock},
-    content::{
-        XrefSegment, document_text, fold_resolved_title, render_xref_template,
-        resolved_destinations, template_partition,
-    },
+    content::{XrefSegment, fold_resolved_title, render_xref_template, resolved_destinations},
     document::Catalog,
     inlines::InlineNode,
     parser::{
@@ -70,15 +67,10 @@ struct TitleNode<'src> {
     /// The cross-references the title's footnotes carry.
     footnote: Vec<XrefSegment>,
 
-    /// The string pipeline's placeholder template, which a title renders from
-    /// when it cannot fold: one whose nodes did not survive the `'src`-erasing
-    /// hop a carried block title travels on, and one the carve-out keeps on the
-    /// string pipeline's own answer (`from_tree` false).
+    /// The placeholder template, which a title renders from when it cannot
+    /// fold: one whose nodes did not survive the `'src`-erasing hop a carried
+    /// block title travels on (see `carried_title_template`).
     template: String,
-
-    /// Whether [`block`](Self::block) and [`footnote`](Self::footnote) were
-    /// read off this title's inline tree.
-    from_tree: bool,
 
     /// The ID under which other cross-references reach this title's reference
     /// text — present only when the title *is* the target's reference text (no
@@ -175,13 +167,11 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
                 let block = deferred.block.to_vec();
                 let footnote = deferred.footnote.to_vec();
                 let template = deferred.template.to_string();
-                let from_tree = deferred.from_tree;
 
                 nodes.push(TitleNode {
                     block,
                     footnote,
                     template,
-                    from_tree,
                     map_id,
                     source: section.section_title_source(),
                     inlines: section.section_title_inlines().to_vec(),
@@ -204,13 +194,11 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
                 let block = deferred.block.to_vec();
                 let footnote = deferred.footnote.to_vec();
                 let template = deferred.template.to_string();
-                let from_tree = deferred.from_tree;
 
                 nodes.push(TitleNode {
                     block,
                     footnote,
                     template,
-                    from_tree,
                     map_id: None,
                     source,
                     inlines: title.inlines().to_vec(),
@@ -324,16 +312,11 @@ fn compute<'src>(
     // difference is pre-existing: a title reports every unresolved target it
     // carries, wherever in the title it sits.
     for xref in block.iter_mut().chain(footnote.iter_mut()) {
-        // The catalog holds the document's own text, so a target the *string
-        // pipeline* deferred leaves that pipeline's escaped sentinel form to be
-        // matched against it. A target read off the tree is already the
-        // document's own and is left alone — unescaping it would corrupt one
-        // that legitimately contains the escape introducer. Same question, and
-        // same discriminator, as `Content::resolve_references`.
-        let target = document_text(&xref.target, !node.from_tree);
-
+        // The catalog holds the document's own text, which is exactly what a
+        // tree-read segment's target carries — same as
+        // `Content::resolve_references`.
         let mut resolved = resolver.resolve(&ResolutionContext {
-            target: &target,
+            target: &xref.target,
             provided_text: xref.provided_text.as_deref(),
             derived: xref.derived.as_ref(),
         });
@@ -357,7 +340,7 @@ fn compute<'src>(
         // correct.
         if !has_explicit_text
             && let Some(reference) = resolved.as_mut()
-            && let Some(target_id) = lookup_id(catalog, &target)
+            && let Some(target_id) = lookup_id(catalog, &xref.target)
             && let Some(&(target_index, target_node)) = id_to_node.get(target_id.as_str())
             && reference.href.strip_prefix('#') == Some(target_id.as_str())
         {
@@ -397,7 +380,7 @@ fn compute<'src>(
         // A target that resolved to nothing — and did not carry its own derived
         // destination — is an unresolved reference, reported against the title.
         if resolved.is_none() && xref.derived.is_none() {
-            warnings.unresolved(&target, node.source);
+            warnings.unresolved(&xref.target, node.source);
         }
 
         xref.resolved = resolved;
@@ -408,20 +391,8 @@ fn compute<'src>(
     // were read off that tree in, so they line up one-to-one when mirrored
     // (see `write_back`). These are the very segments the rendering below is
     // computed from, so the tree cannot disagree with the string.
-    let (block_ordered, footnote_ordered) = if node.from_tree {
-        (
-            resolved_destinations(&block),
-            resolved_destinations(&footnote),
-        )
-    } else {
-        // A title the carve-out keeps on the string pipeline's answer: `block`
-        // is that flat list, split by which placeholders the template still
-        // splices, exactly as it always was.
-        (
-            template_partition(&node.template, &block, true),
-            template_partition(&node.template, &block, false),
-        )
-    };
+    let block_ordered = resolved_destinations(&block);
+    let footnote_ordered = resolved_destinations(&footnote);
 
     // The title's rendering is a **fold of its tree**, with the destinations
     // just resolved installed into it — the same answer `Content::refold` gives
@@ -436,11 +407,10 @@ fn compute<'src>(
     let rendered = node
         .render_attributes
         .as_ref()
-        .filter(|_| node.from_tree)
         .and_then(|attributes| {
             fold_resolved_title(&node.inlines, &block_ordered, attributes, renderer, parser)
         })
-        .unwrap_or_else(|| render_xref_template(&node.template, &block, renderer, !node.from_tree));
+        .unwrap_or_else(|| render_xref_template(&node.template, &block, renderer));
 
     if let Some(flag) = in_progress.get_mut(index) {
         *flag = false;

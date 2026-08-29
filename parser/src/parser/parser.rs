@@ -1862,20 +1862,16 @@ impl Parser {
     /// does not map to the document, so no location is recorded and
     /// resolution falls back to the whole-document span.
     ///
-    /// Takes `&self` so it can be called from the macros substitution step.
-    /// `sentinels_escaped` says whether `text` is held in the string
-    /// pipeline's escaped sentinel form (see
-    /// [`escape_sentinels`](crate::content::escape_sentinels)) — true for the
-    /// string replacer's own call, false for the single-pass builder's, which
-    /// folds the entry from the footnote's subtree and so never enters that
-    /// form.
+    /// Takes `&self` so it can be called during substitution. `text` is the
+    /// single-pass builder's fold of the footnote's subtree, which never
+    /// enters the escaped sentinel form the string pipeline's entries were
+    /// held in.
     pub(crate) fn define_footnote(
         &self,
         id: Option<&str>,
         text: String,
         xrefs: Vec<crate::content::XrefSegment>,
         source: crate::Span<'_>,
-        sentinels_escaped: bool,
     ) -> String {
         // A footnote's text is extracted out of the block during macro
         // substitution, so any cross-reference inside it never reaches the
@@ -1885,20 +1881,9 @@ impl Parser {
         // references. The stored `text` is the unresolved fallback rendering
         // until then, so it is always clean.
         let (text, deferred) = if xrefs.is_empty() {
-            // A string-pipeline text was extracted from content held in escaped
-            // sentinel form (see `escape_sentinels`); it is user-facing from
-            // here, so it leaves escaped form now. The deferred branch below
-            // does the same from `FootnoteDeferred::render`, keeping its
-            // template escaped for later re-rendering.
-            let text = if sentinels_escaped {
-                crate::content::unescape_sentinels(&text).into_owned()
-            } else {
-                text
-            };
-
             (text, None)
         } else {
-            let deferred = crate::content::FootnoteDeferred::new(text, xrefs, sentinels_escaped);
+            let deferred = crate::content::FootnoteDeferred::new(text, xrefs);
 
             let rendered = deferred.render(&*self.renderer);
 

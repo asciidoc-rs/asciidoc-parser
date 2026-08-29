@@ -114,11 +114,7 @@ struct FootnoteRecord {
     /// `Debug` spelling — the template and the segments, in placeholder order.
     ///
     /// A spelling here for the same reason as `warnings`: an `XrefSegment`
-    /// carries seven fields, three of them resolver types of their own. That
-    /// `Debug` omits `sentinels_escaped` costs this corpus nothing, because
-    /// [`snapshot`] already normalizes that field away before comparing — it
-    /// records which *pipeline* built the entry, which is exactly what a
-    /// differential must not treat as a difference.
+    /// carries seven fields, three of them resolver types of their own.
     deferred: Option<String>,
 
     location: Option<(usize, usize)>,
@@ -155,33 +151,12 @@ fn snapshot(parser: &Parser) -> SideEffects {
                 .footnotes()
                 .iter()
                 .cloned()
-                .map(|mut footnote| {
-                    // The one field of an entry that is *not* written by the
-                    // recognizing pass in the same form on both sides: it
-                    // records whether the entry's template is held in the
-                    // string pipeline's escaped sentinel form, which is true of
-                    // that pipeline's own entry and false of the builder's fold
-                    // of the footnote's subtree. Both render the same text —
-                    // which is compared — so the encoding is normalized away
-                    // here rather than counted as a divergence.
-                    //
-                    // Kept even though `FootnoteDeferred`'s `Debug` — the
-                    // spelling `FootnoteRecord::deferred` records — does not
-                    // print the flag: the normalization is the statement that
-                    // the two sides' encodings are not a difference, and it
-                    // should not rest on which fields a `Debug` impl happens
-                    // to include.
-                    if let Some(deferred) = footnote.deferred.as_mut() {
-                        deferred.set_sentinels_escaped(false);
-                    }
-
-                    FootnoteRecord {
-                        index: footnote.index,
-                        id: footnote.id,
-                        text: footnote.text,
-                        deferred: footnote.deferred.map(|d| format!("{d:?}")),
-                        location: footnote.location,
-                    }
+                .map(|footnote| FootnoteRecord {
+                    index: footnote.index,
+                    id: footnote.id,
+                    text: footnote.text,
+                    deferred: footnote.deferred.map(|d| format!("{d:?}")),
+                    location: footnote.location,
                 })
                 .collect(),
         )

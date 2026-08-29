@@ -6,9 +6,9 @@
 mod content;
 pub use content::Content;
 pub(crate) use content::{
-    DeferredParts, FootnoteDeferred, OwnedTitle, XrefSegment, defining_footnotes, document_text,
-    escape_sentinels, fold_resolved_title, render_xref_template, resolved_destinations,
-    sanitize_title, template_partition, unescape_sentinels, xref_segment_from_node,
+    DeferredParts, FootnoteDeferred, OwnedTitle, XrefSegment, defining_footnotes, escape_sentinels,
+    fold_resolved_title, render_xref_template, resolved_destinations, sanitize_title,
+    xref_segment_from_node,
 };
 pub(crate) mod inline_builder;
 
