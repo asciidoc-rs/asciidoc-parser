@@ -284,7 +284,15 @@ impl<'src> Content<'src> {
 
     /// Render this content to a caller-supplied backend. A pure fold over
     /// the same `inlines()`; returns an owned `String`, not cached.
-    pub fn render_with(&self, renderer: &dyn InlineRenderer) -> String;
+    ///
+    /// Takes `parser` as landed: a fold needs a `RenderContext`, whose
+    /// path resolver and file handlers are `Rc<dyn …>` parse-wide
+    /// configuration. Freezing those per content would cost `Content` — and
+    /// with it `Document` — its `Send`/`Sync`, so the caller supplies the
+    /// parser it already holds; only the *order-dependent* half (the
+    /// document attributes) is retained per content. See step 7's
+    /// "landed as" note.
+    pub fn render_with(&self, renderer: &dyn InlineRenderer, parser: &Parser) -> String;
 
     pub fn original(&self) -> Span<'src>;   // unchanged
     pub fn is_empty(&self) -> bool;         // unchanged
@@ -8897,6 +8905,46 @@ Each phase is a reviewable unit with a clear exit gate.
   *What still defers:* step 7's other two pieces — `render_with`/`render_to` and
   `Document::to_asg()` — then Phase 5 and Landing.
 
+  *Step 7 landed as (`Content::render_with` — one parse, any number of renders):* the
+  Phase 3 remainder's core, and the first piece of this branch that is a **capability for
+  callers** rather than an internal reshaping. A `Content` now folds its own tree through any
+  backend the caller supplies, with no reparse and no parser reconfiguration — which is the
+  promise §3.3.1 makes ("one parse feeds any number of renders") finally cashed, and it is a
+  pure fold precisely because the builder resolved every order-dependent fact into node values
+  at parse time.
+
+  *The signature takes `parser`, and the reason was already settled in the code.* §3.3's
+  sketch was `render_with(&self, renderer)`, which cannot work: a fold needs a
+  [`RenderContext`](../../parser/src/parser/render_context.rs), which pairs the document
+  attributes with the path resolver and the file handlers. The attributes are order-dependent
+  and must be *this content's*; the resolver and handlers are parse-wide configuration that
+  cannot change mid-parse — and they are `Rc<dyn …>`, so freezing them per content would cost
+  `Content`, and with it `Document`, its `Send`/`Sync` (which `document_stays_send_and_sync`
+  pins). `Content::render_attributes`' own doc had already reasoned this through and concluded
+  that supplying "the parser the caller already holds" is the cheaper half of the trade. The
+  sketch is corrected above rather than the decision revisited.
+
+  *Retention widened from the deferring contents to all of them.* The attribute snapshot was
+  taken only for content the crate itself re-renders (a deferred cross-reference, a defined
+  footnote), on the rationale that "the overwhelming majority of content is never re-rendered
+  and so never folded later than its parse". `render_with` makes later folding a first-class
+  public operation for *every* content, which retires that premise: narrowing retention would
+  leave the new API silently wrong, and wrong only for documents that rebind `:icons:`,
+  `:data-uri:` or the safe mode mid-flight — the least forgivable shape for a bug. The cost is
+  one box per content whose contents are `Arc`-shared, and the guard is a test that renders two
+  paragraphs straddling an `:icons:` line and asserts they disagree: the first still folds as a
+  font icon after the document has rebound the attribute out from under it.
+
+  *A content with no tree returns its literal text.* `Content`'s public `From<Span>` builds one
+  that was never substituted — no tree to fold, no attributes to fold it under — so the fold is
+  skipped and the text returned unchanged, which is also what `rendered_html()` gives. (The
+  shape that first looked like this case, a `[comment]` paragraph, turned out **not** to be one:
+  `SubstitutionGroup::None` still runs the seam and still builds a one-`Text` tree, which folds
+  back to the same literal bytes.)
+
+  *What still defers:* `Document::render_to` (the document-level convenience over this), then
+  `Document::to_asg()`, Phase 5 and Landing.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -10892,6 +10940,15 @@ Each phase is a reviewable unit with a clear exit gate.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
+     - ✅ **`Content::render_with`.** A public pure fold of a content's own tree through a
+       caller-supplied backend — one parse, any number of renders. Takes `parser` rather than
+       the doc's original zero-argument sketch: a `RenderContext`'s resolver and file handlers
+       are `Rc<dyn …>` parse-wide configuration, and freezing them per content would cost
+       `Content`/`Document` their `Send`/`Sync`. Attribute retention widens from the deferring
+       contents to all of them, since the new API folds any of them later than its parse;
+       pinned by a test where two paragraphs straddling an `:icons:` line disagree. See the
+       step's own "landed as" note above.
+
      - ✅ **the `attribute-missing` per-line hack retired (#564).** The correlation existed
        because the string step's haystack was `Content::rendered`; the builder recognizes
        against `'src` and records its own node span, so it never had the problem. Measured

@@ -476,17 +476,21 @@ fn document_stays_send_and_sync() {
 }
 
 #[test]
-fn only_deferred_content_retains_its_render_attributes() {
+fn every_substituted_content_retains_its_render_attributes() {
     use crate::blocks::Block;
 
-    // Retention is deliberately narrow: a context costs a handful of
-    // reference-count bumps, but the overwhelming majority of content is never
-    // re-rendered and so never folded later than its parse.
+    // Retention is unconditional: `Content::render_with` folds *any* content
+    // through a caller's renderer, later than the parse, and the fold consults
+    // the document attributes that were in effect where the content was
+    // written. Narrowing this to the contents the crate itself re-renders
+    // would make that public API silently wrong for exactly the documents that
+    // rebind an attribute mid-flight. The snapshot is `Arc`-shared internally,
+    // so each one allocates nothing beyond its box.
     let mut parser = crate::Parser::default();
 
     let doc = parser.parse("[[tgt]]Plain paragraph.\n\nSee <<tgt>> and <<missing>>.");
 
-    let contexts: Vec<bool> = doc
+    let retained: Vec<bool> = doc
         .child_blocks()
         .filter_map(|block| match block {
             Block::Simple(simple) => Some(simple.content().render_attributes().is_some()),
@@ -494,18 +498,17 @@ fn only_deferred_content_retains_its_render_attributes() {
         })
         .collect();
 
-    // The anchor-bearing paragraph carries no cross-reference of its own, so
-    // it needs no context; the one that does, does.
-    assert_eq!(contexts, vec![false, true]);
+    assert_eq!(retained, vec![true, true]);
 
-    // And a block with no cross-references anywhere never gets one.
+    // Including content with no cross-reference anywhere, which the crate
+    // never re-renders on its own.
     let doc = parser.parse("Just prose with an image:x.png[X].");
 
     let Some(Block::Simple(simple)) = doc.child_blocks().next() else {
         panic!("expected a simple block");
     };
 
-    assert!(simple.content().render_attributes().is_none());
+    assert!(simple.content().render_attributes().is_some());
 }
 
 #[test]
@@ -546,7 +549,16 @@ fn each_content_retains_the_attributes_of_its_own_point_in_the_document() {
         })
         .collect();
 
-    assert_eq!(dirs, vec!["<unset>".to_string(), "img".to_string()]);
+    // Every content retains, so the anchor-bearing paragraph is here too; the
+    // point is that the two straddling the `:imagesdir:` line disagree.
+    assert_eq!(
+        dirs,
+        vec![
+            "<unset>".to_string(),
+            "<unset>".to_string(),
+            "img".to_string()
+        ]
+    );
 }
 
 // The retirement of the deferred-cross-reference sentinel system (design
@@ -748,4 +760,154 @@ fn the_title_pass_renders_each_title_once() {
         2,
         "the document-order title pass rendered a title more than once"
     );
+}
+
+/// A backend that renders strong emphasis its own way and inherits everything
+/// else, so a fold through it is visibly not the built-in HTML fold.
+#[derive(Debug)]
+struct BracketStrong;
+
+impl crate::parser::InlineSubstitutionRenderer for BracketStrong {
+    fn render_quoted_substitution(
+        &self,
+        type_: crate::parser::QuoteType,
+        scope: crate::parser::QuoteScope,
+        attrlist: Option<crate::attributes::Attrlist<'_>>,
+        id: Option<String>,
+        body: &str,
+        dest: &mut String,
+    ) {
+        if type_ == crate::parser::QuoteType::Strong {
+            dest.push_str("**");
+            dest.push_str(body);
+            dest.push_str("**");
+            return;
+        }
+
+        crate::parser::HtmlSubstitutionRenderer {}
+            .render_quoted_substitution(type_, scope, attrlist, id, body, dest);
+    }
+}
+
+#[test]
+fn render_with_reproduces_the_built_in_html_rendering() {
+    // `rendered_html()` is the cached default-HTML fold of the same tree, so
+    // folding it again through the built-in renderer must agree byte for byte.
+    let mut parser = crate::Parser::default();
+    let doc = parser.parse("A *bold* word and a https://example.org[link].");
+
+    let Some(crate::blocks::Block::Simple(simple)) = doc.child_blocks().next() else {
+        panic!("expected a simple block");
+    };
+
+    assert_eq!(
+        simple
+            .content()
+            .render_with(&crate::parser::HtmlSubstitutionRenderer {}, &parser),
+        simple.content().rendered_html()
+    );
+}
+
+#[test]
+fn render_with_drives_a_caller_supplied_backend() {
+    // The capability itself: one parse, a second rendering through a backend
+    // that is not the built-in HTML one, with no reparse and no parser
+    // reconfiguration.
+    let mut parser = crate::Parser::default();
+    let doc = parser.parse("A *bold* word.");
+
+    let Some(crate::blocks::Block::Simple(simple)) = doc.child_blocks().next() else {
+        panic!("expected a simple block");
+    };
+
+    assert_eq!(
+        simple.content().render_with(&BracketStrong, &parser),
+        "A **bold** word."
+    );
+
+    // The cached default rendering is untouched by the custom fold.
+    assert_eq!(
+        simple.content().rendered_html(),
+        "A <strong>bold</strong> word."
+    );
+}
+
+#[test]
+fn render_with_uses_the_attributes_the_content_was_parsed_under() {
+    // The reason a content retains its own attribute snapshot. `icons` is a
+    // fold-time input, and this document rebinds it *after* the first block:
+    // rendering that block later must still see the value in effect where it
+    // was written, not the parser's end-of-document state.
+    let mut parser = crate::Parser::default();
+    let doc = parser.parse(":icons: font\n\nicon:home[]\n\n:icons:\n\nicon:home[]\n");
+
+    // The `:icons:` lines are themselves blocks, so take the paragraphs only.
+    let paragraphs: Vec<_> = doc
+        .child_blocks()
+        .filter_map(|block| match block {
+            crate::blocks::Block::Simple(simple) => Some(simple.content()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(paragraphs.len(), 2);
+
+    let render = |content: &crate::content::Content<'_>| {
+        content.render_with(&crate::parser::HtmlSubstitutionRenderer {}, &parser)
+    };
+
+    let first = render(paragraphs[0]);
+    let second = render(paragraphs[1]);
+
+    // Written under `icons=font`: a font icon, not an image.
+    assert!(first.contains("fa-home"), "{first}");
+    assert!(!first.contains("<img"), "{first}");
+
+    // Written after `icons` was rebound: an image.
+    assert!(second.contains("<img"), "{second}");
+}
+
+#[test]
+fn render_with_returns_the_literal_text_of_a_content_with_no_tree() {
+    // A `Content` built straight from a span — the public `From<Span>` impl —
+    // has never been substituted: there is no tree to fold, and no retained
+    // attributes to fold it under. Its literal text is the honest answer.
+    let parser = crate::Parser::default();
+    let content = crate::content::Content::from(crate::Span::new("Not interpreted *at all*."));
+
+    assert!(content.inlines().is_empty());
+
+    assert_eq!(
+        content.render_with(&BracketStrong, &parser),
+        "Not interpreted *at all*."
+    );
+}
+
+#[test]
+fn render_with_takes_document_attributes_from_the_content() {
+    // `render_with` takes a parser, and nothing in the type system ties that
+    // parser to the one that produced the content. This bounds what a
+    // mismatched parser can do: the *document attributes* always come from the
+    // content's own snapshot, so how a construct renders as a function of
+    // document state is unaffected. Only the parse-wide configuration — the
+    // path resolver and file handlers — follows the parser handed in.
+    let mut parser = crate::Parser::default();
+    let doc = parser.parse(":icons: font\n\nicon:home[]\n");
+
+    let Some(content) = doc.child_blocks().find_map(|block| match block {
+        crate::blocks::Block::Simple(simple) => Some(simple.content()),
+        _ => None,
+    }) else {
+        panic!("expected a simple block");
+    };
+
+    // A different parser entirely, which never saw `:icons: font`.
+    let other = crate::Parser::default();
+
+    let rendered = content.render_with(&crate::parser::HtmlSubstitutionRenderer {}, &other);
+
+    // Still a font icon: the value in effect where the content was written
+    // wins over anything the supplied parser knows.
+    assert!(rendered.contains("fa-home"), "{rendered}");
+    assert!(!rendered.contains("<img"), "{rendered}");
 }
