@@ -1323,7 +1323,7 @@ mod tests {
                 form: SpanForm::Constrained,
                 id: None,
                 roles: vec![],
-                attrs: None,
+                attrs: crate::attributes::Attrlist::empty(location.slice(0..0)),
                 children: vec![],
                 passthrough: None,
                 location,
@@ -1989,7 +1989,11 @@ mod tests {
         match &nodes[0] {
             InlineNode::Styled(styled) => {
                 assert_eq!(styled.roles, vec![CowStr::from("role")]);
-                assert!(styled.attrs.is_some(), "the attribute list is retained");
+                assert_ne!(
+                    styled.attrs.attributes().len(),
+                    0,
+                    "the attribute list is retained"
+                );
             }
 
             other => panic!("expected Styled, got {other:?}"),
@@ -2133,7 +2137,11 @@ mod tests {
         match &nodes[0] {
             InlineNode::Styled(styled) => {
                 assert_eq!(styled.variant, StyleVariant::Code);
-                assert!(styled.attrs.is_some(), "the attribute list is retained");
+                assert_ne!(
+                    styled.attrs.attributes().len(),
+                    0,
+                    "the attribute list is retained"
+                );
             }
 
             other => panic!("expected Styled, got {other:?}"),
@@ -2437,7 +2445,7 @@ mod tests {
                 form: SpanForm::Constrained,
                 id: None,
                 roles: vec![],
-                attrs: None,
+                attrs: crate::attributes::Attrlist::empty(source.slice(8..9).slice(0..0)),
                 children: vec![],
                 passthrough: None,
                 location: source.slice(8..9),
@@ -2848,7 +2856,7 @@ mod tests {
                 form: SpanForm::Constrained,
                 id: None,
                 roles: vec![],
-                attrs: None,
+                attrs: crate::attributes::Attrlist::empty(source.slice(1..2).slice(0..0)),
                 children: vec![],
                 passthrough: None,
                 location: source.slice(1..2),

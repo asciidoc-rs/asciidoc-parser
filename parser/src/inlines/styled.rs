@@ -19,8 +19,10 @@ pub struct Styled<'src> {
     /// The roles (CSS classes) assigned to the span.
     pub roles: Vec<CowStr<'src>>,
 
-    /// The full attribute list, when the span carried one.
-    pub attrs: Option<Attrlist<'src>>,
+    /// The span's full attribute list —
+    /// [`Attrlist::empty`](crate::attributes::Attrlist::empty) when the span
+    /// carried none, so a consumer reads attributes the same way either way.
+    pub attrs: Attrlist<'src>,
 
     /// The span's content, as child inline nodes.
     pub children: Vec<InlineNode<'src>>,

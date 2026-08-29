@@ -357,7 +357,7 @@ fn fold_into_html(
                 renderer.render_styled(
                     quote_type_of(styled.variant),
                     scope,
-                    styled.attrs.clone(),
+                    &styled.attrs,
                     styled.id.as_ref().map(|id| id.to_string()),
                     &body,
                     out,
@@ -408,36 +408,21 @@ pub(super) fn render_char(ch: char, renderer: &dyn InlineRenderer, out: &mut Str
 /// output is byte-for-byte identical — handing over the node itself, since
 /// `target`, `alt`, `width`/`height` and the restored-range list are all on it.
 ///
-/// The one thing that is *not* on the node is a resolved attribute list: a
-/// macro-built image always carries one, but a hand-built node need not, and a
-/// renderer reading `title`, `link`, `format`, roles or an icon's `size` should
-/// not have to write that fallback itself. So this fold resolves it once — the
-/// node's own [`Attrlist`] when it has one, an empty list sliced from the
-/// node's location when it does not — and passes it alongside.
+/// The attribute list — which a renderer reads `title`, `link`, `format`, roles
+/// and an icon's `size` out of — is on the node too, and unconditionally: a
+/// node built without one carries
+/// [`Attrlist::empty`](crate::attributes::Attrlist::empty), so neither this
+/// fold nor a backend has a fallback to write.
 fn fold_image(
     image: &Image<'_>,
     renderer: &dyn InlineRenderer,
     context: &RenderContext,
     out: &mut String,
 ) {
-    // A macro-built image always carries its attribute list; a node hand-built
-    // without one folds through an empty list, sliced (empty) from the node's
-    // own `'src` location so its lifetime matches.
-    let empty;
-    let attrlist = match &image.attrs {
-        Some(attrlist) => attrlist,
-
-        None => {
-            empty = Attrlist::empty(image.location.slice(0..0));
-
-            &empty
-        }
-    };
-
     if image.is_icon {
-        renderer.render_icon(image, attrlist, context, out);
+        renderer.render_icon(image, context, out);
     } else {
-        renderer.render_image(image, attrlist, context, out);
+        renderer.render_image(image, context, out);
     }
 }
 
@@ -471,11 +456,11 @@ fn fold_ui(ui: &Ui<'_>, renderer: &dyn InlineRenderer, context: &RenderContext, 
 /// the string pipeline's macros step calls, reconstructing the
 /// [`LinkRenderParams`] from the node: the display text is the fold of the
 /// children, the extra roles (`bare`) ride on the node's `roles`, and the
-/// target/window come straight off the node. The attribute list is the
-/// node's own [`Ref::attrs`] when its display text carried one (an `id`, a
-/// `title`, a `role=`/`window=`/`nofollow`/`noopener` — see that field's own
-/// docs for why `render_link` needs the real list, not just `roles`/`window`),
-/// or an empty one otherwise.
+/// target/window and the attribute list come straight off the node. That list
+/// is [`Ref::attrs`], which is always present — empty when the display text
+/// carried none — and `render_link` needs the real thing rather than just
+/// `roles`/`window`, because it reads an `id`, a `title` and the `nofollow` /
+/// `noopener` options out of it; see that field's own docs.
 fn fold_link(
     reference: &Ref<'_>,
     renderer: &dyn InlineRenderer,
@@ -494,20 +479,6 @@ fn fold_link(
         &mut link_text,
     );
 
-    // Sliced (empty) from the node's own location so its lifetime matches when
-    // no attribute list was parsed.
-    let empty_attrlist;
-
-    let attrlist: &Attrlist<'_> = match &reference.attrs {
-        Some(attrs) => attrs,
-
-        None => {
-            empty_attrlist = Attrlist::empty(reference.location.slice(0..0));
-
-            &empty_attrlist
-        }
-    };
-
     let extra_roles: Vec<&str> = reference.roles.iter().map(|r| r.as_ref()).collect();
 
     let params = LinkRenderParams {
@@ -515,7 +486,7 @@ fn fold_link(
         link_text,
         extra_roles,
         window: reference.window.as_deref(),
-        attrlist,
+        attrlist: &reference.attrs,
         context,
     };
 
@@ -783,10 +754,14 @@ pub(in crate::content::inline_builder) fn fold_stem(
         StemNotation::LatexMath => QuoteType::LatexMath,
     };
 
+    // A STEM macro carries no attribute list of its own, and the string
+    // pipeline's passthrough restore passed none either.
+    let attrlist = Attrlist::empty(stem.location.slice(0..0));
+
     renderer.render_styled(
         type_,
         QuoteScope::Unconstrained,
-        None,
+        &attrlist,
         None,
         stem.value.as_ref(),
         out,
@@ -954,7 +929,7 @@ mod tests {
             alt: Some(CowStr::from("Sunset")),
             width: None,
             height: None,
-            attrs: None,
+            attrs: crate::attributes::Attrlist::empty(location.slice(0..0)),
             location,
         });
 
@@ -982,7 +957,7 @@ mod tests {
             alt: Some(CowStr::from("Sunset")),
             width: None,
             height: None,
-            attrs: None,
+            attrs: crate::attributes::Attrlist::empty(location.slice(0..0)),
             location,
         });
 
@@ -1016,7 +991,7 @@ mod tests {
             }),
             derived: None,
             xrefstyle,
-            attrs: None,
+            attrs: crate::attributes::Attrlist::empty(Span::new("").slice(0..0)),
             location: Span::new(""),
         })
     }

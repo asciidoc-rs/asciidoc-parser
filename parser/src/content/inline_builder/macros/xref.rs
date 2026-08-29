@@ -569,7 +569,7 @@ fn build_xref_node<'src>(
         // replacer makes (design §3.3.1 point 1: every order-dependent fact is
         // resolved into node values at build time, so the fold is pure).
         xrefstyle: xrefstyle.or_else(|| document_xrefstyle(parser)),
-        attrs: None,
+        attrs: Attrlist::empty(location.slice(0..0)),
         location,
     })
 }
@@ -849,7 +849,7 @@ fn build_xref_shorthand_node<'src>(
         // the document-wide one, resolved here for the same reason the macro
         // form resolves it here.
         xrefstyle: document_xrefstyle(parser),
-        attrs: None,
+        attrs: Attrlist::empty(location.slice(0..0)),
         location,
     })
 }

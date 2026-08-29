@@ -673,7 +673,7 @@ fn build_image_node<'src>(
         alt,
         width,
         height,
-        attrs: Some(attrlist),
+        attrs: attrlist,
         location,
     })
 }
@@ -1192,7 +1192,7 @@ fn link_self_resolves_to_src(image: &Image<'_>, parser: &Parser) -> bool {
 /// rejection check, returning the target string the renderer would refuse to
 /// promote into an `href`, if any.
 fn rejected_link_target<'a>(image: &'a Image<'_>, parser: &Parser) -> Option<&'a str> {
-    let link = image.attrs.as_ref()?.named_attribute("link")?;
+    let link = image.attrs.named_attribute("link")?;
 
     if link.value() == "self" {
         (link_self_resolves_to_src(image, parser)
@@ -1366,7 +1366,11 @@ mod tests {
 
         // The node captures its own attribute list — the property that makes it
         // self-describing (and unblocks a faithful fold).
-        assert!(image.attrs.is_some(), "the attribute list is retained");
+        assert_ne!(
+            image.attrs.attributes().len(),
+            0,
+            "the attribute list is retained"
+        );
 
         // Its location covers the whole macro, delimiters included.
         assert_eq!(image.location.data(), "image:sunset.jpg[Sunset]");
@@ -1598,7 +1602,7 @@ mod tests {
 
         assert_eq!(image.alt.as_deref(), Some("a &lt; b"));
 
-        let attrs = image.attrs.as_ref().unwrap();
+        let attrs = &image.attrs;
         assert_eq!(attrs.nth_attribute(1).unwrap().value(), "a &lt; b");
         assert_eq!(attrs.named_attribute("role").unwrap().value(), "hl");
 
@@ -1784,7 +1788,7 @@ mod tests {
         assert_eq!(nodes.len(), 1);
         let image = assert_image(&nodes[0]);
 
-        let attrlist = image.attrs.as_ref().unwrap();
+        let attrlist = &image.attrs;
         assert_eq!(
             attrlist.named_attribute("title").unwrap().value(),
             "Pause &#169; Resume"
@@ -2132,7 +2136,7 @@ mod tests {
         let image = assert_image(&nodes[0]);
         assert_eq!(image.alt.as_deref(), Some("abc.myrole#myid"));
 
-        let attrlist = image.attrs.as_ref().unwrap();
+        let attrlist = &image.attrs;
 
         assert_eq!(attrlist.id(), Some("myid"));
         assert_eq!(attrlist.roles(), vec!["myrole"]);
@@ -2200,13 +2204,7 @@ mod tests {
         let image = assert_image(&nodes[0]);
 
         assert_eq!(
-            image
-                .attrs
-                .as_ref()
-                .unwrap()
-                .named_attribute("link")
-                .unwrap()
-                .value(),
+            image.attrs.named_attribute("link").unwrap().value(),
             "javascript:alert(1)"
         );
 
@@ -2742,7 +2740,7 @@ mod tests {
             resolved: None,
             derived: None,
             xrefstyle: None,
-            attrs: None,
+            attrs: crate::attributes::Attrlist::empty(root.slice(0..0)),
             location: root,
         });
 
@@ -3146,7 +3144,7 @@ mod tests {
 
         assert_eq!(image.alt.as_deref(), Some("Sunset"));
 
-        let attrs = image.attrs.as_ref().unwrap();
+        let attrs = &image.attrs;
         assert_eq!(attrs.nth_attribute(1).unwrap().value(), "Sunset");
         assert_eq!(attrs.named_attribute("role").unwrap().value(), "hl");
 

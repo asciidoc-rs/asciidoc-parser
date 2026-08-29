@@ -73,7 +73,7 @@ pub trait InlineRenderer: Debug {
         &self,
         type_: QuoteType,
         scope: QuoteScope,
-        attrlist: Option<Attrlist<'_>>,
+        attrlist: &Attrlist<'_>,
         id: Option<String>,
         body: &str,
         dest: &mut String,
@@ -106,14 +106,8 @@ pub trait InlineRenderer: Debug {
     ///
     /// The renderer should write an appropriate rendering of the specified
     /// image to `dest`.
-    fn render_image(
-        &self,
-        image: &Image<'_>,
-        attrlist: &Attrlist<'_>,
-        context: &RenderContext,
-        dest: &mut String,
-    ) {
-        DEFAULT_HTML_RENDERER.render_image(image, attrlist, context, dest);
+    fn render_image(&self, image: &Image<'_>, context: &RenderContext, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_image(image, context, dest);
     }
 
     /// Construct a URI reference or data URI to the target image.
@@ -156,14 +150,8 @@ pub trait InlineRenderer: Debug {
     ///
     /// The renderer should write an appropriate rendering of the specified
     /// icon to `dest`.
-    fn render_icon(
-        &self,
-        icon: &Image<'_>,
-        attrlist: &Attrlist<'_>,
-        context: &RenderContext,
-        dest: &mut String,
-    ) {
-        DEFAULT_HTML_RENDERER.render_icon(icon, attrlist, context, dest);
+    fn render_icon(&self, icon: &Image<'_>, context: &RenderContext, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_icon(icon, context, dest);
     }
 
     /// Construct a reference or data URI to an icon image for the specified
@@ -695,16 +683,15 @@ impl InlineRenderer for HtmlInlineRenderer {
         &self,
         type_: QuoteType,
         _scope: QuoteScope,
-        attrlist: Option<Attrlist<'_>>,
+        attrlist: &Attrlist<'_>,
         mut id: Option<String>,
         body: &str,
         dest: &mut String,
     ) {
-        let mut roles: Vec<&str> = attrlist.as_ref().map(|a| a.roles()).unwrap_or_default();
+        let mut roles: Vec<&str> = attrlist.roles();
 
         if let Some(block_style) = attrlist
-            .as_ref()
-            .and_then(|a| a.nth_attribute(1))
+            .nth_attribute(1)
             .and_then(|attr1| attr1.block_style())
         {
             roles.insert(0, block_style);
@@ -712,8 +699,7 @@ impl InlineRenderer for HtmlInlineRenderer {
 
         if id.is_none() {
             id = attrlist
-                .as_ref()
-                .and_then(|a| a.nth_attribute(1))
+                .nth_attribute(1)
                 .and_then(|attr1| attr1.id())
                 .map(|id| id.to_owned())
         }
@@ -724,16 +710,14 @@ impl InlineRenderer for HtmlInlineRenderer {
         // included — so recover it here rather than dropping the role.
         if roles.is_empty()
             && id.is_none()
-            && let Some(role) = attrlist
-                .as_ref()
-                .and_then(|a| a.quoted_text_fallback_role())
+            && let Some(role) = attrlist.quoted_text_fallback_role()
         {
             roles.push(role);
         }
 
         match type_ {
             QuoteType::Strong => {
-                wrap_body_in_html_tag(attrlist.as_ref(), "strong", id, roles, body, dest);
+                wrap_body_in_html_tag("strong", id, roles, body, dest);
             }
 
             QuoteType::DoubleQuote => {
@@ -749,34 +733,34 @@ impl InlineRenderer for HtmlInlineRenderer {
             }
 
             QuoteType::Monospaced => {
-                wrap_body_in_html_tag(attrlist.as_ref(), "code", id, roles, body, dest);
+                wrap_body_in_html_tag("code", id, roles, body, dest);
             }
 
             QuoteType::Emphasis => {
-                wrap_body_in_html_tag(attrlist.as_ref(), "em", id, roles, body, dest);
+                wrap_body_in_html_tag("em", id, roles, body, dest);
             }
 
             QuoteType::Mark => {
                 if roles.is_empty() && id.is_none() {
-                    wrap_body_in_html_tag(attrlist.as_ref(), "mark", id, roles, body, dest);
+                    wrap_body_in_html_tag("mark", id, roles, body, dest);
                 } else {
-                    wrap_body_in_html_tag(attrlist.as_ref(), "span", id, roles, body, dest);
+                    wrap_body_in_html_tag("span", id, roles, body, dest);
                 }
             }
 
             QuoteType::Superscript => {
-                wrap_body_in_html_tag(attrlist.as_ref(), "sup", id, roles, body, dest);
+                wrap_body_in_html_tag("sup", id, roles, body, dest);
             }
 
             QuoteType::Subscript => {
-                wrap_body_in_html_tag(attrlist.as_ref(), "sub", id, roles, body, dest);
+                wrap_body_in_html_tag("sub", id, roles, body, dest);
             }
 
             QuoteType::Unquoted => {
                 if roles.is_empty() && id.is_none() {
                     dest.push_str(body);
                 } else {
-                    wrap_body_in_html_tag(attrlist.as_ref(), "span", id, roles, body, dest);
+                    wrap_body_in_html_tag("span", id, roles, body, dest);
                 }
             }
 
@@ -852,13 +836,8 @@ impl InlineRenderer for HtmlInlineRenderer {
         dest.push_str("<br>");
     }
 
-    fn render_image(
-        &self,
-        image: &Image<'_>,
-        attrlist: &Attrlist<'_>,
-        context: &RenderContext,
-        dest: &mut String,
-    ) {
+    fn render_image(&self, image: &Image<'_>, context: &RenderContext, dest: &mut String) {
+        let attrlist = &image.attrs;
         let target = image.target.as_ref();
         let alt = image.alt.as_deref().unwrap_or_default();
 
@@ -1015,13 +994,8 @@ impl InlineRenderer for HtmlInlineRenderer {
         normalized
     }
 
-    fn render_icon(
-        &self,
-        icon: &Image<'_>,
-        attrlist: &Attrlist<'_>,
-        context: &RenderContext,
-        dest: &mut String,
-    ) {
+    fn render_icon(&self, icon: &Image<'_>, context: &RenderContext, dest: &mut String) {
+        let attrlist = &icon.attrs;
         let target = icon.target.as_ref();
         let alt = icon.alt.as_deref().unwrap_or_default();
 
@@ -1465,7 +1439,6 @@ fn push_attribute_value(dest: &mut String, value: &str) {
 }
 
 fn wrap_body_in_html_tag(
-    _attrlist: Option<&Attrlist<'_>>,
     tag: &'static str,
     id: Option<String>,
     roles: Vec<&str>,
@@ -1971,7 +1944,50 @@ fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&str>) -> Strin
 
 #[cfg(test)]
 mod tests {
-    use super::{data_uri_mimetype, drop_anchor_tags, encode_html_attribute, extname, has_extname};
+    use super::{
+        HtmlInlineRenderer, InlineRenderer, QuoteScope, QuoteType, data_uri_mimetype,
+        drop_anchor_tags, encode_html_attribute, extname, has_extname,
+    };
+    use crate::{Span, attributes::Attrlist};
+
+    #[test]
+    fn a_mark_carrying_an_id_or_a_role_renders_as_a_span() {
+        // Asciidoctor renders `#text#` as `<mark>`, but a *styled* one — given
+        // an id or a role — as a `<span>` instead. The builder reaches the same
+        // outcome one step earlier, by classifying a `#…#` that carries an
+        // attribute list as `Unquoted` rather than `Mark` (see
+        // `style_variant_of`), so no parse ever hands this method a `Mark` with
+        // either. That does not make the rule dead: `render_styled` is public,
+        // and a caller folding a node it built itself can present exactly that
+        // combination — so the reference backend has to answer for it, and this
+        // pins the answer.
+        let renderer = HtmlInlineRenderer {};
+        let attrlist = Attrlist::empty(Span::new(""));
+
+        let mut dest = String::new();
+        renderer.render_styled(
+            QuoteType::Mark,
+            QuoteScope::Constrained,
+            &attrlist,
+            Some("anchor".to_owned()),
+            "text",
+            &mut dest,
+        );
+        assert_eq!(dest, r#"<span id="anchor">text</span>"#);
+
+        // With neither an id nor a role it is a plain `<mark>`, which is the
+        // branch every parsed `#text#` takes.
+        let mut dest = String::new();
+        renderer.render_styled(
+            QuoteType::Mark,
+            QuoteScope::Constrained,
+            &attrlist,
+            None,
+            "text",
+            &mut dest,
+        );
+        assert_eq!(dest, "<mark>text</mark>");
+    }
 
     #[test]
     fn extname_extracts_final_segment_extension() {

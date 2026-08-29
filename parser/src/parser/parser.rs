@@ -4517,7 +4517,7 @@ mod tests {
             &self,
             _type_: QuoteType,
             _scope: QuoteScope,
-            _attrlist: Option<Attrlist<'_>>,
+            _attrlist: &Attrlist<'_>,
             _id: Option<String>,
             body: &str,
             dest: &mut String,
@@ -4540,7 +4540,6 @@ mod tests {
         fn render_image(
             &self,
             _image: &crate::inlines::Image<'_>,
-            _attrlist: &Attrlist<'_>,
             _context: &crate::parser::RenderContext,
             dest: &mut String,
         ) {
@@ -4559,7 +4558,6 @@ mod tests {
         fn render_icon(
             &self,
             _icon: &crate::inlines::Image<'_>,
-            _attrlist: &Attrlist<'_>,
             _context: &crate::parser::RenderContext,
             dest: &mut String,
         ) {

@@ -205,7 +205,7 @@ pub struct Styled<'src> {
     pub form: SpanForm,          // Constrained | Unconstrained (ASG `form`)
     pub id: Option<CowStr<'src>>,
     pub roles: Vec<CowStr<'src>>,
-    pub attrs: Option<Attrlist<'src>>,
+    pub attrs: Attrlist<'src>,     // empty when the node carried no list
     pub children: Vec<InlineNode<'src>>,
     pub location: Span<'src>,
 }
@@ -11111,20 +11111,57 @@ Each phase is a reviewable unit with a clear exit gate.
   the small trap that a downstream renderer reading `params.size` and one reading the attrlist
   could disagree.
 
-  *Why the attribute list is a separate argument and not just `image.attrs`.* Because
-  [`Image::attrs`](../../parser/src/inlines/image.rs) is an `Option`: a macro-built image always
-  carries its list, but a hand-built node need not, and the fold has always resolved that with
-  an empty list sliced from the node's own location so the lifetime matches. Pushing that
+  *Why the attribute list was a separate argument and not just `image.attrs`.* Because
+  [`Image::attrs`](../../parser/src/inlines/image.rs) was an `Option`: a macro-built image
+  always carries its list, but a hand-built node need not, and the fold resolved that with an
+  empty list sliced from the node's own location so the lifetime matches. Pushing that
   `let empty; let attrlist = match … ` dance into every backend that wants to read `title`,
   `link`, `format` or a role is the wrong trade for a seam whose whole point is to be easy to
-  implement — so the fold keeps resolving it once and hands it over. The tidier fix is at the
-  *node* (make `attrs` non-optional, as `Styled` and `Ref` would also want), which is a change
-  to a public node's field type and belongs in its own increment, not smuggled into a seam
-  reshape.
+  implement — so the fold kept resolving it once and handed it over. The note flagged the
+  tidier fix as *at the node*, and the maintainer took it: see the slice 3a note below.
 
   *Verification.* No expected-output string changed, all 5,474 tests pass, and coverage is
   flat at 561 missed regions with every touched file unchanged — `fold.rs` 3, `inline_renderer.rs`
   18, `parser.rs` 66, exactly as slice 2 left them.
+
+  *Slice 3a landed as (the `attrs` `Option` removed at the node, on the maintainer's call):*
+  [`Image`](../../parser/src/inlines/image.rs),
+  [`Styled`](../../parser/src/inlines/styled.rs) and
+  [`Ref`](../../parser/src/inlines/ref_node.rs) now hold an `Attrlist<'src>` outright, filled
+  with [`Attrlist::empty`](../../parser/src/attributes/attrlist.rs) — now `pub`, since those
+  node fields are — when the author wrote no list. "Absent attribute list" stops being a state
+  the model can be in, which is what slice 3's own note said the tidier fix would be.
+
+  *The seam simplifies behind it, which was the point.* `render_image` and `render_icon` drop
+  the separate `&Attrlist` argument slice 3 gave them and read `image.attrs`; `render_styled`
+  takes `&Attrlist<'_>` where it took an owned `Option<Attrlist<'_>>`, which also **removes a
+  clone per styled node** — the fold was cloning the list into the `Option` on every span.
+  `fold_image` and `fold_link`'s empty-list resolutions are gone.
+
+  *Two vestiges fell out.* `attributes_of` / `attributes_of_attrlist` in
+  [`quotes.rs`](../../parser/src/content/inline_builder/quotes.rs) declared a return type of
+  `Option<Attrlist>` and never once returned `None` — the `Some(…)` was the last line of the
+  function. And `wrap_body_in_html_tag` took an `_attrlist` parameter it did not read;
+  `render_styled` no longer has an `Option` to pass it, and the dead parameter went with it.
+
+  *Verification.* No expected-output string changed and all 5,475 tests pass. Coverage
+  **improved**, 561 → 551 missed regions, and the files that moved are the ones that held the
+  `Option` branches: `macros/links.rs` 20 → 17, `parser/inline_renderer.rs` 18 → 12,
+  `macros/image.rs` 4 → 3, with `fold.rs`, `quotes.rs` and `attrlist.rs` unchanged. Nothing
+  regressed — a `None` arm that no longer exists cannot be an untested one.
+
+  *One uncovered line was a pre-existing hole this diff walked into.* Codecov measures the
+  **diff**, not the total, and flagged `render_styled`'s
+  `QuoteType::Mark`-with-an-id-or-role branch: dropping the now-dead `attrlist` argument from
+  its `wrap_body_in_html_tag` call made an already-uncovered line a *changed* one. It was
+  uncovered for a reason worth writing down rather than papering over —
+  [`style_variant_of`](../../parser/src/content/inline_builder/quotes.rs) classifies a `#…#`
+  carrying an attribute list as `Unquoted` rather than `Mark`, so **no parse can reach it**.
+  That does not make it dead: `render_styled` is public, and a caller folding a node it built
+  itself can present exactly that combination, so the reference backend has to answer for it.
+  A unit test now pins both halves of the rule (`<span id="…">` with, `<mark>` without) —
+  which is why `inline_renderer.rs` fell to 12 rather than the 16 the `Option` removal alone
+  would have given.
 
   *What still defers:* the last three — `Link`, `Xref` and `IndexTerm`, whose params carry the
   **fold of the node's children**. That one is not a substitution and should not be taken

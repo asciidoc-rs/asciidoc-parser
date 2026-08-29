@@ -691,7 +691,7 @@ mod tests {
             form: SpanForm::Constrained,
             id: None,
             roles: vec![],
-            attrs: None,
+            attrs: crate::attributes::Attrlist::empty(loc.slice(0..0)),
             children: vec![InlineNode::Text {
                 value: CowStr::from(loc.data()),
                 location: loc,
@@ -734,7 +734,7 @@ mod tests {
             resolved: None,
             derived: None,
             xrefstyle: None,
-            attrs: None,
+            attrs: crate::attributes::Attrlist::empty(loc.slice(0..0)),
             location: loc,
         });
 
@@ -949,7 +949,7 @@ mod tests {
                 form: SpanForm::Constrained,
                 id: None,
                 roles: vec![],
-                attrs: None,
+                attrs: crate::attributes::Attrlist::empty(loc.slice(0..0)),
                 children: child(),
                 passthrough: None,
                 location: loc,
@@ -964,7 +964,7 @@ mod tests {
                 resolved: None,
                 derived: None,
                 xrefstyle: None,
-                attrs: None,
+                attrs: crate::attributes::Attrlist::empty(loc.slice(0..0)),
                 location: loc,
             }),
             InlineNode::Anchor(Anchor {

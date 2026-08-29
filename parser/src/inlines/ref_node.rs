@@ -96,10 +96,14 @@ pub struct Ref<'src> {
     /// than `roles`/`window` alone (an `id`, a `title`, the `nofollow` /
     /// `noopener` options), unlike a cross-reference's own attribute-list
     /// text, whose `window`/`role`/`xrefstyle` the plain fields above already
-    /// cover in full. `None` when the link carries no attribute-list text
-    /// (or the `=` was incidental — see `extract_attributes_from_text`), and
-    /// always `None` for an [`Xref`](RefVariant::Xref).
-    pub attrs: Option<Attrlist<'src>>,
+    /// cover in full.
+    ///
+    /// [`Attrlist::empty`](crate::attributes::Attrlist::empty) when the link
+    /// carries no attribute-list text (or the `=` was incidental — see
+    /// `extract_attributes_from_text`), and always empty for an
+    /// [`Xref`](RefVariant::Xref), whose own attribute-list text is fully
+    /// covered by the plain fields.
+    pub attrs: Attrlist<'src>,
 
     /// For a [`Link`](RefVariant::Link), which of AsciiDoc's three link
     /// spellings the source used; `None` for a cross-reference.

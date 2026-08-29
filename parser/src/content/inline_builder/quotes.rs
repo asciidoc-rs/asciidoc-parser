@@ -580,7 +580,7 @@ fn probe_styled_boundaries_markup(styled: &Styled<'_>) -> (String, String) {
     HtmlInlineRenderer {}.render_styled(
         quote_type_of(styled.variant),
         scope,
-        styled.attrs.clone(),
+        &styled.attrs,
         styled.id.as_ref().map(|id| id.to_string()),
         PROBE,
         &mut rendered,
@@ -1332,10 +1332,12 @@ fn rebuild_level<'src>(
                 let mut children = Vec::new();
                 emit_range(nodes, pieces, body.clone(), &mut children);
 
+                let location = source_slice(pieces, construct.clone(), root);
+
                 let (id, roles, attrs) = match attrlist {
                     Some(range) => quote_attributes(s, range.clone(), pieces, root, parser),
 
-                    None => (None, Vec::new(), None),
+                    None => (None, Vec::new(), Attrlist::empty(location.slice(0..0))),
                 };
 
                 out.push(InlineNode::Styled(Styled {
@@ -1346,7 +1348,7 @@ fn rebuild_level<'src>(
                     attrs,
                     children,
                     passthrough: None,
-                    location: source_slice(pieces, construct.clone(), root),
+                    location,
                 }));
             }
         }
@@ -1397,11 +1399,7 @@ fn quote_attributes<'src>(
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
-) -> (
-    Option<CowStr<'src>>,
-    Vec<CowStr<'src>>,
-    Option<Attrlist<'src>>,
-) {
+) -> (Option<CowStr<'src>>, Vec<CowStr<'src>>, Attrlist<'src>) {
     let source = source_slice(pieces, range.clone(), root);
 
     if range_is_verbatim(pieces, &range) {
@@ -1428,11 +1426,7 @@ fn quote_attributes<'src>(
 pub(super) fn attributes_of<'src>(
     source: Span<'src>,
     parser: &Parser,
-) -> (
-    Option<CowStr<'src>>,
-    Vec<CowStr<'src>>,
-    Option<Attrlist<'src>>,
-) {
+) -> (Option<CowStr<'src>>, Vec<CowStr<'src>>, Attrlist<'src>) {
     attributes_of_attrlist(parse_attrlist(source, parser))
 }
 
@@ -1448,11 +1442,7 @@ fn parse_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
 /// list itself.
 fn attributes_of_attrlist<'src>(
     attrlist: Attrlist<'src>,
-) -> (
-    Option<CowStr<'src>>,
-    Vec<CowStr<'src>>,
-    Option<Attrlist<'src>>,
-) {
+) -> (Option<CowStr<'src>>, Vec<CowStr<'src>>, Attrlist<'src>) {
     // Extract owned id/roles before the attrlist is moved into the node, exactly
     // as the string pipeline's quote replacer does.
     //
@@ -1470,7 +1460,7 @@ fn attributes_of_attrlist<'src>(
         .map(|role| CowStr::from(role.to_string()))
         .collect();
 
-    (id, roles, Some(attrlist))
+    (id, roles, attrlist)
 }
 
 /// Emits the original nodes covering the match-string range `[range.start,
@@ -1820,7 +1810,7 @@ mod tests {
             form: SpanForm::Constrained,
             id: None,
             roles: vec![],
-            attrs: None,
+            attrs: crate::attributes::Attrlist::empty(Span::new("x").slice(0..0)),
             children: vec![],
             passthrough: None,
             location: Span::new("x"),
@@ -1884,7 +1874,7 @@ mod tests {
             form: SpanForm::Constrained,
             id: None,
             roles: vec![],
-            attrs: None,
+            attrs: crate::attributes::Attrlist::empty(Span::new("x").slice(0..0)),
             children: vec![],
             passthrough: None,
             location: Span::new("x"),
@@ -2092,7 +2082,7 @@ mod tests {
                 form: SpanForm::Constrained,
                 id: None,
                 roles: Vec::new(),
-                attrs: None,
+                attrs: crate::attributes::Attrlist::empty(Span::new("x").slice(0..0)),
                 children: Vec::new(),
                 passthrough: None,
                 location: Span::new("x"),
@@ -2239,7 +2229,7 @@ mod tests {
                 form: SpanForm::Constrained,
                 id: None,
                 roles: Vec::new(),
-                attrs: None,
+                attrs: crate::attributes::Attrlist::empty(Span::new("x").slice(0..0)),
                 children,
                 passthrough: None,
                 location: Span::new("x"),
@@ -2495,7 +2485,7 @@ mod tests {
             form: SpanForm::Unconstrained,
             id: Some(CowStr::from("x")),
             roles: Vec::new(),
-            attrs: None,
+            attrs: crate::attributes::Attrlist::empty(Span::new("[#x]##y##").slice(0..0)),
             children: Vec::new(),
             passthrough: None,
             location: Span::new("[#x]##y##"),
@@ -2546,7 +2536,7 @@ mod tests {
             form: SpanForm::Unconstrained,
             id: None,
             roles: Vec::new(),
-            attrs: None,
+            attrs: crate::attributes::Attrlist::empty(Span::new("[width=10]##x ##").slice(0..0)),
             children,
             passthrough: None,
             location: Span::new("[width=10]##x ##"),
@@ -3117,7 +3107,7 @@ mod tests {
             form: SpanForm::Constrained,
             id: None,
             roles: vec![],
-            attrs: None,
+            attrs: crate::attributes::Attrlist::empty(source.slice(0..0)),
             children: vec![],
             passthrough: None,
             location: source,
@@ -3801,13 +3791,17 @@ mod tests {
                 // unquoted span, exactly as the string pipeline does.
                 assert_eq!(styled.variant, StyleVariant::Unquoted);
                 assert_eq!(styled.roles, vec![CowStr::from("lead")]);
-                assert!(styled.attrs.is_some(), "the attribute list is retained");
+                assert_ne!(
+                    styled.attrs.attributes().len(),
+                    0,
+                    "the attribute list is retained"
+                );
 
                 // A wholly verbatim attribute list is parsed from its own
                 // `'src` slice, so the node's list is located exactly there
                 // (its values borrow, per §4.5) rather than falling back to
                 // the coarse span an owned one takes.
-                let attrs = styled.attrs.as_ref().unwrap();
+                let attrs = &styled.attrs;
                 assert_eq!(attrs.span().data(), ".lead");
                 assert_eq!(attrs.span().line(), 1);
                 assert_eq!(attrs.span().col(), 2);
@@ -3836,7 +3830,7 @@ mod tests {
                 // is owned and takes the bracket's coarse source span (design
                 // §4.4) as its location tag — the same fallback an image's
                 // bracket and a link's display-text list already take.
-                let attrs = styled.attrs.as_ref().unwrap();
+                let attrs = &styled.attrs;
                 assert_eq!(attrs.span().data(), "#a&b.c<d");
                 assert_eq!(attrs.span().line(), 1);
                 assert_eq!(attrs.span().col(), 2);

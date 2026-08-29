@@ -671,7 +671,7 @@ fn build_inline_link_node<'src>(
         children,
         roles,
         window,
-        attrs,
+        attrs: attrs.unwrap_or_else(|| Attrlist::empty(location.slice(0..0))),
         resolved: None,
         derived: None,
         xrefstyle: None,
@@ -824,7 +824,7 @@ fn build_angle_link_node<'src>(
         children,
         roles: vec![CowStr::from("bare")],
         window: None,
-        attrs: None,
+        attrs: Attrlist::empty(location.slice(0..0)),
         resolved: None,
         derived: None,
         xrefstyle: None,
@@ -1502,7 +1502,7 @@ pub(super) fn build_link_node<'src>(
         children,
         roles,
         window,
-        attrs,
+        attrs: attrs.unwrap_or_else(|| Attrlist::empty(location.slice(0..0))),
         resolved: None,
         derived: None,
         xrefstyle: None,
@@ -1963,7 +1963,7 @@ fn build_email_node<'src>(
         children: macro_text_children(address, range, false, nodes, pieces, root),
         roles: vec![],
         window: None,
-        attrs: None,
+        attrs: Attrlist::empty(location.slice(0..0)),
         resolved: None,
         derived: None,
         xrefstyle: None,
@@ -2936,13 +2936,7 @@ mod tests {
         let reference = assert_link(&nodes[0]);
         assert_eq!(reference.target.as_ref(), "index.html");
         assert_eq!(link_text_of(reference), "Docs");
-        assert_eq!(
-            reference
-                .attrs
-                .as_ref()
-                .and_then(|a| a.roles().into_iter().next()),
-            Some("hl")
-        );
+        assert_eq!(reference.attrs.roles().into_iter().next(), Some("hl"));
 
         assert_eq!(
             fold_html(&nodes, &HtmlInlineRenderer {}),
@@ -3523,8 +3517,8 @@ mod tests {
             );
 
             assert_eq!(
-                reference.attrs.as_ref().map(|attrs| attrs.roles().clone()),
-                Some(vec!["hl"]),
+                reference.attrs.roles(),
+                vec!["hl"],
                 "the parsed list should still split its named attribute for {source:?}"
             );
         }
@@ -4166,7 +4160,7 @@ mod tests {
         assert_eq!(link_text_of(reference), "https://example.org");
         assert_eq!(reference.roles, [CowStr::from("bare")]);
         assert_eq!(reference.window, None);
-        assert!(reference.attrs.is_none());
+        assert_eq!(reference.attrs.attributes().len(), 0);
 
         assert_eq!(reference.location.data(), "<https://example.org>");
         assert_eq!(reference.location.line(), 1);
@@ -4924,7 +4918,7 @@ mod tests {
         let reference = assert_link(&nodes[0]);
         assert_eq!(link_text_of(reference), "a < b");
 
-        let attrs = reference.attrs.as_ref().unwrap();
+        let attrs = &reference.attrs;
         assert_eq!(attrs.roles().into_iter().next(), Some("hl"));
 
         // The parsed positional value is the *escaped* text the string
@@ -4952,13 +4946,7 @@ mod tests {
         let reference = assert_link(&nodes[0]);
         assert_eq!(reference.target.as_ref(), "https://example.org");
         assert_eq!(link_text_of(reference), "Example");
-        assert_eq!(
-            reference
-                .attrs
-                .as_ref()
-                .and_then(|a| a.roles().into_iter().next()),
-            Some("hl")
-        );
+        assert_eq!(reference.attrs.roles().into_iter().next(), Some("hl"));
 
         assert_eq!(
             fold_html(&nodes, &HtmlInlineRenderer {}),
@@ -4978,7 +4966,7 @@ mod tests {
 
         let reference = assert_link(&nodes[0]);
         assert_eq!(link_text_of(reference), "=text");
-        assert!(reference.attrs.is_none() || reference.attrs.as_ref().unwrap().roles().is_empty());
+        assert!(reference.attrs.roles().is_empty());
 
         assert_eq!(
             fold_html(&nodes, &HtmlInlineRenderer {}),
@@ -5434,7 +5422,7 @@ mod tests {
         assert_eq!(link_text_of(reference), "doc.writer@example.com");
         assert!(reference.roles.is_empty());
         assert!(reference.window.is_none());
-        assert!(reference.attrs.is_none());
+        assert_eq!(reference.attrs.attributes().len(), 0);
 
         assert_eq!(reference.location.data(), "doc.writer@example.com");
         assert_eq!(reference.location.line(), 1);
@@ -6780,7 +6768,7 @@ mod tests {
 
         assert_eq!(link_text_of(reference), "Docs");
 
-        let attrs = reference.attrs.as_ref().unwrap();
+        let attrs = &reference.attrs;
         assert_eq!(attrs.roles().into_iter().next(), Some("hl"));
 
         // The positional value is the *expansion*, which no `'src` slice

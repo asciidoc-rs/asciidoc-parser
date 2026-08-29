@@ -43,8 +43,10 @@ pub struct Image<'src> {
     /// The requested height, if any. Not validated as a number.
     pub height: Option<CowStr<'src>>,
 
-    /// The full attribute list, when the image macro carried one.
-    pub attrs: Option<Attrlist<'src>>,
+    /// The image macro's full attribute list —
+    /// [`Attrlist::empty`](crate::attributes::Attrlist::empty) when it carried
+    /// none, so a consumer reads attributes the same way either way.
+    pub attrs: Attrlist<'src>,
 
     /// The source location of the whole image macro.
     pub location: Span<'src>,
