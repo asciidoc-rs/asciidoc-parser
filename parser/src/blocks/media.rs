@@ -980,6 +980,26 @@ mod tests {
         }
 
         #[test]
+        fn warn_points_at_the_precise_reference_in_the_target() {
+            // A macro target is substituted over its *own* source text, so a
+            // match's offsets are source offsets and the warning names the
+            // exact reference rather than the whole target (issue #564; see
+            // `AttributeReplacer::over_its_own_source`).
+            let source = "image::a{missing}b.png[]";
+            let mut p = parser_with_mode("warn");
+            resolve(source, &mut p).unwrap();
+
+            let warnings = p.take_substitution_warnings();
+            assert_eq!(warnings.len(), 1);
+
+            let located = source
+                .get(warnings[0].offset..warnings[0].offset + warnings[0].len)
+                .unwrap();
+
+            assert_eq!(located, "{missing}");
+        }
+
+        #[test]
         fn drop_line_drops_the_whole_block() {
             let mut p = parser_with_mode("drop-line");
             assert!(resolve("image::a{missing}b.png[]", &mut p).is_none());

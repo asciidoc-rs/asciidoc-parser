@@ -8860,6 +8860,43 @@ Each phase is a reviewable unit with a clear exit gate.
   `attribute-missing` per-line hack #564), Phase 5's renderer seam, and Landing. Item (6) — and
   with it step 6's decomposition — is closed.
 
+  *Step 7 landed as (the `attribute-missing` per-line hack retired — #564 closed):* the first
+  of step 7's three pieces, and the one the cutover had already paid for without collecting.
+  Issue #564's chosen approach was a **positional per-line correlation**: the attributes step
+  ran over `Content::rendered` — text earlier steps had already lengthened — so a rendered
+  offset had no constant delta back to source, and the fix was to retain each surviving line's
+  source `Span` at construction, pre-scan that line for `{…}` matches, pair the *k*-th rendered
+  reference with the *k*-th source one, and check the matched text to catch drift.
+
+  *The builder makes the whole correlation unnecessary,* because it never has the problem:
+  it recognizes each reference against `'src` and hands its **own node span** to
+  `record_builder_diagnostic`. That is the honest answer the correlation approximated, and it
+  has been serving production since the cutover — which measurement confirmed: a probe on the
+  string step's `source_lines` branch fires for exactly five sources across the whole suite,
+  every one of them the hack's own unit tests. A production content that carries per-line
+  spans (a simple block) goes through the builder; a content that reaches the string step
+  (an author line, a docinfo file, a `Custom` group over a caller's string) never had them.
+
+  *One live consumer survives, and it needs no correlation either.* The macro-target path
+  (`substitute_attributes_in_macro_target`, for `image::`/`video::`/`audio::` targets)
+  substitutes a haystack that **is** its own source text — so the offsets the regex reports
+  are already source offsets, and the span is sliced directly
+  (`AttributeReplacer::over_its_own_source`). The new test asserting it names exactly
+  `{missing}` passed on its first run, which is the proof the arithmetic reproduces what the
+  pre-scan computed.
+
+  *So the whole chain goes:* `source_line`, `source_matches`, `match_index` and the
+  drift text-check in `AttributeReplacer`; `Content::source_lines` and its accessor;
+  `from_filtered_lines`'s `line_spans` parameter and its per-line `debug_assert`; and
+  `simple.rs`'s `filtered_line_spans` bookkeeping — a `Vec<Span>` built for every paragraph in
+  every document, now unbuilt. Seven of the hack's tests were **kept, not deleted**: they
+  assert precise per-reference spans, and re-pointing them at `SubstitutionGroup::Normal` —
+  the production seam — leaves them asserting the same spans against the builder, so #564's
+  acceptance criteria stay pinned by the mechanism that actually serves them.
+
+  *What still defers:* step 7's other two pieces — `render_with`/`render_to` and
+  `Document::to_asg()` — then Phase 5 and Landing.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -10855,6 +10892,15 @@ Each phase is a reviewable unit with a clear exit gate.
 
   7. `render_with` / `render_to` (the Phase 3 remainder) and `Document::to_asg()`, now that
      nodes are self-describing; retire the `attribute-missing` per-line hack (#564).
+     - ✅ **the `attribute-missing` per-line hack retired (#564).** The correlation existed
+       because the string step's haystack was `Content::rendered`; the builder recognizes
+       against `'src` and records its own node span, so it never had the problem. Measured
+       production-dead (the probe fires only for the hack's own tests), and the one live
+       consumer left — the macro-target path — substitutes its own source text, so a match's
+       offsets *are* source offsets. `Content::source_lines`, `from_filtered_lines`'s
+       `line_spans`, and `simple.rs`'s per-paragraph `Vec<Span>` go with it; the seven
+       precise-span tests are re-pointed at the production seam rather than deleted. See the
+       step's own "landed as" note above.
 
 - **Phase 5 — renderer seam v2.** Reshape `InlineSubstitutionRenderer` into the AST-walking
   form and rename it to `InlineRenderer` (§4.6); update the README backend story.
@@ -10968,7 +11014,7 @@ drift risk that plagued the #942 prototype is designed out.
   questions are answered in §6.
 - **#944** — Phase 4 is its "single-pass AST by span containment," and this design adopts
   its convergence framing.
-- **#564** — retired in Phase 4 once nodes carry precise spans.
+- **#564** — ✅ retired: the builder's node spans replaced the per-line correlation (Phase 4, step 7).
 - **#942** — its `InlineNode` shape and recording renderer are reused as prior art and as
   the Phase 1 bring-up oracle; its known limitations (owned strings, no spans, double pass,
   drift) are the specific things Phases 2 and 4 eliminate.

@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ops::Range, sync::LazyLock};
+use std::{borrow::Cow, sync::LazyLock};
 
 use regex::{Captures, Regex, RegexBuilder, Replacer};
 
@@ -383,45 +383,24 @@ impl AttributeMissing {
 /// therefore has no constant delta back to the original source `Span`, so a
 /// warning cannot simply slice `content.original()` at the rendered offset.
 ///
-/// Three approaches were considered (see issue #564):
+/// The positional per-line correlation this once carried to recover a precise
+/// span from a rendered offset (issue #564's approach 3) is **retired**: block
+/// content is substituted by the single-pass builder now, which recognizes
+/// each reference against `'src` and hands its own node span to
+/// [`record_builder_diagnostic`](crate::Parser) — the honest answer the
+/// correlation only approximated.
 ///
-/// 1. **Thread a source-offset map through every substitution step.** Fully
-///    general, but adds offset-tracking state to `Content` and every mutating
-///    step — a large surface and regression risk disproportionate to a
-///    diagnostic-only refinement.
-/// 2. **Scan the whole original source positionally.** Pair the *k*-th
-///    reference found in `rendered` with the *k*-th `{name}` in
-///    `content.original()`. Simple, but the raw source still contains `{name}`
-///    tokens that never reach substitution — inside removed comment lines and
-///    inside passthroughs — so the pairing drifts out of alignment.
-/// 3. **Per-line positional correlation (chosen).** Anchor each rendered line
-///    to the source `Span` of the line it came from (retained at construction,
-///    see [`Content::from_filtered_lines`]), then pair the *k*-th reference on
-///    the rendered line with the *k*-th `{name}` in that source line.
+/// What is left is the two shapes this replacer still serves, and neither
+/// needs it:
 ///
-/// Approach 3 works because the two length-changing steps that run before
-/// attributes (special characters, quotes) neither add, remove, nor reorder
-/// `{…}`-shaped tokens and never introduce or remove a newline, so a rendered
-/// line and its source line carry the same reference tokens in the same order.
-/// Anchoring per line (rather than per block) sidesteps the
-/// removed-comment-line drift of approach 2 for free.
-///
-/// # Graceful degradation
-///
-/// The correlation is best-effort. When a precise span can't be trusted it
-/// falls back to [`fallback_source`](Self::fallback_source) (the whole-content
-/// span, i.e. the pre-#564 behavior):
-///
-/// - No source line is available ([`source_line`](Self::source_line) is
-///   `None`), e.g. for content not built line-by-line from source.
-/// - The retained line count no longer matches the rendered line count, e.g. a
-///   multi-line passthrough collapsed lines during extraction. The caller
-///   detects this and withholds the source line.
-/// - The *k*-th source-line match's text does not equal the rendered match,
-///   e.g. an inline passthrough on the same line masked an earlier reference
-///   and shifted the count. The [text check](Self::warning_source) catches the
-///   mismatch and degrades to the fallback rather than pointing at the wrong
-///   token.
+/// - A haystack that **is** its own source text, which is the macro-target path
+///   ([`substitute_attributes_in_macro_target`]): a match's own offsets are
+///   source offsets, so the span is sliced directly (see
+///   [`over_its_own_source`](Self::over_its_own_source)).
+/// - A haystack rendered from somewhere else — an author line, a docinfo file,
+///   a `Custom` group applied to a caller's string — where no source mapping
+///   exists to recover and the warning names
+///   [`fallback_source`](Self::fallback_source), exactly as it did before #564.
 #[derive(Debug)]
 struct AttributeReplacer<'p> {
     parser: &'p Parser,
@@ -435,23 +414,11 @@ struct AttributeReplacer<'p> {
     /// docs.
     fallback_source: Span<'p>,
 
-    /// Source `Span` of the line currently being processed, when known. Every
-    /// attribute reference on this line is located by slicing a subrange of
-    /// this span. `None` disables precise location (the warning uses
-    /// [`fallback_source`](Self::fallback_source)).
-    source_line: Option<Span<'p>>,
-
-    /// Byte ranges (into [`source_line`](Self::source_line)'s data) of every
-    /// `ATTRIBUTE_REFERENCE` match on the source line, in order. Populated only
-    /// in the diagnostic-recording modes ([`AttributeMissing::Warn`] and
-    /// [`AttributeMissing::DropLine`]) and only when `source_line` is set.
-    source_matches: Vec<Range<usize>>,
-
-    /// Index of the next reference to be processed on this line, into
-    /// [`source_matches`](Self::source_matches). The regex driver calls
-    /// [`replace_append`](Replacer::replace_append) once per match, left to
-    /// right, so this stays in step with the rendered matches.
-    match_index: usize,
+    /// Whether the haystack being replaced is exactly
+    /// [`fallback_source`](Self::fallback_source)'s own text, so a match's
+    /// offsets are source offsets and a warning can name the precise
+    /// reference. See [`over_its_own_source`](Self::over_its_own_source).
+    haystack_is_source: bool,
 
     /// Set to `true` when a (non-escaped) reference to a missing attribute is
     /// dropped, under either [`AttributeMissing::Drop`] or
@@ -468,42 +435,25 @@ struct AttributeReplacer<'p> {
 }
 
 impl<'p> AttributeReplacer<'p> {
-    /// Builds the replacer for one line, precomputing the source-match ranges
-    /// used to locate `warn` warnings precisely.
-    ///
-    /// `source_line` is the source span the line was rendered from, or `None`
-    /// when no precise mapping is available. `fallback_source` is the coarse
-    /// span used when a precise location cannot be recovered.
-    fn new(
-        parser: &'p Parser,
-        mode: AttributeMissing,
-        fallback_source: Span<'p>,
-        source_line: Option<Span<'p>>,
-    ) -> Self {
-        // The per-reference ranges are only consulted when a warning may be
-        // recorded — `warn` mode, and `drop-line` mode (which records a
-        // diagnostic for each dropped reference) — so skip the extra scan
-        // otherwise.
-        let source_matches = match (mode, source_line) {
-            (AttributeMissing::Warn | AttributeMissing::DropLine, Some(line)) => {
-                ATTRIBUTE_REFERENCE
-                    .find_iter(line.data())
-                    .map(|m| m.range())
-                    .collect()
-            }
-            _ => Vec::new(),
-        };
-
+    /// Builds the replacer over a haystack rendered from somewhere other than
+    /// `fallback_source` itself, so a recorded warning names that coarse span.
+    fn new(parser: &'p Parser, mode: AttributeMissing, fallback_source: Span<'p>) -> Self {
         Self {
             parser,
             mode,
             fallback_source,
-            source_line,
-            source_matches,
-            match_index: 0,
+            haystack_is_source: false,
             missing_on_line: false,
             escape_sentinels: false,
         }
+    }
+
+    /// Marks that the haystack being replaced **is** `fallback_source`'s own
+    /// text, which lets a warning name the exact reference rather than the
+    /// whole span: the match offsets the regex reports are source offsets.
+    fn over_its_own_source(mut self) -> Self {
+        self.haystack_is_source = true;
+        self
     }
 
     /// Escapes the reserved sentinel codepoints of every attribute value this
@@ -513,14 +463,6 @@ impl<'p> AttributeReplacer<'p> {
         self
     }
 
-    /// Returns the source span to attribute a recorded warning to for the
-    /// reference at `index` on this line, whose matched text (including any
-    /// escape backslash) is `matched`.
-    ///
-    /// Falls back to [`fallback_source`](Self::fallback_source) unless a
-    /// retained source-line match at `index` exists *and* its text equals
-    /// `matched` — the text check guards against a correlation that has
-    /// drifted (see the type-level docs).
     /// Records this step's `attribute-missing` diagnostic — unless the
     /// single-pass builder is going to record it instead.
     ///
@@ -533,32 +475,31 @@ impl<'p> AttributeReplacer<'p> {
     /// [`SubstitutionStep::AttributeReferences`] call never runs inside a
     /// build, so this copy diagnoses unconditionally — which is what lets this
     /// step go on being tested in isolation.
-    fn record_missing_reference(&self, index: usize, caps: &Captures<'_>, attr_name: &str) {
+    fn record_missing_reference(&self, caps: &Captures<'_>, attr_name: &str) {
         self.parser.record_substitution_warning(
-            self.warning_source(index, &caps[0]),
+            self.warning_source(caps),
             WarningType::SkippingReferenceToMissingAttribute(attr_name.to_string()),
         );
     }
 
-    fn warning_source(&self, index: usize, matched: &str) -> Span<'p> {
-        if let Some(line) = self.source_line
-            && let Some(range) = self.source_matches.get(index)
-            && line.data().get(range.clone()) == Some(matched)
-        {
-            return line.slice(range.clone());
+    /// The source span to attribute a recorded warning to: the offending
+    /// reference itself where the haystack is its own source, and the coarse
+    /// [`fallback_source`](Self::fallback_source) otherwise.
+    fn warning_source(&self, caps: &Captures<'_>) -> Span<'p> {
+        if !self.haystack_is_source {
+            return self.fallback_source;
         }
 
-        self.fallback_source
+        // `unwrap` on group 0 is safe: a capture always has an overall match.
+        #[allow(clippy::unwrap_used)]
+        let range = caps.get(0).unwrap().range();
+
+        self.fallback_source.slice(range)
     }
 }
 
 impl Replacer for AttributeReplacer<'_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        // Consume this reference's position in the line so the next call lines up
-        // with the next source-line match, regardless of which branch handles it.
-        let match_index = self.match_index;
-        self.match_index += 1;
-
         // A backslash immediately before the opening brace (`\{name}`) or before
         // the closing brace (`{name\}`) — or both, as in `\{name\}` — escapes
         // the reference: it is emitted literally with the escaping backslash(es)
@@ -638,11 +579,11 @@ impl Replacer for AttributeReplacer<'_> {
                     // attribute") for each reference that triggers a drop, so
                     // record the matching diagnostic here.
                     self.missing_on_line = true;
-                    self.record_missing_reference(match_index, caps, attr_name);
+                    self.record_missing_reference(caps, attr_name);
                 }
                 AttributeMissing::Warn => {
                     dest.push_str(&caps[0]);
-                    self.record_missing_reference(match_index, caps, attr_name);
+                    self.record_missing_reference(caps, attr_name);
                 }
             }
             return;
@@ -687,21 +628,6 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
     let mode = AttributeMissing::from_parser(parser);
     let source = content.original();
 
-    // In the modes that record a diagnostic (`warn` and `drop-line`), anchor
-    // each rendered line to the source `Span` it came from so the warning can
-    // name the precise offset of the offending reference (see
-    // `AttributeReplacer`). The retained line spans are only trustworthy when
-    // they still line up one-to-one with the rendered lines; a mismatch (e.g. a
-    // multi-line passthrough that collapsed lines during extraction) withholds
-    // them, falling back to the coarse whole-content span.
-    let source_lines = if mode == AttributeMissing::Warn || mode == AttributeMissing::DropLine {
-        content
-            .source_lines()
-            .filter(|lines| lines.len() == content.rendered.split('\n').count())
-    } else {
-        None
-    };
-
     // Attribute references are replaced line by line so that, in `drop-line`
     // mode, an individual line carrying a missing reference can be removed
     // without disturbing the lines around it. A reference cannot span a line
@@ -711,7 +637,7 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
     let mut changed = false;
     let mut wrote_line = false;
 
-    for (index, line) in content.rendered.split('\n').enumerate() {
+    for line in content.rendered.split('\n') {
         if !line.contains('{') {
             if wrote_line {
                 out.push('\n');
@@ -721,12 +647,7 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
             continue;
         }
 
-        // `index` enumerates the same split whose count the guard above matched
-        // against `source_lines.len()`, so the entry is always present; `.get`
-        // keeps the access panic-free regardless.
-        let source_line = source_lines.and_then(|lines| lines.get(index).copied());
-        let mut replacer =
-            AttributeReplacer::new(parser, mode, source, source_line).escaping_sentinels();
+        let mut replacer = AttributeReplacer::new(parser, mode, source).escaping_sentinels();
 
         let replaced = ATTRIBUTE_REFERENCE.replace_all(line, replacer.by_ref());
 
@@ -785,9 +706,9 @@ pub(crate) fn substitute_attributes_in_macro_target<'src>(
 
     let mode = AttributeMissing::from_parser(parser);
 
-    // The target is a single source-backed line, so it doubles as both the
-    // precise per-reference anchor and the coarse fallback.
-    let mut replacer = AttributeReplacer::new(parser, mode, target, Some(target));
+    // The haystack is the target's own text, so a match's offsets are source
+    // offsets and a warning names the exact reference.
+    let mut replacer = AttributeReplacer::new(parser, mode, target).over_its_own_source();
 
     let replaced = ATTRIBUTE_REFERENCE.replace_all(text, replacer.by_ref());
 
@@ -1426,27 +1347,6 @@ mod tests {
                 content.rendered.to_string()
             }
 
-            /// Builds a `Content` that carries the per-line source spans (as a
-            /// real block would), so the precise `warn`-location correlation is
-            /// exercised. Each line's span is a subrange of the root, mirroring
-            /// what block construction retains via
-            /// [`Content::from_filtered_lines`].
-            fn content_with_source_lines(text: &'static str) -> Content<'static> {
-                let root = Span::new(text);
-                let lines: Vec<&str> = text.split('\n').collect();
-
-                let mut spans = Vec::with_capacity(lines.len());
-                let mut offset = 0;
-                for line in &lines {
-                    spans.push(root.slice(offset..offset + line.len()));
-
-                    // Advance past the line and the '\n' that split consumed.
-                    offset += line.len() + 1;
-                }
-
-                Content::from_filtered_lines(root, &lines, spans)
-            }
-
             /// Asserts that `warning`'s recorded offset/length select exactly
             /// `expected` out of `text`, i.e. the warning points at that
             /// precise reference in the original source.
@@ -1613,8 +1513,8 @@ mod tests {
                 // names the exact offending reference rather than the whole line.
                 let p = parser_with_mode("drop-line");
                 let text = "first {alpha} line\nsecond {beta} line";
-                let mut content = content_with_source_lines(text);
-                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+                let mut content = Content::from(Span::new(text));
+                SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 2);
@@ -1623,9 +1523,10 @@ mod tests {
             }
 
             #[test]
-            fn drop_line_falls_back_to_whole_span_without_source_lines() {
-                // `Content::from` retains no per-line spans, so the drop-line
-                // diagnostic degrades to the whole-content span rather than
+            fn drop_line_falls_back_to_whole_span_on_a_direct_step_call() {
+                // A direct step call substitutes a haystack rendered from
+                // somewhere other than its own source, so the drop-line
+                // diagnostic names the whole-content span rather than
                 // misreporting a location.
                 let p = parser_with_mode("drop-line");
                 let text = "x {foo} y";
@@ -1672,18 +1573,20 @@ mod tests {
                 assert!(p.take_substitution_warnings().is_empty());
             }
 
-            // The tests below use `content_with_source_lines` so the precise
-            // per-reference `warn` location (issue #564) is exercised; the
-            // `render`-based tests above go through `Content::from`, which
-            // retains no source lines and so falls back to the whole-content
-            // span.
+            // The tests below drive `SubstitutionGroup::Normal` — the
+            // production seam — so the precise per-reference `warn` location
+            // (issue #564) is exercised where it is actually produced: the
+            // single-pass builder recognizes each reference against `'src` and
+            // records its own node span. The `render`-based tests above call
+            // the string step directly, which has no source mapping to recover
+            // and so names the whole-content span.
 
             #[test]
             fn warn_points_at_the_precise_reference() {
                 let p = parser_with_mode("warn");
                 let text = "Hello, {name}!";
-                let mut content = content_with_source_lines(text);
-                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+                let mut content = Content::from(Span::new(text));
+                SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 1);
@@ -1694,8 +1597,8 @@ mod tests {
             fn warn_locates_multiple_references_on_one_line() {
                 let p = parser_with_mode("warn");
                 let text = "a {x} b {y} c";
-                let mut content = content_with_source_lines(text);
-                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+                let mut content = Content::from(Span::new(text));
+                SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 2);
@@ -1713,8 +1616,8 @@ mod tests {
                 // individually rather than at the shared whole-block span.
                 let p = parser_with_mode("warn");
                 let text = "first {alpha} line\nsecond {beta} line\nthird {gamma} line";
-                let mut content = content_with_source_lines(text);
-                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+                let mut content = Content::from(Span::new(text));
+                SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 3);
@@ -1727,8 +1630,8 @@ mod tests {
             fn warn_distinguishes_repeated_reference_occurrences() {
                 let p = parser_with_mode("warn");
                 let text = "{dup} and again {dup}";
-                let mut content = content_with_source_lines(text);
-                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+                let mut content = Content::from(Span::new(text));
+                SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 2);
@@ -1748,7 +1651,7 @@ mod tests {
                 // still name the reference's *original* source offset.
                 let p = parser_with_mode("warn");
                 let text = "a < b {foo} c";
-                let mut content = content_with_source_lines(text);
+                let mut content = Content::from(Span::new(text));
                 SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
                 // Sanity check that the earlier step really did shift offsets.
@@ -1766,7 +1669,7 @@ mod tests {
                 // `*bold*` in markup ahead of the attributes step.
                 let p = parser_with_mode("warn");
                 let text = "*bold* {foo}";
-                let mut content = content_with_source_lines(text);
+                let mut content = Content::from(Span::new(text));
                 SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
                 assert!(content.rendered_html().contains("<strong>"));
@@ -1778,10 +1681,10 @@ mod tests {
             }
 
             #[test]
-            fn warn_falls_back_to_whole_span_without_source_lines() {
-                // `Content::from` retains no per-line spans, so the warning
-                // degrades to the whole-content span (the pre-#564 behavior)
-                // rather than misreporting a location.
+            fn warn_falls_back_to_whole_span_on_a_direct_step_call() {
+                // A direct step call has no source mapping to recover, so the
+                // warning degrades to the whole-content span (the pre-#564
+                // behavior) rather than misreporting a location.
                 let p = parser_with_mode("warn");
                 let text = "x {foo} y";
                 let mut content = Content::from(Span::new(text));
