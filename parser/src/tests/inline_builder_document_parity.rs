@@ -772,7 +772,7 @@ impl crate::parser::InlineRenderer for BracketStrong {
         &self,
         type_: crate::parser::QuoteType,
         scope: crate::parser::QuoteScope,
-        attrlist: Option<crate::attributes::Attrlist<'_>>,
+        attrlist: &crate::attributes::Attrlist<'_>,
         id: Option<String>,
         body: &str,
         dest: &mut String,

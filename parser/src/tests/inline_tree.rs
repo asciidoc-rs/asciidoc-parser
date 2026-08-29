@@ -1995,7 +1995,7 @@ fn unresolved_xref() -> InlineNode<'static> {
         resolved: None,
         derived: None,
         xrefstyle: None,
-        attrs: None,
+        attrs: crate::attributes::Attrlist::empty(Span::new("").slice(0..0)),
         location: Span::new(""),
     })
 }
@@ -2023,7 +2023,7 @@ fn link_over(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
         resolved: None,
         derived: None,
         xrefstyle: None,
-        attrs: None,
+        attrs: crate::attributes::Attrlist::empty(Span::new("").slice(0..0)),
         location: Span::new(""),
     })
 }
@@ -2035,7 +2035,7 @@ fn strong_over(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
         form: SpanForm::Constrained,
         id: None,
         roles: vec![],
-        attrs: None,
+        attrs: crate::attributes::Attrlist::empty(Span::new("").slice(0..0)),
         children,
         passthrough: None,
         location: Span::new(""),

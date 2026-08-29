@@ -309,17 +309,22 @@ impl<'src> Attrlist<'src> {
     ///
     /// An attribute list with no attributes, located at `source`.
     ///
-    /// For an inline node that carries no attribute list of its own but folds
-    /// through one anyway (a hand-built [`Image`](crate::inlines::Image), which
-    /// the builder never produces without its list). `source` should be a
+    /// This is what "the node carried no attribute list" looks like. The
+    /// inline nodes that can carry one — [`Image`](crate::inlines::Image),
+    /// [`Styled`](crate::inlines::Styled) and [`Ref`](crate::inlines::Ref) —
+    /// hold an `Attrlist` outright rather than an `Option<Attrlist>`, so every
+    /// consumer reads attributes the same way whether the author wrote a list
+    /// or not; the ones written without a list get this. `source` should be a
     /// zero-length slice of the node's own location, so the empty list's
-    /// lifetime and position match the node a consumer reached it from.
+    /// lifetime and position match the node it belongs to.
     ///
-    /// This exists so the fold need not *parse* an empty span — which would
-    /// cost an attribute-reference substitution pass and, more to the point,
-    /// require a [`Parser`] at a place that has only the
-    /// document state a render needs.
-    pub(crate) fn empty(source: Span<'src>) -> Self {
+    /// It is public because those node fields are: a caller building a node by
+    /// hand needs to be able to say "no attributes", and every other route to
+    /// an `Attrlist` goes through parsing — which would cost an
+    /// attribute-reference substitution pass and, more to the point, require a
+    /// [`Parser`] where only a `Span` is at hand.
+    #[must_use]
+    pub fn empty(source: Span<'src>) -> Self {
         Self {
             attributes: vec![],
             anchor: None,

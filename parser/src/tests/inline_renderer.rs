@@ -84,7 +84,6 @@ impl InlineRenderer for FigureImages {
     fn render_image(
         &self,
         image: &crate::inlines::Image<'_>,
-        _attrlist: &crate::attributes::Attrlist<'_>,
         context: &RenderContext,
         dest: &mut String,
     ) {

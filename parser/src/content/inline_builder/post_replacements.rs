@@ -394,7 +394,7 @@ mod tests {
             resolved: None,
             derived: None,
             xrefstyle: None,
-            attrs: None,
+            attrs: Attrlist::empty(loc.slice(0..0)),
             location: loc,
         });
 

@@ -171,7 +171,7 @@ mod tests {
                 form: SpanForm::Constrained,
                 id: None,
                 roles: vec![],
-                attrs: None,
+                attrs: crate::attributes::Attrlist::empty(location.slice(0..0)),
                 children: vec![],
                 passthrough: None,
                 location,
@@ -186,7 +186,7 @@ mod tests {
                 resolved: None,
                 derived: None,
                 xrefstyle: None,
-                attrs: None,
+                attrs: crate::attributes::Attrlist::empty(location.slice(0..0)),
                 location,
             }),
             InlineNode::Image(Image {
@@ -196,7 +196,7 @@ mod tests {
                 alt: None,
                 width: None,
                 height: None,
-                attrs: None,
+                attrs: crate::attributes::Attrlist::empty(location.slice(0..0)),
                 location,
             }),
             InlineNode::Footnote(Footnote {
