@@ -114,8 +114,12 @@ The branch has been running long enough that "how much further?" is a standing q
 that has just surveyed §5.2 is the cheapest place to answer it. Ground the estimate in four things
 rather than guessing:
 
-1. **The unchecked items in the Phase 4 checklist**, plus step 7 (`render_with`/`render_to`,
-   `Document::to_asg()`, retiring the `attribute-missing` hack), Phase 5, and Landing.
+1. **The unchecked items in the Phase 4 checklist**, plus Phase 5 and Landing. Step 7 is now
+   closed: `render_with` and the `attribute-missing` retirement landed, and both
+   `Document::render_to` and `Document::to_asg()` are recorded as *not being built* (the
+   latter by §6's decision 7 — the ASG schema is a parked 2023 draft that cannot express the
+   crate's inline vocabulary; see §3.5). Phase 4's checklist is likewise fully checked and
+   Phase 5's exit gate is met, so Landing is what remains.
 2. **The "what still defers" sentence** in the newest landed-as note — those are the increments
    already named and sized.
 3. **The observed rate.** Every increment so far is one branch, one PR, one session, so an increment
