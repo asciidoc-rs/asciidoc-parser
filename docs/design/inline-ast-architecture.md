@@ -8844,6 +8844,18 @@ Each phase is a reviewable unit with a clear exit gate.
   *Coverage:* 639 → **582** missed regions — below the 606 the whole freeze-and-delete arc
   started from. Every changed line covered.
 
+  *One pre-existing bug rode along, because the review of this increment found it.* A
+  **discrete** heading is the one section kind that keeps its own `.Title` decoration (every
+  other section's is carried into its first block), and no pass resolved it: the title pass's
+  `Section` arm reads only the heading, and `Block::block_title_content_mut` mapped `Section`
+  to `None`, so its else-branch never saw one either. A cross-reference in such a title stayed
+  at its unresolved fallback. This predates the whole deletion arc — the two probes render
+  byte-identically on the base — and `rebuild_rendered` was never its write-back, so the fold
+  above neither caused it nor could have fixed it by staying. `SectionBlock` now exposes the
+  same `title_content_mut` seam every other titled block does, and both title-pass walks run
+  their block-title branch for every block: heading first, decoration second, in the same order
+  on each side.
+
   *What still defers:* step 7 (`render_with`/`render_to`, `Document::to_asg()`, the
   `attribute-missing` per-line hack #564), Phase 5's renderer seam, and Landing. Item (6) — and
   with it step 6's decomposition — is closed.
