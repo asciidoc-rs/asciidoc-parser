@@ -33,7 +33,7 @@
 //! backend that renders AsciiDoc to roff/troff man pages. As the crate README
 //! states, this crate has built-in support only for HTML5 rendering; other
 //! back ends are the responsibility of downstream crates that implement the
-//! [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)
+//! [`InlineRenderer`](crate::parser::InlineRenderer)
 //! trait, and are not directly supported here.
 //!
 //! The manpage doctype's parser-level behavior — parsing the NAME section into

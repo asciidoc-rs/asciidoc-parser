@@ -9,13 +9,19 @@ use crate::{
     },
 };
 
-/// An implementation of `InlineSubstitutionRenderer` is used when converting
-/// the basic raw text of a simple block to the format which will ultimately be
-/// presented in the final converted output.
+/// An implementation of `InlineRenderer` converts the inline content of a
+/// block into the format which will ultimately be presented in the final
+/// converted output.
 ///
-/// An implementation is provided for HTML output
-/// ([`HtmlSubstitutionRenderer`]); alternative implementations (not provided in
-/// this crate) could support other output formats.
+/// An implementation is provided for HTML output ([`HtmlInlineRenderer`]);
+/// alternative implementations (not provided in this crate) could support
+/// other output formats.
+///
+/// The trait is the crate's **inline** seam and nothing more: every method
+/// renders (or resolves a URI for) one inline construct. Assembling those
+/// renderings into blocks and into a document is the caller's job — see
+/// [`Content::render_with`](crate::content::Content::render_with), which folds
+/// one content's inline tree through an implementation of this trait.
 ///
 /// ## Overriding only what differs
 ///
@@ -46,7 +52,7 @@ use crate::{
 /// [`path_resolver`](RenderContext::path_resolver). The identically-named
 /// [`Parser`](crate::Parser) accessors answer the same question for a caller
 /// that holds the parser, which a renderer does not.
-pub trait InlineSubstitutionRenderer: Debug {
+pub trait InlineRenderer: Debug {
     /// Renders the substitution for a special character.
     ///
     /// The renderer should write the appropriate rendering to `dest`.
@@ -54,12 +60,14 @@ pub trait InlineSubstitutionRenderer: Debug {
         DEFAULT_HTML_RENDERER.render_special_character(type_, dest);
     }
 
-    /// Renders the content of a [quote substitution].
+    /// Renders a formatted span — a [`Styled`] node, which is what the
+    /// [quotes substitution] recognizes.
     ///
     /// The renderer should write the appropriate rendering to `dest`.
     ///
-    /// [quote substitution]: https://docs.asciidoctor.org/asciidoc/latest/subs/quotes/
-    fn render_quoted_substitution(
+    /// [`Styled`]: crate::inlines::Styled
+    /// [quotes substitution]: https://docs.asciidoctor.org/asciidoc/latest/subs/quotes/
+    fn render_styled(
         &self,
         type_: QuoteType,
         scope: QuoteScope,
@@ -68,7 +76,7 @@ pub trait InlineSubstitutionRenderer: Debug {
         body: &str,
         dest: &mut String,
     ) {
-        DEFAULT_HTML_RENDERER.render_quoted_substitution(type_, scope, attrlist, id, body, dest);
+        DEFAULT_HTML_RENDERER.render_styled(type_, scope, attrlist, id, body, dest);
     }
 
     /// Renders the content of a [character replacement].
@@ -280,7 +288,7 @@ pub trait InlineSubstitutionRenderer: Debug {
 }
 
 /// Specifies which special character is being replaced in a call to
-/// [`InlineSubstitutionRenderer::render_special_character`].
+/// [`InlineRenderer::render_special_character`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SpecialCharacter {
     /// Replace `<` character.
@@ -616,17 +624,17 @@ pub struct FootnoteRenderParams<'a> {
     pub text: &'a str,
 }
 
-/// Implementation of [`InlineSubstitutionRenderer`] that renders substitutions
+/// Implementation of [`InlineRenderer`] that renders substitutions
 /// for common HTML-based applications.
 #[derive(Debug)]
-pub struct HtmlSubstitutionRenderer {}
+pub struct HtmlInlineRenderer {}
 
-/// The shared HTML renderer to which [`InlineSubstitutionRenderer`]'s default
+/// The shared HTML renderer to which [`InlineRenderer`]'s default
 /// method bodies delegate. It is stateless, so a single `const` instance serves
 /// every delegation.
-const DEFAULT_HTML_RENDERER: HtmlSubstitutionRenderer = HtmlSubstitutionRenderer {};
+const DEFAULT_HTML_RENDERER: HtmlInlineRenderer = HtmlInlineRenderer {};
 
-impl HtmlSubstitutionRenderer {
+impl HtmlInlineRenderer {
     /// Resolve an image target to a `src`/`data` reference, honoring a
     /// macro-level `imagesdir` attribute.
     ///
@@ -649,7 +657,7 @@ impl HtmlSubstitutionRenderer {
     /// splices the body into the finished `src` — so a fold over restored
     /// values reproduces the same bytes, identically on every platform.
     ///
-    /// [`image_uri`]: InlineSubstitutionRenderer::image_uri
+    /// [`image_uri`]: InlineRenderer::image_uri
     fn image_src(
         &self,
         target: &str,
@@ -763,7 +771,7 @@ fn splice_restored_bodies(resolved: &str, bodies: &[&str]) -> String {
     out
 }
 
-impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
+impl InlineRenderer for HtmlInlineRenderer {
     fn render_special_character(&self, type_: SpecialCharacter, dest: &mut String) {
         match type_ {
             SpecialCharacter::Lt => {
@@ -778,7 +786,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         }
     }
 
-    fn render_quoted_substitution(
+    fn render_styled(
         &self,
         type_: QuoteType,
         _scope: QuoteScope,

@@ -13,7 +13,7 @@ use crate::{
     },
     internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     parser::{
-        CatalogResolver, DeferredWarning, InlineSubstitutionRenderer, Origin, ReferenceResolver,
+        CatalogResolver, DeferredWarning, InlineRenderer, Origin, ReferenceResolver,
         ReferenceWarning, ReferenceWarnings, ResolvedAttributes, SourceMap,
     },
     strings::CowStr,
@@ -550,7 +550,7 @@ impl<'src> Document<'src> {
     }
 
     /// Resolve the document's deferred cross-references using a caller-supplied
-    /// [`ReferenceResolver`] and [`InlineSubstitutionRenderer`].
+    /// [`ReferenceResolver`] and [`InlineRenderer`].
     ///
     /// This is the entry point for multi-document workflows: parse each
     /// document with [`Parser::parse_deferred`], then call this with a
@@ -599,7 +599,7 @@ impl<'src> Document<'src> {
     pub fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         parser: &Parser,
     ) -> Vec<ReferenceWarning> {
         self.internal.with_dependent_mut(|_owner, dependent| {
@@ -649,7 +649,7 @@ impl<'src> Document<'src> {
     /// This is the single-document convenience path used by [`Parser::parse`].
     pub(crate) fn resolve_against_own_catalog(
         &mut self,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         parser: &Parser,
     ) -> Vec<ReferenceWarning> {
         self.internal.with_dependent_mut(|_owner, dependent| {

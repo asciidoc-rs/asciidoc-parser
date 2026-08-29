@@ -6,7 +6,7 @@ use super::{fold_html, passthrough_step::is_special};
 use crate::{
     HasSpan, Parser, Span,
     inlines::{CharRef, InlineNode, RawForm, RawOrigin, RefVariant},
-    parser::InlineSubstitutionRenderer,
+    parser::InlineRenderer,
     strings::CowStr,
 };
 
@@ -304,7 +304,7 @@ fn split_verbatim<'src>(location: Span<'src>, leaf: SpecialLeaf, out: &mut Vec<I
 pub(super) fn flatten_prior_markup<'src>(
     nodes: Vec<InlineNode<'src>>,
     masked: &[(usize, usize)],
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
     nodes
@@ -584,7 +584,7 @@ mod tests {
             Anchor, CharRef, Footnote, InlineNode, RawForm, RawOrigin, Ref, RefVariant, SpanForm,
             StyleVariant, Styled,
         },
-        parser::HtmlSubstitutionRenderer,
+        parser::HtmlInlineRenderer,
         strings::CowStr,
     };
 
@@ -1056,7 +1056,7 @@ mod tests {
             "unicode π < ω &",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_through_special(Span::new(fixture)), &renderer);

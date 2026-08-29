@@ -412,7 +412,7 @@ impl Footnote {
     pub(crate) fn resolve_references<'src>(
         &mut self,
         resolver: &dyn crate::parser::ReferenceResolver,
-        renderer: &dyn crate::parser::InlineSubstitutionRenderer,
+        renderer: &dyn crate::parser::InlineRenderer,
         warnings: &mut crate::parser::ReferenceWarnings<'src>,
         document_source: crate::Span<'src>,
         folded: Option<String>,
@@ -581,7 +581,7 @@ mod tests {
         use crate::{
             Span,
             content::FootnoteDeferred,
-            parser::{CatalogResolver, HtmlSubstitutionRenderer, ReferenceWarnings},
+            parser::{CatalogResolver, HtmlInlineRenderer, ReferenceWarnings},
         };
 
         fn footnote() -> Footnote {
@@ -597,7 +597,7 @@ mod tests {
             }
         }
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
         let source = Span::new("irrelevant");
 
         // The crate's own resolver over an empty catalog, rather than a stub:

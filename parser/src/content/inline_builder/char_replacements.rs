@@ -347,7 +347,7 @@ mod tests {
     use crate::{
         Span,
         inlines::{CharRef, InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
-        parser::HtmlSubstitutionRenderer,
+        parser::HtmlInlineRenderer,
         strings::CowStr,
     };
 
@@ -411,7 +411,7 @@ mod tests {
         ] {
             assert_eq!(
                 golden_replacements(source),
-                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 "fold diverged from the string pipeline for {source:?}"
             );
         }
@@ -443,7 +443,7 @@ mod tests {
         // level owns. If that lands, fold this fixture into the corpus above.
         let source = "*[width=10]#x --# --*";
 
-        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
         assert_ne!(
             folded,
@@ -462,7 +462,7 @@ mod tests {
 
         assert_eq!(
             golden_replacements(source),
-            fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+            fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
         );
     }
 
@@ -551,7 +551,7 @@ mod tests {
             "a_b_c",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -589,7 +589,7 @@ mod tests {
         // the numeric entity the string pipeline emits.
         assert_replacement(&nodes[0], "\u{a9}", "(C)");
 
-        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "&#169;");
+        assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), "&#169;");
     }
 
     #[test]
@@ -648,10 +648,7 @@ mod tests {
 
         assert_text(&nodes[1], " 2026", 1, 7);
 
-        assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
-            "&copy; 2026"
-        );
+        assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), "&copy; 2026");
     }
 
     #[test]
@@ -668,7 +665,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_replacements("\\(C)")
         );
     }
@@ -786,7 +783,7 @@ mod tests {
                     let nodes = build_src(Span::new(&source));
 
                     assert_eq!(
-                        fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                        fold_html(&nodes, &HtmlInlineRenderer {}),
                         golden_replacements(&source),
                         "fold diverged from the string pipeline for {source:?}"
                     );

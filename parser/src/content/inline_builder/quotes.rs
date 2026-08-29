@@ -11,7 +11,7 @@ use crate::{
     attributes::{Attrlist, AttrlistContext},
     content::{QuoteSub, maybe_has_quotes, quote_subs},
     inlines::{CharRef, InlineNode, RawForm, RawOrigin, SpanForm, StyleVariant, Styled},
-    parser::{HtmlSubstitutionRenderer, InlineSubstitutionRenderer, QuoteScope, QuoteType},
+    parser::{HtmlInlineRenderer, InlineRenderer, QuoteScope, QuoteType},
     strings::CowStr,
 };
 
@@ -577,7 +577,7 @@ fn probe_styled_boundaries_markup(styled: &Styled<'_>) -> (String, String) {
 
     let mut rendered = String::new();
 
-    HtmlSubstitutionRenderer {}.render_quoted_substitution(
+    HtmlInlineRenderer {}.render_styled(
         quote_type_of(styled.variant),
         scope,
         styled.attrs.clone(),
@@ -1801,7 +1801,7 @@ mod tests {
     use crate::{
         HasSpan, Span,
         inlines::{CharRef, InlineNode, SpanForm, StyleVariant},
-        parser::HtmlSubstitutionRenderer,
+        parser::HtmlInlineRenderer,
         strings::CowStr,
     };
 
@@ -2318,7 +2318,7 @@ mod tests {
                 golden_quotes(source),
                 fold_html(
                     &build_through_quotes(Span::new(source)),
-                    &HtmlSubstitutionRenderer {}
+                    &HtmlInlineRenderer {}
                 ),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -2373,7 +2373,7 @@ mod tests {
                 golden_quotes(source),
                 fold_html(
                     &build_through_quotes(Span::new(source)),
-                    &HtmlSubstitutionRenderer {}
+                    &HtmlInlineRenderer {}
                 ),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -2428,7 +2428,7 @@ mod tests {
                 golden_quotes(source),
                 fold_html(
                     &build_through_quotes(Span::new(source)),
-                    &HtmlSubstitutionRenderer {}
+                    &HtmlInlineRenderer {}
                 ),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -2453,7 +2453,7 @@ mod tests {
 
         let folded = fold_html(
             &build_through_quotes(Span::new(source)),
-            &HtmlSubstitutionRenderer {},
+            &HtmlInlineRenderer {},
         );
 
         assert_ne!(
@@ -2627,7 +2627,7 @@ mod tests {
             assert_eq!(
                 super::super::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context()
                 ),
                 rendered,
@@ -2674,7 +2674,7 @@ mod tests {
             assert_eq!(
                 super::super::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context()
                 ),
                 rendered,
@@ -2723,7 +2723,7 @@ mod tests {
             assert_eq!(
                 super::super::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context()
                 ),
                 rendered,
@@ -2749,7 +2749,7 @@ mod tests {
         // leaf in as one opaque placeholder, as it did for every replacement
         // before this).
         use super::super::callouts::replacement_type_of;
-        use crate::parser::InlineSubstitutionRenderer;
+        use crate::parser::InlineRenderer;
 
         for value in [
             "\u{a9}",
@@ -2767,7 +2767,7 @@ mod tests {
             let type_ = replacement_type_of(value).unwrap();
 
             let mut rendered = String::new();
-            HtmlSubstitutionRenderer {}.render_character_replacement(type_, &mut rendered);
+            HtmlInlineRenderer {}.render_character_replacement(type_, &mut rendered);
 
             assert_eq!(
                 super::replacement_entity(value),
@@ -2900,7 +2900,7 @@ mod tests {
             "* not a list *",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_through_quotes(Span::new(fixture)), &renderer);
@@ -3643,7 +3643,7 @@ mod tests {
 
         let folded = fold_html(
             &build_through_quotes(Span::new(source)),
-            &HtmlSubstitutionRenderer {},
+            &HtmlInlineRenderer {},
         );
         let golden = golden_quotes(source);
 
@@ -3766,7 +3766,7 @@ mod tests {
 
         // The fold reproduces the literal text (also covered by the corpus).
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_quotes("\\*x*")
         );
     }
@@ -3786,7 +3786,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_quotes("a \\*x*")
         );
     }
@@ -3869,7 +3869,7 @@ mod tests {
         //
         // If that boundary is ever lifted, fold these fixtures into the
         // parity corpus above.
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for (source, golden_html) in [
             ("[.a+++x+++b]#y#", "<span class=\"axb\">y</span>"),
@@ -3990,7 +3990,7 @@ mod tests {
             // parity.
             let folded = super::super::fold_html(
                 &super::super::build(Span::new(source), &parser, None),
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &parser.render_context(),
             );
 
@@ -4040,7 +4040,7 @@ mod tests {
             // the pipeline is gone.
             let folded = super::super::fold_html(
                 &super::super::build(Span::new(source), &parser, None),
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &parser.render_context(),
             );
 

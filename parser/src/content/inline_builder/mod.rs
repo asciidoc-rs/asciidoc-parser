@@ -333,10 +333,9 @@
 //!   doubling it, mirroring [`apply_post_replacements`]'s own string-pipeline
 //!   counterpart exactly.
 //! - [`fold_html`] folds the resulting leaves and spans back to output bytes
-//!   through an
-//!   [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)
-//!   — the first fold over the *public* [`InlineNode`] tree (the recorder's
-//!   `fold_into` folds an intermediate representation, not the public tree).
+//!   through an [`InlineRenderer`](crate::parser::InlineRenderer) — the first
+//!   fold over the *public* [`InlineNode`] tree (the recorder's `fold_into`
+//!   folds an intermediate representation, not the public tree).
 //!
 //! [quoted text]: https://docs.asciidoctor.org/asciidoc/latest/subs/quotes/
 //! [character replacements]:
@@ -736,7 +735,7 @@ mod tests {
         Parser, Span,
         content::inline_builder::fold_html,
         inlines::{InlineNode, RawOrigin},
-        parser::{HtmlSubstitutionRenderer, ModificationContext},
+        parser::{HtmlInlineRenderer, ModificationContext},
         strings::CowStr,
     };
 
@@ -837,11 +836,7 @@ mod tests {
     /// a real cutover would call — through the built-in HTML renderer.
     fn built(source: &str, parser: &Parser) -> String {
         let nodes = build(Span::new(source), parser, None);
-        fold_html(
-            &nodes,
-            &HtmlSubstitutionRenderer {},
-            &parser.render_context(),
-        )
+        fold_html(&nodes, &HtmlInlineRenderer {}, &parser.render_context())
     }
 
     /// Asserts that the single-pass builder's fold of `source` matches the
@@ -1954,7 +1949,7 @@ mod tests {
             );
             let built = fold_html(
                 &nodes,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &built_parser.render_context(),
             );
 
@@ -1980,7 +1975,7 @@ mod tests {
             Parser, Span,
             content::SubstitutionGroup,
             inlines::{CharRef, InlineNode},
-            parser::{HtmlSubstitutionRenderer, ModificationContext},
+            parser::{HtmlInlineRenderer, ModificationContext},
             strings::CowStr,
         };
 
@@ -2036,7 +2031,7 @@ mod tests {
             let nodes = build_group(group, source, &built_parser);
             let built = fold_html(
                 &nodes,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &built_parser.render_context(),
             );
 
@@ -2820,7 +2815,7 @@ mod tests {
                 let nodes = build_group(&group, source, &built_parser);
                 let built = fold_html(
                     &nodes,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &built_parser.render_context(),
                 );
 
@@ -2878,7 +2873,7 @@ mod tests {
             let nodes = build_group(&group, source, &built_parser);
             let built = fold_html(
                 &nodes,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &built_parser.render_context(),
             );
 
@@ -2946,7 +2941,7 @@ mod tests {
         );
         let built = fold_html(
             &nodes,
-            &HtmlSubstitutionRenderer {},
+            &HtmlInlineRenderer {},
             &built_parser.render_context(),
         );
 

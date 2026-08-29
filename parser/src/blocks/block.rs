@@ -10,7 +10,7 @@ use crate::{
     content::{Content, SubstitutionGroup, substitute_attributes_in_reftext},
     document::{Attribute, InterpretedValue, RefType},
     inlines::InlineNode,
-    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, XrefSignifier},
+    parser::{InlineRenderer, ReferenceResolver, ReferenceWarnings, XrefSignifier},
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -942,7 +942,7 @@ impl<'src> Block<'src> {
     pub(crate) fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         warnings: &mut ReferenceWarnings<'src>,
         parser: &Parser,
     ) {

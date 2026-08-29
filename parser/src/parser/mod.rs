@@ -17,16 +17,13 @@ pub use image_file_handler::ImageFileHandler;
 mod include_file_handler;
 pub use include_file_handler::{IncludeContent, IncludeFileHandler, IncludeResolution};
 
-mod inline_substitution_renderer;
-pub use inline_substitution_renderer::{
+mod inline_renderer;
+pub use inline_renderer::{
     CalloutGuard, CalloutRenderParams, CharacterReplacementType, FootnoteRenderParams,
-    HtmlSubstitutionRenderer, IconRenderParams, ImageRenderParams, IndexTermRenderParams,
-    InlineSubstitutionRenderer, LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType,
-    SpecialCharacter, XrefRenderParams,
+    HtmlInlineRenderer, IconRenderParams, ImageRenderParams, IndexTermRenderParams, InlineRenderer,
+    LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType, SpecialCharacter, XrefRenderParams,
 };
-pub(crate) use inline_substitution_renderer::{
-    has_dangerous_scheme, has_dangerous_self_href, is_uri_ish,
-};
+pub(crate) use inline_renderer::{has_dangerous_scheme, has_dangerous_self_href, is_uri_ish};
 
 mod parser;
 pub(crate) use parser::DeferredWarning;

@@ -22,7 +22,7 @@ use crate::{
         },
     },
     inlines::{InlineNode, LinkForm, Ref, RefVariant},
-    parser::{InlineSubstitutionRenderer, has_dangerous_scheme},
+    parser::{InlineRenderer, has_dangerous_scheme},
     strings::CowStr,
 };
 
@@ -1099,7 +1099,7 @@ fn find_link_macro_matches<'src>(
 /// [`Raw`](InlineNode::Raw) node's `value` **is** the substituted text
 /// (`build_passthrough_node` runs the body's own subs at build time), and a
 /// [`Stem`](InlineNode::Stem) node's is its fold — the same
-/// `render_quoted_substitution` call `PassthroughRestoreReplacer` makes for a
+/// `render_styled` call `PassthroughRestoreReplacer` makes for a
 /// STEM entry — so substituting either for the placeholder here finishes the
 /// value into exactly the restored string's bytes. Every other byte is kept
 /// as matched, which is what restore does too — it rewrites the sentinels and
@@ -1109,7 +1109,7 @@ pub(super) fn restore_masked_passthroughs(
     range: &std::ops::Range<usize>,
     nodes: &[InlineNode<'_>],
     pieces: &[Piece],
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
 ) -> Option<(String, Vec<std::ops::Range<usize>>)> {
     let mut out = String::new();
 
@@ -2101,7 +2101,7 @@ mod tests {
         HasSpan, Parser, Span,
         content::inline_builder::build,
         inlines::{CharRef, InlineNode, LinkForm, SpanForm, StyleVariant},
-        parser::{DefaultPathResolver, HtmlSubstitutionRenderer},
+        parser::{DefaultPathResolver, HtmlInlineRenderer},
         strings::CowStr,
     };
 
@@ -2214,7 +2214,7 @@ mod tests {
             "\\link:index.html[with *bold* text]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -2255,7 +2255,7 @@ mod tests {
             "mailto:hello@example.org[]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = crate::content::inline_builder::fold_html(
@@ -2320,7 +2320,7 @@ mod tests {
             "link:++a b++[A] then link:pass:[c d][C]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -2358,7 +2358,7 @@ mod tests {
             "link:https://++example.org/a++[]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = crate::content::inline_builder::fold_html(
@@ -2424,7 +2424,7 @@ mod tests {
                 "a dangerous restored scheme must stay literal: {nodes:?}"
             );
 
-            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+            let folded = fold_html(&nodes, &HtmlInlineRenderer {});
 
             assert!(
                 !folded.contains("<a "),
@@ -2490,7 +2490,7 @@ mod tests {
             "link:https://example.org/stem:[a][p] and link:https://example.org/stem:[b][q]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -2520,7 +2520,7 @@ mod tests {
         // only surfaces on Windows CI.
         use super::super::super::test_support::golden_passthroughs_with;
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         let fixtures = [
             "link:https://example.org/stem:[x][]",
@@ -2599,7 +2599,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context()
                 ),
                 rendered,
@@ -2708,7 +2708,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros("\\link:index.html[Docs]")
         );
     }
@@ -2728,7 +2728,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -2749,7 +2749,7 @@ mod tests {
         assert_eq!(link_text_of(reference), "x");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -2777,7 +2777,7 @@ mod tests {
         assert_text(&reference.children[2], "b.html", 1, 8);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -2798,7 +2798,7 @@ mod tests {
         assert_text(&reference.children[2], "b@example.org", 1, 10);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -2831,7 +2831,7 @@ mod tests {
         assert_eq!(
             crate::content::inline_builder::fold_html(
                 &nodes,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &parser.render_context()
             ),
             golden_macros_in("macros_hide_uri_scheme", source, &parser)
@@ -2862,7 +2862,7 @@ mod tests {
         assert_text(&reference.children[2], " b", 1, 20);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -2897,7 +2897,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -2919,7 +2919,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -2945,7 +2945,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -2966,7 +2966,7 @@ mod tests {
         assert_eq!(link_text_of(reference), "Team");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -2987,7 +2987,7 @@ mod tests {
         assert_eq!(link_text_of(reference), "Full, Name");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -3005,7 +3005,7 @@ mod tests {
         assert_eq!(link_text_of(reference), "Team");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -3134,7 +3134,7 @@ mod tests {
             "\\https://example.org/?a=1&b=2",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -3185,7 +3185,7 @@ mod tests {
             "https://example.org/a&",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = crate::content::inline_builder::fold_html(
@@ -3268,7 +3268,7 @@ mod tests {
             "https://example.org/++a++ and https://example.org/++b++",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -3309,7 +3309,7 @@ mod tests {
             "<https://++example.org/a++>",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = crate::content::inline_builder::fold_html(
@@ -3379,7 +3379,7 @@ mod tests {
         let reference = assert_link(&nodes[0]);
         assert_eq!(reference.target.as_ref(), "https://example.org/a\"b");
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
         assert!(
             folded.contains("href=\"https://example.org/a&quot;b\""),
             "the fold must escape the restored quote: {folded:?}"
@@ -3453,7 +3453,7 @@ mod tests {
             "a stem:[x] and https://example.org/stem:[y] and stem:[z]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -3634,7 +3634,7 @@ mod tests {
             "footnote:[link:https://example.org[++a++,role=hl]]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -3695,7 +3695,7 @@ mod tests {
         use super::super::super::test_support::golden_passthroughs;
 
         let source = "link:https://example.org[T,title=++a\"b++]";
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         assert_eq!(
             fold_html(&build_src(Span::new(source)), &renderer),
@@ -3718,7 +3718,7 @@ mod tests {
         // `nofollow`. So the tree emits the `rel` hardening the golden omits.
         use super::super::super::test_support::golden_passthroughs;
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for (source, folded, golden) in [
             (
@@ -3748,7 +3748,7 @@ mod tests {
         use super::super::super::test_support::golden_passthroughs;
 
         let source = "link:https://example.org[\u{96}0\u{97}++a++,role=hl]";
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         assert_eq!(
             fold_html(&build_src(Span::new(source)), &renderer),
@@ -3792,7 +3792,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context()
                 ),
                 rendered,
@@ -3834,7 +3834,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context()
                 ),
                 rendered,
@@ -3968,7 +3968,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros("see \\https://example.org here")
         );
     }
@@ -3986,7 +3986,7 @@ mod tests {
         assert_eq!(link_text_of(reference), "Example");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -4026,7 +4026,7 @@ mod tests {
             "see https://example.org now",
         ] {
             assert_eq!(
-                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -4048,7 +4048,7 @@ mod tests {
         // than half-supplied and the tree keeps the well-formed reading — the
         // same shape as the quotes step's own crossed-delimiter divergence.
         let source = r#"He said "`https://example.org`" ok."#;
-        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
         assert_ne!(
             golden_macros(source),
@@ -4138,7 +4138,7 @@ mod tests {
             "\\<https://example.org/a&b>",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -4260,7 +4260,7 @@ mod tests {
         assert_text(&reference.children[2], "b=2", 1, 27);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -4349,7 +4349,7 @@ mod tests {
             "_a https://x.org[*b*] c_",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -4414,7 +4414,7 @@ mod tests {
         assert_text(&reference.children[2], " b", 1, 29);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -4471,7 +4471,7 @@ mod tests {
             let nodes = build_src(Span::new(source));
 
             assert_ne!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_macros(source),
                 "{source:?} now agrees with the string pipeline; fold it into the parity corpus"
             );
@@ -4519,7 +4519,7 @@ mod tests {
         assert_text(&reference.children[2], "b=2", 1, 26);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -4547,7 +4547,7 @@ mod tests {
         assert_text(&reference.children[2], " b", 1, 24);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -4578,7 +4578,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -4599,7 +4599,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -4650,7 +4650,7 @@ mod tests {
 
         for fixture in fixtures {
             assert_eq!(
-                fold_html(&build_src(Span::new(fixture)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(fixture)), &HtmlInlineRenderer {}),
                 golden_macros(fixture),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
@@ -4730,7 +4730,7 @@ mod tests {
             "l&#8217;http://www.irit.fr[IRIT]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -4788,7 +4788,7 @@ mod tests {
             "mailto:a@b.com[Tom (C) Jerry,Subject here]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -4904,7 +4904,7 @@ mod tests {
         }
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -4934,7 +4934,7 @@ mod tests {
         assert_eq!(attrs.span().data(), "a < b,role=hl");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -4961,7 +4961,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -4981,7 +4981,7 @@ mod tests {
         assert!(reference.attrs.is_none() || reference.attrs.as_ref().unwrap().roles().is_empty());
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -5048,7 +5048,7 @@ mod tests {
             "_a link:x.html[*b*] c_",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -5090,7 +5090,7 @@ mod tests {
         assert_text(&reference.children[2], " b", 1, 25);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -5154,7 +5154,7 @@ mod tests {
             "link:index.html[*a*\nb,role=hl]",
         ] {
             assert_eq!(
-                fold_html(&build_src(Span::new(fixture)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(fixture)), &HtmlInlineRenderer {}),
                 golden_macros(fixture),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
@@ -5192,7 +5192,7 @@ mod tests {
             "link:index.html[x,title=a [.r]#b# c]",
         ] {
             assert_eq!(
-                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -5227,7 +5227,7 @@ mod tests {
                 r#"class="<span class=&quot;r&quot;>b</span>""#,
             ),
         ] {
-            let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+            let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
             assert!(folded.contains(expected), "{source:?}: {folded:?}");
             assert_eq!(folded, golden_macros(source), "{source:?}");
@@ -5257,7 +5257,7 @@ mod tests {
                 "the tree must now recognize the macro: {nodes:?}"
             );
 
-            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+            let folded = fold_html(&nodes, &HtmlInlineRenderer {});
 
             // The role landed as a class rather than being swallowed into the
             // display text, and the span survives whole inside it.
@@ -5305,7 +5305,7 @@ mod tests {
             let nodes = build_src(Span::new(source));
 
             assert_ne!(
-                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
                 "{source:?} now agrees with the string pipeline; fold it into the parity corpus"
             );
@@ -5406,7 +5406,7 @@ mod tests {
             let nodes = build_src(Span::new(fixture));
 
             assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_macros(fixture),
                 "fold diverged for {fixture:?}"
             );
@@ -5444,7 +5444,7 @@ mod tests {
         assert_text(&reference.children[0], "doc.writer@example.com", 1, 10);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -5463,7 +5463,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
         assert_eq!(golden_macros(source), "doc@example.com");
@@ -5507,7 +5507,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -5581,7 +5581,7 @@ mod tests {
             );
 
             assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_macros(source),
                 "fold diverged for {source:?}"
             );
@@ -5706,7 +5706,7 @@ mod tests {
             "[width=10]##[width=10]##y ##https://example.org##",
         ] {
             assert_eq!(
-                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -5747,7 +5747,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source),
             "fold diverged for {source:?}"
         );
@@ -5781,7 +5781,7 @@ mod tests {
             "*[x-]++[quotes]$$y$$https://example.org++*",
         ] {
             assert_eq!(
-                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_passthroughs(source),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -5798,7 +5798,7 @@ mod tests {
         use super::super::super::test_support::golden_passthroughs;
 
         let source = "[x-]++**b**https://example.org++";
-        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
         assert_eq!(folded, golden_passthroughs(source));
 
@@ -5892,7 +5892,7 @@ mod tests {
             "write to doc@example.org now",
         ] {
             assert_eq!(
-                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -5959,7 +5959,7 @@ mod tests {
         let nodes = build_src(Span::new(source));
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
 
@@ -5985,7 +5985,7 @@ mod tests {
 
         assert_eq!(
             golden_macros(source),
-            fold_html(&nodes, &HtmlSubstitutionRenderer {})
+            fold_html(&nodes, &HtmlInlineRenderer {})
         );
 
         assert_eq!(
@@ -6015,7 +6015,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source),
             "fold diverged for {source:?}"
         );
@@ -6033,7 +6033,7 @@ mod tests {
         // class that wants more than one of them.
         let source = "https://example.org[width=10]##x##";
 
-        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
         assert_ne!(
             golden_macros(source),
@@ -6078,7 +6078,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context()
                 ),
                 rendered,
@@ -6122,7 +6122,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context()
                 ),
                 rendered,
@@ -6164,7 +6164,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context()
                 ),
                 rendered,
@@ -6208,7 +6208,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context()
                 ),
                 rendered,
@@ -6253,7 +6253,7 @@ mod tests {
         assert_text(&reference.children[2], "b@example.com", 1, 3);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -6631,7 +6631,7 @@ mod tests {
         for fixture in fixtures {
             let folded = crate::content::inline_builder::fold_html(
                 &build(Span::new(fixture), &parser, None),
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &parser.render_context(),
             );
 
@@ -6695,7 +6695,7 @@ mod tests {
             assert_eq!(
                 fold_html(
                     &build(Span::new(fixture), &parser, None),
-                    &HtmlSubstitutionRenderer {}
+                    &HtmlInlineRenderer {}
                 ),
                 golden_normal(fixture, &parser),
                 "fold diverged from the string pipeline for {fixture:?}"

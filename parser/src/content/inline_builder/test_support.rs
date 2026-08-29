@@ -11,7 +11,7 @@ use super::{build, quotes::apply_quotes, special_chars::apply_special_characters
 use crate::{
     HasSpan, Parser, Span,
     inlines::{CharRef, InlineNode, RawOrigin, Ref, RefVariant, SpanForm, StyleVariant},
-    parser::HtmlSubstitutionRenderer,
+    parser::HtmlInlineRenderer,
     strings::CowStr,
 };
 
@@ -20,7 +20,7 @@ use crate::{
 /// [`Image`](InlineNode::Image) node (for the document's safe mode,
 /// `data-uri`, and `icons` attributes); tests that need a non-default
 /// document call [`super::fold_html`] directly with their own parser.
-pub(super) fn fold_html(nodes: &[InlineNode<'_>], renderer: &HtmlSubstitutionRenderer) -> String {
+pub(super) fn fold_html(nodes: &[InlineNode<'_>], renderer: &HtmlInlineRenderer) -> String {
     super::fold_html(nodes, renderer, &Parser::default().render_context())
 }
 
@@ -132,7 +132,7 @@ pub(super) fn assert_raw<'src>(node: &InlineNode<'src>, value: &str) -> Span<'sr
     match node {
         InlineNode::Raw { location, .. } => {
             assert_eq!(
-                fold_html(std::slice::from_ref(node), &HtmlSubstitutionRenderer {}),
+                fold_html(std::slice::from_ref(node), &HtmlInlineRenderer {}),
                 value
             );
 

@@ -1,15 +1,15 @@
-//! Tests for the public [`InlineSubstitutionRenderer`] extension surface: a
+//! Tests for the public [`InlineRenderer`] extension surface: a
 //! downstream renderer that overrides only the substitutions it cares about and
 //! inherits the built-in HTML behavior (including `data-uri` embedding) for the
 //! rest, plus the [`Parser`] accessors that expose the registered file
 //! handlers.
 //!
-//! [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+//! [`InlineRenderer`]: crate::parser::InlineRenderer
 
 use crate::{
     Span,
     content::{Content, SubstitutionStep},
-    parser::{ImageRenderParams, InlineSubstitutionRenderer, SpecialCharacter},
+    parser::{ImageRenderParams, InlineRenderer, SpecialCharacter},
     tests::{
         fixtures::{
             image_file_handler::ImageFileHandlerFixture, svg_file_handler::SvgFileHandlerFixture,
@@ -43,11 +43,11 @@ fn rendered(doc: &crate::Document<'_>) -> String {
 /// bracketed placeholders instead of HTML entities. Every other substitution
 /// falls through to the inherited default (the built-in HTML renderer).
 ///
-/// [`render_special_character`]: InlineSubstitutionRenderer::render_special_character
+/// [`render_special_character`]: InlineRenderer::render_special_character
 #[derive(Debug)]
 struct BracketSpecialChars;
 
-impl InlineSubstitutionRenderer for BracketSpecialChars {
+impl InlineRenderer for BracketSpecialChars {
     fn render_special_character(&self, type_: SpecialCharacter, dest: &mut String) {
         match type_ {
             SpecialCharacter::Lt => dest.push_str("[LT]"),
@@ -63,7 +63,7 @@ fn overrides_one_method_and_inherits_the_rest() {
     // substitution is inherited unchanged from the built-in HTML renderer,
     // proving a consumer no longer faces an all-or-nothing implementation.
     let doc = Parser::default()
-        .with_inline_substitution_renderer(BracketSpecialChars)
+        .with_inline_renderer(BracketSpecialChars)
         .parse("a < b > c & d *bold*");
 
     assert_eq!(
@@ -74,13 +74,13 @@ fn overrides_one_method_and_inherits_the_rest() {
 
 /// A renderer that overrides [`render_image`] to emit its own markup but
 /// reaches the built-in `data-uri` embedding through the inherited
-/// [`image_uri`](InlineSubstitutionRenderer::image_uri).
+/// [`image_uri`](InlineRenderer::image_uri).
 ///
-/// [`render_image`]: InlineSubstitutionRenderer::render_image
+/// [`render_image`]: InlineRenderer::render_image
 #[derive(Debug)]
 struct FigureImages;
 
-impl InlineSubstitutionRenderer for FigureImages {
+impl InlineRenderer for FigureImages {
     fn render_image(&self, params: &ImageRenderParams, dest: &mut String) {
         // `image_uri` is not overridden, so this inherits the crate's data-uri
         // embedding, which reads the image bytes through the registered
@@ -101,7 +101,7 @@ fn inherited_image_uri_embeds_data_uri_for_a_custom_renderer() {
     // inherited `image_uri` embeds the image as a `data:` URI — so a custom
     // renderer that only reshapes the surrounding markup still gets embedding.
     let doc = Parser::default()
-        .with_inline_substitution_renderer(FigureImages)
+        .with_inline_renderer(FigureImages)
         .with_safe_mode(SafeMode::Server)
         .with_intrinsic_attribute_bool("data-uri", true, ModificationContext::Anywhere)
         .with_intrinsic_attribute("imagesdir", "fixtures", ModificationContext::Anywhere)
@@ -160,7 +160,7 @@ fn file_handler_accessors_expose_registered_handlers() {
     // The same two handlers are reachable from a `RenderContext`, which is
     // what actually matters: a renderer is handed a context rather than a
     // parser, so these accessors — not the `Parser` ones above — are how a
-    // custom `InlineSubstitutionRenderer` reads an asset the way the built-in
+    // custom `InlineRenderer` reads an asset the way the built-in
     // one does.
     let context = parser.render_context();
 
@@ -190,13 +190,13 @@ fn file_handler_accessors_expose_registered_handlers() {
 
 /// A renderer that overrides nothing, so every substitution falls through to
 /// the inherited default. Its output must match the built-in
-/// [`HtmlSubstitutionRenderer`] exactly.
+/// [`HtmlInlineRenderer`] exactly.
 ///
-/// [`HtmlSubstitutionRenderer`]: crate::parser::HtmlSubstitutionRenderer
+/// [`HtmlInlineRenderer`]: crate::parser::HtmlInlineRenderer
 #[derive(Debug)]
 struct InheritEverything;
 
-impl InlineSubstitutionRenderer for InheritEverything {}
+impl InlineRenderer for InheritEverything {}
 
 /// Applies `step` to `source` twice — once through the default (HTML) renderer
 /// and once through [`InheritEverything`] — with the same parser configuration,
@@ -215,8 +215,7 @@ fn assert_inherits_html(
     };
 
     let expected = render(&configure(Parser::default()));
-    let actual =
-        render(&configure(Parser::default()).with_inline_substitution_renderer(InheritEverything));
+    let actual = render(&configure(Parser::default()).with_inline_renderer(InheritEverything));
 
     assert_eq!(
         actual, expected,
@@ -311,7 +310,7 @@ fn an_empty_renderer_matches_the_html_renderer_for_cross_references() {
     let default_doc = Parser::default().parse(source);
 
     let inherit_doc = Parser::default()
-        .with_inline_substitution_renderer(InheritEverything)
+        .with_inline_renderer(InheritEverything)
         .parse(source);
 
     assert_eq!(

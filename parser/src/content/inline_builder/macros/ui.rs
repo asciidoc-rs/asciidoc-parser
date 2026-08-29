@@ -398,7 +398,7 @@ mod tests {
         Parser, Span,
         content::inline_builder::build,
         inlines::{InlineNode, SpanForm, StyleVariant, Ui, UiKind},
-        parser::HtmlSubstitutionRenderer,
+        parser::HtmlInlineRenderer,
         strings::CowStr,
     };
 
@@ -485,7 +485,7 @@ mod tests {
             "\\menu:File[Save]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
         let parser = experimental_parser();
 
         for fixture in fixtures {
@@ -510,7 +510,7 @@ mod tests {
         // (default-parser) output byte-for-byte.
         let fixtures = ["kbd:[Ctrl+T]", "btn:[Save]", "menu:File[Save]"];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let nodes = build_src(Span::new(fixture));
@@ -648,7 +648,7 @@ mod tests {
         assert_eq!(
             crate::content::inline_builder::fold_html(
                 &nodes,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &experimental_parser().render_context()
             ),
             golden_macros_in("macros_experimental", "\\kbd:[X]", &experimental_parser())
@@ -725,7 +725,7 @@ mod tests {
         // tests used to pin, per their own "fold this into a parity corpus"
         // convention.)
         let parser = experimental_parser();
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         let fixtures = [
             // Keyboard keys crossing each escaped special, alone and in a
@@ -952,7 +952,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     &nodes,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &parser.render_context()
                 ),
                 golden_normal(source, &parser),
@@ -1048,7 +1048,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     &nodes,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &parser.render_context()
                 ),
                 golden_normal(filtered, &parser),
@@ -1085,7 +1085,7 @@ mod tests {
         assert_eq!(
             crate::content::inline_builder::fold_html(
                 inlines,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &Parser::default().render_context()
             ),
             rendered,
@@ -1126,7 +1126,7 @@ mod tests {
         assert_eq!(
             crate::content::inline_builder::fold_html(
                 inlines,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &Parser::default().render_context()
             ),
             rendered,

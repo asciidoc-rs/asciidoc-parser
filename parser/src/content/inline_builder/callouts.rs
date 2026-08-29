@@ -318,7 +318,7 @@ fn rebuild_callout_level<'src>(
 /// through the same [`render_character_replacement`] the step calls.
 ///
 /// [`render_character_replacement`]:
-///     crate::parser::InlineSubstitutionRenderer::render_character_replacement
+///     crate::parser::InlineRenderer::render_character_replacement
 pub(super) fn replacement_type_of(value: &str) -> Option<CharacterReplacementType> {
     Some(match value {
         "\u{a9}" => CharacterReplacementType::Copyright,
@@ -354,7 +354,7 @@ mod tests {
         Parser, Span,
         attributes::{Attrlist, AttrlistContext},
         inlines::{Callout, CalloutGuard, InlineNode},
-        parser::HtmlSubstitutionRenderer,
+        parser::HtmlInlineRenderer,
         strings::CowStr,
     };
 
@@ -486,7 +486,7 @@ mod tests {
 
             let folded = fold_html(
                 &build_verbatim(Span::new(fixture), &parser, None),
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
             );
 
             assert_eq!(
@@ -522,7 +522,7 @@ mod tests {
 
             let folded = crate::content::inline_builder::fold_html(
                 &build_verbatim(Span::new(fixture), parser, None),
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &parser.render_context(),
             );
 
@@ -650,7 +650,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_callouts("require 'x' # \\<1>")
         );
     }
@@ -677,7 +677,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_callouts_with(source, &Parser::default(), Some(&attrlist))
         );
     }
@@ -704,7 +704,7 @@ mod tests {
         assert_text(&nodes[0], "-- ", 1, 1);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_callouts_with(source, &Parser::default(), Some(&attrlist))
         );
     }
@@ -732,7 +732,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_callouts_with(source, &parser, None)
         );
     }

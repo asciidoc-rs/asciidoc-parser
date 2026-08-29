@@ -1,5 +1,5 @@
 use crate::{
-    parser::{CatalogResolver, HtmlSubstitutionRenderer},
+    parser::{CatalogResolver, HtmlInlineRenderer},
     tests::prelude::*,
 };
 
@@ -50,7 +50,7 @@ See <<foobar>>.
 
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
 
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].target, "foobar");
@@ -67,7 +67,7 @@ See <<foobar>>.
 
     // Resolution is repeatable: a second sweep replaces the first sweep's
     // warnings rather than accumulating a duplicate.
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
     assert_eq!(warnings.len(), 1);
     assert_eq!(doc.warnings().count(), 1);
 }

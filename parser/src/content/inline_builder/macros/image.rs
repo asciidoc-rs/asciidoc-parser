@@ -18,9 +18,7 @@ use crate::{
         normalize_text_lf_escaped_bracket,
     },
     inlines::{Image, InlineNode, RawForm, RawOrigin},
-    parser::{
-        InlineSubstitutionRenderer, has_dangerous_scheme, has_dangerous_self_href, is_uri_ish,
-    },
+    parser::{InlineRenderer, has_dangerous_scheme, has_dangerous_self_href, is_uri_ish},
     strings::CowStr,
     warnings::WarningType,
 };
@@ -470,10 +468,10 @@ pub(in crate::content::inline_builder) fn node_is_restorable(node: &InlineNode<'
 /// - a [`Raw`](InlineNode::Raw) leaf's body is its `value`, which the fold also
 ///   emits verbatim, so it is borrowed rather than rendered;
 /// - a [`Stem`](InlineNode::Stem) leaf's body is [`fold_stem`]'s own output —
-///   `render_quoted_substitution` over the already-substituted `value`, with no
-///   attribute list or id — which is the same call `PassthroughRestoreReplacer`
-///   makes for a STEM entry. Sharing that one function is what keeps the
-///   restore and the fold from drifting.
+///   `render_styled` over the already-substituted `value`, with no attribute
+///   list or id — which is the same call `PassthroughRestoreReplacer` makes for
+///   a STEM entry. Sharing that one function is what keeps the restore and the
+///   fold from drifting.
 ///
 /// `renderer` is the **parser's** renderer, mirroring `restore_to`'s own
 /// (`Passthroughs::restore_to` renders a STEM entry through `parser.renderer`
@@ -485,7 +483,7 @@ pub(in crate::content::inline_builder) fn node_is_restorable(node: &InlineNode<'
 /// one `Content` uses.
 pub(in crate::content::inline_builder) fn restorable_body<'a>(
     node: &'a InlineNode<'_>,
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
 ) -> Option<Cow<'a, str>> {
     match node {
         InlineNode::Raw {
@@ -788,7 +786,7 @@ fn masked_default_alt(
     range: &std::ops::Range<usize>,
     nodes: &[InlineNode<'_>],
     pieces: &[Piece],
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
 ) -> String {
     let mut tokened = String::new();
     let mut values: Vec<Cow<'_, str>> = Vec::new();
@@ -1228,7 +1226,7 @@ mod tests {
             special_chars::Masked,
         },
         inlines::{CharRef, Image, InlineNode, RawForm, RawOrigin, SpanForm, StyleVariant},
-        parser::{DefaultPathResolver, HtmlSubstitutionRenderer},
+        parser::{DefaultPathResolver, HtmlInlineRenderer},
         strings::CowStr,
     };
 
@@ -1287,7 +1285,7 @@ mod tests {
             "_image:y.png[Y] in em_",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -1322,7 +1320,7 @@ mod tests {
             "text with icon:star[] inline",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = crate::content::inline_builder::fold_html(
@@ -1439,7 +1437,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros("\\image:sunset.jpg[Sunset]")
         );
     }
@@ -1460,7 +1458,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -1504,7 +1502,7 @@ mod tests {
             "image:sunset.jpg[]&amp;",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -1571,7 +1569,7 @@ mod tests {
             "\\image:x.png[a < b]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -1650,7 +1648,7 @@ mod tests {
             "&copy;image:sunset.jpg[]&reg;",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -1709,7 +1707,7 @@ mod tests {
             "\\image:x.png[Tom &amp; Jerry]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -1760,7 +1758,7 @@ mod tests {
             "(C)image:sunset.jpg[](R)",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -1827,7 +1825,7 @@ mod tests {
             "image:x.png[alt,200,100]",
         ] {
             assert_eq!(
-                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -1919,7 +1917,7 @@ mod tests {
             "\\image:++sunset.jpg++[Alt]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -1995,7 +1993,7 @@ mod tests {
             "expected the documented divergence to still reproduce: {golden:?}"
         );
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
 
         assert!(
             !folded.contains("href="),
@@ -2031,7 +2029,7 @@ mod tests {
             "expected the raw space in the golden src: {golden:?}"
         );
 
-        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), golden);
+        assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), golden);
     }
 
     #[test]
@@ -2096,7 +2094,7 @@ mod tests {
             "\\image:x.png[++alt++]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -2219,7 +2217,7 @@ mod tests {
             "expected the documented divergence to still reproduce: {golden:?}"
         );
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
 
         assert!(
             !folded.contains("href="),
@@ -2253,7 +2251,7 @@ mod tests {
         );
 
         assert!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}).contains(r#"alt="a&quot;b""#),
+            fold_html(&nodes, &HtmlInlineRenderer {}).contains(r#"alt="a&quot;b""#),
             "the fold must emit the encoded quote"
         );
     }
@@ -2298,7 +2296,7 @@ mod tests {
             "\\image:x.png[stem:[y]]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -2372,7 +2370,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context()
                 ),
                 rendered,
@@ -2428,7 +2426,7 @@ mod tests {
             "\\image:stem:[x].png[]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -2487,7 +2485,7 @@ mod tests {
             "image:x.svg[Alt,opts=interactive,fallback=++a b++.png]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let parser = Parser::default().with_safe_mode(SafeMode::Unsafe);
@@ -2529,7 +2527,7 @@ mod tests {
                 file_separator: '\\',
             });
 
-            let renderer = HtmlSubstitutionRenderer {};
+            let renderer = HtmlInlineRenderer {};
 
             let fold_with = |parser: &Parser| {
                 crate::content::inline_builder::fold_html(
@@ -2553,7 +2551,7 @@ mod tests {
         // leave the placeholder in a computed value, and one that rejects a
         // piece whose body *can* be would keep a construct needlessly
         // literal. Pinned over one node of every kind the two decide between.
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
         let root = Span::new("x");
 
         let restorable = [
@@ -3016,7 +3014,7 @@ mod tests {
             "\\image:{logo}[Logo]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = crate::content::inline_builder::fold_html(
@@ -3116,7 +3114,7 @@ mod tests {
             "\\image:sunset.jpg[{caption}]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = crate::content::inline_builder::fold_html(

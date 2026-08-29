@@ -2,7 +2,7 @@
 //!
 //! This crate embeds referenced images as `data:` URIs when the `data-uri`
 //! document attribute is set (see
-//! [`image_uri`](crate::parser::InlineSubstitutionRenderer::image_uri)), which
+//! [`image_uri`](crate::parser::InlineRenderer::image_uri)), which
 //! requires base64-encoding the image bytes. Rather than pull in an external
 //! crate for what is a small, well-specified transform, the standard-alphabet
 //! encoder lives here.
