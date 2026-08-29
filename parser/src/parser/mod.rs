@@ -19,9 +19,9 @@ pub use include_file_handler::{IncludeContent, IncludeFileHandler, IncludeResolu
 
 mod inline_renderer;
 pub use inline_renderer::{
-    CalloutGuard, CalloutRenderParams, CharacterReplacementType, FootnoteRenderParams,
-    HtmlInlineRenderer, IconRenderParams, ImageRenderParams, IndexTermRenderParams, InlineRenderer,
-    LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType, SpecialCharacter, XrefRenderParams,
+    CharacterReplacementType, HtmlInlineRenderer, IconRenderParams, ImageRenderParams,
+    IndexTermRenderParams, InlineRenderer, LinkRenderParams, QuoteScope, QuoteType,
+    SpecialCharacter, XrefRenderParams,
 };
 pub(crate) use inline_renderer::{has_dangerous_scheme, has_dangerous_self_href, is_uri_ish};
 

@@ -5,14 +5,12 @@ use crate::{
     attributes::Attrlist,
     content::{Content, XrefSegment, xref_segment_from_node},
     inlines::{
-        Anchor, Callout, CalloutGuard, CharRef, Footnote, Image, IndexTerm, InlineNode, RawForm,
-        Ref, RefVariant, SpanForm, Stem, StemNotation, Ui, UiKind,
+        Anchor, Callout, CharRef, Footnote, Image, IndexTerm, InlineNode, RawForm, Ref, RefVariant,
+        SpanForm, Stem, StemNotation, Ui, UiKind,
     },
     parser::{
-        CalloutGuard as ParserCalloutGuard, CalloutRenderParams, FootnoteRenderParams,
         IconRenderParams, ImageRenderParams, IndexTermRenderParams, InlineRenderer,
-        LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType, RenderContext, SpecialCharacter,
-        XrefRenderParams,
+        LinkRenderParams, QuoteScope, QuoteType, RenderContext, SpecialCharacter, XrefRenderParams,
     },
     strings::CowStr,
 };
@@ -476,8 +474,7 @@ fn fold_image(
 fn fold_ui(ui: &Ui<'_>, renderer: &dyn InlineRenderer, context: &RenderContext, out: &mut String) {
     match &ui.kind {
         UiKind::Keyboard(keys) => {
-            let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
-            renderer.render_keyboard(&keys, out);
+            renderer.render_keyboard(keys, out);
         }
 
         UiKind::Button(text) => {
@@ -489,16 +486,7 @@ fn fold_ui(ui: &Ui<'_>, renderer: &dyn InlineRenderer, context: &RenderContext, 
             submenus,
             item,
         } => {
-            let submenus: Vec<String> = submenus.iter().map(|s| s.to_string()).collect();
-
-            let params = MenuRenderParams {
-                menu: menu.as_ref(),
-                submenus: &submenus,
-                menuitem: item.as_deref(),
-                context,
-            };
-
-            renderer.render_menu(&params, out);
+            renderer.render_menu(menu.as_ref(), submenus, item.as_deref(), context, out);
         }
     }
 }
@@ -759,9 +747,9 @@ fn fold_index_term(
 }
 
 /// Folds a [`Footnote`](InlineNode::Footnote) through the same
-/// `render_footnote` the string step calls, reconstructing
-/// [`FootnoteRenderParams`] entirely from the node's `is_reference`, `number`,
-/// and `id` fields — no build-time state is needed (design §3.3.1).
+/// `render_footnote` the string step calls — handing over the node itself,
+/// since everything the marker needs is on it (`is_reference`, `number`, `id`)
+/// and no build-time state is required (design §3.3.1).
 ///
 /// Only the in-flow **marker** is folded here (`[1]`, or `[id]` for an
 /// unresolved reference): `render_footnote` never emits the footnote's own
@@ -770,60 +758,29 @@ fn fold_index_term(
 /// `footnote.children` is not folded into `out` at all, the same relationship
 /// [`fold_anchor`]'s `reftext` has to its own marker.
 ///
-/// A defining occurrence (`is_reference == false`) always carries its number
-/// (see `build_footnote_node`) and folds its own `id`, when it has one, into
-/// the marker's `id` attribute. A reference either reuses an existing
-/// footnote's number (`number: Some`, `id` never folded — matching the string
-/// replacer, which renders a reference's `id` attribute only for the
-/// *defining* occurrence) or, unresolved (`number: None`), falls back to
-/// displaying its own `id` as the render params' `text`.
+/// Which of the three markers a node produces is now the *renderer's* reading
+/// of it rather than this fold's — see
+/// [`render_footnote`](crate::parser::InlineRenderer::render_footnote)'s own
+/// documentation for the three cases, and `HtmlInlineRenderer` for the reading
+/// the built-in backend makes.
 fn fold_footnote(footnote: &Footnote<'_>, renderer: &dyn InlineRenderer, out: &mut String) {
-    let (index, id, text): (Option<&str>, Option<&str>, &str) = if footnote.is_reference {
-        match footnote.number.as_deref() {
-            Some(number) => (Some(number), None, ""),
-            None => (None, None, footnote.id.as_deref().unwrap_or("")),
-        }
-    } else {
-        (footnote.number.as_deref(), footnote.id.as_deref(), "")
-    };
-
-    renderer.render_footnote(
-        &FootnoteRenderParams {
-            index,
-            id,
-            is_reference: footnote.is_reference,
-            text,
-        },
-        out,
-    );
+    renderer.render_footnote(footnote, out);
 }
 
 /// Folds a [`Callout`](InlineNode::Callout) through the same `render_callout`
-/// the string step's `Callouts` group calls, reconstructing
-/// [`CalloutRenderParams`] from the node's `number` and `guard` — no
-/// build-time state is needed, mirroring [`fold_footnote`]. This is the
-/// decoupling design §4.6 previews for Phase 5: the node is the canonical,
-/// structured record; the `*RenderParams` struct is rebuilt from it fresh at
-/// fold time, not carried alongside it.
+/// the string step's `Callouts` group calls, handing over the node itself —
+/// no build-time state is needed, mirroring [`fold_footnote`]. This is design
+/// §4.6's Phase 5 reshape arrived at: the node was already the canonical
+/// structured record, and the render-params struct this fold used to rebuild
+/// from it (along with a second `CalloutGuard` differing only in whether the
+/// prefix was a `CowStr` or a `&str`) is gone.
 fn fold_callout(
     callout: &Callout<'_>,
     renderer: &dyn InlineRenderer,
     context: &RenderContext,
     out: &mut String,
 ) {
-    let guard = match &callout.guard {
-        CalloutGuard::LineComment(prefix) => ParserCalloutGuard::LineComment(prefix.as_ref()),
-        CalloutGuard::Xml => ParserCalloutGuard::Xml,
-    };
-
-    renderer.render_callout(
-        &CalloutRenderParams {
-            number: callout.number.as_ref(),
-            guard,
-            context,
-        },
-        out,
-    );
+    renderer.render_callout(callout, context, out);
 }
 
 /// Folds a [`Stem`](InlineNode::Stem) through the same

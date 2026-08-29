@@ -24,11 +24,16 @@ impl<'src> HasSpan<'src> for Callout<'src> {
 }
 
 /// Describes the characters that guard (hide) a callout number in verbatim
-/// source. Mirrors [`crate::parser::CalloutGuard`], the render-time
-/// counterpart the fold reconstructs this into, but is decoupled from it (as
-/// every node in this module is decoupled from its `*RenderParams`
-/// counterpart) so the node stays canonical, structured data rather than a
-/// render-seam type.
+/// source, so a fold can preserve them when icons are not enabled.
+///
+/// This used to be mirrored by a render-time `parser::CalloutGuard` that the
+/// fold converted into, on the reasoning that a node should stay canonical
+/// structured data rather than a render-seam type. Phase 5 retired that
+/// duplicate: with
+/// [`render_callout`](crate::parser::InlineRenderer::render_callout) taking
+/// the [`Callout`] node itself, the node *is* what the seam carries, and a
+/// second enum saying the same thing in `&str` where this one says
+/// [`CowStr`] bought nothing but a conversion.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CalloutGuard<'src> {
     /// A line-comment (or absent) guard. Holds the line-comment prefix that

@@ -394,9 +394,9 @@ fn build_candidate_node<'src>(
 /// Builds one [`Footnote`](InlineNode::Footnote) node from a `footnote:` match,
 /// resolving it into the same three (id, content) cases the string
 /// replacer's `InlineFootnoteMacroReplacer` distinguishes, so the fold —
-/// which reconstructs
-/// [`FootnoteRenderParams`](crate::parser::FootnoteRenderParams) from the node
-/// alone (see `fold_footnote`) — reproduces the same bytes. Returns `None` for
+/// which hands the node straight to
+/// [`render_footnote`](crate::parser::InlineRenderer::render_footnote) (see
+/// `fold_footnote`) — reproduces the same bytes. Returns `None` for
 /// a form this increment defers, or for `footnote:[]` (neither an id nor
 /// content), which is not a footnote at all.
 ///

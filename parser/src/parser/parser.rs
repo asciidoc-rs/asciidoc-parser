@@ -4566,8 +4566,13 @@ mod tests {
             dest.push_str(&format!("[XREF:{}]", params.target));
         }
 
-        fn render_callout(&self, params: &crate::parser::CalloutRenderParams, dest: &mut String) {
-            dest.push_str(&format!("[CALLOUT:{}]", params.number));
+        fn render_callout(
+            &self,
+            callout: &crate::inlines::Callout<'_>,
+            _context: &crate::parser::RenderContext,
+            dest: &mut String,
+        ) {
+            dest.push_str(&format!("[CALLOUT:{}]", callout.number));
         }
 
         fn render_index_term(
@@ -4585,18 +4590,29 @@ mod tests {
             dest.push_str(&format!("[BUTTON:{text}]"));
         }
 
-        fn render_keyboard(&self, keys: &[String], dest: &mut String) {
+        fn render_keyboard(&self, keys: &[crate::strings::CowStr<'_>], dest: &mut String) {
+            let keys: Vec<&str> = keys.iter().map(|k| k.as_ref()).collect();
             dest.push_str(&format!("[KBD:{}]", keys.join("+")));
         }
 
-        fn render_menu(&self, params: &crate::parser::MenuRenderParams, dest: &mut String) {
-            dest.push_str(&format!("[MENU:{}]", params.menu));
+        fn render_menu(
+            &self,
+            menu: &str,
+            _submenus: &[crate::strings::CowStr<'_>],
+            _menuitem: Option<&str>,
+            _context: &crate::parser::RenderContext,
+            dest: &mut String,
+        ) {
+            dest.push_str(&format!("[MENU:{menu}]"));
         }
 
-        fn render_footnote(&self, params: &crate::parser::FootnoteRenderParams, dest: &mut String) {
-            match params.index {
+        fn render_footnote(&self, footnote: &crate::inlines::Footnote<'_>, dest: &mut String) {
+            match footnote.number.as_deref() {
                 Some(index) => dest.push_str(&format!("[FOOTNOTE:{index}]")),
-                None => dest.push_str(&format!("[FOOTNOTE:{}]", params.text)),
+                None => dest.push_str(&format!(
+                    "[FOOTNOTE:{}]",
+                    footnote.id.as_deref().unwrap_or("")
+                )),
             }
         }
     }
@@ -4643,6 +4659,36 @@ mod tests {
         assert_eq!(
             simple_block.content().rendered_html(),
             "test.[FOOTNOTE:missing]"
+        );
+    }
+
+    #[test]
+    fn custom_renderer_renders_ui_macros_and_callouts() {
+        // The UI-macro and callout overrides take the node (or its fields)
+        // rather than a `*RenderParams` struct, so this pins that they are
+        // reached and read the values the node carries.
+        let mut parser = Parser::default().with_inline_renderer(TestRenderer);
+
+        let doc = parser.parse(
+            ":experimental:\n\nPress kbd:[Ctrl,T] then btn:[OK] from menu:File[Save As].\n\n\
+             [source]\n----\nlet x = 1; # <1>\n----",
+        );
+
+        let rendered: Vec<String> = doc
+            .child_blocks()
+            .filter_map(|b| match b {
+                Block::Simple(s) => Some(s.content().rendered_html().to_string()),
+                Block::RawDelimited(r) => Some(r.content().rendered_html().to_string()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            rendered,
+            vec![
+                "Press [KBD:Ctrl+T] then [BUTTON:OK] from [MENU:File].".to_string(),
+                "let x = 1; [CALLOUT:1]".to_string(),
+            ]
         );
     }
 
