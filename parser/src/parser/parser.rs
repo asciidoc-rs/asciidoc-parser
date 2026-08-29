@@ -3460,8 +3460,8 @@ mod tests {
         attributes::Attrlist,
         blocks::Block,
         parser::{
-            CharacterReplacementType, IconRenderParams, ImageRenderParams, InlineRenderer,
-            LinkRenderParams, QuoteScope, QuoteType, SpecialCharacter,
+            CharacterReplacementType, InlineRenderer, LinkRenderParams, QuoteScope, QuoteType,
+            SpecialCharacter,
         },
         tests::prelude::*,
     };
@@ -4537,7 +4537,13 @@ mod tests {
             dest.push_str("[BR]");
         }
 
-        fn render_image(&self, _params: &ImageRenderParams, dest: &mut String) {
+        fn render_image(
+            &self,
+            _image: &crate::inlines::Image<'_>,
+            _attrlist: &Attrlist<'_>,
+            _context: &crate::parser::RenderContext,
+            dest: &mut String,
+        ) {
             dest.push_str("[IMAGE]");
         }
 
@@ -4550,7 +4556,13 @@ mod tests {
             target_image_path.to_string()
         }
 
-        fn render_icon(&self, _params: &IconRenderParams, dest: &mut String) {
+        fn render_icon(
+            &self,
+            _icon: &crate::inlines::Image<'_>,
+            _attrlist: &Attrlist<'_>,
+            _context: &crate::parser::RenderContext,
+            dest: &mut String,
+        ) {
             dest.push_str("[ICON]");
         }
 

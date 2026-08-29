@@ -9,7 +9,7 @@
 use crate::{
     Span,
     content::{Content, SubstitutionStep},
-    parser::{ImageRenderParams, InlineRenderer, SpecialCharacter},
+    parser::{InlineRenderer, RenderContext, SpecialCharacter},
     tests::{
         fixtures::{
             image_file_handler::ImageFileHandlerFixture, svg_file_handler::SvgFileHandlerFixture,
@@ -81,16 +81,22 @@ fn overrides_one_method_and_inherits_the_rest() {
 struct FigureImages;
 
 impl InlineRenderer for FigureImages {
-    fn render_image(&self, params: &ImageRenderParams, dest: &mut String) {
+    fn render_image(
+        &self,
+        image: &crate::inlines::Image<'_>,
+        _attrlist: &crate::attributes::Attrlist<'_>,
+        context: &RenderContext,
+        dest: &mut String,
+    ) {
         // `image_uri` is not overridden, so this inherits the crate's data-uri
         // embedding, which reads the image bytes through the registered
         // `ImageFileHandler` — behavior a custom renderer previously could not
         // reproduce.
-        let uri = self.image_uri(params.target, params.context, None);
+        let uri = self.image_uri(image.target.as_ref(), context, None);
 
         dest.push_str(&format!(
             r#"<figure data-src="{uri}">{alt}</figure>"#,
-            alt = params.alt
+            alt = image.alt.as_deref().unwrap_or_default()
         ));
     }
 }

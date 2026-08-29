@@ -609,9 +609,9 @@ below); the signature reshape has not.
 > - The one substitution-named method, `render_quoted_substitution`, is renamed to match its
 >   node kind: **`render_styled`**. ✅
 > - The `*RenderParams` structs fold into the node types (e.g. `XrefRenderParams` → the
->   `Ref` node), so most are removed rather than renamed. 🔶 *In progress* — three of the
->   eight are gone (see Phase 5's slice 2 note); the five that remain are the ones whose
->   params carry a value no node holds.
+>   `Ref` node), so most are removed rather than renamed. 🔶 *In progress* — five of the
+>   eight are gone (see Phase 5's slice 2 and slice 3 notes); the three that remain are the
+>   ones whose params carry the fold of the node's children.
 >
 > Considered and set aside: `InlineBackend` (introduces a "backend" noun not used elsewhere),
 > `InlineNodeRenderer` ("node" is redundant with "inline"), `InlineConverter` (the crate has
@@ -624,6 +624,11 @@ below); the signature reshape has not.
 > not more faithful. So a `render_styled` or an `HtmlInlineRenderer` in a note dated before
 > this rename is the *current* name of what that note described, not the name it was written
 > with. (Names in `CHANGELOG.md` are **not** swept: those describe APIs as released.)
+>
+> A **retired** type is the other case, and it is left alone rather than swept: where an older
+> note names a `*RenderParams` struct that this phase has since deleted, it is describing the
+> mechanism that existed when the note was written, and there is no current name to point it
+> at. The Phase 5 slice notes below are the authoritative record of which are gone.
 
 ---
 
@@ -11089,10 +11094,44 @@ Each phase is a reviewable unit with a clear exit gate.
   that renderer was dead. A second test parsing `kbd:`/`btn:`/`menu:` and a callout list
   closed that pre-existing hole along with the new one, taking `parser.rs` to 66.
 
-  *What still defers:* the five remaining params structs — `Link`, `Xref`, `IndexTerm`,
+  *What slice 2 left:* the five remaining params structs — `Link`, `Xref`, `IndexTerm`,
   `Image` and `Icon`, the ones whose values are folds of children or derivations from an
-  attribute list — then Landing. (Step 7's `Document::to_asg()` also remains, blocked on
-  reading the Eclipse ASG schema.)
+  attribute list.
+
+  *Slice 3 landed as (`Image`/`IconRenderParams`, and a dead field with them):* the two whose
+  values are *derivations* rather than folds.
+  [`render_image`](../../parser/src/parser/inline_renderer.rs) and `render_icon` now take
+  `(&Image, &Attrlist, &RenderContext)`; `alt`'s empty default and an icon's `size` lookup move
+  into the renderer, where the built-in one was **already** doing the `size` lookup itself.
+
+  *`IconRenderParams::size` was dead.* The fold computed it —
+  `attrlist.named_or_positional_attribute("size", 1)` — and stored it in a public field that
+  nothing read, because `HtmlInlineRenderer::render_icon` performs the same lookup off the
+  attrlist a few lines later. Retiring the struct retires the field, the redundant lookup, and
+  the small trap that a downstream renderer reading `params.size` and one reading the attrlist
+  could disagree.
+
+  *Why the attribute list is a separate argument and not just `image.attrs`.* Because
+  [`Image::attrs`](../../parser/src/inlines/image.rs) is an `Option`: a macro-built image always
+  carries its list, but a hand-built node need not, and the fold has always resolved that with
+  an empty list sliced from the node's own location so the lifetime matches. Pushing that
+  `let empty; let attrlist = match … ` dance into every backend that wants to read `title`,
+  `link`, `format` or a role is the wrong trade for a seam whose whole point is to be easy to
+  implement — so the fold keeps resolving it once and hands it over. The tidier fix is at the
+  *node* (make `attrs` non-optional, as `Styled` and `Ref` would also want), which is a change
+  to a public node's field type and belongs in its own increment, not smuggled into a seam
+  reshape.
+
+  *Verification.* No expected-output string changed, all 5,474 tests pass, and coverage is
+  flat at 561 missed regions with every touched file unchanged — `fold.rs` 3, `inline_renderer.rs`
+  18, `parser.rs` 66, exactly as slice 2 left them.
+
+  *What still defers:* the last three — `Link`, `Xref` and `IndexTerm`, whose params carry the
+  **fold of the node's children**. That one is not a substitution and should not be taken
+  without deciding first whether a method receives the folded children as a `&str` beside its
+  node (which §4.6's "or node fields" sanctions) or a handle it can fold them with itself (the
+  more genuinely AST-walking seam, and the larger commitment). Then Landing. (Step 7's
+  `Document::to_asg()` also remains, blocked on reading the Eclipse ASG schema.)
 
 - **Landing — preflight + merge to `main`.** Preflight the whole branch against the
   `asciidoctor` port (§5.1) to confirm the public API and reshaped seam serve a real
