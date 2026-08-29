@@ -29,8 +29,7 @@ use crate::{
     document::Catalog,
     inlines::InlineNode,
     parser::{
-        InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
-        ResolvedReference,
+        InlineRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext, ResolvedReference,
     },
 };
 
@@ -107,7 +106,7 @@ pub(crate) fn resolve_title_references<'src>(
     blocks: &mut [Block<'src>],
     catalog: &Catalog,
     resolver: &dyn ReferenceResolver,
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     warnings: &mut ReferenceWarnings<'src>,
     parser: &crate::Parser,
 ) {
@@ -225,7 +224,7 @@ fn write_back<'src>(
     blocks: &mut [Block<'src>],
     memo: &[Option<Resolution>],
     index: &mut usize,
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     warnings: &mut ReferenceWarnings<'src>,
     parser: &crate::Parser,
 ) {
@@ -299,7 +298,7 @@ fn compute<'src>(
     id_to_node: &HashMap<&str, (usize, &TitleNode<'src>)>,
     catalog: &Catalog,
     resolver: &dyn ReferenceResolver,
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     memo: &mut [Option<Resolution>],
     in_progress: &mut [bool],
     warnings: &mut ReferenceWarnings<'src>,

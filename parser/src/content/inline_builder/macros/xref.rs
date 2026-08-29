@@ -869,7 +869,7 @@ mod tests {
     use crate::{
         HasSpan, Parser, Span,
         inlines::{CharRef, InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
-        parser::{HtmlSubstitutionRenderer, XrefStyle},
+        parser::{HtmlInlineRenderer, XrefStyle},
     };
 
     /// The string pipeline's output through the **whole** `Normal` group —
@@ -1038,7 +1038,7 @@ mod tests {
             "a copyright (C) then <<x,a & b>>",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -1081,7 +1081,7 @@ mod tests {
         assert!(reference.children.is_empty());
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref("xref:install[]")
         );
     }
@@ -1112,7 +1112,7 @@ mod tests {
         assert_eq!(link_text_of(reference), "Install");
 
         // The fold reproduces the string pipeline's `href="#install"` exactly.
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
         assert!(folded.contains(r##"href="#install""##), "folded: {folded}");
         assert_eq!(folded, golden_xref("xref:#install[Install]"));
     }
@@ -1145,7 +1145,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -1162,7 +1162,7 @@ mod tests {
         let source = "\\xref:sec[*bold*,role=hl]";
         let nodes = build_src(Span::new(source));
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
         assert!(!folded.starts_with('\\'), "folded: {folded}");
         assert_eq!(folded, golden_xref(source));
     }
@@ -1201,7 +1201,7 @@ mod tests {
         assert!(reference.children.is_empty());
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref("<<install>>")
         );
     }
@@ -1251,7 +1251,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -1278,7 +1278,7 @@ mod tests {
         assert_eq!(derived.text, "other.html");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -1304,7 +1304,7 @@ mod tests {
         assert_eq!(derived.href, "#");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -1327,7 +1327,7 @@ mod tests {
         let golden = golden_xref(source);
         assert!(golden.contains(r##"href="#install">"##), "{golden}");
         assert!(!golden.contains("[install]"), "{golden}");
-        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), golden);
+        assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), golden);
     }
 
     #[test]
@@ -1345,7 +1345,7 @@ mod tests {
 
         assert!(golden_xref(source).contains("[install]"));
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -1381,7 +1381,7 @@ mod tests {
         assert_eq!(
             super::super::super::fold_html(
                 inlines,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &Parser::default().render_context()
             ),
             rendered,
@@ -1403,7 +1403,7 @@ mod tests {
         assert_text(&reference.children[0], "", 1, 14);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -1437,7 +1437,7 @@ mod tests {
         assert_text(&reference.children[2], " b", 1, 13);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -1467,7 +1467,7 @@ mod tests {
         assert_eq!(derived.href, "other.html#frag");
         assert_eq!(derived.text, "other.html");
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
         assert!(
             folded.contains(r#"href="other.html#frag""#),
             "folded: {folded}"
@@ -1509,7 +1509,7 @@ mod tests {
         assert_text(&reference.children[2], "b", 1, 12);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -1538,7 +1538,7 @@ mod tests {
         assert_text(&reference.children[2], " Jerry", 1, 18);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -1560,7 +1560,7 @@ mod tests {
         assert_eq!(reference.roles[0].as_ref(), "hl");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -1600,7 +1600,7 @@ mod tests {
             "\\xref:sec[Tom &copy; Jerry]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -1646,7 +1646,7 @@ mod tests {
             "\\xref:sec[Tom (C) Jerry]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -1724,7 +1724,7 @@ mod tests {
         }
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -1746,7 +1746,7 @@ mod tests {
         assert_eq!(link_text_of(reference), "Tom &copy; Jerry");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -1770,7 +1770,7 @@ mod tests {
         assert_text(&reference.children[3], "]c", 1, 14);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -1792,7 +1792,7 @@ mod tests {
             );
 
             assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_xref(source),
                 "fold diverged for {source:?}"
             );
@@ -1854,7 +1854,7 @@ mod tests {
             "a copyright (C) then <<x,*bold*>>",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -1918,7 +1918,7 @@ mod tests {
             "<<sec,*bold*>>",
         ] {
             assert_eq!(
-                fold_html(&build_src(Span::new(fixture)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(fixture)), &HtmlInlineRenderer {}),
                 golden_xref(fixture),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
@@ -2006,7 +2006,7 @@ mod tests {
             );
 
             assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 expected,
                 "for {source:?}"
             );
@@ -2023,7 +2023,7 @@ mod tests {
         // the split reads harmlessly).
         for source in ["xref:sec[a *b, c* d]", "xref:sec[[.r]#x# here,role=hl]"] {
             assert_eq!(
-                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_xref(source),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -2063,7 +2063,7 @@ mod tests {
         // through to the slot exactly as the string pipeline passes them.
         let source = "xref:sec[a,role=\u{96}0\u{97}hl]";
         assert_eq!(
-            fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+            fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
             golden_whole_pipeline(source)
         );
     }
@@ -2131,7 +2131,7 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 expected,
                 "the fold regressed for {source:?}"
             );
@@ -2145,7 +2145,7 @@ mod tests {
         // A value with nothing opaque in it is at parity, as it always was.
         let source = "xref:sec[a,role=hl]";
         assert_eq!(
-            fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+            fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -2177,7 +2177,7 @@ mod tests {
             let nodes = build_src(Span::new(source));
 
             assert_ne!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_xref(source),
                 "{source:?} now agrees with the string pipeline; fold it into the parity corpus"
             );
@@ -2217,10 +2217,7 @@ mod tests {
             "an xref target over a passthrough must stay literal: {nodes:?}"
         );
 
-        assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
-            "xref:someid[]"
-        );
+        assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), "xref:someid[]");
     }
 
     #[test]
@@ -2248,7 +2245,7 @@ mod tests {
         assert_eq!(reference.xrefstyle, Some(XrefStyle::Full));
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -2275,7 +2272,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -2357,7 +2354,7 @@ mod tests {
         // catalog), which is the shape both sides agree on here; the resolved
         // shape, where `xrefstyle` actually changes the bytes, is pinned over
         // whole documents in `inline_builder_document_parity`.
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for style in ["full", "short", "basic"] {
             let parser = parser_with_xrefstyle(style);
@@ -2401,7 +2398,7 @@ mod tests {
         assert_eq!(reference.xrefstyle, None);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -2428,7 +2425,7 @@ mod tests {
         assert_eq!(derived.href, "#");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_xref(source)
         );
     }
@@ -2452,7 +2449,7 @@ mod tests {
 
         let folded = super::super::super::fold_html(
             &nodes,
-            &HtmlSubstitutionRenderer {},
+            &HtmlInlineRenderer {},
             &parser.render_context(),
         );
         assert!(folded.contains(r##"href="#install""##), "folded: {folded}");
@@ -2483,7 +2480,7 @@ mod tests {
 
         let folded = super::super::super::fold_html(
             &nodes,
-            &HtmlSubstitutionRenderer {},
+            &HtmlInlineRenderer {},
             &parser.render_context(),
         );
         assert_eq!(folded, golden_xref_with(source, &parser));
@@ -2572,7 +2569,7 @@ mod tests {
             assert_eq!(
                 super::super::super::fold_html(
                     &nodes,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &parser.render_context()
                 ),
                 golden_normal(source, &parser),
@@ -2640,7 +2637,7 @@ mod tests {
         assert_eq!(
             super::super::super::fold_html(
                 &nodes,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &parser.render_context()
             ),
             golden_normal(source, &parser)
@@ -2659,7 +2656,7 @@ mod tests {
         // parity rather than departing from it — where a *masked* passthrough,
         // which the replacer would not have restored yet, keeps its match
         // deferred (`a_deferred_xref_target_over_a_passthrough_is_a_documented_divergence`).
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in [
             "see xref:{cpp}[{cpp}].",
@@ -2712,7 +2709,7 @@ mod tests {
         assert_eq!(
             super::super::super::fold_html(
                 &nodes,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &parser.render_context()
             ),
             golden_normal(source, &parser)
@@ -2777,7 +2774,7 @@ mod tests {
         assert!(rendered.contains("Tom &amp; Jerry"), "rendered: {rendered}");
 
         assert_eq!(
-            fold_html(inlines, &HtmlSubstitutionRenderer {}),
+            fold_html(inlines, &HtmlInlineRenderer {}),
             rendered,
             "the block's tree must fold to its own rendered string"
         );
@@ -2818,7 +2815,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(inlines, &HtmlSubstitutionRenderer {}),
+            fold_html(inlines, &HtmlInlineRenderer {}),
             rendered,
             "the block's tree must fold to its own rendered string"
         );
@@ -2831,10 +2828,7 @@ mod tests {
             };
 
             assert_eq!(
-                fold_html(
-                    section.section_title_inlines(),
-                    &HtmlSubstitutionRenderer {}
-                ),
+                fold_html(section.section_title_inlines(), &HtmlInlineRenderer {}),
                 section.section_title(),
                 "fold diverged from the rendered section title"
             );

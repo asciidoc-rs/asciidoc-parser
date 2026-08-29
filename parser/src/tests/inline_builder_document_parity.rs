@@ -30,7 +30,7 @@ use crate::{
     blocks::{Block, FindBlocks, IsBlock, TableCellContent, TableRow},
     content::inline_builder::fold_html,
     inlines::InlineNode,
-    parser::{HtmlSubstitutionRenderer, ModificationContext},
+    parser::{HtmlInlineRenderer, ModificationContext},
 };
 
 /// One content location: what the string pipeline rendered, and the tree the
@@ -180,7 +180,7 @@ fn check_document(source: &str) -> Vec<String> {
     let mut parser = parser();
     let doc = parser.parse(source);
 
-    let renderer = HtmlSubstitutionRenderer {};
+    let renderer = HtmlInlineRenderer {};
 
     // The fold's `&Parser` supplies document render context (an image's safe
     // mode, `data-uri`, `icons`); a default one matches these fixtures, none of
@@ -390,7 +390,7 @@ fn fold_matches_the_rendered_string_after_resolution() {
         .map(|l| {
             fold_html(
                 l.inlines,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &Parser::default().render_context(),
             )
         })
@@ -424,12 +424,12 @@ fn a_stateful_renderer_is_not_required_for_the_fold() {
     for location in locations(&doc) {
         let once = fold_html(
             location.inlines,
-            &HtmlSubstitutionRenderer {},
+            &HtmlInlineRenderer {},
             &fold_parser.render_context(),
         );
         let twice = fold_html(
             location.inlines,
-            &HtmlSubstitutionRenderer {},
+            &HtmlInlineRenderer {},
             &fold_parser.render_context(),
         );
 
@@ -438,8 +438,8 @@ fn a_stateful_renderer_is_not_required_for_the_fold() {
     }
 
     // And through a renderer handed out as a shared `Rc`, which is how
-    // `Parser::with_inline_substitution_renderer` installs one.
-    let shared: Rc<HtmlSubstitutionRenderer> = Rc::new(HtmlSubstitutionRenderer {});
+    // `Parser::with_inline_renderer` installs one.
+    let shared: Rc<HtmlInlineRenderer> = Rc::new(HtmlInlineRenderer {});
 
     for location in locations(&doc) {
         assert_eq!(
@@ -606,7 +606,7 @@ fn at_least_one_fold_was_authoritative() {
 
 #[test]
 fn resolution_renders_a_deferred_content_once() {
-    use crate::parser::{CatalogResolver, InlineSubstitutionRenderer, XrefRenderParams};
+    use crate::parser::{CatalogResolver, InlineRenderer, XrefRenderParams};
 
     // A renderer is a host-supplied trait object, so *how many times* it is
     // called during one resolution pass is observable — a stateful one (a
@@ -622,10 +622,10 @@ fn resolution_renders_a_deferred_content_once() {
         xrefs: std::cell::Cell<usize>,
     }
 
-    impl InlineSubstitutionRenderer for CountingRenderer {
+    impl InlineRenderer for CountingRenderer {
         fn render_xref(&self, params: &XrefRenderParams, dest: &mut String) {
             self.xrefs.set(self.xrefs.get() + 1);
-            HtmlSubstitutionRenderer {}.render_xref(params, dest);
+            HtmlInlineRenderer {}.render_xref(params, dest);
         }
     }
 
@@ -714,7 +714,7 @@ fn a_folded_heading_keeps_the_cross_title_coordination() {
 
 #[test]
 fn the_title_pass_renders_each_title_once() {
-    use crate::parser::{CatalogResolver, InlineSubstitutionRenderer, XrefRenderParams};
+    use crate::parser::{CatalogResolver, InlineRenderer, XrefRenderParams};
 
     // The title-side counterpart of `resolution_renders_a_deferred_content_once`,
     // and the property that makes the fold a *replacement* for the document-order
@@ -730,10 +730,10 @@ fn the_title_pass_renders_each_title_once() {
         xrefs: std::cell::Cell<usize>,
     }
 
-    impl InlineSubstitutionRenderer for CountingRenderer {
+    impl InlineRenderer for CountingRenderer {
         fn render_xref(&self, params: &XrefRenderParams, dest: &mut String) {
             self.xrefs.set(self.xrefs.get() + 1);
-            HtmlSubstitutionRenderer {}.render_xref(params, dest);
+            HtmlInlineRenderer {}.render_xref(params, dest);
         }
     }
 
@@ -767,8 +767,8 @@ fn the_title_pass_renders_each_title_once() {
 #[derive(Debug)]
 struct BracketStrong;
 
-impl crate::parser::InlineSubstitutionRenderer for BracketStrong {
-    fn render_quoted_substitution(
+impl crate::parser::InlineRenderer for BracketStrong {
+    fn render_styled(
         &self,
         type_: crate::parser::QuoteType,
         scope: crate::parser::QuoteScope,
@@ -784,8 +784,7 @@ impl crate::parser::InlineSubstitutionRenderer for BracketStrong {
             return;
         }
 
-        crate::parser::HtmlSubstitutionRenderer {}
-            .render_quoted_substitution(type_, scope, attrlist, id, body, dest);
+        crate::parser::HtmlInlineRenderer {}.render_styled(type_, scope, attrlist, id, body, dest);
     }
 }
 
@@ -803,7 +802,7 @@ fn render_with_reproduces_the_built_in_html_rendering() {
     assert_eq!(
         simple
             .content()
-            .render_with(&crate::parser::HtmlSubstitutionRenderer {}, &parser),
+            .render_with(&crate::parser::HtmlInlineRenderer {}, &parser),
         simple.content().rendered_html()
     );
 }
@@ -853,7 +852,7 @@ fn render_with_uses_the_attributes_the_content_was_parsed_under() {
     assert_eq!(paragraphs.len(), 2);
 
     let render = |content: &crate::content::Content<'_>| {
-        content.render_with(&crate::parser::HtmlSubstitutionRenderer {}, &parser)
+        content.render_with(&crate::parser::HtmlInlineRenderer {}, &parser)
     };
 
     let first = render(paragraphs[0]);
@@ -904,7 +903,7 @@ fn render_with_takes_document_attributes_from_the_content() {
     // A different parser entirely, which never saw `:icons: font`.
     let other = crate::Parser::default();
 
-    let rendered = content.render_with(&crate::parser::HtmlSubstitutionRenderer {}, &other);
+    let rendered = content.render_with(&crate::parser::HtmlInlineRenderer {}, &other);
 
     // Still a font icon: the value in effect where the content was written
     // wins over anything the supplied parser knows.

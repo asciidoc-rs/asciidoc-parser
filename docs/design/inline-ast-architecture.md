@@ -48,9 +48,9 @@ The substitution pipeline
 [`substitution_step.rs`](../../parser/src/content/substitution_step.rs),
 [`macros.rs`](../../parser/src/content/macros.rs)) detects syntax with regexes and, for
 each construct it recognizes, calls a method on
-[`InlineSubstitutionRenderer`](../../parser/src/parser/inline_substitution_renderer.rs)
+[`InlineRenderer`](../../parser/src/parser/inline_renderer.rs)
 that writes **final output markup directly into a `&mut String`**. The default
-`HtmlSubstitutionRenderer` emits HTML. There is no point at which inline structure exists
+`HtmlInlineRenderer` emits HTML. There is no point at which inline structure exists
 as data — it is recognized and rendered to string in the same motion.
 
 The entire public inline surface is a flat string:
@@ -102,7 +102,7 @@ tree**. Two things make now the right time:
    ASG core (span / ref / literal, with `variant` and `form`) and extended to cover the
    inline constructs this crate already supports (images, footnotes, UI macros, index
    terms, callouts, anchors, line breaks, STEM).
-2. **Rendering is a fold over the AST.** `InlineSubstitutionRenderer` (or its successor)
+2. **Rendering is a fold over the AST.** `InlineRenderer` (or its successor)
    becomes an AST walker. HTML output is one projection; the ASG JSON is another.
 3. **Byte-for-byte HTML parity** with today's output throughout the migration, guarded by
    the existing ~277 `.rendered()` golden-string assertions used as an oracle.
@@ -450,10 +450,10 @@ changes is the **sink**: instead of each recognized construct calling
   and produce a list of nodes (each step refines the tree: `SpecialCharacters` splits
   `Text` runs into `Text` + `CharRef`; `Quotes` wraps runs in `Styled`; `Macros` replaces
   matched spans with `Ref`/`Image`/`Footnote`/…; etc.).
-- `InlineSubstitutionRenderer` is repurposed from a *string emitter invoked during
+- `InlineRenderer` is repurposed from a *string emitter invoked during
   substitution* into an **AST-walking backend** invoked by the fold. Its method set
-  (`render_xref`, `render_image`, `render_quoted_substitution`, …) maps almost 1:1 onto
-  node kinds, so `HtmlSubstitutionRenderer` largely survives — its methods now receive a
+  (`render_xref`, `render_image`, `render_styled`, …) maps almost 1:1 onto
+  node kinds, so `HtmlInlineRenderer` largely survives — its methods now receive a
   node (or node fields) and append HTML, instead of being called mid-regex.
 
 Two construction strategies were considered:
@@ -587,29 +587,42 @@ populate in two stages:
 
 ### 4.6 Renderer seam changes (breaking, intentional)
 
-`InlineSubstitutionRenderer` and its ~13 `*RenderParams` structs are public and documented
+`InlineRenderer` and its eight `*RenderParams` structs are public and documented
 as the alternate-backend seam. They will change shape (from "called during substitution
 with a `&mut String`" to "called by the fold with a node"). This is an accepted pre-1.0
 break. The method *set* is largely preserved, so a downstream implementer's mental model
 survives; the `*RenderParams` structs are replaced by (or become borrowed views of) the
-corresponding node types.
+corresponding node types. The **naming** half of that break has landed (see the Decision
+below); the signature reshape has not.
 
-> **Decision (Phase 5): rename the trait to `InlineRenderer`.** The word "substitution"
-> names the very mechanism this work removes — post-migration the trait is no longer invoked
-> *during substitution*; it is an AST-walking backend invoked by the fold, so the old name
-> would misdescribe it. `Inline` and `Renderer` both stay accurate, so only the middle word
-> is dropped. The cascade is small and lands in the same Phase 5 pass:
+> **Decision (Phase 5): rename the trait to `InlineRenderer`.** ✅ **Landed.** The word
+> "substitution" names the very mechanism this work removes — post-migration the trait is no
+> longer invoked *during substitution*; it is an AST-walking backend invoked by the fold, so
+> the old name would misdescribe it. `Inline` and `Renderer` both stay accurate, so only the
+> middle word is dropped. The cascade is small:
 >
 > - `InlineSubstitutionRenderer` → **`InlineRenderer`**; `HtmlSubstitutionRenderer` →
->   **`HtmlInlineRenderer`**.
+>   **`HtmlInlineRenderer`**. ✅
+> - `Parser::with_inline_substitution_renderer` → **`with_inline_renderer`**, and the two
+>   modules named after the old trait (`parser/src/parser/`, `parser/src/tests/`) →
+>   `inline_renderer.rs`. ✅
 > - The one substitution-named method, `render_quoted_substitution`, is renamed to match its
->   node kind (e.g. `render_styled`).
+>   node kind: **`render_styled`**. ✅
 > - The `*RenderParams` structs fold into the node types (e.g. `XrefRenderParams` → the
->   `Ref` node), so most are removed rather than renamed.
+>   `Ref` node), so most are removed rather than renamed. ⬜ *Not yet* — this is the
+>   signature reshape, and it is the remaining Phase 5 slice.
 >
 > Considered and set aside: `InlineBackend` (introduces a "backend" noun not used elsewhere),
 > `InlineNodeRenderer` ("node" is redundant with "inline"), `InlineConverter` (the crate has
 > already committed to "renderer" vocabulary).
+>
+> **A note on the old names in this document.** The rename swept this document's prose as
+> well as the code, including the "*landed as*" notes of increments that predate it. Those
+> notes are otherwise left as written — but a symbol name is a pointer to something that
+> still exists, and leaving twenty dangling ones behind would make the record harder to read,
+> not more faithful. So a `render_styled` or an `HtmlInlineRenderer` in a note dated before
+> this rename is the *current* name of what that note described, not the name it was written
+> with. (Names in `CHANGELOG.md` are **not** swept: those describe APIs as released.)
 
 ---
 
@@ -801,9 +814,9 @@ Each phase is a reviewable unit with a clear exit gate.
   while the *asserted output strings* are left untouched, so the oracle still pins the same
   bytes. The rename is **name-only**: the accessor still returns exactly what it returned
   before, including the output of a custom
-  [`InlineSubstitutionRenderer`](../../parser/src/parser/inline_substitution_renderer.rs)
+  [`InlineRenderer`](../../parser/src/parser/inline_renderer.rs)
   installed via
-  [`with_inline_substitution_renderer`](../../parser/src/parser/parser.rs) — the two changes
+  [`with_inline_renderer`](../../parser/src/parser/parser.rs) — the two changes
   the new name ultimately implies (making `rendered_html()` a *fold* of the tree, and
   dropping the parse-time renderer so it is *always* the built-in HTML backend) are the
   deferred remainder of Phase 2 and Phase 4, unchanged by this step. The `render_with` /
@@ -855,7 +868,7 @@ Each phase is a reviewable unit with a clear exit gate.
   consumed, the boundary prefix is kept, and an attributed span (`[.role]#…#`) parses and
   **retains its own `Attrlist<'src>`** (self-describing — better than the recorder's
   `attrs: None`), so [`fold_html`](../../parser/src/content/inline_builder.rs) renders it
-  through the same `render_quoted_substitution` the string step calls. A broad differential
+  through the same `render_styled` the string step calls. A broad differential
   corpus asserts the fold reproduces the string pipeline's output through the quotes step
   byte-for-byte (nesting, unconstrained forms, smart quotes, super/subscript, roles/ids,
   escapes, specials adjacent to delimiters, multi-line runs), alongside structural precise-span
@@ -885,7 +898,7 @@ Each phase is a reviewable unit with a clear exit gate.
   (the `w` in `w--`, the letters around a `w'w` apostrophe) stays outside the consumed range and
   is kept by the surrounding gaps, and an escape (`\(C)`) drops its backslash and wraps nothing.
   Each leaf is sliced back to a precise `'src` span. The fold reconstructs the replacement's
-  [`CharacterReplacementType`](../../parser/src/parser/inline_substitution_renderer.rs) from its
+  [`CharacterReplacementType`](../../parser/src/parser/inline_renderer.rs) from its
   logical value (a bijection) and renders through the same `render_character_replacement` /
   `render_line_break` the string step calls, so its output is byte-identical. A broad
   differential corpus pins symbols, dashes, ellipsis, apostrophes, boundary-straddling arrows
@@ -1124,7 +1137,7 @@ Each phase is a reviewable unit with a clear exit gate.
   [`Ref::xrefstyle`](../../parser/src/inlines/ref_node.rs) field (`Option<XrefStyle>`) carries a
   `xrefstyle=` override. As with the `<<other#frag>>` half, this needed no consumer to pin its
   shape — `window`/`roles` already existed as plain fields (not an `Attrlist<'src>`) because
-  [`XrefRenderParams`](../../parser/src/parser/inline_substitution_renderer.rs) itself takes them
+  [`XrefRenderParams`](../../parser/src/parser/inline_renderer.rs) itself takes them
   that way, not a borrowed attribute list, so the node stores exactly what the fold already needs.
   When the attrlist parse finds no named attribute — the sole positional value is the whole
   normalized text — the `=` was incidental (mirroring Asciidoctor's own
@@ -1329,7 +1342,7 @@ Each phase is a reviewable unit with a clear exit gate.
   body unescapes an escaped `\]`, as every other macro family's bracket content does, which makes the
   unescaped case owned instead); the double-plus and double-dollar forms resolve to
   `SubstitutionGroup::Verbatim` (special characters only) and are run through the real substitution
-  pipeline rather than hand-escaped, so a custom `InlineSubstitutionRenderer`'s escaping is honored —
+  pipeline rather than hand-escaped, so a custom `InlineRenderer`'s escaping is honored —
   the cost is an owned `Raw` value instead of a borrow.
 
   Three forms are deferred, each documented and pinned by a divergence test: an
@@ -1519,7 +1532,7 @@ Each phase is a reviewable unit with a clear exit gate.
   *Step 5d landed as (inline STEM → `Stem`, the first of 5d's four deferred forms):* a new
   [`apply_stem`](../../parser/src/content/inline_builder/stem_step.rs) step recognizes inline STEM
   macros (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) as a [`Stem`](../../parser/src/inlines/stem.rs)
-  node, folding through the same `render_quoted_substitution` the string pipeline's passthrough-restore
+  node, folding through the same `render_styled` the string pipeline's passthrough-restore
   step calls for a STEM entry, so the output is byte-for-byte identical. STEM is an **implicit
   passthrough** — `Passthroughs::extract_from` extracts it last, after both passthrough-macro passes, so
   that a passthrough placeholder nested inside a STEM expression survives — and `apply_stem` mirrors that
@@ -1534,10 +1547,10 @@ Each phase is a reviewable unit with a clear exit gate.
   has its legacy `latexmath` `$…$` wrapper dropped, and is run through the real substitution pipeline
   under its resolved substitution group ([`SubstitutionGroup::Stem`](../../parser/src/content/substitution_group.rs),
   special characters only, for a bare macro) via the passthrough step's own `passthrough_text` helper
-  (now shared `pub(super)`) — so a custom `InlineSubstitutionRenderer`'s escaping is honored exactly as it
+  (now shared `pub(super)`) — so a custom `InlineRenderer`'s escaping is honored exactly as it
   would be for the string pipeline's own restore step, at the cost of an owned value rather than a `'src`
   borrow (the same trade-off the `++…++`/`$$…$$` passthrough forms make). The fold then passes that value
-  straight through as `render_quoted_substitution`'s body, with no attribute list or id (the macro's
+  straight through as `render_styled`'s body, with no attribute list or id (the macro's
   pattern captures neither). The Phase-0 node doc (which described `value` as "the raw expression,
   carried through verbatim") was updated to match this decision.
 
@@ -1596,7 +1609,7 @@ Each phase is a reviewable unit with a clear exit gate.
   shared `pub(crate)`) — each as a [`Styled`](../../parser/src/inlines/styled.rs) node (`Code` for
   monospace, `Unquoted` otherwise; always `Unconstrained`) whose attrlist is parsed the same way an
   attributed quote's is (the quotes step's `attributes_of`, now shared `pub(super)`), folding through the
-  same `render_quoted_substitution` `PassthroughRestoreReplacer` calls when its stored passthrough carries
+  same `render_styled` `PassthroughRestoreReplacer` calls when its stored passthrough carries
   a `type_`, so the output is byte-for-byte identical. The bare forms run as a genuinely **second pass**
   ([`apply_bare_attrlisted_pass_level`](../../parser/src/content/inline_builder/passthrough_step.rs)) over
   what the delimited pass leaves behind, mirroring `Passthroughs::extract_from`'s own two-regex order
@@ -3590,7 +3603,7 @@ Each phase is a reviewable unit with a clear exit gate.
   [`special_entity`](../../parser/src/content/inline_builder/quotes.rs) has always made for an
   escaped special — a custom backend changes what the fold *emits*, not the recognition the AsciiDoc
   patterns were written against — and `replacement_entity_matches_the_built_in_renderer` pins the
-  table against `HtmlSubstitutionRenderer` so the two cannot drift. The replacements step's own rule
+  table against `HtmlInlineRenderer` so the two cannot drift. The replacements step's own rule
   loop gains the same fidelity as a side effect: a later rule now matches over an earlier one's
   emitted bytes exactly as the string pipeline's sequential passes do, instead of over a placeholder.
 
@@ -4455,7 +4468,7 @@ Each phase is a reviewable unit with a clear exit gate.
   of that node emits**: a `Raw` leaf's is its `value`, which the fold emits verbatim (so it is
   borrowed, not rendered); a `Stem` leaf's is
   [`fold_stem`](../../parser/src/content/inline_builder/fold.rs)'s own output — the same
-  `render_quoted_substitution` call, over the already-substituted `value` with no attribute list or
+  `render_styled` call, over the already-substituted `value` with no attribute list or
   id, that `PassthroughRestoreReplacer` makes for a STEM entry. Reusing that one function is what
   keeps the restore and the fold from drifting, and a unit test pins the two helpers to the same set.
   With the pair in place, the two sites the link families use —
@@ -4690,8 +4703,8 @@ Each phase is a reviewable unit with a clear exit gate.
   [`restore_masked_passthroughs`](../../parser/src/content/inline_builder/macros/links.rs) already
   produces in the course of splicing, now kept), and the built-in renderer re-masks exactly those
   ranges into index-keyed sentinel-shaped tokens, resolves, and splices the bodies back
-  ([`mask_restored_ranges`](../../parser/src/parser/inline_substitution_renderer.rs) /
-  [`splice_restored_bodies`](../../parser/src/parser/inline_substitution_renderer.rs) — index-keyed
+  ([`mask_restored_ranges`](../../parser/src/parser/inline_renderer.rs) /
+  [`splice_restored_bodies`](../../parser/src/parser/inline_renderer.rs) — index-keyed
   as `restore_to` is, so a token the resolver's `..` arithmetic consumes is simply dropped, in
   both pipelines). The bracket's own two `web_path`-bound values ride the same mechanism through
   the attribute list:
@@ -4973,7 +4986,7 @@ Each phase is a reviewable unit with a clear exit gate.
   not build, so it reaches the flow through nothing. The link and cross-reference families capture
   their own [`Attrlist<'src>`](../../parser/src/attributes/attrlist.rs) because a role, an id, or a
   `window=` there changes what the fold emits; an index term's whole render surface is
-  [`IndexTermRenderParams`](../../parser/src/parser/inline_substitution_renderer.rs), which carries
+  [`IndexTermRenderParams`](../../parser/src/parser/inline_renderer.rs), which carries
   the shown term and nothing else. So a new
   [`shown_macro_term`](../../parser/src/content/inline_builder/macros/indexterm.rs) *consumes* the
   list where [`InlineIndextermReplacer`](../../parser/src/content/macros.rs) consumes it — the
@@ -5102,7 +5115,7 @@ Each phase is a reviewable unit with a clear exit gate.
   [`Footnote`](../../parser/src/inlines/footnote.rs) already carry, and
   [`fold_index_term`](../../parser/src/content/inline_builder/fold.rs) folds it into the
   already-substituted string
-  [`IndexTermRenderParams`](../../parser/src/parser/inline_substitution_renderer.rs) takes —
+  [`IndexTermRenderParams`](../../parser/src/parser/inline_renderer.rs) takes —
   the relationship [`fold_html`](../../parser/src/content/inline_builder/fold.rs)'s own
   `link_text` has to `Ref::children`, reached for the same reason. Because the fold uses the
   surrounding flow's renderer, the enclosed span is rendered by a *custom* backend too, where
@@ -5512,7 +5525,7 @@ Each phase is a reviewable unit with a clear exit gate.
   template" now has a corpus behind it rather than a design argument. A second test pins the
   property `render_with` will rest on (§3.3.1): the same tree folded twice, and folded through a
   renderer handed out as a shared `Rc` the way
-  [`Parser::with_inline_substitution_renderer`](../../parser/src/parser/parser.rs) installs one,
+  [`Parser::with_inline_renderer`](../../parser/src/parser/parser.rs) installs one,
   gives the same bytes. This is test-only: nothing is wired in, and the corpus-wide fold-parity
   audit is unchanged.
 
@@ -5590,7 +5603,7 @@ Each phase is a reviewable unit with a clear exit gate.
   into. It now builds **both**, from the same range: `children` is the shown text's authoritative
   form (a term's text is a region of the document, not an opaque string), and `terms` carries the
   same text as the single string
-  [`IndexTermRenderParams`](../../parser/src/parser/inline_substitution_renderer.rs) takes whenever
+  [`IndexTermRenderParams`](../../parser/src/parser/inline_renderer.rs) takes whenever
   one can express it. The two agree by construction —
   [`shown_term_range`](../../parser/src/content/inline_builder/macros/indexterm.rs) answers the
   normalization as offsets and `emit_shown_term_range` performs the two remaining rewrites
@@ -9636,7 +9649,7 @@ Each phase is a reviewable unit with a clear exit gate.
        which together carry the two sites the link families use. The invariant is that a restored
        body is exactly what the *fold* of that node emits, so a `Stem`'s comes from
        [`fold_stem`](../../parser/src/content/inline_builder/fold.rs) itself — the same
-       `render_quoted_substitution` call `PassthroughRestoreReplacer` makes — and the two
+       `render_styled` call `PassthroughRestoreReplacer` makes — and the two
        directions cannot drift. Unlike its passthrough sibling this one needs no security
        divergence: a STEM body is restored *wrapped* in its notation's delimiters, so it cannot
        smuggle a live scheme. The **`image:`/`icon:` family is deliberately left out** and its
@@ -9784,7 +9797,7 @@ Each phase is a reviewable unit with a clear exit gate.
        piece of it whose note named a blocker: an `indexterm2:[…]` argument carrying an `=`,
        deferred at part 4b "until the node can hold an `Attrlist<'src>`". The blocker had lapsed —
        an index term's whole render surface is
-       [`IndexTermRenderParams`](../../parser/src/parser/inline_substitution_renderer.rs), which
+       [`IndexTermRenderParams`](../../parser/src/parser/inline_renderer.rs), which
        carries the shown term and nothing else, so the list decides only *which* of the argument's
        own bytes are shown and is **consumed** rather than carried. A new
        [`shown_macro_term`](../../parser/src/content/inline_builder/macros/indexterm.rs) does that
@@ -10946,7 +10959,7 @@ Each phase is a reviewable unit with a clear exit gate.
      - ℹ️ **`Document::render_to` is not being built.** It appears in §3.3.1 only as an
        unspecified parenthetical beside `render_with` — no return type, no account of what it
        would assemble — and it does not survive being specified. The renderer it would take is
-       an [`InlineSubstitutionRenderer`](../../parser/src/parser/inline_substitution_renderer.rs),
+       an [`InlineRenderer`](../../parser/src/parser/inline_renderer.rs),
        whose seventeen methods are *inline*-scoped to the last one: fifteen `render_*` for
        inline constructs, plus the two URI resolvers an inline image and an inline icon need
        (`image_uri`, `icon_uri`). There is no `render_paragraph`, no `render_section`, no
@@ -10980,9 +10993,46 @@ Each phase is a reviewable unit with a clear exit gate.
        precise-span tests are re-pointed at the production seam rather than deleted. See the
        step's own "landed as" note above.
 
-- **Phase 5 — renderer seam v2.** Reshape `InlineSubstitutionRenderer` into the AST-walking
-  form and rename it to `InlineRenderer` (§4.6); update the README backend story.
+- **Phase 5 — renderer seam v2.** 🔶 **In progress.** Reshape the renderer trait into
+  the AST-walking form and rename it to `InlineRenderer` (§4.6); update the README backend
+  story.
   *Exit:* seam documented; a smoke-test alternate renderer (in tests) walks the tree.
+
+  *Slice 1 landed as (`InlineSubstitutionRenderer` → `InlineRenderer`):* §4.6's Decision,
+  carried out. Four identifiers and two module files, and **nothing else** — no signature
+  changed, no default body changed, no asserted output string changed:
+
+  - `InlineSubstitutionRenderer` → [`InlineRenderer`](../../parser/src/parser/inline_renderer.rs)
+    and `HtmlSubstitutionRenderer` → `HtmlInlineRenderer`.
+  - `Parser::with_inline_substitution_renderer` →
+    [`with_inline_renderer`](../../parser/src/parser/parser.rs).
+  - `render_quoted_substitution` → **`render_styled`**, the one method whose name still
+    said *substitution*. It now names the node it renders
+    ([`Styled`](../../parser/src/inlines/styled.rs)) rather than the pipeline step that used
+    to call it — which is the whole point of the rename, in miniature.
+  - Both modules named after the old trait
+    ([`parser/src/parser/inline_renderer.rs`](../../parser/src/parser/inline_renderer.rs),
+    [`parser/src/tests/inline_renderer.rs`](../../parser/src/tests/inline_renderer.rs)).
+
+  *Why the naming half lands on its own.* It is the half of §4.6's accepted pre-1.0 break
+  that costs nothing to verify. A rename is total or it does not compile, so the compiler
+  discharges the entire risk of *completeness*; and because every signature is untouched, the
+  §5.3 oracle pins the same bytes straight through it — all 5,473 tests pass with not one
+  expected-output string edited. The reshape that follows is the opposite kind of change (each
+  method's arguments become a node), so keeping the two apart means the diff a reviewer reads
+  for the reshape contains only the reshape.
+
+  *The exit gate's smoke test is already standing.* §5.4 nominated
+  [`tests/inline_renderer.rs`](../../parser/src/tests/inline_renderer.rs)'s partial-override
+  renderer as the template, and #1324 added `BracketStrong`, which implements exactly one
+  method and is driven by `Content::render_with` — i.e. by a **fold of the tree**, not by the
+  substitution pipeline. So an alternate renderer already walks the tree; what Phase 5 still
+  owes it is a seam whose *shape* says so.
+
+  *What still defers:* the signature reshape — folding the eight `*RenderParams` structs into
+  the node types, so a method receives a node instead of a `&mut String` mid-regex — and then
+  Landing. (Step 7's `Document::to_asg()` also remains, blocked on reading the Eclipse ASG
+  schema.)
 
 - **Landing — preflight + merge to `main`.** Preflight the whole branch against the
   `asciidoctor` port (§5.1) to confirm the public API and reshaped seam serve a real
@@ -11016,7 +11066,7 @@ regressions the hand-written assertions don't cover.
   (nesting, node kinds, per-node spans, resolved xref destinations). These are net-new, not
   replacements.
 - The alternate test renderer already in the suite
-  ([`tests/inline_substitution_renderer.rs`](../../parser/src/tests/inline_substitution_renderer.rs))
+  ([`tests/inline_renderer.rs`](../../parser/src/tests/inline_renderer.rs))
   becomes the template for testing the reshaped seam in Phase 5.
 - Only in a final cleanup (post-landing, optional) would any HTML-string test be restated
   structurally — and only where the structural form is strictly more precise.

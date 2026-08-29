@@ -138,9 +138,9 @@ fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
 /// # Concealed vs. visible, and the recognition boundary
 ///
 /// A **concealed** term (`indexterm:[…]`, `(((…)))`) renders to *nothing* —
-/// [`render_index_term`](crate::parser::InlineSubstitutionRenderer::render_index_term) emits
-/// no output for it — so, much like an inline anchor whose output is a function
-/// of its id alone (see
+/// [`render_index_term`](crate::parser::InlineRenderer::render_index_term)
+/// emits no output for it — so, much like an inline anchor whose output is a
+/// function of its id alone (see
 /// [`find_anchor_matches`](super::anchors::find_anchor_matches)), it is
 /// recognized regardless of what its argument crosses; the node simply carries
 /// an empty `terms`. (The one exception is the string replacer's
@@ -908,7 +908,7 @@ mod tests {
     use crate::{
         Span,
         inlines::{IndexTerm, InlineNode},
-        parser::HtmlSubstitutionRenderer,
+        parser::HtmlInlineRenderer,
     };
 
     /// Asserts that `node` is an [`IndexTerm`](InlineNode::IndexTerm),
@@ -987,7 +987,7 @@ mod tests {
             "_indexterm2:[y] in em_",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -1095,7 +1095,7 @@ mod tests {
                 "an all-concealed level must be left literal for {source:?}: {nodes:?}"
             );
 
-            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+            let folded = fold_html(&nodes, &HtmlInlineRenderer {});
             assert_eq!(folded, source, "left-literal fold for {source:?}");
             assert_eq!(
                 golden_macros(source),
@@ -1114,7 +1114,7 @@ mod tests {
         // reproduces this byte-for-byte, so `leading (((coffee)))` folds to
         // `leading `, not the literal source.
         for source in ["leading (((coffee)))", "((a)) (((b)))"] {
-            let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+            let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
             assert_eq!(
                 folded,
                 golden_macros(source),
@@ -1231,7 +1231,7 @@ mod tests {
             "((*a* b)) and indexterm:[c]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -1325,7 +1325,7 @@ mod tests {
             "x indexterm:[Coffee,region=Kona] y",
         ] {
             assert_eq!(
-                fold_html(&build_src(Span::new(fixture)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(fixture)), &HtmlInlineRenderer {}),
                 golden_macros(fixture),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
@@ -1392,7 +1392,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &crate::Parser::default().render_context()
                 ),
                 rendered,
@@ -1419,7 +1419,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     section.section_title_inlines(),
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &crate::Parser::default().render_context()
                 ),
                 section.section_title(),
@@ -1447,7 +1447,7 @@ mod tests {
             "a term crossing a span must be left unrecognized: {nodes:?}"
         );
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
         assert!(folded.contains("indexterm2:["));
         assert_eq!(golden_macros(source), "<strong>bold</strong> term");
     }
@@ -1498,7 +1498,7 @@ mod tests {
             "((a *bold* term)) end",
         ] {
             assert_eq!(
-                fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -1540,7 +1540,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &crate::Parser::default().render_context()
                 ),
                 rendered,
@@ -1570,7 +1570,7 @@ mod tests {
             let nodes = build_src(Span::new(source));
 
             assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_macros(source),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -1602,7 +1602,7 @@ mod tests {
             let nodes = build_src(Span::new(source));
 
             assert_ne!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_macros(source),
                 "expected a divergence for {source:?}"
             );
@@ -1627,7 +1627,7 @@ mod tests {
             let nodes = build_src(Span::new(source));
 
             assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_macros(source),
                 "expected parity for {source:?}"
             );
@@ -1647,7 +1647,7 @@ mod tests {
         use crate::{
             Parser,
             content::inline_builder::build,
-            parser::{HtmlSubstitutionRenderer, ModificationContext},
+            parser::{HtmlInlineRenderer, ModificationContext},
         };
 
         let parser = Parser::default()
@@ -1692,7 +1692,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     &nodes,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &parser.render_context()
                 ),
                 crate::content::inline_builder::snapshot::recorded("indexterm_expanded", source),
@@ -1796,7 +1796,7 @@ mod tests {
             r"(((y))) and \(((x)))",
         ] {
             assert_eq!(
-                fold_html(&build_src(Span::new(fixture)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(fixture)), &HtmlInlineRenderer {}),
                 golden_macros(fixture),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
@@ -1858,7 +1858,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &crate::Parser::default().render_context()
                 ),
                 rendered,
@@ -1882,7 +1882,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     section.section_title_inlines(),
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &crate::Parser::default().render_context()
                 ),
                 section.section_title(),
@@ -1928,7 +1928,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &crate::Parser::default().render_context()
                 ),
                 rendered,
@@ -1955,7 +1955,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     section.section_title_inlines(),
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &crate::Parser::default().render_context()
                 ),
                 section.section_title(),
@@ -2000,7 +2000,7 @@ mod tests {
             other => panic!("expected a paren-wrapped index term, got {other:?}"),
         }
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
         assert_eq!(folded, "(<strong>bold</strong> term)");
         assert_eq!(golden_macros(source), "(<strong>bold</strong> term)");
     }

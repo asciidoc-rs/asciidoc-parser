@@ -13,7 +13,7 @@ use crate::{
     content::{Content, SubstitutionGroup},
     inlines::InlineNode,
     internal::debug::DebugSliceReference,
-    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings},
+    parser::{InlineRenderer, ReferenceResolver, ReferenceWarnings},
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -576,7 +576,7 @@ impl<'src> QuoteBlock<'src> {
     pub(crate) fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         warnings: &mut ReferenceWarnings<'src>,
         parser: &Parser,
     ) {

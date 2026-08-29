@@ -142,7 +142,7 @@ increment closing a form no golden source exercises leaves the set unchanged).
 In `parser/src/content/substitution_group.rs`, inside `SubstitutionGroup::apply`:
 
 1. Force the seed on: `let tree_seed = if parser.build_inline_tree {` → `let tree_seed = if true {`.
-2. Just before `content.set_inlines(tree)`, fold the tree with `HtmlSubstitutionRenderer` and, when
+2. Just before `content.set_inlines(tree)`, fold the tree with `HtmlInlineRenderer` and, when
    the result differs from `content.rendered`, append `src` / `rendered` / `folded` to a log file —
    one `writeln!` per divergence, formatting all three with `{:?}` (see the third gotcha below).
 

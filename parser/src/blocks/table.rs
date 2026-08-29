@@ -12,8 +12,8 @@ use crate::{
     content::{Content, SubstitutionGroup},
     document::{Footnote, InterpretedValue, TocConfig, TocMode},
     parser::{
-        AttributeValue, InlineSubstitutionRenderer, ModificationContext, ReferenceResolver,
-        ReferenceWarnings, ResolvedAttributes, SourceLine, built_in_attr, built_in_attrs_iter,
+        AttributeValue, InlineRenderer, ModificationContext, ReferenceResolver, ReferenceWarnings,
+        ResolvedAttributes, SourceLine, built_in_attr, built_in_attrs_iter,
         preprocessor::preprocess_with_initial_file_name,
     },
     span::MatchedItem,
@@ -552,7 +552,7 @@ impl<'src> TableBlock<'src> {
     pub(crate) fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         warnings: &mut ReferenceWarnings<'src>,
         parser: &Parser,
     ) {
@@ -2330,7 +2330,7 @@ impl<'src> TableCell<'src> {
     fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         warnings: &mut ReferenceWarnings<'src>,
         parser: &Parser,
     ) {
@@ -2541,7 +2541,7 @@ impl<'src> AsciiDocCell<'src> {
     fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         warnings: &mut ReferenceWarnings<'src>,
         source: Span<'src>,
         parser: &Parser,
@@ -3314,7 +3314,7 @@ mod tests {
         content::FootnoteDeferred,
         document::Footnote,
         parser::{
-            HtmlSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
+            HtmlInlineRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
             ResolvedReference, SourceLine,
         },
     };
@@ -3421,7 +3421,7 @@ mod tests {
 
         cell.resolve_references(
             &NoopResolver,
-            &HtmlSubstitutionRenderer {},
+            &HtmlInlineRenderer {},
             &mut warnings,
             Span::new(""),
             &crate::Parser::default(),

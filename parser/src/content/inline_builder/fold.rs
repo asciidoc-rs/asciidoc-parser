@@ -10,7 +10,7 @@ use crate::{
     },
     parser::{
         CalloutGuard as ParserCalloutGuard, CalloutRenderParams, FootnoteRenderParams,
-        IconRenderParams, ImageRenderParams, IndexTermRenderParams, InlineSubstitutionRenderer,
+        IconRenderParams, ImageRenderParams, IndexTermRenderParams, InlineRenderer,
         LinkRenderParams, MenuRenderParams, QuoteScope, QuoteType, RenderContext, SpecialCharacter,
         XrefRenderParams,
     },
@@ -39,7 +39,7 @@ use crate::{
 /// up.
 pub(crate) fn fold_html(
     nodes: &[InlineNode<'_>],
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &RenderContext,
 ) -> String {
     let mut out = String::new();
@@ -137,7 +137,7 @@ pub(crate) enum Xrefs<'a> {
 /// [`Footnote::resolve_references`]: crate::document::Footnote::resolve_references
 pub(crate) fn fold_deferring_xrefs(
     nodes: &[InlineNode<'_>],
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &RenderContext,
 ) -> (String, Vec<XrefSegment>) {
     let mut out = String::new();
@@ -190,7 +190,7 @@ pub(crate) fn fold_deferring_xrefs(
 /// cross-reference's own display text, is omitted there too.
 pub(crate) fn fold_reference_text(
     nodes: &[InlineNode<'_>],
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &RenderContext,
 ) -> String {
     let mut out = String::new();
@@ -216,7 +216,7 @@ pub(crate) fn fold_reference_text(
 /// markers wherever they sit — see [`fold_reference_text`].
 fn fold_into_html(
     nodes: &[InlineNode<'_>],
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &RenderContext,
     footnotes: Footnotes,
     xrefs: &mut Xrefs<'_>,
@@ -356,7 +356,7 @@ fn fold_into_html(
                     SpanForm::Unconstrained => QuoteScope::Unconstrained,
                 };
 
-                renderer.render_quoted_substitution(
+                renderer.render_styled(
                     quote_type_of(styled.variant),
                     scope,
                     styled.attrs.clone(),
@@ -390,7 +390,7 @@ fn fold_into_html(
 /// Appends `ch` to `out`, routing the three special characters through
 /// `renderer` (so a custom renderer's escaping is honored) and pushing any
 /// other character verbatim.
-pub(super) fn render_char(ch: char, renderer: &dyn InlineSubstitutionRenderer, out: &mut String) {
+pub(super) fn render_char(ch: char, renderer: &dyn InlineRenderer, out: &mut String) {
     let type_ = match ch {
         '<' => SpecialCharacter::Lt,
         '>' => SpecialCharacter::Gt,
@@ -415,7 +415,7 @@ pub(super) fn render_char(ch: char, renderer: &dyn InlineSubstitutionRenderer, o
 /// captured it.
 fn fold_image(
     image: &Image<'_>,
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &RenderContext,
     out: &mut String,
 ) {
@@ -473,12 +473,7 @@ fn fold_image(
 /// menu path the macro step captured, so the output is byte-for-byte identical.
 /// `context` is threaded through because rendering a menu reads the document's
 /// `icons` attribute to choose the caret between menu levels.
-fn fold_ui(
-    ui: &Ui<'_>,
-    renderer: &dyn InlineSubstitutionRenderer,
-    context: &RenderContext,
-    out: &mut String,
-) {
+fn fold_ui(ui: &Ui<'_>, renderer: &dyn InlineRenderer, context: &RenderContext, out: &mut String) {
     match &ui.kind {
         UiKind::Keyboard(keys) => {
             let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
@@ -519,7 +514,7 @@ fn fold_ui(
 /// or an empty one otherwise.
 fn fold_link(
     reference: &Ref<'_>,
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &RenderContext,
     footnotes: Footnotes,
     xrefs: &mut Xrefs<'_>,
@@ -582,7 +577,7 @@ fn fold_link(
 /// the tree.
 fn fold_xref(
     reference: &Ref<'_>,
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &RenderContext,
     footnotes: Footnotes,
     xrefs: &mut Xrefs<'_>,
@@ -671,7 +666,7 @@ fn fold_xref(
 /// string pipeline never passes it.
 fn fold_anchor(
     anchor: &Anchor<'_>,
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &RenderContext,
     footnotes: Footnotes,
     out: &mut String,
@@ -734,7 +729,7 @@ fn fold_anchor(
 /// exactly as an anchor's `reftext` is.
 fn fold_index_term(
     index_term: &IndexTerm<'_>,
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &RenderContext,
     footnotes: Footnotes,
     xrefs: &mut Xrefs<'_>,
@@ -782,11 +777,7 @@ fn fold_index_term(
 /// replacer, which renders a reference's `id` attribute only for the
 /// *defining* occurrence) or, unresolved (`number: None`), falls back to
 /// displaying its own `id` as the render params' `text`.
-fn fold_footnote(
-    footnote: &Footnote<'_>,
-    renderer: &dyn InlineSubstitutionRenderer,
-    out: &mut String,
-) {
+fn fold_footnote(footnote: &Footnote<'_>, renderer: &dyn InlineRenderer, out: &mut String) {
     let (index, id, text): (Option<&str>, Option<&str>, &str) = if footnote.is_reference {
         match footnote.number.as_deref() {
             Some(number) => (Some(number), None, ""),
@@ -816,7 +807,7 @@ fn fold_footnote(
 /// fold time, not carried alongside it.
 fn fold_callout(
     callout: &Callout<'_>,
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &RenderContext,
     out: &mut String,
 ) {
@@ -836,7 +827,7 @@ fn fold_callout(
 }
 
 /// Folds a [`Stem`](InlineNode::Stem) through the same
-/// `render_quoted_substitution` the string pipeline's passthrough-restore step
+/// `render_styled` the string pipeline's passthrough-restore step
 /// calls for a STEM entry (design §3.3.1's fold-time seam). The node's `value`
 /// already carries the resolved substitution group's output (special
 /// characters only, by default), so the fold passes it straight through as
@@ -851,7 +842,7 @@ fn fold_callout(
 /// directions cannot drift.
 pub(in crate::content::inline_builder) fn fold_stem(
     stem: &Stem<'_>,
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     out: &mut String,
 ) {
     let type_ = match stem.notation {
@@ -859,7 +850,7 @@ pub(in crate::content::inline_builder) fn fold_stem(
         StemNotation::LatexMath => QuoteType::LatexMath,
     };
 
-    renderer.render_quoted_substitution(
+    renderer.render_styled(
         type_,
         QuoteScope::Unconstrained,
         None,
@@ -883,8 +874,7 @@ mod tests {
         Parser, Span,
         inlines::{CharRef, Image, InlineNode, RawForm, RawOrigin, Ref, RefVariant},
         parser::{
-            HtmlSubstitutionRenderer, ModificationContext, ResolvedReference, XrefSignifier,
-            XrefStyle,
+            HtmlInlineRenderer, ModificationContext, ResolvedReference, XrefSignifier, XrefStyle,
         },
         strings::CowStr,
     };
@@ -943,7 +933,7 @@ mod tests {
             ),
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for (fixture, expected_reftext) in fixtures {
             // Two independent parsers, since a footnote's number is document
@@ -992,7 +982,7 @@ mod tests {
         };
 
         assert_eq!(
-            fold_html(&[raw], &HtmlSubstitutionRenderer {}),
+            fold_html(&[raw], &HtmlInlineRenderer {}),
             "<b>raw &amp;</b>"
         );
     }
@@ -1009,7 +999,7 @@ mod tests {
             location,
         };
 
-        assert_eq!(fold_html(&[node], &HtmlSubstitutionRenderer {}), "&#122;");
+        assert_eq!(fold_html(&[node], &HtmlInlineRenderer {}), "&#122;");
     }
 
     #[test]
@@ -1037,7 +1027,7 @@ mod tests {
 
         // The macro-built equivalent (which carries an attribute list) is the
         // oracle: the two must fold identically.
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
         let macro_built = fold_html(&build_src(location), &renderer);
 
         assert_eq!(fold_html(&[hand_built], &renderer), macro_built);
@@ -1063,7 +1053,7 @@ mod tests {
             location,
         });
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         assert!(
             fold_html(&[hand_built], &renderer).contains(r#"src="sunset.jpg""#),
@@ -1111,7 +1101,7 @@ mod tests {
         // in the document left set — not what was in effect where the
         // reference was written. Reading it at fold time would therefore
         // silently re-style a reference the string pipeline had already styled.
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         // A parser whose document-wide `xrefstyle` says `full`, which the
         // fold must ignore in both directions.
@@ -1145,7 +1135,7 @@ mod tests {
     fn fold_xref_honors_each_style_the_node_can_carry() {
         // The complement of the test above: a node carrying `Short` folds as
         // `Short`, with the document-wide `full` again ignored.
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
         let nodes = [resolved_xref_with_signifier(Some(XrefStyle::Short))];
 
         let parser = Parser::default().with_intrinsic_attribute(

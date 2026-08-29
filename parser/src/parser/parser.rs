@@ -14,7 +14,7 @@ use crate::{
     document::{Attribute, Catalog, InterpretedValue, RefType},
     parser::{
         AllowableValue, AttributeValue, DatetimeContext, DefaultPathResolver, DocinfoFileHandler,
-        HtmlSubstitutionRenderer, ImageFileHandler, IncludeFileHandler, InlineSubstitutionRenderer,
+        HtmlInlineRenderer, ImageFileHandler, IncludeFileHandler, InlineRenderer,
         ModificationContext, PathResolver, ReferenceTime, RenderContext, ResolvedAttributes,
         SafeMode, SourceLine, SourceMap, SvgFileHandler,
         built_in_attrs::{
@@ -76,9 +76,9 @@ pub struct Parser {
     /// Specifies how the basic raw text of a simple block will be converted to
     /// the format which will ultimately be presented in the final output.
     ///
-    /// Typically this is an [`HtmlSubstitutionRenderer`] but clients may
+    /// Typically this is an [`HtmlInlineRenderer`] but clients may
     /// provide alternative implementations.
-    pub(crate) renderer: Rc<dyn InlineSubstitutionRenderer>,
+    pub(crate) renderer: Rc<dyn InlineRenderer>,
 
     /// Specifies the name of the primary file to be parsed.
     pub(crate) primary_file_name: Option<String>,
@@ -546,7 +546,7 @@ impl Default for Parser {
             attribute_values: Arc::new(HashMap::new()),
             baseline_attribute_values: Arc::new(HashMap::new()),
             default_attribute_values: built_in_default_values(),
-            renderer: Rc::new(HtmlSubstitutionRenderer {}),
+            renderer: Rc::new(HtmlInlineRenderer {}),
             primary_file_name: None,
             path_resolver: Rc::new(DefaultPathResolver::default()),
             include_file_handler: None,
@@ -1364,13 +1364,13 @@ impl Parser {
     /// This is the **only** way a context is built, in or out of the crate:
     /// [`RenderContext`]'s own constructor is not reachable from outside
     /// [`parser`](crate::parser), and this is crate-private. A consumer
-    /// receives a context (as an [`InlineSubstitutionRenderer`], a
+    /// receives a context (as an [`InlineRenderer`], a
     /// [`PathResolver`], an [`ImageFileHandler`], or a [`SvgFileHandler`])
     /// rather than constructing one. If a downstream need to construct one
     /// appears — unit-testing a handler implementation is the likely one —
     /// this is what would be made public.
     ///
-    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+    /// [`InlineRenderer`]: crate::parser::InlineRenderer
     pub(crate) fn render_context(&self) -> RenderContext {
         RenderContext::new(self)
     }
@@ -2416,17 +2416,14 @@ impl Parser {
             })
     }
 
-    /// Replace the default [`InlineSubstitutionRenderer`] for this parser.
+    /// Replace the default [`InlineRenderer`] for this parser.
     ///
-    /// The default implementation of [`InlineSubstitutionRenderer`] that is
+    /// The default implementation of [`InlineRenderer`] that is
     /// provided is suitable for HTML5 rendering. If you are targeting a
     /// different back-end rendering, you will need to provide your own
     /// implementation and set it using this call before parsing.
     #[must_use]
-    pub fn with_inline_substitution_renderer<ISR: InlineSubstitutionRenderer + 'static>(
-        mut self,
-        renderer: ISR,
-    ) -> Self {
+    pub fn with_inline_renderer<ISR: InlineRenderer + 'static>(mut self, renderer: ISR) -> Self {
         self.renderer = Rc::new(renderer);
         self
     }
@@ -2624,15 +2621,15 @@ impl Parser {
     /// [`with_image_file_handler`].
     ///
     /// A renderer is handed a [`RenderContext`] rather than a parser, so a
-    /// custom [`InlineSubstitutionRenderer`] that resolves image URIs itself
+    /// custom [`InlineRenderer`] that resolves image URIs itself
     /// (rather than inheriting [`image_uri`]'s default `data-uri` embedding)
     /// reaches the handler through
     /// [`RenderContext::image_file_handler`] instead of here. This accessor is
     /// for a caller that holds the parser.
     ///
     /// [`ImageFileHandler`]: crate::parser::ImageFileHandler
-    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
-    /// [`image_uri`]: crate::parser::InlineSubstitutionRenderer::image_uri
+    /// [`InlineRenderer`]: crate::parser::InlineRenderer
+    /// [`image_uri`]: crate::parser::InlineRenderer::image_uri
     /// [`with_image_file_handler`]: Self::with_image_file_handler
     pub fn image_file_handler(&self) -> Option<&dyn ImageFileHandler> {
         self.image_file_handler.as_deref()
@@ -2644,15 +2641,15 @@ impl Parser {
     /// [`with_svg_file_handler`].
     ///
     /// A renderer is handed a [`RenderContext`] rather than a parser, so a
-    /// custom [`InlineSubstitutionRenderer`] that renders inline SVG images
+    /// custom [`InlineRenderer`] that renders inline SVG images
     /// itself (rather than inheriting [`render_image`]'s `opts=inline`
     /// handling) reaches the handler through
     /// [`RenderContext::svg_file_handler`] instead of here. This accessor is
     /// for a caller that holds the parser.
     ///
     /// [`SvgFileHandler`]: crate::parser::SvgFileHandler
-    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
-    /// [`render_image`]: crate::parser::InlineSubstitutionRenderer::render_image
+    /// [`InlineRenderer`]: crate::parser::InlineRenderer
+    /// [`render_image`]: crate::parser::InlineRenderer::render_image
     /// [`with_svg_file_handler`]: Self::with_svg_file_handler
     pub fn svg_file_handler(&self) -> Option<&dyn SvgFileHandler> {
         self.svg_file_handler.as_deref()
@@ -3463,8 +3460,8 @@ mod tests {
         attributes::Attrlist,
         blocks::Block,
         parser::{
-            CharacterReplacementType, IconRenderParams, ImageRenderParams,
-            InlineSubstitutionRenderer, LinkRenderParams, QuoteScope, QuoteType, SpecialCharacter,
+            CharacterReplacementType, IconRenderParams, ImageRenderParams, InlineRenderer,
+            LinkRenderParams, QuoteScope, QuoteType, SpecialCharacter,
         },
         tests::prelude::*,
     };
@@ -4506,7 +4503,7 @@ mod tests {
     #[derive(Debug)]
     struct TestRenderer;
 
-    impl InlineSubstitutionRenderer for TestRenderer {
+    impl InlineRenderer for TestRenderer {
         fn render_special_character(&self, type_: SpecialCharacter, dest: &mut String) {
             // Custom rendering: wrap special characters in brackets.
             match type_ {
@@ -4516,7 +4513,7 @@ mod tests {
             }
         }
 
-        fn render_quoted_substitution(
+        fn render_styled(
             &self,
             _type_: QuoteType,
             _scope: QuoteScope,
@@ -4605,8 +4602,8 @@ mod tests {
     }
 
     #[test]
-    fn with_inline_substitution_renderer() {
-        let mut parser = Parser::default().with_inline_substitution_renderer(TestRenderer);
+    fn with_inline_renderer() {
+        let mut parser = Parser::default().with_inline_renderer(TestRenderer);
 
         // Parse a simple document with special characters and a footnote.
         let doc = parser.parse("Hello & goodbye < world > test footnote:[a note]");
@@ -4631,7 +4628,7 @@ mod tests {
 
     #[test]
     fn custom_renderer_renders_unresolved_footnote() {
-        let mut parser = Parser::default().with_inline_substitution_renderer(TestRenderer);
+        let mut parser = Parser::default().with_inline_renderer(TestRenderer);
 
         // An unresolved footnote reference exercises the renderer's `None`
         // (no index) branch, which our custom renderer shows as

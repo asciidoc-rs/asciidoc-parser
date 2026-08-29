@@ -1197,7 +1197,7 @@ mod tests {
             inline_builder::{build, build_for_group},
         },
         inlines::{InlineNode, SpanForm, StyleVariant},
-        parser::HtmlSubstitutionRenderer,
+        parser::HtmlInlineRenderer,
         strings::CowStr,
     };
 
@@ -1277,7 +1277,7 @@ mod tests {
 
             let folded = fold_html(
                 &build(Span::new(fixture), &parser, None),
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
             );
 
             assert_eq!(
@@ -1296,7 +1296,7 @@ mod tests {
 
             let folded = fold_html(
                 &build(Span::new(fixture), &parser, None),
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
             );
 
             assert_eq!(
@@ -1318,7 +1318,7 @@ mod tests {
         for fixture in ["before{flag-on}after", "before{flag-off}after"] {
             let folded = fold_html(
                 &build(Span::new(fixture), &bool_parser, None),
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
             );
 
             assert_eq!(
@@ -1379,7 +1379,7 @@ mod tests {
                 "for {source:?}: {nodes:?}"
             );
             assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 expected,
                 "for {source:?}"
             );
@@ -1412,7 +1412,7 @@ mod tests {
         assert_raw(&nodes[2], ">");
 
         // The fold emits the tag verbatim, unescaped.
-        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "<b>");
+        assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), "<b>");
     }
 
     #[test]
@@ -1475,7 +1475,7 @@ mod tests {
         // did (`&lt;b&gt;`, its recorded rendering for this order) — the
         // documented `subs=attributes+` trick for inspecting a stored
         // attribute value.
-        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "&lt;b&gt;");
+        assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), "&lt;b&gt;");
     }
 
     #[test]
@@ -1498,7 +1498,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_attributes_with("{note}", &parser),
         );
     }
@@ -1516,7 +1516,7 @@ mod tests {
         let nodes = build(Span::new(source), &parser, None);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_attributes_with(source, &parser),
         );
     }
@@ -1611,7 +1611,7 @@ mod tests {
             let nodes = build(Span::new(source), &parser, None);
 
             assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_attributes_with(source, &parser),
                 "fold diverged from the string pipeline for {source:?}"
             );
@@ -1673,7 +1673,7 @@ mod tests {
         for fixture in fixtures {
             let folded = fold_html(
                 &build(Span::new(fixture), &Parser::default(), None),
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
             );
 
             assert_eq!(
@@ -1693,7 +1693,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             "1-2",
             "{nodes:?}"
         );
@@ -1710,22 +1710,14 @@ mod tests {
         // `counter2:n` advances the counter to `1` and splices no node;
         // `counter:n` then advances it again and displays `2`.
         assert_eq!(nodes.len(), 1);
-        assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
-            "2",
-            "{nodes:?}"
-        );
+        assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), "2", "{nodes:?}");
     }
 
     #[test]
     fn a_counter_directive_with_a_seed_starts_from_it() {
         let nodes = build(Span::new("{counter:n:9}"), &Parser::default(), None);
 
-        assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
-            "9",
-            "{nodes:?}"
-        );
+        assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), "9", "{nodes:?}");
     }
 
     #[test]
@@ -1745,7 +1737,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             "1 <strong>2</strong>",
             "{nodes:?}"
         );
@@ -1759,7 +1751,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             "<strong>1</strong> 2",
             "{nodes:?}"
         );
@@ -1798,7 +1790,7 @@ mod tests {
         let nodes = build(Span::new(source), &parser_with_missing_mode(mode), None);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_attributes_in(
                 &format!("attribute_refs_missing_{mode}"),
                 source,
@@ -1968,7 +1960,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             "keep\n<em>{nope}</em>\nkeep too",
             "{nodes:?}"
         );
@@ -1985,7 +1977,7 @@ mod tests {
         let source = "{counter:n}\n{undefined-thing} {counter:n}\n{counter:n}";
 
         let nodes = build(Span::new(source), &parser, None);
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
 
         assert_eq!(folded, "1\n3");
 
@@ -2046,7 +2038,7 @@ mod tests {
         assert_eq!(
             super::super::fold_html(
                 inlines,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &Parser::default().render_context()
             ),
             rendered,
@@ -2081,7 +2073,7 @@ mod tests {
         assert_eq!(
             super::super::fold_html(
                 inlines,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &Parser::default().render_context()
             ),
             rendered,
@@ -2101,7 +2093,7 @@ mod tests {
         let source = "_a\nb_ {undefined-thing}";
 
         let nodes = build(Span::new(source), &parser, None);
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
 
         assert!(
             folded.contains("{undefined-thing}"),
@@ -2124,7 +2116,7 @@ mod tests {
         let source = "_a\n{undefined-thing}\nb_";
 
         let nodes = build(Span::new(source), &parser, None);
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
 
         assert!(
             folded.contains("{undefined-thing}"),

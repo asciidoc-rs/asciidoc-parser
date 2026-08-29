@@ -16,7 +16,7 @@ pub struct Stem<'src> {
     /// rather than the untouched source slice: STEM is an implicit
     /// passthrough (extracted before every other step), so nothing further
     /// acts on this text before the fold wraps it via
-    /// `render_quoted_substitution`.
+    /// `render_styled`.
     ///
     /// [`SubstitutionGroup::Stem`]: crate::content::SubstitutionGroup::Stem
     pub value: CowStr<'src>,

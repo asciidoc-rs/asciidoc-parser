@@ -1077,7 +1077,7 @@ mod tests {
             inline_builder::{build, build_for_group, fold_html},
         },
         inlines::{CharRef, InlineNode, Ref, RefVariant},
-        parser::{HtmlSubstitutionRenderer, ModificationContext},
+        parser::{HtmlInlineRenderer, ModificationContext},
         strings::CowStr,
         warnings::WarningType,
     };
@@ -1115,11 +1115,7 @@ mod tests {
             // drop. (No `{source:?}` message: a multi-line assertion's message
             // argument is a failure-only region, which the coverage report
             // counts as an uncovered line in a file whose tests it measures.)
-            let folded = fold_html(
-                &nodes,
-                &HtmlSubstitutionRenderer {},
-                &parser.render_context(),
-            );
+            let folded = fold_html(&nodes, &HtmlInlineRenderer {}, &parser.render_context());
 
             assert_eq!(
                 folded,
@@ -1226,11 +1222,8 @@ mod tests {
                         None,
                     );
 
-                    let folded = fold_html(
-                        &nodes,
-                        &HtmlSubstitutionRenderer {},
-                        &parser.render_context(),
-                    );
+                    let folded =
+                        fold_html(&nodes, &HtmlInlineRenderer {}, &parser.render_context());
 
                     assert_eq!(
                         folded,
@@ -1274,11 +1267,7 @@ mod tests {
                 None,
             );
 
-            let folded = fold_html(
-                &nodes,
-                &HtmlSubstitutionRenderer {},
-                &parser.render_context(),
-            );
+            let folded = fold_html(&nodes, &HtmlInlineRenderer {}, &parser.render_context());
 
             assert_eq!(folded, content.rendered_html(), "{source:?}");
             assert!(folded.contains(expected), "{source:?}: {folded:?}");
@@ -1370,11 +1359,7 @@ mod tests {
             );
 
             assert_eq!(
-                fold_html(
-                    &nodes,
-                    &HtmlSubstitutionRenderer {},
-                    &parser.render_context()
-                ),
+                fold_html(&nodes, &HtmlInlineRenderer {}, &parser.render_context()),
                 crate::content::inline_builder::snapshot::recorded(
                     "build_for_group_restored_entity",
                     source
@@ -1428,7 +1413,7 @@ mod tests {
             assert_eq!(
                 fold_html(
                     &nodes,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &built_parser.render_context()
                 ),
                 crate::content::inline_builder::snapshot::recorded(
@@ -1554,7 +1539,7 @@ mod tests {
         ] {
             let folded = fold_html(
                 &build(Span::new(source), &Parser::default(), None),
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &Parser::default().render_context(),
             );
 

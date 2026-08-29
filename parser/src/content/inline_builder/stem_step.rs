@@ -113,7 +113,7 @@ fn subs_are_local(subs: &SubstitutionGroup) -> bool {
 /// through the real substitution pipeline under its resolved substitution
 /// group — [`SubstitutionGroup::Stem`] (special characters only) for a bare
 /// macro — via [`passthrough_text`], so a custom
-/// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)'s
+/// [`InlineRenderer`](crate::parser::InlineRenderer)'s
 /// escaping is honored exactly as it would be for the string pipeline's own
 /// restore step. The result becomes the node's `value`; the cost is an owned
 /// value rather than a `'src` borrow, since the pipeline's output is not
@@ -377,7 +377,7 @@ mod tests {
     use crate::{
         Parser, Span,
         inlines::{InlineNode, Stem, StemNotation},
-        parser::HtmlSubstitutionRenderer,
+        parser::HtmlInlineRenderer,
     };
 
     /// Asserts that `node` is a [`Stem`](InlineNode::Stem) of `notation`
@@ -463,7 +463,7 @@ mod tests {
         // Not stripped here (divergence): the golden fold *does* strip it.
         assert_stem(&nodes[0], StemNotation::LatexMath, "$x$");
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
         let golden = golden_passthroughs(source);
 
         assert_ne!(folded, golden);
@@ -547,7 +547,7 @@ mod tests {
             "an escaped STEM macro must not build a Stem node: {nodes:?}"
         );
 
-        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "stem:[x]");
+        assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), "stem:[x]");
     }
 
     #[test]
@@ -563,7 +563,7 @@ mod tests {
         assert_stem(&nodes[0], StemNotation::AsciiMath, "a &lt; b");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source)
         );
     }
@@ -585,7 +585,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source)
         );
     }
@@ -603,7 +603,7 @@ mod tests {
         assert_stem(&nodes[0], StemNotation::AsciiMath, "a < b");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source)
         );
     }
@@ -632,7 +632,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source)
         );
     }
@@ -652,7 +652,7 @@ mod tests {
         assert_stem(&nodes[0], StemNotation::AsciiMath, "a &lt; b <i>or</i> c");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source)
         );
     }
@@ -680,7 +680,7 @@ mod tests {
         // The string pipeline, by contrast, *does* recognize the quote pair.
         let golden = golden_passthroughs(source);
         assert!(golden.contains("<strong>"), "golden: {golden}");
-        assert_ne!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), golden);
+        assert_ne!(fold_html(&nodes, &HtmlInlineRenderer {}), golden);
     }
 
     #[test]
@@ -721,7 +721,7 @@ mod tests {
 
         for source in fixtures {
             let nodes = build_src(Span::new(source));
-            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+            let folded = fold_html(&nodes, &HtmlInlineRenderer {});
 
             assert_eq!(
                 folded,
@@ -748,7 +748,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source)
         );
     }

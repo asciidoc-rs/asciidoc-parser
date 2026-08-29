@@ -799,7 +799,7 @@ mod tests {
     use crate::{
         Span,
         inlines::{Footnote, InlineNode, SpanForm, StyleVariant},
-        parser::HtmlSubstitutionRenderer,
+        parser::HtmlInlineRenderer,
         strings::CowStr,
     };
 
@@ -842,7 +842,7 @@ mod tests {
         // The macro stays literal bytes: the level folds back to the source
         // (the unescaped `<`/`>` as §3.4.1 `Raw` leaves, emitted as-is).
         assert_eq!(
-            fold_html(&macros_only, &HtmlSubstitutionRenderer {}),
+            fold_html(&macros_only, &HtmlInlineRenderer {}),
             "x footnote:[note]</a>"
         );
 
@@ -928,7 +928,7 @@ mod tests {
 
         let source = "The {product} is great, footnote:[x] right?";
         let nodes = build(Span::new(source), &configure(), None);
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
 
         assert_eq!(
             folded,
@@ -1047,7 +1047,7 @@ mod tests {
             "\\footnote:[a \\] note]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -1072,7 +1072,7 @@ mod tests {
         // one sibling and before another — since that is the only arrangement
         // the two orders disagree about: a nested footnote before every
         // sibling, or after every sibling, numbers the same either way.
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in [
             // Each container the walk descends into, with a plain sibling on
@@ -1113,7 +1113,7 @@ mod tests {
         // written there never reaches the string pipeline's footnote pass
         // either. Both sides agree that nothing is numbered — and a real
         // footnote beside it still takes number 1.
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in [
             "[[a,see footnote:[note]]] end",
@@ -1273,7 +1273,7 @@ mod tests {
         // the fold's output bytes — see `build_footnoteref_node`'s doc
         // comment).
         let source = "footnoteref:[disc,a discussion]";
-        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
         assert_eq!(folded, golden_macros(source));
 
@@ -1292,7 +1292,7 @@ mod tests {
         // already-defined footnote — the same shape `footnote:id[]` produces,
         // just spelled the deprecated way.
         let source = "footnote:disc[a discussion] then footnoteref:[disc].";
-        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
         assert_eq!(folded, golden_macros(source));
 
@@ -1312,7 +1312,7 @@ mod tests {
         // diagnostic, deferred to the cutover like every other one this
         // builder skips).
         let source = "footnoteref:[missing]";
-        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
         assert_eq!(folded, golden_macros(source));
 
@@ -1330,7 +1330,7 @@ mod tests {
         // (present, not absent) — a defining occurrence with empty text,
         // unlike the no-comma-at-all `footnoteref:[id]` reference shape.
         let source = "footnoteref:[disc,]";
-        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
         assert_eq!(folded, golden_macros(source));
 
@@ -1362,7 +1362,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -1374,7 +1374,7 @@ mod tests {
         // pins for `footnote:`, through `build_footnoteref_node`'s own
         // (identical) bracket group.
         let source = "footnoteref:[disc,a note ending in a\\]bracket]";
-        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
         assert_eq!(folded, golden_macros(source));
 
@@ -1394,7 +1394,7 @@ mod tests {
         // backslash — and, with no comma at all, the whole bracket is that id
         // (an unresolved reference, rendered as written).
         let source = "footnoteref:[a note ending in a\\]bracket]";
-        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
         assert_eq!(folded, golden_macros(source));
 
@@ -1418,7 +1418,7 @@ mod tests {
             ("footnote:[a note ending in a\\]bracket]", 11),
             ("footnote:disc[a note ending in a\\]bracket]", 15),
         ] {
-            let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+            let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
             assert_eq!(
                 folded,
@@ -1469,7 +1469,7 @@ mod tests {
         // fixes: numbering must follow true left-to-right source order, not
         // tree depth.
         let source = "footnote:[outer] *footnote:[inner]*";
-        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
         assert_eq!(folded, golden_macros(source));
 
@@ -1495,7 +1495,7 @@ mod tests {
         // nesting (see `a_footnote_nested_in_link_text_is_a_documented_divergence`
         // just below, which explains why that direction can never be clean).
         let source = "footnote:[outer] footnote:[see link:https://example.org[inner]]";
-        let folded = fold_html(&build_src(Span::new(source)), &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
         assert_eq!(folded, golden_macros(source));
 
@@ -1553,7 +1553,7 @@ mod tests {
         let link = assert_link(&nodes[0]);
         assert_text(&link.children[0], "footnote:[note", 1, 26);
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
         assert_eq!(
             folded,
             "<a href=\"https://example.org\">footnote:[note</a>]"
@@ -1645,7 +1645,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     &nodes,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &expanding_parser().render_context()
                 ),
                 golden_normal(source, &expanding_parser()),
@@ -1714,7 +1714,7 @@ and another.footnote:[note two]",
                 None,
             );
 
-            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+            let folded = fold_html(&nodes, &HtmlInlineRenderer {});
 
             assert_eq!(
                 folded,
@@ -1749,7 +1749,7 @@ and another.footnote:[note two]",
         assert!(reference.is_reference);
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -1808,7 +1808,7 @@ and another.footnote:[note two]",
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context()
                 ),
                 rendered,

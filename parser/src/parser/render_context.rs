@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// The document state a renderer may read while it renders — everything an
-/// [`InlineSubstitutionRenderer`] needs beyond the element's own
+/// [`InlineRenderer`] needs beyond the element's own
 /// [`Attrlist`](crate::attributes::Attrlist), and nothing else.
 ///
 /// A renderer used to receive the live [`Parser`] itself. That was more than it
@@ -41,7 +41,7 @@ use crate::{
 /// one is cheap enough that a caller who wants a context later should take a
 /// fresh one instead of keeping this one.
 ///
-/// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+/// [`InlineRenderer`]: crate::parser::InlineRenderer
 #[derive(Debug)]
 pub struct RenderContext {
     /// The document attributes, and the safe mode, as of the moment this
@@ -128,20 +128,20 @@ impl RenderContext {
     /// Returns the [`PathResolver`] the parse was configured with — the one
     /// the built-in HTML backend resolves an image or icon target through.
     ///
-    /// A custom [`InlineSubstitutionRenderer`] that resolves targets itself
+    /// A custom [`InlineRenderer`] that resolves targets itself
     /// can use this to resolve them the same way, rather than reimplementing
     /// the resolution.
     ///
-    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+    /// [`InlineRenderer`]: crate::parser::InlineRenderer
     pub fn path_resolver(&self) -> &dyn PathResolver {
         self.path_resolver.as_ref()
     }
 
     /// Returns the [`ImageFileHandler`] the parse was configured with, if any.
     ///
-    /// A custom [`InlineSubstitutionRenderer`] that resolves image URIs itself
+    /// A custom [`InlineRenderer`] that resolves image URIs itself
     /// (rather than inheriting
-    /// [`image_uri`](crate::parser::InlineSubstitutionRenderer::image_uri)'s
+    /// [`image_uri`](crate::parser::InlineRenderer::image_uri)'s
     /// default `data-uri` embedding) can use this to read an image's bytes
     /// through the same handler the built-in HTML renderer uses. `None` when
     /// no handler was registered, in which case there is no way to embed
@@ -152,16 +152,16 @@ impl RenderContext {
     /// renderer is handed a context rather than a parser, so this is how it
     /// reaches the handler.
     ///
-    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+    /// [`InlineRenderer`]: crate::parser::InlineRenderer
     pub fn image_file_handler(&self) -> Option<&dyn ImageFileHandler> {
         self.image_file_handler.as_deref()
     }
 
     /// Returns the [`SvgFileHandler`] the parse was configured with, if any.
     ///
-    /// A custom [`InlineSubstitutionRenderer`] that renders inline SVG images
+    /// A custom [`InlineRenderer`] that renders inline SVG images
     /// itself (rather than inheriting
-    /// [`render_image`](crate::parser::InlineSubstitutionRenderer::render_image)'s
+    /// [`render_image`](crate::parser::InlineRenderer::render_image)'s
     /// `opts=inline` handling) can use this to read an SVG's contents through
     /// the same handler the built-in HTML renderer uses. `None` when no
     /// handler was registered, in which case inline SVG contents are
@@ -172,7 +172,7 @@ impl RenderContext {
     /// renderer is handed a context rather than a parser, so this is how it
     /// reaches the handler.
     ///
-    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+    /// [`InlineRenderer`]: crate::parser::InlineRenderer
     pub fn svg_file_handler(&self) -> Option<&dyn SvgFileHandler> {
         self.svg_file_handler.as_deref()
     }

@@ -13,7 +13,7 @@ use crate::{
     Document, Parser,
     blocks::{Block, FindBlocks, SimpleBlock},
     parser::{
-        CatalogResolver, HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext,
+        CatalogResolver, HtmlInlineRenderer, ReferenceResolver, ResolutionContext,
         ResolvedReference, XrefSignifier,
     },
 };
@@ -324,7 +324,7 @@ fn unresolved_reference_falls_back_and_warns() {
 
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
 
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].target, "nope");
@@ -362,7 +362,7 @@ fn xrefstyle_survives_deferred_resolution() {
     // the signifier and number from the catalog entry registered for the target.
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
     assert!(warnings.is_empty());
     assert_eq!(
         first_paragraph(&doc),
@@ -393,7 +393,7 @@ fn host_resolver_can_attach_signifier() {
         )]),
     };
 
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
     assert!(warnings.is_empty());
     assert_eq!(
         first_paragraph(&doc),
@@ -416,7 +416,7 @@ fn reference_to_this_document_by_name_resolves_within_it() {
 
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
 
     assert!(warnings.is_empty());
 
@@ -444,7 +444,7 @@ fn reference_to_this_document_by_explicit_docname_attribute_resolves_within_it()
 
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
 
     assert!(warnings.is_empty());
 
@@ -542,7 +542,7 @@ fn host_resolver_can_override_a_derived_destination() {
     );
 
     let resolver = DerivedRewritingResolver;
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
 
     assert!(warnings.is_empty());
 
@@ -562,7 +562,7 @@ fn derived_destination_stands_when_the_resolver_declines() {
 
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
 
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].target, "nope");
@@ -619,7 +619,7 @@ fn cross_document_resolution() {
     // Document A still has the pending reference until we resolve it.
     assert!(first_simple(&doc_a).content().has_unresolved_refs());
 
-    let warnings = doc_a.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
+    let warnings = doc_a.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
     assert!(warnings.is_empty());
 
     assert_eq!(
@@ -654,7 +654,7 @@ fn xrefstyle_carries_across_documents() {
     }
     let resolver = CrossDocResolver { index };
 
-    let warnings = doc_a.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
+    let warnings = doc_a.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
     assert!(warnings.is_empty());
     assert_eq!(
         first_paragraph(&doc_a),
@@ -675,7 +675,7 @@ fn resolution_is_repeatable() {
             ResolvedReference::new("first.html#topic".to_string(), Some("First".to_string())),
         )]),
     };
-    doc.resolve_references(&first, &HtmlSubstitutionRenderer {}, &parser);
+    doc.resolve_references(&first, &HtmlInlineRenderer {}, &parser);
     assert_eq!(
         first_paragraph(&doc),
         "See <a href=\"first.html#topic\">First</a>."
@@ -687,7 +687,7 @@ fn resolution_is_repeatable() {
             ResolvedReference::new("second.html#topic".to_string(), Some("Second".to_string())),
         )]),
     };
-    doc.resolve_references(&second, &HtmlSubstitutionRenderer {}, &parser);
+    doc.resolve_references(&second, &HtmlInlineRenderer {}, &parser);
     assert_eq!(
         first_paragraph(&doc),
         "See <a href=\"second.html#topic\">Second</a>."
@@ -709,7 +709,7 @@ fn re_resolution_is_a_full_independent_sweep() {
             ResolvedReference::new("first.html#topic".to_string(), Some("Topic".to_string())),
         )]),
     };
-    let warnings = doc.resolve_references(&knows_topic, &HtmlSubstitutionRenderer {}, &parser);
+    let warnings = doc.resolve_references(&knows_topic, &HtmlInlineRenderer {}, &parser);
     assert!(warnings.is_empty());
     assert_eq!(
         first_paragraph(&doc),
@@ -721,7 +721,7 @@ fn re_resolution_is_a_full_independent_sweep() {
     let knows_nothing = CrossDocResolver {
         index: HashMap::new(),
     };
-    let warnings = doc.resolve_references(&knows_nothing, &HtmlSubstitutionRenderer {}, &parser);
+    let warnings = doc.resolve_references(&knows_nothing, &HtmlInlineRenderer {}, &parser);
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].target, "topic");
     assert_eq!(first_paragraph(&doc), "See <a href=\"#topic\">[topic]</a>.");
@@ -741,7 +741,7 @@ fn footnote_cross_references_resolve_via_host_resolver() {
             ResolvedReference::new("other.html#topic".to_string(), Some("Topic".to_string())),
         )]),
     };
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {}, &parser);
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
 
     assert_eq!(
         doc.catalog().footnotes()[0].text,
@@ -1470,7 +1470,7 @@ mod xrefs_in_titles {
 
         doc.resolve_references(
             &BespokeResolver,
-            &crate::parser::HtmlSubstitutionRenderer {},
+            &crate::parser::HtmlInlineRenderer {},
             &Parser::default(),
         );
 
@@ -1514,7 +1514,7 @@ mod xrefs_in_titles {
 
         let warnings = doc.resolve_references(
             &KnowsNothing,
-            &crate::parser::HtmlSubstitutionRenderer {},
+            &crate::parser::HtmlInlineRenderer {},
             &parser,
         );
 
@@ -1573,7 +1573,7 @@ mod xrefs_in_titles {
 
         doc.resolve_references(
             &ExternalResolver,
-            &crate::parser::HtmlSubstitutionRenderer {},
+            &crate::parser::HtmlInlineRenderer {},
             &Parser::default(),
         );
 

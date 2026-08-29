@@ -8,8 +8,8 @@ use crate::{
     content::{Content, escape_sentinels},
     document::InterpretedValue,
     parser::{
-        CharacterReplacementType, InlineSubstitutionRenderer, QuoteScope, QuoteType,
-        SpecialCharacter, attribute_lookup_name,
+        CharacterReplacementType, InlineRenderer, QuoteScope, QuoteType, SpecialCharacter,
+        attribute_lookup_name,
     },
     strings::CowStr,
     warnings::WarningType,
@@ -77,7 +77,7 @@ impl SubstitutionStep {
     }
 }
 
-fn apply_special_characters(content: &mut Content<'_>, renderer: &dyn InlineSubstitutionRenderer) {
+fn apply_special_characters(content: &mut Content<'_>, renderer: &dyn InlineRenderer) {
     if !content.rendered.contains(['<', '>', '&']) {
         return;
     }
@@ -104,7 +104,7 @@ static SPECIAL_CHARS: LazyLock<Regex> = LazyLock::new(|| {
 
 #[derive(Debug)]
 struct SpecialCharacterReplacer<'r> {
-    renderer: &'r dyn InlineSubstitutionRenderer,
+    renderer: &'r dyn InlineRenderer,
 }
 
 impl Replacer for SpecialCharacterReplacer<'_> {

@@ -183,7 +183,7 @@ mod tests {
         Parser, Span,
         attributes::{Attrlist, AttrlistContext},
         inlines::{InlineNode, Ref, RefVariant},
-        parser::{HtmlSubstitutionRenderer, ModificationContext},
+        parser::{HtmlInlineRenderer, ModificationContext},
         strings::CowStr,
     };
 
@@ -231,7 +231,7 @@ mod tests {
 
                 Some((
                     rendered.to_string(),
-                    fold_html(inlines, &HtmlSubstitutionRenderer {}),
+                    fold_html(inlines, &HtmlInlineRenderer {}),
                 ))
             })
             .collect();
@@ -281,10 +281,7 @@ mod tests {
 
         assert_text(&nodes[2], "\nbar", 1, 6);
 
-        assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
-            "foo<br>\nbar"
-        );
+        assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), "foo<br>\nbar");
     }
 
     #[test]
@@ -306,7 +303,7 @@ mod tests {
             other => panic!("expected LineBreak, got {other:?}"),
         }
 
-        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "only<br>");
+        assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), "only<br>");
     }
 
     #[test]
@@ -320,7 +317,7 @@ mod tests {
         assert!(matches!(nodes[1], InlineNode::LineBreak { .. }));
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             "first\nsecond<br>"
         );
     }
@@ -335,7 +332,7 @@ mod tests {
             crate::content::inline_builder::snapshot::recorded("post_replacements", source);
 
         let nodes = super::super::build(Span::new(source), &parser, None);
-        let built = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let built = fold_html(&nodes, &HtmlInlineRenderer {});
 
         assert_eq!(golden, built, "fold diverged for {source:?}");
     }
@@ -350,7 +347,7 @@ mod tests {
         let nodes = build_src(Span::new("*bold +*"));
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             "<strong>bold +</strong>"
         );
 
@@ -445,7 +442,7 @@ mod tests {
         let golden = crate::content::inline_builder::snapshot::recorded(corpus, source);
 
         let nodes = super::super::build(Span::new(source), parser, attrlist.as_ref());
-        let built = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let built = fold_html(&nodes, &HtmlInlineRenderer {});
 
         assert_eq!(golden, built, "hardbreaks fold diverged for {source:?}");
     }

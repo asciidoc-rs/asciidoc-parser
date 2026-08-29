@@ -10,7 +10,7 @@ use crate::{
     content::Passthrough,
     inlines::{InlineNode, RefVariant},
     parser::{
-        InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
+        InlineRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
         ResolvedAttributes, ResolvedReference, XrefRenderParams,
     },
     strings::CowStr,
@@ -621,8 +621,8 @@ impl<'src> Content<'src> {
     /// after all substitutions have been applied.
     ///
     /// This is the built-in HTML output. (A custom
-    /// [`InlineSubstitutionRenderer`] installed via
-    /// [`Parser::with_inline_substitution_renderer`](crate::Parser::with_inline_substitution_renderer)
+    /// [`InlineRenderer`] installed via
+    /// [`Parser::with_inline_renderer`](crate::Parser::with_inline_renderer)
     /// still drives this output during migration; moving renderer selection to
     /// render time is a later step of the [inline AST architecture].)
     ///
@@ -683,11 +683,7 @@ impl<'src> Content<'src> {
     /// not interpreted — carries no inline tree and no retained attributes.
     /// There is nothing to fold, so its literal text is returned unchanged,
     /// which is also what [`rendered_html`](Self::rendered_html) gives.
-    pub fn render_with(
-        &self,
-        renderer: &dyn InlineSubstitutionRenderer,
-        parser: &Parser,
-    ) -> String {
+    pub fn render_with(&self, renderer: &dyn InlineRenderer, parser: &Parser) -> String {
         let Some(attributes) = self.render_attributes.as_deref() else {
             return self.rendered.to_string();
         };
@@ -872,7 +868,7 @@ impl<'src> Content<'src> {
     pub(crate) fn set_tree_xrefs(
         &mut self,
         tree: &[InlineNode<'src>],
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         context: &crate::parser::RenderContext,
     ) {
         if !tree_defers_xrefs(tree) {
@@ -910,7 +906,7 @@ impl<'src> Content<'src> {
     pub(crate) fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         warnings: &mut ReferenceWarnings<'src>,
         parser: &Parser,
     ) {
@@ -1054,7 +1050,7 @@ impl<'src> Content<'src> {
     /// them for exactly the contents that are rebuilt).
     pub(crate) fn collect_own_folded_footnotes(
         &self,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         parser: &Parser,
         warnings: &mut ReferenceWarnings<'src>,
     ) {
@@ -1066,7 +1062,7 @@ impl<'src> Content<'src> {
     fn collect_folded_footnotes(
         &self,
         attributes: &ResolvedAttributes,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         parser: &Parser,
         warnings: &mut ReferenceWarnings<'src>,
     ) {
@@ -1091,7 +1087,7 @@ impl<'src> Content<'src> {
     fn refold(
         &mut self,
         attributes: ResolvedAttributes,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         parser: &Parser,
     ) {
         let context = parser.render_context_with(attributes);
@@ -1266,7 +1262,7 @@ pub(crate) fn fold_resolved_title(
     inlines: &[InlineNode<'_>],
     block_ordered: &[Option<ResolvedReference>],
     attributes: &ResolvedAttributes,
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     parser: &Parser,
 ) -> Option<String> {
     if inlines.is_empty() || count_tree_xrefs(inlines) != block_ordered.len() {
@@ -1426,7 +1422,7 @@ fn tree_defers_xrefs(nodes: &[InlineNode<'_>]) -> bool {
 /// [`footnote_tree_xref_segments`] derives the complementary list.
 pub(crate) fn block_tree_xref_segments(
     nodes: &[InlineNode<'_>],
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &crate::parser::RenderContext,
 ) -> Vec<XrefSegment> {
     let mut out = Vec::new();
@@ -1444,7 +1440,7 @@ pub(crate) fn block_tree_xref_segments(
 /// [`assign_footnote_tree_xrefs`] makes.
 pub(crate) fn footnote_tree_xref_segments(
     nodes: &[InlineNode<'_>],
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &crate::parser::RenderContext,
 ) -> Vec<XrefSegment> {
     let mut out = Vec::new();
@@ -1457,7 +1453,7 @@ pub(crate) fn footnote_tree_xref_segments(
 /// destination address the same node.
 fn collect_tree_xref_segments(
     nodes: &[InlineNode<'_>],
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &crate::parser::RenderContext,
     out: &mut Vec<XrefSegment>,
 ) {
@@ -1488,7 +1484,7 @@ fn collect_tree_xref_segments(
 /// [`assign_footnote_tree_xrefs`]'s traversal.
 fn collect_footnote_tree_xref_segments(
     nodes: &[InlineNode<'_>],
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &crate::parser::RenderContext,
     out: &mut Vec<XrefSegment>,
 ) {
@@ -1532,7 +1528,7 @@ fn collect_footnote_tree_xref_segments(
 /// makes this derivation idempotent.
 pub(crate) fn xref_segment_from_node(
     reference: &crate::inlines::Ref<'_>,
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &crate::parser::RenderContext,
 ) -> XrefSegment {
     let provided_text = (!reference.children.is_empty())
@@ -1583,7 +1579,7 @@ pub(crate) fn xref_segment_from_node(
 /// the boundary.
 fn carried_title_template(
     nodes: &[InlineNode<'_>],
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     context: &crate::parser::RenderContext,
 ) -> (String, Vec<XrefSegment>) {
     let mut template = String::new();
@@ -1713,7 +1709,7 @@ fn assign_footnote_tree_xrefs(
 pub(crate) fn render_xref_template(
     template: &str,
     xrefs: &[XrefSegment],
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
 ) -> String {
     render_template(template, xrefs, renderer, true)
 }
@@ -1723,7 +1719,7 @@ pub(crate) fn render_xref_template(
 fn render_template(
     template: &str,
     xrefs: &[XrefSegment],
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     template_escaped: bool,
 ) -> String {
     let mut out = String::with_capacity(template.len());
@@ -1831,7 +1827,7 @@ impl FootnoteDeferred {
     /// The template is the builder's fold of the footnote's subtree, which
     /// never enters escaped sentinel form — unlike a [`DeferredContent`]'s
     /// synthesized carried-title template.
-    pub(crate) fn render(&self, renderer: &dyn InlineSubstitutionRenderer) -> String {
+    pub(crate) fn render(&self, renderer: &dyn InlineRenderer) -> String {
         render_template(&self.template, &self.xrefs, renderer, false)
     }
 
@@ -2187,7 +2183,7 @@ mod tests {
         use super::super::{
             XREF_PLACEHOLDER_END, XREF_PLACEHOLDER_START, XrefSegment, render_template,
         };
-        use crate::parser::HtmlSubstitutionRenderer;
+        use crate::parser::HtmlInlineRenderer;
 
         fn segment(target: &str) -> XrefSegment {
             XrefSegment {
@@ -2202,7 +2198,7 @@ mod tests {
         }
 
         fn render(template: &str, xrefs: &[XrefSegment]) -> String {
-            render_template(template, xrefs, &HtmlSubstitutionRenderer {}, true)
+            render_template(template, xrefs, &HtmlInlineRenderer {}, true)
         }
 
         #[test]

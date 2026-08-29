@@ -806,7 +806,7 @@ mod tests {
         Parser, Span,
         content::inline_builder::special_chars::Masked,
         inlines::{Anchor, InlineNode, SpanForm, StyleVariant},
-        parser::HtmlSubstitutionRenderer,
+        parser::HtmlInlineRenderer,
         strings::CowStr,
     };
 
@@ -880,7 +880,7 @@ mod tests {
             "[[[id]]]",
         ];
 
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = fold_html(&build_src(Span::new(fixture)), &renderer);
@@ -973,7 +973,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_macros(source)
         );
     }
@@ -1031,7 +1031,7 @@ mod tests {
             );
 
             assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_macros(source),
                 "fold diverged for {source:?}"
             );
@@ -1068,7 +1068,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &crate::Parser::default().render_context()
                 ),
                 rendered,
@@ -1109,7 +1109,7 @@ mod tests {
             other => panic!("expected a reference text of the span itself, got {other:?}"),
         }
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
         assert_eq!(folded, golden_macros(source));
 
         // The consumed span does not render into the flow.
@@ -1172,7 +1172,7 @@ mod tests {
 
         let folded = crate::content::inline_builder::fold_html(
             &nodes,
-            &HtmlSubstitutionRenderer {},
+            &HtmlInlineRenderer {},
             &parser.render_context(),
         );
 
@@ -1220,7 +1220,7 @@ mod tests {
 
         let folded = crate::content::inline_builder::fold_html(
             &nodes,
-            &HtmlSubstitutionRenderer {},
+            &HtmlInlineRenderer {},
             &parser.render_context(),
         );
         assert_eq!(folded, golden, "fold diverged from the real pipeline");
@@ -1268,7 +1268,7 @@ mod tests {
         let golden = golden_attributes_with(source, &parser);
         let folded = crate::content::inline_builder::fold_html(
             &nodes,
-            &HtmlSubstitutionRenderer {},
+            &HtmlInlineRenderer {},
             &parser.render_context(),
         );
         assert_eq!(folded, golden, "fold diverged from the string pipeline");
@@ -1588,7 +1588,7 @@ mod tests {
         ];
 
         let parser = biblio_parser();
-        let renderer = HtmlSubstitutionRenderer {};
+        let renderer = HtmlInlineRenderer {};
 
         for fixture in fixtures {
             let folded = crate::content::inline_builder::fold_html(
@@ -1707,7 +1707,7 @@ mod tests {
 
         let folded = crate::content::inline_builder::fold_html(
             &nodes,
-            &HtmlSubstitutionRenderer {},
+            &HtmlInlineRenderer {},
             &parser.render_context(),
         );
 
@@ -1740,7 +1740,7 @@ mod tests {
 
             let folded = crate::content::inline_builder::fold_html(
                 &nodes,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &parser.render_context(),
             );
 
@@ -1788,7 +1788,7 @@ mod tests {
 
             let folded = crate::content::inline_builder::fold_html(
                 &nodes,
-                &HtmlSubstitutionRenderer {},
+                &HtmlInlineRenderer {},
                 &parser.render_context(),
             );
 
@@ -1966,7 +1966,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context(),
                 ),
                 rendered,

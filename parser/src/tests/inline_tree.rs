@@ -128,14 +128,14 @@ const RENDERER_FREE_CONSTRUCTS: &[&str] = &[
 ];
 
 /// A renderer that reports, through its own output, how many times it has been
-/// called — the only way to observe an `Rc<dyn InlineSubstitutionRenderer>`,
+/// called — the only way to observe an `Rc<dyn InlineRenderer>`,
 /// which cannot be downcast to read a counter field.
 #[derive(Debug, Default)]
 struct OrdinalRenderer {
     calls: std::cell::Cell<usize>,
 }
 
-impl crate::parser::InlineSubstitutionRenderer for OrdinalRenderer {
+impl crate::parser::InlineRenderer for OrdinalRenderer {
     fn render_special_character(&self, _type_: crate::parser::SpecialCharacter, dest: &mut String) {
         self.calls.set(self.calls.get() + 1);
         dest.push_str(&format!("[{}]", self.calls.get()));
@@ -145,7 +145,7 @@ impl crate::parser::InlineSubstitutionRenderer for OrdinalRenderer {
 /// Builds `source`'s tree and returns how many times the build consulted
 /// `parser`'s renderer.
 fn renderer_calls_while_building(source: &str) -> usize {
-    let parser = Parser::default().with_inline_substitution_renderer(OrdinalRenderer::default());
+    let parser = Parser::default().with_inline_renderer(OrdinalRenderer::default());
 
     let _ = crate::content::inline_builder::build(crate::Span::new(source), &parser, None);
 
@@ -221,7 +221,7 @@ fn the_three_non_specialcharacters_bodies_still_consult_the_renderer() {
 /// alone. This one counts everything, which is the only way to see a body
 /// being substituted an extra *time* rather than an extra *way*.
 fn renderer_calls_while_applying(source: &str) -> usize {
-    let parser = Parser::default().with_inline_substitution_renderer(OrdinalRenderer::default());
+    let parser = Parser::default().with_inline_renderer(OrdinalRenderer::default());
     let mut content = crate::content::Content::from(crate::Span::new(source));
 
     crate::content::SubstitutionGroup::Normal.apply(&mut content, &parser, None);
@@ -1131,7 +1131,7 @@ fn inline_tree_same_target_refs_keep_per_reference_resolution() {
     // gives each node its own destination instead of collapsing both onto the
     // first.
     use crate::parser::{
-        HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
+        HtmlInlineRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
     };
 
     #[derive(Debug)]
@@ -1152,7 +1152,7 @@ fn inline_tree_same_target_refs_keep_per_reference_resolution() {
 
     let mut parser = Parser::default();
     let mut doc = parser.parse_deferred("See <<tgt,first>> and <<tgt,second>>.");
-    doc.resolve_references(&PerTextResolver, &HtmlSubstitutionRenderer {}, &parser);
+    doc.resolve_references(&PerTextResolver, &HtmlInlineRenderer {}, &parser);
 
     let hrefs: Vec<String> = collect_refs(&doc)
         .iter()
@@ -1225,7 +1225,7 @@ fn inline_tree_build_tolerates_a_stateful_renderer() {
         flipped: std::cell::Cell<bool>,
     }
 
-    impl crate::parser::InlineSubstitutionRenderer for FlipRenderer {
+    impl crate::parser::InlineRenderer for FlipRenderer {
         fn render_special_character(
             &self,
             _type_: crate::parser::SpecialCharacter,
@@ -1239,7 +1239,7 @@ fn inline_tree_build_tolerates_a_stateful_renderer() {
         }
     }
 
-    let mut parser = Parser::default().with_inline_substitution_renderer(FlipRenderer::default());
+    let mut parser = Parser::default().with_inline_renderer(FlipRenderer::default());
 
     let doc = parser.parse("a < b");
 
@@ -1448,7 +1448,7 @@ fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
     // (to `Some` or `None`), so the tree tracks the rendered title rather than
     // retaining a superseded link.
     use crate::parser::{
-        HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
+        HtmlInlineRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
     };
 
     /// Resolves every target to a fixed destination, or to nothing when `None`.
@@ -1479,14 +1479,14 @@ fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
     // carries its destination.
     doc.resolve_references(
         &FixedResolver(Some("#tgt")),
-        &HtmlSubstitutionRenderer {},
+        &HtmlInlineRenderer {},
         &parser,
     );
     assert_eq!(title_xref_href(&doc).as_deref(), Some("#tgt"));
 
     // Second pass: the resolver no longer recognizes the target, so the tree xref
     // must fall back to unresolved rather than keep the stale destination.
-    doc.resolve_references(&FixedResolver(None), &HtmlSubstitutionRenderer {}, &parser);
+    doc.resolve_references(&FixedResolver(None), &HtmlInlineRenderer {}, &parser);
     assert_eq!(
         title_xref_href(&doc),
         None,
@@ -1810,7 +1810,7 @@ fn re_resolving_clears_a_now_unresolved_footnote_tree_destination() {
     // recognizes the target clears the subtree's destination rather than leaving
     // the first pass's stale link behind.
     use crate::parser::{
-        HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
+        HtmlInlineRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
     };
 
     /// Resolves every target to a fixed destination, or to nothing when `None`.
@@ -1840,12 +1840,12 @@ fn re_resolving_clears_a_now_unresolved_footnote_tree_destination() {
 
     doc.resolve_references(
         &FixedResolver(Some("#tgt")),
-        &HtmlSubstitutionRenderer {},
+        &HtmlInlineRenderer {},
         &parser,
     );
     assert_eq!(footnote_xref_href(&doc).as_deref(), Some("#tgt"));
 
-    doc.resolve_references(&FixedResolver(None), &HtmlSubstitutionRenderer {}, &parser);
+    doc.resolve_references(&FixedResolver(None), &HtmlInlineRenderer {}, &parser);
     assert_eq!(
         footnote_xref_href(&doc),
         None,
@@ -1883,8 +1883,7 @@ fn a_footnotes_rendering_is_refolded_from_its_subtree_at_resolution() {
         }
     }
 
-    let mut parser =
-        Parser::default().with_inline_substitution_renderer(OrdinalRenderer::default());
+    let mut parser = Parser::default().with_inline_renderer(OrdinalRenderer::default());
 
     let mut doc = parser.parse_deferred("A claim.footnote:[x < y, see <<tgt>>]\n\n[[tgt]]Target.");
 

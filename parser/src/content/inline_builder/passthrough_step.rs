@@ -46,7 +46,7 @@ use crate::{
 /// characters only); rather than hand-escape `<`/`>`/`&`, their content is
 /// run through the real substitution pipeline
 /// ([`passthrough_text`]) so a custom
-/// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)'s
+/// [`InlineRenderer`](crate::parser::InlineRenderer)'s
 /// escaping is honored, exactly as it would be for the string pipeline's own
 /// restore step — the cost is an owned [`Raw`](InlineNode::Raw) value rather
 /// than a `'src` borrow, since the pipeline's output is not guaranteed to
@@ -60,7 +60,7 @@ use crate::{
 /// `Raw` leaf under `SubstitutionGroup::None`/`Verbatim`, unless the legacy
 /// `x-` compatibility marker switches it to a full `Normal`-order subtree
 /// ([`apply_normal_subs`]) — in `Code` (monospace) or `Unquoted`, mirroring
-/// `PassthroughRestoreReplacer`'s own `render_quoted_substitution` call for a
+/// `PassthroughRestoreReplacer`'s own `render_styled` call for a
 /// stored passthrough whose `type_` is `Some`. This runs as a **second pass**
 /// ([`apply_bare_attrlisted_pass_level`]) after the delimited forms above,
 /// mirroring `Passthroughs::extract_from`'s own order (`INLINE_PASS_MACRO`
@@ -167,8 +167,8 @@ use crate::{
 /// re-recognizes it.
 ///
 /// [`INLINE_PASS`]: crate::content::passthroughs
-/// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer):
-/// crate::parser::InlineSubstitutionRenderer
+/// [`InlineRenderer`](crate::parser::InlineRenderer):
+/// crate::parser::InlineRenderer
 pub(super) fn apply_passthroughs<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -954,7 +954,7 @@ fn build_passthrough_node<'src>(
 /// `[attrs]$$text$$`) — the delimited half of the attribute-list-prefixed
 /// forms this increment recognizes (see
 /// [`build_bare_attrlisted_passthrough_node`] for the bare half). Folds through
-/// the same `render_quoted_substitution` `PassthroughRestoreReplacer` calls
+/// the same `render_styled` `PassthroughRestoreReplacer` calls
 /// when its stored passthrough carries a `type_`/`attrlist`, so the output is
 /// byte-for-byte identical.
 ///
@@ -1209,7 +1209,7 @@ fn apply_normal_subs<'src>(text: Span<'src>, parser: &Parser) -> Vec<InlineNode<
 /// `value` — for [`SubstitutionGroup::Verbatim`], for a `stem:` body, and for
 /// the explicit substitution list a `pass:c,q[…]` carries — so the result
 /// honors whatever
-/// [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)
+/// [`InlineRenderer`](crate::parser::InlineRenderer)
 /// `parser` carries rather than a hand-rolled, always-default escaping.
 ///
 /// **This is the authoritative-pass closure** (design §5.2's step 6). Until
@@ -1278,7 +1278,7 @@ mod tests {
     use crate::{
         HasSpan, Parser, Span,
         inlines::{InlineNode, SpanForm, StyleVariant, Styled},
-        parser::HtmlSubstitutionRenderer,
+        parser::HtmlInlineRenderer,
         strings::CowStr,
     };
 
@@ -1431,7 +1431,7 @@ mod tests {
         let source = r"\+++text+++";
         let nodes = build_src(Span::new(source));
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
         assert_eq!(folded, "++text++");
         assert_eq!(folded, golden_passthroughs(source));
     }
@@ -1446,7 +1446,7 @@ mod tests {
         let source = r"\++text++";
         let nodes = build_src(Span::new(source));
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
         assert_eq!(folded, "+text+");
         assert_eq!(folded, golden_passthroughs(source));
     }
@@ -1460,7 +1460,7 @@ mod tests {
             "an escaped passthrough must not build a Raw node: {nodes:?}"
         );
 
-        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "pass:[x]");
+        assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), "pass:[x]");
     }
 
     #[test]
@@ -1506,7 +1506,7 @@ mod tests {
         #[derive(Debug)]
         struct BracketRenderer;
 
-        impl crate::parser::InlineSubstitutionRenderer for BracketRenderer {
+        impl crate::parser::InlineRenderer for BracketRenderer {
             fn render_special_character(
                 &self,
                 type_: crate::parser::SpecialCharacter,
@@ -1524,11 +1524,7 @@ mod tests {
         let nodes = build_src(Span::new("+a < b > c & d+"));
 
         assert_eq!(
-            super::super::fold_html(
-                &nodes,
-                &HtmlSubstitutionRenderer {},
-                &parser.render_context()
-            ),
+            super::super::fold_html(&nodes, &HtmlInlineRenderer {}, &parser.render_context()),
             "a &lt; b &gt; c &amp; d"
         );
 
@@ -1626,7 +1622,7 @@ mod tests {
         #[derive(Debug)]
         struct BracketRenderer;
 
-        impl crate::parser::InlineSubstitutionRenderer for BracketRenderer {
+        impl crate::parser::InlineRenderer for BracketRenderer {
             fn render_special_character(
                 &self,
                 type_: crate::parser::SpecialCharacter,
@@ -1644,11 +1640,7 @@ mod tests {
         let nodes = build_src(Span::new("++a < b > c & d++"));
 
         assert_eq!(
-            super::super::fold_html(
-                &nodes,
-                &HtmlSubstitutionRenderer {},
-                &parser.render_context()
-            ),
+            super::super::fold_html(&nodes, &HtmlInlineRenderer {}, &parser.render_context()),
             "a &lt; b &gt; c &amp; d"
         );
 
@@ -1683,7 +1675,7 @@ mod tests {
             calls: std::cell::Cell<usize>,
         }
 
-        impl crate::parser::InlineSubstitutionRenderer for OrdinalRenderer {
+        impl crate::parser::InlineRenderer for OrdinalRenderer {
             fn render_special_character(
                 &self,
                 _type_: crate::parser::SpecialCharacter,
@@ -1694,8 +1686,7 @@ mod tests {
             }
         }
 
-        let parser =
-            Parser::default().with_inline_substitution_renderer(OrdinalRenderer::default());
+        let parser = Parser::default().with_inline_renderer(OrdinalRenderer::default());
 
         let _ = super::super::build(Span::new("++a < b++"), &parser, None);
 
@@ -1728,7 +1719,7 @@ mod tests {
             calls: std::cell::Cell<usize>,
         }
 
-        impl crate::parser::InlineSubstitutionRenderer for OrdinalRenderer {
+        impl crate::parser::InlineRenderer for OrdinalRenderer {
             fn render_special_character(
                 &self,
                 _type_: crate::parser::SpecialCharacter,
@@ -1742,8 +1733,7 @@ mod tests {
         use super::super::test_support::assert_raw_form;
         use crate::inlines::RawForm;
 
-        let parser =
-            Parser::default().with_inline_substitution_renderer(OrdinalRenderer::default());
+        let parser = Parser::default().with_inline_renderer(OrdinalRenderer::default());
 
         let nodes = super::super::build(Span::new("+a $$b < c$$ d+"), &parser, None);
 
@@ -1972,7 +1962,7 @@ mod tests {
 
         for source in fixtures {
             let nodes = build_src(Span::new(source));
-            let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+            let folded = fold_html(&nodes, &HtmlInlineRenderer {});
 
             assert_eq!(
                 folded,
@@ -2079,7 +2069,7 @@ mod tests {
         assert_raw(&children[0], "<b>");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs("[x-]++pass:[<b>]++")
         );
     }
@@ -2100,7 +2090,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs("[x-]++stem:[x^2]++")
         );
     }
@@ -2123,7 +2113,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs("[x-]++footnote:[note text]++")
         );
     }
@@ -2134,7 +2124,7 @@ mod tests {
         // `method` as the surviving attrlist body. `styled.roles` (from
         // `Attrlist::roles`) does not itself capture a bare first positional
         // attribute like `method` — the renderer's own
-        // `render_quoted_substitution` treats it as a role via
+        // `render_styled` treats it as a role via
         // `nth_attribute(1).block_style()`, using `styled.attrs` (kept in
         // full) rather than `styled.roles` — so this is asserted through the
         // fold, which is what the differential corpus also pins.
@@ -2150,7 +2140,7 @@ mod tests {
         }
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             r#"<code class="method">save()</code>"#
         );
     }
@@ -2173,7 +2163,7 @@ mod tests {
             }
 
             assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 r#"<span class="x-">text</span>"#,
                 "for {source:?}"
             );
@@ -2230,7 +2220,7 @@ mod tests {
         assert_raw(raws[0], "text");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source)
         );
     }
@@ -2265,7 +2255,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context()
                 ),
                 rendered,
@@ -2305,7 +2295,7 @@ mod tests {
         assert_raw(raws[0], "text");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source)
         );
     }
@@ -2328,7 +2318,7 @@ mod tests {
             );
 
             assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_passthroughs(source),
                 "for {source:?}"
             );
@@ -2356,7 +2346,7 @@ mod tests {
         assert_eq!(raws.len(), 1, "expected exactly one Raw leaf: {nodes:?}");
         assert_raw(raws[0], "+text");
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
 
         assert_eq!(folded, r"\[attrs]+text+");
         assert_eq!(folded, golden_passthroughs(source));
@@ -2413,7 +2403,7 @@ mod tests {
             assert_eq!(
                 crate::content::inline_builder::fold_html(
                     inlines,
-                    &HtmlSubstitutionRenderer {},
+                    &HtmlInlineRenderer {},
                     &Parser::default().render_context()
                 ),
                 rendered,
@@ -2492,7 +2482,7 @@ mod tests {
             "a bare-attrlisted match crossing an embedded macro must be left unrecognized: {nodes:?}"
         );
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
         let golden = golden_passthroughs(source);
 
         assert_ne!(folded, golden);
@@ -2516,7 +2506,7 @@ mod tests {
             "an escaped bare-attrlisted delimiter must not build a Styled node: {nodes:?}"
         );
 
-        let folded = fold_html(&nodes, &HtmlSubstitutionRenderer {});
+        let folded = fold_html(&nodes, &HtmlInlineRenderer {});
         assert_eq!(folded, "[attrs]+text+");
         assert_eq!(folded, golden_passthroughs(source));
     }
@@ -2536,7 +2526,7 @@ mod tests {
         assert_raw(&nodes[0], "&lt;b&gt;");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source)
         );
     }
@@ -2554,7 +2544,7 @@ mod tests {
         assert_raw(&nodes[0], "<strong>bold</strong>");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source)
         );
     }
@@ -2575,7 +2565,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source)
         );
     }
@@ -2597,7 +2587,7 @@ mod tests {
         assert_raw(&nodes[0], "&lt;b&gt; &lt;strong&gt;bold&lt;/strong&gt;");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs("pass:q,c[<b> *bold*]")
         );
     }
@@ -2617,7 +2607,7 @@ mod tests {
         assert_raw(&nodes[0], "<b>");
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source)
         );
     }
@@ -2648,7 +2638,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source)
         );
     }
@@ -2724,7 +2714,7 @@ mod tests {
             "a +b\u{E0F0}c\u{E0F0}d+ e",
         ] {
             assert_eq!(
-                fold_html(&build_src(Span::new(fixture)), &HtmlSubstitutionRenderer {}),
+                fold_html(&build_src(Span::new(fixture)), &HtmlInlineRenderer {}),
                 golden_passthroughs(fixture),
                 "fold diverged from the string pipeline for {fixture:?}"
             );
@@ -2751,7 +2741,7 @@ mod tests {
         let nodes = build_src(Span::new("a +text+ b"));
 
         assert_eq!(nodes.len(), 3);
-        assert_eq!(fold_html(&nodes, &HtmlSubstitutionRenderer {}), "a text b");
+        assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), "a text b");
 
         match &nodes[1] {
             InlineNode::Raw {
@@ -2765,7 +2755,7 @@ mod tests {
         }
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs("a +text+ b")
         );
     }
@@ -2808,7 +2798,7 @@ mod tests {
         );
 
         assert_eq!(
-            fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+            fold_html(&nodes, &HtmlInlineRenderer {}),
             golden_passthroughs(source)
         );
     }
@@ -2831,7 +2821,7 @@ mod tests {
             );
 
             assert_eq!(
-                fold_html(&nodes, &HtmlSubstitutionRenderer {}),
+                fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_passthroughs(source),
                 "for {source:?}"
             );
