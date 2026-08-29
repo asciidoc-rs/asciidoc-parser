@@ -918,7 +918,8 @@ with a `&mut String`" to "called by the fold with a node"). This is an accepted 
 break. The method *set* is largely preserved, so a downstream implementer's mental model
 survives; the `*RenderParams` structs are replaced by (or become borrowed views of) the
 corresponding node types. The **naming** half of that break has landed (see the Decision
-below); the signature reshape has not.
+below); the signature reshape is under way — seven of the eight `*RenderParams` structs are
+retired (#1327, #1328, #1330), leaving `XrefRenderParams`.
 
 > **Decision (Phase 5): rename the trait to `InlineRenderer`.** ✅ **Landed.** The word
 > "substitution" names the very mechanism this work removes — post-migration the trait is no
@@ -11576,6 +11577,79 @@ Phases 1–2 are the risk-bearing core; 3–5 are additive and can be paced agai
 demand (echoing the #943/#944 "pin the API with a real consumer" discipline). All of them
 land together in the single merge to `main` — the pacing is *within* the branch, not
 staggered submissions to `main`.
+
+#### Exit-gate audit (2026-08-29)
+
+Every phase above carries an *Exit:* line, and the step lists had drifted far enough ahead of
+them that "the steps are ticked" was being read as "the phase is done". They are not the same
+claim. This is a pass over each outstanding gate, criterion by criterion, against the tree at
+`25ad4070`. **No phase is marked done by this audit** — none passes cleanly — and the marker
+on each bullet above is left as it stands.
+
+Suite state at the time of the audit: `cargo test --workspace` green, **5,482 passed, 0
+failed**, 68 ignored.
+
+| Phase | Criterion | Verdict | Evidence |
+| ----- | --------- | ------- | -------- |
+| 2 | ~277 golden `.rendered()` assertions pass unchanged | ✅ | Suite green, and the §5.3 rename left every asserted string untouched. The renamed accessors have 324 `.rendered_html()` and 173 `.rendered_html_content()` call sites (`git grep -cF` at `25ad4070`). Those are *accessor call sites*, not a recount of §5.3's ~277 golden assertions — most are ordinary reads rather than golden string comparisons — so they evidence the rename's reach, not the size of the oracle. |
+| 2 | sentinels deleted | ⚠️ **2 of 3** | See below. |
+| 2 | benchmarks within an agreed budget of `main` | ❓ **no budget on record** | CodSpeed reports no alteration across 5 benchmarks, but no *agreed budget* is written down anywhere in this document, so the criterion cannot be checked as stated. |
+| 3 | node vocabulary reviewed against the `asciidoctor` port's needs (§6.6) | ❌ **not started, and gated on Landing** | See below. |
+| 3 | purely-structural navigation sugar kept minimal | ✅ | The `inlines` module exposes no navigation helpers at all — no `walk`, `descendants`, `children`, `iter`, `visit`, or `find`; the node types are plain public fields (§3.2's sketch). Minimal by construction. |
+| 3 | doc + README updated (the security section gets its `Raw`-node anchor) | ❌ | [`README.md`](../../README.md)'s "Security: rendering untrusted input" section names the two by-design raw-HTML mechanisms (attribute-reference substitution and passthroughs) but never mentions `Raw`, `InlineNode`, or the tree. The anchor the gate asks for does not exist. |
+| 4 | #944 hard-case policies documented and tested | ⚠️ **tested, not documented** | Spans are asserted per-construct across ten `inline_builder` modules. But §4.4 only *promises* the four hard cases "get explicit policies there" — attribute expansion, passthrough mask/restore, synthesized text, lookahead/retry are nowhere written down as policies, and there is no consolidated span/location test file. |
+| 4 | #564 hack removed | ✅ | Landed in step 7; `Content::source_lines`, `from_filtered_lines`'s `line_spans`, and `simple.rs`'s per-paragraph `Vec<Span>` went with it. |
+| 5 | seam documented | ⚠️ | [`README.md`](../../README.md)'s back-end bullet is current: it names `InlineRenderer` and `Content::render_with` and states the seam is *inline*-scoped. §4.6's own prose is stale, though — see below. |
+| 5 | a smoke-test alternate renderer (in tests) walks the tree | ✅ | `BracketStrong` in [`inline_builder_document_parity.rs`](../../parser/src/tests/inline_builder_document_parity.rs) is folded via `content.render_with(&BracketStrong, &parser)`; `OrdinalRenderer` and `FlipRenderer` in [`inline_tree.rs`](../../parser/src/tests/inline_tree.rs) do the same. |
+
+##### Phase 2's third sentinel system is still live
+
+§4.2 names three. Two are gone:
+
+- **Footnote markers** (`\u{E002}`/`\u{E003}`) — deleted, and
+  [`content.rs`](../../parser/src/content/content.rs)'s `is_reserved_sentinel` documents the
+  absence and its cause: the section-title path derives a heading's reference text by folding
+  its inline subtree instead.
+- **Passthroughs** (`\u{96}`/`\u{97}`) — the mechanism is node-based;
+  [`passthroughs.rs`](../../parser/src/content/passthroughs.rs) works in terms of `InlineNode`
+  and `RawOrigin`, and `Content::passthroughs()` is the filtered view over the tree that §4.2
+  predicted. No production code emits the codepoints any more; `PASSTHROUGH_PLACEHOLDER_START`
+  / `_END` survive only as entries in `RESERVED_SENTINELS` and `is_reserved_sentinel`, i.e. the
+  escaping pass still reserves two codepoints nothing produces.
+
+The third has **not** been retired. `XREF_PLACEHOLDER_START` / `_END` are produced (a
+`format!` over the placeholder index) and consumed (`render_template`) in production, because
+one case remains that cannot be a fold: a block whose inline nodes are dropped carries a
+template synthesized from `carried_title_template`, and renders through
+`render_xref_template`. The code says so in as many words. Retiring it is a real increment,
+not a bookkeeping fix, and it is what stands between Phase 2 and its exit gate.
+
+##### Phase 3's first criterion cannot close before Landing
+
+"Node vocabulary reviewed against the `asciidoctor` port's needs (§6.6)" and Landing's
+"`asciidoctor`-port preflight green" are the same activity at two different gates. §6.6 names
+the port as the consumer that pins the API, but nothing in this document records that review
+having happened, and the port is a separate project whose state this audit did not survey.
+Phase 3 therefore cannot be closed on the branch's own evidence — either the review runs early
+(and Phase 3 closes ahead of Landing), or the criterion is acknowledged as deferred *into*
+Landing. That choice is a decision for the maintainer, not something an audit can settle, and
+it is the single largest unknown in any estimate of what remains.
+
+##### §4.6's prose is stale
+
+§4.6 says "the **naming** half of that break has landed …; the signature reshape has not."
+That was true when written and is no longer: seven of the eight `*RenderParams` structs are
+gone (#1327, #1328, #1330), leaving only `XrefRenderParams`. The sentence is corrected
+in place by this audit; the remaining struct is Phase 5's own outstanding work.
+
+##### What this means for "how much further"
+
+Firm, enumerated, and cheap: Phase 3's README `Raw`-node anchor; Phase 4's four hard-case
+policies written down; §4.6's stale sentence (done here). Firm and substantial: retiring the
+xref template mechanism (Phase 2), and the last `XrefRenderParams` fold (Phase 5). Open-ended:
+the `asciidoctor`-port review, which gates both Phase 3 and Landing and whose cost is unknown
+from inside this repository. Any session count that does not separate those three tiers is
+guessing.
 
 ### 5.3 The golden-HTML oracle (the safety net)
 
