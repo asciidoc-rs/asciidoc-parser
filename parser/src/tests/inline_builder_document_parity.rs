@@ -882,3 +882,32 @@ fn render_with_returns_the_literal_text_of_a_content_with_no_tree() {
         "Not interpreted *at all*."
     );
 }
+
+#[test]
+fn render_with_takes_document_attributes_from_the_content() {
+    // `render_with` takes a parser, and nothing in the type system ties that
+    // parser to the one that produced the content. This bounds what a
+    // mismatched parser can do: the *document attributes* always come from the
+    // content's own snapshot, so how a construct renders as a function of
+    // document state is unaffected. Only the parse-wide configuration — the
+    // path resolver and file handlers — follows the parser handed in.
+    let mut parser = crate::Parser::default();
+    let doc = parser.parse(":icons: font\n\nicon:home[]\n");
+
+    let Some(content) = doc.child_blocks().find_map(|block| match block {
+        crate::blocks::Block::Simple(simple) => Some(simple.content()),
+        _ => None,
+    }) else {
+        panic!("expected a simple block");
+    };
+
+    // A different parser entirely, which never saw `:icons: font`.
+    let other = crate::Parser::default();
+
+    let rendered = content.render_with(&crate::parser::HtmlSubstitutionRenderer {}, &other);
+
+    // Still a font icon: the value in effect where the content was written
+    // wins over anything the supplied parser knows.
+    assert!(rendered.contains("fa-home"), "{rendered}");
+    assert!(!rendered.contains("<img"), "{rendered}");
+}

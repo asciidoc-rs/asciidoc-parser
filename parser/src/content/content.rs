@@ -657,6 +657,25 @@ impl<'src> Content<'src> {
     /// [`Document`](crate::Document) — its [`Send`]/[`Sync`]. Supplying the
     /// parser the caller already holds is the cheaper half of that trade.
     ///
+    /// # Which parser to supply
+    ///
+    /// The one that parsed this content. Nothing in the type system ties the
+    /// two together — a `Content` holds no reference to its parser, which is
+    /// what keeps it [`Send`]/[`Sync`] — so this is a contract rather than a
+    /// guarantee, and it is worth being precise about what a caller risks by
+    /// breaking it.
+    ///
+    /// The **document attributes always come from this content's own
+    /// snapshot**, never from `parser`. Supplying a different parser therefore
+    /// cannot change how a construct is rendered as a function of document
+    /// state: `icons`, `data-uri` and the safe mode are read from the values
+    /// in effect where this content was written, whichever parser is handed
+    /// in (`render_with_takes_document_attributes_from_the_content` pins
+    /// this). What *does* follow `parser` is its parse-wide configuration —
+    /// the path resolver and the image/SVG file handlers — so a mismatched
+    /// parser resolves image paths and reads embedded files the way *it* was
+    /// configured to.
+    ///
     /// # Content with no tree
     ///
     /// A content whose substitution group is never applied at all — a
