@@ -120,10 +120,11 @@ rather than guessing:
    `Document::to_asg()` are recorded as *not being built* (the latter by §6's decision 7 — the
    ASG schema is a parked 2023 draft that cannot express the crate's inline vocabulary; see
    §3.5). **A ticked step list is not a met exit gate**, though, and the two are easy to
-   conflate: Phases 2, 3 and 4 are all still marked 🔶 *In progress*, and at least one gate
-   item is demonstrably outstanding — Phase 3's *Exit:* requires the README's security section
-   to gain its `Raw`-node anchor, and `README.md` does not mention `Raw` at all. Read each
-   phase's own *Exit:* line; do not infer a phase is done from its step ticks.
+   conflate. §5.2's **"Exit-gate audit (2026-08-29)"** records the current state criterion by
+   criterion: every one of Phases 2–5 still has something outstanding, the two substantial ones
+   being the xref template mechanism (§4.2's third sentinel system, still live in production)
+   and the `asciidoctor`-port review, which gates Phase 3 and Landing alike. Start from that
+   table rather than inferring completion from step ticks, and re-run it if it has aged.
 2. **The "what still defers" sentence** in the newest landed-as note — those are the increments
    already named and sized.
 3. **The observed rate.** Every increment so far is one branch, one PR, one session, so an increment
