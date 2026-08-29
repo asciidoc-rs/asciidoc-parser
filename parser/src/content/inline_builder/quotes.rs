@@ -1150,10 +1150,8 @@ enum QuoteMatchKind {
 
 /// Drives `sub` over the match string, mirroring the string pipeline's
 /// look-ahead retry: a rejected monospace-before-quote match slices the
-/// haystack forward and re-searches, exactly as [`replace_with_lookahead`]
+/// haystack forward and re-searches, exactly as `replace_with_lookahead`
 /// does.
-///
-/// [`replace_with_lookahead`]: crate::internal::replace_with_lookahead
 fn find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
     let mut matches = Vec::new();
 

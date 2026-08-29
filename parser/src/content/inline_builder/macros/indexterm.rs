@@ -2,11 +2,11 @@
 //! `indexterm:[…]`, `indexterm2:[…]`).
 
 use super::{MacroMatch, MacroMatchKind, rebuild_macro_level};
-// Referenced by the doc comments below, whose offset arithmetic mirrors these
-// two rewrites (see [`shown_term_range`]); the code performs each structurally
-// rather than calling them.
+// Referenced by the doc comments below, whose offset arithmetic mirrors this
+// rewrite (see [`shown_term_range`]); the code performs it structurally
+// rather than calling it.
 #[allow(unused_imports)]
-use crate::content::{normalize_index_text, strip_see_and_seealso};
+use crate::content::normalize_index_text;
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
@@ -335,7 +335,7 @@ struct ShownTerm<'src> {
 /// The range of `text` the string replacer *shows*, as a narrowing of the
 /// term's own bytes.
 ///
-/// This is [`normalize_index_text`] and [`strip_see_and_seealso`] re-expressed
+/// This is [`normalize_index_text`] and `strip_see_and_seealso` re-expressed
 /// as offsets rather than as a rebuilt string, which is what lets the shown
 /// text be recovered structurally (see [`shown_term`]) as well as computed. The
 /// two agree by construction:

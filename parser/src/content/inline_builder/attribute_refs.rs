@@ -1193,7 +1193,7 @@ mod tests {
     use crate::{
         Parser, Span,
         content::{
-            Content, SubstitutionGroup, SubstitutionStep,
+            SubstitutionGroup, SubstitutionStep,
             inline_builder::{build, build_for_group},
         },
         inlines::{InlineNode, SpanForm, StyleVariant},
@@ -1209,10 +1209,14 @@ mod tests {
         Parser::default().with_intrinsic_attribute(name, value, ModificationContext::Anywhere)
     }
 
-    /// The string pipeline's output through the **attribute-references** step
-    /// for `source`, run against `parser`, used as the golden oracle: the six
-    /// steps [`build`] runs, in order (special characters, quotes, attribute
-    /// references, character replacements, macros, post replacement).
+    /// The string pipeline's recorded output through the
+    /// **attribute-references** step for `source` — what that pipeline
+    /// produced while it existed: the six steps [`build`] runs, in order
+    /// (special characters, quotes, attribute references, character
+    /// replacements, macros, post replacement), frozen into
+    /// `snapshots/attribute_refs.txt`. The `_parser` no longer participates —
+    /// a recording is keyed by source alone — but the parameter stays so the
+    /// call sites that configured one do not churn.
     fn golden_attributes_with(source: &str, parser: &Parser) -> String {
         golden_attributes_in("attribute_refs", source, parser)
     }
@@ -1223,15 +1227,7 @@ mod tests {
     /// `attribute-missing=drop-line` corpus — which renders a shared source
     /// to nothing where the default leaves the reference in place — names
     /// its own.
-    fn golden_attributes_in(corpus: &str, source: &str, parser: &Parser) -> String {
-        let mut content = Content::from(Span::new(source));
-        SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
-        SubstitutionStep::Quotes.apply(&mut content, parser, None);
-        SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
-        SubstitutionStep::CharacterReplacements.apply(&mut content, parser, None);
-        SubstitutionStep::Macros.apply(&mut content, parser, None);
-        SubstitutionStep::PostReplacement.apply(&mut content, parser, None);
-
+    fn golden_attributes_in(corpus: &str, source: &str, _parser: &Parser) -> String {
         crate::content::inline_builder::snapshot::recorded(corpus, source)
     }
 

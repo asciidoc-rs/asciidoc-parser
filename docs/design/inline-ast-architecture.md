@@ -8775,6 +8775,51 @@ Each phase is a reviewable unit with a clear exit gate.
   `SpecialCharacters` and `AttributeReferences` stay behind as before: `document/author.rs` runs
   both in production through direct step calls.
 
+  *Step 6 landed as (the tail's second slice — the string replacers deleted, and one divergence
+  the migration itself caught):* the fourteen replacer structs, `apply_macros`, the four
+  pipeline-only step functions (`apply_quotes`, `apply_character_replacements`,
+  `apply_post_replacements`, `apply_callouts`), the `LookaheadReplacer` machinery
+  (`internal/regex.rs` whole, its "do NOT fix before the cutover" known bug finally moot),
+  `set_deferred_xrefs`, `rehome_xref_placeholders`, and the replacer-only helpers
+  (`strip_see_and_seealso`, `normalize_footnote_text`, `NormalizedCaps::scheme`) — 2,600 lines
+  down, 375 up. What stays in `macros.rs` is exactly the shared surface the builder reads: the
+  eleven recognition regexes, `NormalizedCaps`, and the text helpers. `SubstitutionStep::apply`
+  survives with its two production arms (`SpecialCharacters`, `AttributeReferences` — the
+  header/author machinery's direct calls) and one exhaustiveness arm that refuses the five
+  deleted steps loudly, pinned by a `#[should_panic]` test rather than left uncovered.
+
+  *The migration ran first, as its own gate.* All ~118 remaining direct-step test call sites
+  (the 96 in `substitutions_test.rs`, the step's own unit tests, `security.rs`, the renderer
+  parity sweep) moved to `SubstitutionGroup::Custom(vec![step])` — the production seam — before
+  anything was deleted, so every fixture ran as a divergence probe against the tree while the
+  string implementation still existed to compare against in spirit. **117 passed unchanged; the
+  one failure was real**: the string footnote replacer re-creates Asciidoctor's `(?!</a>)`
+  look-ahead and the builder's footnote family did not, so a macros-only order
+  (`x footnote:[note]</a>`) built a footnote upstream refuses. The guard now lives in
+  `find_footnote_matches`, keyed on the *escaped-form* match string — so under the normal order
+  a document's own `</a>` reaches the pass as `&lt;/a&gt;` and the footnote is still recognized,
+  exactly the string pipeline's behavior in both orders, pinned from both sides by a new unit
+  test. No golden fixture had ever exercised the corner: direct step calls never passed through
+  the audit's forced-build seam, which is why the migration had to be the probe.
+
+  *Three golden helpers were still running the pipeline for nothing.* The dead-prelude species
+  #1319's codecov fix first exposed: `golden_attributes_in`, `golden_replacements`, and
+  `golden_callouts_in` each ran the string steps live and then returned the frozen recording,
+  discarding the run. Collapsed to the lookup, keeping their parameters so call sites do not
+  churn.
+
+  *Coverage closes the loop.* The freeze increment's regression (606 → 1,775 missed regions,
+  "all of it in the four files the tail deletion removes") reverses on schedule: 1,775 → 1,296
+  (first slice) → **639**, with `macros.rs` at 99.6% (617 missed regions → 3) and
+  `substitution_step.rs` at 99.8%. The debt the freeze took on knowingly is paid.
+
+  *What still defers:* the constant-folding collapse the first slice's measurement set up — the
+  `from_tree` field is now `true` for every constructible `DeferredContent` (`set_tree_xrefs` is
+  the only producer left), so the `!from_tree` branches, the `EscapedForm` split, and the
+  template-partition reads reduce to constants — deferred to its own increment because they
+  thread through the live resolve/refold path; then step 7 (`render_with`/`render_to`,
+  `Document::to_asg()`, the `attribute-missing` per-line hack), Phase 5, and Landing.
+
   *Next steps (each a transducer step, gated by the golden-HTML oracle §5.3):*
   1. ✅ Foundation + `SpecialCharacters`.
   2. ✅ `Quotes` → `Styled`, introducing nesting (`*a _b_ c*` becomes a tree, not a flat run).
@@ -10732,6 +10777,20 @@ Each phase is a reviewable unit with a clear exit gate.
        place). Coverage recovers 1,775 → 1,296 missed regions; what remains is the second
        slice's (`macros.rs`'s replacers, the five pipeline-only step arms and their ~130
        direct-step test call sites). See the step's own "landed as" note above.
+
+     - ✅ **the tail's second slice: the string replacers deleted, the migration as its own
+       gate.** All ~118 remaining direct-step test call sites moved to
+       `SubstitutionGroup::Custom(vec![step])` *before* the deletion, each fixture a divergence
+       probe: 117 passed unchanged, and the one failure was a real recognition gap — the
+       builder's footnote family lacked Asciidoctor's `(?!</a>)` look-ahead, now implemented on
+       the escaped-form match string and pinned from both orders. Then the cut: fourteen
+       replacers, `apply_macros`, four step functions, `internal/regex.rs` whole,
+       `set_deferred_xrefs`, `rehome_xref_placeholders`, and the replacer-only helpers — 2,600
+       lines; the shared regexes and text helpers stay, and `SubstitutionStep::apply` keeps its
+       two production arms plus a `#[should_panic]`-pinned refusal for the five deleted ones.
+       Coverage: 1,296 → 639 missed regions (`macros.rs` 617 → 3) — the freeze's debt paid.
+       What remains of item (6) is the `from_tree`/`EscapedForm` constant-folding collapse, its
+       own increment. See the step's own "landed as" note above.
 
      - ℹ️ **the *link* family's dangerous-scheme warning is part of this step, not a prep for it.**
        The last survey item that is not hard-blocked, and the one the survey said would need "a

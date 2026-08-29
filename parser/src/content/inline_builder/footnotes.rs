@@ -343,6 +343,19 @@ fn find_footnote_matches(s: &str) -> Vec<FootnoteMatch<'_>> {
             continue;
         }
 
+        // Asciidoctor's `(?!</a>)` look-ahead, the same way the string
+        // replacer re-created it: a closing bracket immediately followed by a
+        // literal `</a>` is not a footnote (it closes an already-rendered
+        // link), so the bytes stay text. The match string holds the *escaped*
+        // form, so under the normal order a document's own `</a>` reaches here
+        // as `&lt;/a&gt;` and the guard — exactly like the string replacer's —
+        // fires only for the orders whose escaping step has not run.
+        if s.get(full.end..)
+            .is_some_and(|after| after.starts_with("</a>"))
+        {
+            continue;
+        }
+
         matches.push(FootnoteMatch::Candidate { full, caps });
     }
 
@@ -410,7 +423,7 @@ fn build_candidate_node<'src>(
 ///
 /// A content bracket may carry an escaped closing bracket (`\]`), which the
 /// string replacer unescapes to a literal `]`
-/// ([`normalize_footnote_text`](crate::content::macros::normalize_footnote_text)).
+/// (`normalize_footnote_text`).
 /// The subtree carries it the same way: [`footnote_children`] emits the
 /// content through the reference-bearing families' own
 /// [`emit_range_unescaping_brackets`], which drops each backslash as a *gap*
@@ -680,7 +693,7 @@ fn footnote_id_text<'src>(
 /// # The `\]` unescape
 ///
 /// A bracket's content may carry an **escaped closing bracket** (`\]`), which
-/// [`normalize_footnote_text`](crate::content::macros::normalize_footnote_text)
+/// `normalize_footnote_text`
 /// — the string replacer's own normalization — turns back into a literal `]`.
 /// The subtree must carry the same text, so the shared
 /// [`emit_range_unescaping_brackets`] drops
@@ -724,7 +737,7 @@ fn footnote_children<'src>(
 /// replacer reaches the same pair from the other direction — it re-homes the
 /// block template's placeholders out of the already-substituted text it cut
 /// the footnote from
-/// ([`rehome_xref_placeholders`](crate::content::rehome_xref_placeholders)) —
+/// (`rehome_xref_placeholders`) —
 /// so a footnote's own `<<tgt>>` resolves on either side.
 ///
 /// Folding the subtree is also what makes the entry's `text` byte-faithful at
@@ -749,7 +762,7 @@ fn footnote_children<'src>(
 ///
 /// # Normalization
 ///
-/// [`normalize_footnote_text`](crate::content::macros::normalize_footnote_text)
+/// `normalize_footnote_text`
 /// does three things to the string replacer's raw content: trims it, collapses
 /// each embedded newline to a space, and unescapes `\]` to `]`. The first two
 /// apply here unchanged — they are about the *text*, whichever pipeline
@@ -798,6 +811,50 @@ mod tests {
 
             other => panic!("expected a Footnote, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_footnote_immediately_before_a_literal_closing_anchor_tag_is_not_matched() {
+        // Asciidoctor's `(?!</a>)` look-ahead, mirrored from the string
+        // replacer. The match string holds the *escaped* form, so the guard
+        // fires only where the escaping step has not run: under the normal
+        // order the document's own `</a>` reaches the footnote pass as
+        // `&lt;/a&gt;`, the guard stays quiet, and the footnote is recognized.
+        let source = Span::new("x footnote:[note]</a>");
+
+        let macros_only = crate::content::inline_builder::build_for_group(
+            &crate::content::SubstitutionGroup::Custom(vec![
+                crate::content::SubstitutionStep::Macros,
+            ]),
+            CowStr::from(source.data()),
+            source,
+            &crate::Parser::default(),
+            None,
+        );
+
+        assert!(
+            !macros_only
+                .iter()
+                .any(|node| matches!(node, InlineNode::Footnote(_))),
+            "the literal `</a>` must suppress the footnote, got {macros_only:?}"
+        );
+
+        // The macro stays literal bytes: the level folds back to the source
+        // (the unescaped `<`/`>` as §3.4.1 `Raw` leaves, emitted as-is).
+        assert_eq!(
+            fold_html(&macros_only, &HtmlSubstitutionRenderer {}),
+            "x footnote:[note]</a>"
+        );
+
+        let normal = build_src(source);
+
+        assert!(
+            normal
+                .iter()
+                .any(|node| matches!(node, InlineNode::Footnote(_))),
+            "under the normal order the escaped `&lt;/a&gt;` must not \
+             suppress the footnote, got {normal:?}"
+        );
     }
 
     #[test]

@@ -15,43 +15,6 @@ use crate::{
     strings::CowStr,
 };
 
-/// The callouts substitution, as a node transducer: a trailing callout token
-/// (`<1>`, `<.>`, or `<!--1-->` for XML) is replaced with a
-/// [`Callout`](InlineNode::Callout) leaf.
-///
-/// Unlike every other step in this module, this is not a step of the
-/// *normal* effective order [`build`](super::build) runs: callouts belong to
-/// [`SubstitutionGroup::Verbatim`](crate::content::SubstitutionGroup::Verbatim)
-/// (literal, listing, and source blocks), whose only steps are
-/// `SpecialCharacters` then `Callouts` — so `nodes` here can never contain a
-/// [`Styled`](crate::inlines::Styled) or [`Ref`](crate::inlines::Ref) span
-/// (`Quotes` and `Macros` never ran) and this function need not descend into
-/// anything; the level it matches against is the only level. It is additive
-/// like every increment before the cutover: nothing wires it into a block's
-/// actual parse, so a caller (today, only this module's tests) runs it directly
-/// after
-/// [`apply_special_characters`](super::special_chars::apply_special_characters).
-///
-/// It reuses the string pipeline's *exact* recognition —
-/// [`build_callout_regexes`] is now shared `pub(crate)` — so only the
-/// recognition *sink* differs (§4.1): a matched, trailing-position callout
-/// becomes a node instead of rendered markup, folding through the same
-/// `render_callout` the string step calls (see `fold_callout`) so the
-/// output is byte-for-byte identical. `attrlist` is the block's own
-/// attribute list (`None` when the caller has none); together with `parser`
-/// it resolves the `line-comment` attribute exactly as
-/// [`apply_callouts`](crate::content::substitution_step)'s string-pipeline
-/// counterpart does: absent, the default line-comment prefixes (`//`, `#`,
-/// `--`, `;;`) and XML callouts are recognized; present (non-empty), only
-/// that prefix is; present but empty, no prefix is recognized (and neither
-/// are XML callouts).
-///
-/// An escaped callout (`\<1>`) drops its backslash and stays literal,
-/// mirroring every other macro family's escape handling. As throughout the
-/// additive builder, this pass performs **no** recognition side effect: it
-/// does not call `Parser::register_callout`, deferring the callout catalog's
-/// validation to the cutover (design §5.2 Phase 4, step 6), exactly as the
-/// image and link increments defer their own catalog registrations.
 /// Registers every callout the tree carries with `parser`, so the callout list
 /// that annotates the block can be validated against them.
 ///
@@ -59,9 +22,7 @@ use crate::{
 /// the counterpart of
 /// [`apply_macro_side_effects`](super::macros::apply_macro_side_effects) for
 /// the one family that is not a macro. It runs on the real parse path from
-/// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup), while
-/// `Parser::suppress_recognition_side_effects` gates the string pipeline's own
-/// `register_callout` for the same content.
+/// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup).
 ///
 /// A callout number is registered in document order, which is what
 /// [`Parser::callout_defined`](crate::Parser) reads when the following callout
@@ -104,6 +65,43 @@ pub(crate) fn apply_callout_side_effects(nodes: &[InlineNode<'_>], parser: &Pars
     }
 }
 
+/// The callouts substitution, as a node transducer: a trailing callout token
+/// (`<1>`, `<.>`, or `<!--1-->` for XML) is replaced with a
+/// [`Callout`](InlineNode::Callout) leaf.
+///
+/// Unlike every other step in this module, this is not a step of the
+/// *normal* effective order [`build`](super::build) runs: callouts belong to
+/// [`SubstitutionGroup::Verbatim`](crate::content::SubstitutionGroup::Verbatim)
+/// (literal, listing, and source blocks), whose only steps are
+/// `SpecialCharacters` then `Callouts` — so `nodes` here can never contain a
+/// [`Styled`](crate::inlines::Styled) or [`Ref`](crate::inlines::Ref) span
+/// (`Quotes` and `Macros` never ran) and this function need not descend into
+/// anything; the level it matches against is the only level.
+/// [`build_for_group`](super::build_for_group) runs it for the groups that
+/// carry the step, directly after
+/// [`apply_special_characters`](super::special_chars::apply_special_characters).
+///
+/// It reuses the string pipeline's *exact* recognition —
+/// [`build_callout_regexes`] is now shared `pub(crate)` — so only the
+/// recognition *sink* differs (§4.1): a matched, trailing-position callout
+/// becomes a node instead of rendered markup, folding through the same
+/// `render_callout` the string step calls (see `fold_callout`) so the
+/// output is byte-for-byte identical. `attrlist` is the block's own
+/// attribute list (`None` when the caller has none); together with `parser`
+/// it resolves the `line-comment` attribute exactly as
+/// [`apply_callouts`](crate::content::substitution_step)'s string-pipeline
+/// counterpart does: absent, the default line-comment prefixes (`//`, `#`,
+/// `--`, `;;`) and XML callouts are recognized; present (non-empty), only
+/// that prefix is; present but empty, no prefix is recognized (and neither
+/// are XML callouts).
+///
+/// An escaped callout (`\<1>`) drops its backslash and stays literal,
+/// mirroring every other macro family's escape handling. This pass performs
+/// **no** recognition side effect of its own: `Parser::register_callout` is
+/// the replay's to call, from the tree, in
+/// [`apply_callout_side_effects`] — exactly as the macro families leave
+/// their registrations to
+/// [`apply_macro_side_effects`](super::macros::apply_macro_side_effects).
 pub(super) fn apply_callouts<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -355,7 +353,6 @@ mod tests {
     use crate::{
         Parser, Span,
         attributes::{Attrlist, AttrlistContext},
-        content::{Content, SubstitutionStep},
         inlines::{Callout, CalloutGuard, InlineNode},
         parser::HtmlSubstitutionRenderer,
         strings::CowStr,
@@ -412,9 +409,13 @@ mod tests {
         build_verbatim(source, &Parser::default(), None)
     }
 
-    /// The string pipeline's output through the **callouts** step for
-    /// `source`, used as the golden oracle: `SubstitutionGroup::Verbatim`'s
-    /// two steps, in order (special characters, then callouts).
+    /// The string pipeline's recorded output through the **callouts** step
+    /// for `source` — what that pipeline produced while it existed:
+    /// `SubstitutionGroup::Verbatim`'s two steps, in order (special
+    /// characters, then callouts), frozen into `snapshots/callouts.txt`. The
+    /// `_parser` and `_attrlist` no longer participate — a recording is keyed
+    /// by source alone — but the parameters stay so the call sites that
+    /// configured them do not churn.
     fn golden_callouts_with(
         source: &str,
         parser: &Parser,
@@ -431,13 +432,9 @@ mod tests {
     fn golden_callouts_in(
         corpus: &str,
         source: &str,
-        parser: &Parser,
-        attrlist: Option<&Attrlist<'_>>,
+        _parser: &Parser,
+        _attrlist: Option<&Attrlist<'_>>,
     ) -> String {
-        let mut content = Content::from(Span::new(source));
-        SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
-        SubstitutionStep::Callouts.apply(&mut content, parser, attrlist);
-
         crate::content::inline_builder::snapshot::recorded(corpus, source)
     }
 

@@ -281,14 +281,13 @@
 //!   families' own
 //!   [`emit_range_unescaping_brackets`](macros::emit_range_unescaping_brackets),
 //!   so the subtree carries the literal `]` the string replacer's
-//!   [`normalize_footnote_text`](crate::content::macros::normalize_footnote_text)
-//!   produces. The deprecated `footnoteref:[id,text]` / `footnoteref:[id]` form
-//!   (`build_footnoteref_node`) is recognized too, splitting its one bracket on
-//!   the first comma rather than taking an id from the macro target (an id, the
-//!   one half the string replacer never normalizes, keeps its own `\]`); only
-//!   its own deprecation warning (a diagnostic, deferred to the cutover like
-//!   every other family's) remains deferred. The bibliography-anchor form is a
-//!   later increment.
+//!   `normalize_footnote_text` produces. The deprecated `footnoteref:[id,text]`
+//!   / `footnoteref:[id]` form (`build_footnoteref_node`) is recognized too,
+//!   splitting its one bracket on the first comma rather than taking an id from
+//!   the macro target (an id, the one half the string replacer never
+//!   normalizes, keeps its own `\]`); only its own deprecation warning (a
+//!   diagnostic, deferred to the cutover like every other family's) remains
+//!   deferred. The bibliography-anchor form is a later increment.
 //! - [`apply_stem`] recognizes **inline STEM macros** (`stem:[…]`,
 //!   `asciimath:[…]`, `latexmath:[…]`), replacing each with a
 //!   [`Stem`](InlineNode::Stem) leaf. Like [`apply_passthroughs`], it is an

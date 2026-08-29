@@ -264,7 +264,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r#""`a few quoted words`""#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -298,7 +298,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r#"\"`a few quoted words`""#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -326,7 +326,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new("\"`a few\nquoted words`\""));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -356,7 +356,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new(r#""`Here's Johnny!`""#));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -382,7 +382,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new(r#""`Here`s Johnny!`""#));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -410,7 +410,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r#""```E=mc^2^`` is the solution!`""#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -429,7 +429,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r#""``E=mc^2^` is the solution!`""#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -464,7 +464,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r#"'`a few quoted words`'"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -492,7 +492,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r#"\'`a few quoted words`'"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -520,7 +520,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new("'`a few\nquoted words`'"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -552,7 +552,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r#"'`That isn't what I did.`'"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -579,7 +579,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new(r#"'`Here`s Johnny!`'"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -606,7 +606,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new(r#"#a few words#"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -630,7 +630,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new(r#"\#a few words#"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -657,7 +657,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("#a few\nwords#"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -683,7 +683,7 @@ mod quotes {
         ));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -711,7 +711,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r###"##--anything goes ##"###));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -740,7 +740,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r###"\\##--anything goes ##"###));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -767,7 +767,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("##--anything\ngoes ##"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -796,7 +796,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r##"[statement]#a few words#"##));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -825,7 +825,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r#"*a few strong words*"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -850,7 +850,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r#"\*a few strong words*"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -873,7 +873,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new("*a few\nstrong words*"));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -901,7 +901,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("*bl*ck*-eye"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
         assert_eq!(
             content.rendered,
@@ -924,7 +924,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("*黑*眼圈*"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -949,7 +949,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new("_a few emphasized words_"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -978,7 +978,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new("\\_a few emphasized words_"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -1004,7 +1004,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r#"\'a few emphasized words'"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -1029,7 +1029,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new("_a few\nemphasized words_"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -1057,7 +1057,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r#"'`I told him, 'Just go for it!'`'"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -1104,7 +1104,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r#"_a few emphasized words_"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -1129,7 +1129,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new(r#"\_a few emphasized words_"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -1154,7 +1154,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new("_a few\nemphasized words_"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -1842,7 +1842,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new(r#"**Git**Hub"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -1866,7 +1866,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new(r#"\**Git**Hub"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -1890,7 +1890,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("**G\ni\nt\n**Hub"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -1914,7 +1914,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("**bl*ck**-eye"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -1938,7 +1938,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("Git[blue]**Hub**"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -1968,7 +1968,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new(r#"Git\[blue]**Hub**"#));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -1991,7 +1991,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new("__Git__Hub"));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
         assert_eq!(content.rendered, CowStr::Borrowed("<em>Git</em>Hub"));
     }
@@ -2010,7 +2010,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new(r#"\__Git__Hub"#));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
         assert_eq!(content.rendered, CowStr::Borrowed("__Git__Hub"));
     }
@@ -2029,7 +2029,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new(r#"\\__GitHub__"#));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
         assert_eq!(content.rendered, CowStr::Borrowed("__GitHub__"));
     }
@@ -2048,7 +2048,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new("__G\ni\nt\n__Hub"));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
         assert_eq!(content.rendered, CowStr::Borrowed("<em>G\ni\nt\n</em>Hub"));
     }
@@ -2068,7 +2068,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("[gray]__Git__Hub"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2091,7 +2091,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new("\\[gray]__Git__Hub"));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
         assert_eq!(content.rendered, CowStr::Borrowed(r#"[gray]__Git__Hub"#));
     }
@@ -2134,7 +2134,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new("call `save()` to persist the changes"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2182,7 +2182,7 @@ mod quotes {
         ));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2211,7 +2211,7 @@ mod quotes {
         ));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2240,7 +2240,7 @@ mod quotes {
         ));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2269,7 +2269,7 @@ mod quotes {
         ));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2298,7 +2298,7 @@ mod quotes {
         ));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2367,7 +2367,7 @@ mod quotes {
     fn single_line_unconstrained_monospaced_chars_2() {
         let mut content = crate::content::Content::from(crate::Span::new("Git``Hub``"));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
         assert_eq!(content.rendered, CowStr::Borrowed(r#"Git<code>Hub</code>"#));
     }
@@ -2407,7 +2407,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new(r#"Git\``Hub``"#));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
         assert_eq!(content.rendered, CowStr::Borrowed(r#"Git``Hub``"#));
     }
@@ -2447,7 +2447,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("Git``\nH\nu\nb``"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2473,7 +2473,7 @@ mod quotes {
         ));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2498,7 +2498,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new(r#"x\^2^ = x * x"#));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
         assert_eq!(content.rendered, CowStr::Borrowed("x^2^ = x * x"));
     }
@@ -2517,7 +2517,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new("x^(n\n-\n1)^"));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
         assert_eq!(content.rendered, CowStr::Borrowed("x^(n\n-\n1)^"));
     }
@@ -2587,7 +2587,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new("a ^^ b"));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
         assert_eq!(content.rendered, CowStr::Borrowed("a ^^ b"));
     }
@@ -2611,7 +2611,7 @@ mod quotes {
         ));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         // ^^^ TO DO: This needs to be the full substitution group, not just the Quotes
         // substition.
 
@@ -2639,7 +2639,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new("H~2~O"));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
         assert_eq!(content.rendered, CowStr::Borrowed("H<sub>2</sub>O"));
     }
@@ -2658,7 +2658,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new(r#"H\~2~O"#));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
         assert_eq!(content.rendered, CowStr::Borrowed("H~2~O"));
     }
@@ -2679,7 +2679,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new("project~ view\non\nGitHub~"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2702,7 +2702,7 @@ mod quotes {
 
         let mut content = crate::content::Content::from(crate::Span::new("a ~~ b"));
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
         assert_eq!(content.rendered, CowStr::Borrowed("a ~~ b"));
     }
@@ -2724,7 +2724,7 @@ mod quotes {
         ));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2749,7 +2749,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new("[.white.red-background]#alert#"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2773,7 +2773,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("[#bond]#007#"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2798,7 +2798,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new("[#bond.white.red-background]#007#"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2823,7 +2823,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new("[.white.red-background#bond]#007#"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2848,7 +2848,7 @@ mod quotes {
             crate::content::Content::from(crate::Span::new("[.white#bond.red-background]#007#"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2885,7 +2885,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("[#idname]*blah*"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2909,7 +2909,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("[.rolename ]*blah*"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2933,7 +2933,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("[red, foobar]#alert#"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2958,7 +2958,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("[ red , foobar]#alert#"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -2982,7 +2982,7 @@ mod quotes {
         let mut content = crate::content::Content::from(crate::Span::new("[,]#anonymous#"));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -3047,7 +3047,7 @@ mod quotes {
         ));
 
         let p = Parser::default();
-        SubstitutionStep::Quotes.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
         assert!(!content.is_empty());
 
         assert_eq!(
@@ -5077,7 +5077,7 @@ mod macros {
                 CIRCLE_SVG.as_bytes(),
             )]));
 
-        SubstitutionStep::Macros.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(&mut content, &p, None);
 
         let expected = format!(
             concat!(
@@ -5990,7 +5990,7 @@ mod macros {
             ModificationContext::ApiOnly,
         );
 
-        SubstitutionStep::Macros.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(&mut content, &p, None);
         assert_eq!(
             content.rendered,
             CowStr::Boxed(expected.to_string().into_boxed_str())
@@ -6015,7 +6015,7 @@ mod macros {
 
         let p = Parser::default();
 
-        SubstitutionStep::Macros.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(&mut content, &p, None);
         assert_eq!(
             content.rendered,
             CowStr::Boxed(expected.to_string().into_boxed_str())
@@ -6041,7 +6041,7 @@ mod macros {
 
         let p = Parser::default();
 
-        SubstitutionStep::Macros.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(&mut content, &p, None);
         assert_eq!(
             content.rendered,
             CowStr::Boxed(expected.to_string().into_boxed_str())
@@ -6071,7 +6071,7 @@ mod macros {
 
         let p = Parser::default();
 
-        SubstitutionStep::Macros.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(&mut content, &p, None);
         assert_eq!(
             content.rendered,
             CowStr::Boxed(expected.to_string().into_boxed_str())
@@ -6097,7 +6097,7 @@ mod macros {
 
         let p = Parser::default();
 
-        SubstitutionStep::Macros.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(&mut content, &p, None);
         assert_eq!(
             content.rendered,
             CowStr::Boxed(expected.to_string().into_boxed_str())
@@ -6126,7 +6126,7 @@ mod macros {
             ModificationContext::ApiOnly,
         );
 
-        SubstitutionStep::Macros.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(&mut content, &p, None);
         assert_eq!(
             content.rendered,
             CowStr::Boxed(expected.to_string().into_boxed_str())
@@ -6156,7 +6156,7 @@ mod macros {
             ModificationContext::ApiOnly,
         );
 
-        SubstitutionStep::Macros.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(&mut content, &p, None);
         assert_eq!(
             content.rendered,
             CowStr::Boxed(expected.to_string().into_boxed_str())
@@ -6188,7 +6188,7 @@ mod macros {
             ModificationContext::ApiOnly,
         );
 
-        SubstitutionStep::Macros.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(&mut content, &p, None);
         assert_eq!(
             content.rendered,
             CowStr::Boxed(expected.to_string().into_boxed_str())
@@ -6220,7 +6220,7 @@ mod macros {
             ModificationContext::ApiOnly,
         );
 
-        SubstitutionStep::Macros.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(&mut content, &p, None);
         assert_eq!(
             content.rendered,
             CowStr::Boxed(expected.to_string().into_boxed_str())
@@ -6253,7 +6253,7 @@ mod macros {
             ModificationContext::ApiOnly,
         );
 
-        SubstitutionStep::Macros.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(&mut content, &p, None);
         assert_eq!(
             content.rendered,
             CowStr::Boxed(expected.to_string().into_boxed_str())
@@ -7193,7 +7193,10 @@ mod macros {
             let mut content =
                 crate::content::Content::from(crate::Span::new("x footnote:[note]</a>"));
             let parser = Parser::default();
-            crate::content::SubstitutionStep::Macros.apply(&mut content, &parser, None);
+            crate::content::SubstitutionGroup::Custom(vec![
+                crate::content::SubstitutionStep::Macros,
+            ])
+            .apply(&mut content, &parser, None);
 
             assert_eq!(content.rendered_html(), "x footnote:[note]</a>");
         }
@@ -8648,7 +8651,7 @@ mod macros {
             ModificationContext::ApiOnly,
         );
 
-        SubstitutionStep::Macros.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(&mut content, &p, None);
         assert_eq!(
             content.rendered,
             CowStr::Boxed(expected.to_string().into_boxed_str())
@@ -8669,7 +8672,7 @@ mod macros {
             ModificationContext::ApiOnly,
         );
 
-        SubstitutionStep::Macros.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(&mut content, &p, None);
         assert_eq!(
             content.rendered,
             CowStr::Boxed(expected.to_string().into_boxed_str())
@@ -8689,7 +8692,7 @@ mod macros {
             ModificationContext::ApiOnly,
         );
 
-        SubstitutionStep::Macros.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(&mut content, &p, None);
         assert_eq!(
             content.rendered,
             CowStr::Boxed(expected.to_string().into_boxed_str())
@@ -11078,7 +11081,11 @@ foo&#8201;&#8212;&#8201;stuff in between
 foo&#8201;&#8212;&#8201;"#;
 
         let p = Parser::default();
-        SubstitutionStep::CharacterReplacements.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::CharacterReplacements]).apply(
+            &mut content,
+            &p,
+            None,
+        );
         assert_eq!(
             content.rendered,
             CowStr::Boxed(expected.to_string().into_boxed_str())
@@ -11101,7 +11108,11 @@ foo&#8201;&#8212;&#8201;"#;
         let mut content = crate::content::Content::from(crate::Span::new("富--巴"));
 
         let p = Parser::default();
-        SubstitutionStep::CharacterReplacements.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::CharacterReplacements]).apply(
+            &mut content,
+            &p,
+            None,
+        );
         assert_eq!(
             content.rendered,
             CowStr::Boxed("富&#8212;&#8203;巴".to_string().into_boxed_str())
@@ -11124,7 +11135,11 @@ foo&#8201;&#8212;&#8201;"#;
             crate::content::Content::from(crate::Span::new(r#"(C) (R) (TM) \(C) \(R) \(TM)"#));
 
         let p = Parser::default();
-        SubstitutionStep::CharacterReplacements.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::CharacterReplacements]).apply(
+            &mut content,
+            &p,
+            None,
+        );
 
         assert_eq!(
             content.rendered,
@@ -11153,7 +11168,11 @@ foo&#8201;&#8212;&#8201;"#;
 
         let mut content = crate::content::Content::from(crate::Span::new(input));
         let p = Parser::default();
-        SubstitutionStep::CharacterReplacements.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::CharacterReplacements]).apply(
+            &mut content,
+            &p,
+            None,
+        );
         assert_eq!(
             content.rendered,
             CowStr::Boxed(input.to_string().into_boxed_str())
@@ -11177,7 +11196,11 @@ foo&#8201;&#8212;&#8201;"#;
 
         let mut content = crate::content::Content::from(crate::Span::new(input));
         let p = Parser::default();
-        SubstitutionStep::CharacterReplacements.apply(&mut content, &p, None);
+        SubstitutionGroup::Custom(vec![SubstitutionStep::CharacterReplacements]).apply(
+            &mut content,
+            &p,
+            None,
+        );
 
         assert_eq!(
             content.rendered,
@@ -11301,7 +11324,11 @@ foo&#8201;&#8212;&#8201;"#;
 
         for (given, expected) in cases {
             let mut content = crate::content::Content::from(crate::Span::new(given));
-            SubstitutionStep::CharacterReplacements.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::CharacterReplacements]).apply(
+                &mut content,
+                &p,
+                None,
+            );
             assert_eq!(content.rendered, CowStr::from(expected), "input: {given:?}");
         }
     }
