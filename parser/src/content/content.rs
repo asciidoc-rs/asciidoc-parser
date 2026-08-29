@@ -51,22 +51,6 @@ pub struct Content<'src> {
     /// resolution it holds the resolved rendering.
     pub(crate) rendered: CowStr<'src>,
 
-    /// Source [`Span`] of each line that survived construction filtering, in
-    /// the same order as the lines of [`rendered`](Self::rendered) at
-    /// construction time.
-    ///
-    /// This is retained only so the attribute-references substitution can
-    /// locate an `attribute-missing=warn` warning at the precise source
-    /// offset of the offending `{name}` reference, rather than at the
-    /// whole-content span. See
-    /// [`apply_attributes`](crate::content::substitution_step) for the
-    /// rationale and the correlation it performs.
-    ///
-    /// `None` when the content was not built line-by-line from document source
-    /// (e.g. [`From<Span>`] or a table cell's pre-filtered value), in which
-    /// case such warnings fall back to the whole-content span.
-    source_lines: Option<Box<[Span<'src>]>>,
-
     /// Deferred cross-references discovered during substitution, awaiting
     /// resolution against a (possibly cross-document) catalog.
     ///
@@ -513,7 +497,6 @@ impl<'src> Content<'src> {
         Self {
             original: span,
             rendered,
-            source_lines: None,
             deferred: None,
             passthroughs: Vec::new(),
             inlines: Vec::new(),
@@ -598,7 +581,6 @@ impl<'src> Content<'src> {
         Self {
             original: span,
             rendered: title.rendered.into(),
-            source_lines: None,
             deferred: title.deferred.map(Box::new),
             passthroughs: Vec::new(),
             inlines: Vec::new(),
@@ -607,24 +589,8 @@ impl<'src> Content<'src> {
     }
 
     /// Constructs a `Content` from a source `Span` and the per-line filtered
-    /// view of that source, retaining the source `Span` of each surviving line.
-    ///
-    /// `line_spans` must contain one entry per line of `filtered_lines`, in the
-    /// same order; each entry is the source span whose text is that filtered
-    /// line (i.e. after any leading-indent stripping and trailing-whitespace
-    /// trimming the caller applied). The retained spans let the
-    /// attribute-references substitution report an `attribute-missing=warn`
-    /// warning at the precise source offset of the offending reference; see
-    /// [`apply_attributes`](crate::content::substitution_step).
-    pub(crate) fn from_filtered_lines(
-        span: Span<'src>,
-        filtered_lines: &[&'src str],
-        line_spans: Vec<Span<'src>>,
-    ) -> Self {
-        // One source span is required per filtered line; the default
-        // `debug_assert_eq!` message reports both counts if this is ever broken.
-        debug_assert_eq!(filtered_lines.len(), line_spans.len());
-
+    /// view of that source.
+    pub(crate) fn from_filtered_lines(span: Span<'src>, filtered_lines: &[&'src str]) -> Self {
         // A single surviving line needs no join: it is already a contiguous
         // `'src` slice, so borrow it rather than allocating an owned copy. This
         // is the common plain-prose paragraph case; only a genuinely multi-line
@@ -637,7 +603,6 @@ impl<'src> Content<'src> {
         Self {
             original: span,
             rendered,
-            source_lines: Some(line_spans.into_boxed_slice()),
             deferred: None,
             passthroughs: Vec::new(),
             inlines: Vec::new(),
@@ -650,16 +615,6 @@ impl<'src> Content<'src> {
     /// This is the source text before any substitions have been applied.
     pub fn original(&self) -> Span<'src> {
         self.original
-    }
-
-    /// Returns the source `Span` of each line that survived construction
-    /// filtering, in rendered-line order, when they were retained (see
-    /// [`from_filtered_lines`](Self::from_filtered_lines)).
-    ///
-    /// Used only by the attribute-references substitution to locate
-    /// `attribute-missing=warn` warnings precisely.
-    pub(crate) fn source_lines(&self) -> Option<&[Span<'src>]> {
-        self.source_lines.as_deref()
     }
 
     /// Returns the default **HTML** rendering of this content: the final text
@@ -1853,7 +1808,6 @@ impl<'src> From<Span<'src>> for Content<'src> {
         Self {
             original: span,
             rendered: CowStr::from(span.data()),
-            source_lines: None,
             deferred: None,
             passthroughs: Vec::new(),
             inlines: Vec::new(),
@@ -1871,7 +1825,6 @@ impl PartialEq for Content<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.original == other.original
             && self.rendered == other.rendered
-            && self.source_lines == other.source_lines
             && self.deferred == other.deferred
             && self.passthroughs == other.passthroughs
     }
@@ -1883,7 +1836,6 @@ impl std::hash::Hash for Content<'_> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.original.hash(state);
         self.rendered.hash(state);
-        self.source_lines.hash(state);
         self.deferred.hash(state);
         self.passthroughs.hash(state);
     }

@@ -369,7 +369,6 @@ fn parse_lines<'src>(
     // so the attribute-references substitution can locate an
     // `attribute-missing=warn` warning at the precise source offset of the
     // offending reference (see `Content::from_filtered_lines`).
-    let mut filtered_line_spans: Vec<Span<'src>> = vec![];
     let mut skipped_comment_line = false;
 
     // Determine how much indentation to strip from literal paragraphs.
@@ -522,7 +521,6 @@ fn parse_lines<'src>(
         };
 
         let line = line.trim_trailing_whitespace();
-        filtered_line_spans.push(line);
         filtered_lines.push(line.data());
     }
 
@@ -531,8 +529,7 @@ fn parse_lines<'src>(
         return None;
     }
 
-    let mut content: Content<'src> =
-        Content::from_filtered_lines(source, &filtered_lines, filtered_line_spans);
+    let mut content: Content<'src> = Content::from_filtered_lines(source, &filtered_lines);
 
     // A `[comment]`-styled paragraph is the single-paragraph form of a comment
     // block. Its content is retained in the parsed model (this parser does not
