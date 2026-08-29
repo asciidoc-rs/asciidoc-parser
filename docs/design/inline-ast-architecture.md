@@ -11624,6 +11624,53 @@ template synthesized from `carried_title_template`, and renders through
 `render_xref_template`. The code says so in as many words. Retiring it is a real increment,
 not a bookkeeping fix, and it is what stands between Phase 2 and its exit gate.
 
+*The carried-title half landed as (`XrefTemplatePiece` — the template made structural):*
+surveying the increment corrected this audit's own record first: "one case" was an
+under-count, because the placeholders had **two** independent live producers. The carried
+title was one; the other is the footnote path —
+[`fold_deferring_xrefs`](../../parser/src/content/inline_builder/fold.rs) writes a
+placeholder per cross-reference into the fold a footnote's catalog entry is built from, and
+[`FootnoteDeferred::render`](../../parser/src/content/content.rs) reads them back, at
+registration (`Parser::define_footnote`'s unresolved-fallback text) and again at resolution
+for any footnote no tree fold reaches (`Footnote::resolve_references` with `folded: None`).
+
+What landed is the carried-title half, and it retired the *encoding* rather than the
+template: [`DeferredContent::template`](../../parser/src/content/content.rs) is now a
+`Vec<XrefTemplatePiece>` — literal runs interleaved with typed `Xref(index)` splice points —
+so `carried_title_template` writes no sentinel bytes and escapes nothing (a splice point is
+a variant, not a byte pattern a document could forge; the `sentinels` suite's carried-title
+fixture now holds by construction), and `render_xref_template` is a piece walk that scans
+and decodes nothing. The escaped-template form went with it: `unescape_sentinels` and
+`document_text` are deleted, and **no production pass reads escaped form back any more** —
+`escape_sentinels` survives only where the four legacy string-step paths (an attrlist value,
+an author line, a reftext, a list-item marker) splice attribute values into strings nothing
+ever scans, a protection with nothing left to protect, whose deletion is now a separate,
+purely mechanical increment. Verified by a title-level differential: every resolved title in
+the suite logged on both sides, 64 unique `(source, rendered)` pairs, byte-identical sets;
+coverage per changed file unchanged (content.rs 5 missed regions before and after,
+title_refs.rs 5 and 5).
+
+*What still defers* is the footnote half — the last production sentinels anywhere. It did
+not come along, for two concrete reasons rather than scope thrift. First, a footnote's
+placeholder can sit **inside renderer-produced markup**: the deferring fold hands
+`render_styled` a body string, so `footnote:[*<<tgt>>*]` puts the placeholder inside the
+span's rendered bytes, where a flat piece list cannot represent it — top-level pieces would
+bake a *nested* reference's unresolved fallback, the narrowing the carried title documents
+and measures at zero but footnotes demonstrably exercise (that source is a
+`side_effect_parity` corpus fixture). Second, the frozen side-effect corpus
+([`side_effects.txt`](../../parser/snapshots/side_effects.txt)) pins `FootnoteDeferred`'s
+`Debug` spelling byte-for-byte, template included, against recordings of the deleted string
+pipeline — and the nested fixtures' spellings are not reconstructible from a piece
+representation, so the corpus's `deferred` comparison needs redesigning (segments compared
+structurally, literal bytes delegated to the already-compared `text` field, or an equivalent
+that keeps the freeze meaningful). The honest shape of that increment: a render-and-capture
+fold mode (segments recorded while the unresolved rendering is written in place), top-level
+pieces with the nested narrowing measured first (which footnotes reach `folded: None` — the
+carried-title-defined ones, plus whatever remains of the "6 of 55" the catalog's comment
+records from before the title pass collected its own folds), and the corpus codec change.
+One increment, but with those three decisions inside it; only after it can Phase 2's
+"sentinels deleted" gate close and the reserved-codepoint table shrink to nothing.
+
 ##### Phase 3's first criterion cannot close before Landing
 
 "Node vocabulary reviewed against the `asciidoctor` port's needs (§6.6)" and Landing's
