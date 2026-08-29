@@ -28,19 +28,30 @@ by the most recent update from upstream (asciidoc-parser
 
 ## What is included
 
-Only the upstream `docs/` folder is snapshotted here, at
-[`docs/`](./docs) (i.e. `ref/asciidoc-lang/docs`). This is the Antora
-documentation site that constitutes the AsciiDoc language description.
+Two upstream folders are snapshotted here, both at the pinned commit above:
 
-The upstream `asg/` and `spec/` folders are **not** included at this time; we may
-revisit importing them later.
+- [`docs/`](./docs) (i.e. `ref/asciidoc-lang/docs`) — the Antora documentation
+  site that constitutes the AsciiDoc language description.
+- [`asg/`](./asg) (i.e. `ref/asciidoc-lang/asg`) — the JSON Schema for AsciiDoc's
+  Abstract Semantic Graph (ASG), which is the structure the AsciiDoc TCK validates
+  an implementation's output against. The schema itself is
+  [`asg/schema.json`](./asg/schema.json); the `package.json`, `bin/`, `lib/`, and
+  `test/` entries alongside it are upstream's own Ajv-based validation harness,
+  copied so the snapshot matches upstream exactly — nothing here runs `npm`. For
+  what the schema says and what it means for this crate, see
+  [`docs/design/inline-ast-architecture.md`](../../docs/design/inline-ast-architecture.md)
+  §3.5.
+
+The upstream `spec/` folder is **not** included at this time; we may revisit
+importing it later.
 
 ## How to update this snapshot
 
 1. Fetch the desired revision from the upstream repository:
    `git fetch https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang main`
-2. Replace the contents of [`docs/`](./docs) with the upstream `docs/` folder at
-   that revision.
+2. Replace the contents of [`docs/`](./docs) and [`asg/`](./asg) with the upstream
+   `docs/` and `asg/` folders at that revision, so that the whole snapshot stays
+   at a single revision.
 3. Update the **Pinned commit**, **Commit date**, and **Commit summary** rows in
    the table above to the new upstream commit.
 4. Review and adjust the `track_file!("ref/asciidoc-lang/docs/...")` markers in
@@ -51,9 +62,19 @@ revisit importing them later.
 
 The user documentation in [`docs/`](./docs) is made available under the terms of
 a [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/)
-(CC-BY-4.0); see [`docs/LICENSE`](./docs/LICENSE). The AsciiDoc Language project
-as a whole is made available under the terms of the Eclipse Public License v 2.0
-(EPL-2.0); see the
+(CC-BY-4.0); see [`docs/LICENSE`](./docs/LICENSE).
+
+The ASG schema and harness in [`asg/`](./asg) are covered by the project-wide
+Eclipse Public License v 2.0 (EPL-2.0). Upstream, `asg/` carries neither a
+`LICENSE` file of its own nor any per-file license header, and the CC-BY-4.0
+grant does not extend to it: [`docs/LICENSE`](./docs/LICENSE) scopes itself to
+content "under this directory", and upstream's `NOTICE.adoc` likewise confines
+CC-BY-4.0 to "the end user documentation content" while declaring EPL-2.0
+(`SPDX-License-Identifier: EPL-2.0`) for the technology specification and its
+accompanying materials. Upstream's root `README.adoc` describes the same split.
+
+The AsciiDoc Language project as a whole is made available under the terms of the
+Eclipse Public License v 2.0 (EPL-2.0); see the
 [project LICENSE](https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/main/LICENSE)
 for the full text.
 

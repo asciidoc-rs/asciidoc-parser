@@ -1,0 +1,22 @@
+{
+  "name": "asciidoc-asg",
+  "description": "Maintains and tests the JSON schema for the AsciiDoc ASG",
+  "type": "module",
+  "bin": {
+    "validate-asg": "bin/validate-asg.js"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./schema.js": "./schema.js"
+  },
+  "scripts": {
+    "test": "node --test test/*-test.js",
+    "validate": "find $npm_config_dir -name '*-output.json' -exec node bin/validate-asg.js {} \\;"
+  },
+  "dependencies": {
+    "ajv": "latest"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,0 +1,37 @@
+= AsciiDoc ASG Schema
+
+This subproject of the AsciiDoc Language project hosts the JSON schema for AsciiDoc's Abstract Semantic Graph (ASG).
+The AsciiDoc ASG represents the semantic structure and content of a parsed AsciiDoc document.
+This ASG is used by the TCK to validate the behavior of a compatible AsciiDoc implementation (i.e., parser).
+
+== About the schema
+
+The schema is defined using the JSON schema language.
+The schema is stored in the file _schema.json_ at the root of this subproject.
+The schema identifies the valid structure of the ASG, required and optional properties, and expected types.
+
+== Run tests
+
+The schema is tested by the test suite in this subproject using the https://github.com/ajv-validator/ajv[Ajv JSON schema validator].
+To run the tests, you first need to install the required dependencies:
+
+ $ npm ci
+
+To run the self test suite, invoke the npm `test` task:
+
+ $ npm t
+
+== Validate output files
+
+The TCK asserts that the ASG that an implementation produces the expected ASG for a given AsciiDoc input document.
+You can validate those expected output files using the npm `validate` task:
+
+ $ npm run validate --dir=/path/to/tests
+
+The task will automatically select files that end with _-output.json_ and validate them against the ASG schema.
+
+You can also validate a single file using the `validate-asg` bin script:
+
+ $ npx validate-asg test/fixtures/sample-1.json
+
+The source of the validate-asg bin script can be found at _bin/validate-asg.js_.

@@ -435,6 +435,281 @@ This projection doubles as a **conformance test surface**: we can validate our A
 against the schema and, when the language TCK matures, run it. Where the ASG under-models
 what we support, we document the projection choice and keep the richer native node.
 
+#### Notes for `Document::to_asg()`
+
+Everything below is read directly off the schema now snapshotted at
+[`ref/asciidoc-lang/asg/schema.json`](../../ref/asciidoc-lang/asg/schema.json), whose `$id`
+is `https://schemas.asciidoc.org/asg/1-0-0/draft-01` — a *draft* of 1.0.0, and it shows.
+§2 and §3.5 above record the inline vocabulary but none of the mechanics below, and the
+first finding invalidates a row of the table above.
+
+##### An `inlineSpan` cannot carry a role — nor an id, nor attributes
+
+There is no `metadata` object, no `roles` array, and no `attributes` map on any inline node.
+A span's entire property set is the union of two `$defs`:
+
+```json
+"abstractParentInline": {
+  "type": "object",
+  "required": ["type", "inlines"],
+  "properties": {
+    "type": { "type": "string", "const": "inline" },
+    "inlines": { "$ref": "#/$defs/inlines" },
+    "location": { "$ref": "#/$defs/location" }
+  }
+},
+"inlineSpan": {
+  "type": "object",
+  "allOf": [{ "$ref": "#/$defs/abstractParentInline" }],
+  "unevaluatedProperties": false,
+  "required": ["name", "variant", "form"],
+  "properties": {
+    "name": { "type": "string", "const": "span" },
+    "variant": { "type": "string", "enum": ["strong", "emphasis", "code", "mark"] },
+    "form": { "type": "string", "enum": ["constrained", "unconstrained"] }
+  }
+}
+```
+
+That is `type`, `inlines`, `location`, `name`, `variant`, `form` — and
+`"unevaluatedProperties": false` forbids anything else. `roles` does exist in the schema,
+but only at block level, under `blockMetadata`:
+
+```json
+"blockMetadata": {
+  "type": "object",
+  "defaults": { "attributes": {}, "options": [], "roles": [] },
+  "additionalProperties": false,
+  "properties": {
+    "attributes": { "type": "object", "…": "…" },
+    "options": { "type": "array", "items": { "type": "string" } },
+    "roles": { "type": "array", "items": { "type": "string" } },
+    "location": { "$ref": "#/$defs/location" }
+  }
+}
+```
+
+and `blockMetadata` is reachable only through `abstractBlock`'s `metadata` property. No
+inline node has one. Three consequences for the projection table above:
+
+- **`Styled{Superscript, Subscript}` → "`span` with a role" is not implementable.** There
+  is nowhere to put the role, and `variant` is a closed four-value enum that has no
+  superscript or subscript member, so the ASG has no legal node for either construct. The
+  projection has to be chosen afresh — unwrap to the children's inlines and lose the
+  distinction, emit an out-of-enum `variant` and be knowingly non-conformant, or wait for
+  the schema to grow the variants. This is an open question, not a decided row.
+- **`Styled{Unquoted}` → "`span` carrying only id/roles" has the same problem**, and worse:
+  strip the id and roles and nothing distinguishes the node from its children, so an
+  unquoted span projects to its children directly.
+- **`inlineRef` is role-free too.** §3.2's `Ref::roles` and `Ref::window` have no ASG home
+  either; `inlineRef` evaluates to exactly `type`/`inlines`/`location` plus `name`,
+  `variant` (`link` | `xref`), and `target`, again under `"unevaluatedProperties": false`.
+
+##### Every node carries `type` beside `name`, and it has three values
+
+`name` is the union discriminator — both the block and the inline union say so explicitly:
+
+```json
+"block":  { "type": "object", "discriminator": { "propertyName": "name" }, "oneOf": [ … ] },
+"inline": { "type": "object", "discriminator": { "propertyName": "name" }, "oneOf": [
+  { "$ref": "#/$defs/inlineSpan" },
+  { "$ref": "#/$defs/inlineRef" },
+  { "$ref": "#/$defs/inlineLiteral" }
+] }
+```
+
+`type` is a coarser category tag that sits beside it, with exactly three values:
+
+| `type` value | Carried by |
+| ------------ | ---------- |
+| `"block"`    | the document root, every `block` union member, `section`, `listItem`, `dlistItem` |
+| `"inline"`   | `inlineSpan` and `inlineRef` (both via `abstractParentInline`) |
+| `"string"`   | `inlineLiteral` — i.e. `text`, `charref`, and `raw` |
+
+It is required everywhere, never merely optional: the root has
+`"required": ["name", "type"]`, `abstractBlock` has `"required": ["type"]`,
+`abstractParentInline` has `"required": ["type", "inlines"]`, and `inlineLiteral` has
+`"required": ["name", "type", "value"]`. Note that the three `inlineLiteral` names are
+exactly `text` / `charref` / `raw`, which confirms the trichotomy §3.4 is built on:
+
+```json
+"inlineLiteral": {
+  "type": "object",
+  "required": ["name", "type", "value"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "enum": ["text", "charref", "raw"] },
+    "type": { "type": "string", "const": "string" },
+    "value": { "type": "string" },
+    "location": { "$ref": "#/$defs/location" }
+  }
+}
+```
+
+##### `id` is block-only, and an inline anchor has nowhere to live
+
+The schema contains exactly one `id`, on `abstractBlock`:
+
+```json
+"abstractBlock": {
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": { "type": "string", "const": "block" },
+    "id": { "type": "string" },
+    "title": { "$ref": "#/$defs/inlines" },
+    "reftext": { "$ref": "#/$defs/inlines" },
+    "metadata": { "$ref": "#/$defs/blockMetadata" },
+    "location": { "$ref": "#/$defs/location" }
+  }
+}
+```
+
+No inline node has one, and none can acquire one: `inlineSpan` and `inlineRef` close with
+`"unevaluatedProperties": false`, `inlineLiteral` with `"additionalProperties": false`. So
+an inline anchor's id belongs, as far as this schema is concerned, to the enclosing
+**block** — `Anchor` (§3.2) has no inline representation at all. The pointing direction is
+modelled but the declaring direction is not: an `inlineRef` with `"variant": "xref"` carries
+the `target` id it refers to, while nothing in the inline layer can *declare* an id for it
+to resolve against.
+
+##### `location` is exactly two boundaries; `line` and `col` required, `file` an array
+
+```json
+"location": {
+  "type": "array",
+  "prefixItems": [
+    { "$ref": "#/$defs/locationBoundary" },
+    { "$ref": "#/$defs/locationBoundary" }
+  ],
+  "minItems": 2,
+  "maxItems": 2
+},
+"locationBoundary": {
+  "type": "object",
+  "required": ["line", "col"],
+  "additionalProperties": false,
+  "properties": {
+    "line": { "type": "integer", "minimum": 1 },
+    "col": { "type": "integer", "minimum": 0 },
+    "file": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+  }
+}
+```
+
+Four things to note. It is a two-element array, never longer or shorter — `prefixItems`
+types both slots and `minItems`/`maxItems` pin the length. `line` and `col` are required and
+`file` is not, so the ordinary boundary is a two-key object. `line` is 1-based
+(`"minimum": 1`) while `col` allows 0. And `file` is an **array of strings**, not a string;
+the schema constrains it no further than `"minItems": 1`, and says nothing about what the
+elements mean (an include stack is the obvious reading, but that is inference, not schema).
+
+`location` itself is optional on every node — it appears in no `required` list anywhere —
+though upstream's fixtures carry it on every node. The end boundary is *inclusive* of the
+last character rather than one past it: `asg/test/fixtures/sample-1.json` gives the
+seven-character source line `* water` the location
+`[{ "line": 1, "col": 1 }, { "line": 1, "col": 7 }]`. That maps onto §3.2.1's `Span`
+without a new type: the start boundary is the span's `line`/`col`, and the end boundary is
+the position of the last character of `location.data()`.
+
+##### The block-level names `Document::to_asg()` has to emit
+
+The root is the `document` node itself: `"name": "document"`, `"type": "block"`, a `blocks`
+array typed as `sectionBody`, and optional `header`, `attributes`, and `location`. One
+conditional applies to it:
+
+```json
+"if": { "required": ["header"] },
+"then": { "required": ["attributes"] }
+```
+
+— a document that emits a `header` must also emit an `attributes` object, even an empty
+one. The `header` in turn holds `title` (an `inlines` array), `authors` (`minItems: 1`, so
+omit the key entirely rather than emitting `[]`), and `location`.
+
+Below the root, every block node and what it requires:
+
+| `name` | `$defs` | Required beyond `name`/`type` | Children |
+| ------ | ------- | ----------------------------- | -------- |
+| `section` | `section` | `title`, `level` | `blocks` (`sectionBody`) |
+| `heading` | `discreteHeading` | `title`, `level` | — |
+| `paragraph`, `listing`, `literal`, `pass`, `stem`, `verse` | `leafBlock` | — (`delimiter` if `form` is `delimited`) | `inlines` |
+| `admonition`, `example`, `sidebar`, `open`, `quote` | `parentBlock` | `form` (`"delimited"`), `delimiter`; `variant` when `admonition` | `blocks` (`nonSectionBlockBody`) |
+| `list` | `list` | `marker`, `variant`, `items` | `items` (`listItem`, `minItems: 1`) |
+| `listItem` | `listItem` | `marker`, `principal` | `blocks` (`nonSectionBlockBody`) |
+| `dlist` | `dlist` | `marker`, `items` | `items` (`dlistItem`, `minItems: 1`) |
+| `dlistItem` | `dlistItem` | `marker`, `terms` | `principal`, `blocks` |
+| `break` | `break` | `variant` | — |
+| `audio`, `video`, `image`, `toc` | `blockMacro` | `form` (`"macro"`) | — (optional `target`) |
+
+The closed enums, in full: `list.variant` is `callout` | `ordered` | `unordered`;
+`break.variant` is `page` | `thematic`; an `admonition`'s `variant` is `caution` |
+`important` | `note` | `tip` | `warning`; `leafBlock.form` is `delimited` | `indented` |
+`paragraph`, gated by
+
+```json
+"if": {
+  "required": ["form"],
+  "properties": { "form": { "const": "delimited" } }
+},
+"then": {
+  "required": ["delimiter"],
+  "properties": { "delimiter": { "type": "string" } }
+}
+```
+
+Six traps in that table:
+
+- **There is no table block.** Nothing in the schema models tables, and the `leafBlock` and
+  `parentBlock` name enums are closed, so a table cannot be smuggled in as either.
+- A discrete heading's `name` is `heading`, not `discreteHeading`; `discreteHeading` is only
+  the `$defs` key. Conversely `listItem` and `dlistItem` *are* their `name` values.
+- `listItem` and `dlistItem` are not members of the `block` union — they are reachable only
+  through `list.items` and `dlist.items`.
+- Sections nest only inside `sectionBody`, which is used by the root's `blocks` and by
+  `section.blocks`. A `parentBlock` or list-item body is `nonSectionBlockBody`, which admits
+  blocks only.
+- Every block inherits `abstractBlock`'s optional `id`, `title`, `reftext`, `metadata`, and
+  `location`; `title` and `reftext` are `inlines` **arrays**, not strings, so a block title
+  is a full inline subtree.
+- `dlistItem.terms` is an array *of* `inlines` arrays (`{ "items": { "$ref":
+  "#/$defs/inlines" }, "minItems": 1 }`) — a list of terms, each of which is itself a list of
+  inline nodes.
+
+##### Two things the schema does not settle
+
+**How an unset document attribute is encoded.** The root's `attributes` is a pattern-keyed
+map of string-or-null:
+
+```json
+"attributes": {
+  "type": "object",
+  "additionalProperties": false,
+  "patternProperties": {
+    "^[a-zA-Z0-9_][-a-zA-Z0-9_]*$": {
+      "oneOf": [{ "type": "string" }, { "type": "null" }]
+    }
+  }
+}
+```
+
+but upstream's own supposedly-*valid* fixture disagrees with it: `sample-2.json` writes
+`"unset-attribute": false`, and running the pinned revision's `npm test` fails that case
+with `must be string` at `/attributes/unset-attribute`. So `null` is what the schema asks
+for and `false` is what the fixture models, and this draft has not reconciled them. Note
+also that `blockMetadata.attributes` is a *different* map: its key pattern
+`^(?:[a-zA-Z_][a-zA-Z0-9_-]*|\$[1-9][0-9]*)$` additionally admits positional `$1`, `$2`
+keys (as `sample-3.json` shows for `[discrete]`), and its values are plain strings with no
+null alternative.
+
+**`defaults` is not JSON Schema.** The `"defaults"` keyword appearing on the root,
+`abstractListItem`, `section`, `leafBlock`, `parentBlock`, and `blockMetadata` is a custom
+Ajv keyword defined in [`asg/lib/ajv-keyword-defaults.js`](../../ref/asciidoc-lang/asg/lib/ajv-keyword-defaults.js);
+it *modifies the data*, filling in `blocks: []`, `inlines: []`, `attributes: {}`,
+`options: []`, and `roles: []` before the rest of validation runs. A validator that does not
+register the keyword ignores it. The practical upshot for us is that omitting an empty
+`blocks` or `inlines` and emitting it explicitly as `[]` are equally conformant.
+
 ---
 
 ## 4. Key implementation details
