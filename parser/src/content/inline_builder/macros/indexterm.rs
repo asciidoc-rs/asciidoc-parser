@@ -668,7 +668,8 @@ fn build_indexterm_macro_match<'src>(
 /// [`Attrlist<'src>`](Attrlist) their own bracket parses, because a role, an
 /// id, or a `window=` there changes what the fold emits. An index term's whole
 /// render surface is
-/// [`IndexTermRenderParams`](crate::parser::IndexTermRenderParams), which
+/// [`render_index_term`](crate::parser::InlineRenderer::render_index_term)'s
+/// `visible_term`, which
 /// carries the shown term and nothing else — so the list is *consumed* here
 /// rather than carried, and the [`IndexTerm`] node goes on holding the same
 /// already-substituted shown text every other visible spelling gives it. That

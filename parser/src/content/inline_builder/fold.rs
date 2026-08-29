@@ -9,8 +9,7 @@ use crate::{
         SpanForm, Stem, StemNotation, Ui, UiKind,
     },
     parser::{
-        IndexTermRenderParams, InlineRenderer, LinkRenderParams, QuoteScope, QuoteType,
-        RenderContext, SpecialCharacter, XrefRenderParams,
+        InlineRenderer, QuoteScope, QuoteType, RenderContext, SpecialCharacter, XrefRenderParams,
     },
     strings::CowStr,
 };
@@ -453,14 +452,16 @@ fn fold_ui(ui: &Ui<'_>, renderer: &dyn InlineRenderer, context: &RenderContext, 
 }
 
 /// Folds a link [`Ref`](InlineNode::Ref) node through the same `render_link`
-/// the string pipeline's macros step calls, reconstructing the
-/// [`LinkRenderParams`] from the node: the display text is the fold of the
-/// children, the extra roles (`bare`) ride on the node's `roles`, and the
-/// target/window and the attribute list come straight off the node. That list
-/// is [`Ref::attrs`], which is always present — empty when the display text
-/// carried none — and `render_link` needs the real thing rather than just
-/// `roles`/`window`, because it reads an `id`, a `title` and the `nofollow` /
-/// `noopener` options out of it; see that field's own docs.
+/// the string pipeline's macros step calls — handing over the node itself,
+/// since the target, window, roles (the `bare` class an auto-recognized URL
+/// picks up) and attribute list are all on it.
+///
+/// The one argument beside it is the display text, because that is the **fold
+/// of the node's children** and so cannot live on a node: it is a per-render
+/// result, not a parse-time fact. `render_link` reads the real attribute list
+/// rather than just `roles`/`window`, because an `id`, a `title` and the
+/// `nofollow` / `noopener` options come out of it; see [`Ref::attrs`]'s own
+/// docs.
 fn fold_link(
     reference: &Ref<'_>,
     renderer: &dyn InlineRenderer,
@@ -479,18 +480,7 @@ fn fold_link(
         &mut link_text,
     );
 
-    let extra_roles: Vec<&str> = reference.roles.iter().map(|r| r.as_ref()).collect();
-
-    let params = LinkRenderParams {
-        target: reference.target.to_string(),
-        link_text,
-        extra_roles,
-        window: reference.window.as_deref(),
-        attrlist: &reference.attrs,
-        context,
-    };
-
-    renderer.render_link(&params, out);
+    renderer.render_link(reference, &link_text, out);
 }
 
 /// Folds a cross-reference [`Ref`](InlineNode::Ref) node through the same
@@ -690,7 +680,7 @@ fn fold_index_term(
         None
     };
 
-    renderer.render_index_term(&IndexTermRenderParams { visible_term }, out);
+    renderer.render_index_term(index_term, visible_term, out);
 }
 
 /// Folds a [`Footnote`](InlineNode::Footnote) through the same

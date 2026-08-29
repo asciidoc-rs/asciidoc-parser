@@ -4,7 +4,7 @@ use regex::Regex;
 
 use crate::{
     attributes::Attrlist,
-    inlines::{Callout, CalloutGuard, Footnote, Image},
+    inlines::{Callout, CalloutGuard, Footnote, Image, IndexTerm, Ref},
     parser::{
         DerivedReference, RenderContext, ResolvedReference, SafeMode, XrefSignifier, XrefStyle,
     },
@@ -190,8 +190,8 @@ pub trait InlineRenderer: Debug {
     ///
     /// The renderer should write an appropriate rendering of the specified
     /// link, to `dest`.
-    fn render_link(&self, params: &LinkRenderParams, dest: &mut String) {
-        DEFAULT_HTML_RENDERER.render_link(params, dest);
+    fn render_link(&self, link: &Ref<'_>, link_text: &str, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_link(link, link_text, dest);
     }
 
     /// Renders an anchor.
@@ -229,20 +229,46 @@ pub trait InlineRenderer: Debug {
 
     /// Renders an [index term].
     ///
-    /// A *flow* (visible) index term ([`IndexTermRenderParams::visible_term`]
-    /// is `Some`) appears in the flow of text, so the renderer should write
-    /// the term text to `dest`. A *concealed* index term ([`visible_term`]
-    /// is `None`) does not appear in the rendered text, so the renderer
-    /// should typically write nothing.
+    /// A *flow* (visible) index term (`visible_term` is `Some`) appears in the
+    /// flow of text, so the renderer should write that text to `dest`. A
+    /// *concealed* index term (`visible_term` is `None`) does not appear in
+    /// the rendered text, so the renderer should typically write nothing.
+    ///
+    /// `visible_term` is the term's shown text *rendered* — the fold of
+    /// [`IndexTerm::children`](crate::inlines::IndexTerm), which is why it
+    /// arrives alongside the node rather than on it.
     ///
     /// Note that the built-in HTML5 converter never builds an index catalog;
     /// index terms only contribute markup in output formats (such as DocBook or
     /// PDF) that generate an index.
     ///
+    /// # What the node can and cannot tell you yet
+    ///
+    /// The node is passed so that a backend which *does* build an index has
+    /// somewhere to read the term from. Be aware of what it currently holds:
+    /// for a **flow** term, [`terms`](crate::inlines::IndexTerm) is the shown
+    /// term as a single already-substituted string (empty when the shown text
+    /// contains markup only the fold can produce, such as `((*tiger*))`); for
+    /// a **concealed** term it is **empty**, along with `children` — the
+    /// builder does not reconstruct a concealed term's argument, because
+    /// nothing in it reaches the flow.
+    ///
+    /// So an index-building backend cannot yet get the authored
+    /// primary/secondary/tertiary levels out of a concealed
+    /// `indexterm:[p, s, t]` or `(((p, s, t)))`, which are exactly the terms
+    /// that exist only to build an index. Populating them is a change to what
+    /// the builder records, not to this seam, and the field is marked
+    /// provisional for that reason (see
+    /// [`IndexTerm`]'s own Phase-0 note).
+    ///
     /// [index term]: https://docs.asciidoctor.org/asciidoc/latest/sections/user-index/
-    /// [`visible_term`]: IndexTermRenderParams::visible_term
-    fn render_index_term(&self, params: &IndexTermRenderParams, dest: &mut String) {
-        DEFAULT_HTML_RENDERER.render_index_term(params, dest);
+    fn render_index_term(
+        &self,
+        index_term: &IndexTerm<'_>,
+        visible_term: Option<&str>,
+        dest: &mut String,
+    ) {
+        DEFAULT_HTML_RENDERER.render_index_term(index_term, visible_term, dest);
     }
 
     /// Renders a [button] UI macro (`btn:[label]`).
@@ -427,30 +453,6 @@ pub enum CharacterReplacementType {
     CharacterReference(String),
 }
 
-/// Provides parsed parameters for a link to be rendered.
-#[derive(Clone, Debug)]
-pub struct LinkRenderParams<'a> {
-    /// Target (the target of this link).
-    pub target: String,
-
-    /// Link text.
-    pub link_text: String,
-
-    /// Roles (CSS classes) for this link not specified in the attrlist.
-    pub extra_roles: Vec<&'a str>,
-
-    /// Target window selection (passed through to `window` function in HTML).
-    pub window: Option<&'a str>,
-
-    /// Attribute list.
-    pub attrlist: &'a Attrlist<'a>,
-
-    /// The document state as of the point in the document this element came
-    /// from — where a renderer finds document settings such as an image
-    /// directory. See [`RenderContext`].
-    pub context: &'a RenderContext,
-}
-
 /// Provides parameters for rendering a cross-reference.
 #[derive(Clone, Debug)]
 pub struct XrefRenderParams<'a> {
@@ -486,18 +488,6 @@ pub struct XrefRenderParams<'a> {
 
     /// The resolved destination, or `None` if the reference is unresolved.
     pub resolved: Option<&'a ResolvedReference>,
-}
-
-/// Provides parameters for rendering an [index term].
-///
-/// [index term]: https://docs.asciidoctor.org/asciidoc/latest/sections/user-index/
-#[derive(Clone, Debug)]
-pub struct IndexTermRenderParams<'a> {
-    /// For a *flow* (visible) index term (`((term))` or `indexterm2:[term]`),
-    /// the already-substituted primary term text to display in the flow of
-    /// text. `None` for a *concealed* index term (`(((p, s, t)))` or
-    /// `indexterm:[p, s, t]`), which produces no visible output.
-    pub visible_term: Option<&'a str>,
 }
 
 /// Joins a slice of [`CowStr`]s with `sep`.
@@ -1131,11 +1121,15 @@ impl InlineRenderer for HtmlInlineRenderer {
         );
     }
 
-    fn render_link(&self, params: &LinkRenderParams, dest: &mut String) {
-        let id = params.attrlist.id();
+    fn render_link(&self, link: &Ref<'_>, link_text: &str, dest: &mut String) {
+        let attrlist = &link.attrs;
+        let id = attrlist.id();
 
-        let mut roles = params.extra_roles.clone();
-        let mut attrlist_roles = params.attrlist.roles().clone();
+        // The node's own roles (the `bare` class an auto-recognized URL picks
+        // up) come first, then whatever the display text's attribute list
+        // spelled out.
+        let mut roles: Vec<&str> = link.roles.iter().map(CowStr::as_ref).collect();
+        let mut attrlist_roles = attrlist.roles().clone();
         roles.append(&mut attrlist_roles);
 
         let link = format!(
@@ -1146,7 +1140,7 @@ impl InlineRenderer for HtmlInlineRenderer {
             // and let an author inject further attributes (e.g. an event
             // handler), so escape the quote delimiter here — mirroring the
             // image `alt`/`title` handling.
-            target = encode_attribute_value(params.target.clone()),
+            target = encode_attribute_value(link.target.to_string()),
             // The `id` and each role are author-supplied for the same reason
             // the `target` is, and reach this attribute by the same route, so
             // they take the same escape — as `render_xref`'s own roles and the
@@ -1171,7 +1165,7 @@ impl InlineRenderer for HtmlInlineRenderer {
             // Mirrors Asciidoctor's HTML5 converter: `title="#{node.attr 'title'}"`
             // is emitted (after the class) when the link carries a `title`
             // attribute.
-            title = if let Some(title) = params.attrlist.named_attribute("title") {
+            title = if let Some(title) = attrlist.named_attribute("title") {
                 format!(
                     r#" title="{title}""#,
                     title = encode_attribute_value(title.value().to_owned())
@@ -1179,8 +1173,8 @@ impl InlineRenderer for HtmlInlineRenderer {
             } else {
                 "".to_owned()
             },
-            link_constraint_attrs = link_constraint_attrs(params.attrlist, params.window),
-            link_text = params.link_text,
+            link_constraint_attrs = link_constraint_attrs(attrlist, link.window.as_deref()),
+            link_text = link_text,
         );
 
         dest.push_str(&link);
@@ -1308,11 +1302,19 @@ impl InlineRenderer for HtmlInlineRenderer {
         }
     }
 
-    fn render_index_term(&self, params: &IndexTermRenderParams, dest: &mut String) {
+    fn render_index_term(
+        &self,
+        _index_term: &IndexTerm<'_>,
+        visible_term: Option<&str>,
+        dest: &mut String,
+    ) {
         // The HTML5 converter does not generate an index, so a concealed index
         // term produces no output and a flow index term renders only its
-        // (already-substituted) visible term text.
-        if let Some(term) = params.visible_term {
+        // visible term text. The node itself is unused *here* — it is passed
+        // so that a backend which does build an index has somewhere to read
+        // the term from; see the trait method's own docs for what that node
+        // does and does not carry today.
+        if let Some(term) = visible_term {
             dest.push_str(term);
         }
     }
