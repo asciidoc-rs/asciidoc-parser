@@ -273,8 +273,8 @@ pub(super) fn menu_macros_level<'src>(
 /// No boundary can split such a leaf, either: the match is delimited by
 /// `menu:`, `[`, and `]`, and its item list by `&gt;` or `,` — none of which
 /// occurs in `&lt;`, `&amp;`, or a restored entity's own `&name;`, while a
-/// `&gt;` *is* the delimiter the item list itself splits on — so every atomic overlap
-/// is either wholly contained or consumed as the delimiter itself.
+/// `&gt;` *is* the delimiter the item list itself splits on — so every atomic
+/// overlap is either wholly contained or consumed as the delimiter itself.
 fn find_menu_matches<'src>(
     nodes: &[InlineNode<'src>],
     s: &str,
@@ -295,8 +295,8 @@ fn find_menu_matches<'src>(
         // own — because dropping the backslash keeps the rest of the match as
         // its own original nodes (an escaped special or a rendered span among
         // them), which fold back to exactly the
-        // original bytes minus the backslash. Mirrors the same hoist the `footnoteref:`
-        // family makes for the identical reason.
+        // original bytes minus the backslash. Mirrors the same hoist the
+        // `footnoteref:` family makes for the identical reason.
         if whole.as_str().starts_with('\\') {
             matches.push(MacroMatch {
                 kind: MacroMatchKind::Unescape {
@@ -340,9 +340,9 @@ fn find_menu_matches<'src>(
 /// [`text_slice`]), and — when it crosses an escaped special or a restored
 /// entity, which [`text_slice`] declines because it cannot slice one — comes
 /// from the **match string**, i.e. in the already-substituted form
-/// `render_menu` receives from the string pipeline and emits verbatim
+/// `render_menu` receives and emits verbatim
 /// (`menu:F&le[Save]`'s name is `F&amp;le` on both sides). The submenu path
-/// and trailing item are split exactly as the string replacer splits them, out
+/// and trailing item are split out
 /// of that same match string (owned, because a split part is trimmed).
 fn build_menu_node<'src>(
     caps: &regex::Captures<'_>,
@@ -373,18 +373,17 @@ fn build_menu_node<'src>(
     })
 }
 
-/// Splits a menu macro's item list into its submenu path and trailing item,
-/// reproducing the string replacer's delimiter handling: a
+/// Splits a menu macro's item list into its submenu path and trailing item: a
 /// [`SUBMENU_DELIMITER`] (from a source `>`) takes precedence over a comma,
 /// the last part is the menu item, and any earlier parts are submenus. With no
 /// delimiter the whole (right-trimmed) list is a single item, and an absent
 /// list (an empty `[]`) is a bare menu reference.
 ///
-/// The list it splits is the *match string* text — the same escaped text the
-/// string replacer splits — so the caret branch keys off `&gt;` here exactly as
-/// it does there, and so does every other part: an item carrying an escaped
+/// The list it splits is the *match string* text — its own escaped text —
+/// so the caret branch keys off `&gt;`, and so does every other part: an item
+/// carrying an escaped
 /// special or a restored entity keeps that leaf's own entity bytes, which is
-/// precisely the text `render_menu` receives from the string pipeline and
+/// precisely the text `render_menu` receives and
 /// emits verbatim.
 fn split_menu_items<'src>(items: Option<&str>) -> (Vec<CowStr<'src>>, Option<CowStr<'src>>) {
     let Some(items) = items else {
@@ -432,8 +431,7 @@ mod tests {
     };
 
     /// A parser with the `experimental` attribute set, so the UI macros are
-    /// recognized (the string step gates them on it, and the builder mirrors
-    /// that gate).
+    /// recognized.
     fn experimental_parser() -> Parser {
         use crate::parser::ModificationContext;
 
@@ -452,11 +450,11 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_ui_macros() {
         // For each fixture, folding the single-pass tree (all five steps, under
-        // `experimental`) reproduces the string pipeline's output
-        // byte-for-byte. This is the differential corpus (design §5.3)
-        // that pins the UI-macro increment. Every fixture is
+        // `experimental`) reproduces the golden output
+        // byte-for-byte. This is the differential corpus
+        // that pins the UI-macro family. Every fixture is
         // deliberately *verbatim* (no `<`/`>`/`&` inside a macro), the
-        // boundary this increment claims.
+        // boundary that family claims.
         let fixtures = [
             // No UI macro despite macro-ish characters.
             "kbd is a word, not a macro",
@@ -500,8 +498,7 @@ mod tests {
             "\\menu:View[Zoom > Reset]",
             // An escaped macro the gate would *reject* (its item list crosses
             // an escaped `&`): the escape is honored ahead of the gate, so the
-            // backslash is dropped here exactly as the string replacer drops
-            // it.
+            // backslash is simply dropped.
             "\\menu:File[A & B]",
             // Several UI macros together, and next to another macro family.
             "See kbd:[F1] for help and btn:[Go] to run.",
@@ -535,8 +532,8 @@ mod tests {
 
     #[test]
     fn ui_macros_are_literal_without_experimental() {
-        // Without `experimental`, the string step does not recognize the UI
-        // macros, and neither does the builder: the fold reproduces the literal
+        // Without `experimental`, the UI
+        // macros are not recognized: the fold reproduces the literal
         // (default-parser) output byte-for-byte.
         let fixtures = ["kbd:[Ctrl+T]", "btn:[Save]", "menu:File[Save]"];
 
@@ -589,7 +586,7 @@ mod tests {
     #[test]
     fn a_kbd_sequence_splits_into_keys() {
         // The `+`/`,` delimiter selects how the sequence is split into keys,
-        // exactly as the string replacer's `split_kbd_keys` does.
+        // via the shared `split_kbd_keys`.
         let nodes = build_ui(Span::new("kbd:[Ctrl+Shift+N]"));
 
         match &assert_ui(&nodes[0]).kind {
@@ -608,8 +605,8 @@ mod tests {
 
     #[test]
     fn a_btn_macro_becomes_a_ui_node() {
-        // The label is normalized (surrounding whitespace folded) like the
-        // string replacer's `normalize_index_text`.
+        // The label is normalized (surrounding whitespace folded) via the
+        // shared `normalize_index_text`.
         let nodes = build_ui(Span::new("btn:[ Save ]"));
 
         match &assert_ui(&nodes[0]).kind {
@@ -744,16 +741,11 @@ mod tests {
         // **escaped special** (`&`, `<`, `>`), a **restored entity**
         // (`&copy;`, `&#8942;`), or a **typographic replacement** (`(C)`, a
         // smart apostrophe) is recognized: all three are atomic pieces
-        // `build_match_string` gives *real bytes* to — the very bytes the
-        // string replacer's own escaped haystack carries there — and every
+        // `build_match_string` gives *real bytes* to, and every
         // value a `Ui` node holds is read out of that match string and emitted
         // verbatim by `render_keyboard`/`render_button`/`render_menu`. So the
-        // fold reproduces the string pipeline's output byte-for-byte, which is
-        // what these fixtures pin. (This closes the boundary the
-        // `a_menu_over_a_special_character_is_a_documented_divergence` and
-        // `a_kbd_macro_over_a_special_character_is_a_documented_divergence`
-        // tests used to pin, per their own "fold this into a parity corpus"
-        // convention.)
+        // fold reproduces the golden output byte-for-byte, which is
+        // what these fixtures pin.
         let parser = experimental_parser();
         let renderer = HtmlInlineRenderer {};
 
@@ -839,7 +831,7 @@ mod tests {
         // The structural counterpart of the parity corpus above: a `Ui` node's
         // values are *already-substituted* text (the contract an `IndexTerm`'s
         // `terms` already uses), because that is what `render_keyboard` and
-        // friends receive from the string pipeline and emit verbatim. So a key
+        // friends receive and emit verbatim. So a key
         // crossing an escaped special carries the entity, not the source's own
         // `&` — while the node's `location` still covers the macro in *source*
         // terms (the entity is one byte there, five in the match string).
@@ -865,8 +857,8 @@ mod tests {
         // `'src` (through `text_slice`). When it crosses a recoverable atomic
         // piece — here a restored entity, which `text_slice` declines because
         // it cannot slice one — the name comes from the match string instead,
-        // in the same already-substituted form the string replacer's own
-        // params carry. The item list, split from that same string, is
+        // in the same already-substituted form `render_menu` receives. The
+        // item list, split from that same string, is
         // unaffected.
         let nodes = build_ui(Span::new("menu:&#8942;[More Tools, Extensions]"));
 
@@ -896,9 +888,9 @@ mod tests {
         // macro family keeps: a match crossing an **opaque** piece — a
         // rendered span, an already-recognized macro node — is left
         // unrecognized. `build_match_string` stands each in as a single
-        // placeholder where the string pipeline's own haystack holds the
-        // markup it will fold to, so a value read out of the match string
-        // would not be the replacer's, and reading the markup would mean
+        // placeholder whose markup exists only at fold time, so a value read
+        // out of the match string would not be the true rendered text, and
+        // reading the markup would mean
         // folding while building the tree (which this module never does).
         for source in [
             // A rendered span inside a keyboard, button, and menu macro.
@@ -913,8 +905,8 @@ mod tests {
                 "a UI macro crossing an opaque piece must be left unrecognized: {nodes:?}"
             );
 
-            // The string pipeline, by contrast, *does* build a UI macro here —
-            // the divergence this test documents. (If a later increment lifts
+            // The golden recording, by contrast, *does* hold a UI macro here —
+            // the divergence this test documents. (If a later change lifts
             // it, fold these fixtures into the parity corpus above.)
             let golden = golden_macros_in("macros_experimental", source, &experimental_parser());
 
@@ -994,7 +986,7 @@ mod tests {
     #[test]
     fn a_menu_inside_an_expanded_value_keeps_a_coarse_location() {
         // The values are exact; only the node's `location` falls back to the
-        // enclosing synthesized run's coarse span (design §4.4), since an
+        // enclosing synthesized run's coarse span, since an
         // expanded value's bytes have no `'src` counterpart of their own. The
         // menu name recovered from such a run is necessarily owned.
         let parser = expanding_parser();

@@ -2101,7 +2101,7 @@ mod tests {
                 assert_eq!(
                     golden_for_group(&group, source),
                     source,
-                    "the string pipeline must leave this content untouched under {group:?}"
+                    "this content must render untouched under {group:?}"
                 );
 
                 assert_group_parity(&group, source);

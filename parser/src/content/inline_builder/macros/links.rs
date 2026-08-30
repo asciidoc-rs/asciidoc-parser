@@ -2579,10 +2579,10 @@ mod tests {
 
     #[test]
     fn registers_the_restored_target_for_a_link_over_a_stem_expression() {
-        // As for a passthrough target, the staged side effect registers the
-        // node's own — *restored* — target, for both the macro family and the
-        // auto-link one, where the string pipeline registers the sentinel it
-        // matched. The two come back in **family pass order**, not source
+        // As for a passthrough target, [`apply_link_side_effects`] registers
+        // the node's own — *restored* — target, for both the macro family
+        // and the
+        // auto-link one. The two come back in **family pass order**, not source
         // order (see
         // `registers_interleaved_forms_in_family_pass_order_not_source_order`),
         // so the auto-link precedes the macro written before it.
@@ -2640,13 +2640,11 @@ mod tests {
 
     #[test]
     fn registers_the_restored_target_for_a_link_macro_over_a_passthrough() {
-        // The staged side effect registers the node's own target — the
-        // *restored* bytes. The string pipeline registers the sentinel it
-        // matched (`"\u{96}0\u{97}"` verbatim, since its restore pass rewrites
-        // only the rendered string, never the catalog), which no consumer can
-        // read anything from; the cutover deliberately adopts the tree's
-        // honest answer rather than reproducing that wart, so this pins the
-        // policy with no golden-catalog comparison.
+        // [`apply_link_side_effects`] registers the node's own target — the
+        // *restored* bytes — rather than an unrestored placeholder no
+        // consumer could read anything from. This pins that policy with no
+        // golden-catalog comparison, since the frozen recordings never
+        // captured a restored catalog entry to compare against.
         let source =
             "link:++https://example.org/a__b++[] and link:pass:[My Documents/report.pdf][R]";
         let parser = Parser::default().with_catalog_assets(true);
@@ -2762,11 +2760,11 @@ mod tests {
 
     #[test]
     fn a_link_macro_target_crossing_an_escaped_special_is_recognized() {
-        // The string pipeline matches macros over *escaped* text, so a target
+        // Macros match over *escaped* text, so a target
         // containing `&` is matched as `a&amp;b.html` — and the level's match
-        // string carries those very bytes for the `CharRef::Special` the
-        // `SpecialCharacters` step made, so the node's target is exactly the
-        // one the string replacer computed. `target` is a computed value, not
+        // string carries those very bytes for the `CharRef::Special`
+        // `apply_special_characters` made, so the node's target is exactly
+        // the correctly escaped one. `target` is a computed value, not
         // an `'src` slice, so nothing here needs the source's own `&`.
         let source = "link:a&b.html[x]";
         let nodes = build_src(Span::new(source));
@@ -2870,8 +2868,8 @@ mod tests {
         // A display text crossing an escaped special is rebuilt out of the
         // nodes it covers rather than baked into one `Text` child: the special
         // stays the `CharRef` it already is — keeping its own precise `'src`
-        // span (#944) — and folds back to the same entity the string replacer's
-        // text carries, where a single `Text` holding `&lt;` would be escaped a
+        // span (#944) — and folds back to the same entity, where a single
+        // `Text` holding `&lt;` would be escaped a
         // second time.
         let source = "link:index.html[a < b]";
         let nodes = build_src(Span::new(source));
@@ -3049,8 +3047,8 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_inline_links() {
         // For each fixture, folding the single-pass tree (all five steps)
-        // reproduces the string pipeline's output byte-for-byte. This is the
-        // differential corpus (design §5.3) that pins the auto-link /
+        // reproduces the frozen golden recording byte-for-byte. This is the
+        // differential corpus that pins the auto-link /
         // formal-URL link increment. A fixture may cross an escaped
         // special anywhere but its own attribute-list text; the forms
         // still deferred (an attribute-list text crossing a special, a
@@ -3103,8 +3101,8 @@ mod tests {
             // An **attribute-list-bearing** text with no `'src` slice of its
             // own: one crossing an escaped special and one spanning two lines
             // (which the attrlist parse joins with a space). Each is parsed
-            // from the level's match string — the same bytes the string
-            // replacer parses — and owned off it. The incidental-`=` fallback
+            // from the level's match string — already-escaped bytes — and
+            // owned off it. The incidental-`=` fallback
             // reaches the same path.
             "https://example.org[a < b,role=hl]",
             "https://example.org[Tom & Jerry,role=hl^]",
@@ -3127,8 +3125,8 @@ mod tests {
             "*see https://example.org*",
             "_https://example.org in em_",
             // A URL crossing an *escaped special*: the target this pass reads
-            // off the level's match string is the escaped one the string
-            // replacer computed, and a bare link's shown text is recovered from
+            // off the level's match string is the correctly escaped one,
+            // and a bare link's shown text is recovered from
             // that same range as structured children rather than baked.
             "https://example.org/?a=1&b=2",
             "See https://example.org/?a=1&b=2, then stop.",
@@ -3229,14 +3227,13 @@ mod tests {
     fn fold_matches_the_string_pipeline_for_an_auto_link_target_over_a_passthrough() {
         // The differential corpus for an auto-link / formal-URL target
         // crossing a masked **passthrough** — the last family of that class.
-        // The string pipeline swallows the `\u{96}`*n*`\u{97}` sentinel into
-        // the URL (both target classes admit it exactly as they admit the
-        // tree's placeholder, and the bare branch's own trailing character
-        // class admits the last byte of either spelling, so the two recognize
-        // the same extent) and the restore pass then splices the extracted
-        // body over every sentinel in the rendered string, so the tree's
+        // Both target classes admit the tree's own placeholder exactly as
+        // they would admit its restored bytes, and the bare branch's own
+        // trailing character class admits the last byte of either spelling,
+        // so this family needs no widening of its own to recognize the same
+        // extent, and the tree's
         // computed target substitutes the `Raw` node's value for its
-        // placeholder the same way (see [`restore_masked_passthroughs`]).
+        // placeholder directly (see [`restore_masked_passthroughs`]).
         use super::super::super::test_support::golden_passthroughs;
 
         let fixtures = [
@@ -3256,8 +3253,9 @@ mod tests {
             "https://example.org/++a++#frag",
             "https://++a++.++b++.org/x",
             // The trailing-punctuation strip keys off the target's final
-            // character in both pipelines — a placeholder is no more a `;`
-            // than the sentinel is, so a `;` *inside* the passthrough stays
+            // character — a placeholder is no more a `;`
+            // than the passthrough's own restored bytes are, so a `;`
+            // *inside* the passthrough stays
             // in the target while a literal one after it is stripped.
             "see https://example.org/++a++; now",
             "https://example.org/a++;++",
@@ -3385,15 +3383,16 @@ mod tests {
 
     #[test]
     fn a_quote_restored_into_an_auto_link_target_is_a_documented_divergence() {
-        // A `"` inside the passthrough body reaches the `href` through two
-        // different orders. The string pipeline renders its *sentinel* — which
-        // carries no quote for `encode_attribute_value` to escape — and the
-        // restore then splices the raw `"` into the finished attribute, which
-        // it closes; the fold renders the *restored* target, so the quote is
-        // escaped where it belongs. The tree's is the well-formed reading, and
+        // A `"` inside the passthrough body could reach the `href` two
+        // different ways: spliced raw into the finished attribute — which it
+        // would close, since the placeholder itself carries no quote for
+        // `encode_attribute_value` to escape — or escaped where it belongs,
+        // by rendering the *restored* target and letting the fold's own
+        // escape run over it. The fold takes the second, well-formed
+        // reading, and
         // it is the reading the two sibling families' own restores already
         // take (`link:++a"b++[]`, `image:++a"b.png++[]`), so this is pinned
-        // rather than corrected.
+        // as a documented divergence from the literal-splice reading.
         use super::super::super::test_support::golden_passthroughs;
 
         let source = "https://example.org/++a\"b++";
@@ -3428,10 +3427,11 @@ mod tests {
         //
         // Recognition needs no widening here for the same reason the
         // passthrough increment found: [`INLINE_LINK`]'s three URL classes
-        // admit the sentinel and the one-character placeholder alike, and
+        // admit the placeholder the same way they would admit the restored
+        // bytes, and
         // both pre-restore decisions — rejecting a quoted URL, stripping a
-        // bare one's trailing punctuation — read a placeholder exactly as the
-        // sentinel-holding haystack reads its own sentinel.
+        // bare one's trailing punctuation — read the placeholder exactly as
+        // they would read the restored bytes.
         use super::super::super::test_support::golden_passthroughs;
 
         let fixtures = [
@@ -3442,8 +3442,8 @@ mod tests {
             "https://example.org/stem:[a]stem:[b]",
             "https://example.org/stem:[x]#frag",
             // The trailing-punctuation strip keys off the target's final
-            // character in both pipelines — a placeholder is no more a `;`
-            // or a `.` than the sentinel is.
+            // character — a placeholder is no more a `;`
+            // or a `.` than the passthrough's own restored bytes are.
             "https://example.org/stem:[x],",
             "(https://example.org/stem:[x])",
             "See https://example.org/stem:[x]. Then.",
@@ -3492,11 +3492,11 @@ mod tests {
     #[test]
     fn an_auto_link_target_over_a_stem_expression_is_recognized() {
         // The computed target is the restored bytes — the expression's
-        // *rendered* form, which is what the string pipeline's `href`
+        // *rendered* form, which is what the `href`
         // carries once `Passthroughs::restore_to` runs — while the bare
         // link's shown text keeps the [`Stem`](InlineNode::Stem) node itself
         // as a child, so the fold emits those same bytes without re-escaping
-        // them (design §3.4), exactly as a bare macro's `Raw` child does.
+        // them, exactly as a bare macro's `Raw` child does.
         let nodes = build_src(Span::new("https://example.org/stem:[x + y]"));
 
         let reference = assert_link(&nodes[0]);
@@ -3562,9 +3562,10 @@ mod tests {
         // formal-URL family (an `=`) — all three of which come back from the
         // one [`text_attrlist`] parse.
         //
-        // Reproducing the string pipeline means reproducing its *order*, as
+        // Reproducing Asciidoctor's own output means reproducing its
+        // *order*, as
         // the image family's own bracket increment found: its
-        // [`Attrlist::parse`] reads the `\u{96}`n`\u{97}` sentinel as one
+        // [`Attrlist::parse`] reads the `\u{96}`n`\u{97}` token as one
         // opaque run carrying none of the `,`/`=`/`"` bytes the split reads,
         // so the text is put into that same shape before the parse
         // ([`tokened_bracket`]) and restored after it — into the parsed
@@ -3588,8 +3589,8 @@ mod tests {
             "link:https://example.org[++a,b++]",
             // An `=` inside the body, with no real named attribute to split
             // off: `extract_attributes_from_text` hands the whole tokened text
-            // back unparsed, exactly as it hands the string replacer its own
-            // sentinel-bearing one.
+            // back unparsed, exactly as it would for any other text with no
+            // real attribute to split off.
             "link:https://example.org[++a=b++]",
             // A body inside a *named* value, a quoted one, and both halves of
             // one list at once.
@@ -3605,8 +3606,9 @@ mod tests {
             "link:https://example.org[T,role=hl,++a++]",
             "link:https://example.org[++a++,,role=hl]",
             // The shorthand items after a token: their offsets are shifted
-            // past the restore rather than re-derived, so the `#`/`.`/`%` the
-            // string pipeline found over its own sentinel are the same ones.
+            // past the restore rather than re-derived, so the `#`/`.`/`%`
+            // found over the token are the same ones the restored bytes
+            // would give.
             "link:https://example.org[++abc++#myid.myrole,role=hl]",
             "link:https://example.org[++a++%myopt,role=hl]",
             // The `^` window suffix past a token, and the `\]` unescape.
@@ -3673,11 +3675,12 @@ mod tests {
     #[test]
     fn a_mailto_subject_over_a_masked_construct_is_deferred() {
         // A `mailto:`'s second and third positionals are read **before** the
-        // restore: [`encode_uri_component`] folds them into the `href`, and
-        // the string pipeline encodes its own sentinel there
-        // (`%C2%960%C2%97`), which `Passthroughs::restore_to` then cannot
-        // find in the finished attribute — so its golden *leaks* the encoded
-        // sentinel and no restore here can reproduce it. Deferred with the
+        // restore: [`encode_uri_component`] would percent-encode the
+        // placeholder token itself there
+        // (`%C2%960%C2%97`), which `Passthroughs::restore_to` can then no
+        // longer find in the finished attribute — the frozen golden
+        // recording for this shape captures exactly that leaked,
+        // still-encoded token, and no restore here can reproduce it. Deferred with the
         // whole match left literal, the same boundary the cross-reference
         // family's own pre-restore target keeps, and drawn per *slot* so that
         // the sibling fixtures above (a masked display text beside a plain
@@ -3710,11 +3713,11 @@ mod tests {
     fn a_restored_quote_in_a_link_title_is_a_documented_divergence() {
         // The tree's is the **well-formed** reading, and the same one the
         // image family's own bracket already takes for its `alt`: the fold
-        // escapes the restored `"` through `encode_attribute_value`, where
-        // the string pipeline encoded its quote-free *sentinel* and then
-        // spliced the raw quote into the finished `title="…"`, closing the
-        // attribute early. (The `id` slot is emitted unescaped in both, so it
-        // stays byte-identical; only the encoded slots come apart.)
+        // escapes the restored `"` through `encode_attribute_value`, rather
+        // than splicing the raw quote straight into the finished
+        // `title="…"`, which would close the attribute early. (The `id`
+        // slot is emitted unescaped either way, so it stays byte-identical;
+        // only the encoded slots come apart from a literal-splice reading.)
         use super::super::super::test_support::golden_passthroughs;
 
         let source = "link:https://example.org[T,title=++a\"b++]";
@@ -3736,8 +3739,8 @@ mod tests {
         // The other half of the same class the image family's `link=` check
         // named, and it runs the **safe** way here too: `window=` and
         // `opts=` are values the renderer makes a *decision* on rather than
-        // emits, and it now reads the restored bytes, where the string
-        // pipeline tested its own sentinel and found neither `_blank` nor
+        // emits, and it reads the restored bytes rather than the
+        // placeholder, which by itself would match neither `_blank` nor
         // `nofollow`. So the tree emits the `rel` hardening the golden omits.
         use super::super::super::test_support::golden_passthroughs;
 

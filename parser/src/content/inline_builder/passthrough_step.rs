@@ -1782,9 +1782,9 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_passthroughs() {
         // For each fixture, folding the single-pass tree (all six steps,
-        // passthroughs included) reproduces the string pipeline's output
-        // byte-for-byte. This is the differential corpus (design §5.3) that
-        // pins the passthrough increment.
+        // passthroughs included) reproduces the frozen golden recording
+        // byte-for-byte. This is the differential corpus that pins
+        // passthrough recognition.
         let fixtures = [
             // No passthrough despite passthrough-ish characters.
             "plain text",
@@ -2688,8 +2688,8 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_for_a_bare_form_over_an_extracted_passthrough() {
         // The bare `+…+` form runs in this step's *second* pass, so its body
-        // can enclose a construct the first pass already replaced. The string
-        // pipeline sees its own sentinel there and treats it as ordinary body
+        // can enclose a construct the first pass already replaced. Asciidoctor
+        // treats its own placeholder there as ordinary body
         // text — substituting over it and letting the final restore splice the
         // inner body in afterwards — and this reproduces that order exactly.
         for fixture in [
@@ -2842,7 +2842,7 @@ mod tests {
         // the bare unconstrained form's own pattern already excludes a `\`,
         // `:`, or `;` prefix in its consuming boundary group, so this is
         // parity, not a divergence: the passthrough is correctly left
-        // unrecognized *and* the golden string pipeline agrees.
+        // unrecognized *and* the golden recording agrees.
         for source in [r"a\+text+ b", "a:+text+ b", "a;+text+ b"] {
             let nodes = build_src(Span::new(source));
 

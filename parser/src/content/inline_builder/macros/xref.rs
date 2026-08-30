@@ -1063,7 +1063,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_xref(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen recording for {fixture:?}"
             );
         }
     }
@@ -1624,7 +1624,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_xref(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen recording for {fixture:?}"
             );
         }
     }
@@ -1670,7 +1670,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_xref(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen recording for {fixture:?}"
             );
         }
     }
@@ -1878,7 +1878,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_xref(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen recording for {fixture:?}"
             );
         }
     }
@@ -1936,7 +1936,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(fixture)), &HtmlInlineRenderer {}),
                 golden_xref(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen recording for {fixture:?}"
             );
         }
     }
@@ -2042,7 +2042,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_xref(source),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the frozen recording for {source:?}"
             );
         }
     }
@@ -2391,7 +2391,7 @@ mod tests {
                 assert_eq!(
                     folded,
                     golden_xref_with(fixture, &parser),
-                    "fold diverged from the string pipeline for {fixture:?} under xrefstyle={style:?}"
+                    "fold diverged from the frozen recording for {fixture:?} under xrefstyle={style:?}"
                 );
             }
         }
@@ -2594,7 +2594,7 @@ mod tests {
                     &parser.render_context()
                 ),
                 golden_normal(source, &parser),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the frozen recording for {source:?}"
             );
         }
     }
@@ -2693,7 +2693,7 @@ mod tests {
             assert_eq!(
                 fold_html(&nodes, &renderer),
                 golden_whole_pipeline(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen recording for {fixture:?}"
             );
         }
 
