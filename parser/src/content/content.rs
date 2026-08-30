@@ -3,8 +3,6 @@
 //!
 //! [substitutions]: https://docs.asciidoctor.org/asciidoc/latest/subs/
 
-use std::borrow::Cow;
-
 use crate::{
     Parser, Span,
     content::Passthrough,
@@ -158,10 +156,11 @@ struct DeferredContent {
     /// This used to be one `String` in *escaped sentinel form*: a raw
     /// `U+E000 <index> U+E001` marked each splice point, and every
     /// document-derived byte was escaped so a typed copy of that sequence
-    /// could not forge one (see [`escape_sentinels`]). The structure makes
-    /// both halves of that machinery unnecessary — a splice point is a
-    /// [`Xref`](XrefTemplatePiece::Xref) variant rather than a byte pattern,
-    /// so nothing scans the literal text and nothing in it needs escaping.
+    /// could not forge one (see `escape_sentinels`, since retired). The
+    /// structure makes both halves of that machinery unnecessary — a splice
+    /// point is a [`Xref`](XrefTemplatePiece::Xref) variant rather than a
+    /// byte pattern, so nothing scans the literal text and nothing in it
+    /// needs escaping.
     ///
     /// The one content that *renders* from a template in production — a block
     /// title carried across a section heading, which travels through
@@ -231,10 +230,10 @@ pub(crate) struct XrefSegment {
 ///
 /// This is the **out-of-band** replacement for the in-band placeholder
 /// sentinels (`U+E000 <index> U+E001`) the template used to be written in.
-/// In-band marks needed the escaping pass on [`escape_sentinels`] to stay
-/// unforgeable — a document-typed copy of the byte sequence was otherwise
-/// byte-identical to a real placeholder. A splice point that is a variant
-/// rather than a byte pattern cannot be typed at all: a document's own
+/// In-band marks needed the escaping pass — `escape_sentinels`, since retired
+/// — to stay unforgeable — a document-typed copy of the byte sequence was
+/// otherwise byte-identical to a real placeholder. A splice point that is a
+/// variant rather than a byte pattern cannot be typed at all: a document's own
 /// `U+E000 0 U+E001` is content inside a [`Literal`](Self::Literal), and
 /// nothing reads placeholders back out of text.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -246,115 +245,6 @@ pub(crate) enum XrefTemplatePiece {
     /// rendered from the segment's current (resolved or unresolved) state at
     /// splice time.
     Xref(usize),
-}
-
-/// Sentinel codepoints (Unicode Private Use Area) that used to bracket a
-/// placeholder index in a [`FootnoteDeferred`] template — the last template
-/// written as an in-band string, and design §4.2's third and final sentinel
-/// system. Both [`DeferredContent::template`] and [`FootnoteDeferred`]'s own
-/// are structured [`XrefTemplatePiece`] lists now, so nothing in the crate
-/// produces these codepoints any more; they survive only as entries in
-/// [`RESERVED_SENTINELS`] and [`is_reserved_sentinel`], mirroring how
-/// [`PASSTHROUGH_PLACEHOLDER_START`] and [`PASSTHROUGH_PLACEHOLDER_END`]
-/// already stood — reserved codepoints with nothing left producing them.
-/// Retiring the table itself (with [`escape_sentinels`], its last reader) is
-/// a separate, purely mechanical increment.
-const XREF_PLACEHOLDER_START: char = '\u{E000}';
-const XREF_PLACEHOLDER_END: char = '\u{E001}';
-
-/// Sentinel codepoints (C1 control range) bracketing an extracted
-/// passthrough's index while the other substitutions run. Defined here so the
-/// escaping pass below covers them alongside the Private Use Area sentinels;
-/// they are emitted and consumed by
-/// [`passthroughs`](crate::content::passthroughs).
-pub(crate) const PASSTHROUGH_PLACEHOLDER_START: char = '\u{96}';
-pub(crate) const PASSTHROUGH_PLACEHOLDER_END: char = '\u{97}';
-
-/// Introduces the escaped form of a reserved sentinel (see
-/// [`escape_sentinels`]). A document's own copies of this codepoint are
-/// escaped too, so an occurrence in escaped text always introduces an escape.
-const SENTINEL_ESCAPE: char = '\u{E004}';
-
-/// Every codepoint the substitution pipeline reserves as an in-band control
-/// sentinel, paired with the ASCII tag that stands in for it in escaped text.
-///
-/// The tags are arbitrary; all that matters is that each is distinct and that
-/// the escape introducer itself is in the table, so escaping is reversible.
-const RESERVED_SENTINELS: [(char, char); 5] = [
-    (XREF_PLACEHOLDER_START, 'a'),
-    (XREF_PLACEHOLDER_END, 'b'),
-    (PASSTHROUGH_PLACEHOLDER_START, 'e'),
-    (PASSTHROUGH_PLACEHOLDER_END, 'f'),
-    (SENTINEL_ESCAPE, 'g'),
-];
-
-/// Replaces each reserved sentinel codepoint a *document* typed with an escaped
-/// form, so that the only unescaped sentinels in the text being substituted are
-/// the ones the substitution pipeline wrote itself.
-///
-/// This was the **string pipeline's** own protection: its sentinels were
-/// in-band, spliced into the same string as the document's text, so the passes
-/// that read them back could not otherwise tell a sentinel the parser wrote
-/// from one the document did. The single-pass builder needs no counterpart —
-/// it recognizes constructs by range over the source rather than by scanning a
-/// rendered string for its own marks — and the carried title's template, the
-/// last escaped-form data to cross a seam, is a structured
-/// [`XrefTemplatePiece`] list now, so no production pass unescapes anything
-/// any more.
-///
-/// What survives is this pass itself, on the string-substitution steps the
-/// builder does not own: [`SubstitutionStep::AttributeReferences`] applied to
-/// an attrlist value, an author line, or a reftext still escapes each
-/// substituted attribute value on the way in (see
-/// `AttributeReplacer::escaping_sentinels`). Nothing scans those strings for
-/// sentinels and nothing reverses the escape, so the pass no longer protects
-/// anything — it is a byte-for-byte-preserved vestige, and retiring it (with
-/// the [`RESERVED_SENTINELS`] table under it) is its own increment.
-///
-/// Text with no reserved codepoint — the overwhelming majority — is borrowed
-/// through unchanged.
-///
-/// [`SubstitutionStep::AttributeReferences`]: crate::content::SubstitutionStep::AttributeReferences
-pub(crate) fn escape_sentinels(text: &str) -> Cow<'_, str> {
-    if !text.contains(is_reserved_sentinel) {
-        return Cow::Borrowed(text);
-    }
-
-    let mut out = String::with_capacity(text.len());
-
-    for c in text.chars() {
-        match RESERVED_SENTINELS
-            .iter()
-            .find(|(sentinel, _)| *sentinel == c)
-        {
-            Some((_, tag)) => {
-                out.push(SENTINEL_ESCAPE);
-                out.push(*tag);
-            }
-            None => out.push(c),
-        }
-    }
-
-    Cow::Owned(out)
-}
-
-/// Returns `true` if `c` is one of the codepoints the substitution pipeline
-/// reserves for its own use.
-///
-/// Written as an inline match rather than a scan of [`RESERVED_SENTINELS`]:
-/// this runs over every character of every block's content, while the table
-/// itself is only consulted for text that has a sentinel in it. A unit test
-/// pins the two to the same set of codepoints.
-///
-/// `\u{E002}` and `\u{E003}` are deliberately absent: they were the
-/// footnote-marker sentinels, and this branch's section-title path derives a
-/// heading's reference text by folding its inline subtree instead, so nothing
-/// reserves them any more (design §4.2's first sentinel system).
-fn is_reserved_sentinel(c: char) -> bool {
-    matches!(
-        c,
-        '\u{96}' | '\u{97}' | '\u{E000}' | '\u{E001}' | '\u{E004}'
-    )
 }
 
 /// Strips markup down to plain text, mirroring Asciidoctor's
@@ -1518,9 +1408,10 @@ pub(crate) fn xref_segment_from_node(
 /// is what keeps the template's two populations apart — a splice point is a
 /// variant, not a byte pattern — where the string-form template this replaces
 /// had to write in-band `U+E000 <index> U+E001` sentinels and pass every
-/// document-derived byte through [`escape_sentinels`] so a document-typed copy
-/// of that sequence (see the `sentinels` test module, issue #1235) could not
-/// forge a placeholder. Nothing here scans text, so nothing needs escaping.
+/// document-derived byte through `escape_sentinels` (since retired) so a
+/// document-typed copy of that sequence (see the `sentinels` test module, issue
+/// #1235) could not forge a placeholder. Nothing here scans text, so nothing
+/// needs escaping.
 ///
 /// The price of reading only the top level is a cross-reference **nested**
 /// inside another top-level construct (a styled span's children, a visible
@@ -2009,83 +1900,6 @@ mod tests {
         }
     }
 
-    mod escape_sentinels {
-        use std::borrow::Cow;
-
-        use super::super::{
-            PASSTHROUGH_PLACEHOLDER_END, PASSTHROUGH_PLACEHOLDER_START, RESERVED_SENTINELS,
-            SENTINEL_ESCAPE, XREF_PLACEHOLDER_END, XREF_PLACEHOLDER_START, escape_sentinels,
-            is_reserved_sentinel,
-        };
-
-        #[test]
-        fn the_range_test_and_the_table_describe_the_same_codepoints() {
-            for (sentinel, _) in RESERVED_SENTINELS {
-                assert!(
-                    is_reserved_sentinel(sentinel),
-                    "{sentinel:?} is reserved but not covered by the inline match"
-                );
-            }
-
-            for c in '\u{0}'..=char::MAX {
-                assert_eq!(
-                    is_reserved_sentinel(c),
-                    RESERVED_SENTINELS
-                        .iter()
-                        .any(|(sentinel, _)| *sentinel == c),
-                    "the inline match and the table disagree about {c:?}"
-                );
-            }
-        }
-
-        #[test]
-        fn borrows_text_with_no_reserved_codepoint() {
-            assert!(matches!(
-                escape_sentinels("plain text"),
-                Cow::Borrowed("plain text")
-            ));
-        }
-
-        #[test]
-        fn escaped_text_holds_no_reserved_codepoint() {
-            // No production pass reads the escaped form back any more (the
-            // decoder went with the carried title's escaped template), so what
-            // this pins is the escaping's own output: distinct tags per
-            // codepoint, behind an introducer that is itself escaped.
-            let typed = format!(
-                "a{XREF_PLACEHOLDER_START}0{XREF_PLACEHOLDER_END}b\
-                 {PASSTHROUGH_PLACEHOLDER_START}1{PASSTHROUGH_PLACEHOLDER_END}\
-                 e{SENTINEL_ESCAPE}f"
-            );
-
-            let escaped = escape_sentinels(&typed);
-
-            for reserved in [
-                XREF_PLACEHOLDER_START,
-                XREF_PLACEHOLDER_END,
-                PASSTHROUGH_PLACEHOLDER_START,
-                PASSTHROUGH_PLACEHOLDER_END,
-            ] {
-                assert!(
-                    !escaped.contains(reserved),
-                    "escaped text still contains {reserved:?}: {escaped:?}"
-                );
-            }
-
-            // The escape introducer is the one reserved codepoint that remains,
-            // and every occurrence of it is one the escaping wrote.
-            assert_eq!(escaped.matches(SENTINEL_ESCAPE).count(), 5, "{escaped:?}");
-
-            assert_eq!(
-                escaped,
-                format!(
-                    "a{SENTINEL_ESCAPE}a0{SENTINEL_ESCAPE}bb\
-                     {SENTINEL_ESCAPE}e1{SENTINEL_ESCAPE}f\
-                     e{SENTINEL_ESCAPE}gf"
-                )
-            );
-        }
-    }
     mod sanitize_title {
         use super::super::sanitize_title;
 
