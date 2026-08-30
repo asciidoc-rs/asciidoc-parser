@@ -3972,8 +3972,8 @@ mod tests {
     fn a_restored_entity_contributes_its_own_bytes_to_the_match_string() {
         // The two `CharRef` leaves are the atomic pieces `build_match_string`
         // gives real bytes to: a `Special` its canonical entity, and an
-        // `Entity` the entity itself. Both are what the string pipeline's own
-        // haystack holds at that position, which is what lets a family read a
+        // `Entity` the entity itself. Both are the bytes this position holds,
+        // which is what lets a family read a
         // value across one; both stay `atomic`, since a leaf is one
         // indivisible node.
         let nodes = vec![
@@ -4011,9 +4011,11 @@ mod tests {
     #[test]
     fn crossed_delimiters_are_a_documented_divergence() {
         // `` `a *b` c* `` interleaves a monospace and a strong span so their
-        // ranges *overlap* rather than nest. The string pipeline, rewriting a
-        // flat string, emits crossed — malformed — HTML tags (`<code>…<strong>…
-        // </code>…</strong>`) that no tree can represent. The single-pass
+        // ranges *overlap* rather than nest. The old string-substitution
+        // implementation, rewriting a flat string, emitted crossed —
+        // malformed — HTML tags (`<code>…<strong>…</code>…</strong>`) that no
+        // tree can represent, and that recording is still this test's golden
+        // oracle. The single-pass
         // builder instead treats an earlier span as opaque, so it produces a
         // well-formed tree (here, monospace wrapping a strong span). This is
         // the documented boundary of the single-pass recognition (see
@@ -4027,7 +4029,7 @@ mod tests {
         );
         let golden = golden_quotes(source);
 
-        // The string pipeline's crossed tags: monospace matched *through* the
+        // The golden recording's crossed tags: monospace matched *through* the
         // rendered `<strong>` tag, so `</code>` closes before `</strong>`.
         assert_eq!(golden, "<code>a <strong>b</code> c</strong>");
 
@@ -4114,8 +4116,8 @@ mod tests {
     #[test]
     fn a_char_ref_inside_a_span_is_preserved_as_a_child() {
         // The special character splits into a `CharRef` child of the span; the
-        // fold re-escapes it, matching the string pipeline (covered by the
-        // corpus) while the structure exposes the entity.
+        // fold re-escapes it, matching Asciidoctor's own output (covered by
+        // the corpus) while the structure exposes the entity.
         let nodes = build_src(Span::new("*a<b*"));
 
         let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
@@ -4178,7 +4180,7 @@ mod tests {
         match &nodes[0] {
             InlineNode::Styled(styled) => {
                 // `#…#` with an attribute list downgrades from mark to an
-                // unquoted span, exactly as the string pipeline does.
+                // unquoted span, matching Asciidoctor's own behavior.
                 assert_eq!(styled.variant, StyleVariant::Unquoted);
                 assert_eq!(styled.roles, vec![CowStr::from("lead")]);
                 assert_ne!(
@@ -4189,7 +4191,7 @@ mod tests {
 
                 // A wholly verbatim attribute list is parsed from its own
                 // `'src` slice, so the node's list is located exactly there
-                // (its values borrow, per §4.5) rather than falling back to
+                // (its values borrow) rather than falling back to
                 // the coarse span an owned one takes.
                 let attrs = &styled.attrs;
                 assert_eq!(attrs.span().data(), ".lead");
@@ -4205,9 +4207,9 @@ mod tests {
     fn an_attributed_spans_attribute_list_is_parsed_from_the_escaped_text() {
         // The structural counterpart of the corpus fixtures above: the role
         // and id a special-carrying attribute list yields are the *escaped*
-        // bytes — the ones the string pipeline's quote replacer parses out of
-        // its own (already-escaped) haystack and renders verbatim into the
-        // `class`/`id` attribute — not the author's raw `<`/`&`.
+        // bytes — parsed out of the level's own (already-escaped) match
+        // string and rendered verbatim into the `class`/`id` attribute — not
+        // the author's raw `<`/`&`.
         let source = "[#a&b.c<d]*bold*";
         let nodes = build_src(Span::new(source));
 
@@ -4217,8 +4219,8 @@ mod tests {
                 assert_eq!(styled.roles, vec![CowStr::from("c&lt;d")]);
 
                 // Those bytes have no `'src` slice of their own, so the list
-                // is owned and takes the bracket's coarse source span (design
-                // §4.4) as its location tag — the same fallback an image's
+                // is owned and takes the bracket's coarse source span as its
+                // location tag — the same fallback an image's
                 // bracket and a link's display-text list already take.
                 let attrs = &styled.attrs;
                 assert_eq!(attrs.span().data(), "#a&b.c<d");
@@ -4239,17 +4241,14 @@ mod tests {
         // An *opaque* piece inside an attribute list — a masked passthrough
         // (`[.a+++x+++b]#y#`) or a span an earlier sub already rendered
         // (`[.a**b**c]#y#`) — is the one shape `attrlist_is_readable` rejects.
-        // The string pipeline parses its attribute list out of a haystack that
-        // holds the passthrough's own *placeholder* (one atomic character no
-        // comma can hide behind), or the earlier sub's rendered tags, and
-        // restores the passthrough's text into the rendered `class`
-        // afterwards. A tree cannot reproduce either: splicing a passthrough's
-        // text in at parse time would let a comma inside it split the list
-        // where the placeholder never can, and a span's markup exists at fold
-        // time alone. So the construct is left unrecognized — literal text,
-        // never a *wrong* node (which is what the raw source slice used to
-        // yield here: a `class` of `a**b**c`) — exactly as every macro family
-        // leaves its own opaque-piece boundary.
+        // Splicing a passthrough's real text back in at parse time would let
+        // a comma inside it split the attribute list, where the placeholder —
+        // one atomic character no comma can hide behind — never can; a
+        // rendered span's markup, likewise, exists only at fold time and has
+        // no source bytes to parse a list from. So the construct is left
+        // unrecognized — literal text, never a *wrong* node (which is what
+        // the raw source slice used to yield here: a `class` of `a**b**c`) —
+        // exactly as every macro family leaves its own opaque-piece boundary.
         //
         // If that boundary is ever lifted, fold these fixtures into the
         // parity corpus above.
@@ -4279,7 +4278,7 @@ mod tests {
             assert_ne!(folded, golden, "expected a divergence for {source:?}");
 
             // The attributed construct itself is gone from the tree: what the
-            // string pipeline renders as an attributed `<span>` is left as
+            // golden recording renders as an attributed `<span>` is left as
             // literal text (an earlier sub's own span, or the passthrough's
             // `Raw` leaf, still sits inside it).
             assert!(
@@ -4304,9 +4303,9 @@ mod tests {
         // Every family that parses an attribute list therefore agrees on a
         // quoted role, whichever step recognized it: the quotes step, whose
         // list is a slice of the buffer (`['{myrole}']*bold*`), and the
-        // passthrough-extraction step, whose list the string pipeline
-        // substitutes at *restore* time instead (`['{myrole}']++text++`, see
-        // `PassthroughRestoreReplacer`). The unquoted spellings — a bare
+        // passthrough-extraction step, whose list is substituted at
+        // *restore* time instead (`['{myrole}']++text++`, see
+        // `substitute_and_restore`). The unquoted spellings — a bare
         // positional, a shorthand role, an id — never took this path at all,
         // and are here to pin that they still do not.
         let parser = crate::Parser::default().with_intrinsic_attribute(
@@ -4369,7 +4368,7 @@ mod tests {
                 "<strong class=\"highlight\">bold</strong>",
             ),
         ] {
-            // `golden_html` is the string pipeline's recorded rendering,
+            // `golden_html` is the golden recording's rendering,
             // frozen in the fixture at the last differentially-verified
             // parity.
             let folded = super::super::fold_html(
@@ -4386,18 +4385,18 @@ mod tests {
     fn an_attribute_list_rewritten_by_a_later_step_is_a_documented_divergence() {
         // The complement of the boundary above, and not one this step can
         // draw: under the *normal* order the steps that run **after** quotes
-        // (character replacements) go on matching over the string pipeline's
-        // whole rendered string — the markup the quotes step just wrote
-        // included — so they rewrite bytes that live only inside a rendered
-        // `class`/`id` attribute. A later *sub* of this same step does it too
+        // (character replacements) used to go on matching over the whole
+        // rendered string — the markup the quotes step just wrote
+        // included — so they rewrote bytes that live only inside a rendered
+        // `class`/`id` attribute. A later *sub* of this same step did it too
         // (`[.a~b~c]#y#`, whose subscript sub runs after the unquoted one that
         // consumed the attribute list). A tree's markup exists at fold time
         // alone, and its later transducers see the nodes, not the tags, so an
         // attribute list is whatever the sub that recognized it parsed, and
         // nothing rewrites it afterwards.
         //
-        // This is the same class as `flatten_prior_markup`'s own (design
-        // §5.2, Phase 4 step 6's late-escaping increment) — a step acting on
+        // This is the same class as `flatten_prior_markup`'s own case
+        // — a step acting on
         // another step's emitted markup — seen from the other side, and it
         // costs three shapes: a typographic replacement, a *restored* entity
         // (whose escaped `&amp;amp;` the replacements step unwinds one level
@@ -4420,9 +4419,9 @@ mod tests {
             ),
             ("[.a~b~c]#y#", "<span class=\"a<sub>b</sub>c\">y</span>"),
         ] {
-            // `golden_html` is what the string pipeline rendered — the
-            // recorded half of the divergence, frozen in the fixture now that
-            // the pipeline is gone.
+            // `golden_html` is what the old string-substitution
+            // implementation rendered — the recorded half of the divergence,
+            // frozen in the fixture now that it is gone.
             let folded = super::super::fold_html(
                 &super::super::build(Span::new(source), &parser, None),
                 &HtmlInlineRenderer {},

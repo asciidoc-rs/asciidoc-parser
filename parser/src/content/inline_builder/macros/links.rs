@@ -5429,8 +5429,8 @@ mod tests {
             "link:index.html[Docs] then doc@example.com",
             "https://example.org then doc@example.com",
             // An address inside a footnote's own text (extracted after the
-            // e-mail pass has already recognized it, exactly as the string
-            // pipeline substitutes it before the footnote text is pulled out).
+            // e-mail pass has already recognized it, before the footnote
+            // text is pulled out).
             "A claim.footnote:[write to doc@example.com]",
             // An address inside an anchor's reference text and beside an
             // anchor (both later passes).
@@ -5917,8 +5917,8 @@ mod tests {
             "``code``[width=10]#doc@example.org#",
             // A transparent span read *as* a sibling presents its own body,
             // where every other variant presents its markup: the space `x `
-            // ends with is what the string pipeline's flat haystack holds
-            // beside the address, and neither pipeline reads a mismatch
+            // ends with is what matching over the rendered markup would find
+            // beside the address, and no reading finds a mismatch
             // character there.
             "[width=10]##x ##doc@example.org",
             "*x [width=10]##y ##doc@example.org*",
@@ -5928,7 +5928,7 @@ mod tests {
             "[width=10]##x/##doc@example.org",
             "[width=10]##x:##doc@example.org",
             // And the same addresses at the content's own top level, where a
-            // level's start is exactly what the string pipeline presents.
+            // level's start satisfies the same requirement.
             "doc@example.org",
             "write to doc@example.org now",
         ] {
@@ -5943,7 +5943,8 @@ mod tests {
     #[test]
     fn an_address_at_a_tag_rendered_spans_edge_builds_no_node() {
         // The parity above, read structurally: the address is left as literal
-        // text rather than recognized into a link the string pipeline does not
+        // text rather than recognized into a link a markup-based reading
+        // would not
         // build.
         let nodes = build_src(Span::new("*doc@example.org*"));
         let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
@@ -5961,8 +5962,8 @@ mod tests {
         // a role nor an id renders to its body and nothing else, so its
         // children read what stands beside the *span* rather than the
         // enclosing `<strong>`'s own `>` — a space here, which is no mismatch
-        // character, so the address links exactly as the string pipeline links
-        // it.
+        // character, so the address links, matching Asciidoctor's own
+        // behavior.
         let nodes = build_src(Span::new("*x [width=10]#doc@example.org#*"));
         let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
 
@@ -5994,8 +5995,8 @@ mod tests {
         // placeholder — so
         // [`LevelContext::child_contexts`](super::super::quotes::LevelContext)
         // hands the transparent span that `>`, one of the bare e-mail
-        // pattern's three mismatch characters, and the address stays literal
-        // exactly as the string pipeline leaves it.
+        // pattern's three mismatch characters, and the address stays
+        // literal, matching Asciidoctor's own behavior.
         let source = "*x*[width=10]#doc@example.org#";
         let nodes = build_src(Span::new(source));
 
@@ -6040,8 +6041,8 @@ mod tests {
         // The half the identity protects here, exactly as it protects the
         // tag-rendered one. `[width=10]++x ++` renders its body and nothing
         // else too — but it is the passthrough-extraction pass's own wrapper,
-        // and the string pipeline is holding it as its `\u{96}…\u{97}`
-        // sentinel for every step this module runs, so the space inside it is
+        // masked behind its own placeholder for every step this module
+        // runs, so the space inside it is
         // not what the boundary-prefix group reads there and the URL stays
         // literal. Classifying a transparent span by its *body* alone would
         // have made this the increment's own new divergence.
@@ -6066,7 +6067,7 @@ mod tests {
     fn a_bare_url_swallowing_a_transparent_spans_body_is_a_documented_divergence() {
         // What the *opening* half cannot reach. A bare URL's body class
         // (`[^\s\[\]<]*`) consumes greedily rather than reading one
-        // character, so where the string pipeline's flat haystack lets it
+        // character, so where matching over the rendered markup would let it
         // swallow the whole body of the span beside it — building a target out
         // of both — a level holding that span as one opaque piece can only
         // reject the match: a URL crossing a span is not this level's to
@@ -6222,7 +6223,7 @@ mod tests {
     fn a_real_documents_span_edge_addresses_fold_to_their_rendered_strings() {
         // End-to-end, through the real parse path, on the shapes that named
         // this increment: an address written against a span's own edge must
-        // stay literal (as the string pipeline leaves it) and one written
+        // stay literal and one written
         // against a smart quote's must link, so a tree that decided either the
         // other way would regress the moment `rendered_html()` becomes a fold
         // of this tree.
@@ -6266,11 +6267,11 @@ mod tests {
 
     #[test]
     fn an_email_crossing_an_escaped_special_shows_structured_children() {
-        // The pattern's local-part class admits `&amp;`, so the string
-        // pipeline matches an address carrying a literal `&` over its own
+        // The pattern's local-part class admits `&amp;`, so an address
+        // carrying a literal `&` is matched over its own
         // *escaped* text. The match string carries the same entity there, so
-        // the target this pass computes off it is the very one the replacer
-        // computed (and registers), and the shown text — which for this form
+        // the target this pass computes off it is the correctly escaped
+        // one, and the shown text — which for this form
         // *is* the address — is recovered from the match's own range as
         // structured children, so the `&` stays the `CharRef` it already is
         // rather than being escaped a second time.
@@ -6299,7 +6300,7 @@ mod tests {
         );
     }
 
-    // ---- `apply_link_side_effects` (staged for the eventual cutover) ------
+    // ---- `apply_link_side_effects` -----------------------------------------
 
     use super::apply_link_side_effects;
 
@@ -6335,15 +6336,13 @@ mod tests {
 
     #[test]
     fn registers_the_restored_target_for_an_auto_link_over_a_passthrough() {
-        // The staged side effect registers the node's own target — the
+        // [`apply_link_side_effects`] registers the node's own target — the
         // *restored* bytes — exactly as it does for the two sibling families
-        // (`registers_the_restored_target_for_a_link_macro_over_a_passthrough`).
-        // The string pipeline registers the sentinel it matched
-        // (`"\u{96}0\u{97}"` verbatim, since its restore pass rewrites only
-        // the rendered string, never the catalog), which no consumer can read
-        // anything from; the cutover deliberately adopts the tree's honest
-        // answer rather than reproducing that wart, so this pins the policy
-        // with no golden-catalog comparison.
+        // (`registers_the_restored_target_for_a_link_macro_over_a_passthrough`),
+        // rather than an unrestored placeholder no consumer could read
+        // anything from. This pins that policy with no golden-catalog
+        // comparison, since the frozen recordings never captured a restored
+        // catalog entry to compare against.
         let source = "https://++example.org/a__b++ and <https://++x.example.org/y++>";
         let parser = Parser::default().with_catalog_assets(true);
         let nodes = build_with(Span::new(source), &parser);
@@ -6751,7 +6750,7 @@ mod tests {
     fn a_wholly_expanded_link_macro_keeps_a_coarse_location_and_its_form() {
         // The shape behind that parity: the node is a `Macro`-form link — the
         // signal the registration walk reads — with the whole attribute
-        // reference as its `location`, design §4.4's coarse fallback.
+        // reference as its `location`, the coarse whole-content-span fallback.
         let parser = expanding_parser();
         let nodes = build(Span::new("see {link-src} now"), &parser, None);
 
@@ -6814,7 +6813,8 @@ mod tests {
         // location`: a display text with no `'src` slice is parsed from the
         // level's match string, so every value on the resulting `Attrlist`
         // is **owned** off that temporary, and the list's own location tag
-        // falls back to the bracketed text's coarse span (design §4.4).
+        // falls back to the bracketed text's coarse span (the coarse
+        // whole-content-span fallback).
         let parser = expanding_parser();
         let source = "link:index.html[{label},role=hl]";
         let nodes = build(Span::new(source), &parser, None);
@@ -6832,13 +6832,13 @@ mod tests {
         assert_eq!(attrs.nth_attribute(1).unwrap().value(), "Docs");
 
         // The list's location tag is the bracketed text as *written*, not the
-        // expansion it stands for (design §4.4's coarse fallback).
+        // expansion it stands for (the coarse whole-content-span fallback).
         assert_eq!(attrs.span().data(), "{label},role=hl");
     }
 
     #[test]
     fn registers_the_recorded_links_inside_expanded_values() {
-        // The staged `register_link` side effect classifies each node by the
+        // The `register_link` side effect classifies each node by the
         // pass that built it, from the node's own `location` — which is exactly
         // why `link_macro_level` still requires its `link:`/`mailto:` marker to
         // be verbatim. These fixtures interleave the two URL-link passes' forms
