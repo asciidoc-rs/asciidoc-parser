@@ -639,9 +639,10 @@ fn build_image_node<'src>(
     });
 
     // Pre-extract the resolved alt/width/height into owned values, ending the
-    // `&'src self`-tied borrows before the attribute list is moved into the node
-    // (the same read-then-move shape [`attributes_of`] uses). An icon carries a
-    // `size` rather than width/height, recomputed at fold time from `attrs`.
+    // `&'src self`-tied borrows before the attribute list is moved into the
+    // node (the same read-then-move shape [`attributes_of`] uses). An icon
+    // carries a `size` rather than width/height, recomputed at fold time
+    // from `attrs`.
     let (alt, width, height) = if is_icon {
         let alt = attrlist.named_attribute("alt").map_or(default_alt, |a| {
             normalize_text_lf_escaped_bracket(a.value())
@@ -1390,8 +1391,8 @@ mod tests {
 
     #[test]
     fn image_default_alt_derives_from_the_basename() {
-        // With no alt, the default is the target's basename with `_`/`-` read as
-        // spaces and the extension dropped.
+        // With no alt, the default is the target's basename with `_`/`-` read
+        // as spaces and the extension dropped.
         let nodes = build_src(Span::new("image:a_b-c.png[]"));
 
         let image = assert_image(&nodes[0]);
@@ -2721,7 +2722,8 @@ mod tests {
     fn registers_an_image_nested_inside_a_refs_display_children() {
         // A `Ref`'s display children can hold an `Image` too — `apply_macros`
         // itself descends into a `Ref`'s own children before matching at its
-        // level (see `apply_macros_recognizes_a_macro_inside_reference_children`
+        // level (see
+        // `apply_macros_recognizes_a_macro_inside_reference_children`
         // in `macros/mod.rs`'s own tests), so a hand-built `Ref` exercises the
         // same container here.
         use crate::inlines::{Ref, RefVariant};

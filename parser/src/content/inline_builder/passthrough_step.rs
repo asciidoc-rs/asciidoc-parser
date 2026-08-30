@@ -1284,9 +1284,9 @@ mod tests {
 
     #[test]
     fn apply_passthroughs_is_a_noop_without_passthrough_syntax() {
-        // The cheap pre-filter returns the seed unchanged when no `++`, `$$`, or
-        // `ss:` substring is present, so ordinary content never pays for the
-        // level-building machinery.
+        // The cheap pre-filter returns the seed unchanged when no `++`, `$$`,
+        // or `ss:` substring is present, so ordinary content never pays
+        // for the level-building machinery.
         let source = Span::new("plain text, no passthrough syntax here");
         let seeded = seed(source);
         let nodes = apply_passthroughs(seeded.clone(), source, &Parser::default());
@@ -1345,8 +1345,9 @@ mod tests {
 
     #[test]
     fn triple_plus_borrows_its_content_unescaped() {
-        // `SubstitutionGroup::None` applies nothing, so the content is genuinely
-        // raw — not even special characters are escaped — and borrows `'src`.
+        // `SubstitutionGroup::None` applies nothing, so the content is
+        // genuinely raw — not even special characters are escaped — and
+        // borrows `'src`.
         let nodes = build_src(Span::new("+++<b>*not quotes*</b>+++"));
 
         assert_eq!(nodes.len(), 1);
@@ -1370,9 +1371,9 @@ mod tests {
 
     #[test]
     fn double_plus_and_double_dollar_escape_specials_only() {
-        // `SubstitutionGroup::Verbatim` applies only special characters: `<`/`>`
-        // are escaped, but `*not quotes*` is left alone (quotes never runs over
-        // passthrough content).
+        // `SubstitutionGroup::Verbatim` applies only special characters:
+        // `<`/`>` are escaped, but `*not quotes*` is left alone (quotes
+        // never runs over passthrough content).
         for source in ["++<b>*not quotes*</b>++", "$$<b>*not quotes*</b>$$"] {
             let nodes = build_src(Span::new(source));
 
@@ -1438,7 +1439,8 @@ mod tests {
 
     #[test]
     fn an_escaped_double_plus_reveals_a_nested_bare_passthrough() {
-        // Same mechanism as `an_escaped_triple_plus_reveals_a_nested_bare_passthrough`,
+        // Same mechanism as
+        // `an_escaped_triple_plus_reveals_a_nested_bare_passthrough`,
         // one delimiter layer down: de-escaping `\++text++` to `++text++`
         // leaves a leading `++` the bare-form pass now legitimately
         // re-consumes as a bare passthrough wrapping `+text`, leaving a
@@ -1543,11 +1545,11 @@ mod tests {
         // which form a passthrough body takes, and the two are not the same
         // thing wearing different labels:
         //
-        //   - `+++…+++` and bare `pass:[…]` apply *nothing*, so the author's bytes are
-        //     the output bytes — raw output by design.
-        //   - `++…++` and `$$…$$` apply special characters and nothing else, so the
-        //     body is the author's *literal text*. Escaping it is the fold's job, with
-        //     whatever renderer the fold is given.
+        //   - `+++…+++` and bare `pass:[…]` apply *nothing*, so the author's
+        //     bytes are the output bytes — raw output by design.
+        //   - `++…++` and `$$…$$` apply special characters and nothing else, so
+        //     the body is the author's *literal text*. Escaping it is the
+        //     fold's job, with whatever renderer the fold is given.
         //
         // Both stay opaque to every later step — that is what keeps them one
         // node kind — so this pins the distinction the kind alone cannot.
@@ -1610,12 +1612,12 @@ mod tests {
         // time, through whichever renderer the `Parser` carried, and frozen
         // into the node. Two things followed, and both are wrong:
         //
-        //   1. folding the tree with a *different* renderer — which is the whole point
-        //      of `render_with` — silently emitted the parse-time renderer's escaping
-        //      instead;
-        //   2. building the tree *invoked* the document's renderer for a value nothing
-        //      reads, so a renderer with state saw extra calls and a later block's
-        //      authoritative output shifted under it.
+        //   1. folding the tree with a *different* renderer — which is the
+        //      whole point of `render_with` — silently emitted the parse-time
+        //      renderer's escaping instead;
+        //   2. building the tree *invoked* the document's renderer for a value
+        //      nothing reads, so a renderer with state saw extra calls and a
+        //      later block's authoritative output shifted under it.
         //
         // Folding the same tree through two different backends is the sharpest
         // statement of the fix: one tree, two renderings, neither frozen.
@@ -2466,12 +2468,13 @@ mod tests {
 
     #[test]
     fn a_bare_attrlisted_form_wrapping_an_embedded_macro_pass_is_a_documented_divergence() {
-        // `[method x-]+pass:[<b>]+`: the *macro* pass (`apply_pass_macro_level`,
-        // which runs first) recognizes the embedded `pass:[<b>]` on its own —
-        // `INLINE_PASS_MACRO`'s `pass:` alternative matches that substring
-        // regardless of surrounding context — *before* the bare-form second
-        // pass gets a chance to see `[method x-]+…+` as one attrlisted
-        // construct. The candidate bare-form match's body then spans the
+        // `[method x-]+pass:[<b>]+`: the *macro* pass
+        // (`apply_pass_macro_level`, which runs first) recognizes the
+        // embedded `pass:[<b>]` on its own — `INLINE_PASS_MACRO`'s
+        // `pass:` alternative matches that substring regardless of
+        // surrounding context — *before* the bare-form second pass gets
+        // a chance to see `[method x-]+…+` as one attrlisted construct.
+        // The candidate bare-form match's body then spans the
         // already-built (opaque) node the macro pass left behind, so
         // `range_is_verbatim` defers it — the real-world trigger for
         // `a_bare_attrlisted_match_whose_content_crosses_an_already_built_node_is_deferred`'s

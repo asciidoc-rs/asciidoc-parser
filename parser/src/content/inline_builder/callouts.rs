@@ -362,9 +362,9 @@ mod tests {
     fn replacement_type_of_round_trips_every_variant() {
         use super::replacement_type_of;
 
-        // Every replacement value the classifier assigns maps back to a type, so
-        // the fold always routes through the renderer. An unknown value is the
-        // defensive `None`.
+        // Every replacement value the classifier assigns maps back to a type,
+        // so the fold always routes through the renderer. An unknown
+        // value is the defensive `None`.
         for value in [
             "\u{a9}",
             "\u{ae}",

@@ -1443,15 +1443,15 @@ fn parse_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
 fn attributes_of_attrlist<'src>(
     attrlist: Attrlist<'src>,
 ) -> (Option<CowStr<'src>>, Vec<CowStr<'src>>, Attrlist<'src>) {
-    // Extract owned id/roles before the attrlist is moved into the node, exactly
-    // as the string pipeline's quote replacer does.
+    // Extract owned id/roles before the attrlist is moved into the node,
+    // exactly as the string pipeline's quote replacer does.
     //
-    // Unlike that replacer, this deliberately performs *no* side effect: it does
-    // not `register_ref` an assigned id in the catalog, because the builder is
-    // additive and not yet the recognition sink — the authoritative string
-    // pipeline still registers it. The cutover (design §5.2 Phase 4, step 6)
-    // must add that registration so cross-references to an inline id resolve
-    // (tracked by #1087).
+    // Unlike that replacer, this deliberately performs *no* side effect: it
+    // does not `register_ref` an assigned id in the catalog, because the
+    // builder is additive and not yet the recognition sink — the
+    // authoritative string pipeline still registers it. The cutover (design
+    // §5.2 Phase 4, step 6) must add that registration so cross-references
+    // to an inline id resolve (tracked by #1087).
     let id = attrlist.id().map(|id| CowStr::from(id.to_string()));
 
     let roles = attrlist
@@ -1732,8 +1732,8 @@ fn s_to_src(pieces: &[Piece], x: usize, bias: Bias) -> usize {
         }
     }
 
-    // Past the last piece: the end of the source the pieces cover, or the anchor
-    // for an empty level.
+    // Past the last piece: the end of the source the pieces cover, or the
+    // anchor for an empty level.
     pieces
         .last()
         .map_or(0, |last| last.src_offset + last.src_len)
@@ -2479,7 +2479,8 @@ mod tests {
         // An id rather than a role, so the probe sees a `<span …>`: the fold
         // hands the renderer the span's `attrs` and `id` and lets it derive
         // the roles, so a `roles` field with no attribute list behind it
-        // renders nothing (see `styled_boundaries_match_the_built_in_renderer`).
+        // renders nothing (see
+        // `styled_boundaries_match_the_built_in_renderer`).
         let styled = Styled {
             variant: StyleVariant::Unquoted,
             form: SpanForm::Unconstrained,
@@ -2569,10 +2570,10 @@ mod tests {
         assert_eq!(s, SPAN_PLACEHOLDER.to_string());
         assert_eq!(pieces[0].s_start, 0);
 
-        // And a node the identity *names* is such a wrapper — `[width=10]++x ++`
-        // renders its body and nothing else too, and the string pipeline is
-        // holding its `\u{96}…\u{97}` sentinel there, which is exactly what a
-        // bare placeholder reads as.
+        // And a node the identity *names* is such a wrapper — `[width=10]++x
+        // ++` renders its body and nothing else too, and the string
+        // pipeline is holding its `\u{96}…\u{97}` sentinel there, which
+        // is exactly what a bare placeholder reads as.
         let wrapper = styled(body());
 
         let identity = (
@@ -2779,8 +2780,9 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_quotes() {
         // For each fixture, folding the single-pass tree (special characters +
-        // quotes) reproduces the string pipeline's output byte-for-byte. This is
-        // the differential corpus (design §5.3) that pins the quotes increment.
+        // quotes) reproduces the string pipeline's output byte-for-byte. This
+        // is the differential corpus (design §5.3) that pins the quotes
+        // increment.
         let fixtures = [
             // No quotes.
             "plain text",
@@ -3626,9 +3628,10 @@ mod tests {
         // flat string, emits crossed — malformed — HTML tags (`<code>…<strong>…
         // </code>…</strong>`) that no tree can represent. The single-pass
         // builder instead treats an earlier span as opaque, so it produces a
-        // well-formed tree (here, monospace wrapping a strong span). This is the
-        // documented boundary of the single-pass recognition (see the module
-        // docs): for pathological cross-span input the two intentionally differ.
+        // well-formed tree (here, monospace wrapping a strong span). This is
+        // the documented boundary of the single-pass recognition (see
+        // the module docs): for pathological cross-span input the two
+        // intentionally differ.
         let source = "`a *b` c*";
 
         let folded = fold_html(
@@ -3656,8 +3659,8 @@ mod tests {
         assert_eq!(nodes.len(), 1);
         let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
 
-        // The delimiters are consumed; the child is the borrowed body, precisely
-        // located just past the opening `*`.
+        // The delimiters are consumed; the child is the borrowed body,
+        // precisely located just past the opening `*`.
         assert_eq!(children.len(), 1);
         assert_text(&children[0], "bold", 1, 2);
 
@@ -3681,8 +3684,8 @@ mod tests {
 
     #[test]
     fn emphasis_nests_inside_strong() {
-        // The canonical nesting example: constrained emphasis matches inside the
-        // body of the strong span an earlier sub created.
+        // The canonical nesting example: constrained emphasis matches inside
+        // the body of the strong span an earlier sub created.
         let nodes = build_src(Span::new("*a _b_ c*"));
 
         assert_eq!(nodes.len(), 1);
@@ -3766,8 +3769,8 @@ mod tests {
         // Regression guard for the escape-after-a-boundary case (`a \*x*`): the
         // backslash immediately before the delimiter is the constrained match's
         // *leading boundary group*, hence the first character of the whole
-        // match, so it is still recognized as an escape. The construct must stay
-        // literal rather than becoming a span.
+        // match, so it is still recognized as an escape. The construct must
+        // stay literal rather than becoming a span.
         let nodes = build_src(Span::new("a \\*x*"));
 
         assert!(
@@ -4017,7 +4020,8 @@ mod tests {
         // (`['{myrole}']*bold*`), and no longer does: that one was never
         // really about a later step reading emitted markup, but about
         // `Attrlist::parse` discarding the substituted text one accessor
-        // needs — see `a_quoted_role_reads_the_attribute_lists_substituted_text`
+        // needs — see
+        // `a_quoted_role_reads_the_attribute_lists_substituted_text`
         // above. What is left here is genuinely markup-reading.
         let parser = crate::Parser::default();
 

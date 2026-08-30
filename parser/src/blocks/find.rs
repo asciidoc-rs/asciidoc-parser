@@ -572,8 +572,8 @@ mod tests {
     #[test]
     fn document_order_and_nesting() {
         // A section containing a list (which owns its items) and a source
-        // listing. The walk should yield each in document order, descending into
-        // the section and the list.
+        // listing. The walk should yield each in document order, descending
+        // into the section and the list.
         let doc = Parser::default()
             .parse("== Section\n\n* one\n* two\n\n[source,rust]\n----\nfn main() {}\n----\n");
 
@@ -705,8 +705,8 @@ mod tests {
             })
             .collect();
 
-        // Only the outer sidebar: the inner sidebar is behind the prune, and the
-        // trailing paragraph is rejected.
+        // Only the outer sidebar: the inner sidebar is behind the prune, and
+        // the trailing paragraph is rejected.
         assert_eq!(sidebars.len(), 1);
     }
 
@@ -785,9 +785,10 @@ mod tests {
 
     #[test]
     fn traverse_documents_skips_non_asciidoc_cells() {
-        // One plain cell and one AsciiDoc (`a|`) cell. With `traverse_documents`
-        // the plain cell contributes no blocks (its content is inline), while the
-        // AsciiDoc cell contributes its paragraph.
+        // One plain cell and one AsciiDoc (`a|`) cell. With
+        // `traverse_documents` the plain cell contributes no blocks
+        // (its content is inline), while the AsciiDoc cell contributes
+        // its paragraph.
         let doc = Parser::default().parse("|===\n| plain\na| AsciiDoc _text_.\n|===\n");
 
         let deep = doc
@@ -905,9 +906,9 @@ mod tests {
 
     #[test]
     fn child_blocks_does_not_enter_table_cells() {
-        // A table reports no direct child blocks; its AsciiDoc cell content is a
-        // separate nested document, reachable only through `find_blocks` with
-        // `traverse_documents`.
+        // A table reports no direct child blocks; its AsciiDoc cell content is
+        // a separate nested document, reachable only through
+        // `find_blocks` with `traverse_documents`.
         let doc = Parser::default().parse("|===\na| Cell _text_.\n|===\n");
 
         let table = doc.child_blocks().next().unwrap();

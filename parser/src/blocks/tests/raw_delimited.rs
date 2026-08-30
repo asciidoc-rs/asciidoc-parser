@@ -888,9 +888,10 @@ mod fenced {
     fn language_on_fence_sets_source_style() {
         // A language on the opening fence (```ruby) is shorthand for a source
         // block: the block resolves like `[source,ruby]` over a listing block.
-        // The synthesized attribute list carries the `source` block style in the
-        // first position and the language in the second, so a downstream renderer
-        // can read the source language without this parser highlighting it.
+        // The synthesized attribute list carries the `source` block style in
+        // the first position and the language in the second, so a
+        // downstream renderer can read the source language without this
+        // parser highlighting it.
         let mut parser = Parser::default();
 
         let mi =
@@ -968,9 +969,9 @@ mod fenced {
 
     #[test]
     fn language_on_fence_closes_on_bare_fence() {
-        // The closing fence of a language-aware fenced block is a bare ``` — the
-        // language appears only on the opening fence, so the closing fence never
-        // repeats it.
+        // The closing fence of a language-aware fenced block is a bare ``` —
+        // the language appears only on the opening fence, so the
+        // closing fence never repeats it.
         let mut parser = Parser::default();
 
         let mi =
@@ -1048,8 +1049,8 @@ mod fenced {
 
     #[test]
     fn four_backticks_with_language_is_not_a_fence() {
-        // A run of four (or more) backticks is not a fence, even when followed by
-        // a language token; it is ordinary paragraph text.
+        // A run of four (or more) backticks is not a fence, even when followed
+        // by a language token; it is ordinary paragraph text.
         let mut parser = Parser::default();
 
         let mi = crate::blocks::Block::parse(
@@ -1107,8 +1108,9 @@ mod fenced {
 
     #[test]
     fn closing_fence_must_match_exactly() {
-        // A line of four backticks does not close a three-backtick fence, so the
-        // block runs to the end of the input and is reported as unterminated.
+        // A line of four backticks does not close a three-backtick fence, so
+        // the block runs to the end of the input and is reported as
+        // unterminated.
         let mut parser = Parser::default();
 
         let maw =

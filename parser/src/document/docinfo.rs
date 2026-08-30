@@ -100,9 +100,9 @@ impl Docinfo {
             return Self::default();
         };
 
-        // The `docinfo` attribute selects which scopes/locations apply. An unset
-        // attribute means no docinfo; an empty value (a bare `:docinfo:`) is
-        // equivalent to `private`.
+        // The `docinfo` attribute selects which scopes/locations apply. An
+        // unset attribute means no docinfo; an empty value (a bare
+        // `:docinfo:`) is equivalent to `private`.
         //
         // When `docinfo` itself is unset, the legacy `docinfo1`/`docinfo2`
         // standalone boolean attributes are consulted as a fallback: `docinfo1`
@@ -167,8 +167,9 @@ impl Docinfo {
             _ => ".html".to_string(),
         };
 
-        // When `docinfodir` is set, files are searched only there; otherwise the
-        // document directory is searched (the handler owns path resolution).
+        // When `docinfodir` is set, files are searched only there; otherwise
+        // the document directory is searched (the handler owns path
+        // resolution).
         let docinfodir = match parser.attribute_value("docinfodir") {
             InterpretedValue::Value(v) => Some(v),
             _ => None,

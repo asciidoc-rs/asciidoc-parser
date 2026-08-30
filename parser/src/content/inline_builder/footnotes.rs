@@ -1492,7 +1492,8 @@ mod tests {
         // `link_macro_level`), the link's brackets are already consumed into
         // a `Ref` node (no literal `[`/`]` left to collide with) by the time
         // the footnote's own lazy bracket match runs, unlike the reverse
-        // nesting (see `a_footnote_nested_in_link_text_is_a_documented_divergence`
+        // nesting (see
+        // `a_footnote_nested_in_link_text_is_a_documented_divergence`
         // just below, which explains why that direction can never be clean).
         let source = "footnote:[outer] footnote:[see link:https://example.org[inner]]";
         let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});

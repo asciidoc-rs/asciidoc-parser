@@ -220,8 +220,8 @@ fn icon_image_dimensions_and_title_escape_quote_delimiter() {
 
 #[test]
 fn icon_image_src_escapes_quote_delimiter() {
-    // A `"` in the icon target reaches the resolved `src`; it must be escaped so
-    // it cannot break out of the `src` attribute.
+    // A `"` in the icon target reaches the resolved `src`; it must be escaped
+    // so it cannot break out of the `src` attribute.
     assert_eq!(
         render_icon(r#"icon:a"x[]"#, ""),
         r#"<span class="icon"><img src="./images/icons/a&quot;x.png" alt="a&quot;x"></span>"#

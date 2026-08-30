@@ -399,9 +399,9 @@ fn apply_reference_families<'src>(
 
     // A bare e-mail address (`doc@example.org`) runs after both URL-link
     // families and before the anchor pass, exactly where the string step runs
-    // `InlineEmailReplacer` — so an address that is really the tail of a URL, or
-    // a `mailto:` macro's own target, is already inside an opaque node (there,
-    // already-rendered `<a …>` markup) and is not re-recognized.
+    // `InlineEmailReplacer` — so an address that is really the tail of a URL,
+    // or a `mailto:` macro's own target, is already inside an opaque node
+    // (there, already-rendered `<a …>` markup) and is not re-recognized.
     let nodes = email_level(nodes, root, ctx, masked);
 
     // Inline anchors (`[[id]]`, `anchor:id[…]`) run after the link families and
@@ -652,8 +652,8 @@ pub(super) fn macro_text_children<'src>(
         None => {
             // The text crosses an escaped special (the only atomic piece the
             // callers' gate admits) — or, degenerately, is a range `text_slice`
-            // declined to recover. Rebuild it out of the nodes it covers, so each
-            // special stays the `CharRef` it already is.
+            // declined to recover. Rebuild it out of the nodes it covers, so
+            // each special stays the `CharRef` it already is.
             let mut children = Vec::new();
 
             if unescape_bracket {
@@ -1376,21 +1376,23 @@ mod tests {
         // take the same lift, closing the escaped-special / restored-entity
         // boundary for every macro family:
         //
-        // - The **UI** family (`kbd:`/`btn:`/`menu:`) swapped its own gate for the
-        //   shared opaque-piece one. Every value a `Ui` node holds is
-        //   already-substituted text read out of the match string, which is exactly
-        //   what the string replacer computes from its own escaped haystack.
+        // - The **UI** family (`kbd:`/`btn:`/`menu:`) swapped its own gate for
+        //   the shared opaque-piece one. Every value a `Ui` node holds is
+        //   already-substituted text read out of the match string, which is
+        //   exactly what the string replacer computes from its own escaped
+        //   haystack.
         //
         // - A **footnote's text** needed no code change at all: its content is
-        //   structured children (`emit_range` keeps a `CharRef` leaf as its own child),
-        //   so it never sliced `'src` for a value in the first place. What made this
-        //   look like a boundary was the *harness*: the test that pinned it drove the
-        //   golden pipeline and the builder from one shared `Parser`, so each fixture's
-        //   footnote was numbered twice (`1` on the golden side, `2` on the built side)
-        //   and the two sides "diverged" for a reason that had nothing to do with the
-        //   entity. Hence `parity`, below, which configures one parser per side — the
-        //   two-independent-parsers discipline every footnote-bearing corpus in this
-        //   module already uses.
+        //   structured children (`emit_range` keeps a `CharRef` leaf as its own
+        //   child), so it never sliced `'src` for a value in the first place.
+        //   What made this look like a boundary was the *harness*: the test
+        //   that pinned it drove the golden pipeline and the builder from one
+        //   shared `Parser`, so each fixture's footnote was numbered twice (`1`
+        //   on the golden side, `2` on the built side) and the two sides
+        //   "diverged" for a reason that had nothing to do with the entity.
+        //   Hence `parity`, below, which configures one parser per side — the
+        //   two-independent-parsers discipline every footnote-bearing corpus in
+        //   this module already uses.
         let configure = || {
             Parser::default().with_intrinsic_attribute(
                 "experimental",

@@ -114,10 +114,10 @@ Therefore, the third table is assigned the label _Data Set 2._
 "#
     );
 
-    // The three tables share a document whose `table-caption` is "Data Set". The
-    // two titled tables are labeled "Data Set 1." and "Data Set 2."; the untitled
-    // middle table is neither labeled nor counted, so the third table is numbered
-    // 2 rather than 3.
+    // The three tables share a document whose `table-caption` is "Data Set".
+    // The two titled tables are labeled "Data Set 1." and "Data Set 2.";
+    // the untitled middle table is neither labeled nor counted, so the
+    // third table is numbered 2 rather than 3.
     let doc = Parser::default().parse(
         "= Document Title\n:table-caption: Data Set\n\n.A table with a title\n[cols=\"2,1\"]\n|===\n|Lots and lots of data |A little data\n\n|834,734 |3\n|3,999,271.5601 |5\n|===\n\n|===\n|Group |Climate |Example\n\n|A\n|Tropical\n|Suva, Fiji\n\n|B\n|Arid\n|Lima, Peru\n|===\n\n.Another table with a title\n|===\n|Value |Result |Notes\n\n|Null |A mystery |See Appendix R\n|===",
     );
@@ -187,11 +187,11 @@ The table from <<ex-caption>> is displayed below.
 "#
     );
 
-    // The explicit `caption` attribute (on its own attribute-list line above the
-    // title, with the `cols` specifier on a second line below it) sets the label
-    // verbatim — including its trailing space — with no automatically inserted
-    // number. The label and title render together inside the table's
-    // `<caption class="title">`.
+    // The explicit `caption` attribute (on its own attribute-list line above
+    // the title, with the `cols` specifier on a second line below it) sets
+    // the label verbatim — including its trailing space — with no
+    // automatically inserted number. The label and title render together
+    // inside the table's `<caption class="title">`.
     let doc = Parser::default().parse(
         "[caption=\"Table A. \"]\n.A table with a custom label\n[cols=\"3*\"]\n|===\n|Null\n|A mystery\n|See Appendix R\n|===",
     );
@@ -236,13 +236,13 @@ include::example$table.adoc[tag=b-col-h]
 "#
     );
 
-    // This alternate form disables the caption *label* (`caption=` clears it) and
-    // instead supplies the whole caption line through the block's `title`
-    // attribute. The `title` value resolves `{table-caption}` to its default
-    // ("Table") and `{counter:table-number}` to the table's number, yielding
-    // "Table 1"; with the label suppressed, the rendered `<caption>` is just the
-    // title. (`example$table.adoc[tag=b-col-h]` is inlined here to avoid
-    // depending on include resolution.)
+    // This alternate form disables the caption *label* (`caption=` clears it)
+    // and instead supplies the whole caption line through the block's
+    // `title` attribute. The `title` value resolves `{table-caption}` to
+    // its default ("Table") and `{counter:table-number}` to the table's
+    // number, yielding "Table 1"; with the label suppressed, the rendered
+    // `<caption>` is just the title. (`example$table.adoc[tag=b-col-h]` is
+    // inlined here to avoid depending on include resolution.)
     let doc = Parser::default().parse(
         "[caption=,title=\"{table-caption} {counter:table-number}\"]\n[%header,cols=2*]\n|===\n|Name of Column 1\n|Name of Column 2\n\n|Cell in column 1, row 1\n|Cell in column 2, row 1\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n|===",
     );

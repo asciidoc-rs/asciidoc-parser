@@ -96,7 +96,8 @@ AsciiDoc also supports comma-separated values (CSV), tab-separated values (TSV),
         DataFormat::Psv
     );
 
-    // CSV, TSV, and DSV are also supported, selected with the `format` attribute.
+    // CSV, TSV, and DSV are also supported, selected with the `format`
+    // attribute.
     assert_eq!(
         parse_table("[format=csv]\n|===\na,b\n|===").data_format(),
         DataFormat::Csv
@@ -151,8 +152,8 @@ This table will render as follows:
 "#
     );
 
-    // The backslash-escaped separator (`\|`) is unescaped to a bare `|`, and the
-    // leading backslash is removed from the rendered cell.
+    // The backslash-escaped separator (`\|`) is unescaped to a bare `|`, and
+    // the leading backslash is removed from the rendered cell.
     let table = parse_table(
         "[cols=2*]\n|===\n|The default separator in PSV tables is the \\| character.\n|The \\| character is often referred to as a \"`pipe`\".\n|===",
     );
@@ -230,8 +231,8 @@ To address these cases, AsciiDoc allows you to override the cell separator.
 "#
     );
 
-    // The `{vbar}` attribute reference renders as a bare `|`, producing the same
-    // result as the backslash escape.
+    // The `{vbar}` attribute reference renders as a bare `|`, producing the
+    // same result as the backslash escape.
     let table = parse_table(
         "[cols=2*]\n|===\n|The default separator in PSV tables is the {vbar} character.\n|The {vbar} character is often referred to as a \"`pipe`\".\n|===",
     );
@@ -258,8 +259,8 @@ A good candidate is the broken bar, or `¦`.
 "#
     );
 
-    // With the separator overridden to the broken bar (`¦`), the vertical bar in
-    // the cell content is ordinary text rather than a cell boundary.
+    // With the separator overridden to the broken bar (`¦`), the vertical bar
+    // in the cell content is ordinary text rather than a cell boundary.
     let table = parse_table(
         "[cols=2*,separator=¦]\n|===\n¦The default separator in PSV tables is the | character.\n¦The | character is often referred to as a \"`pipe`\".\n|===",
     );
@@ -296,8 +297,8 @@ You can safely use the original cell separator in the cell content and not worry
 "#
     );
 
-    // With the separator overridden to the broken bar (`¦`), the vertical bars in
-    // the cell content are ordinary text and need no escaping.
+    // With the separator overridden to the broken bar (`¦`), the vertical bars
+    // in the cell content are ordinary text and need no escaping.
     let table = parse_table(
         "[cols=2*,separator=¦]\n|===\n¦The default separator in PSV tables is the | character.\n¦The | character is often referred to as a \"`pipe`\".\n|===",
     );
@@ -333,8 +334,9 @@ How the table data gets interpreted is controlled by the `format` and `separator
     assert_eq!(table.columns().len(), 3);
     assert_eq!(all_texts(&table), ["a", "b", "c"]);
 
-    // A data cell does not accept a cell formatting spec: what would be a colspan
-    // operator in PSV (`2+`) is taken literally as the cell's value.
+    // A data cell does not accept a cell formatting spec: what would be a
+    // colspan operator in PSV (`2+`) is taken literally as the cell's
+    // value.
     let table = parse_table("[format=csv]\n|===\n2+,b,c\n|===");
     assert_eq!(table.columns().len(), 3);
     assert_eq!(table.body_rows()[0].cells()[0].colspan(), 1);
@@ -634,8 +636,8 @@ Table data in DSV format is parsed according to the following rules:
 "#
     );
 
-    // The default delimiter for DSV is a colon, empty lines are skipped, and the
-    // whitespace surrounding each value is stripped.
+    // The default delimiter for DSV is a colon, empty lines are skipped, and
+    // the whitespace surrounding each value is stripped.
     let table = parse_table("[format=dsv]\n|===\na : b :c\nd:e:f\n|===");
     assert!(table.header_row().is_none());
     assert_eq!(all_texts(&table), ["a", "b", "c", "d", "e", "f"]);
@@ -699,7 +701,8 @@ d;e;f
 "#
     );
 
-    // The DSV example with a custom `;` separator parses into two three-cell rows.
+    // The DSV example with a custom `;` separator parses into two three-cell
+    // rows.
     let table = parse_table("[format=dsv,separator=;]\n|===\na;b;c\nd;e;f\n|===");
     assert_eq!(table.data_format(), DataFormat::Dsv);
     assert_eq!(table.columns().len(), 3);
@@ -736,9 +739,9 @@ If you set `format=dsv` and `separator=,`, the data will be processed using the 
 "#
     );
 
-    // The same separator is processed by whichever format's rules are in effect.
-    // Under DSV a double quote is not an enclosing character, so it stays in the
-    // value and the separator still splits around it.
+    // The same separator is processed by whichever format's rules are in
+    // effect. Under DSV a double quote is not an enclosing character, so it
+    // stays in the value and the separator still splits around it.
     let table = parse_table("[format=dsv,separator=;]\n|===\n\"a;b\";c\n|===");
     assert_eq!(table.data_format(), DataFormat::Dsv);
     assert_eq!(table.columns().len(), 3);
@@ -794,7 +797,8 @@ include::example$data.adoc[tag=s-csv]
 "#
     );
 
-    // `include::example$data.adoc[tag=s-csv]` expands to this shorthand CSV table.
+    // `include::example$data.adoc[tag=s-csv]` expands to this shorthand CSV
+    // table.
     let table = parse_table(",===\nArtist,Track,Genre\n\nBaauer,Harlem Shake,Hip Hop\n,===");
     assert_eq!(table.data_format(), DataFormat::Csv);
     assert!(table.header_row().is_some());
@@ -843,7 +847,8 @@ include::example$data.adoc[tag=s-dsv]
 "#
     );
 
-    // `include::example$data.adoc[tag=s-dsv]` expands to this shorthand DSV table.
+    // `include::example$data.adoc[tag=s-dsv]` expands to this shorthand DSV
+    // table.
     let table = parse_table(":===\nArtist:Track:Genre\n\nRobyn:Indestructible:Dance\n:===");
     assert_eq!(table.data_format(), DataFormat::Dsv);
     assert!(table.header_row().is_some());
@@ -891,11 +896,13 @@ There is no special delimited block notation for a TSV table.
 "#
     );
 
-    // TSV is selected with `format=tsv`; there is no shorthand delimiter for it.
+    // TSV is selected with `format=tsv`; there is no shorthand delimiter for
+    // it.
     let table = parse_table("[format=tsv]\n|===\na\tb\tc\n|===");
     assert_eq!(table.data_format(), DataFormat::Tsv);
 
-    // Either `|===` or `,===` may be used as the block delimiter for a TSV table.
+    // Either `|===` or `,===` may be used as the block delimiter for a TSV
+    // table.
     let table = parse_table("[format=tsv]\n,===\na\tb\tc\n,===");
     assert_eq!(table.data_format(), DataFormat::Tsv);
     assert_eq!(all_texts(&table), ["a", "b", "c"]);
@@ -918,9 +925,9 @@ Instead, you can apply cell formatting to all cells in a given column using the 
 "#
     );
 
-    // The delimited formats carry no per-cell spec, so cell formatting is applied
-    // per column with the `cols` spec: here column 1 is a header column and
-    // column 2 is an AsciiDoc column.
+    // The delimited formats carry no per-cell spec, so cell formatting is
+    // applied per column with the `cols` spec: here column 1 is a header
+    // column and column 2 is an AsciiDoc column.
     let table = parse_table(
         "[format=csv,cols=\"1h,1a\"]\n|===\nSky,image::sky.jpg[]\nForest,image::forest.jpg[]\n|===",
     );

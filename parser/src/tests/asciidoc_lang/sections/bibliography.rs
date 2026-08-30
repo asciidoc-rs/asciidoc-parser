@@ -117,9 +117,10 @@ include::example$bibliography.adoc[tag=base]
 "#
     );
 
-    // The `base` example included above, with the `include::` directive expanded
-    // by inlining the example's `base` tag: two entries in a bibliography
-    // section, each cross-referenced from the introductory paragraph.
+    // The `base` example included above, with the `include::` directive
+    // expanded by inlining the example's `base` tag: two entries in a
+    // bibliography section, each cross-referenced from the introductory
+    // paragraph.
     let doc = Parser::default().parse(
         "_The Pragmatic Programmer_ <<pp>> should be required reading for all developers.\nTo learn all about design patterns, refer to the book by the \"`Gang of Four`\" <<gof>>.\n\n[bibliography]\n== References\n\n* [[[pp]]] Andy Hunt & Dave Thomas. The Pragmatic Programmer:\nFrom Journeyman to Master. Addison-Wesley. 1999.\n* [[[gof,gang]]] Erich Gamma, Richard Helm, Ralph Johnson & John Vlissides.\nDesign Patterns: Elements of Reusable Object-Oriented Software. Addison-Wesley. 1994.\n",
     );
@@ -142,9 +143,9 @@ Using this label, you can then reference the entry from anywhere above the bibli
 "#
     );
 
-    // A bibliography entry can be cross-referenced from anywhere above it, using
-    // the normal cross-reference syntax. The reference renders the bracketed
-    // label.
+    // A bibliography entry can be cross-referenced from anywhere above it,
+    // using the normal cross-reference syntax. The reference renders the
+    // bracketed label.
     let doc = Parser::default().parse(
         "Refer to <<pp>>.\n\n[bibliography]\n== References\n\n* [[[pp]]] Andy Hunt & Dave Thomas. 1999.\n",
     );
@@ -178,8 +179,8 @@ This prevents the anchor from being matched as a bibliography anchor or a normal
 "#
     );
 
-    // The escape syntax `[\[[word]]]` leaves the triple brackets untouched: it is
-    // matched neither as a bibliography anchor nor as a normal anchor.
+    // The escape syntax `[\[[word]]]` leaves the triple brackets untouched: it
+    // is matched neither as a bibliography anchor nor as a normal anchor.
     let doc =
         Parser::default().parse("[bibliography]\n== References\n\n* [\\[[word]]] Not an anchor.\n");
 
@@ -195,9 +196,10 @@ If you specify xreftext on the bibliography anchor (e.g., `+[[[label,xreftext]]]
 "#
     );
 
-    // By default the anchor and any reference are converted to `[<label>]`. When
-    // an xreftext is supplied (`[[[label,xreftext]]]`), `[<xreftext>]` is used
-    // instead, both at the entry and at every cross-reference to it.
+    // By default the anchor and any reference are converted to `[<label>]`.
+    // When an xreftext is supplied (`[[[label,xreftext]]]`), `[<xreftext>]`
+    // is used instead, both at the entry and at every cross-reference to
+    // it.
     let doc = Parser::default().parse(
         "See <<pp>> and <<gof>>.\n\n[bibliography]\n== References\n\n* [[[pp]]] Andy Hunt.\n* [[[gof,gang]]] Erich Gamma.\n",
     );

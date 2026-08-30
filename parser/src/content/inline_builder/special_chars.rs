@@ -662,8 +662,8 @@ mod tests {
         assert_text(&nodes[0], "a", 1, 1);
         assert_special(&nodes[1], '<', 2, 1);
 
-        // The middle run is "\nb": it starts right after `<` (line 1, col 3) and
-        // carries into line 2.
+        // The middle run is "\nb": it starts right after `<` (line 1, col 3)
+        // and carries into line 2.
         assert_text(&nodes[2], "\nb", 1, 3);
 
         // The closing `>` lands on line 2.
@@ -682,8 +682,8 @@ mod tests {
 
     #[test]
     fn special_characters_recurses_into_styled_children() {
-        // A custom `subs` order can run quotes before special characters, so the
-        // step must descend into a `Styled` span's children.
+        // A custom `subs` order can run quotes before special characters, so
+        // the step must descend into a `Styled` span's children.
         let loc = Span::new("a<b");
 
         let styled = InlineNode::Styled(Styled {
@@ -857,8 +857,9 @@ mod tests {
 
     #[test]
     fn classification_splits_specials_into_raw_with_precise_spans() {
-        // The `Raw` counterpart of `splits_text_and_specials_with_precise_spans`
-        // above: the same split, keeping the same honest per-node spans, but
+        // The `Raw` counterpart of
+        // `splits_text_and_specials_with_precise_spans` above: the same
+        // split, keeping the same honest per-node spans, but
         // classifying each special as the verbatim leaf an order that never
         // runs `SpecialCharacters` calls for (design §3.4.1).
         let nodes = classify_unescaped_specials(seed("a<b>c&d"));

@@ -52,7 +52,8 @@ When `table-caption` is unset, table titles aren't preceded by a label and label
 
     // Unsetting `table-caption` in the document header suppresses the label for
     // every titled table: the title still renders inside the table's
-    // `<caption class="title">`, but with no "Table <n>." prefix in front of it.
+    // `<caption class="title">`, but with no "Table <n>." prefix in front of
+    // it.
     let doc = Parser::default().parse(
         "= Title of Document\n:table-caption!:\n\n.A table with a title but no label\n|===\n|Value |Result |Notes\n\n|Null |A mystery |See Appendix R\n|===",
     );

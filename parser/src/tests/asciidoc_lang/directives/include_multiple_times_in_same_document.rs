@@ -381,10 +381,10 @@ The single quotes around the variable name in the assignment are required to for
     );
 
     // Verify line number mapping.
-    // This verifies that the source map correctly tracks the original file and line
-    // numbers for included content. Each line in the preprocessed document should
-    // map back to either the main document (None) or the included file
-    // (Some(filename)).
+    // This verifies that the source map correctly tracks the original file and
+    // line numbers for included content. Each line in the preprocessed
+    // document should map back to either the main document (None) or the
+    // included file (Some(filename)).
     let source_map = doc.source_map();
 
     // Main document lines.
