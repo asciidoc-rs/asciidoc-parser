@@ -3,9 +3,6 @@ use crate::{HasSpan, Span, inlines::InlineNode, strings::CowStr};
 /// An inline anchor (`[[id]]`, `[[id,reftext]]`, or `anchor:id[reftext]`), or
 /// the bibliography anchor (`[[[label]]]`, `[[[label,xreftext]]]`) that
 /// prefixes a bibliography list item.
-///
-/// Field set is provisional (Phase 0) and will be refined against the first
-/// consumer.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Anchor<'src> {
     /// The anchor's ID.
@@ -33,9 +30,9 @@ pub struct Anchor<'src> {
     /// `is_icon` tells its two forms apart.
     ///
     /// The bracketed label a bibliography anchor renders into the flow is
-    /// **not** this node's own children: it is emitted as the sibling text
-    /// nodes that follow, exactly as the string pipeline leaves that text in
-    /// the flow for its own later passes to see.
+    /// **not** this node's own children: it is built as the sibling text
+    /// nodes that follow this one, leaving that text in the flow for the
+    /// rest of the tree to see and render normally.
     pub is_bibliography: bool,
 
     /// The source location of the whole anchor.

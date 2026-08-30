@@ -4,8 +4,7 @@ use crate::{HasSpan, Span, inlines::InlineNode, strings::CowStr};
 /// (`footnote:id[]`).
 ///
 /// The footnote's number is resolved into the node at parse time, so rendering
-/// stays a pure fold. Field set is provisional (Phase 0) and will be refined
-/// against the first consumer.
+/// stays a pure fold.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Footnote<'src> {
     /// The footnote's own ID, when it was given one.

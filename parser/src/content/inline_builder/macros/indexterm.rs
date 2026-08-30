@@ -74,24 +74,18 @@ pub(super) fn indexterm_macros_level<'src>(
         return nodes;
     }
 
-    // The string replacer runs the shorthand through
-    // [`replace_with_lookahead`], whose look-ahead retry (a shorthand
-    // absorbing trailing parens) has a subtle consequence: if the whole
-    // substitution accumulates *no* output and the last event is such a
-    // retry, the helper returns `Cow::Borrowed` and the caller
-    // keeps the original text **unchanged**. Concretely, content that is
-    // nothing but concealed shorthand terms (`(((coffee)))`,
-    // `(((a)))(((b)))`) is left *literal*, where the same terms with any
-    // surrounding output render to nothing. Detect that no-op and mirror
-    // it: leave the level untouched.
+    // A shorthand's look-ahead retry (absorbing trailing parens) has a subtle
+    // consequence: if the whole level accumulates *no* output and the last
+    // match is such a retry, the level is left **unchanged** rather than
+    // replaced. Concretely, content that is nothing but concealed shorthand
+    // terms (`(((coffee)))`, `(((a)))(((b)))`) is left *literal*, where the
+    // same terms with any surrounding output render to nothing. Detect that
+    // no-op and mirror it: leave the level untouched.
     //
-    // This mirrors a **known string-pipeline bug**
-    // (asciidoc-rs/asciidoc-parser#1123): a whole-content concealed term should
-    // render empty, not literal. The additive builder reproduces it here to
-    // keep byte-for-byte parity (design §5.3); the fix for both is to drop this
-    // call at the cutover (design §5.2, Phase 4, step 6),
-    // where `rendered_html()` becomes the fold and the golden output is
-    // updated.
+    // This is a **known bug** (asciidoc-rs/asciidoc-parser#1123): a
+    // whole-content concealed term should render empty, not literal. The tree
+    // reproduces it here to keep parity with the golden output; fixing both
+    // is future work, tracked by that issue.
     if indexterm_substitution_is_a_noop(&matches) {
         return nodes;
     }
@@ -101,9 +95,9 @@ pub(super) fn indexterm_macros_level<'src>(
     rebuild_macro_level(&nodes, &pieces, &s, macro_matches)
 }
 
-/// A recognized index-term match, plus the two facts the string replacer's
-/// look-ahead loop needs to reproduce its `Cow::Borrowed` (no-op) return (see
-/// [`indexterm_substitution_is_a_noop`]).
+/// A recognized index-term match, plus the two facts
+/// [`indexterm_substitution_is_a_noop`] needs to reproduce the whole-level
+/// no-op case.
 struct RecognizedIndexterm<'src> {
     macro_match: MacroMatch<'src>,
 
@@ -111,22 +105,21 @@ struct RecognizedIndexterm<'src> {
     /// or an unescaped literal). A concealed term renders nothing.
     rendered_nonempty: bool,
 
-    /// Whether recognizing this match advances the string replacer via a
-    /// look-ahead retry (`SkipAheadAndRetry`) — true only for a shorthand that
-    /// absorbed trailing parens. The macro forms always `Continue`.
+    /// Whether recognizing this match advanced via a look-ahead retry — true
+    /// only for a shorthand that absorbed trailing parens. The macro forms
+    /// never retry.
     is_skip: bool,
 }
 
-/// Reports whether the string replacer's index-term substitution over this
-/// level would be a **no-op** — returning `Cow::Borrowed` and so leaving the
-/// content unchanged (see [`indexterm_macros_level`]).
+/// Reports whether this level's index-term substitution would be a **no-op**,
+/// leaving the content unchanged rather than replaced (see
+/// [`indexterm_macros_level`]).
 ///
 /// That happens exactly when the accumulated output is empty *and* the last
 /// recognized match advanced via a look-ahead retry: an empty gap before every
 /// match, every match rendering nothing, and the final match a paren-absorbing
-/// shorthand. Any non-empty gap or shown term — or a trailing macro form, which
-/// `Continue`s instead of retrying — makes the substitution `Cow::Owned` and
-/// the terms are recognized normally.
+/// shorthand. Any non-empty gap or shown term — or a trailing macro form,
+/// which never retries — means the terms are recognized normally.
 fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
     let mut emitted_nonempty = false;
     let mut prev_end = 0;
@@ -135,8 +128,8 @@ fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
     for m in matches {
         let full = &m.macro_match.full;
 
-        // A non-empty gap before the match is literal text the replacer pushes,
-        // making the accumulated output non-empty.
+        // A non-empty gap before the match is literal text, making the
+        // accumulated output non-empty.
         if full.start > prev_end {
             emitted_nonempty = true;
         }
@@ -164,15 +157,15 @@ fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
 /// function of its id alone (see
 /// [`find_anchor_matches`](super::anchors::find_anchor_matches)), it is
 /// recognized regardless of what its argument crosses; the node simply carries
-/// an empty `terms`. (The one exception is the string replacer's
-/// whole-substitution no-op for a level of *only* concealed shorthand terms,
-/// which [`indexterm_macros_level`] mirrors by leaving the level literal.)
+/// an empty `terms`. (The one exception is the whole-level no-op for a level
+/// of *only* concealed shorthand terms, which [`indexterm_macros_level`]
+/// handles by leaving the level literal.)
 ///
 /// A **visible** (flow) term (`indexterm2:[…]`, `((term))`) shows its term text
 /// in the flow, so that text must be reconstructible from this level's escaped
-/// match string. It is — with the *same* entity bytes the string pipeline sees,
-/// since a [`CharRef`](InlineNode::CharRef) contributes its canonical entity to
-/// the match string — whenever the term crosses no *opaque span* (an
+/// match string. It is — since a [`CharRef`](InlineNode::CharRef) contributes
+/// its canonical entity to the match string — whenever the term crosses no
+/// *opaque span* (an
 /// earlier-recognized
 /// [`Styled`](crate::inlines::Styled)/[`Ref`](crate::inlines::Ref), carried
 /// here as a single [`SPAN_PLACEHOLDER`] rather than its rendered markup). A
@@ -190,12 +183,12 @@ fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
 /// bytes exactly, and this family reads its term from nowhere else — it never
 /// slices `'src`, and an [`IndexTerm`] node carries no `Span`-typed field — so
 /// the shown text is recovered precisely; only the node's `location` takes
-/// design §4.4's coarse fallback. This is the same lift the anchor and
+/// the coarse fallback. This is the same lift the anchor and
 /// bare-e-mail families already made, for the same reason.
 ///
 /// A visible term's shown text is **not** a boundary the other macro families
-/// stop at, because the string replacer puts that text back into the one flat
-/// haystack every later pass scans. So the shorthand spellings carry it as
+/// stop at: it is ordinary flow content, and a later family must still be able
+/// to recognize a construct inside it. So the shorthand spellings carry it as
 /// nodes in [`children`](crate::inlines::IndexTerm::children) — always, not
 /// only when it encloses a rendered span — and
 /// [`apply_macro_families`](super::apply_macro_families) hands those children
@@ -213,8 +206,8 @@ fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
 /// test.
 ///
 /// As in the additive builder generally, this performs *no* recognition side
-/// effect; the string replacer records nothing in a catalog either (the HTML
-/// backend generates no index), so there is none to skip here.
+/// effect; the HTML backend generates no index, so there is nothing to record
+/// here regardless.
 fn find_indexterm_matches<'src>(
     s: &str,
     nodes: &[InlineNode<'src>],

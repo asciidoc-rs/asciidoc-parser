@@ -64,9 +64,9 @@ pub(super) fn image_macros_level<'src>(
     let (s, pieces) = ctx.shift(s, pieces);
 
     // …and with each masked passthrough's or STEM expression's placeholder
-    // widened into the sentinel-shaped token the string pipeline's own
-    // haystack holds there — see `widen_masked_pieces` for why this family
-    // alone needs that.
+    // widened into the three-byte token [`INLINE_IMAGE_MACRO`]'s target class
+    // needs to match it — see `widen_masked_pieces` for why this family alone
+    // needs that.
     let (s, pieces) = widen_masked_pieces(s, pieces, &nodes);
 
     let matches = find_image_matches(&s, &pieces, root, parser, &nodes);
@@ -125,8 +125,8 @@ fn find_image_matches<'src>(
         // `bracket_attrlist` reads its bytes as content — so a placeholder
         // there would be read as literal text, and it keeps the opaque-piece
         // gate for a rendered span, admitting a masked passthrough or STEM
-        // expression (whose sentinel the string pipeline's `Attrlist::parse`
-        // swallows into a value that only *restores* after the split — the
+        // expression (whose placeholder `Attrlist::parse` swallows into a
+        // value that only *restores* after the split — the
         // order [`tokened_bracket`] and
         // [`Attrlist::into_owned_restoring`](Attrlist) reproduce). The
         // **target** (group 1) is the one value this family computes off the
@@ -167,7 +167,7 @@ fn find_image_matches<'src>(
 /// (an attribute-expanded value, a `counter` directive) is rejected here too:
 /// [`apply_character_replacements`](super::super::char_replacements::apply_character_replacements)
 /// can recognize a construct inside one (it produces a leaf needing no `'src`
-/// slice of its own — design §4.4's coarse fallback), but a macro node bakes
+/// slice of its own, falling back to the piece's coarse `location`), but a macro node bakes
 /// its target/attribute list straight from source, so it still needs a real
 /// `'src` slice a synthesized run cannot provide — the same boundary an
 /// escaped-special or a rendered span already documents.
@@ -203,7 +203,7 @@ pub(in crate::content::inline_builder) fn range_is_verbatim(
 /// [`text_slice`] rather than
 /// [`source_slice`] to recover the
 /// range's own *text* precisely, since `source_slice` only ever offers a
-/// synthesized piece's coarse *location* fallback (design §4.4), never its
+/// synthesized piece's coarse *location* as a fallback, never its
 /// exact bytes.
 pub(in crate::content::inline_builder) fn range_is_verbatim_or_synthesized(
     pieces: &[Piece],
@@ -238,17 +238,15 @@ pub(in crate::content::inline_builder) fn range_is_verbatim_or_synthesized(
 /// [`Styled`](crate::inlines::Styled) span, an
 /// earlier-recognized macro node, or a masked passthrough or STEM expression,
 /// each of which [`build_match_string`] stands in as one
-/// `SPAN_PLACEHOLDER` rather than the markup or entity the string pipeline's
-/// own haystack holds there.
+/// `SPAN_PLACEHOLDER` rather than its rendered markup or entity.
 ///
 /// All three `CharRef` leaves are admissible for the same reason: their
 /// match-string bytes — a special's canonical entity (`&lt;`, `&gt;`,
 /// `&amp;`), a restored entity's own text (`&copy;`, `&#8217;`), a
 /// replacement's built-in rendering (`&#169;` for `(C)`, `&#8217;` for `'`,
 /// via [`replacement_entity`](super::super::quotes::replacement_entity)) — are
-/// the very byte sequence the string pipeline's own haystack carries at that
-/// position, so a family that reads its values out of the match string sees
-/// exactly what the string replacer sees.
+/// exactly the bytes each leaf renders as, so a family that reads its values
+/// out of the match string sees the same escaped form its own output would.
 /// What such a family cannot do is *slice* those bytes from `'src` (the source
 /// holds one character, or `(C)`, where the match string holds an entity, and
 /// `&amp;copy;` where it holds `&copy;`), so a value that must ride on the node

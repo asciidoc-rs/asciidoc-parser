@@ -16,8 +16,8 @@ use crate::{
 };
 
 /// A single opaque codepoint standing in for a whole [`Styled`] span (produced
-/// by an earlier sub) while a later sub matches at that span's level. Like a
-/// rendered `<strong>…</strong>` in the string pipeline, it is a single
+/// by an earlier sub) while a later sub matches at that span's level. Like the
+/// `<strong>…</strong>` markup a completed span folds to, it is a single
 /// non-word, non-space boundary character that a quote pattern treats as
 /// opaque content.
 ///
@@ -37,18 +37,17 @@ use crate::{
 pub(super) const SPAN_PLACEHOLDER: char = '\u{10}';
 
 /// The characters an enclosing construct's own rendering presents to the level
-/// nested inside it — the bytes the string pipeline's haystack holds
-/// immediately before and after that level's own text.
+/// nested inside it — the bytes immediately before and after that level's own
+/// text once the enclosing markup is rendered.
 ///
-/// The string pipeline has no levels: a step matches over one flat string in
-/// which an earlier step's construct is already *rendered markup*, so a
-/// pattern's boundary classes read that markup's own characters. A transducer
-/// matches one level at a time, where the same position is the start (or end)
-/// of the haystack — which is what `^`, `$`, and a `(^|[^\w&;:}])`-style
-/// boundary group see instead. The two agree for a construct written at the
-/// content's own top level and diverge for one written *inside* a span, where
-/// the string pipeline reads the span's opening `<strong>` (or `&#8220;`)
-/// rather than a start anchor: ``` `"``end points``"` ``` renders
+/// A quote pattern's boundary classes (`^`, `$`, and a `(^|[^\w&;:}])`-style
+/// group) need to read the same characters a whole-content match would see at
+/// that position, but a transducer matches one level at a time, where the same
+/// position is instead the very start (or end) of that level's own haystack.
+/// The two agree for a construct written at the content's own top level and
+/// diverge for one written *inside* a span, where the enclosing rendering is
+/// the span's opening `<strong>` (or `&#8220;`) rather than a start anchor:
+/// ``` `"``end points``"` ``` renders
 /// ``` `&#8220;`end points`&#8221;` ``` there — the inner backticks stay
 /// literal, because the `;` ending the entity fails the monospace sub's own
 /// boundary class — where a level matched in isolation sees `^` and wraps them
@@ -69,7 +68,7 @@ pub(super) const SPAN_PLACEHOLDER: char = '\u{10}';
 pub(super) struct LevelContext {
     /// The last character of the enclosing construct's *opening* markup, or
     /// `None` at the content's own top level (where a pattern's `^` is
-    /// exactly what the string pipeline's haystack presents).
+    /// exactly right).
     before: Option<char>,
 
     /// The first character of the enclosing construct's *closing* markup, or
@@ -85,18 +84,19 @@ impl LevelContext {
     ///
     /// Only an order that runs `macros` *before* a step that descends into a
     /// reference's children reaches this at all (the built-in orders run it
-    /// last but one, ahead of `post_replacements` alone). A cross-reference
-    /// the string pipeline is still holding as a deferred placeholder at that
-    /// moment presents that placeholder's own characters rather than the
-    /// element's, which read the same to every boundary class in play: both
-    /// are non-word, and neither is one of the `&;:}` a constrained quote
-    /// excludes nor the space or line end a spaced em dash requires.
+    /// last but one, ahead of `post_replacements` alone). A deferred
+    /// cross-reference — one whose target resolution has not yet filled the
+    /// node's rendered text in — presents its own placeholder characters at
+    /// that moment rather than the element's, which read the same to every
+    /// boundary class in play: both are non-word, and neither is one of the
+    /// `&;:}` a constrained quote excludes nor the space or line end a spaced
+    /// em dash requires.
     pub(super) const INSIDE_REF: Self = Self {
         before: Some('>'),
         after: Some('<'),
     };
     /// The content's own top level: nothing encloses it, so a pattern's `^`
-    /// and `$` anchor exactly where the string pipeline's do.
+    /// and `$` anchor exactly where they should.
     pub(super) const ROOT: Self = Self {
         before: None,
         after: None,
@@ -136,7 +136,7 @@ impl LevelContext {
     ///
     /// A **transparent** span wraps its children in nothing, so what they read
     /// is not the enclosing construct's markup but whatever stands *beside the
-    /// span itself* in the string pipeline's own flat haystack. Inheriting the
+    /// span itself* once this level is rendered. Inheriting the
     /// enclosing context — what [`inside_styled`](Self::inside_styled) does on
     /// its own — is right only while the span is all its level holds; the
     /// moment a sibling precedes it, the haystack shows what that sibling
@@ -393,21 +393,21 @@ fn styled_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
 /// [`LevelContext`]); this one answers what the same span presents to the
 /// nodes *beside* it at its own level, where
 /// [`build_match_string`] otherwise stands the whole span in as one opaque
-/// [`SPAN_PLACEHOLDER`] belonging to no boundary class at all. The string
-/// pipeline, having no levels, holds that span's rendered markup there — so a
-/// following construct reads `>` where the span rendered a tag and `;` where
-/// it rendered a smart quote's `&#8221;`, and a preceding one reads `<` or
-/// `&`.
+/// [`SPAN_PLACEHOLDER`] belonging to no boundary class at all. A rendered
+/// span's own markup is what a following/preceding construct actually reads
+/// there — a following one reads `>` where the span rendered a tag and `;`
+/// where it rendered a smart quote's `&#8221;`, and a preceding one reads `<`
+/// or `&`.
 ///
 /// # An extraction-pass wrapper is not a rendered span
 ///
-/// A [`Styled`] node reaching [`build_match_string`] is not necessarily a span
-/// the string pipeline has rendered at all: the passthrough-extraction pass
+/// A [`Styled`] node reaching [`build_match_string`] is not necessarily one
+/// whose markup has actually been rendered: the passthrough-extraction pass
 /// builds one of its own for an attribute-list-prefixed passthrough
-/// (`[quotes]++text++`, `` [x-]`text` ``), which the string pipeline is
-/// holding as a **placeholder** — its own `\u{96}…\u{97}` sentinel pair —
-/// rather than as markup, for every step this module runs. A sibling reads
-/// that sentinel, which is exactly what the bare [`SPAN_PLACEHOLDER`] already
+/// (`[quotes]++text++`, `` [x-]`text` ``), standing in as a **placeholder**
+/// for content masked out and restored later, rather than as markup, for
+/// every step this module runs. A sibling reads that placeholder's own
+/// characters, which are exactly what the bare [`SPAN_PLACEHOLDER`] already
 /// reads as to every class in play (both are non-word, in none of `&;:}`,
 /// `[>\(\)\[\];"']`, or `[\\>:/]`), so such a wrapper keeps the bare
 /// placeholder — not as an approximation, but because that is the right

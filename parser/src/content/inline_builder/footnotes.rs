@@ -20,11 +20,12 @@ use crate::{
 /// every [`Styled`](crate::inlines::Styled)/[`Ref`](crate::inlines::Ref) child
 /// it finds along the way.
 ///
-/// This is the last macro family (design §5.2 Phase 4, step 4b(ii) part 4c)
-/// and runs as [`build`](super::build)'s own step, *after*
-/// [`apply_macros`](super::macros::apply_macros) has fully resolved every other
-/// family at every level, mirroring the string step's order exactly: footnotes
-/// run last, once, over the whole (already substituted) string (macros.rs).
+/// This is the last macro family recognized, running as
+/// [`build`](super::build)'s own step *after*
+/// [`apply_macros`](super::macros::apply_macros) has fully resolved every
+/// other family at every level: footnotes are recognized last, once, over
+/// the whole already-substituted tree, matching Asciidoctor's own
+/// footnote-numbering order.
 ///
 /// # Why this cannot be a level pass *within* [`apply_macros`](super::macros::apply_macros)
 ///
@@ -40,7 +41,7 @@ use crate::{
 /// span [`apply_quotes`](super::quotes::apply_quotes) already built before
 /// [`apply_macros`](super::macros::apply_macros) ever runs) **before** a
 /// footnote that precedes that span in the source, reversing their markers
-/// relative to the string pipeline's left-to-right sweep over one flat string.
+/// relative to a strict left-to-right numbering over the source.
 /// This function fixes that by walking `nodes` in true source order: it
 /// recognizes every footnote at *this* level, but recurses
 /// into a [`Styled`](crate::inlines::Styled)/[`Ref`](crate::inlines::Ref) child
@@ -132,7 +133,7 @@ fn subtree_might_have_footnote(nodes: &[InlineNode<'_>]) -> bool {
 ///
 /// Each candidate's node is **built here**, immediately after the gap that
 /// precedes it, rather than during the scan (see [`FootnoteMatch`]). That is
-/// what puts the numbers in the string pipeline's own order: a footnote nested
+/// what puts the numbers in true source order: a footnote nested
 /// in a child that falls between two of this level's is numbered between them,
 /// because the gap carrying that child is emitted — and recursed into — before
 /// this match's own node is made.
@@ -250,15 +251,15 @@ fn emit_range_recursing_footnotes<'src>(
                 }
 
                 // A **visible** index term's shown text reaches the flow, so
-                // the string replacer's footnote pass scans it like any other
+                // this pass scans it for footnotes like any other
                 // text — the same reason the later macro families are handed
                 // that text (see the index-term family's own note).
                 //
                 // An [`Anchor`](InlineNode::Anchor)'s `reftext` is the
                 // opposite case and is deliberately *not* recursed into: the
-                // anchor replacer consumes that text rather than emitting it,
-                // so a `footnote:[…]` written there never reaches the string
-                // pipeline's footnote pass either.
+                // anchor family consumes that text rather than emitting it,
+                // so a `footnote:[…]` written there never reaches this
+                // footnote pass either.
                 InlineNode::IndexTerm(mut index_term) => {
                     index_term.children = apply_footnotes(index_term.children, root, parser);
                     out.push(InlineNode::IndexTerm(index_term));
@@ -301,8 +302,8 @@ fn emit_range_recursing_footnotes<'src>(
 /// yet built**.
 ///
 /// Deferring construction is what keeps the numbers right. A footnote's
-/// assigned number is a side effect of *recognition order*, and the string
-/// pipeline recognizes in one left-to-right sweep over one flat string — so a
+/// assigned number is a side effect of *recognition order*, and footnotes are
+/// numbered in one left-to-right sweep over the source — so a
 /// footnote nested in a [`Styled`](crate::inlines::Styled) span that sits
 /// between two of this level's own footnotes must be numbered between them.
 /// Building every match up front (as this scan used to) assigns all of this
@@ -312,10 +313,10 @@ fn emit_range_recursing_footnotes<'src>(
 /// it, after the gap before it — children and all — has been emitted.
 enum FootnoteMatch<'h> {
     /// An escape (`\footnote:…`, `\footnoteref:…`): the backslash is dropped
-    /// and the rest kept literal, mirroring the string replacer's leading
-    /// `caps[0].starts_with('\\')` check — which runs *before* the
-    /// ref-vs-plain branch, so this is decided during the scan, not at build
-    /// time. It creates no node and needs no number.
+    /// and the rest kept literal. Whether the match is escaped is checked
+    /// (`whole.as_str().starts_with('\\')`, see [`find_footnote_matches`])
+    /// *before* the ref-vs-plain branch, so this is decided during the scan,
+    /// not at build time. It creates no node and needs no number.
     Unescape {
         full: std::ops::Range<usize>,
         backslash: usize,
@@ -352,13 +353,13 @@ fn find_footnote_matches(s: &str) -> Vec<FootnoteMatch<'_>> {
             continue;
         }
 
-        // Asciidoctor's `(?!</a>)` look-ahead, the same way the string
-        // replacer re-created it: a closing bracket immediately followed by a
-        // literal `</a>` is not a footnote (it closes an already-rendered
-        // link), so the bytes stay text. The match string holds the *escaped*
-        // form, so under the normal order a document's own `</a>` reaches here
-        // as `&lt;/a&gt;` and the guard — exactly like the string replacer's —
-        // fires only for the orders whose escaping step has not run.
+        // Recreates Asciidoctor's `(?!</a>)` look-ahead, which the Rust regex
+        // engine has no native support for: a closing bracket immediately
+        // followed by a literal `</a>` is not a footnote (it closes an
+        // already-rendered link), so the bytes stay text. The match string
+        // holds the *escaped* form, so under the normal order a document's
+        // own `</a>` reaches here as `&lt;/a&gt;`, and this guard fires only
+        // for the orders whose escaping step has not run.
         if s.get(full.end..)
             .is_some_and(|after| after.starts_with("</a>"))
         {
@@ -391,7 +392,8 @@ fn build_candidate_node<'src>(
     // `footnote:id[…]` does.
     if caps.get(1).is_some() {
         // With no bracketed text at all (`footnoteref:[]`), it is left
-        // unrecognized — mirroring the string replacer's `next $&`.
+        // unrecognized: the match's own text is emitted unchanged, matching
+        // Asciidoctor's behavior for this form.
         let raw = caps.get(3)?;
 
         return build_footnoteref_node(raw, full, s, pieces, nodes, root, parser);

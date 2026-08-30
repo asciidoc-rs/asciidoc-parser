@@ -41,7 +41,7 @@ use crate::{
 /// branch** — an angle-bracketed URL (`<https://example.org>`) and the
 /// bracketed form that keeps its `&lt;` (`<https://example.org[text]`) — in
 /// their verbatim
-/// forms, reproducing the string replacer's boundary-prefix
+/// forms, matching Asciidoctor's own boundary-prefix
 /// preservation, bare-URL trailing-punctuation stripping, `^` new-window
 /// suffix, `hide-uri-scheme` display text, and `\` scheme escape. It
 /// deliberately leaves several forms **unrecognized** for a later increment,
@@ -73,7 +73,8 @@ use crate::{
 /// and the bracketed display text — is computed out of the level's match
 /// string, which carries a synthesized run's bytes exactly, so
 /// `https://{host}/path` and `{url}[Docs]` are recognized with only the node's
-/// `location` taking design §4.4's coarse fallback. A **formal text carrying
+/// `location` taking the coarse whole-content-span fallback (see this
+/// module's header). A **formal text carrying
 /// an attribute list** (an `=` selecting roles / id / title / window) is no
 /// exception any more: [`text_attrlist`] parses that list from the same match
 /// string when the text has no `'src` slice of its own, and owns the result
@@ -87,9 +88,9 @@ use crate::{
 /// [`range_has_no_opaque_piece`](super::image::range_has_no_opaque_piece),
 /// after the cross-reference and `link:`/`mailto:` macro families. The match
 /// string carries such a leaf's
-/// canonical entity — the very bytes the string replacer's own escaped haystack
-/// holds there — so the target this pass computes off that string
-/// (`https://example.org/?a=1&amp;b=2`) *is* the one the replacer computed, and
+/// canonical entity — the same escaped bytes `apply_special_characters`
+/// always produces there — so the target this pass computes off that string
+/// (`https://example.org/?a=1&amp;b=2`) *is* the correctly escaped one, and
 /// no value on the node needs the source's own `<`/`>`/`&`. The display text
 /// then becomes **structured children** rather than one baked `Text` (see
 /// [`macro_text_children`]), so the special folds back to its own entity
@@ -110,8 +111,8 @@ use crate::{
 /// children through [`macro_text_children`], whose
 /// [`emit_range`](super::super::quotes::emit_range) path clones the opaque
 /// piece's own node whole into them — so the text is carried *structurally*,
-/// and the fold re-renders exactly the markup the string replacer captured
-/// there. Everything this pass *computes* stays gated: the **target**, and
+/// and the fold re-renders that markup exactly. Everything this pass
+/// *computes* stays gated: the **target**, and
 /// with it a **bare** link's shown text (a slice of the target's own range)
 /// and the `<url>` form's whole interior (see [`build_angle_link_node`]). An
 /// **attribute-list text** is computed too — its display text comes back from
@@ -124,24 +125,25 @@ use crate::{
 /// lift, after the cross-reference one (`xref::find_xref_matches`) and the
 /// `link:`/`mailto:` macro ([`find_link_macro_matches`]).
 ///
-/// What the admission cannot do is make the *recognition* agree in every case,
-/// because the string replacer matches over the markup itself where this
-/// matches over one placeholder standing in for it — and this pass cannot know
-/// what that markup carries without folding, which building a tree must never
-/// do. The two read the same extent unless the markup carries a character the
-/// pattern (or the replacer's own attribute-list probe) is sensitive to, which
-/// leaves two documented divergences of *extent*, each pinned by its own test
-/// and each one where the string pipeline's reading is the markup-perturbed one
-/// and the tree's the well-formed one — exactly as the quotes step's own
-/// crossed-delimiter divergence is:
+/// What the admission cannot do is make the *recognition* agree with matching
+/// over the fully rendered markup in every case, because this pass cannot know
+/// what a span's markup carries without folding it first, which building a
+/// tree must never do — so it matches over one placeholder standing in for the
+/// span instead. The two extents coincide unless the markup carries a
+/// character the pattern (or an attribute-list probe reading the rendered
+/// text) is sensitive to, which leaves two documented divergences of
+/// *extent*, each pinned by its own test and each one where matching the
+/// rendered markup gives the perturbed reading and the tree's is the
+/// well-formed one — exactly as the quotes step's own crossed-delimiter
+/// divergence is:
 ///
-/// - a `]` inside the span (`https://example.org[a *b ] c* d]`), which ends
-///   [`INLINE_LINK`]'s own lazy text capture early for the string replacer but
-///   not here;
+/// - a `]` inside the span (`https://example.org[a *b ] c* d]`), which would
+///   end [`INLINE_LINK`]'s own lazy text capture early if matched over the
+///   rendered markup, but not here;
 /// - markup carrying an `=` beside a comma elsewhere in the text
-///   (`…example.org[one, [.hl]#two#]`): the replacer's attribute-list probe
-///   fires on the markup's own `=`, and the parse then keeps only what precedes
-///   that comma.
+///   (`…example.org[one, [.hl]#two#]`): an attribute-list probe reading the
+///   rendered markup fires on its own `=`, keeping only what precedes that
+///   comma.
 ///
 /// # A masked construct in the target
 ///
@@ -854,7 +856,7 @@ fn build_angle_link_node<'src>(
 }
 
 /// The display text for a bare link, dropping the URI scheme under
-/// `hide-uri-scheme` exactly as the string replacer's `URI_SNIFF` strip does.
+/// `hide-uri-scheme` via the shared [`URI_SNIFF`] strip.
 /// Neither of the two callers can be left with nothing by the strip:
 /// [`INLINE_LINK`]'s bare branch rejects a bare scheme with no body upstream,
 /// and its ANGLE branch's `<url>` alternative requires at least one character

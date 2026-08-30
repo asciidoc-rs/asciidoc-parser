@@ -6,9 +6,6 @@ use crate::{HasSpan, Span, attributes::Attrlist, strings::CowStr};
 /// distinguishes them, because they render through different renderer methods
 /// (an icon consults the `icons`/`icontype` document attributes and carries a
 /// `size` rather than a `width`/`height`).
-///
-/// Field set is provisional (Phase 0) and will be refined against the first
-/// consumer.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Image<'src> {
     /// `true` for an `icon:` macro, `false` for an `image:` macro.
@@ -23,15 +20,12 @@ pub struct Image<'src> {
     /// crossed none.
     ///
     /// Path resolution must treat each such range as one opaque run rather
-    /// than as path syntax: the substitution pipeline resolves the `src` while
-    /// each masked construct is still its `\u{96}`*n*`\u{97}` sentinel and
-    /// splices the body in afterwards, so none of its bytes — a space
-    /// `web_path` would percent-encode, a backslash it would posixify, a `/`
-    /// or `.` its segment arithmetic would read — ever reaches the resolver.
-    /// The built-in renderer reproduces that order by masking these ranges
-    /// around its own `web_path` call — see
-    /// [`image_uri`](crate::parser::InlineRenderer::image_uri), which receives
-    /// them off this node.
+    /// than as path syntax, so that none of its bytes — a space `web_path`
+    /// would percent-encode, a backslash it would posixify, a `/` or `.` its
+    /// segment arithmetic would read — ever reaches the resolver. The
+    /// built-in renderer masks these ranges around its own `web_path` call —
+    /// see [`image_uri`](crate::parser::InlineRenderer::image_uri), which
+    /// receives them off this node.
     pub restored_target_ranges: Vec<std::ops::Range<usize>>,
 
     /// The alt text, explicit or defaulted.
