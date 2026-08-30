@@ -797,7 +797,7 @@ impl InlineRenderer for BracketStrong {
             return;
         }
 
-        crate::parser::HtmlInlineRenderer {}.render_styled(type_, scope, attrlist, id, body, dest);
+        HtmlInlineRenderer {}.render_styled(type_, scope, attrlist, id, body, dest);
     }
 }
 
@@ -815,7 +815,7 @@ fn render_with_reproduces_the_built_in_html_rendering() {
     assert_eq!(
         simple
             .content()
-            .render_with(&crate::parser::HtmlInlineRenderer {}, &parser),
+            .render_with(&HtmlInlineRenderer {}, &parser),
         simple.content().rendered_html()
     );
 }
@@ -864,8 +864,7 @@ fn render_with_uses_the_attributes_the_content_was_parsed_under() {
 
     assert_eq!(paragraphs.len(), 2);
 
-    let render =
-        |content: &Content<'_>| content.render_with(&crate::parser::HtmlInlineRenderer {}, &parser);
+    let render = |content: &Content<'_>| content.render_with(&HtmlInlineRenderer {}, &parser);
 
     let first = render(paragraphs[0]);
     let second = render(paragraphs[1]);
@@ -915,7 +914,7 @@ fn render_with_takes_document_attributes_from_the_content() {
     // A different parser entirely, which never saw `:icons: font`.
     let other = crate::Parser::default();
 
-    let rendered = content.render_with(&crate::parser::HtmlInlineRenderer {}, &other);
+    let rendered = content.render_with(&HtmlInlineRenderer {}, &other);
 
     // Still a font icon: the value in effect where the content was written
     // wins over anything the supplied parser knows.
