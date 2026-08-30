@@ -3,7 +3,7 @@
 use super::{
     fold_deferring_xrefs,
     macros::{emit_range_unescaping_brackets, image::range_has_no_opaque_piece},
-    quotes::{Piece, build_match_string, source_slice, text_slice},
+    quotes::{Piece, build_match_string, single_text_value, source_slice, text_slice},
     special_chars::Masked,
 };
 use crate::{
@@ -99,6 +99,15 @@ pub(super) fn apply_footnotes<'src>(
 /// could) but allocates no [`InlineNode`], letting a subtree with nothing to
 /// find come back from `apply_footnotes` completely unchanged.
 fn subtree_might_have_footnote(nodes: &[InlineNode<'_>]) -> bool {
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // lone `Text` node has no `Styled`/`Ref`/`IndexTerm` child to recurse
+    // into either, so this level's own value is the whole answer for it —
+    // this is what keeps this recursive scan from paying for a build at
+    // *every* level of a large, footnote-free subtree.
+    if let Some(value) = single_text_value(nodes) {
+        return value.contains("tnote");
+    }
+
     let (s, _) = build_match_string(nodes, Masked::UNKNOWN);
 
     if s.contains("tnote") {

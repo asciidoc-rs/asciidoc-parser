@@ -24,15 +24,15 @@ Unicode sentinel characters:
   against the document's reference catalog in a later pass.
 - **Footnote markers** — a third sentinel pair, `\u{E002}`/`\u{E003}`.
 
-The `inline-ast` branch replaces that model with a first-class inline AST
-(`InlineNode`, in `parser/src/inlines/`), built directly from source in a single forward
-pass by the builder in `parser/src/content/inline_builder/`. Rendering (`rendered_html()`)
-is now a pure fold over that tree, not something that happens during parsing. Each of the
-three sentinel systems became an ordinary node instead of a string hack: a passthrough is
-a `Raw` node, a deferred cross-reference is a `Ref { variant: Xref, resolved: None }` node
-that resolution fills in **in place**, and a footnote marker is a `Footnote` node — all
-three sentinel systems, and the string pipeline itself, are now fully retired from
-production code.
+The `inline-ast` branch ([#1059](https://github.com/asciidoc-rs/asciidoc-parser/pull/1059))
+replaced that model with a first-class inline AST (`InlineNode`, in `parser/src/inlines/`),
+built directly from source in a single forward pass by the builder in
+`parser/src/content/inline_builder/`. Rendering (`rendered_html()`) is now a pure fold
+over that tree, not something that happens during parsing. Each of the three sentinel systems
+became an ordinary node instead of a string hack: a passthrough is a `Raw` node, a deferred
+cross-reference is a `Ref { variant: Xref, resolved: None }` node that resolution fills in
+**in place**, and a footnote marker is a `Footnote` node — all three sentinel systems, and
+the string pipeline itself, are now fully retired from production code.
 
 While both the string pipeline and the tree builder existed side by side, every corpus in
 this directory was a genuine **differential test**: a fixture was rendered both ways, and

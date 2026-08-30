@@ -5,7 +5,7 @@ use regex::Captures;
 use super::{
     macros::{MacroMatch, MacroMatchKind, rebuild_macro_level},
     passthrough_step::passthrough_text,
-    quotes::{Piece, build_match_string, emit_range, source_slice},
+    quotes::{Piece, build_match_string, emit_range, single_text_value, source_slice},
     special_chars::Masked,
 };
 use crate::{
@@ -136,15 +136,33 @@ fn subs_are_local(subs: &SubstitutionGroup) -> bool {
 /// is wired into the parse path.
 ///
 /// [`InlineStemMacroReplacer`]: crate::content::passthroughs
+/// Mirrors `Passthroughs::extract_from`'s own guard: whether `s` could
+/// possibly open a `stem:`/`asciimath:`/`latexmath:` macro. Shared between
+/// [`apply_stem`]'s pre-build sniff (run against a single node's own value)
+/// and its post-build one (run against the level's full match string), so
+/// the two answers cannot drift apart.
+fn stem_prefilter(s: &str) -> bool {
+    s.contains(':') && (s.contains("stem:") || s.contains("math:"))
+}
+
 pub(super) fn apply_stem<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // single, unsplit `Text` node's match string is its own value, so the
+    // check below can run against that directly rather than paying for the
+    // build first. A level already split by an earlier extraction falls back
+    // to the build, exactly as before.
+    if single_text_value(&nodes).is_some_and(|value| !stem_prefilter(value)) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // Cheap pre-filter mirroring `Passthroughs::extract_from`'s own guard.
-    if !(s.contains(':') && (s.contains("stem:") || s.contains("math:"))) {
+    if !stem_prefilter(&s) {
         return nodes;
     }
 
