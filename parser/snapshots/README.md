@@ -3,8 +3,9 @@
 Frozen, checked-in golden recordings for the `inline-ast` branch's differential test
 corpora. Each file is a **recording**, not a fixture list: it holds output that was once
 produced by the old string-substitution pipeline, captured before that pipeline was
-deleted (the "step 6" cutover — see below). Tests now read these files as a fixed oracle
-instead of re-deriving the expected output at test time.
+deleted (as part of [#1059](https://github.com/asciidoc-rs/asciidoc-parser/pull/1059)).
+Tests now read these files as a fixed oracle instead of re-deriving the expected output
+at test time.
 
 ## Background: the string pipeline these corpora replaced
 
@@ -61,8 +62,7 @@ Once the string pipeline was deleted, re-deriving a corpus's "expected" side at 
 would just compare the tree's HTML fold against itself — tautological, and worthless as a
 regression check. So each corpus's expected side was recorded once, checked in, and is now
 read rather than re-derived — exactly like the crate's ~277 golden-HTML string assertions
-elsewhere in the test suite. There is no `ASCIIDOC_UPDATE_SNAPSHOTS=1`-style regeneration
-mode; that went away with the pipeline that would have produced the values.
+elsewhere in the test suite.
 
 **A recording is edited by hand, and reviewed like the behavior change it records.**
 Adding or changing a line is asserting "this rendering is correct" — treat it as an
@@ -140,7 +140,3 @@ any other expected-output string in a test — it is now the specification for t
 | `whole_pipeline.txt` | A broad general sweep through the full normal-order pipeline |
 | `xref_macros.txt`, `xref_normal.txt`, `xref_whole_pipeline.txt` | Cross-reference (`<<...>>`, `xref:`) recognition and resolution |
 | `xref_passthrough_divergence.txt` | A **documented divergence**: a passthrough body inside an xref target, where the tree deliberately does not match the old pipeline's output |
-
-For the branch's broader design history and rationale (largely superseded now that the
-migration it planned is done), see
-[`docs/design/inline-ast-architecture.md`](../../docs/design/inline-ast-architecture.md).
