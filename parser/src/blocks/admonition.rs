@@ -449,7 +449,7 @@ mod tests {
     use std::ops::Deref;
 
     use crate::{
-        blocks::{AdmonitionVariant, Block, ContentModel, IsBlock},
+        blocks::{AdmonitionBlock, AdmonitionVariant, Block, ContentModel, IsBlock},
         tests::prelude::*,
     };
 
@@ -461,7 +461,7 @@ mod tests {
             .item
     }
 
-    fn as_admonition<'a>(block: &'a Block<'a>) -> &'a crate::blocks::AdmonitionBlock<'a> {
+    fn as_admonition<'a>(block: &'a Block<'a>) -> &'a AdmonitionBlock<'a> {
         match block {
             Block::Admonition(admonition) => admonition,
 

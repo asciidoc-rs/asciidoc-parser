@@ -10,12 +10,13 @@ use crate::{
         parse_utils::parse_blocks_until,
     },
     content::{
-        Content, SubstitutionGroup, inline_builder::fold_reference_text,
+        Content, DeferredParts, SubstitutionGroup, inline_builder::fold_reference_text,
         substitute_attributes_in_reftext,
     },
     document::{InterpretedValue, RefType},
+    inlines::InlineNode,
     internal::debug::DebugSliceReference,
-    parser::{ResolvedReference, XrefSignifier},
+    parser::{ResolvedAttributes, ResolvedReference, XrefSignifier},
     span::MatchedItem,
     strings::CowStr,
     warnings::{Warning, WarningType},
@@ -517,7 +518,7 @@ impl<'src> SectionBlock<'src> {
     /// [`Document::resolve_references`]).
     ///
     /// [`Document::resolve_references`]: crate::Document::resolve_references
-    pub(crate) fn section_title_deferred_parts(&self) -> Option<crate::content::DeferredParts<'_>> {
+    pub(crate) fn section_title_deferred_parts(&self) -> Option<DeferredParts<'_>> {
         self.section_title.deferred_parts()
     }
 
@@ -546,7 +547,7 @@ impl<'src> SectionBlock<'src> {
     /// Returns the section title's inline tree — the tree the document-order
     /// title pass folds to render this heading, and which that pass then
     /// mirrors its resolved destinations into.
-    pub(crate) fn section_title_inlines(&self) -> &[crate::inlines::InlineNode<'src>] {
+    pub(crate) fn section_title_inlines(&self) -> &[InlineNode<'src>] {
         self.section_title.inlines()
     }
 
@@ -583,9 +584,7 @@ impl<'src> SectionBlock<'src> {
     /// they were retained — the order-dependent half of the render context a
     /// fold of the tree above needs. See
     /// [`Content::render_attributes`](crate::content::Content).
-    pub(crate) fn section_title_render_attributes(
-        &self,
-    ) -> Option<&crate::parser::ResolvedAttributes> {
+    pub(crate) fn section_title_render_attributes(&self) -> Option<&ResolvedAttributes> {
         self.section_title.render_attributes()
     }
 

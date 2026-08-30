@@ -26,11 +26,12 @@
 use std::rc::Rc;
 
 use crate::{
-    Parser,
+    Document, Parser,
+    attributes::Attrlist,
     blocks::{Block, FindBlocks, IsBlock, TableCellContent, TableRow},
-    content::inline_builder::fold_html,
+    content::{Content, inline_builder::fold_html},
     inlines::InlineNode,
-    parser::{HtmlInlineRenderer, ModificationContext},
+    parser::{HtmlInlineRenderer, InlineRenderer, ModificationContext, QuoteScope, QuoteType},
 };
 
 /// One content location: what the string pipeline rendered, and the tree the
@@ -43,7 +44,7 @@ struct Location<'a, 'src> {
 
 /// Collects every content-bearing location in `doc` that carries a tree, in a
 /// fixed document order.
-fn locations<'src>(doc: &'src crate::Document<'src>) -> Vec<Location<'src, 'src>> {
+fn locations<'src>(doc: &'src Document<'src>) -> Vec<Location<'src, 'src>> {
     fn cells<'src>(row: &'src TableRow<'src>, out: &mut Vec<Location<'src, 'src>>) {
         for cell in row.cells() {
             // Only inline (`Simple`) cells carry a single `Content`; an
@@ -779,12 +780,12 @@ fn the_title_pass_renders_each_title_once() {
 #[derive(Debug)]
 struct BracketStrong;
 
-impl crate::parser::InlineRenderer for BracketStrong {
+impl InlineRenderer for BracketStrong {
     fn render_styled(
         &self,
-        type_: crate::parser::QuoteType,
-        scope: crate::parser::QuoteScope,
-        attrlist: &crate::attributes::Attrlist<'_>,
+        type_: QuoteType,
+        scope: QuoteScope,
+        attrlist: &Attrlist<'_>,
         id: Option<String>,
         body: &str,
         dest: &mut String,
@@ -796,7 +797,7 @@ impl crate::parser::InlineRenderer for BracketStrong {
             return;
         }
 
-        crate::parser::HtmlInlineRenderer {}.render_styled(type_, scope, attrlist, id, body, dest);
+        HtmlInlineRenderer {}.render_styled(type_, scope, attrlist, id, body, dest);
     }
 }
 
@@ -814,7 +815,7 @@ fn render_with_reproduces_the_built_in_html_rendering() {
     assert_eq!(
         simple
             .content()
-            .render_with(&crate::parser::HtmlInlineRenderer {}, &parser),
+            .render_with(&HtmlInlineRenderer {}, &parser),
         simple.content().rendered_html()
     );
 }
@@ -863,9 +864,7 @@ fn render_with_uses_the_attributes_the_content_was_parsed_under() {
 
     assert_eq!(paragraphs.len(), 2);
 
-    let render = |content: &crate::content::Content<'_>| {
-        content.render_with(&crate::parser::HtmlInlineRenderer {}, &parser)
-    };
+    let render = |content: &Content<'_>| content.render_with(&HtmlInlineRenderer {}, &parser);
 
     let first = render(paragraphs[0]);
     let second = render(paragraphs[1]);
@@ -915,7 +914,7 @@ fn render_with_takes_document_attributes_from_the_content() {
     // A different parser entirely, which never saw `:icons: font`.
     let other = crate::Parser::default();
 
-    let rendered = content.render_with(&crate::parser::HtmlInlineRenderer {}, &other);
+    let rendered = content.render_with(&HtmlInlineRenderer {}, &other);
 
     // Still a font icon: the value in effect where the content was written
     // wins over anything the supplied parser knows.

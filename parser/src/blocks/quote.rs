@@ -881,7 +881,7 @@ mod tests {
     use std::ops::Deref;
 
     use crate::{
-        blocks::{Block, ContentModel, IsBlock, QuoteType},
+        blocks::{Block, ContentModel, IsBlock, QuoteBlock, QuoteType},
         tests::prelude::*,
     };
 
@@ -893,7 +893,7 @@ mod tests {
             .item
     }
 
-    fn as_quote<'a>(block: &'a Block<'a>) -> &'a crate::blocks::QuoteBlock<'a> {
+    fn as_quote<'a>(block: &'a Block<'a>) -> &'a QuoteBlock<'a> {
         match block {
             Block::Quote(quote) => quote,
 
