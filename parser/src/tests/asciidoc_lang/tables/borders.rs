@@ -134,8 +134,9 @@ include::example$row.adoc[tag=base-h]
 "#
     );
 
-    // <<ex-ends>>: the standard three-column table framed on its ends. The frame
-    // is the only thing that changes; the header and body rows are unaffected.
+    // <<ex-ends>>: the standard three-column table framed on its ends. The
+    // frame is the only thing that changes; the header and body rows are
+    // unaffected.
     let src = format!("[frame=ends]\n{BASE_H}");
     let table = parse_table(&src);
     assert_eq!(table.frame(), Frame::Ends);

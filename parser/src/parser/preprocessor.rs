@@ -311,9 +311,10 @@ impl<'p> PreprocessorState<'p> {
             }
 
             // The lines of a `[comment]` paragraph after its first are likewise
-            // raw, up to the blank line that ends the paragraph. (Its first line
-            // is still processed, matching Asciidoctor's one-line look-ahead: by
-            // the time a paragraph is recognized as a comment, the reader has
+            // raw, up to the blank line that ends the paragraph. (Its first
+            // line is still processed, matching Asciidoctor's
+            // one-line look-ahead: by the time a paragraph is
+            // recognized as a comment, the reader has
             // already visited that line.)
             if in_comment_paragraph {
                 if line.data().is_empty() {
@@ -330,9 +331,10 @@ impl<'p> PreprocessorState<'p> {
             }
 
             // Conditional preprocessor directives (`ifdef`, `ifndef`, `ifeval`,
-            // `endif`) are handled before anything else so they take effect even
-            // while a surrounding conditional is skipping (the nesting still has
-            // to be tracked to balance the stack).
+            // `endif`) are handled before anything else so they take effect
+            // even while a surrounding conditional is skipping (the
+            // nesting still has to be tracked to balance the
+            // stack).
             if has_conditional_prefix(line.data())
                 && let Some(caps) = CONDITIONAL_DIRECTIVE.captures(line.data())
             {
@@ -351,7 +353,8 @@ impl<'p> PreprocessorState<'p> {
                     // Escaped directive (e.g. `\ifdef::foo[]`): not processed.
                     // The leading backslash is stripped and the remainder is
                     // emitted literally, matching Asciidoctor — unless we're
-                    // skipping, in which case it's discarded like any other line.
+                    // skipping, in which case it's discarded like any other
+                    // line.
                     if !self.skipping() {
                         // The leading backslash is removed, so the emitted line
                         // no longer matches the origin column-for-column.
@@ -384,16 +387,16 @@ impl<'p> PreprocessorState<'p> {
                 continue;
             }
 
-            // A `////` line (four or more slashes, nothing else) opens a comment
-            // block. Its content is raw, so it is emitted verbatim and no
-            // directive within it is processed until the matching closing
-            // delimiter. See issue #810.
+            // A `////` line (four or more slashes, nothing else) opens a
+            // comment block. Its content is raw, so it is emitted
+            // verbatim and no directive within it is processed
+            // until the matching closing delimiter. See issue #810.
             if is_comment_block_delimiter(line.data()) {
                 comment_block_delimiter = Some(line.data().to_owned());
 
-                // A `////` block is self-identifying, so it consumes any pending
-                // `[comment]` style; clearing it keeps the block that follows
-                // this one independent.
+                // A `////` block is self-identifying, so it consumes any
+                // pending `[comment]` style; clearing it keeps
+                // the block that follows this one independent.
                 comment_style_pending = false;
                 self.emit_line(
                     line.data(),
@@ -406,11 +409,12 @@ impl<'p> PreprocessorState<'p> {
             }
 
             // With a `[comment]` block style pending, classify the block it
-            // introduces. An open block (`--`) is a comment block, raw up to the
-            // closing `--`; otherwise the block is a comment paragraph, whose
-            // lines after the first are raw (see above). Further block metadata
-            // (a title `.text`, an anchor or attribute list `[…]`) may sit
-            // between the `[comment]` line and the block it styles; the pending
+            // introduces. An open block (`--`) is a comment block, raw up to
+            // the closing `--`; otherwise the block is a comment
+            // paragraph, whose lines after the first are raw (see
+            // above). Further block metadata (a title `.text`, an
+            // anchor or attribute list `[…]`) may sit between the
+            // `[comment]` line and the block it styles; the pending
             // style holds across it until the block itself is reached.
             if comment_style_pending {
                 if line.data() == "--" {
@@ -434,8 +438,8 @@ impl<'p> PreprocessorState<'p> {
                     // content is preprocessed with fresh comment state, so a
                     // directive on its own subsequent lines is still evaluated.
                     // That case (an include on the very first line of a comment
-                    // paragraph) is an accepted limitation of preprocessing in a
-                    // separate pass.
+                    // paragraph) is an accepted limitation of preprocessing in
+                    // a separate pass.
                     if !line.data().is_empty() {
                         in_comment_paragraph = true;
                     }
@@ -444,10 +448,11 @@ impl<'p> PreprocessorState<'p> {
             }
 
             // A block attribute list sets or replaces the pending block style:
-            // `[comment]` marks the upcoming block a comment, another positional
-            // style (`[source]`, …) overrides it, and a bracketed line without a
-            // positional style (an anchor `[[id]]`, a shorthand- or named-only
-            // list) leaves the pending style unchanged.
+            // `[comment]` marks the upcoming block a comment, another
+            // positional style (`[source]`, …) overrides it, and a
+            // bracketed line without a positional style (an anchor
+            // `[[id]]`, a shorthand- or named-only list) leaves the
+            // pending style unchanged.
             if let Some(is_comment) = self.attrlist_block_style_is_comment(line.data()) {
                 comment_style_pending = is_comment;
             }
@@ -457,10 +462,11 @@ impl<'p> PreprocessorState<'p> {
                 && (line.ends_with(':') || line.contains(": "))
                 && let Some(attr) = Attribute::parse(original_source, self.parser)
             {
-                // Process attribute entries so they're available for include directives. NOTE:
-                // We ignore warnings here since this is a quick pass through the content.
-                // Later, `Block::parse` will see the same warnings, if they occur, and will
-                // actually record them.
+                // Process attribute entries so they're available for include
+                // directives. NOTE: We ignore warnings here
+                // since this is a quick pass through the content.
+                // Later, `Block::parse` will see the same warnings, if they
+                // occur, and will actually record them.
                 self.record_origin(
                     file_name,
                     source_line_number,
@@ -501,9 +507,10 @@ impl<'p> PreprocessorState<'p> {
                 // If none of the above apply, add the line to output.
                 //
                 // An escaped include directive (e.g. `\include::foo[]`) is not
-                // processed. The leading backslash is removed and the remainder is
-                // emitted literally, matching Asciidoctor. The backslash is only
-                // removed when what follows is actually an include directive; a
+                // processed. The leading backslash is removed and the remainder
+                // is emitted literally, matching Asciidoctor.
+                // The backslash is only removed when what
+                // follows is actually an include directive; a
                 // backslash followed by anything else is left untouched.
                 let escaped_include = line.starts_with("\\include::")
                     && INCLUDE_DIRECTIVE.is_match(&line.data()[1..]);
@@ -1102,13 +1109,14 @@ impl<'p> PreprocessorState<'p> {
                 let attr_name = &caps[2];
 
                 // A backslash immediately before the opening brace (`\{id}`) or
-                // before the closing brace (`{id\}`) — or both, as in `\{id\}` —
-                // escapes the reference: it is emitted literally with the
-                // escaping backslash(es) removed, whether or not the attribute is
-                // set. This mirrors the content-substitution path and
-                // Asciidoctor's `sub_attributes`, which returns `{#{name}}` when
-                // either its leading or trailing backslash capture is present
-                // (see issue #667).
+                // before the closing brace (`{id\}`) — or both, as in `\{id\}`
+                // — escapes the reference: it is emitted
+                // literally with the escaping backslash(es)
+                // removed, whether or not the attribute is set.
+                // This mirrors the content-substitution path and
+                // Asciidoctor's `sub_attributes`, which returns `{#{name}}`
+                // when either its leading or trailing backslash
+                // capture is present (see issue #667).
                 if caps.get(1).is_some() || caps.get(3).is_some() {
                     dest.push('{');
                     dest.push_str(attr_name);
@@ -1117,9 +1125,10 @@ impl<'p> PreprocessorState<'p> {
                 }
 
                 // Resolve case-insensitively: attribute names are stored
-                // lower-cased, so the lookup name is folded the same way (see the
-                // content-substitution path in `content::substitution_step` and
-                // Asciidoctor's `key = $2.downcase`).
+                // lower-cased, so the lookup name is folded the same way (see
+                // the content-substitution path in
+                // `content::substitution_step` and Asciidoctor'
+                // s `key = $2.downcase`).
                 let lookup_name = attribute_lookup_name(attr_name);
 
                 if !self.parser.has_attribute(&lookup_name) {
@@ -1368,8 +1377,8 @@ impl<'p> PreprocessorState<'p> {
 
         // `ifdef` / `ifndef`.
         if target.is_empty() {
-            // Malformed: a target (attribute name) is required. Dropped, with an
-            // error logged unless already skipping.
+            // Malformed: a target (attribute name) is required. Dropped, with
+            // an error logged unless already skipping.
             if !already_skipping {
                 self.emit_conditional_warning(
                     WarningType::MalformedConditionalDirective(
@@ -1395,8 +1404,8 @@ impl<'p> PreprocessorState<'p> {
                 source_line: source_line_number,
             });
         } else if !already_skipping && self.eval_ifdef(keyword, target) {
-            // Single-line form: the bracketed content is included in place (with
-            // no `endif`) when the condition holds.
+            // Single-line form: the bracketed content is included in place
+            // (with no `endif`) when the condition holds.
             self.process_single_line_content(
                 content,
                 file_name,
@@ -1505,10 +1514,11 @@ impl<'p> PreprocessorState<'p> {
         source_line_number: usize,
         has_reported_file: &mut bool,
     ) {
-        // A single-line conditional whose body is itself an include directive is
-        // re-fed through include processing rather than emitted literally,
-        // matching Asciidoctor: its reader restores the body as the next line and
-        // decrements the look-ahead so a line beginning `include::` is processed
+        // A single-line conditional whose body is itself an include directive
+        // is re-fed through include processing rather than emitted
+        // literally, matching Asciidoctor: its reader restores the body
+        // as the next line and decrements the look-ahead so a line
+        // beginning `include::` is processed
         // again (`replace_next_line`/`@look_ahead -= 1`). The body is right-
         // trimmed first (Asciidoctor's `replace_next_line text.rstrip`) so the
         // anchored include-directive pattern still matches.
@@ -1542,7 +1552,8 @@ impl<'p> PreprocessorState<'p> {
         }
 
         // The bracketed content is spliced in from within the directive line
-        // (`ifdef::name[content]`), so its columns do not align with the origin.
+        // (`ifdef::name[content]`), so its columns do not align with the
+        // origin.
         self.emit_line(
             content,
             file_name,
@@ -1551,11 +1562,12 @@ impl<'p> PreprocessorState<'p> {
             has_reported_file,
         );
 
-        // The main attribute-entry handler leaves `can_have_attribute` unchanged
-        // so that consecutive attribute entries are all applied by the
-        // preprocessor (and thus observed by later include targets); `emit_line`
-        // would instead clear it for this non-empty line. Restore the invariant
-        // when the single-line content was itself an attribute entry.
+        // The main attribute-entry handler leaves `can_have_attribute`
+        // unchanged so that consecutive attribute entries are all
+        // applied by the preprocessor (and thus observed by later
+        // include targets); `emit_line` would instead clear it for this
+        // non-empty line. Restore the invariant when the single-line
+        // content was itself an attribute entry.
         if applied_attribute {
             self.can_have_attribute = can_have_attribute;
         }
@@ -1627,7 +1639,8 @@ impl<'p> PreprocessorState<'p> {
     fn resolve_expr_val(&self, raw: &str) -> Value {
         let raw = raw.trim();
 
-        // A value wrapped in matching single or double quotes is always a string.
+        // A value wrapped in matching single or double quotes is always a
+        // string.
         let quoted_inner = raw
             .strip_prefix('"')
             .and_then(|s| s.strip_suffix('"'))
@@ -2094,9 +2107,10 @@ fn is_absolute_path(path: &str) -> bool {
 /// `includes` field of [`PreprocessorState`]), so the key is always relative to
 /// that document — the coordinate system an inter-document xref target uses.
 fn include_catalog_key(target: &str) -> &str {
-    // `target` names an AsciiDoc file, so its final `.`-delimited segment is the
-    // extension to strip; only the trailing extension is removed, so a path that
-    // contains a period elsewhere (`using-.net-web-services.adoc`) keeps it.
+    // `target` names an AsciiDoc file, so its final `.`-delimited segment is
+    // the extension to strip; only the trailing extension is removed, so a
+    // path that contains a period elsewhere
+    // (`using-.net-web-services.adoc`) keeps it.
     match target.rsplit_once('.') {
         Some((stem, _ext)) if !stem.is_empty() => stem,
         _ => target,
@@ -2227,12 +2241,14 @@ enum TagFilterDiagnostic {
 /// line; `from..to` is inclusive; an empty or negative end (`from..` or
 /// `from..-1`) extends to the end of the file.
 fn select_by_line_ranges(text: &str, spec: &str) -> String {
-    // Each range is `(from, Some(to))` or `(from, None)` for an open-ended range.
+    // Each range is `(from, Some(to))` or `(from, None)` for an open-ended
+    // range.
     let ranges: Vec<(usize, Option<usize>)> = split_delimited_value(spec)
         .map(|entry| {
             if let Some((from, to)) = entry.split_once("..") {
-                // A non-numeric start coerces to 0, matching Ruby `String#to_i`.
-                // Since line numbers are 1-based this behaves the same as a start
+                // A non-numeric start coerces to 0, matching Ruby
+                // `String#to_i`. Since line numbers are 1-based
+                // this behaves the same as a start
                 // of 1 (the range still begins at the first line).
                 let from = from.trim().parse().unwrap_or(0);
                 let to = to.trim();
@@ -2353,8 +2369,8 @@ fn select_by_tags(text: &str, spec: &str) -> (String, Vec<TagFilterDiagnostic>) 
     let mut select = base_select;
     let mut active_tag: Option<String> = None;
 
-    // Each entry records the tag name and the `select` state to restore when the
-    // region is closed.
+    // Each entry records the tag name and the `select` state to restore when
+    // the region is closed.
     let mut tag_stack: Vec<(String, bool)> = vec![];
 
     for line in text.lines() {
@@ -2373,12 +2389,14 @@ fn select_by_tags(text: &str, spec: &str) -> (String, Vec<TagFilterDiagnostic>) 
                         }
                     }
                 } else if let Some(idx) = tag_stack.iter().rposition(|(n, _)| n == name) {
-                    // The named region is open, but it is not the innermost one:
-                    // an inner region was left unclosed. Report the mismatch and
+                    // The named region is open, but it is not the innermost
+                    // one: an inner region was left
+                    // unclosed. Report the mismatch and
                     // close the named region (the still-open inner regions are
                     // reported as unclosed at end of file). This matches
-                    // Asciidoctor, which removes the matched entry from the stack
-                    // while leaving the active (innermost) region in effect.
+                    // Asciidoctor, which removes the matched entry from the
+                    // stack while leaving the active
+                    // (innermost) region in effect.
                     diagnostics.push(TagFilterDiagnostic::MismatchedEnd {
                         expected: active_tag.clone().unwrap_or_default(),
                         found: name.to_string(),
@@ -2400,8 +2418,9 @@ fn select_by_tags(text: &str, spec: &str) -> (String, Vec<TagFilterDiagnostic>) 
                 select = if let Some(named) = lookup(name) {
                     named
                 } else if let Some(wildcard) = wildcard {
-                    // An unnamed region uses the wildcard default, unless we are
-                    // already inside an unselected region (then it stays excluded).
+                    // An unnamed region uses the wildcard default, unless we
+                    // are already inside an unselected
+                    // region (then it stays excluded).
                     if active_tag.is_some() && !select {
                         false
                     } else {
@@ -2592,7 +2611,8 @@ fn adjust_indentation(lines: &mut [String], indent: usize) {
     };
 
     if offset == 0 {
-        // At least one line is flush left, so the `indent` attribute is ignored.
+        // At least one line is flush left, so the `indent` attribute is
+        // ignored.
         return;
     }
 
@@ -3199,7 +3219,8 @@ mod tests {
             "= Document Title\n\nUnresolved directive in main.adoc - include::missing.adoc[]\n\nMore content.\n"
         );
 
-        // With no handler at all, the include is likewise unresolved and warned.
+        // With no handler at all, the include is likewise unresolved and
+        // warned.
         assert_eq!(warnings.len(), 1);
         assert_eq!(
             warnings[0].warning,
@@ -3248,8 +3269,8 @@ mod tests {
 
     #[test]
     fn asciidoc_include_processes_nested_directives() {
-        // An included AsciiDoc file is run through the preprocessor, so a nested
-        // include within it is expanded.
+        // An included AsciiDoc file is run through the preprocessor, so a
+        // nested include within it is expanded.
         let source = "include::outer.adoc[]";
 
         let handler = InlineFileHandler::from_pairs([
@@ -3269,8 +3290,9 @@ mod tests {
 
     #[test]
     fn non_asciidoc_include_merged_verbatim() {
-        // A non-AsciiDoc file (here `.csv`) is merged verbatim: a nested include
-        // directive within it is left as literal text, not expanded.
+        // A non-AsciiDoc file (here `.csv`) is merged verbatim: a nested
+        // include directive within it is left as literal text, not
+        // expanded.
         let source = "include::data.csv[]";
 
         let handler = InlineFileHandler::from_pairs([
@@ -3301,9 +3323,10 @@ mod tests {
 
     #[test]
     fn non_asciidoc_include_in_body_tracks_header_state() {
-        // A non-AsciiDoc include placed in the document body (so the preprocessor
-        // is past the header) whose content includes a blank line exercises the
-        // verbatim path's header-state updates for both blank and non-blank lines.
+        // A non-AsciiDoc include placed in the document body (so the
+        // preprocessor is past the header) whose content includes a
+        // blank line exercises the verbatim path's header-state updates
+        // for both blank and non-blank lines.
         let source = "Body.\n\ninclude::data.csv[]";
 
         let handler = InlineFileHandler::from_pairs([("data.csv", "row one\n\nrow two")]);
@@ -3320,8 +3343,9 @@ mod tests {
 
     #[test]
     fn optional_include_dropped_silently() {
-        // `opts=optional` drops an unresolved include with no output text and no
-        // warning, while keeping the source map aligned for the lines that follow.
+        // `opts=optional` drops an unresolved include with no output text and
+        // no warning, while keeping the source map aligned for the
+        // lines that follow.
         let source = "Before.\n\ninclude::missing.adoc[opts=optional]\n\nAfter.";
 
         // Handler doesn't provide missing.adoc.
@@ -3334,7 +3358,8 @@ mod tests {
 
         let (processed_source, source_map, warnings, _includes) = preprocess(source, &parser);
 
-        // The directive line is gone; no "Unresolved directive" text is inserted.
+        // The directive line is gone; no "Unresolved directive" text is
+        // inserted.
         assert_eq!(processed_source, "Before.\n\n\nAfter.\n");
         assert!(warnings.is_empty());
 
@@ -3386,10 +3411,10 @@ mod tests {
 
     #[test]
     fn include_target_with_missing_attribute_is_dropped_under_drop_line() {
-        // `attribute-missing=drop-line` drops the entire directive line: nothing
-        // is emitted in its place, no warning is recorded, and the include file
-        // handler is never consulted. The source map stays aligned for the lines
-        // that follow. See issue #776.
+        // `attribute-missing=drop-line` drops the entire directive line:
+        // nothing is emitted in its place, no warning is recorded, and
+        // the include file handler is never consulted. The source map
+        // stays aligned for the lines that follow. See issue #776.
         let source = "Before.\n\ninclude::{foodir}/partial.adoc[]\n\nAfter.";
 
         let (processed_source, source_map, warnings, _includes) =
@@ -3434,8 +3459,9 @@ mod tests {
     fn include_target_with_missing_attribute_warns_under_warn() {
         // `attribute-missing=warn` leaves the "Unresolved directive" message in
         // place of the directive and records a warning naming the whole
-        // directive (Asciidoctor maps `warn` to `drop-line` when substituting an
-        // include target, so the target is emptied and never resolved).
+        // directive (Asciidoctor maps `warn` to `drop-line` when substituting
+        // an include target, so the target is emptied and never
+        // resolved).
         let source = "Before.\n\ninclude::{foodir}/partial.adoc[]\n\nAfter.";
 
         let (processed_source, _source_map, warnings, _includes) =
@@ -3485,8 +3511,9 @@ mod tests {
 
     #[test]
     fn escaped_include_directive() {
-        // An escaped include directive is not processed. The leading backslash is
-        // stripped and the remainder is emitted literally (matching Asciidoctor).
+        // An escaped include directive is not processed. The leading backslash
+        // is stripped and the remainder is emitted literally (matching
+        // Asciidoctor).
         let source = "Before.\n\n\\include::partial.adoc[]\n\nAfter.";
 
         let handler = InlineFileHandler::from_pairs([("partial.adoc", "SHOULD NOT APPEAR")]);
@@ -3511,8 +3538,9 @@ mod tests {
 
     #[test]
     fn escaped_include_directive_without_primary_file() {
-        // The backslash is stripped even when there is no primary file name (and
-        // thus no include handler) so the escape behaves identically.
+        // The backslash is stripped even when there is no primary file name
+        // (and thus no include handler) so the escape behaves
+        // identically.
         let source = "\\include::partial.adoc[]";
         let parser = Parser::default();
         let (processed_source, _source_map, _warnings, _includes) = preprocess(source, &parser);
@@ -3521,8 +3549,8 @@ mod tests {
 
     #[test]
     fn escaped_non_directive_is_unchanged() {
-        // A backslash followed by something that is not a valid include directive
-        // (here, no attribute brackets) is left untouched.
+        // A backslash followed by something that is not a valid include
+        // directive (here, no attribute brackets) is left untouched.
         let source = "\\include::partial.adoc";
         let parser = Parser::default().with_primary_file_name("main.adoc");
         let (processed_source, _source_map, _warnings, _includes) = preprocess(source, &parser);
@@ -3758,9 +3786,9 @@ mod tests {
         // A backslash before the closing brace (`{missing\}`) — or both braces
         // (`\{missing\}`) — escapes the reference the same way a leading
         // backslash does: every escaping backslash is removed and the reference
-        // is left unexpanded, so the include target resolves against the literal
-        // `{missing}` form. This matches the content-substitution path and
-        // Asciidoctor.
+        // is left unexpanded, so the include target resolves against the
+        // literal `{missing}` form. This matches the
+        // content-substitution path and Asciidoctor.
         let source = "include::pre{missing\\}mid\\{missing\\}post.adoc[]";
 
         let handler = InlineFileHandler::from_pairs([(
@@ -3862,11 +3890,12 @@ mod tests {
     fn attribute_substitution_with_multiline_attribute() {
         let source = ":longpath: very/long/path/to/some/ \\\nsubdirectory\n:ext: adoc\n\ninclude::{longpath}/file.{ext}[]";
 
-        // A soft-wrap line continuation folds the ` \` marker, the newline, and any
-        // ensuing indentation into a single space (see the `wrap_values` spec test).
-        // So `{longpath}` correctly resolves to "very/long/path/to/some/ subdirectory"
-        // *with* the space, matching Asciidoctor. The space is inherent to soft
-        // wrapping, not a stray artifact.
+        // A soft-wrap line continuation folds the ` \` marker, the newline, and
+        // any ensuing indentation into a single space (see the
+        // `wrap_values` spec test). So `{longpath}` correctly resolves
+        // to "very/long/path/to/some/ subdirectory" *with* the space,
+        // matching Asciidoctor. The space is inherent to soft wrapping,
+        // not a stray artifact.
         let handler = InlineFileHandler::from_pairs([(
             "very/long/path/to/some/ subdirectory/file.adoc",
             "Multi-line attribute worked!",
@@ -3992,9 +4021,9 @@ mod tests {
 
     #[test]
     fn ifdef_single_line_include_in_brackets_honors_rstrip() {
-        // Asciidoctor right-trims the single-line body before re-reading it, so a
-        // trailing space inside the brackets still leaves an include directive
-        // the anchored pattern matches.
+        // Asciidoctor right-trims the single-line body before re-reading it, so
+        // a trailing space inside the brackets still leaves an include
+        // directive the anchored pattern matches.
         let handler = InlineFileHandler::from_pairs([("snippet.adoc", "snippet content\n")]);
 
         let parser = Parser::default()
@@ -4013,10 +4042,11 @@ mod tests {
         // An *escaped* include in a single-line conditional body is emitted
         // literally with its backslash intact, matching Asciidoctor. Its reader
         // decrements the look-ahead — forcing the body to be re-read as an
-        // include — only when the body starts with the unescaped `include::`, so
-        // `\include::…` is left as written rather than being unescaped the way a
-        // normal reader line is. A normal line `\include::…` does drop the
-        // backslash; the two paths legitimately differ.
+        // include — only when the body starts with the unescaped `include::`,
+        // so `\include::…` is left as written rather than being
+        // unescaped the way a normal reader line is. A normal line
+        // `\include::…` does drop the backslash; the two paths
+        // legitimately differ.
         let handler = InlineFileHandler::from_pairs([("snippet.adoc", "snippet content\n")]);
 
         let parser = Parser::default()
@@ -4032,9 +4062,10 @@ mod tests {
 
     #[test]
     fn ifdef_single_line_include_in_brackets_becomes_link_when_secure() {
-        // At `SafeMode::Secure` (the default) the include directive is disabled,
-        // so the single-line body is rewritten to a link to its target — the
-        // same rewrite a top-level include gets — rather than being resolved.
+        // At `SafeMode::Secure` (the default) the include directive is
+        // disabled, so the single-line body is rewritten to a link to
+        // its target — the same rewrite a top-level include gets —
+        // rather than being resolved.
         assert_eq!(
             conditional_output(":foo:\n\nifdef::foo[include::snippet.adoc[]]"),
             ":foo:\n\nlink:snippet.adoc[role=include]\n"
@@ -4080,8 +4111,8 @@ mod tests {
 
     #[test]
     fn comment_open_block_suppresses_conditional_directive() {
-        // A `[comment]`-styled open block (`--`) is a comment block: a directive
-        // within it is emitted verbatim.
+        // A `[comment]`-styled open block (`--`) is a comment block: a
+        // directive within it is emitted verbatim.
         assert_eq!(
             conditional_output("[comment]\n--\nfirst\nifdef::foo[dropped]\nlast\n--\n\ntail"),
             "[comment]\n--\nfirst\nifdef::foo[dropped]\nlast\n--\n\ntail\n"
@@ -4127,9 +4158,9 @@ mod tests {
 
     #[test]
     fn later_style_overrides_comment_style() {
-        // A positional style on a later attribute list (`[source]`) overrides an
-        // earlier `[comment]`, so the block is a real listing and an `include::`
-        // within it is processed rather than left raw.
+        // A positional style on a later attribute list (`[source]`) overrides
+        // an earlier `[comment]`, so the block is a real listing and an
+        // `include::` within it is processed rather than left raw.
         let source = "[comment]\n[source]\n----\ninclude::sub.adoc[]\n----\n";
         let handler = InlineFileHandler::from_pairs([("sub.adoc", "Included.")]);
         let parser = Parser::default()
@@ -4155,9 +4186,9 @@ mod tests {
 
     #[test]
     fn comment_style_carried_across_metadata_before_open_block() {
-        // The same carry-across applies before a `[comment]` open block: a title
-        // between `[comment]` and `--` must not stop the block from being
-        // recognized as a comment.
+        // The same carry-across applies before a `[comment]` open block: a
+        // title between `[comment]` and `--` must not stop the block
+        // from being recognized as a comment.
         assert_eq!(
             conditional_output("[comment]\n.title\n--\nifdef::foo[dropped]\n--\n\ntail"),
             "[comment]\n.title\n--\nifdef::foo[dropped]\n--\n\ntail\n"
@@ -4176,10 +4207,11 @@ mod tests {
 
     #[test]
     fn single_line_attribute_entry_preserves_attribute_context() {
-        // Emitting an attribute-entry line via a single-line conditional must not
-        // disable preprocessor attribute handling for the immediately following
-        // line (as the main attribute-entry handler leaves it enabled). Here the
-        // entry after the directive must still be applied so the include target
+        // Emitting an attribute-entry line via a single-line conditional must
+        // not disable preprocessor attribute handling for the
+        // immediately following line (as the main attribute-entry
+        // handler leaves it enabled). Here the entry after the
+        // directive must still be applied so the include target
         // that references it resolves.
         let source = ":flag:\n\nifdef::flag[:dir: sub]\n:file: {dir}/f\ninclude::{file}.adoc[]";
 
@@ -4347,8 +4379,8 @@ mod tests {
 
     #[test]
     fn ifdef_with_empty_target_is_malformed() {
-        // `ifdef`/`ifndef` require a target; an empty one is malformed and opens
-        // no conditional.
+        // `ifdef`/`ifndef` require a target; an empty one is malformed and
+        // opens no conditional.
         assert_eq!(conditional_output("ifdef::[]\nkept\nendif::[]"), "kept\n");
     }
 
@@ -4547,8 +4579,8 @@ mod tests {
 
     #[test]
     fn leveloffset_wraps_included_content() {
-        // The included content is surrounded by `:leveloffset:` attribute entries
-        // that apply and then reset the offset.
+        // The included content is surrounded by `:leveloffset:` attribute
+        // entries that apply and then reset the offset.
         assert_eq!(
             include_output("leveloffset=+1", "== Chapter\n\nBody."),
             ":leveloffset: +1\n\n== Chapter\n\nBody.\n\n:leveloffset!:\n"
@@ -4594,8 +4626,8 @@ mod tests {
 
     #[test]
     fn uri_include_resolved_with_allow_uri_read() {
-        // With `allow-uri-read` set (and safe mode below secure), the handler is
-        // consulted for the URI target.
+        // With `allow-uri-read` set (and safe mode below secure), the handler
+        // is consulted for the URI target.
         let source = "include::https://example.org/frag.adoc[]";
         let handler =
             InlineFileHandler::from_pairs([("https://example.org/frag.adoc", "Remote content.")]);
@@ -4631,8 +4663,8 @@ mod tests {
 
     #[test]
     fn non_utf8_encoding_warns_but_still_includes() {
-        // A non-UTF-8 `encoding` cannot be honored, so a warning is recorded; the
-        // content (as provided by the handler) is still merged.
+        // A non-UTF-8 `encoding` cannot be honored, so a warning is recorded;
+        // the content (as provided by the handler) is still merged.
         let source = "include::sample.adoc[encoding=iso-8859-1]";
         let handler = InlineFileHandler::from_pairs([("sample.adoc", "Résumé.")]);
         let parser = Parser::default()
@@ -4693,8 +4725,8 @@ mod tests {
 
     #[test]
     fn leveloffset_restores_previous_offset() {
-        // When a `:leveloffset:` is already in effect, the include restores it to
-        // that value (rather than unsetting it) afterward.
+        // When a `:leveloffset:` is already in effect, the include restores it
+        // to that value (rather than unsetting it) afterward.
         let source = ":leveloffset: 1\n\ninclude::sample.adoc[leveloffset=+1]";
         let handler = InlineFileHandler::from_pairs([("sample.adoc", "== Chapter")]);
         let parser = Parser::default()
@@ -4712,9 +4744,9 @@ mod tests {
 
     #[test]
     fn leveloffset_restore_ignores_offset_set_within_include() {
-        // A `:leveloffset:` set inside the included file must not affect the value
-        // restored after the include: the restore reflects the offset in effect
-        // *before* the include (here, unset).
+        // A `:leveloffset:` set inside the included file must not affect the
+        // value restored after the include: the restore reflects the
+        // offset in effect *before* the include (here, unset).
         let source = "include::sample.adoc[leveloffset=+1]";
         let handler =
             InlineFileHandler::from_pairs([("sample.adoc", ":leveloffset: 2\n\n== Chapter")]);
@@ -4751,7 +4783,8 @@ mod tests {
             "x\ny\n"
         );
 
-        // A negated double wildcard combined with an exclusion selects no lines.
+        // A negated double wildcard combined with an exclusion selects no
+        // lines.
         assert_eq!(
             include_output(
                 "tags=!**;!foo",
@@ -4767,8 +4800,8 @@ mod tests {
             "c\n"
         );
 
-        // A `tag::` that is not immediately followed by a space or end of line is
-        // not a directive, so the line is kept as content.
+        // A `tag::` that is not immediately followed by a space or end of line
+        // is not a directive, so the line is kept as content.
         assert_eq!(
             include_output("tag=x", "// tag::x[]\ntag::x[]y\n// end::x[]"),
             "tag::x[]y\n"
@@ -4796,8 +4829,9 @@ mod tests {
 
     #[test]
     fn indent_with_tabsize_and_untabbed_line() {
-        // With `tabsize` set, leading tabs are expanded even on a block that also
-        // contains a line with no tabs (which is passed through unchanged).
+        // With `tabsize` set, leading tabs are expanded even on a block that
+        // also contains a line with no tabs (which is passed through
+        // unchanged).
         let source = "----\ninclude::code.rb[indent=0]\n----";
         let handler = InlineFileHandler::from_pairs([("code.rb", "\ta\nno-tab\n\tb")]);
         let parser = Parser::default()
@@ -4808,8 +4842,9 @@ mod tests {
 
         let (output, _source_map, _warnings, _includes) = preprocess(source, &parser);
 
-        // Tabs expand to the tab stop; the common indent is zero (the middle line
-        // is flush left), so no further indentation change is made.
+        // Tabs expand to the tab stop; the common indent is zero (the middle
+        // line is flush left), so no further indentation change is
+        // made.
         assert_eq!(output, "----\n    a\nno-tab\n    b\n----\n");
     }
 
@@ -5038,8 +5073,9 @@ mod tests {
 
         #[test]
         fn lines_takes_precedence_over_a_whole_file_tag_selection() {
-            // A `lines` selection is partial even when `tags=**` is also present
-            // (`lines` wins, matching the selection the preprocessor applies).
+            // A `lines` selection is partial even when `tags=**` is also
+            // present (`lines` wins, matching the selection the
+            // preprocessor applies).
             assert!(!is_full("lines=1..2,tags=**"));
         }
     }

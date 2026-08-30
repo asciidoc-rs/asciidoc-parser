@@ -147,9 +147,9 @@ const { expect, expectCalledWith, heredoc } = require('../test/test-utils')
 "#
     );
 
-    // A pair of four consecutive asterisks delimits a sidebar block; no `sidebar`
-    // style is needed. The block can contain any type of content (here: a title,
-    // a paragraph, a TIP admonition, and a source block).
+    // A pair of four consecutive asterisks delimits a sidebar block; no
+    // `sidebar` style is needed. The block can contain any type of content
+    // (here: a title, a paragraph, a TIP admonition, and a source block).
     let doc = Parser::default().parse(
         ".Optional Title\n****\nSidebars are used to visually separate auxiliary bits of content\nthat supplement the main text.\n\nTIP: They can contain any type of content.\n\n.Source code block in a sidebar\n[source,js]\n----\nconst { expect, expectCalledWith, heredoc } = require('../test/test-utils')\n----\n****",
     );

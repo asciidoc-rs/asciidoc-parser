@@ -209,11 +209,12 @@ impl<'src> AdmonitionBlock<'src> {
         }
 
         // Unreachable in practice: `parse_paragraph` is only called after
-        // `admonition_paragraph_prefix` matched, which requires a non-whitespace
-        // character after the label on the first line (trailing whitespace is
-        // trimmed before the match). `content_start` therefore points at
-        // non-empty content, so `SimpleBlock::parse` always returns `Some`. This
-        // fall-through is kept as a defensive default that mirrors
+        // `admonition_paragraph_prefix` matched, which requires a
+        // non-whitespace character after the label on the first line
+        // (trailing whitespace is trimmed before the match).
+        // `content_start` therefore points at non-empty content, so
+        // `SimpleBlock::parse` always returns `Some`. This fall-through
+        // is kept as a defensive default that mirrors
         // `parse_masquerade`.
         MatchAndWarnings {
             item: None,

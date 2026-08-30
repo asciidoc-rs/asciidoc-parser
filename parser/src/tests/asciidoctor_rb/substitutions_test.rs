@@ -142,8 +142,9 @@ mod dispatcher {
         );
 
         // The crate models `apply_subs` as immutable substitution: the block's
-        // `original` span is preserved while `rendered` holds the result, so the
-        // upstream "source string is not mutated" guarantee holds by construction.
+        // `original` span is preserved while `rendered` holds the result, so
+        // the upstream "source string is not mutated" guarantee holds
+        // by construction.
         let mut p = Parser::default();
 
         let maw =
@@ -183,10 +184,10 @@ mod dispatcher {
 
     // Not ported to this crate:
     // - 'should not drop trailing blank lines when performing substitutions':
-    //   para.lines trailing-blank round-trip: no crate API to inject trailing blank
-    //   lines.
-    // - 'should expand subs passed to expand_subs': expand_subs Ruby API; sub-list
-    //   resolution is covered by content::substitution_group tests.
+    //   para.lines trailing-blank round-trip: no crate API to inject trailing
+    //   blank lines.
+    // - 'should expand subs passed to expand_subs': expand_subs Ruby API;
+    //   sub-list resolution is covered by content::substitution_group tests.
     non_normative!(
         r#"
     test 'should not drop trailing blank lines when performing substitutions' do
@@ -224,8 +225,8 @@ mod dispatcher {
         );
 
         // Upstream passes an explicit `nil` subs list; this crate resolves a
-        // `[pass]` block to no substitutions at parse time, so its raw content is
-        // emitted verbatim.
+        // `[pass]` block to no substitutions at parse time, so its raw content
+        // is emitted verbatim.
         let doc = Parser::default().parse("[pass]\n*raw*");
         assert_eq!(rendered_paragraphs(&doc), &["*raw*"]);
     }
@@ -2612,8 +2613,8 @@ mod quotes {
 
         let p = Parser::default();
         SubstitutionStep::Quotes.apply(&mut content, &p, None);
-        // ^^^ TO DO: This needs to be the full substitution group, not just the Quotes
-        // substition.
+        // ^^^ TO DO: This needs to be the full substitution group, not just the
+        // Quotes substition.
 
         assert!(!content.is_empty());
 
@@ -4544,8 +4545,8 @@ mod macros {
                 .parse("image:circle.svg[Tiger,100,opts=inline,link=self]");
 
             // The `link` value is used verbatim: `self` is not resolved to the
-            // image's own URI (which would be meaningless for an inline SVG), so
-            // the anchor's `href` is the literal string `self`.
+            // image's own URI (which would be meaningless for an inline SVG),
+            // so the anchor's `href` is the literal string `self`.
             assert_eq!(
                 rendered(&doc),
                 concat!(
@@ -4623,9 +4624,9 @@ mod macros {
         #[test]
         fn an_inline_svg_image_should_render_as_a_plain_img_when_safe_mode_is_secure() {
             // Like `interactive`, the `inline` option is disabled in `Secure`
-            // mode (the default), so the SVG contents are never read and a plain
-            // `<img>` is emitted. The registered handler is intentionally
-            // ignored.
+            // mode (the default), so the SVG contents are never read and a
+            // plain `<img>` is emitted. The registered handler is
+            // intentionally ignored.
             let doc = Parser::default()
                 .with_intrinsic_attribute("imagesdir", "fixtures", ModificationContext::Anywhere)
                 .with_svg_file_handler(SvgFileHandlerFixture::from_pairs([(
@@ -4643,8 +4644,8 @@ mod macros {
         #[test]
         fn an_inline_svg_image_appends_both_width_and_height_to_the_opening_tag() {
             // When both a width and a height are supplied, both are appended to
-            // the opening `<svg>` tag (after the original width/height/style are
-            // stripped).
+            // the opening `<svg>` tag (after the original width/height/style
+            // are stripped).
             let doc = Parser::default()
                 .with_safe_mode(SafeMode::Server)
                 .with_intrinsic_attribute("imagesdir", "fixtures", ModificationContext::Anywhere)
@@ -4665,8 +4666,9 @@ mod macros {
 
         #[test]
         fn an_inline_svg_image_without_dimensions_keeps_the_original_opening_tag() {
-            // With neither a width nor a height supplied, the opening `<svg>` tag
-            // is left untouched; only the XML preamble is stripped.
+            // With neither a width nor a height supplied, the opening `<svg>`
+            // tag is left untouched; only the XML preamble is
+            // stripped.
             let doc = Parser::default()
                 .with_safe_mode(SafeMode::Server)
                 .with_intrinsic_attribute("imagesdir", "fixtures", ModificationContext::Anywhere)
@@ -4861,11 +4863,12 @@ mod macros {
     }
 
     // Not ported to this crate:
-    // - 'a single-line image macro with text and dimensions should be interpreted
-    //   as an image with alt text and dimensions in docbook': DocBook backend not
-    //   supported (grouped Rust stub covers all four DocBook image tests).
-    // - 'a single-line image macro with scaledwidth attribute should be supported
-    //   in docbook': DocBook backend not supported.
+    // - 'a single-line image macro with text and dimensions should be
+    //   interpreted as an image with alt text and dimensions in docbook':
+    //   DocBook backend not supported (grouped Rust stub covers all four
+    //   DocBook image tests).
+    // - 'a single-line image macro with scaledwidth attribute should be
+    //   supported in docbook': DocBook backend not supported.
     // - 'a single-line image macro with scaled attribute should be supported in
     //   docbook': DocBook backend not supported.
     // - 'should pass through role on image macro to DocBook output': DocBook
@@ -5053,7 +5056,8 @@ mod macros {
             "<circle cx=\"250\" cy=\"250\" r=\"200\"/></svg>",
         );
 
-        // Base64 (strict, `pack 'm0'`) of `CIRCLE_SVG`, the `data:` URI payload.
+        // Base64 (strict, `pack 'm0'`) of `CIRCLE_SVG`, the `data:` URI
+        // payload.
         const CIRCLE_SVG_BASE64: &str = concat!(
             "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyB4bWxucz0iaHR0",
             "cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MDAiIGhlaWdodD0iNTAwIiBzdHls",
@@ -5091,8 +5095,8 @@ mod macros {
     }
 
     // Not ported to this crate:
-    // - 'an inline image macro with link should be interpreted as a linked image in
-    //   docbook': DocBook backend not supported.
+    // - 'an inline image macro with link should be interpreted as a linked
+    //   image in docbook': DocBook backend not supported.
     non_normative!(
         r#"
     test 'an inline image macro with link should be interpreted as a linked image in docbook' do
@@ -5875,10 +5879,11 @@ mod macros {
 "#
         );
 
-        // With `catalog_assets` enabled, the `image:` macro in the section title
-        // records its target in the document catalog. The `{iconsdir}` reference
-        // in the target is resolved (to `fixtures`) by the attribute-references
-        // step, which runs before the macros step, so the catalog records the
+        // With `catalog_assets` enabled, the `image:` macro in the section
+        // title records its target in the document catalog. The
+        // `{iconsdir}` reference in the target is resolved (to
+        // `fixtures`) by the attribute-references step, which runs
+        // before the macros step, so the catalog records the
         // resolved `fixtures/dot.gif`. `imagesdir` is unset here, so the
         // reference carries no `imagesdir`.
         let doc = Parser::default()
@@ -6902,7 +6907,8 @@ mod macros {
             assert_eq!(doc.catalog().footnotes().len(), 1);
             // Every occurrence links to the single footnote definition.
             assert_css(&doc, r##"a[href="#_footnotedef_1"]"##, 3);
-            // Setting compat mode suppresses the footnoteref deprecation warning.
+            // Setting compat mode suppresses the footnoteref deprecation
+            // warning.
             assert_eq!(doc.warnings().count(), 0);
         }
 
@@ -7103,10 +7109,11 @@ mod macros {
         // Intentional divergence (https://github.com/asciidoc-rs/asciidoc-parser/issues/594):
         // Asciidoctor converts section titles eagerly and out of document order
         // (to generate IDs and cross-reference text), so footnotes in headings
-        // are numbered out of sequence — this test asserts that quirk. The crate
-        // instead applies a title's substitutions before parsing its section
-        // body, numbering heading footnotes in straightforward document order.
-        // That in-order behavior is covered by
+        // are numbered out of sequence — this test asserts that quirk. The
+        // crate instead applies a title's substitutions before parsing
+        // its section body, numbering heading footnotes in
+        // straightforward document order. That in-order behavior is
+        // covered by
         // `asciidoc_lang::macros::footnote::footnotes_in_headings_are_numbered_in_document_order`,
         // so this Asciidoctor-fidelity test stays ignored.
         fn footnotes_in_headings_are_numbered_out_of_sequence() {
@@ -7261,7 +7268,8 @@ mod macros {
 "##
             );
 
-            // 'a single-line index term macro with primary and secondary terms ...'
+            // 'a single-line index term macro with primary and secondary terms
+            // ...'
             for macro_ in ["indexterm:[Big cats, Tigers]", "(((Big cats, Tigers)))"] {
                 let doc = Parser::default().parse(&format!("{SENTENCE}\n{macro_}"));
                 assert_eq!(rendered_paragraphs(&doc), &[format!("{SENTENCE}\n")]);
@@ -7317,7 +7325,8 @@ mod macros {
 "##
             );
 
-            // 'a multi-line index term macro should be compacted and registered ...'
+            // 'a multi-line index term macro should be compacted and registered
+            // ...'
             for macro_ in ["indexterm:[Panthera\ntigris]", "(((Panthera\ntigris)))"] {
                 let doc = Parser::default().parse(&format!("{SENTENCE}\n{macro_}"));
                 assert_eq!(rendered_paragraphs(&doc), &[format!("{SENTENCE}\n")]);
@@ -7409,8 +7418,9 @@ mod macros {
             );
 
             // 'should not split index terms on commas inside of quoted terms'
-            // The quoted comma keeps the term intact; the concealed term renders
-            // nothing, so only the leading sentence remains.
+            // The quoted comma keeps the term intact; the concealed term
+            // renders nothing, so only the leading sentence
+            // remains.
             let macro_form =
                 "Tigers are big, scary cats.\nindexterm:[Tigers, \"[Big\\],\nscary cats\"]";
             let shorthand = "Tigers are big, scary cats.\n(((Tigers, \"[Big],\nscary cats\")))";
@@ -7443,7 +7453,8 @@ mod macros {
             );
 
             // 'normal substitutions are performed on an index term macro'
-            // The concealed term renders nothing regardless of inner formatting.
+            // The concealed term renders nothing regardless of inner
+            // formatting.
             for macro_ in ["indexterm:[*Tigers*]", "(((*Tigers*)))"] {
                 let doc = Parser::default().parse(&format!("{SENTENCE}\n{macro_}"));
                 assert_eq!(rendered_paragraphs(&doc), &[format!("{SENTENCE}\n")]);
@@ -7573,8 +7584,8 @@ mod macros {
 "##
             );
 
-            // 'an index term macro with square bracket syntax may contain square
-            // brackets in term'
+            // 'an index term macro with square bracket syntax may contain
+            // square brackets in term'
             let doc = Parser::default().parse(&format!(
                 "{SENTENCE}\nindexterm:[Tiger [Panthera tigris\\]]"
             ));
@@ -7630,8 +7641,8 @@ mod macros {
 "#
             );
 
-            // 'a multi-line index term 2 macro should be compacted ... and retain
-            // term inline'
+            // 'a multi-line index term 2 macro should be compacted ... and
+            // retain term inline'
             let expected = "The panthera tigris is the largest cat species.";
             for input in [
                 "The indexterm2:[ panthera\ntigris ] is the largest cat species.",
@@ -7772,8 +7783,9 @@ mod macros {
 
             // The DocBook-only `see`/`see-also` structure is not modeled, but
             // Asciidoctor strips the `see` (` >> `) and `see-also` (` &> `)
-            // clauses from a *visible* term's inline text regardless of backend,
-            // leaving only the primary term in the flow of text.
+            // clauses from a *visible* term's inline text regardless of
+            // backend, leaving only the primary term in the flow of
+            // text.
             let doc =
                 Parser::default().parse("((Flash >> HTML 5)) and ((HTML 5 &> CSS 3 &> SVG)) done.");
             assert_eq!(rendered_paragraphs(&doc), &["Flash and HTML 5 done."]);
@@ -7781,8 +7793,8 @@ mod macros {
 
         // Not ported to this crate:
         // - 'should parse concealed shorthand index term with see and seealso':
-        //   DocBook-only see/seealso structure; concealed shorthand form has no HTML5
-        //   analogue (concealed term renders nothing).
+        //   DocBook-only see/seealso structure; concealed shorthand form has no
+        //   HTML5 analogue (concealed term renders nothing).
         non_normative!(
             r#"
     test 'should parse concealed shorthand index term with see and seealso' do
@@ -7884,9 +7896,9 @@ mod macros {
     // - 'should parse concealed index term macro with see and seealso':
     //   DocBook-only see/seealso structure; concealed macro form has no HTML5
     //   analogue (concealed term renders nothing).
-    // - 'should honor secondary and tertiary index terms when primary index term is
-    //   quoted and contains equals sign': DocBook backend not supported; asserts
-    //   <indexterm> primary/secondary/tertiary markup.
+    // - 'should honor secondary and tertiary index terms when primary index
+    //   term is quoted and contains equals sign': DocBook backend not
+    //   supported; asserts <indexterm> primary/secondary/tertiary markup.
     non_normative!(
         r#"
     test 'should parse concealed index term macro with see and seealso' do
@@ -8091,8 +8103,8 @@ mod macros {
         }
 
         // Not ported to this crate:
-        // - 'kbd macro with key combination, docbook backend': DocBook backend not
-        //   supported.
+        // - 'kbd macro with key combination, docbook backend': DocBook backend
+        //   not supported.
         non_normative!(
             r#"
       test 'kbd macro with key combination, docbook backend' do
@@ -8172,7 +8184,8 @@ mod macros {
 "#
             );
 
-            // 'kbd macro with key combination delimited by plus containing a comma key'
+            // 'kbd macro with key combination delimited by plus containing a
+            // comma key'
             assert_eq!(
                 render("kbd:[Ctrl+,]"),
                 r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>,</kbd></span>"#
@@ -8191,7 +8204,8 @@ mod macros {
 "#
             );
 
-            // 'kbd macro with key combination delimited by commas containing a plus key'
+            // 'kbd macro with key combination delimited by commas containing a
+            // plus key'
             assert_eq!(
                 render("kbd:[Ctrl, +, Shift]"),
                 r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>+</kbd>+<kbd>Shift</kbd></span>"#
@@ -8210,7 +8224,8 @@ mod macros {
 "#
             );
 
-            // 'kbd macro with key combination where last key matches plus delimiter'
+            // 'kbd macro with key combination where last key matches plus
+            // delimiter'
             assert_eq!(
                 render("kbd:[Ctrl + +]"),
                 r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>+</kbd></span>"#
@@ -8229,7 +8244,8 @@ mod macros {
 "#
             );
 
-            // 'kbd macro with key combination where last key matches comma delimiter'
+            // 'kbd macro with key combination where last key matches comma
+            // delimiter'
             assert_eq!(
                 render("kbd:[Ctrl, ,]"),
                 r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>,</kbd></span>"#
@@ -8330,7 +8346,8 @@ mod macros {
         }
 
         // Not ported to this crate:
-        // - 'should process menu for docbook backend': DocBook backend not supported.
+        // - 'should process menu for docbook backend': DocBook backend not
+        //   supported.
         non_normative!(
             r#"
       test 'should process menu for docbook backend' do
@@ -8431,8 +8448,8 @@ mod macros {
 "#
             );
 
-            // 'should process menu with menu item using macro syntax when fonts icons are
-            // enabled'
+            // 'should process menu with menu item using macro syntax when fonts
+            // icons are enabled'
             assert_eq!(
                 render_with_attributes(&[":icons: font"], "menu:Tools[More Tools &gt; Extensions]"),
                 r#"<span class="menuseq"><b class="menu">Tools</b>&#160;<i class="fa fa-angle-right caret"></i> <b class="submenu">More Tools</b>&#160;<i class="fa fa-angle-right caret"></i> <b class="menuitem">Extensions</b></span>"#
@@ -8440,8 +8457,8 @@ mod macros {
         }
 
         // Not ported to this crate:
-        // - 'should process menu with menu item for docbook backend': DocBook backend
-        //   not supported.
+        // - 'should process menu with menu item for docbook backend': DocBook
+        //   backend not supported.
         non_normative!(
             r#"
       test 'should process menu with menu item for docbook backend' do
@@ -8464,7 +8481,8 @@ mod macros {
 "#
             );
 
-            // 'should process menu with menu item in submenu using macro syntax'
+            // 'should process menu with menu item in submenu using macro
+            // syntax'
             assert_eq!(
                 render("menu:Tools[Project &gt; Build]"),
                 r#"<span class="menuseq"><b class="menu">Tools</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">Project</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Build</b></span>"#
@@ -8472,8 +8490,8 @@ mod macros {
         }
 
         // Not ported to this crate:
-        // - 'should process menu with menu item in submenu for docbook backend':
-        //   DocBook backend not supported.
+        // - 'should process menu with menu item in submenu for docbook
+        //   backend': DocBook backend not supported.
         non_normative!(
             r#"
       test 'should process menu with menu item in submenu for docbook backend' do
@@ -8496,8 +8514,8 @@ mod macros {
 "#
             );
 
-            // 'should process menu with menu item in submenu using macro syntax and comma
-            // delimiter'
+            // 'should process menu with menu item in submenu using macro syntax
+            // and comma delimiter'
             assert_eq!(
                 render("menu:Tools[Project, Build]"),
                 r#"<span class="menuseq"><b class="menu">Tools</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">Project</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Build</b></span>"#
@@ -8507,10 +8525,10 @@ mod macros {
         // Not ported to this crate:
         // - 'should process menu with menu item using inline syntax': Inline
         //   (shorthand) menu syntax not ported.
-        // - 'should process menu with menu item in submenu using inline syntax': Inline
-        //   (shorthand) menu syntax not ported.
-        // - 'inline menu syntax should not match closing quote of XML attribute':
-        //   Inline (shorthand) menu syntax not ported.
+        // - 'should process menu with menu item in submenu using inline
+        //   syntax': Inline (shorthand) menu syntax not ported.
+        // - 'inline menu syntax should not match closing quote of XML
+        //   attribute': Inline (shorthand) menu syntax not ported.
         non_normative!(
             r#"
       test 'should process menu with menu item using inline syntax' do
@@ -8543,7 +8561,8 @@ mod macros {
 "#
             );
 
-            // 'should process menu macro with items containing multibyte characters'
+            // 'should process menu macro with items containing multibyte
+            // characters'
             assert_eq!(
                 render("menu:视图[放大, 重置]"),
                 r#"<span class="menuseq"><b class="menu">视图</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">放大</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">重置</b></span>"#
@@ -8551,8 +8570,8 @@ mod macros {
         }
 
         // Not ported to this crate:
-        // - 'should process inline menu with items containing multibyte characters':
-        //   Inline (shorthand) menu syntax not ported.
+        // - 'should process inline menu with items containing multibyte
+        //   characters': Inline (shorthand) menu syntax not ported.
         non_normative!(
             r#"
       test 'should process inline menu with items containing multibyte characters' do
@@ -8575,8 +8594,8 @@ mod macros {
 "#
             );
 
-            // 'should process a menu macro with a target that begins with a character
-            // reference'
+            // 'should process a menu macro with a target that begins with a
+            // character reference'
             assert_eq!(
                 render("menu:&#8942;[More Tools, Extensions]"),
                 r#"<span class="menuseq"><b class="menu">&#8942;</b>&#160;<b class="caret">&#8250;</b> <b class="submenu">More Tools</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Extensions</b></span>"#
@@ -8598,9 +8617,9 @@ mod macros {
 "#
             );
 
-            // 'should not process a menu macro with a target that ends with a space'
-            // Only the second (well-formed) macro is processed; the first is
-            // left as literal text.
+            // 'should not process a menu macro with a target that ends with a
+            // space' Only the second (well-formed) macro is
+            // processed; the first is left as literal text.
             assert_eq!(
                 render("menu:foo [bar] menu:File[Save]"),
                 r#"menu:foo [bar] <span class="menuseq"><b class="menu">File</b>&#160;<b class="caret">&#8250;</b> <b class="menuitem">Save</b></span>"#
@@ -8608,8 +8627,8 @@ mod macros {
         }
 
         // Not ported to this crate:
-        // - 'should process an inline menu that begins with a character reference':
-        //   Inline (shorthand) menu syntax not ported.
+        // - 'should process an inline menu that begins with a character
+        //   reference': Inline (shorthand) menu syntax not ported.
         non_normative!(
             r#"
       test 'should process an inline menu that begins with a character reference' do
@@ -8621,8 +8640,8 @@ mod macros {
 
         #[test]
         fn escaped_macros_are_emitted_verbatim() {
-            // A leading backslash escapes each UI macro, emitting the macro text
-            // without the backslash.
+            // A leading backslash escapes each UI macro, emitting the macro
+            // text without the backslash.
             assert_eq!(render("\\kbd:[F3]"), "kbd:[F3]");
             assert_eq!(render("\\btn:[Save]"), "btn:[Save]");
             assert_eq!(render("\\menu:File[Save]"), "menu:File[Save]");
@@ -9035,7 +9054,8 @@ mod passthroughs {
         // An attribute reference embedded in a passthrough role is resolved
         // before the role is applied, mirroring Asciidoctor's
         // `parse_quoted_text_attributes` (which runs `sub_attributes` on the
-        // attribute list). This is a crate-specific regression test, not a port.
+        // attribute list). This is a crate-specific regression test, not a
+        // port.
         let render = |input: &str| {
             let mut p = Parser::default().with_intrinsic_attribute(
                 "myrole",
@@ -9808,8 +9828,8 @@ mod passthroughs {
 "##
         );
 
-        // NOTE: Placeholder is surrounded by text to prevent reader from stripping
-        // trailing boundary char (unique to test scenario).
+        // NOTE: Placeholder is surrounded by text to prevent reader from
+        // stripping trailing boundary char (unique to test scenario).
         let mut content =
             crate::content::Content::from(crate::Span::new("some \u{96}0\u{97} to study"));
 
@@ -9860,8 +9880,8 @@ mod passthroughs {
 "##
         );
 
-        // NOTE: Placeholder is surrounded by text to prevent reader from stripping
-        // trailing boundary char (unique to test scenario).
+        // NOTE: Placeholder is surrounded by text to prevent reader from
+        // stripping trailing boundary char (unique to test scenario).
         let mut content = crate::content::Content::from(crate::Span::new(
             "some \u{96}0\u{97} to study in the \u{96}1\u{97} programming language",
         ));
@@ -10805,11 +10825,12 @@ mod passthroughs {
         }
 
         // Not ported to this crate:
-        // - 'should convert contents of asciimath macro to MathML in DocBook output if
-        //   asciimath gem is available': DocBook backend / asciimath gem not supported.
-        // - 'should not perform specialcharacters subs on asciimath macro content in
-        //   Docbook output if asciimath gem not available': DocBook backend / asciimath
+        // - 'should convert contents of asciimath macro to MathML in DocBook
+        //   output if asciimath gem is available': DocBook backend / asciimath
         //   gem not supported.
+        // - 'should not perform specialcharacters subs on asciimath macro
+        //   content in Docbook output if asciimath gem not available': DocBook
+        //   backend / asciimath gem not supported.
         non_normative!(
             r#"
       test 'should convert contents of asciimath macro to MathML in DocBook output if asciimath gem is available' do
@@ -10959,8 +10980,9 @@ mod passthroughs {
         }
 
         // Not ported to this crate:
-        // - 'should not perform specialcharacters subs on latexmath macro content in
-        //   docbook backend by default': DocBook backend not supported.
+        // - 'should not perform specialcharacters subs on latexmath macro
+        //   content in docbook backend by default': DocBook backend not
+        //   supported.
         non_normative!(
             r#"
       test 'should not perform specialcharacters subs on latexmath macro content in docbook backend by default' do
@@ -11630,8 +11652,8 @@ foo&#8201;&#8212;&#8201;"#;
         );
 
         // Ported from Asciidoctor's `should replace right single quote marks`.
-        // In Asciidoctor this exercises `sub_replacements`, which corresponds to
-        // the `CharacterReplacements` substitution step here.
+        // In Asciidoctor this exercises `sub_replacements`, which corresponds
+        // to the `CharacterReplacements` substitution step here.
         let cases = [
             (r#"`'Twas the night"#, "&#8217;Twas the night"),
             (r#"a `'57 Chevy!"#, "a &#8217;57 Chevy!"),

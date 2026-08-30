@@ -13,8 +13,8 @@ pub fn replace_with_lookahead<'h, LR: LookaheadReplacer>(
     let mut last_match = 0;
 
     'retry: loop {
-        // Optimization: If we don't have any matches, we can continue to borrow the
-        // source.
+        // Optimization: If we don't have any matches, we can continue to borrow
+        // the source.
         let mut it = regex.captures_iter(haystack).enumerate().peekable();
 
         if new.is_empty() && it.peek().is_none() {
@@ -192,9 +192,9 @@ TheRiver 1980
     #[test]
     fn skip_ahead_after_continue() {
         // Regression: a Continue match advances last_match to a nonzero offset,
-        // then a SkipAheadAndRetry slices the haystack forward. Without resetting
-        // last_match the next gap-fill indexes the new, shorter haystack with a
-        // stale offset -> panic.
+        // then a SkipAheadAndRetry slices the haystack forward. Without
+        // resetting last_match the next gap-fill indexes the new,
+        // shorter haystack with a stale offset -> panic.
         let re = Regex::new(r"[AB]").unwrap();
         let new = replace_with_lookahead(&re, "xAyBzBw", ContinueThenSkip {});
         assert_eq!(new, "xaybzbw");

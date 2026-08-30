@@ -106,10 +106,10 @@ image::document-title.png[Title of document]
     }
 
     // Out of scope (https://github.com/asciidoc-rs/asciidoc-parser/issues/380):
-    // multiple level-0 headings are only valid for the `book` doctype, where the
-    // additional level-0 titles are interpreted as parts of a multi-part book. We
-    // don't support the `book` doctype's parts, so this is treated as
-    // non-normative.
+    // multiple level-0 headings are only valid for the `book` doctype, where
+    // the additional level-0 titles are interpreted as parts of a
+    // multi-part book. We don't support the `book` doctype's parts, so this
+    // is treated as non-normative.
     non_normative!(
         r#"
 === Doctypes and titles
@@ -259,8 +259,9 @@ If neither a level 0 section title or `doctitle` is specified in the header, but
     );
 
     // With no level 0 section title (`= …`) and no `doctitle` attribute in the
-    // header, a `title` attribute entry supplies the document title: there is no
-    // section title, and the effective doctitle falls back to the `title` value.
+    // header, a `title` attribute entry supplies the document title: there is
+    // no section title, and the effective doctitle falls back to the
+    // `title` value.
     let doc = Parser::default().parse(":title: The Intrepid Chronicles\n\nA frigid morning.");
 
     assert_eq!(doc.header().title(), None);

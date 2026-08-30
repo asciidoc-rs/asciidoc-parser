@@ -171,8 +171,8 @@ fn limit_is_coerced_like_ruby_to_i() {
     assert_eq!(cap_of("-5"), 0);
 
     // Both non-`Value` forms are reachable only through the API (the attribute
-    // is API-only): an empty (`Set`) value coerces to 0, while an explicit unset
-    // falls back to the default.
+    // is API-only): an empty (`Set`) value coerces to 0, while an explicit
+    // unset falls back to the default.
     assert_eq!(
         Parser::default()
             .with_intrinsic_attribute_bool("max-block-nesting", true, ModificationContext::ApiOnly)

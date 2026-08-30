@@ -113,10 +113,11 @@ rain::
 "#
     );
 
-    // Setting `glossary` on both the section and the description list within it:
-    // the section carries the `glossary` style, and the description list renders
-    // with the `glossary` style class. Per the spec, the section style is not
-    // implicitly propagated to the list; the list must declare it explicitly.
+    // Setting `glossary` on both the section and the description list within
+    // it: the section carries the `glossary` style, and the description
+    // list renders with the `glossary` style class. Per the spec, the
+    // section style is not implicitly propagated to the list; the list must
+    // declare it explicitly.
     let doc = Parser::default().parse(
         "[glossary]\n== Glossary\n\n[glossary]\nmud:: wet, cold dirt\nrain::\n\twater falling from the sky\n",
     );

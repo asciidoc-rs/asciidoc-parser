@@ -409,7 +409,8 @@ include::document:example$header.adoc[tag=qr-attributes]
     let doc = Parser::default().parse("= Title\nv2.0, 2019-03-22");
     assert!(doc.header().revision_line().is_none());
 
-    // With an author line present, the third line is parsed as the revision line.
+    // With an author line present, the third line is parsed as the revision
+    // line.
     let doc = Parser::default().parse("= Title\nAuthor Name <author@email.org>\nv2.0, 2019-03-22");
     assert!(doc.header().author_line().is_some());
     assert!(doc.header().revision_line().is_some());
@@ -625,7 +626,8 @@ Assuming the safe mode is less than SECURE, you must also set the `allow-uri-rea
             .any(|p| p.contains("Remote content."))
     );
 
-    // In SECURE mode the read is forcefully disabled even with `allow-uri-read`.
+    // In SECURE mode the read is forcefully disabled even with
+    // `allow-uri-read`.
     let handler = InlineFileHandler::from_pairs([(URI, "SECRET CONTENT")]);
     let doc = Parser::default()
         .with_safe_mode(SafeMode::Secure)
@@ -791,8 +793,8 @@ include::lists:example$complex.adoc[tag=b-complex]
         2
     );
 
-    // The unordered list marker can be changed with a list style (e.g. `square`),
-    // which the parser captures as the list's declared style.
+    // The unordered list marker can be changed with a list style (e.g.
+    // `square`), which the parser captures as the list's declared style.
     let doc = Parser::default().parse("[square]\n* one\n* two");
     let Some(Block::List(list)) = doc.child_blocks().next() else {
         panic!("expected a list");
@@ -831,7 +833,8 @@ include::lists:example$complex.adoc[tag=b-complex]
     };
     assert_eq!(list.type_(), ListType::Description);
 
-    // Question-and-answer lists are description lists carrying the `qanda` style.
+    // Question-and-answer lists are description lists carrying the `qanda`
+    // style.
     let doc = Parser::default().parse("[qanda]\nWhat is the answer?::\nThis is the answer.");
     let Some(Block::List(list)) = doc.child_blocks().next() else {
         panic!("expected a list");
@@ -943,7 +946,8 @@ You can also pass it as a command line argument using `-a data-uri`.
     };
     assert_eq!(m.type_(), MediaType::Image);
 
-    // ... whereas `image:` (one colon) is an inline image within a line of text.
+    // ... whereas `image:` (one colon) is an inline image within a line of
+    // text.
     let doc = Parser::default().parse("Click image:play.png[] to start.");
     assert!(rendered_paragraphs(&doc)[0].contains(r#"<span class="image">"#));
 }
@@ -1303,7 +1307,8 @@ include::verbatim:example$source.adoc[tag=src-para]
         .parse("[source,ruby]\n----\nputs 'hi' # <1>\n----\n<1> Prints a greeting.\n");
     assert_output_contains(&doc, r#"<b class="conum">(1)</b>"#);
 
-    // A `[source,ruby]` paragraph (no delimiters) is a Source-styled simple block.
+    // A `[source,ruby]` paragraph (no delimiters) is a Source-styled simple
+    // block.
     let doc = Parser::default().parse("[source,ruby]\nputs 'hi'");
     let Some(Block::Simple(sb)) = doc.child_blocks().next() else {
         panic!("expected a simple block");
@@ -2004,8 +2009,8 @@ Any named, numeric or hexadecimal {url-char-xml}[XML character reference^] is su
 "#
     );
 
-    // Named, numeric, and hexadecimal XML character references are all preserved
-    // in the output.
+    // Named, numeric, and hexadecimal XML character references are all
+    // preserved in the output.
     let doc = Parser::default().parse("Named &sect;, decimal &#167;, hex &#xA9; stay.");
     assert_eq!(
         rendered_paragraphs(&doc)[0],

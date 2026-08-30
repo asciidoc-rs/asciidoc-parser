@@ -167,8 +167,8 @@ fn extname_should_return_whether_path_contains_an_extname() {
         block.content().rendered().to_string()
     }
 
-    // `assert Asciidoctor::Helpers.extname?('document.adoc')`: has an extension,
-    // so the name is used verbatim (no `.png` appended).
+    // `assert Asciidoctor::Helpers.extname?('document.adoc')`: has an
+    // extension, so the name is used verbatim (no `.png` appended).
     assert_eq!(
         icon_src("document.adoc"),
         r#"<span class="icon"><img src="./images/icons/document.adoc" alt="document"></span>"#
@@ -188,9 +188,9 @@ fn extname_should_return_whether_path_contains_an_extname() {
         r#"<span class="icon"><img src="./images/icons/basename.png" alt="basename"></span>"#
     );
 
-    // `refute Asciidoctor::Helpers.extname?('include.d/basename')`: the only dot
-    // is in a non-final segment, so the final segment has no extension and
-    // `png` is appended.
+    // `refute Asciidoctor::Helpers.extname?('include.d/basename')`: the only
+    // dot is in a non-final segment, so the final segment has no extension
+    // and `png` is appended.
     assert_eq!(
         icon_src("include.d/basename"),
         r#"<span class="icon"><img src="./images/icons/include.d/basename.png" alt="basename"></span>"#

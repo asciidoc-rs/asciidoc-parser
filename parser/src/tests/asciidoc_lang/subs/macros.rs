@@ -95,7 +95,8 @@ mod default_macros_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -167,10 +168,11 @@ mod default_macros_substitution {
         );
 
         // Can one macro contain another? Yes. The macros substitution step is
-        // applied to the *positional text* of a macro, so a macro nested in that
-        // text is itself processed. The canonical example is an inline image in
-        // the text of a link: the link text `image:logo.png[Logo]` is
-        // substituted into an image span, which then becomes the link's content.
+        // applied to the *positional text* of a macro, so a macro nested in
+        // that text is itself processed. The canonical example is an
+        // inline image in the text of a link: the link text
+        // `image:logo.png[Logo]` is substituted into an image span,
+        // which then becomes the link's content.
         let doc = Parser::default().parse("https://example.org[image:logo.png[Logo]]");
 
         let block1 = doc.child_blocks().next().unwrap();
@@ -234,7 +236,8 @@ mod default_macros_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -307,7 +310,8 @@ mod default_macros_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -337,7 +341,8 @@ mod default_macros_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {

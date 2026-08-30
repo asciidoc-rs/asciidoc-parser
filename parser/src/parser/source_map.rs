@@ -189,8 +189,9 @@ impl SourceMap {
     /// same line number.
     fn resolve(&self, key: usize) -> (Option<u32>, usize, Fidelity) {
         // The exact match and the segment-before-`key` cases share one formula
-        // (`source_line + key - output_line`, which is `source_line` on an exact
-        // match). A `key` before the first segment has no governing segment.
+        // (`source_line + key - output_line`, which is `source_line` on an
+        // exact match). A `key` before the first segment has no
+        // governing segment.
         let segment = match self.segments.binary_search_by_key(&key, |s| s.output_line) {
             Ok(i) => self.segments.get(i),
             Err(0) => None,

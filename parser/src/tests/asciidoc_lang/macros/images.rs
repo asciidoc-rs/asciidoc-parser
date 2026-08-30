@@ -514,7 +514,8 @@ To turn off figure caption labels and numbers, unset the `figure-caption` attrib
 "#
         );
 
-        // By default a titled block image is captioned "Figure N." and numbered.
+        // By default a titled block image is captioned "Figure N." and
+        // numbered.
         let doc = Parser::default().parse(".A mountain sunset\nimage::sunset.jpg[Sunset]");
         let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.title(), Some("A mountain sunset"));

@@ -294,9 +294,9 @@ pub(crate) fn strip_footnote_marker_spans(s: &str) -> String {
         rest = &rest[start + FOOTNOTE_MARKER_START.len_utf8()..];
 
         // Drop through the matching end sentinel (the marker text). A start
-        // without an end cannot occur — the substitution always emits both — but
-        // if it somehow did, drop the remainder rather than reintroduce the
-        // stray sentinel.
+        // without an end cannot occur — the substitution always emits both —
+        // but if it somehow did, drop the remainder rather than
+        // reintroduce the stray sentinel.
         rest = match rest.find(FOOTNOTE_MARKER_END) {
             Some(end) => &rest[end + FOOTNOTE_MARKER_END.len_utf8()..],
             None => "",
@@ -449,7 +449,8 @@ impl<'src> Content<'src> {
         line_spans: Vec<Span<'src>>,
     ) -> Self {
         // One source span is required per filtered line; the default
-        // `debug_assert_eq!` message reports both counts if this is ever broken.
+        // `debug_assert_eq!` message reports both counts if this is ever
+        // broken.
         debug_assert_eq!(filtered_lines.len(), line_spans.len());
 
         // A single surviving line needs no join: it is already a contiguous
@@ -739,8 +740,9 @@ impl<'src> Content<'src> {
                     derived: xref.derived.as_ref(),
                 });
 
-                // A reference whose placeholder is no longer in the template was
-                // re-homed into a footnote (see `rehome_xref_placeholders`); the
+                // A reference whose placeholder is no longer in the template
+                // was re-homed into a footnote (see
+                // `rehome_xref_placeholders`); the
                 // footnote resolves and reports it, so it is not reported here.
                 // A target that names a document is never reported: it
                 // carries its own destination, so there was nothing here to
@@ -1038,9 +1040,9 @@ mod tests {
 
         #[test]
         fn borrows_source_when_filter_is_a_no_op() {
-            // A filtered view byte-identical to the source span is borrowed from
-            // the span rather than allocating an owned copy of text we already
-            // hold.
+            // A filtered view byte-identical to the source span is borrowed
+            // from the span rather than allocating an owned copy of
+            // text we already hold.
             let content = Content::from_filtered(Span::new("plain text"), "plain text");
 
             assert!(matches!(content.rendered, CowStr::Borrowed(_)));
@@ -1049,8 +1051,8 @@ mod tests {
 
         #[test]
         fn owns_rendered_text_when_filter_changes_it() {
-            // A filtered view that differs from the source is materialized as an
-            // owned copy.
+            // A filtered view that differs from the source is materialized as
+            // an owned copy.
             let content = Content::from_filtered(Span::new("a|b"), "ab");
 
             assert!(matches!(content.rendered, CowStr::Boxed(_)));
@@ -1175,8 +1177,8 @@ mod tests {
         #[test]
         fn passes_a_dangling_escape_introducer_through() {
             // Cannot arise from `escape_sentinels` (which always writes a tag),
-            // so this only pins down that a malformed sequence is content, not a
-            // dropped character.
+            // so this only pins down that a malformed sequence is content, not
+            // a dropped character.
             let dangling = format!("x{SENTINEL_ESCAPE}");
             assert_eq!(unescape_sentinels(&dangling), dangling);
 
@@ -1213,8 +1215,9 @@ mod tests {
 
         #[test]
         fn a_start_without_an_end_drops_the_remainder() {
-            // Defensive: the substitution always emits balanced sentinels, but a
-            // lone start must not leak the sentinel into the output.
+            // Defensive: the substitution always emits balanced sentinels, but
+            // a lone start must not leak the sentinel into the
+            // output.
             let input = format!("Title{FOOTNOTE_MARKER_START}dangling");
             assert_eq!(strip_footnote_marker_spans(&input), "Title");
         }
@@ -1378,7 +1381,8 @@ mod tests {
         #[test]
         fn malformed_placeholders_are_passed_through_literally() {
             // A non-numeric index and an unterminated placeholder are both left
-            // as-is (these cannot arise in practice, but the fallback is exercised).
+            // as-is (these cannot arise in practice, but the fallback is
+            // exercised).
             let bad_index = format!("a{XREF_PLACEHOLDER_START}xyz{XREF_PLACEHOLDER_END}b");
             let (template, local) = rehome_xref_placeholders(&bad_index, &[]);
             assert_eq!(template, bad_index);

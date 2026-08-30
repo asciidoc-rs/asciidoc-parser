@@ -571,8 +571,8 @@ impl ToVirtualDom for Document<'_> {
 
         // The document title renders as an `<h1>` when it is shown. This
         // virtual DOM models the *embedded* output, whose default is
-        // title-hidden: the title shows only when `showtitle` is set, or (absent
-        // `showtitle`) when `notitle` is present and cleared.
+        // title-hidden: the title shows only when `showtitle` is set, or
+        // (absent `showtitle`) when `notitle` is present and cleared.
         let show_doctitle = if self.has_attribute("showtitle") {
             self.is_attribute_set("showtitle")
         } else if self.has_attribute("notitle") {
@@ -590,9 +590,9 @@ impl ToVirtualDom for Document<'_> {
         // body; `preamble` defers it to the preamble; `macro` stashes it for a
         // `toc::[]` macro in the body to pick up. (The side/top/bottom-column
         // styling of the positional placements needs the standalone HTML body
-        // framing this embeddable virtual DOM does not model, so they render like
-        // `auto` here, which is also Asciidoctor's documented fallback for
-        // embeddable output.)
+        // framing this embeddable virtual DOM does not model, so they render
+        // like `auto` here, which is also Asciidoctor's documented
+        // fallback for embeddable output.)
         let toc_mode = self.toc_mode();
         let toc_data = toc_mode.is_enabled().then(|| {
             TocData::build(
@@ -646,8 +646,9 @@ impl ToVirtualDom for Document<'_> {
 /// NOTE: Some block types (like lists) handle their titles internally, so we
 /// skip adding a separate title element for those.
 fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
-    // A `toc::[]` macro renders the table of contents (when a `toc: macro` scope
-    // is active) rather than a paragraph, and never carries a separate title.
+    // A `toc::[]` macro renders the table of contents (when a `toc: macro`
+    // scope is active) rather than a paragraph, and never carries a
+    // separate title.
     if is_toc_macro(block) {
         if let Some(toc) = toc_macro_node(block) {
             parent.children.push(toc);
@@ -657,10 +658,10 @@ fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
 
     // Check if this block type handles its own title internally. Lists render
     // their title inside the list wrapper; tables render it as a <caption>;
-    // admonitions render it inside the content cell; a collapsible block renders
-    // it as the `<summary>` toggle text; a sidebar renders it as the first child
-    // of its `div.content` wrapper; an example block renders it as a numbered
-    // caption before its `div.content` wrapper.
+    // admonitions render it inside the content cell; a collapsible block
+    // renders it as the `<summary>` toggle text; a sidebar renders it as
+    // the first child of its `div.content` wrapper; an example block
+    // renders it as a numbered caption before its `div.content` wrapper.
     let handles_title_internally = is_collapsible(block)
         || is_sidebar(block)
         || is_example(block)
@@ -717,16 +718,16 @@ fn add_block_with_title<'a>(parent: &mut VirtualNode, block: &'a Block<'a>) {
 
 impl ToVirtualDom for Block<'_> {
     fn to_virtual_dom(&self) -> VirtualNode {
-        // A collapsible example block or paragraph renders as an HTML disclosure
-        // element (`<details>`/`<summary>`) rather than its usual example-block
-        // markup.
+        // A collapsible example block or paragraph renders as an HTML
+        // disclosure element (`<details>`/`<summary>`) rather than its
+        // usual example-block markup.
         if is_collapsible(self) {
             return collapsible_to_node(self);
         }
 
         // A sidebar block (the `****` structural container or the `[sidebar]`
-        // paragraph style) renders as `div.sidebarblock > div.content`, with its
-        // title and content nested inside the content wrapper.
+        // paragraph style) renders as `div.sidebarblock > div.content`, with
+        // its title and content nested inside the content wrapper.
         if is_sidebar(self) {
             return sidebar_to_node(self);
         }
@@ -764,7 +765,8 @@ impl ToVirtualDom for Block<'_> {
 
                 let mut node = simple_block_to_node(simple);
 
-                // For literal and verse blocks, add a <pre> element containing the content.
+                // For literal and verse blocks, add a <pre> element containing
+                // the content.
                 if simple.style() == SimpleBlockStyle::Literal
                     || simple.declared_style() == Some("literal")
                     || simple.declared_style() == Some("verse")
@@ -979,8 +981,10 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
                         dt_node = dt_node.with_html_content(term.rendered().to_string());
                         list_element.children.push(dt_node);
 
-                        // Create dd node for the definition, but only if the item has content.
-                        // Multiple consecutive terms can share a single definition.
+                        // Create dd node for the definition, but only if the
+                        // item has content.
+                        // Multiple consecutive terms can share a single
+                        // definition.
                         let nested = list_item.child_blocks().collect::<Vec<_>>();
 
                         if !nested.is_empty() {
@@ -989,7 +993,8 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
                             let has_multiple_blocks = nested.len() > 1;
 
                             // Check if the first block was attached via list
-                            // continuation (+). When content is from continuation,
+                            // continuation (+). When content is from
+                            // continuation,
                             // paragraphs should be wrapped in div.paragraph.
                             let first_block_from_continuation =
                                 nested.first().is_some_and(|first_block| {
@@ -1189,10 +1194,10 @@ fn list_item_to_node<'a>(item: &'a ListItem<'a>) -> VirtualNode {
     for (index, child) in nested.iter().enumerate() {
         let child_vdom = child.to_virtual_dom();
 
-        // Wrap paragraphs in div.paragraph when they appear after other blocks in the
-        // list item. This matches Asciidoctor's HTML output for list
-        // continuations. The first paragraph block is never wrapped, only
-        // subsequent ones.
+        // Wrap paragraphs in div.paragraph when they appear after other blocks
+        // in the list item. This matches Asciidoctor's HTML output for
+        // list continuations. The first paragraph block is never
+        // wrapped, only subsequent ones.
         if has_multiple_blocks
             && index > 0
             && child_vdom.tag == "p"
@@ -1228,9 +1233,9 @@ fn checklist_item_to_node<'a>(
 ) -> VirtualNode {
     let mut node = list_item_to_node(item);
 
-    // The principal paragraph is always the first child (continuation blocks, if
-    // any, follow it). Prefix it with the checkbox marker when this item has
-    // checkbox syntax.
+    // The principal paragraph is always the first child (continuation blocks,
+    // if any, follow it). Prefix it with the checkbox marker when this item
+    // has checkbox syntax.
     if let Some(checked) = item.checkbox()
         && let Some(principal) = node.children.first_mut()
     {
@@ -1584,7 +1589,8 @@ fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
     }
 
     if tag != "comment" {
-        // Check if this is a source block by looking for style="source" in attrlist.
+        // Check if this is a source block by looking for style="source" in
+        // attrlist.
         let is_source_block = raw
             .attrlist()
             .and_then(|attrlist| attrlist.attributes().next())
@@ -1595,8 +1601,8 @@ fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
             // For source blocks, create pre > code structure.
             let mut code = VirtualNode::new("code");
 
-            // Add data-lang attribute if language is specified (second positional
-            // attribute).
+            // Add data-lang attribute if language is specified (second
+            // positional attribute).
             if let Some(attrlist) = raw.attrlist() {
                 let mut attrs = attrlist.attributes();
 
@@ -1907,9 +1913,9 @@ fn sidebar_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
     }
 
     // The title, when present, is the first child of the content wrapper. It is
-    // inserted *after* the body content because `with_html_content` replaces the
-    // children vector when the rendered content contains inline markup; pushing
-    // the title first would let that replacement silently drop it.
+    // inserted *after* the body content because `with_html_content` replaces
+    // the children vector when the rendered content contains inline markup;
+    // pushing the title first would let that replacement silently drop it.
     if let Some(title) = block.title() {
         content.children.insert(
             0,
@@ -2110,9 +2116,11 @@ fn quote_to_node<'a>(quote: &'a QuoteBlock<'a>) -> VirtualNode {
 
             match quote.content_model() {
                 ContentModel::Compound => {
-                    // `blocks()` returns a slice (rather than the `child_blocks()`
-                    // iterator) so a Markdown-style blockquote's nested blocks,
-                    // which borrow the block's own owned source, are rendered too.
+                    // `blocks()` returns a slice (rather than the
+                    // `child_blocks()` iterator) so a
+                    // Markdown-style blockquote's nested blocks,
+                    // which borrow the block's own owned source, are rendered
+                    // too.
                     for child in quote.blocks() {
                         add_block_with_title(&mut blockquote, child);
                     }
@@ -2253,8 +2261,8 @@ fn table_to_node<'a>(table: &'a TableBlock<'a>) -> VirtualNode {
 
         if column.is_autowidth() {
             // An autowidth column is sized to its content: it carries the
-            // `autowidth-option` marker (present with an empty value) and no HTML
-            // `width` attribute.
+            // `autowidth-option` marker (present with an empty value) and no
+            // HTML `width` attribute.
             col = col.with_attribute("autowidth-option", "");
         } else {
             // A proportional column emits its percentage as the HTML `width`.
@@ -2417,9 +2425,10 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
                     content.children.push(toc_block("toc", false, data));
                 }
 
-                // Always (re)scope both stashes for the cell body so a `toc::[]`
-                // inside the cell never picks up the parent document's TOC; only
-                // a cell with its own `toc: macro`/`toc: preamble` provides one.
+                // Always (re)scope both stashes for the cell body so a
+                // `toc::[]` inside the cell never picks up the
+                // parent document's TOC; only a cell with its
+                // own `toc: macro`/`toc: preamble` provides one.
                 let _macro_scope = scoped_toc(
                     &MACRO_TOC,
                     match toc_mode {
@@ -2437,7 +2446,8 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
 
                 if cell.is_inline() {
                     // An `inline` doctype renders block content as bare inline
-                    // content, without the `<div class="paragraph"><p>` wrapper.
+                    // content, without the `<div class="paragraph"><p>`
+                    // wrapper.
                     for block in cell.blocks() {
                         match block.rendered_content() {
                             Some(rendered) => {
@@ -2958,9 +2968,10 @@ mod tests {
         #[test]
         fn left_and_right_render_like_auto_at_top() {
             // `left`/`right` request a side column in standalone HTML, but this
-            // embeddable virtual DOM (Asciidoctor's documented fallback) renders
-            // them like `auto`: a `div#toc` at the top of the body. The container
-            // still carries the side-column `toc2` class (see #749).
+            // embeddable virtual DOM (Asciidoctor's documented fallback)
+            // renders them like `auto`: a `div#toc` at the top of
+            // the body. The container still carries the side-column
+            // `toc2` class (see #749).
             for (value, mode) in [("left", TocMode::Left), ("right", TocMode::Right)] {
                 let doc =
                     Parser::default().parse(&format!("= Title\n:toc: {value}\n\n== Section\n\nhi"));
@@ -3005,8 +3016,8 @@ mod tests {
 
         #[test]
         fn preamble_toc_absent_without_preamble() {
-            // The CAUTION on the position page: a `toc: preamble` placement does
-            // not appear when the document has no preamble.
+            // The CAUTION on the position page: a `toc: preamble` placement
+            // does not appear when the document has no preamble.
             let doc = Parser::default().parse("= Title\n:toc: preamble\n\n== Section\n\nhi");
 
             assert_eq!(doc.toc_mode(), TocMode::Preamble);
@@ -3018,8 +3029,8 @@ mod tests {
             let doc = Parser::default()
                 .parse("= Title\n:toc:\n\n== Level 1\n\n=== Level 2\n\n==== Level 3\n\ncontent");
 
-            // The default `toclevels` is 2, so the `==` and `===` sections appear
-            // but the `====` (level 3) section is excluded.
+            // The default `toclevels` is 2, so the `==` and `===` sections
+            // appear but the `====` (level 3) section is excluded.
             assert_eq!(doc.toc_levels(), 2);
             assert_css(&doc, "ul.sectlevel1", 1);
             assert_css(&doc, "ul.sectlevel2", 1);
@@ -3097,8 +3108,8 @@ mod tests {
 
         #[test]
         fn toc_defaults_when_attributes_unset() {
-            // With `toc` enabled but the others unset, the resolved depth, title,
-            // and class are the documented defaults.
+            // With `toc` enabled but the others unset, the resolved depth,
+            // title, and class are the documented defaults.
             let doc = Parser::default().parse("= Title\n:toc:\n\n== Section\n\nhi");
 
             assert_eq!(doc.toc_levels(), 2);
@@ -3135,8 +3146,8 @@ mod tests {
 
         #[test]
         fn macro_placement_without_macro_renders_no_toc() {
-            // `toc: macro` only renders where a `toc::[]` macro appears; with no
-            // such macro, no TOC is generated.
+            // `toc: macro` only renders where a `toc::[]` macro appears; with
+            // no such macro, no TOC is generated.
             let doc = Parser::default().parse("= Title\n:toc: macro\n\n== Section\n\nhi");
 
             assert_eq!(doc.toc_mode(), TocMode::Macro);
@@ -3145,8 +3156,8 @@ mod tests {
 
         #[test]
         fn toc_macro_renders_nothing_when_toc_not_enabled() {
-            // A stray `toc::[]` with no `toc` attribute renders nothing — neither
-            // a TOC nor the literal paragraph text.
+            // A stray `toc::[]` with no `toc` attribute renders nothing —
+            // neither a TOC nor the literal paragraph text.
             let doc = Parser::default().parse("= Title\n\ntoc::[]\n\n== Section\n\nhi");
 
             assert_eq!(doc.toc_mode(), TocMode::Disabled);

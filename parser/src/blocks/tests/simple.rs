@@ -1502,8 +1502,8 @@ mod comment_directly_above_metadata {
 
     #[test]
     fn bare_table_delimiter_after_comment() {
-        // A comment directly above a bare table delimiter opens the table rather
-        // than swallowing the whole table as paragraph text.
+        // A comment directly above a bare table delimiter opens the table
+        // rather than swallowing the whole table as paragraph text.
         let doc = Parser::default().parse("= T\n\n// note\n|===\n|a |b\n|===\n");
         let blocks = top_blocks(&doc);
 

@@ -281,8 +281,8 @@ impl SubstitutionGroup {
 
         // Capture any deferred cross-references as a placeholder template and
         // render the unresolved fallback, so `rendered()` is clean even before
-        // references are resolved. This is a no-op when no cross-references were
-        // found.
+        // references are resolved. This is a no-op when no cross-references
+        // were found.
         content.finalize_deferred(&*parser.renderer);
     }
 
@@ -304,10 +304,11 @@ impl SubstitutionGroup {
             // A declared block style reinterprets a simple-content (paragraph)
             // block as another context, which can change the substitution group
             // that applies. This masquerade only affects blocks whose default
-            // group is `Normal`: a delimited block's delimiter already fixes its
-            // group (verbatim, pass, stem, etc.), and Asciidoctor does not let a
-            // style keyword override it. So the mapping below is scoped to
-            // `Normal` blocks, matching Asciidoctor's parser.
+            // group is `Normal`: a delimited block's delimiter already fixes
+            // its group (verbatim, pass, stem, etc.), and
+            // Asciidoctor does not let a style keyword override it.
+            // So the mapping below is scoped to `Normal` blocks,
+            // matching Asciidoctor's parser.
             if result == SubstitutionGroup::Normal
                 && let Some(block_style) = attrlist.nth_attribute(1).and_then(|a| a.block_style())
             {
@@ -383,9 +384,10 @@ mod tests {
 
         #[test]
         fn applies_special_characters_only() {
-            // The `Stem` group applies only the special characters substitution:
-            // `<` is escaped, but quotes (`*bold*`) and attribute references
-            // (`{color}`) are left untouched.
+            // The `Stem` group applies only the special characters
+            // substitution: `<` is escaped, but quotes (`*bold*`)
+            // and attribute references (`{color}`) are left
+            // untouched.
             let mut content = Content::from(crate::Span::new("*a* < {color}"));
             let p = Parser::default();
             SubstitutionGroup::Stem.apply(&mut content, &p, None);
@@ -1035,9 +1037,9 @@ mod tests {
 
         #[test]
         fn non_masquerade_styles_keep_normal() {
-            // Styles whose content model is simple (or compound) keep the normal
-            // substitution group; e.g. `verse` uses normal subs even though its
-            // content model is verbatim.
+            // Styles whose content model is simple (or compound) keep the
+            // normal substitution group; e.g. `verse` uses normal
+            // subs even though its content model is verbatim.
             for style in ["normal", "verse", "quote", "sidebar", "example"] {
                 assert_eq!(
                     resolve(SubstitutionGroup::Normal, style),
@@ -1049,10 +1051,11 @@ mod tests {
 
         #[test]
         fn style_does_not_override_a_delimited_block_group() {
-            // A delimited block's delimiter fixes its substitution group; a style
-            // keyword must not override it (matching Asciidoctor). A `[pass]`
-            // style on a `----`/`....` verbatim block keeps verbatim subs, and a
-            // `[source]` style on a `++++` pass block keeps the pass group.
+            // A delimited block's delimiter fixes its substitution group; a
+            // style keyword must not override it (matching
+            // Asciidoctor). A `[pass]` style on a `----`/`....`
+            // verbatim block keeps verbatim subs, and a `[source]`
+            // style on a `++++` pass block keeps the pass group.
             assert_eq!(
                 resolve(SubstitutionGroup::Verbatim, "pass"),
                 SubstitutionGroup::Verbatim
@@ -1071,8 +1074,9 @@ mod tests {
 
         #[test]
         fn subs_attribute_still_overrides() {
-            // An explicit `subs=` attribute overrides the group regardless of the
-            // block style, and takes precedence over the style masquerade.
+            // An explicit `subs=` attribute overrides the group regardless of
+            // the block style, and takes precedence over the style
+            // masquerade.
             assert_eq!(
                 resolve(SubstitutionGroup::Normal, "listing,subs=normal"),
                 SubstitutionGroup::Normal

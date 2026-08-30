@@ -281,10 +281,10 @@ fn collect_isolated_single_quote_positional_attribute() {
 "#
     );
 
-    // A lone single quote has no terminator, so it is a literal positional value
-    // (`'`), not a quoted string. `asciidoc-parser` additionally emits a lenient
-    // "missing terminating quote" warning, which these value-focused tests
-    // disregard.
+    // A lone single quote has no terminator, so it is a literal positional
+    // value (`'`), not a quoted string. `asciidoc-parser` additionally
+    // emits a lenient "missing terminating quote" warning, which these
+    // value-focused tests disregard.
     let a = parse_attrlist("'");
     assert_eq!(a.nth(1), Some("'"));
     assert!(a.named.is_empty());
@@ -353,10 +353,10 @@ fn collect_unnamed_attribute_single_quoted_containing_escaped_quote() {
     );
 
     // A genuinely single-quoted value has the normal substitution group applied
-    // in a block context — exactly Asciidoctor's behavior when a block is present
-    // (`single_quoted && @block`). So the unescaped `ba'zaar` becomes
-    // `ba&#8217;zaar` (typographic apostrophe), where the Ruby unit test, which
-    // stubs `apply_subs`, sees the literal `ba'zaar`.
+    // in a block context — exactly Asciidoctor's behavior when a block is
+    // present (`single_quoted && @block`). So the unescaped `ba'zaar`
+    // becomes `ba&#8217;zaar` (typographic apostrophe), where the Ruby unit
+    // test, which stubs `apply_subs`, sees the literal `ba'zaar`.
     let a = parse_attrlist("'ba\\'zaar'");
     assert_eq!(a.nth(1), Some("ba&#8217;zaar"));
     assert!(a.named.is_empty());

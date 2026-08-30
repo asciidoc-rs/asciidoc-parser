@@ -178,22 +178,23 @@ The two combinators cannot be combined in the same expression.
 "#
     );
 
-    // The spec forbids mixing the `,` (or) and `+` (and) combinators in a single
-    // expression, but the parser (like Asciidoctor) neither rejects nor warns
-    // about a mixed expression. Instead, whichever combinator appears *first*
-    // governs the whole expression, and the target is split on that delimiter
-    // alone — so the other delimiter becomes part of a single literal attribute
-    // name. Since no attribute is ever named (for example) `b+c`, such a segment
-    // can never match.
+    // The spec forbids mixing the `,` (or) and `+` (and) combinators in a
+    // single expression, but the parser (like Asciidoctor) neither rejects
+    // nor warns about a mixed expression. Instead, whichever combinator
+    // appears *first* governs the whole expression, and the target is split
+    // on that delimiter alone — so the other delimiter becomes part of a
+    // single literal attribute name. Since no attribute is ever named (for
+    // example) `b+c`, such a segment can never match.
 
     // `,` appears first, so this is an "`or`": the `a` segment is set, so the
     // content is included (the `b+c` segment is never consulted).
     let doc = Parser::default().parse(":a:\n:b:\n:c:\n\nifdef::a,b+c[Shown.]");
     assert_eq!(rendered_paragraphs(&doc), vec!["Shown."]);
 
-    // Still an "`or`" (`,` first): with `a` unset, the `b+c` segment is a single
-    // never-set attribute name — the `+` is not honored as an "`and`" — so the
-    // content is excluded even though both `b` and `c` are set.
+    // Still an "`or`" (`,` first): with `a` unset, the `b+c` segment is a
+    // single never-set attribute name — the `+` is not honored as an
+    // "`and`" — so the content is excluded even though both `b` and `c` are
+    // set.
     let doc = Parser::default().parse(":b:\n:c:\n\nifdef::a,b+c[Shown.]\n\nTail.");
     assert_eq!(rendered_paragraphs(&doc), vec!["Tail."]);
 
@@ -234,8 +235,8 @@ Otherwise, the content is not included.
 "#
     );
 
-    // OR (comma): the default backend is `html5`, so the derived `backend-html5`
-    // flag is set and the content is included.
+    // OR (comma): the default backend is `html5`, so the derived
+    // `backend-html5` flag is set and the content is included.
     let doc = Parser::default().parse("ifdef::backend-html5,backend-docbook5[Shown.]");
     assert_eq!(rendered_paragraphs(&doc), vec!["Shown."]);
 
@@ -292,22 +293,26 @@ Otherwise, the content is included.
 "#
     );
 
-    // "Unless any" (comma): neither attribute is set, so the content is included.
+    // "Unless any" (comma): neither attribute is set, so the content is
+    // included.
     let doc = Parser::default().parse("ifndef::profile-production,env-site[Shown.]");
     assert_eq!(rendered_paragraphs(&doc), vec!["Shown."]);
 
-    // "Unless any" (comma): one attribute is set, so the content is not included.
+    // "Unless any" (comma): one attribute is set, so the content is not
+    // included.
     let doc = Parser::default()
         .parse(":env-site:\n\nifndef::profile-production,env-site[Shown.]\n\nTail.");
     assert_eq!(rendered_paragraphs(&doc), vec!["Tail."]);
 
-    // "Unless all" (plus): all attributes are set, so the content is not included.
+    // "Unless all" (plus): all attributes are set, so the content is not
+    // included.
     let doc = Parser::default().parse(
         ":profile-staging:\n:env-site:\n\nifndef::profile-staging+env-site[Shown.]\n\nTail.",
     );
     assert_eq!(rendered_paragraphs(&doc), vec!["Tail."]);
 
-    // "Unless all" (plus): only one attribute is set, so the content is included.
+    // "Unless all" (plus): only one attribute is set, so the content is
+    // included.
     let doc = Parser::default().parse(":env-site:\n\nifndef::profile-staging+env-site[Shown.]");
     assert_eq!(rendered_paragraphs(&doc), vec!["Shown."]);
 }
