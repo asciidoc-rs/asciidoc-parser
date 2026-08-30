@@ -195,8 +195,8 @@ Additionally, no AsciiDoc syntax within the delimited lines is interpreted, not 
     );
 
     // The content of a comment block is raw: neither inline markup nor an
-    // attribute reference is interpreted, and an inner `//` line (a preprocessor
-    // line comment) is retained verbatim rather than stripped.
+    // attribute reference is interpreted, and an inner `//` line (a
+    // preprocessor line comment) is retained verbatim rather than stripped.
     let doc = Parser::default().parse("////\n*bold* {attr}\n// inner\n////");
     let block = doc.child_blocks().next().expect("expected a block");
     assert_eq!(
@@ -232,10 +232,10 @@ A comment block can also be written as an open block with the comment style:
 "#
     );
 
-    // An open block (`--`) carrying the `comment` style is the alternate form of
-    // a comment block: same `comment` context, raw (uninterpreted) content —
-    // inner `//` lines retained, and a `subs` override ignored — matching the
-    // `////` form exactly.
+    // An open block (`--`) carrying the `comment` style is the alternate form
+    // of a comment block: same `comment` context, raw (uninterpreted)
+    // content — inner `//` lines retained, and a `subs` override ignored —
+    // matching the `////` form exactly.
     let doc = Parser::default().parse("[comment]\n--\n*bold* {attr}\n// inner\n--");
     let block = doc.child_blocks().next().expect("expected a block");
     assert_eq!(block.resolved_context().as_ref(), "comment");

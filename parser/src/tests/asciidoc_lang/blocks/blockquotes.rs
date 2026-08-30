@@ -56,8 +56,8 @@ These positional attributes are all optional.
         1,
     );
 
-    // The attribution and citation are both optional: a bare `quote` style still
-    // produces a quote block, with no attribution.
+    // The attribution and citation are both optional: a bare `quote` style
+    // still produces a quote block, with no attribution.
     let doc = Parser::default().parse("[quote]\n____\nA quote with no attribution.\n____");
 
     assert_css(&doc, ".quoteblock", 1);
@@ -180,8 +180,8 @@ If the quote or excerpt is more than one paragraph, place the text between delim
 "#
     );
 
-    // A quote delimited block contains multiple paragraphs, each rendered inside
-    // the blockquote.
+    // A quote delimited block contains multiple paragraphs, each rendered
+    // inside the blockquote.
     let doc = Parser::default()
         .parse("[quote,Monty Python]\n____\nDennis: Help! I'm being repressed!\n\nKing Arthur: Bloody peasant!\n____");
 
@@ -314,8 +314,8 @@ The exceptation is that this role makes the quote block appear with the quote de
 "#
     );
 
-    // The `excerpt` role is carried through to the rendered block as a CSS class
-    // on the quote block.
+    // The `excerpt` role is carried through to the rendered block as a CSS
+    // class on the quote block.
     let doc = Parser::default().parse("[.excerpt]\n____\nThis text is an excerpt.\n____");
 
     assert_css(&doc, ".quoteblock.excerpt", 1);
@@ -452,8 +452,8 @@ If you need to put a description list inside a blockquote, you should use the As
 "#
     );
 
-    // A `>`-prefixed line that is also a valid description-list term is parsed as
-    // a description list, not a Markdown-style blockquote.
+    // A `>`-prefixed line that is also a valid description-list term is parsed
+    // as a description list, not a Markdown-style blockquote.
     let doc = Parser::default().parse("> term:: definition");
 
     assert_css(&doc, ".dlist", 1);

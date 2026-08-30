@@ -277,7 +277,8 @@ fn a_group_that_does_not_extract_reports_nothing() {
     // extraction pass, so there was nothing to retain; now the answer comes
     // from the tree not *holding* a passthrough node under such a group. Same
     // result, different reason — which is exactly the kind of substitution this
-    // branch has twice shipped a hole in, so it is asserted rather than assumed.
+    // branch has twice shipped a hole in, so it is asserted rather than
+    // assumed.
     let parser = Parser::default();
 
     for group in [
@@ -326,9 +327,9 @@ fn the_view_returns_document_order() {
     // lists them in an order that has nothing to do with where the author wrote
     // them. The view walks the tree, which gives document order.
     //
-    // This is a deliberate, documented difference rather than an accident, so it
-    // is asserted from both ends: the view's order is exactly the source's, and
-    // it is *not* the extraction pass's.
+    // This is a deliberate, documented difference rather than an accident, so
+    // it is asserted from both ends: the view's order is exactly the
+    // source's, and it is *not* the extraction pass's.
     let parser = Parser::default();
 
     for (source, expected) in [
@@ -394,9 +395,9 @@ fn a_stem_expression_embedding_a_passthrough_reports_both_entries() {
     // still disagree on a *body* while agreeing on the count.
     //
     // The pass records **two** entries: the inner passthrough, and the STEM
-    // itself — whose own text keeps the `\u{96}0\u{97}` sentinel where that body
-    // was lifted out. The view reports two as well, reaching the inner one
-    // through `Stem::children`; but the STEM entry it reports holds the
+    // itself — whose own text keeps the `\u{96}0\u{97}` sentinel where that
+    // body was lifted out. The view reports two as well, reaching the inner
+    // one through `Stem::children`; but the STEM entry it reports holds the
     // **restored** body, because `stem_expression_value` splices each inner
     // body back in while computing the expression.
     //

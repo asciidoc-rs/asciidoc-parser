@@ -427,11 +427,11 @@ If the syntax that follows the backslash does not match an attribute reference, 
         );
 
         // The braces here enclose spaces, which is not a valid attribute name,
-        // so this does not look like an attribute reference at all. The escaping
-        // backslash is therefore left in place, unlike an escaped *valid*
-        // reference such as `\{id}` (see `prefix_with_backslash`), whose
-        // backslash is always removed regardless of whether the attribute is
-        // set.
+        // so this does not look like an attribute reference at all. The
+        // escaping backslash is therefore left in place, unlike an
+        // escaped *valid* reference such as `\{id}` (see
+        // `prefix_with_backslash`), whose backslash is always removed
+        // regardless of whether the attribute is set.
         let mut parser = Parser::default();
 
         let doc = parser.parse("In the path /items/\\{not a name}, this is preserved.");

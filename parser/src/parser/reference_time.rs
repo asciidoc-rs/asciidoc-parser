@@ -380,9 +380,9 @@ impl DatetimeContext {
 /// [reproducible builds specification]: https://reproducible-builds.org/specs/source-date-epoch/
 fn source_date_epoch_from_env() -> Option<ReferenceTime> {
     // An unset variable reads as empty, which `parse_source_date_epoch` rejects
-    // just like a set-but-empty value — so the (common) unset path exercises the
-    // same line as a set one, without the tests having to mutate the process
-    // environment.
+    // just like a set-but-empty value — so the (common) unset path exercises
+    // the same line as a set one, without the tests having to mutate the
+    // process environment.
     parse_source_date_epoch(&std::env::var("SOURCE_DATE_EPOCH").unwrap_or_default())
 }
 

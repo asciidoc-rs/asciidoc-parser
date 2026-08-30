@@ -296,9 +296,10 @@ fn rebuild_replacements<'src>(
             }
 
             ReplacementKind::Replace { consumed, value } => {
-                // The gap runs up to `consumed`, absorbing any kept leading word
-                // character; the cursor stops at `consumed.end`, so a kept
-                // trailing letter (the second letter of a `w'w` apostrophe) is
+                // The gap runs up to `consumed`, absorbing any kept leading
+                // word character; the cursor stops at
+                // `consumed.end`, so a kept trailing letter
+                // (the second letter of a `w'w` apostrophe) is
                 // absorbed by the next gap.
                 emit_range(nodes, pieces, cursor..consumed.start, &mut out);
 
@@ -595,7 +596,8 @@ mod tests {
     #[test]
     fn an_arrow_replacement_spans_a_text_and_charref_boundary() {
         // `->` is `-` (text) followed by `&gt;` (a `CharRef::Special` from the
-        // special-characters step), so the arrow rule must match across the two.
+        // special-characters step), so the arrow rule must match across the
+        // two.
         let nodes = build_src(Span::new("a -> b"));
 
         // "a " kept, the arrow leaf over "->", then " b".

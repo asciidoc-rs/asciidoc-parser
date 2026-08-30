@@ -30,8 +30,8 @@ pub(crate) fn query_css<'a>(root: &'a VirtualNode, selector: &str) -> Vec<&'a Vi
 
     // A descendant selector can reach the same node through more than one
     // matching ancestor (e.g. `.tableblock h1` where both the `<table>` and the
-    // `<td>` carry the `tableblock` class). De-duplicate so each node is counted
-    // once, matching a real CSS engine.
+    // `<td>` carry the `tableblock` class). De-duplicate so each node is
+    // counted once, matching a real CSS engine.
     let mut seen: Vec<*const VirtualNode> = Vec::new();
     query_descendant_or_self(root, selector)
         .into_iter()
@@ -63,8 +63,8 @@ fn find_descendant_combinator_space(pattern: &str) -> Option<usize> {
             continue;
         }
 
-        // Whitespace immediately before a `>`/`+` combinator is not a descendant
-        // combinator (e.g. the space in `div >`).
+        // Whitespace immediately before a `>`/`+` combinator is not a
+        // descendant combinator (e.g. the space in `div >`).
         let rest = pattern[i..].trim_start();
         if rest.starts_with('>') || rest.starts_with('+') {
             continue;
@@ -89,8 +89,9 @@ fn find_descendant_combinator_space(pattern: &str) -> Option<usize> {
 fn query_descendant_or_self<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a VirtualNode> {
     // Check which combinator appears first to process them in correct order.
     // Space (descendant) has lower precedence and should be processed first.
-    // However, we need to distinguish between a space as a descendant combinator
-    // and a space that's just whitespace around `>` or `+` combinators.
+    // However, we need to distinguish between a space as a descendant
+    // combinator and a space that's just whitespace around `>` or `+`
+    // combinators.
     let space_pos = find_descendant_combinator_space(pattern);
     let gt_pos = pattern.find('>');
 
@@ -107,9 +108,10 @@ fn query_descendant_or_self<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a
         let mut results = Vec::new();
         collect_descendants_matching(node, first, &mut results);
 
-        // For each matching node, search its descendants (not including itself) for
-        // the rest of the pattern. The descendant combinator (space) means "any
-        // descendant", which by definition excludes the element itself.
+        // For each matching node, search its descendants (not including itself)
+        // for the rest of the pattern. The descendant combinator
+        // (space) means "any descendant", which by definition excludes
+        // the element itself.
         let mut final_results = Vec::new();
         for matched_node in results {
             // Search only children (descendants), not the matched node itself.
@@ -129,12 +131,13 @@ fn query_descendant_or_self<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a
         // Find all nodes matching first part.
         // NOTE: We still search all descendants for the first part, because the
         // initial query can match elements anywhere in the tree. The `>` only
-        // constrains the relationship between matched elements and what follows.
+        // constrains the relationship between matched elements and what
+        // follows.
         let mut results = Vec::new();
         collect_descendants_matching(node, first, &mut results);
 
-        // For each matching node, use the direct-child-only query helper to process
-        // rest.
+        // For each matching node, use the direct-child-only query helper to
+        // process rest.
         let mut final_results = Vec::new();
         for matched_node in results {
             let children_matches = query_with_direct_child_constraint(matched_node, rest);
@@ -152,7 +155,8 @@ fn query_descendant_or_self<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a
         let mut results = Vec::new();
         collect_descendants_matching_with_siblings(node, first, &mut results);
 
-        // For each matching node, find its next sibling and check if it matches rest.
+        // For each matching node, find its next sibling and check if it matches
+        // rest.
         let mut final_results = Vec::new();
         for (_matched_node, parent, child_index) in results {
             if let Some(next_sibling) = parent.children.get(child_index + 1) {
@@ -245,8 +249,9 @@ fn query_with_direct_child_constraint<'a>(
         let mut results = Vec::new();
         for child in &node.children {
             if matches_selector_with_context(child, first, Some(node)) {
-                // The descendant combinator excludes the matched child itself, so
-                // search its subtrees rather than the child node.
+                // The descendant combinator excludes the matched child itself,
+                // so search its subtrees rather than the child
+                // node.
                 for grandchild in &child.children {
                     results.extend(query_descendant_or_self(grandchild, rest));
                 }
@@ -293,10 +298,11 @@ fn query_with_direct_child_constraint<'a>(
                     && let Some(next_sibling) = node.children.get(idx + 1)
                 {
                     // Check if next sibling matches rest.
-                    // If rest has combinators, we need to continue processing from
-                    // next_sibling.
+                    // If rest has combinators, we need to continue processing
+                    // from next_sibling.
                     if rest.contains('>') || rest.contains('+') {
-                        // Parse the first part of rest to check against next_sibling.
+                        // Parse the first part of rest to check against
+                        // next_sibling.
                         let (next_part, remaining) = if let Some(pos) = rest.find('>') {
                             (rest[..pos].trim(), Some(rest[pos + 1..].trim()))
                         } else if let Some(pos) = rest.find('+') {
@@ -308,13 +314,15 @@ fn query_with_direct_child_constraint<'a>(
                         // Check if next_sibling matches next_part.
                         if matches_selector_with_context(next_sibling, next_part, Some(node)) {
                             if let Some(remaining) = remaining {
-                                // Continue processing from next_sibling with remaining
+                                // Continue processing from next_sibling with
+                                // remaining
                                 // selector.
                                 let further =
                                     query_with_direct_child_constraint(next_sibling, remaining);
                                 results.extend(further);
                             } else {
-                                // No more selector parts, next_sibling is a match.
+                                // No more selector parts, next_sibling is a
+                                // match.
                                 results.push(next_sibling);
                             }
                         }
@@ -509,7 +517,8 @@ fn matches_single_pseudo(node: &VirtualNode, pseudo: &str, parent: Option<&Virtu
 
     match pseudo {
         "first-of-type" => {
-            // Check if this is the first child with the same tag among its siblings.
+            // Check if this is the first child with the same tag among its
+            // siblings.
             if let Some(parent) = parent {
                 // Find the first child with the same tag.
                 for child in &parent.children {
@@ -843,7 +852,8 @@ mod tests {
     #[test]
     fn query_nth_child_and_pseudo_chain() {
         // A two-row, three-column table whose middle row has an empty trailing
-        // cell. Exercises `:nth-child(N)` and a pseudo chain (`:nth-child(3):empty`).
+        // cell. Exercises `:nth-child(N)` and a pseudo chain
+        // (`:nth-child(3):empty`).
         let doc = Parser::default().parse("[format=csv]\n|===\na,b,c\n1,2,\n|===");
         let vdom = doc.to_virtual_dom();
 
@@ -869,8 +879,8 @@ mod tests {
     fn query_child_chain_then_descendant() {
         // A chain of `>` child combinators followed by a trailing descendant
         // combinator (`a > b > c d`). The descendant step is reached only after
-        // the preceding `>` steps are stripped, so it must be handled inside the
-        // direct-child traversal, not just at the top level.
+        // the preceding `>` steps are stripped, so it must be handled inside
+        // the direct-child traversal, not just at the top level.
         let doc = Parser::default().parse("[cols=\"1a\"]\n|===\n|AsciiDoc content\n|===");
         let vdom = doc.to_virtual_dom();
 
@@ -903,7 +913,8 @@ mod tests {
         let doc = Parser::default().parse("* Foo\n[start=2]\n. Boo\n* Blech\n");
         let vdom = doc.to_virtual_dom();
 
-        // Find all ol elements with start attribute using CSS-style attribute selector.
+        // Find all ol elements with start attribute using CSS-style attribute
+        // selector.
         let result = query_css(&vdom, "ol[@start=\"2\"]");
         assert_eq!(result.len(), 1, "Should find one ol with start=2");
 
@@ -990,7 +1001,8 @@ mod tests {
         let ulist_divs = query_css(&vdom, "div.ulist");
         assert_eq!(ulist_divs.len(), 1, "Should find 1 .ulist div");
 
-        // Find divs that have the .ulist class - :not(.ulist) should exclude them.
+        // Find divs that have the .ulist class - :not(.ulist) should exclude
+        // them.
         let ulist_with_not = query_css(&vdom, ".ulist:not(.olist)");
         assert_eq!(
             ulist_with_not.len(),

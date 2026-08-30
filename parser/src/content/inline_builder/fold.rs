@@ -865,8 +865,8 @@ mod tests {
 
     #[test]
     fn fold_emits_raw_verbatim() {
-        // A `Raw` leaf is emitted without HTML-escaping, unlike `Text`; its `<`,
-        // `>`, and `&` pass straight through.
+        // A `Raw` leaf is emitted without HTML-escaping, unlike `Text`; its
+        // `<`, `>`, and `&` pass straight through.
         let location = Span::new("<b>raw &amp;</b>");
 
         let raw = InlineNode::Raw {

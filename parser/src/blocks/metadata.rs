@@ -57,9 +57,9 @@ impl<'src> BlockMetadata<'src> {
         let mut warnings: Vec<Warning<'src>> = vec![];
         let source = source.discard_empty_lines();
 
-        // Block metadata items (title, anchor, and attribute list) can appear in any
-        // order. We loop through lines until we can't parse any more metadata
-        // items.
+        // Block metadata items (title, anchor, and attribute list) can appear
+        // in any order. We loop through lines until we can't parse any
+        // more metadata items.
         let mut title_source: Option<Span<'src>> = None;
         let mut anchor: Option<Span<'src>> = None;
         let mut reftext: Option<Span<'src>> = None;
@@ -88,10 +88,12 @@ impl<'src> BlockMetadata<'src> {
             // permitted and the last one wins (`[[bar]]` / `[[foo]]` → `foo`),
             // matching Asciidoctor, which simply overwrites the running `id`
             // (and its reftext) for each anchor line. There is deliberately no
-            // `anchor.is_none()` guard: a later anchor overrides an earlier one.
+            // `anchor.is_none()` guard: a later anchor overrides an earlier
+            // one.
             let mut anchor_maw = parse_maybe_block_anchor(block_start);
 
-            // Collect any warnings from the anchor parsing (e.g., empty anchor).
+            // Collect any warnings from the anchor parsing (e.g., empty
+            // anchor).
             if !anchor_maw.warnings.is_empty() {
                 warnings.append(&mut anchor_maw.warnings);
             }
@@ -128,9 +130,11 @@ impl<'src> BlockMetadata<'src> {
                         if anchor_content.is_xml_name() {
                             anchor = Some(anchor_content);
 
-                            // A later plain anchor (`[[foo]]`) clears any reftext
-                            // carried by an earlier `[[bar,text]]`, keeping the
-                            // last-wins semantics consistent across both fields.
+                            // A later plain anchor (`[[foo]]`) clears any
+                            // reftext carried by an
+                            // earlier `[[bar,text]]`, keeping the
+                            // last-wins semantics consistent across both
+                            // fields.
                             reftext = None;
                             block_start = mi.after;
                         } else {
@@ -188,11 +192,12 @@ impl<'src> BlockMetadata<'src> {
             // comment blocks as ordinary blocks, so the transparency is scoped
             // to the section-transfer case the wider divergence would otherwise
             // break. A comment that a metadata line directly decorates (with no
-            // following section) is therefore left in place for normal dispatch.
+            // following section) is therefore left in place for normal
+            // dispatch.
             //
             // This only applies once at least one metadata item has been
-            // collected, so a standalone comment (with no preceding metadata) is
-            // untouched.
+            // collected, so a standalone comment (with no preceding metadata)
+            // is untouched.
             if !(title_source.is_none() && anchor.is_none() && attrlist.is_none())
                 && let Some(after_comments) =
                     skip_comments_before_section(block_start, parser.level_offset())
@@ -219,17 +224,20 @@ impl<'src> BlockMetadata<'src> {
                     // A single-quoted `title=` value already had the normal
                     // substitution group applied when the attribute list was
                     // parsed; substituting it again here would double-escape
-                    // special characters (and re-process inline markup), so it is
-                    // used verbatim. Any other form receives the title (normal)
+                    // special characters (and re-process inline markup), so it
+                    // is used verbatim. Any other form
+                    // receives the title (normal)
                     // substitutions now, matching a `.Title` line. (Attribute
                     // references in the value were resolved when the attribute
                     // list was parsed, so they are not re-evaluated here.)
                     //
-                    // A `title=` value's rendered text is anchored at the block's
-                    // source (rather than at the attribute value, which is
+                    // A `title=` value's rendered text is anchored at the
+                    // block's source (rather than at the
+                    // attribute value, which is
                     // borrowed from `attrlist` and would outlive this borrow):
-                    // any cross-reference in it is rendered to its fallback here
-                    // and not re-resolved later, matching the pre-existing
+                    // any cross-reference in it is rendered to its fallback
+                    // here and not re-resolved later,
+                    // matching the pre-existing
                     // treatment of a substituted value.
                     let rendered = if value_is_substituted {
                         value.to_string()
@@ -586,10 +594,11 @@ mod tests {
     #[test]
     fn title_does_not_extend_via_plus_syntax() {
         // A trailing ` +` on a block title does not join the following line
-        // (`def`) into the title: the title is a single line and `def` remains a
-        // separate paragraph. The ` +` is, however, still a hard line break, so
-        // the post_replacements step renders it as `<br>` within the title
-        // itself (the raw `title_source` keeps the literal ` +`).
+        // (`def`) into the title: the title is a single line and `def` remains
+        // a separate paragraph. The ` +` is, however, still a hard line
+        // break, so the post_replacements step renders it as `<br>`
+        // within the title itself (the raw `title_source` keeps the
+        // literal ` +`).
         let doc: crate::Document<'_> =
             Parser::default().parse(".Title abc +\ndef\n****\nStuff > nonsense\n****");
 
@@ -889,8 +898,8 @@ mod tests {
         #[test]
         fn later_line_carrying_both_formal_and_shorthand_roles() {
             // When a single later line carries both a formal `role=` and a
-            // shorthand `.role`, the formal value replaces the running roles and
-            // that same line's shorthand then appends after it.
+            // shorthand `.role`, the formal value replaces the running roles
+            // and that same line's shorthand then appends after it.
             let metadata = crate::blocks::metadata::BlockMetadata::new(
                 "[role=formal]\n[.sh,role=formal2]\ncontent\n",
             );
@@ -992,21 +1001,22 @@ mod tests {
 
         #[test]
         fn sets_title_from_attribute() {
-            // A `title=` entry in a block's attribute list sets the block title,
-            // equivalent to a `.Title` line.
+            // A `title=` entry in a block's attribute list sets the block
+            // title, equivalent to a `.Title` line.
             let metadata =
                 crate::blocks::metadata::BlockMetadata::new("[title=\"My Title\"]\ncontent\n");
 
             assert_eq!(metadata.title_str(), Some("My Title"));
 
-            // A title supplied through an attribute has no `.Title` source line.
+            // A title supplied through an attribute has no `.Title` source
+            // line.
             assert!(metadata.title_source.is_none());
         }
 
         #[test]
         fn dot_title_line_wins_over_attribute() {
-            // When both a `.Title` line and a `title=` attribute are present, the
-            // `.Title` line takes precedence.
+            // When both a `.Title` line and a `title=` attribute are present,
+            // the `.Title` line takes precedence.
             let metadata = crate::blocks::metadata::BlockMetadata::new(
                 ".Line Title\n[title=\"Attr Title\"]\ncontent\n",
             );
@@ -1028,10 +1038,11 @@ mod tests {
 
         #[test]
         fn single_quoted_value_is_not_double_substituted() {
-            // A single-quoted value already had the normal substitutions applied
-            // when the attribute list was parsed. Substituting it again would
-            // double-escape the `>` to `&amp;gt;`; the title must instead render
-            // `a &gt; b`, matching the double-quoted form.
+            // A single-quoted value already had the normal substitutions
+            // applied when the attribute list was parsed.
+            // Substituting it again would double-escape the `>` to
+            // `&amp;gt;`; the title must instead render `a &gt; b`,
+            // matching the double-quoted form.
             let metadata =
                 crate::blocks::metadata::BlockMetadata::new("[title='a > b']\ncontent\n");
 
@@ -1061,8 +1072,8 @@ mod tests {
         #[test]
         fn resolves_attribute_references_in_value() {
             // Attribute references in a `title=` value are resolved (when the
-            // attribute list is parsed), then the title substitutions render the
-            // result.
+            // attribute list is parsed), then the title substitutions render
+            // the result.
             let doc =
                 Parser::default().parse(":who: World\n\n[title=\"Hello {who}\"]\n====\nbody\n====");
 
@@ -1073,8 +1084,8 @@ mod tests {
         #[test]
         fn straddles_a_second_attribute_line() {
             // A `title=` attribute merges across multiple attribute lines just
-            // like any other named attribute, so it still supplies the title when
-            // it sits on a separate line from the block style.
+            // like any other named attribute, so it still supplies the title
+            // when it sits on a separate line from the block style.
             let metadata = crate::blocks::metadata::BlockMetadata::new(
                 "[title=\"Merged Title\"]\n[sidebar]\ncontent\n",
             );

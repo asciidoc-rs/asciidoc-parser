@@ -95,10 +95,11 @@ The normal substitution group (`normal`) is applied to the majority of the Ascii
 
     // Unlike the other substitution groups in this section, the `header` group
     // applies to document-header metadata lines (author/revision) and to
-    // attribute-entry values rather than to a parsed block. There's no block that
-    // exposes a `header` substitution group to assert against — the way the normal
-    // and verbatim groups are checked below — so this paragraph is out of scope
-    // for verification and is treated as non-normative.
+    // attribute-entry values rather than to a parsed block. There's no block
+    // that exposes a `header` substitution group to assert against — the
+    // way the normal and verbatim groups are checked below — so this
+    // paragraph is out of scope for verification and is treated as
+    // non-normative.
     non_normative!(
         r#"
 [#header-group]

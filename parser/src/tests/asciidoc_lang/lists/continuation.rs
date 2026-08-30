@@ -2106,9 +2106,9 @@ include::example$complex.adoc[tag=complex-only]
 
         // The principal-text node is dropped from each item's child blocks (the
         // listing block is the only child, so it lines up with the marker), but
-        // each item records that it had an empty principal text. A renderer uses
-        // this to emit the empty principal paragraph ahead of the attached
-        // listing block, matching Asciidoctor.
+        // each item records that it had an empty principal text. A renderer
+        // uses this to emit the empty principal paragraph ahead of the
+        // attached listing block, matching Asciidoctor.
         let Some(crate::blocks::Block::List(list)) = doc.child_blocks().next() else {
             panic!("expected a list block");
         };

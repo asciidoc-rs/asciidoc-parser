@@ -1984,9 +1984,9 @@ mod tests {
 
         #[test]
         fn borrows_source_when_filter_is_a_no_op() {
-            // A filtered view byte-identical to the source span is borrowed from
-            // the span rather than allocating an owned copy of text we already
-            // hold.
+            // A filtered view byte-identical to the source span is borrowed
+            // from the span rather than allocating an owned copy of
+            // text we already hold.
             let content = Content::from_filtered(Span::new("plain text"), "plain text");
 
             assert!(matches!(content.rendered, CowStr::Borrowed(_)));
@@ -1995,8 +1995,8 @@ mod tests {
 
         #[test]
         fn owns_rendered_text_when_filter_changes_it() {
-            // A filtered view that differs from the source is materialized as an
-            // owned copy.
+            // A filtered view that differs from the source is materialized as
+            // an owned copy.
             let content = Content::from_filtered(Span::new("a|b"), "ab");
 
             assert!(matches!(content.rendered, CowStr::Boxed(_)));
@@ -2113,8 +2113,8 @@ mod tests {
         #[test]
         fn passes_a_dangling_escape_introducer_through() {
             // Cannot arise from `escape_sentinels` (which always writes a tag),
-            // so this only pins down that a malformed sequence is content, not a
-            // dropped character.
+            // so this only pins down that a malformed sequence is content, not
+            // a dropped character.
             let dangling = format!("x{SENTINEL_ESCAPE}");
             assert_eq!(unescape_sentinels(&dangling), dangling);
 

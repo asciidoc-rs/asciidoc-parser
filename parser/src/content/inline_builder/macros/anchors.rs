@@ -152,10 +152,11 @@ pub(super) fn biblio_anchor_level<'src>(
 
     // The id, by contrast, rides on the node as logical text, so it is sliced
     // back to `'src` (borrowing where it can) exactly as an ordinary anchor's
-    // own id is. Its character class admits neither a special nor a placeholder,
-    // so the two readings coincide — and, for the same reason, the `None` arm
-    // (the id crossing an atomic piece) is not actually reachable, kept only
-    // for symmetry with [`build_anchor_node`]'s own gate.
+    // own id is. Its character class admits neither a special nor a
+    // placeholder, so the two readings coincide — and, for the same reason,
+    // the `None` arm (the id crossing an atomic piece) is not actually
+    // reachable, kept only for symmetry with [`build_anchor_node`]'s own
+    // gate.
     let Some(id) = text_slice(&nodes, &pieces, id_range) else {
         return nodes;
     };
@@ -199,8 +200,8 @@ pub(super) fn anchor_macros_level<'src>(
     let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter: an anchor needs either the shorthand `[[` opener or the
-    // `anchor:` macro prefix. The `[` characters are not special, so a shorthand
-    // reaches the macros step with its `[[` intact.
+    // `anchor:` macro prefix. The `[` characters are not special, so a
+    // shorthand reaches the macros step with its `[[` intact.
     if !s.contains("[[") && !s.contains("anchor:") {
         return nodes;
     }
@@ -257,10 +258,11 @@ pub(super) fn find_anchor_matches<'src>(
 
         // An escape (`\[[…` / `\anchor:…`) is honored by dropping the backslash
         // and keeping the rest literal, mirroring the string replacer's leading
-        // `caps.get(1)` check. [`rebuild_macro_level`] emits the kept range with
-        // [`emit_range`], which clones an atomic piece (a rendered-span reference
-        // text) whole, so the unescape works even across a non-verbatim reference
-        // text — just as the id itself is always verbatim, the whole anchor
+        // `caps.get(1)` check. [`rebuild_macro_level`] emits the kept range
+        // with [`emit_range`], which clones an atomic piece (a
+        // rendered-span reference text) whole, so the unescape works
+        // even across a non-verbatim reference text — just as the id
+        // itself is always verbatim, the whole anchor
         // unescapes regardless.
         if caps.get(1).is_some() {
             matches.push(MacroMatch {
@@ -347,8 +349,8 @@ fn build_anchor_node<'src>(
     let location = source_slice(pieces, full.clone(), root);
 
     // Exactly one id group matches: group 2 for the `[[…]]` shorthand (with its
-    // reference text in group 3), else group 4 for the `anchor:…[…]` macro (with
-    // its reference text in group 5).
+    // reference text in group 3), else group 4 for the `anchor:…[…]` macro
+    // (with its reference text in group 5).
     #[allow(clippy::unwrap_used)]
     let (id_match, reftext_match, is_shorthand) = if let Some(id) = caps.get(2) {
         (id, caps.get(3), true)
@@ -952,7 +954,8 @@ mod tests {
         let anchor = assert_anchor(&nodes[0]);
         let reftext = anchor.reftext.as_ref().unwrap();
 
-        // `[[install, ` is 11 characters, so the trimmed text starts at column 12.
+        // `[[install, ` is 11 characters, so the trimmed text starts at column
+        // 12.
         assert_text(&reftext[0], "Installation", 1, 12);
     }
 
@@ -960,8 +963,9 @@ mod tests {
     fn an_anchor_shorthand_reftext_that_is_whitespace_only_has_no_reftext() {
         // A shorthand reference text that trims to empty (the pattern's `(.+?)`
         // matched only the whitespace the string replacer's `trim_end` strips)
-        // leaves `reftext` `None`, the same shape as the bare `[[id]]` form — and
-        // it still folds to the same `<a id="…"></a>` the string pipeline emits.
+        // leaves `reftext` `None`, the same shape as the bare `[[id]]` form —
+        // and it still folds to the same `<a id="…"></a>` the string
+        // pipeline emits.
         let source = "[[install, ]]";
         let nodes = build_src(Span::new(source));
 
@@ -980,9 +984,9 @@ mod tests {
 
     #[test]
     fn an_anchor_macro_reftext_unescapes_a_bracket() {
-        // A macro reference text unescapes `\]` into `]`, making the logical text
-        // a synthesized (owned) value whose `location` still covers the raw
-        // source it derives from.
+        // A macro reference text unescapes `\]` into `]`, making the logical
+        // text a synthesized (owned) value whose `location` still
+        // covers the raw source it derives from.
         let nodes = build_src(Span::new("anchor:foo[a\\]b]"));
 
         let anchor = assert_anchor(&nodes[0]);
@@ -1020,8 +1024,8 @@ mod tests {
     #[test]
     fn an_escaped_anchor_stays_literal() {
         // `\[[…]]` and `\anchor:…[…]` drop the backslash and keep the anchor as
-        // literal text — no anchor node — exactly as the string replacer's escape
-        // branch does.
+        // literal text — no anchor node — exactly as the string replacer's
+        // escape branch does.
         for source in ["\\[[install]]", "\\anchor:install[Installation]"] {
             let nodes = build_src(Span::new(source));
 
@@ -1665,9 +1669,9 @@ mod tests {
     #[test]
     fn a_bibliography_anchor_is_recognized_only_inside_a_bibliography_list_item() {
         // The same source, built against a parser that is *not* flagged: the
-        // triple bracket falls through to the ordinary inline-anchor pass, whose
-        // node carries no bibliography flag (and whose id the side-effect pass
-        // deliberately does not catalog — see
+        // triple bracket falls through to the ordinary inline-anchor pass,
+        // whose node carries no bibliography flag (and whose id the
+        // side-effect pass deliberately does not catalog — see
         // `does_not_register_the_inner_anchor_of_a_bibliography_style_triple_bracket`).
         let nodes = build_src(Span::new("[[[gof]]]"));
 
@@ -1801,8 +1805,8 @@ mod tests {
         // The pass is `^`-anchored to the whole content, so it is a no-op for a
         // level whose text merely *contains* a triple bracket, and for one that
         // starts with it but under a parser that is not inside a bibliography
-        // list item. Driven directly, since `apply_macros` only ever calls it at
-        // the content's top level.
+        // list item. Driven directly, since `apply_macros` only ever calls it
+        // at the content's top level.
         let root = Span::new("x [[[gof]]]");
         let nodes = vec![InlineNode::Text {
             value: CowStr::from(root.data()),

@@ -759,15 +759,15 @@ fn two_shapes_where_a_tree_built_footnote_entry_still_diverges() {
     // diverged for *every* fixture above — and neither is one it can close.
 
     // 1. A passthrough (or a STEM expression) inside a footnote. The string
-    //    pipeline restores a passthrough *after* the macros step, over the whole
-    //    block string — by which time the footnote's text has already been cut out
-    //    of it, so the entry keeps a raw passthrough sentinel that no later pass
-    //    will ever replace. It is one of design §4.2's three sentinel systems
-    //    leaking into public API, and the tree simply has no sentinels: the
-    //    passthrough is a node, so folding the subtree yields the restored text.
-    //    The tree is *right* here and the string pipeline is wrong, which is why
-    //    this is pinned as a divergence rather than fixed on the tree's side to
-    //    match.
+    //    pipeline restores a passthrough *after* the macros step, over the
+    //    whole block string — by which time the footnote's text has already
+    //    been cut out of it, so the entry keeps a raw passthrough sentinel that
+    //    no later pass will ever replace. It is one of design §4.2's three
+    //    sentinel systems leaking into public API, and the tree simply has no
+    //    sentinels: the passthrough is a node, so folding the subtree yields
+    //    the restored text. The tree is *right* here and the string pipeline is
+    //    wrong, which is why this is pinned as a divergence rather than fixed
+    //    on the tree's side to match.
     for (source, string_side, tree_side) in [
         (
             "A footnote:[a +++<b>raw</b>+++ passthrough] here.",
@@ -796,14 +796,14 @@ fn two_shapes_where_a_tree_built_footnote_entry_still_diverges() {
         );
     }
 
-    // 2. A cross-reference inside a **link's display text**. The builder does not
-    //    recognize one there at all — the link family escapes its text rather than
-    //    substituting into it — so the tree holds `CharRef` leaves where the string
-    //    pipeline holds a deferred reference. That is a recognition gap in the
-    //    *link* family, which shows identically outside any footnote (`A
-    //    link:x.html[<<tgt>>] here.` renders `&lt;&lt;tgt&gt;&gt;` in the flow
-    //    either way it is reached); the footnote entry is only where it becomes
-    //    visible in a side effect.
+    // 2. A cross-reference inside a **link's display text**. The builder does
+    //    not recognize one there at all — the link family escapes its text
+    //    rather than substituting into it — so the tree holds `CharRef` leaves
+    //    where the string pipeline holds a deferred reference. That is a
+    //    recognition gap in the *link* family, which shows identically outside
+    //    any footnote (`A link:x.html[<<tgt>>] here.` renders
+    //    `&lt;&lt;tgt&gt;&gt;` in the flow either way it is reached); the
+    //    footnote entry is only where it becomes visible in a side effect.
     let (golden, builder) = side_effects("A footnote:[link:x.html[<<tgt>>]] here.");
 
     assert_eq!(
@@ -1226,10 +1226,11 @@ fn a_real_parse_records_each_side_effect_exactly_once() {
     );
 
     // Pass order, not source order: the auto-link / formal-URL pass runs ahead
-    // of the `link:`/`mailto:` macro pass, so `z` precedes `y` even though it is
-    // written after it. `apply_macro_side_effects` reproduces that ordering
-    // because it composes the families in the string pipeline's own order — the
-    // property `links::apply_link_side_effects` documents for itself.
+    // of the `link:`/`mailto:` macro pass, so `z` precedes `y` even though it
+    // is written after it. `apply_macro_side_effects` reproduces that
+    // ordering because it composes the families in the string pipeline's
+    // own order — the property `links::apply_link_side_effects` documents
+    // for itself.
     assert_eq!(
         catalog.links().to_vec(),
         [
@@ -1273,11 +1274,11 @@ fn a_duplicate_id_warns_once_through_a_real_parse() {
 fn a_description_list_term_still_registers_from_the_string_pipeline() {
     // The carve-out, pinned. A term runs the substitution steps directly rather
     // than through `SubstitutionGroup::apply` (see
-    // `blocks::list_item_marker::DefinedTerm::substitute`), so it builds no tree
-    // and has nothing to replay from — and it stays correct only because it
-    // never enters the suppression window, which lives inside `apply`. Hoisting
-    // the flag to cover a whole parse rather than one pass would drop this
-    // registration silently.
+    // `blocks::list_item_marker::DefinedTerm::substitute`), so it builds no
+    // tree and has nothing to replay from — and it stays correct only
+    // because it never enters the suppression window, which lives inside
+    // `apply`. Hoisting the flag to cover a whole parse rather than one
+    // pass would drop this registration silently.
     let mut parser = Parser::default();
     let doc = parser.parse("[[term-id]]A term:: its description.");
 
@@ -1291,12 +1292,12 @@ fn a_description_list_term_still_registers_from_the_string_pipeline() {
 #[test]
 fn a_passthrough_body_with_its_own_macros_registers_once() {
     // The nesting case the save-and-*restore* exists for. A `pass:` macro with
-    // an explicit substitution list re-enters `SubstitutionGroup::apply` for its
-    // body while the outer content's suppression window is open, and closes a
-    // window of its own on the way out. Restoring the previous value is what
-    // leaves the outer content suppressed for everything *after* the
-    // passthrough; clearing it instead would let the string pipeline record
-    // `outer.png` alongside the replay's copy.
+    // an explicit substitution list re-enters `SubstitutionGroup::apply` for
+    // its body while the outer content's suppression window is open, and
+    // closes a window of its own on the way out. Restoring the previous
+    // value is what leaves the outer content suppressed for everything
+    // *after* the passthrough; clearing it instead would let the string
+    // pipeline record `outer.png` alongside the replay's copy.
     //
     // The body's own image is not catalogued at all, on this branch or before
     // it — a pre-existing gap in how a `pass:`-with-subs body reaches the

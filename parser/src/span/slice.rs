@@ -240,9 +240,10 @@ mod tests {
     mod empty {
         use crate::tests::prelude::*;
 
-        // `empty()` is the release-build fallback that the slice functions reach
-        // for an out-of-bounds range (debug builds panic before reaching it). It
-        // returns a zero-length span anchored at the start of `self`.
+        // `empty()` is the release-build fallback that the slice functions
+        // reach for an out-of-bounds range (debug builds panic before
+        // reaching it). It returns a zero-length span anchored at the
+        // start of `self`.
         #[test]
         fn anchors_at_start_of_span() {
             let s = crate::Span::new("abcdef").slice_from(2..);

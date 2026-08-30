@@ -142,7 +142,8 @@ impl<'src> ListItemMarker<'src> {
             {
                 Self::ArabicNumeral(marker)
             } else {
-                // Regex and if-else chain should be exhaustive. If not, treat as non-match.
+                // Regex and if-else chain should be exhaustive. If not, treat
+                // as non-match.
                 return None;
             };
 
@@ -174,9 +175,10 @@ impl<'src> ListItemMarker<'src> {
             let term = source.slice(0..term_len);
             let mut term: Content<'src> = term.into();
 
-            // Apply attribute substitution to the term so that attribute references
-            // like `{blank}` are resolved before determining if this is a valid
-            // definition list marker.
+            // Apply attribute substitution to the term so that attribute
+            // references like `{blank}` are resolved before
+            // determining if this is a valid definition list
+            // marker.
             SubstitutionStep::AttributeReferences.apply(&mut term, parser, None);
 
             let marker = source.slice_from(term_len..);
@@ -636,10 +638,11 @@ mod tests {
 
     #[test]
     fn term_special_characters_are_escaped() {
-        // A description-list term receives the full `normal` substitution group,
-        // so the special characters `&`, `<`, and `>` are escaped rather than
-        // passed through verbatim. The horizontal and qanda list variants share
-        // this code path, since their terms are the same `DefinedTerm` marker.
+        // A description-list term receives the full `normal` substitution
+        // group, so the special characters `&`, `<`, and `>` are
+        // escaped rather than passed through verbatim. The horizontal
+        // and qanda list variants share this code path, since their
+        // terms are the same `DefinedTerm` marker.
         assert_eq!(term_rendered("a & b:: desc"), "a &amp; b");
         assert_eq!(term_rendered("a < b:: desc"), "a &lt; b");
         assert_eq!(term_rendered("a > b:: desc"), "a &gt; b");
