@@ -1271,6 +1271,28 @@ fn split_attribute_value<'src>(
 ///
 /// Text with none of the three reserved codepoints — the overwhelming
 /// majority — is borrowed through unchanged.
+///
+/// # Known limits — documented, intentional debt
+///
+/// This guards **one** road to a forged occurrence: a value this step splices
+/// in. A document that types the pair in the clear inside a macro bracket
+/// never reaches this function, and ahead of a real masked piece it forges the
+/// same restore (`tests/sentinels.rs`'s
+/// `a_typed_placeholder_before_a_masked_piece_forges_a_bracket_restore`). The
+/// structural cure — capture each occurrence's provenance where it is written
+/// instead of re-deriving it from bytes, which is what `quotes.rs`'s `Piece`
+/// table does one layer up — was investigated as a byte-offset table carried
+/// through `Attrlist::parse` and **rejected**: that parse re-substitutes
+/// attribute references over the tokened text (length-changing under any
+/// `subs=` list naming `macros` without `attributes`), and a parsed value is
+/// not a slice of the split text in any case, since
+/// [`ElementAttribute::parse`](crate::attributes::ElementAttribute) derives it
+/// through unreported rewrites. Both are pinned by fixtures in
+/// `tests/sentinels.rs`, and the full reasoning — including the alternative
+/// that *would* work, escaping in the bytes `tokened_bracket`/`tokened_text`
+/// copy rather than in this splice — is in the design doc's "The masked-piece
+/// placeholder's offset table cannot be carried through `Attrlist::parse`"
+/// note. Until that lands, this stays.
 fn escape_passthrough_sentinels(value: &str) -> Cow<'_, str> {
     const ESCAPE: char = '\u{E005}';
 

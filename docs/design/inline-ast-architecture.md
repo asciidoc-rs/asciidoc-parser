@@ -12033,7 +12033,10 @@ has its own internal attribute-reference re-substitution (for a literal `{missin
 `attribute-missing=skip`/`warn` policy leaves behind), which can in principle shift byte
 offsets inside the very string `tokened_bracket`'s table would be computed against, and ruling
 that out — or handling it — needs more validation than this increment's scope covered. Left as
-open follow-up work, not silently dropped.
+open follow-up work, not silently dropped. **Closed since:** that validation ran as its own
+increment and the move is rejected — see "The masked-piece placeholder's offset table cannot be
+carried through `Attrlist::parse`" below, which also corrects the claim two paragraphs up about
+the typed-in-the-clear case being covered.
 
 `cargo test --workspace` is green (5,485 tests in the library crate, three more than before —
 the same shorthand-role and cross-attribute-offset assertions folded into extended existing
@@ -12046,6 +12049,101 @@ shape's "malformed token" case no longer exists to reach it by a different path 
 `image.rs`'s own sentinel-shaped-bytes test was extended with a case exercising it directly
 (an author-typed adjacent pair after a bracket's only real passthrough already spent the one
 body supplied).
+
+##### The masked-piece placeholder's offset table cannot be carried through `Attrlist::parse` (2026-08-30)
+
+The open follow-up the note above left — "carry `tokened_bracket`'s own byte-offset table
+through `Attrlist::parse`'s split, so restoration never re-scans text for the placeholder's
+byte value at all" — was taken up as its own increment and **investigated and rejected**. The
+spike is written down here in full rather than merely deferred again, because the reasoning is
+the kind that gets re-litigated from scratch otherwise: the idea is genuinely attractive (it is
+exactly the property `quotes.rs`'s `Piece` table has one layer up, and it would let
+`escape_passthrough_sentinels` be deleted rather than merely widened), and the two things that
+kill it are both invisible from the call site.
+
+*Blocker 1 — `Attrlist::parse`'s own attribute-reference re-substitution runs on tokened text,
+and does change its length.* The note above guessed at this ("can in principle shift byte
+offsets") and named `attribute-missing=skip`/`warn`'s literal `{missing}` as the shape to
+worry about. That particular shape is harmless — a policy that leaves a reference literal
+leaves it the same length — but the real one is not, and is not exotic. `Attrlist::parse`
+substitutes whenever the text it is handed holds both a `{` and a `}`, and a `subs=` list
+naming `macros` without `attributes` reaches the macros step with *every* reference still
+unresolved, because the content-level pass never ran. The inner substitution is then the one
+that expands them, after `tokened_bracket` has already written its placeholder into the same
+string. Measured on `[subs=macros]` + `image:x.png[alt={name},title=++real++]` with `:name:
+a-much-longer-value`: the tokener writes `alt={name},title=\u{96}\u{97}` and the split reads
+`alt=a-much-longer-value,title=\u{96}\u{97}` — the occurrence sits at byte 30 where the table
+would record byte 17. Ordinal restoration is indifferent to this (the occurrence *count*
+either side of an expansion is unchanged, which is why this renders correctly today); a byte
+-offset table is not. Pinned by
+`an_attrlist_level_reference_expansion_moves_a_placeholder_in_the_tokened_text`
+(`tests/sentinels.rs`), in both the image and link spellings.
+
+*Blocker 2 — a parsed value is not a slice of the text that was split, and nothing reports the
+mapping.* This one is independent of blocker 1, holds for text containing no brace at all, and
+is the decisive one, because it also rules out the obvious sidestep (trust the table only when
+the tokened text provably holds no `{`/`}`, and fall back to the guarded re-scan otherwise —
+which would keep `escape_passthrough_sentinels` alive anyway, defeating the purpose).
+`Attrlist::parse`'s entry loop does hand out `(start_index, new_index)` byte ranges, but the
+value inside one is derived by `ElementAttribute::parse` through a chain of rewrites it does
+not report: leading whitespace skipped, the name and `=` stripped, the quotes stripped, `\"`
+rewritten to `"` by a plain `String::replace`, trailing spaces trimmed — and, for a
+single-quoted value in a *block* attrlist, a whole `SubstitutionGroup::Normal` pass (out of
+reach for the tokened path, which is `AttrlistContext::Inline`, but it is the same return
+signature). What comes back is `(attribute, end_offset, warnings)` and nothing else. Remapping
+tokened coordinates into value coordinates would therefore mean threading a byte mapping out of
+`ElementAttribute::parse`, and into `take_quoted_string`, the `replace`, and
+`trim_item_trailing_spaces` — and then again through `parse_shorthand_items`,
+`split_role_value`, and `roles_with_token_offset`, each of which slices the value further.
+That is a side channel through most of `attributes/`, several increments' worth, in service of
+deleting one guard. Pinned by
+`a_quoted_values_own_unescape_moves_a_placeholder_in_the_parsed_value` (`tests/sentinels.rs`):
+`image:x.png[alt="a \" b ++real++ c"]` shortens the value by one byte ahead of the placeholder,
+with no brace anywhere in the bracket.
+
+*What the spike found on the way — the guard is not the whole defense.* `restore_into`'s
+positional walk cannot tell a genuine occurrence from any other, and
+`escape_passthrough_sentinels` guards exactly **one** road to a forged one: a value spliced in
+by `split_attribute_value`, the attribute-reference step's content-level splice. A document
+that types the pair *in the clear* inside the bracket never passes through that splice, so
+nothing escapes it — and ahead of a real masked piece it captures that piece's body just as a
+spliced forgery would. `image:x.png[alt=\u{96}\u{97},++real++]` renders `alt="real"
+width="\u{96}\u{97}"`, and `link:x[role=\u{96}\u{97},++real++]` renders `class="bare real"` with
+the display text collapsed to the target. The note above asserted the pair's collision
+resistance and extended `a_bracket_body_carrying_sentinel_shaped_bytes_is_not_re_matched` to
+cover it, but only in the order where the typed pair sits *behind* the bracket's one real piece
+— by which point `bodies` is spent and `restore_tokens`' leniency keeps it literal. The
+forging order is the other one, and it was not covered. It is recorded rather than fixed here
+(fixing it is a mechanism change, and this increment is a spike):
+`a_typed_placeholder_before_a_masked_piece_forges_a_bracket_restore` (`tests/sentinels.rs`)
+pins the current behavior in both families, named so it reads as the gap it is.
+
+The same spike found the two `a_placeholder_from_an_attribute_value_cannot_forge_*` regressions
+had gone stale in exactly the way that hides this: both still spelled the *retired*
+digit-carrying shape (`\u{96}0\u{97}`) and both put the forgery behind the real passthrough, so
+both passed with `escape_passthrough_sentinels` deleted — they were pinning the escape's output,
+not the forgery it prevents. Retargeted here to the two-codepoint pair in the forging order;
+both now fail on their own "must not restore the passthrough's body" assertion when the guard is
+removed, which is what they were always meant to say.
+
+*Where this leaves the mechanism.* `escape_passthrough_sentinels` stays, as documented,
+intentional debt rather than an oversight, and the byte-offset table is closed rather than
+deferred. The move that *would* get the construction-time property the table was after is a
+different one, and it is the recommended next increment: escape the placeholder's codepoints in
+the bytes `tokened_bracket`/`tokened_text` **copy** from their non-tokened pieces, at the one
+moment provenance is still known — after which every occurrence in the tokened text is one the
+tokener itself wrote, by construction, with no coordinates to carry through anything. It is
+strictly stronger than today's guard (it closes the typed-in-the-clear road as well as the
+spliced one, and being two-way it would let a typed pair round-trip to the output instead of
+arriving escaped), and it lets `escape_passthrough_sentinels` and its `split_attribute_value`
+call site go. Its cost is the un-escape, which has to happen at every consumer of a tokened
+parse and must not be missed at any: `restore_into`'s both paths (including the
+no-placeholder early return), `untranslated_value`, `restored_value_children` /
+`computed_value_children`, `TextAttrlist::text`, and `Attrlist::source_text`. That audit is
+the increment.
+
+`cargo test --workspace` is green. No production code changed: this increment is the two
+evidence fixtures, the open-gap fixture, the two retargeted regressions, and this note.
 
 ##### Phase 3's first criterion cannot close before Landing
 
@@ -12072,7 +12170,10 @@ policies written down; §4.6's stale sentence (done here); the `escape_sentinels
 `RESERVED_SENTINELS` table under it (done — see the sentinel table's own landed-as note
 above). Firm and substantial: the last
 `XrefRenderParams` fold (Phase 5) — the xref template mechanism itself is retired now, both
-halves. Open-ended: the `asciidoctor`-port review, which gates both Phase 3 and Landing and
+halves — and the masked-piece placeholder's provenance fix (escape at the tokener rather than
+at the content-level splice), newly enumerated by the offset-table spike's own note above,
+which is a mechanism change plus an audit of every consumer of a tokened parse. Open-ended:
+the `asciidoctor`-port review, which gates both Phase 3 and Landing and
 whose cost is unknown from inside this repository. Any session count that does not separate
 those three tiers is guessing.
 

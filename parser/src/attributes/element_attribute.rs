@@ -822,6 +822,17 @@ fn is_shorthand_delimiter(c: char) -> bool {
 /// escape each codepoint on its own — a forged value contributing only one
 /// half, beside the other half from an unrelated source, would complete the
 /// same pair.
+///
+/// "Unlikely", though, is the whole of what the pair buys: a document that
+/// *does* type both codepoints adjacent, in the clear, **ahead** of a real
+/// masked piece in the same bracket takes that piece's body — the escape
+/// guard guards the attribute-reference splice only, and this byte never
+/// passes through it. Pinned as a known gap by
+/// `a_typed_placeholder_before_a_masked_piece_forges_a_bracket_restore`
+/// (`tests/sentinels.rs`); the fix is provenance at the tokener rather than a
+/// wider escape, and is written up in the design doc's "The masked-piece
+/// placeholder's offset table cannot be carried through `Attrlist::parse`"
+/// note.
 pub(crate) const MASKED_PIECE_PLACEHOLDER_START: char = '\u{96}';
 
 /// See [`MASKED_PIECE_PLACEHOLDER`].
