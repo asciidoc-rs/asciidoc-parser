@@ -11758,6 +11758,55 @@ Phase 2's "sentinels deleted" gate now closes on the letter of its own wording, 
 producers: no production code emits an in-band control sentinel, and the table that used to
 reserve codepoints for one no longer exists either.
 
+##### The retirement's own audit missed one splice point (found 2026-08-30)
+
+"No production code emits an in-band control sentinel any more" turned out to overstate what
+the retirement actually surveyed: `tokened_bracket` (`inline_builder/macros/image.rs`) still
+writes the passthrough pair's own `\u{96}`*n*`\u{97}` shape, transiently, to give
+`Attrlist::parse` the same haystack shape the string pipeline held there for an `image:`/`icon:`
+bracket or a link family's display-text list — and `Attrlist::into_owned_restoring`
+(`restore_into`, `attributes/element_attribute.rs`) still restores each token **by byte
+pattern** once that parse returns. Neither is `RESERVED_SENTINELS`-tracked (both predate this
+increment and neither was in scope for it), so the retirement's own claim was true of what it
+audited and false of the crate as a whole: this pair's scan-and-restore is the one form the
+tree builder still shares with the string pipeline's own vulnerability, and it needed the same
+counterpart the string pipeline had.
+
+It did not have one. `apply_attribute_references`'s own splice
+(`inline_builder/attribute_refs.rs`, `split_attribute_value`) runs *before* macro recognition,
+content-level, exactly where `AttributeReplacer::escaping_sentinels` used to guard the string
+pipeline's equivalent splice — but nothing on the tree-builder side ever called an equivalent
+of `escape_sentinels` for it, because by the time this increment retired that function, every
+*other* consumer it had guarded (the deferred cross-reference and footnote-marker templates)
+had already moved to structured piece lists nothing scans. A document defining an attribute
+whose value spells the passthrough pair (`:forge: \u{96}0\u{97}`) and referencing it inside an
+`image:`/`icon:` bracket or a `link:` display-text list that also holds a genuine masked
+passthrough or STEM expression (`image:x.png[++real++,alt={forge}]`) could therefore forge the
+restore: the reference's value is spliced in before the bracket is even recognized, so by the
+time it is tokened the forged bytes are indistinguishable from the pipeline's own token at that
+index, and the attribute ends up holding the passthrough's *rendered body* instead of the
+literal text the document defined. Confirmed present on this branch before this increment
+landed (the retirement here only deleted a string-pipeline mechanism nothing downstream read,
+which is orthogonal), so this is a pre-existing gap the retirement's audit did not introduce and
+did not close either.
+
+*Fixed as* `escape_passthrough_sentinels` (`inline_builder/attribute_refs.rs`): the
+`split_attribute_value` splice's own counterpart to the retired `escape_sentinels`, covering
+just this one pair (the other three retired codepoints have no scanning consumer left to
+forge). One-way and unconditional, for the same reasons its predecessor was — this splice
+cannot know whether its value will end up beside a masked construct in some later bracket, and
+nothing downstream ever needs to reverse it. Pinned end-to-end by
+`a_placeholder_from_an_attribute_value_cannot_forge_an_image_restore` and
+`a_placeholder_from_an_attribute_value_cannot_forge_a_link_display_text_restore`
+(`tests/sentinels.rs`), and at the unit level by
+`a_reference_expanding_to_a_passthrough_sentinel_is_escaped`
+(`inline_builder/attribute_refs.rs`), which also covers the escape's own introducer codepoint
+folding back on itself. `cargo test --workspace` is green (5,479 tests, three more than
+before), and `attribute_refs.rs`'s coverage is diff-neutral against a baseline worktree of the
+commit this fix branched from once its own new "author literally typed the escape introducer"
+branch is exercised — every other newly-uncovered line in the file is a pre-existing
+`other => panic!` test-assertion fallback, not a gap this change opened.
+
 ##### Phase 3's first criterion cannot close before Landing
 
 "Node vocabulary reviewed against the `asciidoctor` port's needs (§6.6)" and Landing's
