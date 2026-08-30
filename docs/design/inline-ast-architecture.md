@@ -893,10 +893,113 @@ populate in two stages:
    is already a `Span`, this is a matter of *which* `Span` a node is given — not a type
    change — so precision can improve later with no public churn.
 2. **Precision stage (#944):** the single-pass builder assigns each construct the source
-   range it consumed and slices interstitial `Text` directly from `'src`. The hard cases
-   #944 enumerates — attribute expansion, passthrough mask/restore, synthesized text,
-   lookahead/retry — get explicit policies there. Landing this lets the `attribute-missing`
-   diagnostic (#564) drop its per-line correlation hack and use the offending node's span.
+   range it consumed and slices interstitial `Text` directly from `'src`. Landing this lets
+   the `attribute-missing` diagnostic (#564) drop its per-line correlation hack and use the
+   offending node's span (closed in step 6/7 — see §5.2's own "landed as" notes).
+
+**The mechanism behind every fallback.** A match-string range maps back to a source `Span`
+through one function,
+[`source_slice`](../../parser/src/content/inline_builder/quotes.rs) (and the byte-offset
+mapper underneath it, `s_to_src`). A boundary inside an ordinary verbatim `Text` piece maps
+one-to-one — its match-string position *is* its source position. A boundary inside an
+**atomic** piece (a rendered span, an escaped special, a masked passthrough/STEM sentinel, an
+earlier-recognized macro node) has no honest position of its own, so it snaps to that piece's
+*nearer* edge — such a boundary never legitimately lands there in the first place. A boundary
+inside a **synthesized** piece (a run with no single contiguous `'src` slice of its own — an
+expanded attribute value, a filtered multi-line block's joined seed) snaps to that piece's
+*whole* span regardless of exactly where inside it the boundary falls. This one mechanism is
+what every hard case below falls back to; none of them needed a policy of its own so much as
+a place where the general one applies. #944 names four:
+
+1. **Attribute expansion.** A resolved `{attribute}` reference's (or a `counter`/`counter2`
+   directive's) value is spliced into the node stream as one or more `Text`/`Raw` nodes —
+   split at any literal `<`, `>`, `&` it carries (§3.4.1) — and **every** node the splice
+   produces carries the *whole reference's own span* as its `location`, not some sub-range of
+   it: `{name}` is a five-byte match that might expand to a much longer (or a zero-length)
+   value, and there is no source position inside that expansion for a byte to honestly claim.
+   ([`split_attribute_value`](../../parser/src/content/inline_builder/attribute_refs.rs);
+   pinned by `a_reference_to_a_set_attribute_expands_to_a_text_node`, which asserts
+   `location.data() == "{greeting}"` for the expanded `"Hello"` text.) A macro recognized
+   *inside* such an expansion (`image:{logo}[Logo]`) inherits the same fallback one level up:
+   its target and attribute-list *values* are still recovered exactly (via the match string,
+   or [`text_slice`](../../parser/src/content/inline_builder/quotes.rs)), but the node's own
+   `location` is the whole macro's own bytes as written, not the expansion's
+   (`an_image_inside_an_expanded_value_keeps_a_coarse_location`).
+
+2. **Passthrough mask/restore.** A passthrough construct's own node — `+++text+++`,
+   `++text++`, `$$text$$`, `pass:[text]`, or the bare `+text+` form — gets a **precise** span
+   covering its whole delimited construct, delimiters included, sliced straight from `'src`
+   exactly like any other macro node
+   ([`build_passthrough_node`](../../parser/src/content/inline_builder/passthrough_step.rs);
+   pinned by `triple_plus_borrows_its_content_unescaped`, whose own comment states the rule:
+   "`location` covers the whole `+++…+++` construct (delimiters included), matching every
+   other macro node; only `value` is the unwrapped content"). Only when that passthrough's
+   own body encloses *another*, already-extracted masked construct — `+a $$b$$ c+` — does its
+   *value* need restoring, each inner sentinel-shaped placeholder replaced by that
+   construct's own rendered body
+   ([`substitute_and_restore`](../../parser/src/content/inline_builder/passthrough_step.rs));
+   the value comes back exact either way, and it is only the *outer* node's own `location`
+   that can fall to this section's coarse policy, for the same structural reason as any other
+   range straddling a synthesized or atomic piece.
+
+   The same split shows up one layer further out, in the `image:`/`icon:` bracket and the
+   link families' display-text list: a masked construct there is *tokened* to the sentinel's
+   own shape before the bracket is parsed as an `Attrlist`, and each surviving token is
+   restored with that construct's own body once the parse returns
+   ([`tokened_bracket`](../../parser/src/content/inline_builder/macros/image.rs),
+   [`Attrlist::into_owned_restoring`](../../parser/src/attributes/attrlist.rs)). The
+   *values* this produces are exact — an `alt` recovers the passthrough's own rendered text
+   byte-for-byte — but the `Attrlist` itself is `into_owned`'d onto the bracket's own coarse
+   span, exactly the trade `Attrlist::into_owned`'s own doc comment names for every
+   non-verbatim bracket ("passing the coarser source span the text corresponds to as the
+   list's own location tag").
+
+3. **Synthesized text.** The builder's own seed can itself be synthesized — a filtered
+   multi-line block whose surviving lines were joined with `\n` has no single contiguous
+   `'src` slice of its own — and
+   [`build_from_value`](../../parser/src/content/inline_builder.rs) draws the same line
+   `apply_special_characters`'s `split_text` already draws one node deeper in the tree: when
+   the seed `value` is exactly `location.data()`, every node built from it gets an honest,
+   precise span; when it differs, every node gets `location`'s own coarse span — "the same
+   fallback an attribute-reference expansion or a `counter` directive's resolved value
+   already receives," in the function's own words. Nothing downstream needed to know the
+   difference: `source_slice`'s piece walk treats a synthesized seed's `Text` node exactly
+   like it treats any other synthesized piece, at any depth — the same mechanism case 1
+   above already pins with a direct `location.data()` assertion
+   (`an_image_inside_an_expanded_value_keeps_a_coarse_location`). What is specific to a
+   *wholly*-synthesized seed, and has its own test, is that recognition itself still
+   succeeds from one: `a_macro_construct_is_recognized_when_the_whole_seed_is_synthesized`
+   asserts a `link:` macro folds correctly when built entirely from a seed whose `value`
+   differs from its `location` — a recognition guarantee, not a `location` assertion of its
+   own, since that half rests on the shared mechanism rather than needing a second test of
+   it.
+
+4. **Lookahead/retry.** Two passes re-scan a slice of their own match string rather than
+   accepting or rejecting a match outright: the passthrough-extraction pass's
+   *prohibited-prefix* retry — an attribute-list-prefixed bare form
+   (`index:[attrs]+text+`, `` \[x-]`text` ``) that turns out to sit behind a `\`, `:`, or `;`
+   writes that first character back verbatim and rescans the rest of the same match,
+   recursively — and the quotes step's own monospace-before-quote retry, which slices the
+   haystack forward and re-searches on a rejected look-ahead. Both retries follow the same
+   pattern: every capture offset the retry reads is relative to the sub-range it rescanned,
+   not the level's own match string, and is rebased (`offset + …`) back to that match
+   string's coordinates before `source_slice`/`s_to_src` ever see it, so no error from the
+   retry's own bookkeeping survives into the node's `location`. This is pinned directly for
+   the passthrough pass's own retry by
+   `a_prohibited_prefix_before_a_bare_attrlisted_form_keeps_its_source_offsets`, whose own
+   comment states the invariant — "the `Raw` leaf's location must be the body's own source
+   bytes, not a range shifted left by the retry's start" — verified over
+   `"see index:[foo]+bar+ end"`, where the retry recognizes `+bar+` only after rejecting the
+   `]`-prefixed match, and the leaf's span is still exactly `source.slice(15..20)`. The
+   quotes step's retry rebases offsets the identical way but has no test of its own naming
+   the invariant this explicitly — a gap the consolidated span/location test file this row
+   still lacks (see below) would be the place to close.
+
+   A **failed** lookahead is a different, simpler case: the verbatim-content callout pass's
+   own trailing-position lookahead (`tail_rx`) either matches or it does not, and a lookahead
+   that fails is not retried — the candidate match is simply left out of the level's match
+   list, so the surrounding gap logic re-emits the original nodes unchanged. No node is ever
+   born from a failed lookahead, so there is no span policy for one to need.
 
 ### 4.5 Lifetimes and allocation
 
@@ -11597,7 +11700,7 @@ failed**, 68 ignored.
 | 3 | node vocabulary reviewed against the `asciidoctor` port's needs (§6.6) | ❌ **not started, and gated on Landing** | See below. |
 | 3 | purely-structural navigation sugar kept minimal | ✅ | The `inlines` module exposes no navigation helpers at all — no `walk`, `descendants`, `children`, `iter`, `visit`, or `find`; the node types are plain public fields (§3.2's sketch). Minimal by construction. |
 | 3 | doc + README updated (the security section gets its `Raw`-node anchor) | ✅ | [`README.md`](../../README.md)'s "Security: rendering untrusted input" section now names `InlineNode::Raw` and its `RawOrigin` (`Passthrough`/`Substitution`) as the tree-level home of each by-design raw-HTML mechanism, pointing at `Content::inlines()` as the accessor a caller matches a node's `origin` through. See below. |
-| 4 | #944 hard-case policies documented and tested | ⚠️ **tested, not documented** | Spans are asserted per-construct across ten `inline_builder` modules. But §4.4 only *promises* the four hard cases "get explicit policies there" — attribute expansion, passthrough mask/restore, synthesized text, lookahead/retry are nowhere written down as policies, and there is no consolidated span/location test file. |
+| 4 | #944 hard-case policies documented and tested | ⚠️ **documented; still no consolidated test file** | §4.4 now spells out all four hard cases' policies (attribute expansion, passthrough mask/restore, synthesized text, lookahead/retry), each traced to the one shared mechanism (`source_slice`/`s_to_src`) and cited against an existing pinning test. See below. Spans are still asserted per-construct across ten `inline_builder` modules rather than from one consolidated span/location test file — that consolidation is real but separable work, not attempted here. |
 | 4 | #564 hack removed | ✅ | Landed in step 7; `Content::source_lines`, `from_filtered_lines`'s `line_spans`, and `simple.rs`'s per-paragraph `Vec<Span>` went with it. |
 | 5 | seam documented | ⚠️ | [`README.md`](../../README.md)'s back-end bullet is current: it names `InlineRenderer` and `Content::render_with` and states the seam is *inline*-scoped. §4.6's own prose is stale, though — see below. |
 | 5 | a smoke-test alternate renderer (in tests) walks the tree | ✅ | `BracketStrong` in [`inline_builder_document_parity.rs`](../../parser/src/tests/inline_builder_document_parity.rs) is folded via `content.render_with(&BracketStrong, &parser)`; `OrdinalRenderer` and `FlipRenderer` in [`inline_tree.rs`](../../parser/src/tests/inline_tree.rs) do the same. |
@@ -11628,6 +11731,37 @@ the spans the section exists to warn about. `Content::inlines()` is the accessor
 carries `RawOrigin` out to a caller, and is what the corrected text points at instead. A good
 illustration of why "no new API, just a cross-reference" is not the same as "no way to get this
 wrong" — the cross-reference itself needs to name a real capability.
+
+##### Phase 4's #944 hard-case policies landed (2026-08-30)
+
+The remaining half of Phase 4's own exit gate that needed no design decision, only writing
+down what the code already does: §4.4 promised that attribute expansion, passthrough
+mask/restore, synthesized text, and lookahead/retry "get explicit policies there," and never
+delivered them. All four turn out to be one mechanism wearing four names —
+[`source_slice`](../../parser/src/content/inline_builder/quotes.rs)'s piece walk, which
+already snaps an **atomic** piece's boundary to its nearer edge and a **synthesized** piece's
+boundary to its own whole span — so §4.4 now states that once, then traces each hard case to
+where the general rule applies: `split_attribute_value`'s splice (attribute expansion),
+`build_passthrough_node`/`tokened_bracket`/`Attrlist::into_owned_restoring` (passthrough
+mask/restore — precise for the construct's own node, coarse only for an *enclosing* node its
+restored value lands inside), `build_from_value`'s seed split (synthesized text), and the
+passthrough-extraction and quotes steps' own retries (lookahead/retry — exact despite the
+retry's temporary sub-range, because every offset is rebased before `source_slice` sees it;
+a *failed*, non-retrying lookahead such as the callout pass's `tail_rx` simply drops the
+candidate match, so no node — and no span question — ever arises from it). Each claim is
+tied to an existing test that already pinned it (`a_reference_to_a_set_attribute_expands_to_a_text_node`,
+`triple_plus_borrows_its_content_unescaped`,
+`an_image_inside_an_expanded_value_keeps_a_coarse_location`,
+`a_macro_construct_is_recognized_when_the_whole_seed_is_synthesized`,
+`a_prohibited_prefix_before_a_bare_attrlisted_form_keeps_its_source_offsets`) — a documentation
+increment in the fullest sense: no code changed, and every sentence is one an existing test or
+doc comment already made true.
+
+*What still doesn't close the row:* the audit's other named gap, "no consolidated span/location
+test file" — the assertions above still live scattered across ten `inline_builder` modules
+rather than in one file a reader could audit in one pass. Real, separable work (a test file that
+imports and re-asserts each case, or at minimum an index pointing at each existing test), left
+for its own increment rather than bundled here.
 
 ##### Phase 2's third sentinel system is still live
 
