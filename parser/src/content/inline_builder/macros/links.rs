@@ -6457,12 +6457,12 @@ mod tests {
 
     #[test]
     fn registers_the_recorded_links_for_a_broad_fixture_set() {
-        // Each fixture uses its own pair of *independent* parsers (design
-        // §5.3's two-independent-parsers discipline, already established by
-        // the image increment's own differential corpus): one that the
-        // additive builder builds against and this function then walks, one
-        // that the real string pipeline (`golden_macros_with`) runs against
-        // directly. Because neither path is wired into the other, comparing
+        // Each fixture uses its own pair of *independent* parsers, the
+        // discipline already established by
+        // the image increment's own differential corpus: one that the
+        // tree builder builds against and this function then walks, one
+        // that produces the frozen golden recording (`golden_macros_with`).
+        // Because neither path is wired into the other, comparing
         // their two catalogs after the fact is the whole test.
         //
         // The separators are plain spaces, not `{sp}` attribute references:
@@ -6509,7 +6509,7 @@ mod tests {
                 r#"["https://c.example", "b.html", "mailto:a@example.org", "mailto:d@example.org"]"#,
             ),
             // A macro whose target crosses an escaped special registers the
-            // *escaped* target, exactly as the string replacer does.
+            // *escaped* target, matching Asciidoctor's own behavior.
             ("link:a&b.html[x]", r#"["a&amp;b.html"]"#),
             (
                 "mailto:a&b@example.org[]",
@@ -6594,13 +6594,14 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_for_links_inside_expanded_values() {
         // A link whose target or display text crosses a synthesized run (an
-        // attribute expansion) is now recognized: every value these nodes hold
+        // attribute expansion) is recognized: every value these nodes hold
         // is computed out of the level's match string, which carries an
         // expanded value's bytes exactly, so only the node's `location` takes
-        // design §4.4's coarse fallback — an attribute-list-bearing display
+        // the coarse whole-content-span fallback — an attribute-list-bearing
+        // display
         // text included, which `text_attrlist` parses from that same match
-        // string and owns off it. The one shape that still defers, a wholly
-        // expanded `link:`/`mailto:` macro, has its own divergence test
+        // string and owns off it. A wholly
+        // expanded `link:`/`mailto:` macro is recognized too, its own test
         // below.
         let parser = expanding_parser();
 
@@ -6637,9 +6638,9 @@ mod tests {
             "\\https://{host}",
             // A display text carrying an **attribute list** over a spliced
             // value, in all three spellings: the list is parsed from the
-            // level's match string — which carries the expansion's own bytes,
-            // exactly as the string replacer's already-expanded haystack does
-            // — and owned onto design §4.4's coarse span.
+            // level's match string — which carries the expansion's own
+            // bytes, already escaped
+            // — and owned onto the coarse whole-content-span fallback.
             "link:index.html[{label},role=hl]",
             "https://example.org[{label},role=hl]",
             "mailto:hello@example.org[{label},Hi there]",
@@ -6668,7 +6669,8 @@ mod tests {
     fn a_link_inside_an_expanded_value_keeps_a_coarse_location() {
         // The target and display text are recovered *exactly* from the match
         // string, while the node's `location` falls back to the enclosing
-        // synthesized run's own span — design §4.4's documented split.
+        // synthesized run's own span — the coarse whole-content-span
+        // fallback documented at this module's header.
         let parser = expanding_parser();
         let source = "link:{url}[{label}]";
         let nodes = build(Span::new(source), &parser, None);
@@ -6691,8 +6693,8 @@ mod tests {
         // is recognized now that the node records which spelling built it
         // ([`Ref::link_form`]) instead of having it re-derived from
         // `location` — the signal `apply_link_side_effects` reads to replay
-        // the string pipeline's family-pass registration order. Only the
-        // node's `location` takes design §4.4's coarse span. This closes the
+        // the crate's own family-pass registration order. Only the
+        // node's `location` takes the coarse whole-content-span fallback. This closes the
         // divergence `a_wholly_expanded_link_macro_is_a_documented_divergence`
         // used to pin, per its own "if this boundary is ever lifted" note.
         let parser = expanding_parser();

@@ -1704,7 +1704,7 @@ mod tests {
         // `escaped_value_children` re-derives the same split from the value's
         // own bytes: the escaped special becomes the character a `Text` holds
         // logically, and the restored entity its own `CharRef` leaf. Both fold
-        // back to one escape level, as the string replacer's own text does.
+        // back to one escape level, as Asciidoctor's own text does.
         let source = "xref:sec[Tom &copy; & Jerry,role=hl]";
         let nodes = build_src(Span::new(source));
 
@@ -1713,7 +1713,7 @@ mod tests {
         assert_eq!(reference.children.len(), 3);
 
         // Every part of a parsed positional value shares the bracketed text's
-        // own coarse span (design §4.4) — it has no `'src` slice of its own.
+        // own coarse span — it has no `'src` slice of its own.
         let text_span = reference.children[0].span();
         assert_eq!(text_span.data(), "Tom &copy; & Jerry,role=hl");
 
@@ -1817,15 +1817,15 @@ mod tests {
 
     #[test]
     fn fold_matches_the_string_pipeline_for_a_text_crossing_a_rendered_span() {
-        // The differential corpus for this increment: a display or reference
+        // The differential corpus for cross-reference text: a display or
+        // reference
         // text crossing an **opaque** piece — a rendered span, an
         // already-recognized macro node, a masked passthrough — in both
         // spellings. The text is carried structurally (each opaque piece's own
-        // node becomes a child), so the fold re-renders exactly the markup the
-        // string replacer captured in its own text.
+        // node becomes a child), so the fold re-renders exactly that markup.
         let fixtures = [
-            // (A masked passthrough is opaque here too — and in the string
-            // pipeline, which restores passthroughs only after every step — but
+            // (A masked passthrough is opaque here too, and restored only
+            // after every step, but
             // this oracle runs the steps directly, without the extraction the
             // real `SubstitutionGroup::apply` performs around them, so those
             // fixtures live in the whole-pipeline sweep instead; see
@@ -1961,8 +1961,7 @@ mod tests {
 
                 // The bytes around the token take the same rebuild every
                 // attribute-list value takes: an owned run off the parse,
-                // whose location is the bracketed text's own coarse span
-                // (design §4.4).
+                // whose location is the bracketed text's own coarse span.
                 assert_eq!(value.as_ref(), " here");
             }
 
@@ -1972,12 +1971,13 @@ mod tests {
 
     #[test]
     fn an_attribute_list_delimiter_inside_a_span_is_the_trees_to_read() {
-        // The deferral divergence (design §5.2's step 6), decided in favor of
+        // The deferral divergence, decided in favor of
         // the tree.
         //
         // A token carries none of the `,` / `=` / `"` a bracket split reads, so
         // the tree's split sees `a ␖ d,role=hl` — a display text and a role.
-        // The string replacer splits over the piece's own **markup**: `a *b, c*
+        // Splitting over the piece's own rendered **markup** instead gives a
+        // different answer: `a *b, c*
         // d` renders `a <strong>b, c</strong> d`, whose list splits at the
         // comma *inside the tag*, ending the anchor at `a <strong>b` and
         // leaving it unbalanced. Asciidoctor does the same.
@@ -1985,9 +1985,9 @@ mod tests {
         // This used to defer where the two readings disagreed, which made the
         // presence of a comma inside a span decide whether the macro was
         // recognized **at all** — the fixtures below came out as literal text.
-        // Emitting the replacer's split is the wrong answer and reproducing it
-        // was never on the table, so the tree's reading stands and this crate
-        // diverges from both the replacer and Asciidoctor here.
+        // Splitting over rendered markup is the wrong answer, and reproducing
+        // it was never on the table, so the tree's reading stands and this
+        // crate diverges from Asciidoctor here.
         for (source, expected) in [
             (
                 "xref:sec[a *b, c* d,role=hl]",
@@ -2005,7 +2005,8 @@ mod tests {
             };
 
             // The role landed as a role rather than being swallowed into the
-            // display text, which is the half the replacer's split loses.
+            // display text, which is the half a split over rendered markup
+            // would lose.
             assert_eq!(
                 ref_.roles.iter().map(|r| r.as_ref()).collect::<Vec<_>>(),
                 ["hl"],
@@ -2027,8 +2028,8 @@ mod tests {
                 "for {source:?}"
             );
 
-            // The divergence, stated as bytes: the replacer cuts the anchor
-            // short inside the tag it just wrote.
+            // The divergence, stated as bytes: the frozen recording cuts the
+            // anchor short inside the tag it just wrote.
             assert_ne!(golden_xref(source), expected, "for {source:?}");
         }
 
@@ -2068,15 +2069,15 @@ mod tests {
                 "an author-written token byte must defer the match: {nodes:?}"
             );
 
-            // The string pipeline builds one, keeping the author's bytes: it
-            // reaches its own restore over the *finished* string, which never
-            // rewrites a `role=` it did not extract into.
+            // The frozen recording builds one, keeping the author's bytes:
+            // passthrough restoration ran over the *finished* string, which
+            // never rewrote a `role=` it did not extract into.
             assert!(golden_whole_pipeline(source).contains("<a href"));
         }
 
         // A text with **no** opaque piece never reaches that gate, and needs
         // not to: there is no token to confuse, so the author's bytes pass
-        // through to the slot exactly as the string pipeline passes them.
+        // through to the slot unchanged.
         let source = "xref:sec[a,role=\u{96}0\u{97}hl]";
         assert_eq!(
             fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
@@ -2103,9 +2104,9 @@ mod tests {
 
         // A masked passthrough contributes its **body**, not its source span:
         // the `+++` delimiters are syntax saying *do not substitute this*, so
-        // the body is exactly the literal text asked for — here a value the
-        // string pipeline cannot express at all (`full` reaches the slot as a
-        // sentinel, so it never selects a style).
+        // the body is exactly the literal text asked for — a value that used
+        // to reach this slot only as its passthrough-placeholder token, never
+        // as `full` itself, so it could never select a style.
         let nodes = build_src(Span::new("xref:sec[a,xrefstyle=+++full+++]"));
         let reference = assert_xref(&nodes[0]);
         assert_eq!(reference.xrefstyle, Some(XrefStyle::Full));
@@ -2131,11 +2132,11 @@ mod tests {
     fn an_untranslated_string_attribute_is_escaped_by_the_renderer() {
         // What the slot holds is *text*, and the renderer escapes it for the
         // attribute it is building — so a body carrying a `"` or an `&` lands
-        // inert rather than breaking out of the tag. The string pipeline
-        // cannot make this guarantee (a passthrough is restored into the
-        // rendered string after every escape has run), which is the whole
-        // reason the values differ; here it does not even reach the value,
-        // leaking the sentinel that stood for it instead.
+        // inert rather than breaking out of the tag. The frozen recording
+        // cannot make this guarantee: a passthrough there is restored into
+        // the rendered string only after every escape has run, so it never
+        // reaches the value at all — leaking the sentinel that stood for it
+        // instead.
         for (source, expected) in [
             (
                 "xref:sec[a,role=+++x&y\"z+++]",
@@ -2169,25 +2170,27 @@ mod tests {
     #[test]
     fn a_span_whose_markup_perturbs_the_string_pipeline_is_a_documented_divergence() {
         // What the structural recovery cannot do is make the *recognition*
-        // agree in every case: the string replacer matches over the span's
-        // markup where this matches over the one placeholder standing in for
-        // it, so the two read the same extent only while that markup carries
-        // no character the pattern is sensitive to. These are the three shapes
-        // where it does — and in each the string pipeline's reading is the
-        // markup-perturbed one (a truncated text, a text the attribute-list
-        // parse cut in half) and the tree's the well-formed one, exactly as
+        // agree in every case: matching over the span's rendered markup
+        // instead of the one placeholder standing in for it reads a different
+        // extent whenever that markup carries a character the pattern is
+        // sensitive to. These are the three shapes
+        // where it does — and in each the well-formed reading is the tree's,
+        // not the markup-perturbed one a match over raw text would give
+        // (a truncated text, a text the attribute-list
+        // parse cut in half) — exactly as
         // the quotes step's own crossed-delimiter divergence is.
         for source in [
-            // A `]` inside the span ends the macro form's lazy text capture
-            // early for the string replacer, but not here.
+            // A `]` inside the span would end the macro form's lazy text
+            // capture early if matched over raw markup, but not here.
             "xref:sec[a *b ] c* d]",
-            // A `>>` inside the span is the shorthand's own terminator, seen
-            // as `&gt;&gt;` in the string pipeline's haystack.
+            // A `>>` inside the span is the shorthand's own terminator, which
+            // a match over raw markup would see as `&gt;&gt;`.
             "<<x,a *b >> c* d>>",
             // Markup carrying an `=` (an attributed span) *and* a comma
-            // elsewhere in the text: the string replacer's attribute-list
-            // probe fires on the markup's own `=`, and the parse then splits
-            // the text at that comma, keeping only what precedes it.
+            // elsewhere in the text: matching over raw markup would have its
+            // attribute-list probe fire on the markup's own `=`, and the
+            // parse then split the text at that comma, keeping only what
+            // precedes it.
             "xref:sec[one, [.hl]#two#]",
         ] {
             let nodes = build_src(Span::new(source));
@@ -2205,17 +2208,17 @@ mod tests {
         // The cross-reference family keeps the opaque-piece gate over a
         // masked passthrough — unlike the `link:`/`mailto:` family, which
         // restores one into its target — because a deferred cross-reference's
-        // target is used *before* the restore pass can reach it: the string
-        // pipeline captures it into the deferred segment while the haystack
-        // still holds the `\u{96}`*n*`\u{97}` sentinel, and the restore pass
-        // rewrites only the rendered string, so the sentinel bytes leak into
-        // the golden output's own `href` and fallback text. The tree defers
+        // target used to be captured into the deferred segment while the
+        // haystack still held the `\u{96}`*n*`\u{97}` passthrough sentinel,
+        // before the restore pass — which rewrote only the rendered string —
+        // could reach it, so the sentinel bytes leaked into the recorded
+        // output's own `href` and fallback text. The tree defers
         // instead and folds the restored literal — the well-formed reading
-        // against the string pipeline's leaked one.
+        // against that recorded, leaked one.
         let source = "xref:++someid++[]";
 
         // Recorded, so the leaked bytes this divergence is *about* outlive the
-        // string pipeline that leaked them (see [`snapshot`]).
+        // retired mechanism that produced them (see [`snapshot`]).
         let golden = crate::content::inline_builder::snapshot::recorded(
             "xref_passthrough_divergence",
             source,
@@ -2363,8 +2366,8 @@ mod tests {
     fn fold_matches_the_string_pipeline_under_a_document_wide_xrefstyle() {
         // The differential corpus for the reading above: with the style
         // resolved into the node rather than read at fold time, the fold still
-        // reproduces the string pipeline's bytes — the string replacer making
-        // the very same `document_xrefstyle` call in the very same pass.
+        // reproduces the frozen recording's bytes — `document_xrefstyle` is
+        // called at build time, in the very same pass the recording reflects.
         //
         // These fold to the *unresolved* fallback (a bare `Content` has no
         // catalog), which is the shape both sides agree on here; the resolved
@@ -2534,11 +2537,12 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_for_xrefs_inside_expanded_values() {
         // A cross-reference whose target or reference text crosses a
-        // *synthesized* run (an attribute expansion) is now recognized:
+        // *synthesized* run (an attribute expansion) is recognized:
         // nothing on a `Ref{Xref}` node is `Span`-typed — its target and text
         // come from the match string, which carries a synthesized run's bytes
         // exactly — so only the node's `location` takes
-        // design §4.4's coarse fallback. This is the same lift the anchor,
+        // the coarse fallback span used when a construct has no `Span`-typed
+        // field of its own. This is the same lift the anchor,
         // bare-e-mail, UI, and index-term families already made.
         let parser = expanding_parser();
 
@@ -2598,8 +2602,8 @@ mod tests {
     #[test]
     fn an_xref_inside_an_expanded_value_keeps_a_coarse_location() {
         // The values are exact; only the node's `location` (and its children's)
-        // falls back to the enclosing synthesized run's coarse span (design
-        // §4.4), since an expanded value's bytes have no `'src` counterpart of
+        // falls back to the enclosing synthesized run's coarse span,
+        // since an expanded value's bytes have no `'src` counterpart of
         // their own. A reference text recovered from such a run is necessarily
         // owned rather than borrowed.
         use crate::strings::CowStr;
@@ -2663,16 +2667,19 @@ mod tests {
 
     #[test]
     fn an_xref_target_may_be_attribute_expanded() {
-        // The point of this increment. `{cpp}` is `C&#43;&#43;`, and §3.4.1
-        // leaves an expanded value's `&` unescaped — so the target crosses two
+        // `{cpp}` is `C&#43;&#43;`, and an expanded attribute value's `&` is
+        // left unescaped, since the attributes step runs after
+        // `specialcharacters` — so the target crosses two
         // `Raw` leaves, which the match string stands in as placeholders.
         //
         // Those leaves are `RawOrigin::Substitution`: nothing extracted them
-        // and nothing restores them, so the string replacer's own haystack held
-        // exactly these bytes. Filling the placeholders in therefore reaches
-        // parity rather than departing from it — where a *masked* passthrough,
-        // which the replacer would not have restored yet, keeps its match
-        // deferred (`a_deferred_xref_target_over_a_passthrough_is_a_documented_divergence`).
+        // and nothing restores them, so these are exactly the bytes a
+        // rendered value holds. Filling the placeholders in therefore
+        // reproduces that value rather than departing from it — where a
+        // *masked* passthrough, not yet restored at this point, keeps its
+        // match deferred
+        // (`a_deferred_xref_target_over_a_passthrough_is_a_documented_divergence`).
+        //
         let renderer = HtmlInlineRenderer {};
 
         for fixture in [
@@ -2702,10 +2709,10 @@ mod tests {
     fn an_xref_over_a_rendered_span_in_an_expanded_value_is_still_deferred() {
         // Lifting the boundary admits a *synthesized* run, not an
         // [`atomic`](Piece::atomic) one: an expanded value whose own `<` became
-        // a `Raw` leaf (design §3.4.1 — the attributes step runs after
+        // a `Raw` leaf (the attributes step runs after
         // `specialcharacters`, so a literal special in a value is emitted
-        // unescaped) is opaque, so the shorthand around it still defers. The
-        // string pipeline leaves it literal too, for its own reason: its
+        // unescaped) is opaque, so the shorthand around it still defers.
+        // Asciidoctor leaves it literal too, for its own reason: its
         // `id.contains('<')` guard.
         use crate::parser::ModificationContext;
 
