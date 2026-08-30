@@ -2298,10 +2298,11 @@ mod tests {
         // Every tag-rendered variant keeps the bare placeholder where the
         // identity is missing — not because its rendering has no outer
         // characters (it has `<` and `>`), but because such a node may be the
-        // passthrough-extraction pass's own wrapper, which the string pipeline
-        // is still holding as a placeholder. A **transparent** span takes the
-        // same guard: `[width=10]++x ++` is a wrapper that renders its body and
-        // nothing else. See [`styled_sibling_boundaries`]'s own scope note.
+        // passthrough-extraction pass's own wrapper, which is standing in as
+        // a placeholder rather than as markup. A **transparent** span takes
+        // the same guard: `[width=10]++x ++` is a wrapper that renders its
+        // body and nothing else. See [`styled_sibling_boundaries`]'s own
+        // scope note.
         for variant in [
             StyleVariant::Strong,
             StyleVariant::Emphasis,
@@ -2319,8 +2320,8 @@ mod tests {
 
         // And a node the identity *names* keeps it too, which is the whole
         // point of carrying the identity: `[quotes]++text++` renders a
-        // `<span class="quotes">`, but the string pipeline is holding it as
-        // its own `\u{96}…\u{97}` sentinel for every step this module runs.
+        // `<span class="quotes">`, but this wrapper stands in as its own
+        // placeholder for every step this module runs.
         let wrapper = span(StyleVariant::Code);
         let identity = (
             wrapper.location.byte_offset(),
@@ -2517,7 +2518,7 @@ mod tests {
         );
 
         // With the identity in hand it presents the `>` its own `<strong>`
-        // ends in, exactly as the string pipeline's flat haystack does.
+        // ends in, exactly as a whole-content match would see there.
         assert_eq!(
             LevelContext::child_contexts(
                 &[styled(StyleVariant::Strong), styled(StyleVariant::Unquoted)],
@@ -2533,9 +2534,9 @@ mod tests {
             ]
         );
 
-        // And a node that identity *names* is an extraction-pass wrapper the
-        // string pipeline is still holding as a placeholder, so it goes back to
-        // contributing the bare one.
+        // And a node that identity *names* is an extraction-pass wrapper that
+        // still stands in as a placeholder rather than as rendered markup, so
+        // it goes back to contributing the bare one.
         assert_eq!(
             LevelContext::child_contexts(
                 &[styled(StyleVariant::Strong), styled(StyleVariant::Unquoted)],
@@ -2547,8 +2548,8 @@ mod tests {
 
         // A **transparent** span presents no markup either, but it does
         // present its own *body*: the second span here reads the space the
-        // first one's body ends with, which is what the string pipeline's flat
-        // haystack holds between the two.
+        // first one's body ends with, which is what a whole-content match
+        // would read between the two.
         fn transparent(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
             InlineNode::Styled(Styled {
                 variant: StyleVariant::Unquoted,
@@ -2600,11 +2601,11 @@ mod tests {
     #[test]
     fn a_sub_inside_a_span_reads_that_spans_own_boundary_characters() {
         // The nesting cases the enclosing span's rendering decides, each
-        // pinned against the string pipeline's own flat haystack.
+        // pinned against the frozen golden recording (see `golden_quotes`).
         for source in [
             // The shape that named this: the double-quote sub runs *before*
-            // the monospace one, so by the time monospace matches, the string
-            // pipeline's haystack holds `&#8220;` — whose `;` its boundary
+            // the monospace one, so by the time monospace matches, the
+            // enclosing rendering holds `&#8220;` — whose `;` its boundary
             // class excludes — where the level alone would show `^`.
             r#""``end points``""#,
             r#""`_e_`""#,
@@ -2636,7 +2637,7 @@ mod tests {
                     &build_through_quotes(Span::new(source)),
                     &HtmlInlineRenderer {}
                 ),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the golden recording for {source:?}"
             );
         }
     }
@@ -2645,7 +2646,7 @@ mod tests {
     fn a_sub_beside_a_span_reads_that_spans_own_sibling_boundary_characters() {
         // The mirror image of the fixtures above, one level out: a construct
         // written *beside* an entity-rendered span reads the last character of
-        // that span's own closing markup in the string pipeline's haystack
+        // that span's own closing markup
         // (`&#8221;`, whose `;` the monospace sub's boundary class excludes),
         // where [`build_match_string`] used to stand the whole span in as one
         // [`SPAN_PLACEHOLDER`] — a private-use codepoint that belongs to no
@@ -2691,7 +2692,7 @@ mod tests {
                     &build_through_quotes(Span::new(source)),
                     &HtmlInlineRenderer {}
                 ),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the golden recording for {source:?}"
             );
         }
     }
@@ -2746,7 +2747,7 @@ mod tests {
                     &build_through_quotes(Span::new(source)),
                     &HtmlInlineRenderer {}
                 ),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the golden recording for {source:?}"
             );
         }
     }
@@ -2778,7 +2779,7 @@ mod tests {
             "expected the documented divergence to still reproduce"
         );
 
-        // The string pipeline's haystack is `xd #c#`, all of it one flat
+        // A whole-content match sees `xd #c#`, all of it one flat
         // string, so the sub wraps `c`; the tree holds `d #c` inside the span
         // and the closing `#` beside it, and leaves both literal.
         assert_eq!(golden_quotes(source), "xd <mark>c</mark>");
@@ -2789,10 +2790,10 @@ mod tests {
     fn a_sub_beside_a_masked_passthrough_wrapper_keeps_the_bare_placeholder() {
         // The one tag-rendered span that presents *no* markup to a sibling.
         // The passthrough-extraction pass builds a [`Styled`] wrapper of its
-        // own for an attribute-list-prefixed passthrough, which the string
-        // pipeline is holding as its `\u{96}…\u{97}` sentinel rather than as
-        // markup for every step this module runs — so a sibling reads that
-        // sentinel, which is exactly what the bare placeholder reads as. The
+        // own for an attribute-list-prefixed passthrough, standing in as its
+        // own placeholder rather than as markup for every step this module
+        // runs — so a sibling reads that placeholder, which is exactly what
+        // the bare placeholder reads as. The
         // identity `masked` carries is what tells one from a genuinely
         // rendered span of the identical shape.
         //
@@ -2834,8 +2835,8 @@ mod tests {
         assert_eq!(pieces.len(), 1);
         assert_eq!(pieces[0].s_start, 0);
 
-        // The same node, *not* named by the identity, is a span the string
-        // pipeline has really rendered — and presents the two characters its
+        // The same node, *not* named by the identity, is a span that really
+        // has been rendered — and presents the two characters its
         // `<span class="x">…</span>` puts beside its siblings.
         let (s, pieces) = build_match_string(&[InlineNode::Styled(styled)], Masked::known(&[]));
 
@@ -2897,8 +2898,8 @@ mod tests {
         assert_eq!(pieces[0].s_start, 0);
 
         // And a node the identity *names* is such a wrapper — `[width=10]++x
-        // ++` renders its body and nothing else too, and the string
-        // pipeline is holding its `\u{96}…\u{97}` sentinel there, which
+        // ++` renders its body and nothing else too, and it stands in
+        // as its own placeholder there, which
         // is exactly what a bare placeholder reads as.
         let wrapper = styled(body());
 
@@ -3025,7 +3026,7 @@ mod tests {
     fn a_real_documents_sibling_span_tree_folds_to_its_rendered_string() {
         // End-to-end, through the real parse path, on the shape one level out
         // from the test above: a construct written *beside* an entity-rendered
-        // span, whose `&#8221;` the string pipeline reads a `;` from where the
+        // span, whose rendering supplies a `;` from `&#8221;` where the
         // tree holds one placeholder.
         use crate::{
             Parser,
@@ -3073,9 +3074,8 @@ mod tests {
         // End-to-end, through the real parse path, on the **tag**-rendered half
         // of the shape above — the one the extraction pass's identity had to
         // reach recognition for. A URL written against a closing tag's own `>`
-        // links in both pipelines; one written against the pass's own wrapper,
-        // which the string pipeline is still holding as a sentinel, stays
-        // literal in both.
+        // links; one written against the pass's own wrapper, which still
+        // stands in as its own placeholder, stays literal.
         use crate::{
             Parser,
             blocks::{FindBlocks, IsBlock},
@@ -3120,8 +3120,8 @@ mod tests {
     #[test]
     fn replacement_entity_matches_the_built_in_renderer() {
         // The table `build_match_string` reads is the built-in backend's own
-        // rendering of each replacement — the bytes the string pipeline's
-        // haystack holds from the replacements step onward — so the two cannot
+        // rendering of each replacement — the bytes this position holds
+        // from the replacements step onward — so the two cannot
         // be allowed to drift. Every value the classifier recognizes is
         // checked against the renderer that produces it, and a value no rule
         // produces has no entity at all (`build_match_string` stands such a
@@ -3158,8 +3158,8 @@ mod tests {
         assert!(super::replacement_entity("not a replacement").is_none());
     }
 
-    /// The string pipeline's output through the **quotes** step for `source`,
-    /// used as the golden oracle: `Content::from` then `SpecialCharacters` then
+    /// The frozen golden recording through the **quotes** step for `source`,
+    /// used as the oracle: `Content::from` then `SpecialCharacters` then
     /// `Quotes`, exactly the order [`build`] runs them.
     fn golden_quotes(source: &str) -> String {
         crate::content::inline_builder::snapshot::recorded("quotes", source)
@@ -3168,9 +3168,9 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_quotes() {
         // For each fixture, folding the single-pass tree (special characters +
-        // quotes) reproduces the string pipeline's output byte-for-byte. This
-        // is the differential corpus (design §5.3) that pins the quotes
-        // increment.
+        // quotes) reproduces the golden recording's output byte-for-byte. This
+        // is the differential corpus that pins the quotes
+        // step.
         let fixtures = [
             // No quotes.
             "plain text",
@@ -3225,10 +3225,9 @@ mod tests {
             "['quoted role']#x#",
             "[.role1.role2]#x#",
             // An attribute list carrying a special character. The escaping
-            // step runs *before* this one, so the string pipeline parses the
+            // step runs *before* this one, so `quote_attributes` parses the
             // already-escaped text and renders the entity straight into the
-            // `class`/`id` attribute; `quote_attributes` parses the same
-            // match-string bytes, in every spelling an attribute list has.
+            // `class`/`id` attribute, in every spelling an attribute list has.
             "[.a<b]*bold*",
             "[#a&b]#x#",
             "[a<b]#x#",
@@ -3288,7 +3287,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_quotes(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the golden recording for {fixture:?}"
             );
         }
     }
@@ -3435,7 +3434,7 @@ mod tests {
         // A boundary inside a `CharRef` leaf cuts it, because either half of
         // its match-string bytes is what that half's own fold emits. The three
         // leaves are cut alike; each half keeps the leaf's whole location
-        // (design §4.4), and the two concatenate back to the entity.
+        // (its coarse fallback), and the two concatenate back to the entity.
         let source = Span::new("&(C)\u{a9}");
 
         let nodes = vec![

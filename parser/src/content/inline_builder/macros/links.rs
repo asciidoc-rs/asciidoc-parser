@@ -4784,8 +4784,9 @@ mod tests {
         // character-replacements step turns into `CharRef::Replacement`
         // leaves) is admitted for the same reason the two other `CharRef`
         // leaves are: its match-string bytes — the entity the built-in backend
-        // renders it as (`&#169;`, `&#8217;`) — are the string pipeline's own
-        // haystack bytes there, and the fold routes the leaf back through the
+        // renders it as (`&#169;`, `&#8217;`) — are the same bytes the match
+        // string always carries there, and the fold routes the leaf back
+        // through the
         // renderer to those same bytes. A display text carrying one keeps it
         // as its own child rather than baking the entity into a `Text` the
         // fold would escape.
@@ -4801,8 +4802,8 @@ mod tests {
             "link:a(C)b.html[Text]",
             "https://example.org/?a=(C)b",
             // A bare e-mail address abutting one — the `;` a replacement's
-            // entity ends in is no mismatch character, so the string pipeline
-            // links the address that follows it, and now so does the tree.
+            // entity ends in is no mismatch character, so the address that
+            // follows it is linked.
             "a(C)b@example.com",
             // A target crossing a replacement, an escaped special, and a
             // restored entity at once.
@@ -4904,7 +4905,8 @@ mod tests {
         // `CharRef::Entity` leaf — which the fold emits verbatim — where one
         // `Text` holding the whole value would escape its `&` a second time.
         // Every part of the value shares the bracketed text's coarse span
-        // (design §4.4): a parsed value has no `'src` slice of its own.
+        // (the coarse whole-content-span fallback): a parsed value has no
+        // `'src` slice of its own.
         let source = "https://example.org[a &copy; b,role=hl]";
         let nodes = build_src(Span::new(source));
 
@@ -4962,8 +4964,8 @@ mod tests {
         let attrs = &reference.attrs;
         assert_eq!(attrs.roles().into_iter().next(), Some("hl"));
 
-        // The parsed positional value is the *escaped* text the string
-        // replacer's own attrlist carries, and the list's location tag is the
+        // The parsed positional value is the *escaped* text, and the
+        // list's location tag is the
         // bracketed text as written.
         assert_eq!(attrs.nth_attribute(1).unwrap().value(), "a &lt; b");
         assert_eq!(attrs.span().data(), "a < b,role=hl");
@@ -4979,8 +4981,8 @@ mod tests {
         // A formal URL text carrying an `=` splits into an attribute list
         // (here a role): the first positional attribute becomes the display
         // text, and the parsed `Attrlist<'src>` rides on the node's own
-        // `attrs` field, so the fold reproduces the role exactly as the
-        // string replacer does.
+        // `attrs` field, so the fold reproduces the role Asciidoctor's own
+        // rendering does.
         let source = "https://example.org[Example,role=hl]";
         let nodes = build_src(Span::new(source));
 
@@ -5021,11 +5023,11 @@ mod tests {
         // macro whose bracketed display text crosses an **opaque** piece — a
         // rendered span, an already-recognized macro node of another family, a
         // masked passthrough. The text is carried structurally (each opaque
-        // piece's own node becomes a child), so the fold re-renders exactly the
-        // markup the string replacer captured in its own text.
+        // piece's own node becomes a child), so the fold reproduces that
+        // markup exactly.
         let fixtures = [
-            // (A masked passthrough is opaque here too — and in the string
-            // pipeline, which restores passthroughs only after every step — but
+            // (A masked passthrough is opaque here too — since it restores
+            // only after every substitution step has run — but
             // this oracle runs the steps directly, without the extraction the
             // real `SubstitutionGroup::apply` performs around them, so those
             // fixtures live in the whole-pipeline sweep instead; see
@@ -5195,9 +5197,8 @@ mod tests {
     fn a_span_in_a_rendered_attribute_keeps_its_markup() {
         // The boundary this family used to draw per **slot**, now gone. A
         // rendered piece's body is the build-time fold with the parser's own
-        // renderer — the very bytes the string replacer reads out of its own
-        // already-rendered haystack — so a slot `render_link` writes out
-        // reproduces the string pipeline's answer rather than deferring the
+        // renderer, so a slot `render_link` writes out carries the same
+        // markup Asciidoctor's own rendering does, rather than deferring the
         // whole macro to literal text. This is the image family's own bracket
         // rule (`bracket_attrlist`), which the three `Attrlist`-bearing
         // families now share.
@@ -5242,11 +5243,11 @@ mod tests {
     fn a_rendered_slot_cannot_break_out_of_its_attribute() {
         // What makes carrying fold-time markup into a slot safe: the value is
         // escaped for the `"` delimiter where it lands, so a span whose own
-        // markup carries a quote cannot close the attribute it sits in. The
-        // string pipeline reaches the same bytes here because it renders from
-        // the same values; what it cannot make inert is a *passthrough*, whose
-        // body it splices into the finished string after every escape has run
-        // (asciidoctor#2661) — the deliberate divergence its own test pins.
+        // markup carries a quote cannot close the attribute it sits in. A
+        // *passthrough* is different: its body is spliced into the finished
+        // string after every escape has run
+        // (asciidoctor#2661), so it cannot be made inert the same way — the
+        // deliberate divergence its own test pins.
         for (source, expected) in [
             (
                 r#"link:index.html[x,title=[.r"z]#b#]"#,
@@ -5266,8 +5267,8 @@ mod tests {
 
     #[test]
     fn a_span_whose_markup_splits_the_attribute_list_is_the_trees_to_read() {
-        // The link family's half of the deferral divergence (design §5.2's
-        // step 6) — the same decision the xref family's own test records, for
+        // The link family's half of the deferral divergence — the same
+        // decision the xref family's own test records, for
         // the same reason and by the same mechanism.
         //
         // A span whose markup carries a character the split reads used to make
@@ -5309,26 +5310,30 @@ mod tests {
     #[test]
     fn a_span_whose_markup_perturbs_the_string_pipeline_is_a_documented_divergence() {
         // What the structural recovery cannot do is make the *recognition*
-        // agree in every case: the string replacer matches over the span's
-        // markup where this matches over the one placeholder standing in for
-        // it, so the two read the same extent only while that markup carries
-        // no character the pattern (or the replacer's own attribute-list
-        // probe) is sensitive to. These are the three shapes where it does —
-        // and in each the string pipeline's reading is the markup-perturbed
-        // one (a truncated text, a text the attribute-list parse cut in half)
-        // and the tree's the well-formed one, exactly as the quotes step's own
+        // agree with matching over the span's rendered markup in every case:
+        // this matches over the one placeholder standing in for
+        // it, so the two extents coincide only while that markup carries
+        // no character the pattern (or an attribute-list probe reading it)
+        // is sensitive to. These are the three shapes where it does —
+        // and in each matching the rendered markup gives the perturbed
+        // reading (a truncated text, a text the attribute-list parse cut in
+        // half)
+        // and the tree's is the well-formed one, exactly as the quotes step's own
         // crossed-delimiter divergence is.
         for source in [
-            // A `]` inside the span ends `INLINE_LINK_MACRO`'s own lazy text
-            // capture early for the string replacer, but not here.
+            // A `]` inside the span would end `INLINE_LINK_MACRO`'s own lazy
+            // text capture early if matched over the rendered markup, but
+            // not here.
             "link:index.html[a *b ] c* d]",
             // Markup carrying an `=` (an attributed span) *and* a comma
-            // elsewhere in the text: the string replacer's attribute-list
-            // probe fires on the markup's own `=`, and the parse then splits
+            // elsewhere in the text: an attribute-list
+            // probe reading the rendered markup fires on its own `=`, and
+            // the parse then splits
             // the text at that comma, keeping only what precedes it.
             "link:index.html[one, [.hl]#two#]",
             // The `mailto:` spelling's own probe is a `,`, so a comma the span
-            // itself carries sends the string replacer down the subject branch
+            // itself carries sends a markup-based match down the subject
+            // branch
             // where this one stays plain.
             "mailto:a@example.org[a *b, c* d]",
         ] {
@@ -5354,8 +5359,8 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_bare_emails() {
         // For each fixture, folding the single-pass tree (all five steps)
-        // reproduces the string pipeline's output byte-for-byte. This is the
-        // differential corpus (design §5.3) that pins the bare e-mail
+        // reproduces the frozen golden recording byte-for-byte. This is the
+        // differential corpus that pins the bare e-mail
         // increment: the address forms the pattern claims, the prefixes it
         // treats as mismatches, and the escape.
         let fixtures = [
@@ -5482,8 +5487,7 @@ mod tests {
     #[test]
     fn an_escaped_email_stays_literal() {
         // `\doc@example.com` drops the single backslash and leaves the address
-        // as literal text — no link node — mirroring the string replacer's
-        // `caps[0][1..]`.
+        // as literal text — no link node.
         let source = "\\doc@example.com";
         let nodes = build_src(Span::new(source));
 
@@ -5502,10 +5506,10 @@ mod tests {
     #[test]
     fn a_mailto_macro_target_is_not_re_recognized_as_a_bare_email() {
         // The e-mail pass runs *after* the `link:`/`mailto:` macro pass, so by
-        // then the macro is one opaque node here (already-rendered `<a …>`
-        // markup in the string pipeline, whose `mailto:` prefix the pattern's
-        // own `:` mismatch group rejects). Either way exactly one link node
-        // results, and it is the macro's.
+        // then the macro is already a `Ref` node here — one opaque
+        // placeholder in the match string, whose `mailto:` prefix the
+        // pattern's own `:` mismatch group rejects anyway. Exactly one link
+        // node results, and it is the macro's.
         let source = "mailto:hello@example.org[Email us]";
         let nodes = build_src(Span::new(source));
 
@@ -5546,8 +5550,7 @@ mod tests {
     fn an_email_inside_an_expanded_attribute_value_is_recognized() {
         // An address whose bytes come from a *synthesized* run (an attribute
         // reference's resolved value) — recovered exactly by `text_slice`,
-        // since an e-mail node carries only plain text (design §3.4.1's "a
-        // macro inside an expanded value" boundary). The two URL-link passes
+        // since an e-mail node carries only plain text. The two URL-link passes
         // now make the same lift for their own targets and display texts —
         // an attribute-list-bearing one included, since `text_attrlist` parses
         // a text with no `'src` slice from the level's match string and owns
@@ -5578,20 +5581,21 @@ mod tests {
         assert_eq!(link_text_of(reference), "doc@example.com");
 
         // The address has no honest `'src` slice of its own, so its location
-        // falls back to the enclosing synthesized run's coarse span (design
-        // §4.4) while its text stays exact.
+        // falls back to the enclosing synthesized run's coarse span (the
+        // coarse whole-content-span fallback) while its text stays exact.
         assert_eq!(reference.location.data(), "{contact}");
     }
 
     #[test]
     fn an_email_abutting_a_rendered_construct_stays_literal() {
         // The mismatch-prefix group reads the character immediately before the
-        // address. The string pipeline reads it out of already-rendered markup
-        // — `</strong>`, `</a>`, and `<img …>` all end in `>`, a mismatch
-        // character — and so leaves the address literal. The tree stands the
+        // address. Matching over already-rendered markup would read
+        // `</strong>`, `</a>`, and `<img …>` — all ending in `>`, a mismatch
+        // character — and so would leave the address literal. The tree stands
+        // the
         // construct in as one opaque placeholder, which belongs to no mismatch
         // class, so `find_email_matches` defers explicitly instead of building
-        // a link the string pipeline does not: parity, not a divergence, for
+        // a link a markup-based reading would not: parity, not a divergence, for
         // every construct whose rendering ends in one of `\`, `>`, `:`, `/`.
         for source in [
             "**bold**doc@example.com",
@@ -5621,10 +5625,11 @@ mod tests {
     #[test]
     fn an_email_abutting_a_construct_that_hides_its_boundary_is_a_documented_divergence() {
         // What the unconditional deferral above costs, pinned exactly. In each
-        // of these the string pipeline's mismatch-prefix group does *not* see a
-        // mismatch character before the address, so it links it — a concealed
-        // index term renders to nothing, and a passthrough or STEM expression
-        // is still masked by its own sentinel when the macros step runs (it is
+        // of these, matching over the rendered markup would find *no*
+        // mismatch character before the address and so would link it — a
+        // concealed index term renders to nothing, and a passthrough or STEM
+        // expression is still masked behind its own placeholder when the
+        // macros step runs (it is
         // restored afterwards), so neither presents rendered markup there. The
         // tree cannot tell those apart from a construct that *did* render
         // markup without folding the preceding node while building, so all of
@@ -5666,15 +5671,17 @@ mod tests {
         // The mirror image of the boundary above, in the sibling auto-link
         // family, which predates the e-mail pass: `INLINE_LINK`'s own
         // boundary-prefix group *requires* one of `^`, a blank, or
-        // `[>()\[\];"\']`. The string pipeline reads `</strong>`'s own `>`
-        // there and builds a link, where the bare placeholder standing in for
+        // `[>()\[\];"\']`. Matching over the rendered markup would read
+        // `</strong>`'s own `>`
+        // there and build a link, where the bare placeholder standing in for
         // the span belongs to no such class — so this is the one boundary a
         // `>` and a placeholder read *differently*, and the reason the identity
         // that tells a rendered span from an extraction-pass wrapper has to
         // reach recognition at all.
         for source in [
-            // A bare URL against each tag-rendered variant's closing edge. The
-            // string pipeline reads the `>` that ends the tag and links; so
+            // A bare URL against each tag-rendered variant's closing edge.
+            // Matching over the rendered markup would read the `>` that ends
+            // the tag and link; so
             // does the tree, now that the placeholder carries it.
             "**bold**https://example.org",
             "__em__https://example.org",
@@ -5693,22 +5700,23 @@ mod tests {
             // One character further out, where a space intervenes and both
             // pipelines match on the space itself.
             "**bold** https://example.org",
-            // And with no span at all, where the level's own start anchor is
-            // what the string pipeline presents too.
+            // And with no span at all, where the level's own start anchor
+            // satisfies the same requirement.
             "https://example.org",
             "see https://example.org now",
             // The reverse direction: a span written against a bare URL's own
             // tail. The `<` that opens the tag is what ends the URL body
-            // (`[^\s\[\]<]*` excludes it) in the string pipeline, and now
-            // here as well.
+            // (`[^\s\[\]<]*` excludes it), matching over the rendered markup
+            // or over the tree alike.
             "https://example.org**bold**",
             "https://example.org\"`q`\"",
             // A formal-URL link's own boundary-prefix group is the same one.
             "**bold**https://example.org[Site]",
             // A **transparent** span read *as* a sibling: rendering to its
-            // body and nothing else, what it presents is that body — so the
-            // string pipeline's flat haystack holds the space `x ` ends with
-            // where the tree stood one placeholder, and both link.
+            // body and nothing else, what it presents is that body — so
+            // matching over the rendered markup would find the space `x `
+            // ends with, where the tree stands one placeholder in its place,
+            // and both link.
             "[width=10]##x ##https://example.org",
             "*[width=10]##x ##https://example.org*",
             "x [width=10]##y ##https://example.org",
@@ -5761,8 +5769,8 @@ mod tests {
     fn an_auto_link_abutting_a_passthrough_wrapper_stays_literal() {
         // The half the identity exists to protect. An attribute-list-prefixed
         // passthrough builds a [`Styled`](crate::inlines::Styled) wrapper that
-        // renders `<span class="quotes">…</span>` — but the string pipeline is
-        // holding it as its own `\u{96}…\u{97}` sentinel for every step this
+        // renders `<span class="quotes">…</span>` — but it is masked behind
+        // its own placeholder for every step this
         // module runs, so the boundary-prefix group sees no `>` and the URL
         // stays literal. Classifying it by its *rendering* would have made this
         // the increment's own new divergence.
@@ -5791,8 +5799,8 @@ mod tests {
         // nested `Normal` build — so a wrapper *that* build extracts is
         // invisible to this content's list. Consulting the list there would
         // find no entry and call the wrapper a rendered span, handing the URL
-        // beside it a `>` the string pipeline never presents (it is holding
-        // the wrapper as its own `\u{96}…\u{97}` sentinel, exactly as at the
+        // beside it a `>` that is never actually there (the
+        // wrapper is masked behind its own placeholder, exactly as at the
         // top level).
         //
         // Nothing consults it, because no family descends into a wrapper at
@@ -5822,8 +5830,8 @@ mod tests {
     fn a_url_in_a_nested_builds_body_is_linked_once() {
         // The same body, one step on: what the nested build *does* recognize
         // it recognizes with its own identity in hand, so a URL written
-        // against a tag-rendered span there links exactly as the string
-        // pipeline links it — and links **once**, since the outer step does
+        // against a tag-rendered span there links, matching Asciidoctor's
+        // own behavior — and links **once**, since the outer step does
         // not descend to match over the result a second time.
         use super::super::super::test_support::golden_passthroughs;
 
@@ -5841,13 +5849,15 @@ mod tests {
     #[test]
     fn an_address_at_a_spans_own_edge_reads_that_spans_boundary_characters() {
         // The mismatch-prefix group reads the character immediately before the
-        // address, and inside a span the string pipeline reads that span's own
-        // *rendered* markup there: `<strong>` ends in `>`, one of the group's
+        // address, and inside a span, matching over that span's own
+        // *rendered* markup would read: `<strong>` ends in `>`, one of the
+        // group's
         // three mismatch characters, so `*doc@example.org*` keeps the address
         // literal where a level matched in isolation sees a start anchor and
         // links it. The macros step takes the same
         // [`LevelContext`](super::super::quotes::LevelContext) the quotes and
-        // character-replacements steps do, so the two pipelines agree again.
+        // character-replacements steps do, so recognition agrees with the
+        // rendered-markup reading again.
         for source in [
             // Against a span's opening edge, in each variant's own rendering
             // shape. Every tag-rendered variant ends its opening markup in `>`
@@ -5898,8 +5908,9 @@ mod tests {
             // boundary-prefix group.
             "*x [width=10]#https://example.org#*",
             // A **tag-rendered** span beside the transparent one presents the
-            // `>` its own closing markup ends in, which the string pipeline
-            // reads there too — a mismatch character for the e-mail family and
+            // `>` its own closing markup ends in, which matching over the
+            // rendered markup would read there too — a mismatch character
+            // for the e-mail family and
             // an accepted prefix for the auto-link one.
             "*x*[width=10]#doc@example.org#",
             "*x*[width=10]#https://example.org#",

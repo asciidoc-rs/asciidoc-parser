@@ -1232,8 +1232,8 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_macros() {
         // For each fixture, folding the single-pass tree (all five steps)
-        // reproduces the string pipeline's output byte-for-byte. This is the
-        // differential corpus (design §5.3) that pins the image/icon increment.
+        // reproduces the frozen golden output byte-for-byte. This is the
+        // differential corpus that pins the image/icon increment.
         let fixtures = [
             // No macro despite macro-ish characters.
             "plain text",
@@ -1292,7 +1292,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -1331,7 +1331,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros_in("macros_imagesdir", fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -1468,7 +1468,7 @@ mod tests {
 
     #[test]
     fn fold_matches_the_string_pipeline_for_a_target_crossing_an_escaped_special() {
-        // The string pipeline matches macros over *escaped* text, so a target
+        // Macros are matched over *escaped* text, so a target
         // containing `&` is matched as `a&amp;b.png`. Those entity bytes are
         // exactly what this level's match string carries, so the node's target
         // is read off it and the fold reproduces the same `src`/default alt —
@@ -1513,14 +1513,14 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
 
     #[test]
     fn a_target_crossing_an_escaped_special_carries_the_entity_bytes() {
-        // The node's `target` is the string replacer's own `caps[1]` — the
+        // The node's `target` is exactly `caps[1]` — the
         // escaped haystack's bytes, not the source's single `&` — which is
         // also what `apply_image_side_effects` registers. The default alt
         // derives from that same string, exactly as `default_alt` does.
@@ -1545,9 +1545,9 @@ mod tests {
     fn fold_matches_the_string_pipeline_for_an_attribute_list_crossing_an_escaped_special() {
         // The bracket has no `'src` slice here — the source holds one
         // character where the match string holds an entity — so it is parsed
-        // from the match string, which is the very `caps[2]` the string
-        // replacer parses out of its own escaped haystack, and owned off that
-        // temporary. Every attribute the two read is therefore the same.
+        // from the match string, which is the very `caps[2]` parsed out of
+        // its own escaped haystack, and owned off that
+        // temporary.
         let fixtures = [
             // A special in a positional alt, in a named value, and in both a
             // named value and the target at once.
@@ -1580,18 +1580,18 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
 
     #[test]
     fn an_attribute_list_crossing_an_escaped_special_is_owned_and_coarsely_located() {
-        // The parsed values are the *escaped* ones the string replacer reads
+        // The parsed values are the *escaped* ones
         // (`a &lt; b`, not `a < b`), they own their bytes rather than
         // borrowing from the temporary they were parsed from, and the list's
-        // own span falls back to the bracket's coarse source range (design
-        // §4.4) — the same split the node's `location` already takes for a
+        // own span falls back to the bracket's coarse source range — the
+        // same split the node's `location` already takes for a
         // synthesized run.
         let source = "image:x.png[a < b,role=hl]";
         let nodes = build_src(Span::new(source));
@@ -1621,7 +1621,7 @@ mod tests {
         // An author-written entity (`&amp;copy;`, `&amp;#8217;`) is escaped by
         // `SpecialCharacters` and then *restored* by `CharacterReplacements`
         // into a `CharRef::Entity` leaf whose value is the entity itself. Those
-        // bytes are what the string pipeline's own haystack carries from the
+        // bytes are what the match string carries from the
         // replacements step onward, and what the fold emits verbatim, so
         // `range_has_no_opaque_piece` admits the leaf exactly as it admits an
         // escaped special.
@@ -1659,7 +1659,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -1690,8 +1690,8 @@ mod tests {
     fn fold_matches_the_string_pipeline_for_an_attribute_list_crossing_a_restored_entity() {
         // A restored entity takes the same lift as an escaped special, for the
         // same reason: the source holds `&amp;copy;` where the match string
-        // holds `&copy;`, so the bracket has no `'src` slice — and the match
-        // string's bytes are the ones the string replacer parses.
+        // holds `&copy;`, so the bracket has no `'src` slice — and it is
+        // parsed from the match string's own bytes.
         let fixtures = [
             "image:x.png[Tom &amp; Jerry]",
             "image:x.png[alt=a &copy; b]",
@@ -1718,7 +1718,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -1728,10 +1728,10 @@ mod tests {
         // A typographic replacement (`(C)`, `(R)`, `'`, `...`) is the third
         // recoverable piece, admitted for the same reason the two `CharRef`
         // entity leaves are: `build_match_string` gives it the entity the
-        // built-in backend renders it as, which is what the string pipeline's
-        // own haystack carries from the replacements step onward — so both the
-        // target read off that string and the bracket parsed from it are the
-        // string replacer's own bytes.
+        // built-in backend renders it as, and that is what the match string
+        // carries from the replacements step onward — so both the
+        // target read off that string and the bracket parsed from it carry
+        // those same bytes.
         let fixtures = [
             // A target crossing one, alone and beside an attribute list.
             "image:a(C)b.png[]",
@@ -1769,7 +1769,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -1778,9 +1778,9 @@ mod tests {
     fn an_attribute_list_crossing_a_character_replacement_reads_the_rendered_entity() {
         // The structural companion: the bracket has no `'src` slice (the
         // source holds `(C)` where the match string holds `&#169;`), so it is
-        // parsed from the match string and owned onto design §4.4's coarse
-        // span — carrying the already-substituted value the string replacer
-        // parses, entity and all.
+        // parsed from the match string and owned onto the bracket's coarse
+        // span — carrying the already-substituted value,
+        // entity and all.
         let source = "image:x.png[title=Pause (C) Resume]";
         let nodes = build_src(Span::new(source));
 
@@ -1830,7 +1830,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from golden for {source:?}"
             );
         }
     }
@@ -1863,26 +1863,26 @@ mod tests {
             "a target crossing a rendered span must be left unrecognized: {nodes:?}"
         );
 
-        // The string pipeline, by contrast, *does* build an image here.
+        // The frozen golden recording, by contrast, *does* build an image here.
         assert!(golden_macros(source).contains("<img"));
     }
 
     #[test]
     fn fold_matches_the_string_pipeline_for_an_image_target_over_a_passthrough() {
         // The differential corpus for an `image:`/`icon:` target crossing a
-        // masked **passthrough** — the string pipeline swallows the
-        // `\u{96}`*n*`\u{97}` sentinel into the target (the widened match
-        // string carries the same bytes, see [`widen_masked_pieces`])
-        // and the restore pass then splices the extracted body over every
-        // sentinel in the rendered string, so the tree's computed target
-        // substitutes the `Raw` node's value for its placeholder the same
-        // way, and the `default_alt` *arithmetic* runs over the masked bytes
+        // masked **passthrough** — the widened match string carries the
+        // `\u{96}`*n*`\u{97}` placeholder into the target (see
+        // [`widen_masked_pieces`]), and the restore then splices the
+        // extracted body over every placeholder in the computed value, so
+        // the tree's computed target
+        // substitutes the `Raw` node's value for its placeholder, and the
+        // `default_alt` *arithmetic* runs over the masked bytes
         // first (see [`masked_default_alt`]).
         use super::super::super::test_support::golden_passthroughs;
 
         let fixtures = [
             // The double-plus idiom, bare-bracketed and with an alt — and the
-            // default-alt arithmetic over the sentinel: the underscores and
+            // default-alt arithmetic over the placeholder: the underscores and
             // the extension hide inside it, so the whole restored body is the
             // alt (`alt="a_b-c.jpg"`), where the verbatim spelling shows
             // `a b c`.
@@ -1905,8 +1905,7 @@ mod tests {
             "image:https://++example.org/x++.png[]",
             // `web_path`'s own `..` arithmetic consumes the masked segment,
             // so the token never reaches the resolved path and its body is
-            // dropped — in both pipelines (the string pipeline's restore
-            // cannot find the sentinel either).
+            // dropped, unrestored.
             "image:++dropped++/../kept.png[]",
             // The icon form, which derives its default alt the same way.
             "icon:++a_b++[]",
@@ -1928,7 +1927,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -1936,9 +1935,9 @@ mod tests {
     #[test]
     fn an_image_target_over_a_passthrough_is_recognized() {
         // The target is the restored bytes; the default alt is the masked
-        // derivation with the surviving sentinel restored — the whole body,
+        // derivation with the surviving placeholder restored — the whole body,
         // underscores, hyphens, and extension intact, since all of them hide
-        // from the arithmetic inside the sentinel.
+        // from the arithmetic inside the placeholder.
         let nodes = build_src(Span::new("image:++a_b-c.jpg++[]"));
 
         let image = assert_image(&nodes[0]);
@@ -1975,10 +1974,10 @@ mod tests {
         // The one place this increment chooses the safe reading over byte
         // parity, mirroring the link family's own passthrough increment: the
         // renderer's `link=self` dangerous-target check runs over the node's
-        // *restored* target, where the string pipeline's renderer checks the
-        // sentinel it matched — through which a smuggled `javascript:` target
-        // passes, the restore then completing a live link around the image in
-        // the golden output. The tree's fold rejects it instead (the image
+        // *restored* target, where the golden output's renderer instead
+        // checked the raw placeholder it matched — through which a smuggled
+        // `javascript:` target passed, completing a live link around the
+        // image. The tree's fold rejects it instead (the image
         // renders without the wrapping anchor), pinned here rather than by
         // the corpus above.
         use super::super::super::test_support::golden_passthroughs;
@@ -2009,13 +2008,13 @@ mod tests {
         // Formerly this module's own documented divergence: the fold-time
         // `web_path` used to run over the node's *restored* target, so a
         // space the passthrough smuggled past the target class was
-        // percent-encoded into the `src` where the string pipeline
-        // normalized its space-free sentinel and spliced the raw space in
+        // percent-encoded into the `src`, where the golden output kept its
+        // space-free placeholder and spliced the raw space in
         // afterwards. The masked-resolve order closed it — `render_image`
         // resolves the `src` with the node's
         // [`restored_target_ranges`](Image) masked
-        // to the same sentinel shape and splices the bodies back in, so the
-        // space never reaches `web_path` in either pipeline.
+        // to the same placeholder shape and splices the bodies back in, so the
+        // space never reaches `web_path`.
         use super::super::super::test_support::golden_passthroughs;
 
         let source = "image:pass:[My Documents/chart.png][]";
@@ -2039,11 +2038,10 @@ mod tests {
     fn fold_matches_the_string_pipeline_for_an_image_bracket_over_a_passthrough() {
         // The differential corpus for an `image:`/`icon:` **bracket**
         // crossing a masked passthrough. The bracket comes back from a
-        // *parse*, so the restore is the one the string pipeline performs:
-        // `Attrlist::parse` reads the `\u{96}`*n*`\u{97}` sentinel as one
-        // opaque run — carrying none of the `,`/`=`/`"` bytes the split
-        // reads — and the restore pass splices each body over whatever
-        // sentinel reached the rendered string. `tokened_bracket` puts the
+        // *parse*: `Attrlist::parse` reads the `\u{96}`*n*`\u{97}` placeholder
+        // as one opaque run — carrying none of the `,`/`=`/`"` bytes the
+        // split reads — and the restore then splices each body over whatever
+        // placeholder survived the parse. `tokened_bracket` puts the
         // match string into that same shape and
         // `Attrlist::into_owned_restoring` performs the after-the-split
         // half.
@@ -2056,7 +2054,7 @@ mod tests {
             "image:x.png[a ++b_c__d++ e]",
             "image:x.png[++a++ and ++b++]",
             // The split invariant: a `,` or an `=` inside the body must not
-            // divide the list, because the string pipeline's own parse never
+            // divide the list, because the parse never
             // sees it. These are the fixtures a restore-*then*-parse fails.
             "image:x.png[++a,b++]",
             "image:x.png[++a=b++]",
@@ -2068,7 +2066,7 @@ mod tests {
             "image:x.png[++a++,++200++]",
             // Shorthand: the `#id`/`.role` the scan finds sit *after* a
             // token, so their offsets have to shift with the restore while
-            // the items themselves stay the ones the string pipeline found.
+            // the items themselves stay the ones the parse found.
             "image:x.png[++abc++#myid]",
             "image:x.png[++abc++.myrole]",
             "image:x.png[++a b++.myrole#myid]",
@@ -2105,7 +2103,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -2114,7 +2112,7 @@ mod tests {
     fn an_image_bracket_over_a_passthrough_is_recognized() {
         // The parsed values carry the *restored* bytes, owned off the
         // temporary the parse read and tagged with the bracket's own coarse
-        // span (design §4.4), exactly as every other non-verbatim bracket is.
+        // span, exactly as every other non-verbatim bracket is.
         let source = "image:x.png[++Alt text++,++100++,50]";
         let nodes = build_src(Span::new(source));
 
@@ -2301,7 +2299,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -2431,7 +2429,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -2496,7 +2494,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs_with(fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -3024,7 +3022,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_normal(fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -3124,7 +3122,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_normal(fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }

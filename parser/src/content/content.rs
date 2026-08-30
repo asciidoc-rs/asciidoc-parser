@@ -986,8 +986,8 @@ impl<'src> Content<'src> {
     /// resolved state from `block_ordered` and `footnote_ordered`.
     ///
     /// Returns whether the **block-level** correlation ran — i.e. whether the
-    /// tree holds exactly the cross-reference nodes whose placeholders the
-    /// string pipeline left in the template. A `false` means the builder left
+    /// tree holds exactly the cross-reference nodes the carried title's own
+    /// template expects a slot for. A `false` means the builder left
     /// at least one of them unrecognized, so this content's tree is known not
     /// to describe its rendering; a caller that folds the tree instead of
     /// rebuilding from that template (see [`refold`](Self::refold)) uses this
@@ -1013,7 +1013,7 @@ impl<'src> Content<'src> {
         // documented set of divergent forms unrecognized (e.g. a display text
         // crossing a rendered span — see the `inline_builder` module), so the
         // tree can legitimately hold *fewer* cross-reference nodes than the
-        // string pipeline deferred. When the counts differ the positional
+        // template expects a slot for. When the counts differ the positional
         // pairing is unknowable; the mirror is skipped for that list — leaving
         // its nodes in their honest unresolved state — rather than assigning
         // destinations to the wrong nodes.
@@ -1129,9 +1129,9 @@ fn count_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
 
             InlineNode::Styled(styled) => count_tree_xrefs(&styled.children),
 
-            // A **visible index term** shows its text in the flow, so the
-            // string replacer's own haystack holds any cross-reference written
-            // inside it and defers a segment for one. It is the fifth nested
+            // A **visible index term** shows its text in the flow, so a
+            // cross-reference written inside it renders in place and defers a
+            // segment of its own. It is the fifth nested
             // node list a tree can hold a construct in (see the side-effect
             // sweep's own note), and the one a walk written by matching on
             // `children` is bound to miss.
@@ -1187,45 +1187,40 @@ fn tree_defers_xrefs(nodes: &[InlineNode<'_>]) -> bool {
 }
 
 /// Derives the **block-level** deferred cross-reference segments from an
-/// already-built inline tree — the list `run_pipeline`'s own
-/// `InlineXrefReplacer` produced and its `set_deferred_xrefs` installed,
-/// read off the nodes instead.
+/// already-built inline tree, read off the nodes.
 ///
-/// This is one of the six things design §5.2's survey found the string pipeline
-/// still solely owning — the first of them the survey called *blocked* rather
-/// than merely unbuilt. It is **wired**: [`Content::set_tree_xrefs`] installs
+/// [`Content::set_tree_xrefs`] installs
 /// what this returns, so what a content carries for its deferred
 /// cross-references is what its tree said.
 ///
 /// A [`Ref`](InlineNode::Ref)`{`[`Xref`](RefVariant::Xref)`}` node already
 /// carries every field an [`XrefSegment`] holds but one — `target`, `window`,
 /// `roles`, `xrefstyle` and `derived` are plain values the builder resolved at
-/// recognition time — so the survey recorded the family as blocked on
-/// [`provided_text`](XrefSegment::provided_text) alone, which the segment holds
+/// recognition time. Only
+/// [`provided_text`](XrefSegment::provided_text) needs deriving, which the segment holds
 /// as a **string** where the node holds its display text as *children*.
 ///
 /// That slot takes the **fold of those children**, and it is a different answer
-/// from the one the sibling increment gave `role=` / `window=` / `xrefstyle=`
+/// from the one given `role=` / `window=` / `xrefstyle=`
 /// (the author's untranslated source, see
 /// [`untranslated_value`](crate::content::inline_builder)) for a reason worth
 /// stating: a display text *is* markup by nature. `xref:sec[*bold*]` shows
-/// bold text, and the string replacer captures exactly
-/// `<strong>bold</strong>` out of its own already-rendered haystack — so the
-/// fold reproduces the byte string rather than approximating it, where a
-/// computed string slot had no such answer to match.
+/// bold text, and the fold of the node's own children reproduces exactly
+/// `<strong>bold</strong>` — the byte string a display text always renders as,
+/// rather than approximating it, where a computed string slot had no such
+/// answer to match.
 ///
 /// The fold runs **here**, at the end of the parse, with the renderer the parse
-/// carried — which is where the string replacer computes it too. Deriving it
+/// carried. Deriving it
 /// later, at resolution time, would read whatever renderer that caller passed
-/// and hand the resolver a different [`ResolutionContext`] than the string
-/// pipeline does; taking it at build time keeps the two byte-identical and
-/// keeps this function a pure function of the tree plus the parse's own
+/// and hand the resolver a different [`ResolutionContext`]; taking it at
+/// build time keeps this function a pure function of the tree plus the parse's own
 /// renderer.
 ///
 /// Present-but-empty is preserved, because it is a distinction the renderer
 /// acts on: the `<<id,>>` shorthand records one empty
-/// [`Text`](InlineNode::Text) child, which the string replacer carries as
-/// `Some("")` and renders as an empty `<a>…</a>`, where an absent text
+/// [`Text`](InlineNode::Text) child, folding to
+/// `Some("")` and rendering as an empty `<a>…</a>`, where an absent text
 /// (`None`) falls back to the target's reference text. So the `Option` keys on
 /// the **presence of a child**, not on what that child folds to — the same rule
 /// [`fold_xref`](crate::content::inline_builder) already applies, and the
