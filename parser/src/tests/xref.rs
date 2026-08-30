@@ -1355,10 +1355,10 @@ mod xrefs_in_titles {
 
     #[test]
     fn two_references_in_a_carried_title_resolve_in_order() {
-        // The carried title's placeholder template is synthesized from its own
+        // The carried title's deferred template is synthesized from its own
         // inline tree at the hop (see `Content::to_owned_title`), so the
-        // placeholder indices and the segment list are built in one walk and
-        // must line up: the first reference takes the first segment's
+        // template's `Xref` pieces and the segment list are built in one walk
+        // and must line up: the first reference takes the first segment's
         // destination, the second the second's.
         let doc = Parser::default()
             .parse(".See <<goal>> then <<par>>\n== Section\n\n[[par]]para\n\n[#goal]\n== Goal");
@@ -1409,8 +1409,8 @@ mod xrefs_in_titles {
         // A documented boundary of the tree-synthesized carried-title template
         // (see `carried_title_template`): the synthesis reads the tree's
         // top-level nodes, so a cross-reference *nested* inside another
-        // construct — here a styled span — folds with its enclosing node as
-        // template text rather than contributing a placeholder. It is baked as
+        // construct — here a styled span — folds with its enclosing node into
+        // a literal piece rather than contributing a splice. It is baked as
         // its unresolved fallback (the derived `#goal` destination with the
         // bracketed text) instead of splicing the target's reference text, and
         // — having no segment — an unresolvable one is not reported either.
