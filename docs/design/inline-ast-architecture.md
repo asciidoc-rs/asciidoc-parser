@@ -13,8 +13,9 @@
 
 The Eclipse AsciiDoc Language project defines an **Abstract Semantic Graph (ASG)** as the
 canonical machine-readable representation of a parsed document, published as a JSON
-Schema:
-<https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/main/asg/schema.json>.
+Schema (linked at the revision §3.5's reading is based on; `main` was byte-identical for
+`asg/` as of 2026-08-29):
+<https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/d335f56572b656a7c9f84a5e0c76ea6f41f281e1/asg/schema.json>.
 
 In the ASG, a leaf block does **not** carry a rendered string. It carries an ordered array
 of **inline nodes** (`inlines`). The inline vocabulary is deliberately small:
@@ -29,6 +30,10 @@ Every node carries an optional `location` (a two-element `[start, end]` array of
 `{ line, col, file }` boundaries). The direction of travel is explicit: **inline content
 is structured data, and text substitution is an implementation detail of a renderer, not
 the model itself.**
+
+That direction is what this design takes from the ASG. The published schema itself is a
+2023 draft that has not changed since — §3.5 reads it in full and explains why emitting
+conformant ASG is *not* a goal of this branch.
 
 ### 1.2 Where this crate is today
 
@@ -82,10 +87,11 @@ authoritative rendered string. This proposal **inverts** that: the AST becomes t
 **canonical** inline representation, and the rendered string becomes a **fold over the
 tree**. Two things make now the right time:
 
-1. **The language is standardizing on the ASG.** Aligning the internal model with the ASG
-   now — while we are pre-1.0 and free to break the API — avoids a far more disruptive
-   migration after 1.0, and positions the crate to emit conformant ASG (and to pass the
-   language TCK) as a first-class output.
+1. **The language is moving toward the ASG.** Aligning the internal model with the ASG's
+   *shapes* now — while we are pre-1.0 and free to break the API — avoids a far more
+   disruptive migration after 1.0. What this no longer claims is conformant ASG output: the
+   published schema is a parked 2023 draft that cannot express most of what this crate
+   parses, so emitting it is not a goal of this branch (§3.5).
 2. **The rendered-string model is a local maximum.** Every capability the downstream tools
    want (per-node access, source spans, structural diff, alternate backends that re-flow
    rather than regex-mangle HTML) is blocked by the same root cause: structure is never
@@ -103,7 +109,7 @@ tree**. Two things make now the right time:
    inline constructs this crate already supports (images, footnotes, UI macros, index
    terms, callouts, anchors, line breaks, STEM).
 2. **Rendering is a fold over the AST.** `InlineRenderer` (or its successor)
-   becomes an AST walker. HTML output is one projection; the ASG JSON is another.
+   becomes an AST walker. HTML output is one projection; alternate backends are others.
 3. **Byte-for-byte HTML parity** with today's output throughout the migration, guarded by
    the existing ~277 `.rendered()` golden-string assertions used as an oracle.
 4. **Per-node source locations** designed into the public type from day one (populated
@@ -122,6 +128,10 @@ tree**. Two things make now the right time:
   same regex-detection events the current pipeline uses; we change the *sink* (nodes
   instead of string), not the *recognition*. This preserves fidelity.
 - **Round-tripping AST → source.** The AST is a semantic graph, not a lossless CST.
+- **Emitting conformant ASG.** The published schema is a 2023 draft, unmaintained since, that
+  under-models this crate's inline vocabulary too severely for a faithful projection —
+  `Document::to_asg()` is not being built (§3.5, §6's decision 7). The ASG's *shapes* remain
+  the model's spine; only the serializer is dropped.
 
 ---
 
@@ -129,10 +139,12 @@ tree**. Two things make now the right time:
 
 ### 3.1 Design principles
 
-- **ASG core, crate superset.** The four ASG shapes (span, ref, text/charref/raw) are the
-  spine. Everything this crate supports beyond the ASG is an additional variant that
-  *projects down* to ASG-legal nodes (usually `span`/`ref`/`text`) when emitting conformant
-  ASG, and renders richly in HTML.
+- **ASG shapes, crate superset.** The four ASG shapes (span, ref, text/charref/raw) are the
+  spine — because they are a good model, not because we serialize them. Everything this crate
+  supports beyond them is an additional variant that renders richly in HTML. We keep the
+  ASG's *vocabulary* (`variant`, `form`, the literal trichotomy) so a conformant serializer
+  stays cheap to add if the schema ever matures, but no projection to ASG-legal nodes is
+  defined or built (§3.5).
 - **Logical text, not output text.** Nodes hold the reader's characters, not escaped HTML.
   HTML-escaping is the fold's job. This is what the ASG's `text` / `charref` / `raw`
   trichotomy encodes, and it is the single most important shift from the current model
@@ -177,8 +189,8 @@ pub enum InlineNode<'src> {
 
     /// A formatted span. ASG: `inlineSpan`. The ASG `variant` set is
     /// {strong, emphasis, code, mark}; the crate extends it (superscript,
-    /// subscript, smart-quoted, and role-only/unquoted spans) and projects
-    /// those to the nearest ASG-legal form when emitting ASG.
+    /// subscript, smart-quoted, and role-only/unquoted spans), none of which
+    /// the ASG can express — it has no role slot on any inline node (§3.5).
     Styled(Styled<'src>),
 
     /// A link or cross-reference. ASG: `inlineRef`, `variant ∈ {link, xref}`.
@@ -213,7 +225,7 @@ pub struct Styled<'src> {
 pub enum StyleVariant {
     // ASG-native:
     Strong, Emphasis, Code, Mark,
-    // crate extensions (project to Mark/span-with-role for ASG):
+    // crate extensions (no ASG equivalent — §3.5):
     Superscript, Subscript, DoubleQuote, SingleQuote, Unquoted,
 }
 
@@ -419,21 +431,334 @@ are the only fragments that are `Raw` regardless of order, because they are extr
 any step and re-inserted after all of them. This ordering-faithful policy is what keeps the
 byte-for-byte parity claim above actually achievable.
 
-### 3.5 ASG projection and conformance
+### 3.5 ASG projection and conformance — withdrawn
 
-Provide `Document::to_asg()` (and per-node projection) emitting JSON conformant to the
-Eclipse schema. Crate-extension nodes project as follows (proposal):
+**`Document::to_asg()` is not being built.** The initial draft proposed it, together with a
+per-node table mapping each crate extension onto "the nearest ASG-legal form", and justified
+it as a conformance test surface. Reading the published schema closed the question in the
+other direction: the projection that table assumed is not expressible, and the schema is not
+a maintained artifact. See §6's decision 7 for the decision and §2's non-goals; the reading
+below is the evidence for it and the checklist for revisiting it.
 
-| Crate node                         | ASG projection                                                        |
-| ---------------------------------- | --------------------------------------------------------------------- |
-| `Styled{Superscript/Subscript}`    | `span` with a role (`superscript`/`subscript`) — closest legal form   |
-| `Styled{DoubleQuote/SingleQuote}`  | children with `charref` quote characters, no wrapping span             |
-| `Styled{Unquoted}`                 | `span` carrying only id/roles                                          |
-| `Image`, `Footnote`, `Ui`, `IndexTerm`, `Callout`, `Stem`, `Anchor` | best-effort `span`/`ref`/`text` (the ASG does not yet model these) |
+What survives is the **shape** alignment of §3.1 — the crate's node vocabulary stays named
+and structured after the ASG's, so a serializer remains cheap to add if the schema matures.
+What is withdrawn is conformant output and the conformance-testing rationale. The branch's
+safety net is, and always was, the byte-for-byte golden-HTML oracle (§5.3), to which ASG
+conformance never contributed.
 
-This projection doubles as a **conformance test surface**: we can validate our ASG output
-against the schema and, when the language TCK matures, run it. Where the ASG under-models
-what we support, we document the projection choice and keep the richer native node.
+#### What the schema says
+
+Read off `asg/schema.json` at upstream revision `d335f565`
+([schema.json](https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/d335f56572b656a7c9f84a5e0c76ea6f41f281e1/asg/schema.json)),
+whose `$id` is `https://schemas.asciidoc.org/asg/1-0-0/draft-01` — a *draft* of 1.0.0, and it
+shows. §1.1 and §2 record the inline vocabulary; none of the mechanics below appear there.
+
+##### An `inlineSpan` cannot carry a role — nor an id, nor attributes
+
+There is no `metadata` object, no `roles` array, and no `attributes` map on any inline node.
+A span's entire property set is the union of two `$defs`:
+
+```json
+"abstractParentInline": {
+  "type": "object",
+  "required": ["type", "inlines"],
+  "properties": {
+    "type": { "type": "string", "const": "inline" },
+    "inlines": { "$ref": "#/$defs/inlines" },
+    "location": { "$ref": "#/$defs/location" }
+  }
+},
+"inlineSpan": {
+  "type": "object",
+  "allOf": [{ "$ref": "#/$defs/abstractParentInline" }],
+  "unevaluatedProperties": false,
+  "required": ["name", "variant", "form"],
+  "properties": {
+    "name": { "type": "string", "const": "span" },
+    "variant": { "type": "string", "enum": ["strong", "emphasis", "code", "mark"] },
+    "form": { "type": "string", "enum": ["constrained", "unconstrained"] }
+  }
+}
+```
+
+That is `type`, `inlines`, `location`, `name`, `variant`, `form` — and
+`"unevaluatedProperties": false` forbids anything else. `roles` does exist in the schema, but
+only at block level, under `blockMetadata`:
+
+```json
+"blockMetadata": {
+  "type": "object",
+  "defaults": { "attributes": {}, "options": [], "roles": [] },
+  "additionalProperties": false,
+  "properties": {
+    "attributes": { "type": "object", "…": "…" },
+    "options": { "type": "array", "items": { "type": "string" } },
+    "roles": { "type": "array", "items": { "type": "string" } },
+    "location": { "$ref": "#/$defs/location" }
+  }
+}
+```
+
+and `blockMetadata` is reachable only through `abstractBlock`'s `metadata` property. No inline
+node has one. This is what killed the withdrawn projection table, three rows at a time:
+
+- **`Styled{Superscript, Subscript}` → "`span` with a role" is not implementable.** There is
+  nowhere to put the role, and `variant` is a closed four-value enum with no superscript or
+  subscript member, so the ASG has no legal node for either construct in any form.
+- **`Styled{Unquoted}` → "`span` carrying only id/roles" is worse**: strip the id and roles
+  and nothing distinguishes the node from its children.
+- **`inlineRef` is role-free too.** §3.2's `Ref::roles` and `Ref::window` have no ASG home
+  either; `inlineRef` evaluates to exactly `type`/`inlines`/`location` plus `name`, `variant`
+  (`link` | `xref`), and `target`, again under `"unevaluatedProperties": false`.
+
+##### Every node carries `type` beside `name`, and it has three values
+
+`name` is the union discriminator — both the block and the inline union say so explicitly:
+
+```json
+"block":  { "type": "object", "discriminator": { "propertyName": "name" }, "oneOf": [ … ] },
+"inline": { "type": "object", "discriminator": { "propertyName": "name" }, "oneOf": [
+  { "$ref": "#/$defs/inlineSpan" },
+  { "$ref": "#/$defs/inlineRef" },
+  { "$ref": "#/$defs/inlineLiteral" }
+] }
+```
+
+`type` is a coarser category tag beside it, with exactly three values:
+
+| `type` value | Carried by |
+| ------------ | ---------- |
+| `"block"`    | the document root, every `block` union member, `section`, `listItem`, `dlistItem` |
+| `"inline"`   | `inlineSpan` and `inlineRef` (both via `abstractParentInline`) |
+| `"string"`   | `inlineLiteral` — i.e. `text`, `charref`, and `raw` |
+
+It is required everywhere, never merely optional: the root has `"required": ["name", "type"]`,
+`abstractBlock` has `"required": ["type"]`, `abstractParentInline` has
+`"required": ["type", "inlines"]`, and `inlineLiteral` has `"required": ["name", "type", "value"]`.
+Note that the three `inlineLiteral` names are exactly `text` / `charref` / `raw`, which
+confirms the trichotomy §3.4 is built on — the one piece of the ASG this design takes on its
+merits rather than for conformance:
+
+```json
+"inlineLiteral": {
+  "type": "object",
+  "required": ["name", "type", "value"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "enum": ["text", "charref", "raw"] },
+    "type": { "type": "string", "const": "string" },
+    "value": { "type": "string" },
+    "location": { "$ref": "#/$defs/location" }
+  }
+}
+```
+
+##### `id` is block-only, and an inline anchor has nowhere to live
+
+The schema contains exactly one `id`, on `abstractBlock`:
+
+```json
+"abstractBlock": {
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": { "type": "string", "const": "block" },
+    "id": { "type": "string" },
+    "title": { "$ref": "#/$defs/inlines" },
+    "reftext": { "$ref": "#/$defs/inlines" },
+    "metadata": { "$ref": "#/$defs/blockMetadata" },
+    "location": { "$ref": "#/$defs/location" }
+  }
+}
+```
+
+No inline node has one, and none can acquire one: `inlineSpan` and `inlineRef` close with
+`"unevaluatedProperties": false`, `inlineLiteral` with `"additionalProperties": false`. So an
+inline anchor's id belongs, as far as this schema is concerned, to the enclosing **block** —
+`Anchor` (§3.2) has no inline representation at all. The pointing direction is modelled but
+the declaring direction is not: an `inlineRef` with `"variant": "xref"` carries the `target`
+id it refers to, while nothing in the inline layer can *declare* an id for it to resolve
+against.
+
+##### `location` is exactly two boundaries; `line` and `col` required, `file` an array
+
+```json
+"location": {
+  "type": "array",
+  "prefixItems": [
+    { "$ref": "#/$defs/locationBoundary" },
+    { "$ref": "#/$defs/locationBoundary" }
+  ],
+  "minItems": 2,
+  "maxItems": 2
+},
+"locationBoundary": {
+  "type": "object",
+  "required": ["line", "col"],
+  "additionalProperties": false,
+  "properties": {
+    "line": { "type": "integer", "minimum": 1 },
+    "col": { "type": "integer", "minimum": 0 },
+    "file": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+  }
+}
+```
+
+Four things to note. It is a two-element array, never longer or shorter — `prefixItems` types
+both slots and `minItems`/`maxItems` pin the length. `line` and `col` are required and `file`
+is not, so the ordinary boundary is a two-key object. `line` is 1-based (`"minimum": 1`) while
+`col` allows 0. And `file` is an **array of strings**, not a string; the schema constrains it
+no further than `"minItems": 1` and says nothing about what the elements mean (an include
+stack is the obvious reading, but that is inference, not schema).
+
+`location` itself is optional on every node — it appears in no `required` list anywhere —
+though upstream's fixtures carry it everywhere. The end boundary is *inclusive* of the last
+character rather than one past it: `sample-1.json` gives the seven-character source line
+`* water` the location `[{ "line": 1, "col": 1 }, { "line": 1, "col": 7 }]`. That maps onto
+§3.2.1's `Span` without a new type — the start boundary is the span's `line`/`col`, and the
+end boundary is the position of the last character of `location.data()`.
+
+##### The block-level names an emitter would have to produce
+
+Recorded for completeness, since it is what `Document::to_asg()` would have had to walk. The
+root is the `document` node itself: `"name": "document"`, `"type": "block"`, a `blocks` array
+typed as `sectionBody`, and optional `header`, `attributes`, and `location`. One conditional
+applies to it:
+
+```json
+"if": { "required": ["header"] },
+"then": { "required": ["attributes"] }
+```
+
+— a document that emits a `header` must also emit an `attributes` object, even an empty one.
+The `header` in turn holds `title` (an `inlines` array), `authors` (`minItems: 1`, so omit the
+key entirely rather than emitting `[]`), and `location`.
+
+| `name` | `$defs` | Required beyond `name`/`type` | Children |
+| ------ | ------- | ----------------------------- | -------- |
+| `section` | `section` | `title`, `level` | `blocks` (`sectionBody`) |
+| `heading` | `discreteHeading` | `title`, `level` | — |
+| `paragraph`, `listing`, `literal`, `pass`, `stem`, `verse` | `leafBlock` | — (`delimiter` if `form` is `delimited`) | `inlines` |
+| `admonition`, `example`, `sidebar`, `open`, `quote` | `parentBlock` | `form` (`"delimited"`), `delimiter`; `variant` when `admonition` | `blocks` (`nonSectionBlockBody`) |
+| `list` | `list` | `marker`, `variant`, `items` | `items` (`listItem`, `minItems: 1`) |
+| `listItem` | `listItem` | `marker`, `principal` | `blocks` (`nonSectionBlockBody`) |
+| `dlist` | `dlist` | `marker`, `items` | `items` (`dlistItem`, `minItems: 1`) |
+| `dlistItem` | `dlistItem` | `marker`, `terms` | `principal`, `blocks` |
+| `break` | `break` | `variant` | — |
+| `audio`, `video`, `image`, `toc` | `blockMacro` | `form` (`"macro"`) | — (optional `target`) |
+
+The closed enums, in full: `list.variant` is `callout` | `ordered` | `unordered`;
+`break.variant` is `page` | `thematic`; an `admonition`'s `variant` is `caution` | `important`
+| `note` | `tip` | `warning`; `leafBlock.form` is `delimited` | `indented` | `paragraph`, gated
+by
+
+```json
+"if": {
+  "required": ["form"],
+  "properties": { "form": { "const": "delimited" } }
+},
+"then": {
+  "required": ["delimiter"],
+  "properties": { "delimiter": { "type": "string" } }
+}
+```
+
+Six traps in that table:
+
+- **There is no table block.** Nothing in the schema models tables, and the `leafBlock` and
+  `parentBlock` name enums are closed, so a table cannot be smuggled in as either. This alone
+  would make a conformant `Document::to_asg()` lossy for a large share of real documents.
+- A discrete heading's `name` is `heading`, not `discreteHeading`; `discreteHeading` is only
+  the `$defs` key. Conversely `listItem` and `dlistItem` *are* their `name` values.
+- `listItem` and `dlistItem` are not members of the `block` union — they are reachable only
+  through `list.items` and `dlist.items`.
+- Sections nest only inside `sectionBody`, used by the root's `blocks` and by `section.blocks`.
+  A `parentBlock` or list-item body is `nonSectionBlockBody`, which admits blocks only.
+- Every block inherits `abstractBlock`'s optional `id`, `title`, `reftext`, `metadata`, and
+  `location`; `title` and `reftext` are `inlines` **arrays**, not strings, so a block title is
+  a full inline subtree.
+- `dlistItem.terms` is an array *of* `inlines` arrays
+  (`{ "items": { "$ref": "#/$defs/inlines" }, "minItems": 1 }`) — a list of terms, each of
+  which is itself a list of inline nodes.
+
+##### Two things the schema does not settle
+
+**How an unset document attribute is encoded.** The root's `attributes` is a pattern-keyed map
+of string-or-null:
+
+```json
+"attributes": {
+  "type": "object",
+  "additionalProperties": false,
+  "patternProperties": {
+    "^[a-zA-Z0-9_][-a-zA-Z0-9_]*$": {
+      "oneOf": [{ "type": "string" }, { "type": "null" }]
+    }
+  }
+}
+```
+
+but upstream's own supposedly-*valid* fixture disagrees: `sample-2.json` writes
+`"unset-attribute": false`. `null` is what the schema asks for, `false` is what the fixture
+models, and this draft has not reconciled them (see below — it never noticed). Note also that
+`blockMetadata.attributes` is a *different* map: its key pattern
+`^(?:[a-zA-Z_][a-zA-Z0-9_-]*|\$[1-9][0-9]*)$` additionally admits positional `$1`, `$2` keys,
+and its values are plain strings with no null alternative.
+
+**`defaults` is not JSON Schema.** The `"defaults"` keyword appearing on the root,
+`abstractListItem`, `section`, `leafBlock`, `parentBlock`, and `blockMetadata` is a custom Ajv
+keyword defined in
+[`asg/lib/ajv-keyword-defaults.js`](https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/d335f56572b656a7c9f84a5e0c76ea6f41f281e1/asg/lib/ajv-keyword-defaults.js);
+it *modifies the data*, filling in `blocks: []`, `inlines: []`, `attributes: {}`,
+`options: []`, and `roles: []` before the rest of validation runs. A validator that does not
+register the keyword ignores it, so omitting an empty `blocks`/`inlines` and emitting `[]`
+would have been equally conformant.
+
+##### The schema is a parked artifact, not an early one
+
+This is what turns "under-modelled today" into "not worth building against". Upstream `asg/`
+has not been touched since **2023-09-24**. The whole subproject was written in a burst between
+2023-04 and 2023-09 and has been frozen since, in a repository whose other folders are
+actively maintained — `docs/` as recently as 2026-06 and `spec/` 2026-01. The project is
+alive; the ASG specifically is parked, and `spec/` was still adding foundational "block
+element, content model, and structural forms" pages in 2024, which is well upstream of where a
+settled ASG could be derived from.
+
+The sharper signal is that its own test suite has been red that entire time. Two commits:
+
+- `462b650` (2023-06-27), *"allow value of document attribute to be false (indicates attribute
+  was unset)"*, added `"unset-attribute": false` to `test/fixtures/sample-2.json`.
+- `7925ed8` (2023-09-24), *"fix type for AsciiDoc attributes from boolean to null (allowing
+  string or null)"*, narrowed the schema to `string | null` — and touched **only**
+  `schema.json`.
+
+The later commit invalidated the fixture its own suite asserts *valid*, and nobody has noticed
+in three years; `npm test` at the pinned revision fails with `must be string` at
+`/attributes/unset-attribute`. An artifact whose maintainers are not running its tests is not
+one to validate our output against.
+
+That also disposes of the "wait for the TCK to mature" argument the initial draft leaned on.
+The TCK validates an implementation's output *against this schema*, so it cannot be further
+along than the schema it tests. (The TCK repository was not surveyed; the dependency is
+enough.)
+
+##### What would make this worth revisiting
+
+Not a date — the artifact is not on a schedule. The trigger is upstream activity on `asg/` at
+all, and specifically a revision that:
+
+1. gives inline nodes somewhere to put **roles and ids**, without which superscript,
+   subscript, unquoted spans, inline anchors, and every role-carrying inline construct stay
+   inexpressible;
+2. adds a **table** block, plus inline nodes for footnotes, images, index terms, UI macros,
+   callouts, STEM, and line breaks — or an extension point that admits them;
+3. **validates its own fixtures**, the minimum bar for use as a conformance oracle.
+
+If that happens the work is small, precisely because §3.1's shape alignment was kept:
+`Document::to_asg()` becomes a serializer over an already-ASG-shaped tree rather than a
+redesign. Re-import the schema at that point —
+[`ref/asciidoc-lang/README.md`](../../ref/asciidoc-lang/README.md) documents the snapshot
+procedure — and diff it against the findings above.
 
 ---
 
@@ -593,7 +918,8 @@ with a `&mut String`" to "called by the fold with a node"). This is an accepted 
 break. The method *set* is largely preserved, so a downstream implementer's mental model
 survives; the `*RenderParams` structs are replaced by (or become borrowed views of) the
 corresponding node types. The **naming** half of that break has landed (see the Decision
-below); the signature reshape has not.
+below); the signature reshape is under way — seven of the eight `*RenderParams` structs are
+retired (#1327, #1328, #1330), leaving `XrefRenderParams`.
 
 > **Decision (Phase 5): rename the trait to `InlineRenderer`.** ✅ **Landed.** The word
 > "substitution" names the very mechanism this work removes — post-migration the trait is no
@@ -833,13 +1159,13 @@ Each phase is a reviewable unit with a clear exit gate.
   Phase 4 single-pass builder, so `render_with` / `render_to` is **resequenced to land after**
   that builder covers the inline vocabulary (see Phase 4's step list).
 
-- **Phase 4 — precision spans + single-pass builder + ASG output.** 🔶 **In progress.** Land
+- **Phase 4 — precision spans + single-pass builder.** 🔶 **In progress.** Land
   the single-pass builder (Strategy B) so the tree is built **directly from `'src`** — nodes
   carrying honest per-node spans (#944) and their own `Attrlist<'src>` (self-describing) —
-  then make `rendered_html()` a fold of the tree, add `Document::to_asg()`, validate against
-  the ASG schema, and retire the `attribute-missing` per-line hack (#564).
-  *Exit:* ASG output validates; #944 hard-case policies documented and tested; #564 hack
-  removed.
+  then make `rendered_html()` a fold of the tree and retire the `attribute-missing` per-line
+  hack (#564).
+  *Exit:* #944 hard-case policies documented and tested; #564 hack removed. (The phase and its
+  exit gate originally also carried "ASG output validates"; §3.5 withdraws it.)
 
   *Step 1 landed as (the single-pass builder foundation + `SpecialCharacters`):* a new
   [`inline_builder`](../../parser/src/content/inline_builder.rs) module recasts a
@@ -10963,8 +11289,24 @@ Each phase is a reviewable unit with a clear exit gate.
        no `pub` type widened for the duration of a transition and narrowed after it. See the step's
        own "landed as" note above.
 
-  7. `render_with` (the Phase 3 remainder) and `Document::to_asg()`, now that nodes are
-     self-describing; retire the `attribute-missing` per-line hack (#564).
+  7. ✅ `render_with` (the Phase 3 remainder), now that nodes are self-describing; retire the
+     `attribute-missing` per-line hack (#564). Its other two candidate pieces,
+     `Document::to_asg()` and `Document::render_to`, are both recorded below as not being
+     built, so the step is closed.
+     - ℹ️ **`Document::to_asg()` is not being built (for now).** It is the one piece of step 7
+       that reading its input retired rather than specified. The Eclipse ASG schema it would
+       target has no role, id, or attribute slot on *any* inline node and closes every inline
+       def against extension, so the projection §3.5 proposed for `Styled{Superscript,
+       Subscript}` and `Styled{Unquoted}` — "a `span` with a role" — has nowhere to put the
+       role, and `variant` is a closed four-value enum with no superscript or subscript
+       member. Nor does the schema model tables, footnotes, inline images, index terms, UI
+       macros, callouts, inline STEM, line breaks, or inline anchors. A projection that lossy
+       cannot serve the purpose the initial draft claimed for it — a conformance test surface
+       — because a projection bug and a legitimate lossy projection are indistinguishable in
+       its output, and the branch's actual safety net is the golden-HTML oracle (§5.3)
+       regardless. The schema is also unmaintained: frozen since 2023-09-24, with its own test
+       suite red that whole time. What is *kept* is the shape alignment (§3.1), which is why
+       revisiting is cheap if the schema matures. Full reading and the revisit trigger: §3.5.
      - ℹ️ **`Document::render_to` is not being built.** It appears in §3.3.1 only as an
        unspecified parenthetical beside `render_with` — no return type, no account of what it
        would assemble — and it does not survive being specified. The renderer it would take is
@@ -11222,7 +11564,8 @@ Each phase is a reviewable unit with a clear exit gate.
   `parser.rs` 66 → 52 missed regions, total 551 → 537.
 
   *What still defers:* nothing in Phase 5's reshape — its exit gate is met. Then Landing.
-  (Step 7's `Document::to_asg()` also remains, blocked on reading the Eclipse ASG schema.)
+  (Step 7's `Document::to_asg()` had also remained, blocked on reading the Eclipse ASG schema;
+  reading it retired the item instead — §3.5. Step 7 is closed.)
 
 - **Landing — preflight + merge to `main`.** Preflight the whole branch against the
   `asciidoctor` port (§5.1) to confirm the public API and reshaped seam serve a real
@@ -11234,6 +11577,79 @@ Phases 1–2 are the risk-bearing core; 3–5 are additive and can be paced agai
 demand (echoing the #943/#944 "pin the API with a real consumer" discipline). All of them
 land together in the single merge to `main` — the pacing is *within* the branch, not
 staggered submissions to `main`.
+
+#### Exit-gate audit (2026-08-29)
+
+Every phase above carries an *Exit:* line, and the step lists had drifted far enough ahead of
+them that "the steps are ticked" was being read as "the phase is done". They are not the same
+claim. This is a pass over each outstanding gate, criterion by criterion, against the tree at
+`25ad4070`. **No phase is marked done by this audit** — none passes cleanly — and the marker
+on each bullet above is left as it stands.
+
+Suite state at the time of the audit: `cargo test --workspace` green, **5,482 passed, 0
+failed**, 68 ignored.
+
+| Phase | Criterion | Verdict | Evidence |
+| ----- | --------- | ------- | -------- |
+| 2 | ~277 golden `.rendered()` assertions pass unchanged | ✅ | Suite green, and the §5.3 rename left every asserted string untouched. The renamed accessors have 324 `.rendered_html()` and 173 `.rendered_html_content()` call sites (`git grep -cF` at `25ad4070`). Those are *accessor call sites*, not a recount of §5.3's ~277 golden assertions — most are ordinary reads rather than golden string comparisons — so they evidence the rename's reach, not the size of the oracle. |
+| 2 | sentinels deleted | ⚠️ **2 of 3** | See below. |
+| 2 | benchmarks within an agreed budget of `main` | ❓ **no budget on record** | CodSpeed reports no alteration across 5 benchmarks, but no *agreed budget* is written down anywhere in this document, so the criterion cannot be checked as stated. |
+| 3 | node vocabulary reviewed against the `asciidoctor` port's needs (§6.6) | ❌ **not started, and gated on Landing** | See below. |
+| 3 | purely-structural navigation sugar kept minimal | ✅ | The `inlines` module exposes no navigation helpers at all — no `walk`, `descendants`, `children`, `iter`, `visit`, or `find`; the node types are plain public fields (§3.2's sketch). Minimal by construction. |
+| 3 | doc + README updated (the security section gets its `Raw`-node anchor) | ❌ | [`README.md`](../../README.md)'s "Security: rendering untrusted input" section names the two by-design raw-HTML mechanisms (attribute-reference substitution and passthroughs) but never mentions `Raw`, `InlineNode`, or the tree. The anchor the gate asks for does not exist. |
+| 4 | #944 hard-case policies documented and tested | ⚠️ **tested, not documented** | Spans are asserted per-construct across ten `inline_builder` modules. But §4.4 only *promises* the four hard cases "get explicit policies there" — attribute expansion, passthrough mask/restore, synthesized text, lookahead/retry are nowhere written down as policies, and there is no consolidated span/location test file. |
+| 4 | #564 hack removed | ✅ | Landed in step 7; `Content::source_lines`, `from_filtered_lines`'s `line_spans`, and `simple.rs`'s per-paragraph `Vec<Span>` went with it. |
+| 5 | seam documented | ⚠️ | [`README.md`](../../README.md)'s back-end bullet is current: it names `InlineRenderer` and `Content::render_with` and states the seam is *inline*-scoped. §4.6's own prose is stale, though — see below. |
+| 5 | a smoke-test alternate renderer (in tests) walks the tree | ✅ | `BracketStrong` in [`inline_builder_document_parity.rs`](../../parser/src/tests/inline_builder_document_parity.rs) is folded via `content.render_with(&BracketStrong, &parser)`; `OrdinalRenderer` and `FlipRenderer` in [`inline_tree.rs`](../../parser/src/tests/inline_tree.rs) do the same. |
+
+##### Phase 2's third sentinel system is still live
+
+§4.2 names three. Two are gone:
+
+- **Footnote markers** (`\u{E002}`/`\u{E003}`) — deleted, and
+  [`content.rs`](../../parser/src/content/content.rs)'s `is_reserved_sentinel` documents the
+  absence and its cause: the section-title path derives a heading's reference text by folding
+  its inline subtree instead.
+- **Passthroughs** (`\u{96}`/`\u{97}`) — the mechanism is node-based;
+  [`passthroughs.rs`](../../parser/src/content/passthroughs.rs) works in terms of `InlineNode`
+  and `RawOrigin`, and `Content::passthroughs()` is the filtered view over the tree that §4.2
+  predicted. No production code emits the codepoints any more; `PASSTHROUGH_PLACEHOLDER_START`
+  / `_END` survive only as entries in `RESERVED_SENTINELS` and `is_reserved_sentinel`, i.e. the
+  escaping pass still reserves two codepoints nothing produces.
+
+The third has **not** been retired. `XREF_PLACEHOLDER_START` / `_END` are produced (a
+`format!` over the placeholder index) and consumed (`render_template`) in production, because
+one case remains that cannot be a fold: a block whose inline nodes are dropped carries a
+template synthesized from `carried_title_template`, and renders through
+`render_xref_template`. The code says so in as many words. Retiring it is a real increment,
+not a bookkeeping fix, and it is what stands between Phase 2 and its exit gate.
+
+##### Phase 3's first criterion cannot close before Landing
+
+"Node vocabulary reviewed against the `asciidoctor` port's needs (§6.6)" and Landing's
+"`asciidoctor`-port preflight green" are the same activity at two different gates. §6.6 names
+the port as the consumer that pins the API, but nothing in this document records that review
+having happened, and the port is a separate project whose state this audit did not survey.
+Phase 3 therefore cannot be closed on the branch's own evidence — either the review runs early
+(and Phase 3 closes ahead of Landing), or the criterion is acknowledged as deferred *into*
+Landing. That choice is a decision for the maintainer, not something an audit can settle, and
+it is the single largest unknown in any estimate of what remains.
+
+##### §4.6's prose is stale
+
+§4.6 says "the **naming** half of that break has landed …; the signature reshape has not."
+That was true when written and is no longer: seven of the eight `*RenderParams` structs are
+gone (#1327, #1328, #1330), leaving only `XrefRenderParams`. The sentence is corrected
+in place by this audit; the remaining struct is Phase 5's own outstanding work.
+
+##### What this means for "how much further"
+
+Firm, enumerated, and cheap: Phase 3's README `Raw`-node anchor; Phase 4's four hard-case
+policies written down; §4.6's stale sentence (done here). Firm and substantial: retiring the
+xref template mechanism (Phase 2), and the last `XrefRenderParams` fold (Phase 5). Open-ended:
+the `asciidoctor`-port review, which gates both Phase 3 and Landing and whose cost is unknown
+from inside this repository. Any session count that does not separate those three tiers is
+guessing.
 
 ### 5.3 The golden-HTML oracle (the safety net)
 
@@ -11270,7 +11686,7 @@ regressions the hand-written assertions don't cover.
 | Performance regression (extra allocation for nodes vs. one string)    | `'src` borrowing for `Text`/`Raw`; single-node fast path for plain paragraphs; benchmark gate in Phase 2 (existing Criterion/CodSpeed benches). |
 | Long-running branch drifts from `main`                                | Frequent `main`→branch merges (never rebase); land as one merge commit preserving staged history. |
 | Public API pinned before a consumer proves it out                     | Keep `inlines()` behind the phase gate; align field sets with the `asciidoctor` port (§6.6), per #943's discipline. |
-| ASG under-models crate constructs, forcing lossy projection           | Keep native rich nodes; document projection choices; treat ASG as an output, not the internal ceiling. |
+| ASG under-models crate constructs, forcing lossy projection           | **Materialized, and resolved by dropping the output** (§3.5): the schema has no role/id slot on any inline node and no table block, so no faithful projection exists. Native rich nodes and the ASG-shaped vocabulary are kept; the serializer is not built. |
 | Attribute-expansion / passthrough span provenance is genuinely hard   | Ship Phase 3 with coarse fallback spans (shape is span-ready); defer precision to Phase 4 with #944's explicit policies. |
 
 ---
@@ -11282,8 +11698,9 @@ the recommendations below were reviewed and adopted, and now stand as decisions 
 implementation.
 
 1. **Node text: logical vs. rendered vs. source?** → **Logical** (reader's characters),
-   with escaping deferred to the fold. This is what enables ASG conformance and clean
-   backends. *(Resolves the #943 open question.)*
+   with escaping deferred to the fold. This is what enables clean backends. (It was also
+   justified by ASG conformance, which decision 7 withdraws — the trichotomy stands on its
+   own merits.) *(Resolves the #943 open question.)*
 2. **Model every macro, or a catch-all?** → **Model** image / footnote / xref / link /
    anchor / kbd / btn / menu / index term / callout / stem as named variants (we already
    have the data for each from the renderer params); avoid the prototype's `Macro{kind,
@@ -11309,6 +11726,20 @@ implementation.
      the conceptual shape only (as reflected in §1.3). Per the #943 discipline, keep the
      structural-navigation conveniences minimal and let them be pinned by those consumers
      when they materialize; do not finalize them by guessing now.
+
+*Accepted by the maintainer on 2026-08-29, after the decisions above.*
+
+7. **Emit conformant ASG (`Document::to_asg()`)?** → **No, not for now.** Reading the schema
+   (§3.5) showed the projection the initial draft proposed is not expressible — no inline node
+   has a role, id, or attribute slot, `inlineSpan.variant` is a closed four-value enum, and
+   there is no table block — and that the schema is an unmaintained 2023 draft whose own test
+   suite has been failing for three years. The conformance-test rationale falls with it: a
+   lossy projection cannot distinguish a projection bug from correct lossiness, and the
+   golden-HTML oracle (§5.3) is the real safety net either way. **What is kept** is the ASG
+   *shape* alignment of §3.1 — node names, `variant`/`form`, and the `text`/`charref`/`raw`
+   trichotomy — so that a serializer is a small, mechanical addition rather than a redesign if
+   the schema matures. Revisit on any upstream commit to `asg/` meeting the three conditions
+   in §3.5; there is no date, because the artifact is not on a schedule.
 
 ---
 
@@ -11339,7 +11770,7 @@ drift risk that plagued the #942 prototype is designed out.
 
 ## References
 
-- Eclipse AsciiDoc Language ASG schema:
-  <https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/main/asg/schema.json>
+- Eclipse AsciiDoc Language ASG schema (pinned; unchanged upstream since 2023 — §3.5):
+  <https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/d335f56572b656a7c9f84a5e0c76ea6f41f281e1/asg/schema.json>
 - AsciiDoc substitutions: <https://docs.asciidoctor.org/asciidoc/latest/subs/>
 - Internal issues: #892, #942, #943, #944, #564.

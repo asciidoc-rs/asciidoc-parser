@@ -114,8 +114,17 @@ The branch has been running long enough that "how much further?" is a standing q
 that has just surveyed §5.2 is the cheapest place to answer it. Ground the estimate in four things
 rather than guessing:
 
-1. **The unchecked items in the Phase 4 checklist**, plus step 7 (`render_with`/`render_to`,
-   `Document::to_asg()`, retiring the `attribute-missing` hack), Phase 5, and Landing.
+1. **The unchecked items in the Phase 4 checklist**, plus the phase *exit gates*, Phase 5, and
+   Landing. Phase 4's step list is now fully ticked — step 7 is closed: `render_with` and the
+   `attribute-missing` retirement landed, and both `Document::render_to` and
+   `Document::to_asg()` are recorded as *not being built* (the latter by §6's decision 7 — the
+   ASG schema is a parked 2023 draft that cannot express the crate's inline vocabulary; see
+   §3.5). **A ticked step list is not a met exit gate**, though, and the two are easy to
+   conflate. §5.2's **"Exit-gate audit (2026-08-29)"** records the current state criterion by
+   criterion: every one of Phases 2–5 still has something outstanding, the two substantial ones
+   being the xref template mechanism (§4.2's third sentinel system, still live in production)
+   and the `asciidoctor`-port review, which gates Phase 3 and Landing alike. Start from that
+   table rather than inferring completion from step ticks, and re-run it if it has aged.
 2. **The "what still defers" sentence** in the newest landed-as note — those are the increments
    already named and sized.
 3. **The observed rate.** Every increment so far is one branch, one PR, one session, so an increment
