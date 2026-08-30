@@ -34,7 +34,7 @@ mod substitution_step;
 pub use substitution_step::SubstitutionStep;
 pub(crate) use substitution_step::{
     ATTRIBUTE_REFERENCE, AttributeMissing, CharacterReplacement, QuoteSub, build_callout_regexes,
-    character_replacements, hard_line_break_pattern, maybe_has_quotes, maybe_has_replacements,
-    quote_subs, restored_entity_pattern, substitute_attributes_in_macro_target,
+    character_replacements, hard_line_break_pattern, maybe_has_replacements, quote_subs,
+    restored_entity_pattern, substitute_attributes_in_macro_target,
     substitute_attributes_in_reftext,
 };

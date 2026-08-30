@@ -9,7 +9,7 @@ use super::{
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    content::{QuoteSub, maybe_has_quotes, maybe_has_replacements, quote_subs},
+    content::{QuoteSub, maybe_has_replacements, quote_subs},
     inlines::{CharRef, InlineNode, RawForm, RawOrigin, SpanForm, StyleVariant, Styled},
     parser::{HtmlInlineRenderer, InlineRenderer, QuoteScope, QuoteType},
     strings::CowStr,
@@ -723,12 +723,12 @@ fn match_level<'src>(
     ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     // Cheap pre-filter, taken *before* the match string is materialized: if
-    // nothing quote-like is present at this level, no sub can match, so skip
-    // the build (and its allocations) entirely. Every sub runs this gate at
-    // every level, so probing the nodes' contributions piecewise — rather
-    // than building the string just to sniff it — is what keeps a quote-free
-    // level's cost at a scan.
-    if !level_may_have_quotes(&nodes) {
+    // this sub's own marker character(s) (see `sub_markers`) are not present
+    // anywhere at this level, `sub` cannot possibly match, so skip the build
+    // (and its allocations) entirely — see `level_may_match_sub`'s own doc
+    // comment for why this is sub-specific rather than one gate shared by
+    // every sub in `quote_subs`.
+    if !level_may_match_sub(&nodes, sub) {
         return nodes;
     }
 
@@ -812,26 +812,28 @@ fn attrlist_is_readable(nodes: &[InlineNode<'_>], pieces: &[Piece], m: &QuoteMat
 /// question turns on for every tag-rendered span; see [`Masked`].
 ///
 /// [`apply_character_replacements`]: super::char_replacements::apply_character_replacements
-/// Reports whether this level's match string *could* contain a character the
-/// quoted-text sniff ([`maybe_has_quotes`]) looks for, without materializing
-/// the string.
+/// Reports whether this level's match string *could* satisfy `predicate`,
+/// without materializing the string.
 ///
 /// This probes exactly the contributions [`build_match_string`] would write —
 /// a `Text` run's value, a `CharRef`'s entity bytes ([`charref_entity`]), and
 /// the up-to-two sibling-boundary characters wrapped around an opaque node's
-/// placeholder (the placeholder itself is never a sniff character) — so its
-/// answer equals sniffing the built string: the sniff's class is single
-/// characters only, which cannot straddle two contributions. Probing under
-/// [`Masked::UNKNOWN`] mirrors the build [`match_level`] would do.
-fn level_may_have_quotes(nodes: &[InlineNode<'_>]) -> bool {
+/// placeholder (the placeholder itself matches no predicate a caller here
+/// passes) — so its answer equals testing the built string with `predicate`,
+/// *provided* `predicate` cannot itself be satisfied by two contributions
+/// straddled together (single-character predicates never can; see
+/// [`level_may_have_replacements`] for the one caller whose predicate can, and
+/// how it stays conservative instead). Probing under [`Masked::UNKNOWN`]
+/// mirrors the build [`match_level`] would do.
+fn level_may_contain(nodes: &[InlineNode<'_>], predicate: impl Fn(&str) -> bool) -> bool {
     let mut buf = [0u8; 4];
 
     nodes.iter().any(|node| match node {
-        InlineNode::Text { value, .. } => maybe_has_quotes(value),
+        InlineNode::Text { value, .. } => predicate(value),
 
         node => {
             if let Some(entity) = charref_entity(node) {
-                maybe_has_quotes(entity)
+                predicate(entity)
             } else {
                 let (before, after) = match node {
                     InlineNode::Styled(styled) => {
@@ -840,17 +842,73 @@ fn level_may_have_quotes(nodes: &[InlineNode<'_>]) -> bool {
                     _ => (None, None),
                 };
 
-                before.is_some_and(|ch| maybe_has_quotes(ch.encode_utf8(&mut buf)))
-                    || after.is_some_and(|ch| maybe_has_quotes(ch.encode_utf8(&mut buf)))
+                before.is_some_and(|ch| predicate(ch.encode_utf8(&mut buf)))
+                    || after.is_some_and(|ch| predicate(ch.encode_utf8(&mut buf)))
             }
         }
     })
 }
 
+/// The character(s) a [`QuoteSub`] of the given [`QuoteType`] requires
+/// *somewhere* in its match to have any chance of matching — [`Strong`]'s
+/// `*`, [`Monospaced`]'s `` ` ``, and so on — read straight off `QUOTE_SUBS`'s
+/// own patterns. [`DoubleQuote`] and [`SingleQuote`] need *two*: their quote
+/// character and the backtick immediately beside it.
+///
+/// [`Strong`]: QuoteType::Strong
+/// [`Monospaced`]: QuoteType::Monospaced
+/// [`DoubleQuote`]: QuoteType::DoubleQuote
+/// [`SingleQuote`]: QuoteType::SingleQuote
+fn sub_markers(type_: QuoteType) -> &'static [char] {
+    match type_ {
+        QuoteType::Strong => &['*'],
+        QuoteType::DoubleQuote => &['"', '`'],
+        QuoteType::SingleQuote => &['\'', '`'],
+        QuoteType::Monospaced => &['`'],
+        QuoteType::Emphasis => &['_'],
+        QuoteType::Mark => &['#'],
+        QuoteType::Superscript => &['^'],
+        QuoteType::Subscript => &['~'],
+
+        // None of these three is ever a `QuoteSub`'s own `type_` — `Unquoted`
+        // is a rendering *variant* [`style_variant`] maps `Mark` to, never a
+        // recognition rule of its own, and the two math types are recognized
+        // by [`apply_stem`](super::stem_step::apply_stem) instead of by any
+        // sub in [`quote_subs`]. An empty marker list is a safe (if
+        // unhelpful) answer for a caller that somehow asked anyway — spelled
+        // out per variant, rather than behind a wildcard, so each one stays a
+        // choice a future match-exhaustiveness error surfaces rather than a
+        // case silently falling through; see
+        // `every_quote_sub_has_specific_markers`.
+        QuoteType::Unquoted | QuoteType::AsciiMath | QuoteType::LatexMath => &[],
+    }
+}
+
+/// Reports whether this level could possibly satisfy `sub`'s own pattern —
+/// every one of its [`sub_markers`] present *somewhere* at this level (not
+/// necessarily adjacent, nor in one node: each is a single ASCII character,
+/// so none can be split across two contributions) — without materializing the
+/// match string.
+///
+/// A sub-specific tightening of what used to be one gate shared by every sub
+/// ("could *any* quoted-text construct start here?"): a level containing only
+/// `*bold*` still has every other sub in [`quote_subs`] pay for that shared
+/// sniff passing, and, worse, for the match-string build it could not by
+/// itself prevent. Checking the one or two characters *this* sub's own
+/// pattern needs — instead of the six-character union the group's own shared
+/// `maybe_has_quotes` sniff answers for as a whole — lets a level using only
+/// a couple of quote families skip the build for every sub that could never
+/// have matched there in the first place.
+fn level_may_match_sub(nodes: &[InlineNode<'_>], sub: &QuoteSub) -> bool {
+    sub_markers(sub.type_)
+        .iter()
+        .all(|&marker| level_may_contain(nodes, |s| s.contains(marker)))
+}
+
 /// Reports whether this level's match string *could* contain text the
 /// character-replacements sniff ([`maybe_has_replacements`]) looks for,
 /// without materializing the string — the replacements counterpart of
-/// [`level_may_have_quotes`], probing the same contributions.
+/// [`level_may_match_sub`], probing the same contributions.
 ///
 /// Unlike the quotes sniff, this one holds multi-character alternatives
 /// (`--`, `...`, `(C)`…), which *can* straddle two adjacent contributions the
@@ -1947,6 +2005,75 @@ mod tests {
         parser::HtmlInlineRenderer,
         strings::CowStr,
     };
+
+    #[test]
+    fn every_quote_sub_has_specific_markers() {
+        // Every `QuoteType` a real `QuoteSub` carries has its own non-empty
+        // marker list — the three that never appear in `quote_subs` at all
+        // (`Unquoted`, `AsciiMath`, `LatexMath`) are the only ones
+        // `sub_markers` answers "no markers" for, which
+        // `sub_markers_answers_empty_for_every_type_no_quote_sub_carries`
+        // pins directly.
+        use super::{quote_subs, sub_markers};
+
+        for sub in quote_subs() {
+            assert!(
+                !sub_markers(sub.type_).is_empty(),
+                "{:?} has no specific markers",
+                sub.type_
+            );
+        }
+    }
+
+    #[test]
+    fn sub_markers_answers_empty_for_every_type_no_quote_sub_carries() {
+        use super::sub_markers;
+        use crate::parser::QuoteType;
+
+        for type_ in [
+            QuoteType::Unquoted,
+            QuoteType::AsciiMath,
+            QuoteType::LatexMath,
+        ] {
+            assert!(sub_markers(type_).is_empty(), "{type_:?}");
+        }
+    }
+
+    #[test]
+    fn level_may_match_sub_rules_out_a_level_missing_the_subs_own_marker() {
+        use super::{level_may_match_sub, quote_subs};
+
+        let text = |value: &'static str| InlineNode::Text {
+            value: CowStr::from(value),
+            location: Span::new(value),
+        };
+
+        // Plain prose carries none of the eight marker characters any
+        // `QuoteSub` needs, so every sub is correctly ruled out.
+        let nodes = [text("plain prose, nothing quote-like at all")];
+
+        for sub in quote_subs() {
+            assert!(
+                !level_may_match_sub(&nodes, sub),
+                "{:?} should not match plain prose",
+                sub.type_
+            );
+        }
+
+        // A level carrying only `*`, on the other hand, still rules out
+        // every sub whose own marker is not `*` — the whole point of a
+        // sub-specific gate over the old shared one.
+        let starred = [text("*bold*")];
+
+        for sub in quote_subs() {
+            assert_eq!(
+                level_may_match_sub(&starred, sub),
+                sub.type_ == crate::parser::QuoteType::Strong,
+                "{:?} disagreed on `*bold*`",
+                sub.type_
+            );
+        }
+    }
 
     #[test]
     fn styled_boundaries_match_the_built_in_renderer() {

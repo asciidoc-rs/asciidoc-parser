@@ -130,11 +130,6 @@ impl Replacer for SpecialCharacterReplacer<'_> {
     }
 }
 
-static QUOTED_TEXT_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
-    #[allow(clippy::unwrap_used)]
-    Regex::new("[*_`#^~]").unwrap()
-});
-
 /// One quoted-text recognition rule: a [`QuoteType`]/[`QuoteScope`] pairing and
 /// the [`Regex`] that recognizes it.
 ///
@@ -153,14 +148,6 @@ pub(crate) struct QuoteSub {
 /// significant: it encodes Asciidoctor's precedence (see [`QUOTE_SUBS`]).
 pub(crate) fn quote_subs() -> &'static [QuoteSub] {
     &QUOTE_SUBS
-}
-
-/// Reports whether `text` contains any character that could open a quoted-text
-/// construct. A cheap pre-filter (shared with the single-pass builder) that
-/// lets a caller skip the full pattern sweep when nothing quote-like is
-/// present.
-pub(crate) fn maybe_has_quotes(text: &str) -> bool {
-    QUOTED_TEXT_SNIFF.is_match(text)
 }
 
 // Adapted from QUOTE_SUBS in Ruby Asciidoctor implementation,
