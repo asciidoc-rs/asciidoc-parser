@@ -14,7 +14,7 @@ use crate::{
             fold_html,
             quotes::{
                 LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, emit_range,
-                range_overlaps_synthesized, source_slice, text_slice,
+                range_overlaps_synthesized, single_text_value, source_slice, text_slice,
             },
             special_chars::Masked,
         },
@@ -107,6 +107,14 @@ pub(super) fn biblio_anchor_level<'src>(
         return nodes;
     }
 
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // single, unsplit `Text` node's match string is its own value, so the
+    // check below can run against that directly. A level already split by
+    // an earlier step falls back to the build, exactly as before.
+    if single_text_value(&nodes).is_some_and(|value| !value.starts_with("[[[")) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter, mirroring the string step's own `text.contains("[[[")`
@@ -187,6 +195,15 @@ pub(super) fn biblio_anchor_level<'src>(
     out
 }
 
+/// An anchor needs either the shorthand `[[` opener or the `anchor:` macro
+/// prefix. The `[` characters are not special, so a shorthand reaches the
+/// macros step with its `[[` intact. Shared between
+/// [`anchor_macros_level`]'s pre-build sniff and its post-build one, so the
+/// two answers cannot drift apart.
+fn anchor_prefilter(s: &str) -> bool {
+    s.contains("[[") || s.contains("anchor:")
+}
+
 /// Matches `INLINE_ANCHOR` at this level's escaped text, replacing each
 /// recognized inline anchor — the `[[id]]` / `[[id,reftext]]` shorthand and the
 /// `anchor:id[reftext]` macro — with the [`Anchor`](InlineNode::Anchor) node it
@@ -197,12 +214,18 @@ pub(super) fn anchor_macros_level<'src>(
     ctx: LevelContext,
     masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: see
+    // `biblio_anchor_level`'s own copy of this comment.
+    if single_text_value(&nodes).is_some_and(|value| !anchor_prefilter(value)) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter: an anchor needs either the shorthand `[[` opener or the
     // `anchor:` macro prefix. The `[` characters are not special, so a
     // shorthand reaches the macros step with its `[[` intact.
-    if !s.contains("[[") && !s.contains("anchor:") {
+    if !anchor_prefilter(&s) {
         return nodes;
     }
 
@@ -1816,6 +1839,32 @@ mod tests {
         let out = biblio_anchor_level(nodes, root, &biblio_parser(), Masked::UNKNOWN);
         assert_eq!(out.len(), 1);
         assert!(matches!(out[0], InlineNode::Text { .. }));
+    }
+
+    #[test]
+    fn the_bibliography_pass_declines_a_multi_node_level_it_can_never_match() {
+        // The single-`Text`-node pre-filter (`single_text_value`) is silent
+        // for a level already split into more than one node, so this level's
+        // "does it start with `[[[`?" answer still has to come from the built
+        // match string — the same declined answer as the single-node case
+        // above, reached by a different path. Driven directly with two
+        // adjoining `Text` nodes, for the same reason that test is.
+        let root = Span::new("x [[[gof]]]");
+
+        let nodes = vec![
+            InlineNode::Text {
+                value: CowStr::from("x "),
+                location: root.slice(0..2),
+            },
+            InlineNode::Text {
+                value: CowStr::from("[[[gof]]]"),
+                location: root.slice(2..11),
+            },
+        ];
+
+        let out = biblio_anchor_level(nodes, root, &biblio_parser(), Masked::UNKNOWN);
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|n| matches!(n, InlineNode::Text { .. })));
     }
 
     #[test]
