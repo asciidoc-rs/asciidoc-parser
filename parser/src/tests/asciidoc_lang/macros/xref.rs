@@ -212,7 +212,8 @@ If the intention is to link to an ID within the same document, the target must b
         &[r##"See <a href="#the-id">Custom Text</a>."##]
     );
 
-    // A `#`-prefixed target is an explicit reference to an ID in the same document.
+    // A `#`-prefixed target is an explicit reference to an ID in the same
+    // document.
     let doc = Parser::default().parse("See xref:#the-id[].\n\n[#the-id]\n== Some Section\n");
 
     assert_eq!(

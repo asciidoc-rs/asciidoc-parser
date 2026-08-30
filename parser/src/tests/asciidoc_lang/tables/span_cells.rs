@@ -74,8 +74,8 @@ A span is the first operator in a xref:add-cells-and-rows.adoc#specifiers[cell s
 "#
     );
 
-    // A column span factor (`<n>`) followed by the span operator (`+`) makes the
-    // cell span `<n>` consecutive columns (and a single row).
+    // A column span factor (`<n>`) followed by the span operator (`+`) makes
+    // the cell span `<n>` consecutive columns (and a single row).
     let table = parse_table("|===\n3+|x\n|===");
     assert_eq!(body_spans(&table), vec![vec![(3, 1)]]);
 
@@ -162,9 +162,9 @@ include::example$cell.adoc[tag=span-rows]
 "#
     );
 
-    // Expansion of `example$cell.adoc[tag=span-rows]`. The `.2+` cell spans rows
-    // 2 and 3 in the first column, so it carries that column down into row 3,
-    // which then needs only its single remaining cell.
+    // Expansion of `example$cell.adoc[tag=span-rows]`. The `.2+` cell spans
+    // rows 2 and 3 in the first column, so it carries that column down into
+    // row 3, which then needs only its single remaining cell.
     let table = parse_table(
         "|===\n|Column 1, header row |Column 2, header row\n\n.2+|This cell spans rows 2 and 3 because its specifier contains a span of `.2+`\n|Cell in column 2, row 2\n\n|Cell in column 2, row 3\n\n|Cell in column 1, row 4\n|Cell in column 2, row 4\n|===",
     );

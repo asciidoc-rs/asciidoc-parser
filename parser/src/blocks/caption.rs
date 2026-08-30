@@ -128,10 +128,11 @@ pub(crate) fn assign_caption(
     explicit_caption: Option<&str>,
 ) -> Option<Caption> {
     // An untitled block is never captioned or counted. Likewise, captioning
-    // applies only to captionable contexts: this gate matches Asciidoctor, where
-    // `assign_caption` is only invoked when the block's context is a key in
-    // `CAPTION_ATTRIBUTE_NAMES`, so an override such as a document-wide `caption`
-    // attribute never leaks onto, say, an ordinary titled paragraph.
+    // applies only to captionable contexts: this gate matches Asciidoctor,
+    // where `assign_caption` is only invoked when the block's context is a
+    // key in `CAPTION_ATTRIBUTE_NAMES`, so an override such as a
+    // document-wide `caption` attribute never leaks onto, say, an ordinary
+    // titled paragraph.
     if !has_title {
         return None;
     }
@@ -175,15 +176,16 @@ pub(crate) fn assign_caption(
     }
 
     // Otherwise build "<label> <n>. " from the context's caption attribute,
-    // consuming the next value of that context's document-wide counter. When the
-    // caption attribute is unset (or empty), the block keeps its title but
-    // receives no caption and no number.
+    // consuming the next value of that context's document-wide counter. When
+    // the caption attribute is unset (or empty), the block keeps its title
+    // but receives no caption and no number.
     match parser.attribute_value(attr_name) {
         InterpretedValue::Value(label) if !label.is_empty() => {
-            // The caption number is the counter named `<context>-number`, shared
-            // with any `{counter:<context>-number}` reference in the document.
-            // A captioning counter advances (and stays readable as) its
-            // attribute even when locked, mirroring Asciidoctor's
+            // The caption number is the counter named `<context>-number`,
+            // shared with any `{counter:<context>-number}`
+            // reference in the document. A captioning counter
+            // advances (and stays readable as) its attribute even
+            // when locked, mirroring Asciidoctor's
             // `increment_and_store_counter`.
             let value = parser.counter_for_caption(&format!("{context}-number"), None);
             let prefix = format!("{label} {value}. ");
@@ -332,8 +334,8 @@ mod tests {
             (None, None)
         );
 
-        // ... and an explicitly empty value (resolving to `Value("")`) leave the
-        // block with just its title and no number.
+        // ... and an explicitly empty value (resolving to `Value("")`) leave
+        // the block with just its title and no number.
         assert_eq!(
             first_block_caption(":caption: \n\n.Title\n====\nbody.\n===="),
             (None, None)
@@ -342,11 +344,11 @@ mod tests {
 
     #[test]
     fn empty_document_caption_attribute_consumes_no_counter() {
-        // A block suppressed by an empty document `caption` must not advance the
-        // context counter: toggling `caption` on, then off, then relabeling must
-        // number the surviving example blocks 1 and 2 (not 1 and 3). This
-        // mirrors Asciidoctor's `blocks_test.rb` "automatic caption can be turned
-        // off and on and modified".
+        // A block suppressed by an empty document `caption` must not advance
+        // the context counter: toggling `caption` on, then off, then
+        // relabeling must number the surviving example blocks 1 and 2
+        // (not 1 and 3). This mirrors Asciidoctor's `blocks_test.rb`
+        // "automatic caption can be turned off and on and modified".
         let doc = Parser::default().parse(concat!(
             ".first example\n====\nan example\n====\n\n",
             ":caption:\n\n",
@@ -375,8 +377,9 @@ mod tests {
 
     #[test]
     fn collapsible_example_is_unnumbered() {
-        // A collapsible example suppresses its caption (and number), and does not
-        // consume a counter value, so a following example is still "Example 1".
+        // A collapsible example suppresses its caption (and number), and does
+        // not consume a counter value, so a following example is still
+        // "Example 1".
         let doc = Parser::default()
             .parse("[%collapsible]\n====\nhidden\n====\n\n.Title\n====\nbody.\n====");
         let numbers: Vec<_> = doc.child_blocks().map(|b| b.number()).collect();
@@ -385,8 +388,8 @@ mod tests {
 
     #[test]
     fn listing_caption_is_unset_by_default() {
-        // Unlike the other captionable contexts, `listing-caption` is not set by
-        // default, so a titled listing keeps only its title.
+        // Unlike the other captionable contexts, `listing-caption` is not set
+        // by default, so a titled listing keeps only its title.
         assert_eq!(
             first_block_caption(".Title\n----\ncode\n----"),
             (None, None)
@@ -424,9 +427,9 @@ mod tests {
 
     #[test]
     fn image_uses_figure_caption_and_number() {
-        // An image is captioned under the `figure` context: its label comes from
-        // `figure-caption` and its number from the `figure-number` counter (both
-        // set by default).
+        // An image is captioned under the `figure` context: its label comes
+        // from `figure-caption` and its number from the `figure-number`
+        // counter (both set by default).
         assert_eq!(
             first_block_caption(".Sunset\nimage::sunset.jpg[]"),
             (Some("Figure 1. ".to_string()), Some(1))
@@ -436,7 +439,8 @@ mod tests {
     #[test]
     fn image_caption_override_on_macro_wins() {
         // A `caption` attribute on the macro itself is a verbatim, unnumbered
-        // override, and it takes precedence over one on the block attribute list.
+        // override, and it takes precedence over one on the block attribute
+        // list.
         assert_eq!(
             first_block_caption(
                 "[caption=\"Block. \"]\n.Sunset\nimage::sunset.jpg[caption=\"Photo. \"]"
@@ -522,10 +526,10 @@ mod tests {
 
     #[test]
     fn dropped_image_does_not_consume_figure_number() {
-        // Under `attribute-missing=drop-line`, an image whose target references a
-        // missing attribute is dropped *before* its caption is assigned, so it
-        // does not consume the `figure-number` counter: the next titled image is
-        // still "Figure 1.".
+        // Under `attribute-missing=drop-line`, an image whose target references
+        // a missing attribute is dropped *before* its caption is
+        // assigned, so it does not consume the `figure-number` counter:
+        // the next titled image is still "Figure 1.".
         let doc = Parser::default().parse(
             ":attribute-missing: drop-line\n\n.Gone\nimage::{undefined}.jpg[]\n\n.Kept\nimage::ok.jpg[]",
         );

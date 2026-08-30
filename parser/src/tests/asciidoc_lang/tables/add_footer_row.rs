@@ -152,9 +152,9 @@ In <<ex-short>>, `footer` is assigned using the shorthand syntax for `options`.
 "#
     );
 
-    // Shorthand `%header%footer` entered before `cols` is honored: the first row
-    // is the header and the last row is the footer (this is the `ex-short`
-    // example from the page).
+    // Shorthand `%header%footer` entered before `cols` is honored: the first
+    // row is the header and the last row is the footer (this is the
+    // `ex-short` example from the page).
     let before = parse_table(
         "[%header%footer,cols=\"2,2,1\"]\n|===\n|Column 1, header row\n|Column 2, header row\n|Column 3, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n|Cell in column 3, row 2\n\n|Column 1, footer row\n|Column 2, footer row\n|Column 3, footer row\n|===",
     );
@@ -226,8 +226,8 @@ include::example$row.adoc[tag=opt-f]
 "#
     );
 
-    // The `ex-formal` example sets the `options` attribute to `footer` using the
-    // formal syntax, promoting the last row to the footer.
+    // The `ex-formal` example sets the `options` attribute to `footer` using
+    // the formal syntax, promoting the last row to the footer.
     let ex_formal =
         parse_table("[options=\"footer\"]\n|===\n|Cell 1 |Cell 2\n|Foot 1 |Foot 2\n|===");
     assert!(ex_formal.footer_row().is_some());

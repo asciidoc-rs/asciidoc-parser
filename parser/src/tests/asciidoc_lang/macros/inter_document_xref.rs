@@ -91,8 +91,8 @@ Now you can create inter-document cross references without the headache.
     // `document-b.adoc` is included into this document in full, so its
     // `section-b` anchor is now part of this document and the inter-document
     // reference to it collapses to a same-document one (issue #808). The Ruby
-    // suite reads the included file from disk; here an include handler serves it
-    // inline.
+    // suite reads the included file from disk; here an include handler serves
+    // it inline.
     let doc = Parser::default()
         .with_safe_mode(SafeMode::Server)
         .with_include_file_handler(inline_file_handler::InlineFileHandler::from_pairs([(

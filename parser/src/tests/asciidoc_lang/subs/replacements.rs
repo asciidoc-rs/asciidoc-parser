@@ -340,7 +340,8 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -462,7 +463,8 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -532,7 +534,8 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -559,7 +562,8 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -578,8 +582,8 @@ mod blocks_and_inline_elements_subject_to_the_replacements_substitution {
 "#
         );
 
-        // The replacements substitution applies to default table cells but not to
-        // literal (`l`) cells, hence "Varies".
+        // The replacements substitution applies to default table cells but not
+        // to literal (`l`) cells, hence "Varies".
         let doc = Parser::default().parse("|===\n|(C)\nl|(C)\n|===");
 
         let Some(Block::Table(table)) = doc.child_blocks().next() else {

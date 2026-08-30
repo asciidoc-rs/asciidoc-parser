@@ -130,7 +130,8 @@ impl<'src> ListItemMarker<'src> {
             {
                 Self::ArabicNumeral(marker)
             } else {
-                // Regex and if-else chain should be exhaustive. If not, treat as non-match.
+                // Regex and if-else chain should be exhaustive. If not, treat
+                // as non-match.
                 return None;
             };
 
@@ -162,9 +163,10 @@ impl<'src> ListItemMarker<'src> {
             let term = source.slice(0..term_len);
             let mut term: Content<'src> = term.into();
 
-            // Apply attribute substitution to the term so that attribute references
-            // like `{blank}` are resolved before determining if this is a valid
-            // definition list marker.
+            // Apply attribute substitution to the term so that attribute
+            // references like `{blank}` are resolved before
+            // determining if this is a valid definition list
+            // marker.
             SubstitutionStep::AttributeReferences.apply(&mut term, parser, None);
 
             let marker = source.slice_from(term_len..);
@@ -218,11 +220,11 @@ impl<'src> ListItemMarker<'src> {
         SubstitutionStep::Quotes.apply(term, parser, None);
         SubstitutionStep::CharacterReplacements.apply(term, parser, None);
 
-        // A leading inline anchor (`[[id]]` or `[[id,reftext]]`) at the start of
-        // the term is registered in the catalog before the macros step renders
-        // it, so that only its own duplicate-registration warning is suppressed
-        // during that pass. Any other term goes straight through the macros
-        // step.
+        // A leading inline anchor (`[[id]]` or `[[id,reftext]]`) at the start
+        // of the term is registered in the catalog before the macros
+        // step renders it, so that only its own duplicate-registration
+        // warning is suppressed during that pass. Any other term goes
+        // straight through the macros step.
         if term.rendered().starts_with("[[") {
             if let Some(captures) = LEADING_INLINE_ANCHOR.captures(term.rendered()) {
                 let id = &captures[1];
@@ -687,10 +689,11 @@ mod tests {
 
     #[test]
     fn term_special_characters_are_escaped() {
-        // A description-list term receives the full `normal` substitution group,
-        // so the special characters `&`, `<`, and `>` are escaped rather than
-        // passed through verbatim. The horizontal and qanda list variants share
-        // this code path, since their terms are the same `DefinedTerm` marker.
+        // A description-list term receives the full `normal` substitution
+        // group, so the special characters `&`, `<`, and `>` are
+        // escaped rather than passed through verbatim. The horizontal
+        // and qanda list variants share this code path, since their
+        // terms are the same `DefinedTerm` marker.
         assert_eq!(term_rendered("a & b:: desc"), "a &amp; b");
         assert_eq!(term_rendered("a < b:: desc"), "a &lt; b");
         assert_eq!(term_rendered("a > b:: desc"), "a &gt; b");

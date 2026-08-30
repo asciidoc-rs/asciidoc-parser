@@ -267,11 +267,12 @@ impl<'src> TableBlock<'src> {
             .as_ref()
             .is_some_and(|a| a.has_option("autowidth"));
 
-        // The first row is an (implicit) header row when the line directly after
-        // the opening delimiter is non-empty and is itself followed by an empty
-        // line. The `header` option forces the same interpretation; the
-        // `noheader` option suppresses only the implicit detection, so an
-        // explicit `header` still wins when both are present.
+        // The first row is an (implicit) header row when the line directly
+        // after the opening delimiter is non-empty and is itself
+        // followed by an empty line. The `header` option forces the
+        // same interpretation; the `noheader` option suppresses only
+        // the implicit detection, so an explicit `header` still wins
+        // when both are present.
         let opts_header = metadata
             .attrlist
             .as_ref()
@@ -289,19 +290,20 @@ impl<'src> TableBlock<'src> {
             .as_ref()
             .is_some_and(|a| a.has_option("footer"));
 
-        // The blank line must genuinely exist after the first row; the end of the
-        // table (an empty remainder) does not count, so a single-row table is not
-        // mistaken for an all-header table.
+        // The blank line must genuinely exist after the first row; the end of
+        // the table (an empty remainder) does not count, so a
+        // single-row table is not mistaken for an all-header table.
         let line1 = inside.take_line();
         let line1_blank = line1.item.data().trim().is_empty();
         let line2_blank =
             !line1.after.is_empty() && line1.after.take_line().item.data().trim().is_empty();
 
-        // An implicit header additionally requires that the first row be complete
-        // on the first line. If the first cell spans multiple lines — for PSV,
-        // the first non-blank line after the blank gap continues the cell instead
-        // of starting a new one; for CSV/TSV, the first line opens a quoted value
-        // that is not closed on that line — there is no implicit header (matching
+        // An implicit header additionally requires that the first row be
+        // complete on the first line. If the first cell spans multiple
+        // lines — for PSV, the first non-blank line after the blank gap
+        // continues the cell instead of starting a new one; for
+        // CSV/TSV, the first line opens a quoted value that is not
+        // closed on that line — there is no implicit header (matching
         // Asciidoctor, which cancels the implicit header in these cases).
         let first_row_complete = match data_format {
             DataFormat::Psv => first_nonblank_line(line1.after)
@@ -314,17 +316,19 @@ impl<'src> TableBlock<'src> {
             opts_header || (!opts_noheader && !line1_blank && line2_blank && first_row_complete);
 
         // A titled table is given a caption (e.g. "Table 1. ") that a processor
-        // prepends to the title, drawn from the `table-caption` attribute (which
-        // defaults to "Table"); each such captioned table consumes the next
-        // value of a document-wide table counter. An explicit `caption`
-        // attribute sets the label verbatim with no number; an explicitly empty
-        // `caption` (e.g. `[caption=]`) removes the label entirely. When
-        // `table-caption` is unset and no explicit `caption` is given, no caption
-        // (and no number) is assigned. See [`assign_block_caption`] for the full,
+        // prepends to the title, drawn from the `table-caption` attribute
+        // (which defaults to "Table"); each such captioned table
+        // consumes the next value of a document-wide table counter. An
+        // explicit `caption` attribute sets the label verbatim with no
+        // number; an explicitly empty `caption` (e.g. `[caption=]`)
+        // removes the label entirely. When `table-caption` is unset and
+        // no explicit `caption` is given, no caption (and no number) is
+        // assigned. See [`assign_block_caption`] for the full,
         // shared rules.
         //
-        // Computed before the cell iterator below borrows `parser` immutably, so
-        // that the mutable counter update does not conflict with that borrow.
+        // Computed before the cell iterator below borrows `parser` immutably,
+        // so that the mutable counter update does not conflict with
+        // that borrow.
         let caption = assign_block_caption(
             parser,
             "table",
@@ -334,13 +338,14 @@ impl<'src> TableBlock<'src> {
         let number = caption.as_ref().and_then(|caption| caption.number);
         let caption = caption.map(|caption| caption.prefix);
 
-        // The `frame` and `grid` attributes control the table's borders, and the
-        // `stripes` attribute controls zebra striping. The borders each default
-        // to `all` and stripes defaults to `none`; the default can be changed for
-        // the whole document with the `table-frame` / `table-grid` /
-        // `table-stripes` attribute, and an explicit attribute on the table
-        // overrides both. Each value is resolved here (while `parser` is borrowed
-        // only immutably) and stored on the block so the accessors need no further
+        // The `frame` and `grid` attributes control the table's borders, and
+        // the `stripes` attribute controls zebra striping. The borders
+        // each default to `all` and stripes defaults to `none`; the
+        // default can be changed for the whole document with the
+        // `table-frame` / `table-grid` / `table-stripes` attribute, and
+        // an explicit attribute on the table overrides both. Each value
+        // is resolved here (while `parser` is borrowed only immutably)
+        // and stored on the block so the accessors need no further
         // document lookup.
         let frame = resolve_table_attribute::<Frame>(metadata, parser, "frame", "table-frame");
         let grid = resolve_table_attribute::<Grid>(metadata, parser, "grid", "table-grid");
@@ -371,8 +376,8 @@ impl<'src> TableBlock<'src> {
         let mut body_rows: Vec<TableRow<'src>> = rows.collect();
 
         // The footer row, when requested, is the last row of the table. It is
-        // moved out of the body so the caller sees it as a distinct footer. When
-        // the table has no rows to spare, no footer is produced.
+        // moved out of the body so the caller sees it as a distinct footer.
+        // When the table has no rows to spare, no footer is produced.
         let footer_row = if opts_footer { body_rows.pop() } else { None };
 
         let source = metadata
@@ -1148,10 +1153,10 @@ fn build_psv_table<'src>(
 
     let separator = separator.as_str();
 
-    // When the column count is implicit, it is the number of column slots in the
-    // first non-empty line: a cell that spans columns (`<n>+`) counts as `<n>`
-    // slots, not one, and a cell duplicated `<n>` times (`<n>*`) counts as `<n>`
-    // single-column slots (one per clone).
+    // When the column count is implicit, it is the number of column slots in
+    // the first non-empty line: a cell that spans columns (`<n>+`) counts
+    // as `<n>` slots, not one, and a cell duplicated `<n>` times (`<n>*`)
+    // counts as `<n>` single-column slots (one per clone).
     let first_line_cells: usize =
         scan_cells(inside.discard_empty_lines().take_line().item, separator)
             .0
@@ -1180,10 +1185,10 @@ fn build_psv_table<'src>(
     // A table can never have more rows than it has cells, so a row span is
     // clamped to the cell count for the `active_rowspans` bookkeeping below: a
     // larger span carries into rows that can't exist and so has no additional
-    // layout effect. The clamp also bounds the `active_rowspans` allocation, so a
-    // hostile specifier such as `.1000000000+` can't trigger a multi-gigabyte
-    // allocation. (The cell's reported [`rowspan`] keeps the literal parsed
-    // value, matching Asciidoctor.)
+    // layout effect. The clamp also bounds the `active_rowspans` allocation, so
+    // a hostile specifier such as `.1000000000+` can't trigger a
+    // multi-gigabyte allocation. (The cell's reported [`rowspan`] keeps the
+    // literal parsed value, matching Asciidoctor.)
     //
     // [`rowspan`]: TableCell::rowspan
     let max_rowspan = raw_cells.len().saturating_add(1);
@@ -1191,10 +1196,11 @@ fn build_psv_table<'src>(
     let mut raw_rows: Vec<Vec<RawCell<'src>>> = vec![];
 
     if ncols > 0 {
-        // A queue: each completed row consumes the slots carried into it from the
-        // front (`pop_front`), while a multi-row cell reserves slots in the rows it
-        // extends into via the back. `VecDeque` keeps both ends O(1); a `Vec` would
-        // pay an O(n) shift on every `remove(0)`.
+        // A queue: each completed row consumes the slots carried into it from
+        // the front (`pop_front`), while a multi-row cell reserves
+        // slots in the rows it extends into via the back. `VecDeque`
+        // keeps both ends O(1); a `Vec` would pay an O(n) shift on
+        // every `remove(0)`.
         let mut active_rowspans: VecDeque<usize> = VecDeque::from([0]);
         let mut column_visits = 0usize;
         let mut current_row: Vec<RawCell<'src>> = vec![];
@@ -1218,8 +1224,9 @@ fn build_psv_table<'src>(
             let cell_source = raw.content;
             current_row.push(raw);
 
-            // The slots carried into the current row are `active_rowspans[0]`; the
-            // deque is never empty here, so the fallback is unreachable.
+            // The slots carried into the current row are `active_rowspans[0]`;
+            // the deque is never empty here, so the fallback is
+            // unreachable.
             let carried = active_rowspans.front().copied().unwrap_or(0);
             let effective = column_visits + carried;
             if effective >= ncols {
@@ -1227,8 +1234,8 @@ fn build_psv_table<'src>(
                     raw_rows.push(std::mem::take(&mut current_row));
                 } else {
                     // Overrun: this cell's span pushes the row past `ncols`.
-                    // Discard the whole row so the remaining cells stay aligned to
-                    // the grid.
+                    // Discard the whole row so the remaining cells stay aligned
+                    // to the grid.
                     current_row.clear();
                     warnings.push(Warning::new(
                         cell_source,
@@ -1255,12 +1262,12 @@ fn build_psv_table<'src>(
         }
     }
 
-    // Each cell is processed according to the style of the column it falls in. A
-    // cell's column is its ordinal position within its row (matching Asciidoctor,
-    // which assigns the column by cell count, not grid slot). The header row
-    // (when present) is the first row and is always processed as plain header
-    // content, regardless of the column styles, so that a style operator doesn't
-    // affect the header row.
+    // Each cell is processed according to the style of the column it falls in.
+    // A cell's column is its ordinal position within its row (matching
+    // Asciidoctor, which assigns the column by cell count, not grid slot).
+    // The header row (when present) is the first row and is always
+    // processed as plain header content, regardless of the column styles,
+    // so that a style operator doesn't affect the header row.
     let mut rows: Vec<TableRow<'src>> = Vec::with_capacity(raw_rows.len());
     for (row_idx, raw_row) in raw_rows.into_iter().enumerate() {
         let is_header = has_header && row_idx == 0;
@@ -1303,9 +1310,9 @@ fn build_data_table<'src>(
 
     let separator = separator.as_str();
 
-    // DSV is parsed by its own, simpler rules; CSV and TSV share their rules and
-    // differ only in the default separator (resolved by the caller). PSV never
-    // reaches this builder.
+    // DSV is parsed by its own, simpler rules; CSV and TSV share their rules
+    // and differ only in the default separator (resolved by the caller).
+    // PSV never reaches this builder.
     let (fields, first_row_len) = if data_format == DataFormat::Dsv {
         parse_dsv_fields(inside, separator)
     } else {
@@ -1320,8 +1327,8 @@ fn build_data_table<'src>(
 
     let columns = finalize_columns(cols_attr, ncols, autowidth);
 
-    // Integer division drops any partial trailing row; `checked_div` yields zero
-    // rows when there are no columns.
+    // Integer division drops any partial trailing row; `checked_div` yields
+    // zero rows when there are no columns.
     let nrows = fields.len().checked_div(ncols).unwrap_or(0);
     let mut rows: Vec<TableRow<'src>> = Vec::with_capacity(nrows);
     let mut fields = fields.into_iter();
@@ -1387,8 +1394,8 @@ fn parse_csv_fields<'src>(
     let mut first_row_done = false;
     let mut fields_in_row = 0usize;
 
-    // The raw text of the cell currently being accumulated runs from `cell_start`
-    // to the next boundary.
+    // The raw text of the cell currently being accumulated runs from
+    // `cell_start` to the next boundary.
     let mut cell_start = 0usize;
     let mut i = 0usize;
 
@@ -1411,9 +1418,10 @@ fn parse_csv_fields<'src>(
             continue;
         }
 
-        // A wholly blank physical line (or trailing blank text at the end of the
-        // region) between rows is skipped rather than emitted as an empty cell. A
-        // blank cell that follows a separator on a populated line is kept.
+        // A wholly blank physical line (or trailing blank text at the end of
+        // the region) between rows is skipped rather than emitted as an
+        // empty cell. A blank cell that follows a separator on a
+        // populated line is kept.
         let blank_skip = (at_nl || at_eof) && fields_in_row == 0 && raw.trim().is_empty();
         if !blank_skip {
             fields.push(make_csv_field(region, cell_start, i, warnings));
@@ -1428,8 +1436,8 @@ fn parse_csv_fields<'src>(
         }
 
         if at_nl {
-            // The newline ends the row. The first populated row fixes the implicit
-            // column count.
+            // The newline ends the row. The first populated row fixes the
+            // implicit column count.
             if fields_in_row > 0 {
                 first_row_done = true;
             }
@@ -1672,49 +1680,54 @@ fn process_content<'src>(
 ) -> TableCellContent<'src> {
     if style == ColumnStyle::AsciiDoc {
         // The AsciiDoc style effectively creates a nested, standalone AsciiDoc
-        // document in the cell. It inherits the parent document's attributes, but
-        // any attribute it defines is scoped to the cell and must not leak back
-        // into the parent. Snapshot the attribute set before parsing and restore
-        // it afterward to enforce that boundary (matching Asciidoctor, where a
-        // `:foo:` set inside a cell is not visible after the table).
+        // document in the cell. It inherits the parent document's attributes,
+        // but any attribute it defines is scoped to the cell and must
+        // not leak back into the parent. Snapshot the attribute set
+        // before parsing and restore it afterward to enforce that
+        // boundary (matching Asciidoctor, where a `:foo:` set inside a
+        // cell is not visible after the table).
         let saved_attributes = parser.attribute_values.clone();
 
         // An attribute that is set in the parent document cannot be modified
-        // inside the cell. Lock every inherited attribute that currently holds a
-        // value for the duration of the cell (other than the handful of
-        // exceptions the spec carves out), so a body assignment to one of them is
-        // ignored. An attribute that is unset in the parent is not locked: the
-        // cell may assign it (matching Asciidoctor, which here diverges from the
-        // spec's "set or explicitly unset" wording). The lock set is saved and
+        // inside the cell. Lock every inherited attribute that currently holds
+        // a value for the duration of the cell (other than the handful
+        // of exceptions the spec carves out), so a body assignment to
+        // one of them is ignored. An attribute that is unset in the
+        // parent is not locked: the cell may assign it (matching
+        // Asciidoctor, which here diverges from the spec's "set or
+        // explicitly unset" wording). The lock set is saved and
         // restored so it applies only within the cell and nests correctly.
         // An attribute set in the parent is locked, as is one hard set or unset
-        // through the API (its modification context is `ApiOnly`) even though it
-        // is unset — matching Asciidoctor, where an API-controlled attribute can
-        // never be overridden in a cell. An attribute merely unset in the parent
-        // document is not locked, so the cell may assign it.
+        // through the API (its modification context is `ApiOnly`) even though
+        // it is unset — matching Asciidoctor, where an API-controlled
+        // attribute can never be overridden in a cell. An attribute
+        // merely unset in the parent document is not locked, so the
+        // cell may assign it.
         //
         // The inherited attribute set is the shared built-in defaults with the
         // parent's per-parser entries (`saved_attributes`) layered on top, so
         // walk both, letting a per-parser entry shadow a like-named built-in.
         // The synthesized backend-family and `safe-mode-*` flags need no lock
-        // here: they are read-only intrinsics that reject a cell-body assignment
-        // on their own (see `DERIVED_FAMILY_FLAG` / `SAFE_MODE_ACTIVE_FLAG`),
-        // which a static lock could not do anyway once the cell changes its own
-        // doctype.
+        // here: they are read-only intrinsics that reject a cell-body
+        // assignment on their own (see `DERIVED_FAMILY_FLAG` /
+        // `SAFE_MODE_ACTIVE_FLAG`), which a static lock could not do
+        // anyway once the cell changes its own doctype.
         let saved_locks = parser.locked_attribute_names.clone();
 
         // The cached section-numbering depth is frozen at the end of the
-        // enclosing document's header, so it holds the parent's value throughout
-        // the cell. A cell that assigns its own `sectnumlevels` refreshes it (see
-        // `Parser::set_attribute_from_body`); snapshot and restore it here so that
-        // refresh cannot leak back into the parent's numbering.
+        // enclosing document's header, so it holds the parent's value
+        // throughout the cell. A cell that assigns its own
+        // `sectnumlevels` refreshes it (see
+        // `Parser::set_attribute_from_body`); snapshot and restore it here so
+        // that refresh cannot leak back into the parent's numbering.
         let saved_sectnumlevels = parser.sectnumlevels;
         {
             // Whether `name` (holding `value` in the inherited set) must be
             // locked for the cell. Kept separate from the insert so each source
             // can own its name only when it is actually locked: a built-in name
-            // is `&'static` and stored borrowed (no allocation), while a dynamic
-            // parent-defined name is cloned into an owned entry.
+            // is `&'static` and stored borrowed (no allocation), while a
+            // dynamic parent-defined name is cloned into an owned
+            // entry.
             let should_lock = |name: &str, value: &AttributeValue| {
                 let api_locked = value.modification_context == ModificationContext::ApiOnly;
                 (!matches!(value.value, InterpretedValue::Unset) || api_locked)
@@ -1738,9 +1751,9 @@ fn process_content<'src>(
         // The modifiable attributes may always be changed inside a cell, even
         // when the parent or the API set them with a restrictive modification
         // context. Materialize each into the per-parser map (a built-in such as
-        // `toc` otherwise lives only in the shared table) with a relaxed context
-        // for the duration of the cell so a body assignment is honored; the
-        // snapshot restore reverts it afterward.
+        // `toc` otherwise lives only in the shared table) with a relaxed
+        // context for the duration of the cell so a body assignment is
+        // honored; the snapshot restore reverts it afterward.
         let attrs = Arc::make_mut(&mut parser.attribute_values);
         for name in ASCIIDOC_CELL_MODIFIABLE_ATTRIBUTES {
             if let Some(mut attr) = attrs.get(*name).or_else(|| built_in_attr(name)).cloned() {
@@ -1749,23 +1762,26 @@ fn process_content<'src>(
             }
         }
 
-        // A cell does not inherit the parent's doctype; it resets to the default
-        // (`article`). The cell body may still set its own doctype, and the
-        // derived `backend-html5-doctype-*` attribute is refreshed to match.
+        // A cell does not inherit the parent's doctype; it resets to the
+        // default (`article`). The cell body may still set its own
+        // doctype, and the derived `backend-html5-doctype-*` attribute
+        // is refreshed to match.
         parser.force_doctype("article");
 
-        // Likewise, a cell does not inherit the parent's `toc` setting: a nested
-        // document starts without a table of contents and may enable its own.
-        // Reset the value to unset; the relax loop above already made `toc`
-        // modifiable inside the cell, so a cell-body `:toc:` is still honored.
+        // Likewise, a cell does not inherit the parent's `toc` setting: a
+        // nested document starts without a table of contents and may
+        // enable its own. Reset the value to unset; the relax loop
+        // above already made `toc` modifiable inside the cell, so a
+        // cell-body `:toc:` is still honored.
         if let Some(toc) = Arc::make_mut(&mut parser.attribute_values).get_mut("toc") {
             toc.value = InterpretedValue::Unset;
         }
 
         // A cell whose content holds a preprocessor directive (an `include::`)
-        // is parsed from an owned, expanded source the cell carries; every other
-        // cell is parsed in place from the parent document's source, which keeps
-        // its spans (and line numbers) and avoids a copy.
+        // is parsed from an owned, expanded source the cell carries; every
+        // other cell is parsed in place from the parent document's
+        // source, which keeps its spans (and line numbers) and avoids a
+        // copy.
         let cell = if content_has_directive(trimmed.data()) {
             // `trimmed` indexes the document source unless this cell is itself
             // being parsed from some *other* cell's owned (include-expanded)
@@ -1795,10 +1811,11 @@ fn process_content<'src>(
             let cell_origin_file = cell_origin.as_ref().and_then(|sl| sl.0.clone());
 
             // Re-run the preprocessor over the cell content, naming the file it
-            // came from so an unresolved directive is attributed to it. Keep the
-            // resulting source map: while this cell's owned source is parsed it
-            // lets a directive buried deeper (e.g. in a nested table cell) map
-            // its position back to the file and line it originally came from.
+            // came from so an unresolved directive is attributed to it. Keep
+            // the resulting source map: while this cell's owned
+            // source is parsed it lets a directive buried deeper
+            // (e.g. in a nested table cell) map its position back
+            // to the file and line it originally came from.
             let (expanded, cell_source_map, preprocessor_warnings, cell_includes) =
                 preprocess_with_initial_file_name(
                     trimmed.data(),
@@ -1840,10 +1857,12 @@ fn process_content<'src>(
             if at_document_level {
                 // `directive_line` indexes the document source, so re-anchor
                 // each warning to it: its cursor then maps back to the
-                // directive's true (file, line) through the document source map.
+                // directive's true (file, line) through the document source
+                // map.
                 for pw in preprocessor_warnings {
-                    // A no-output directive (a malformed/unterminated conditional
-                    // or a tag-filter diagnostic) carries a pre-resolved `origin`;
+                    // A no-output directive (a malformed/unterminated
+                    // conditional or a tag-filter
+                    // diagnostic) carries a pre-resolved `origin`;
                     // resolve it to an absolute location (see
                     // `absolute_cell_directive_origin`). Warnings without an
                     // `origin` (e.g. an unresolved include target) keep
@@ -1874,8 +1893,9 @@ fn process_content<'src>(
                 // failure rather than a silent loss.
                 let mut owned_warnings: Vec<Warning<'_>> = vec![];
 
-                // Substitution warnings (e.g. `attribute-missing=warn`) recorded
-                // while parsing this owned source carry offsets into it, not the
+                // Substitution warnings (e.g. `attribute-missing=warn`)
+                // recorded while parsing this owned source
+                // carry offsets into it, not the
                 // primary document source, so they too must be discarded.
                 let substitution_warnings_mark = parser.substitution_warnings_len();
 
@@ -1893,9 +1913,10 @@ fn process_content<'src>(
                     let warning_source = owned_root.slice(sw.offset..sw.offset + sw.len);
 
                     // A substitution warning locates itself by offset into the
-                    // owned source, so it has no pre-resolved origin; resolve it
-                    // through this cell's source map (the directive-warning
-                    // override path does not apply).
+                    // owned source, so it has no pre-resolved origin; resolve
+                    // it through this cell's source map
+                    // (the directive-warning override path
+                    // does not apply).
                     parser.record_owned_cell_warning(warning_source.line(), sw.warning, None);
                 }
                 parser.pop_owned_cell_source_map();
@@ -1921,9 +1942,10 @@ fn process_content<'src>(
             // with a pre-resolved origin while the owned source was parsed
             // above. At document level, surface those now: anchor each to this
             // cell's directive line (a real document span) so it still has a
-            // cursor, and carry its true origin so consumers can report the file
-            // and line the failing directive actually lives at. Deeper owned
-            // cells leave them queued for the document-level cell enclosing them.
+            // cursor, and carry its true origin so consumers can report the
+            // file and line the failing directive actually lives
+            // at. Deeper owned cells leave them queued for the
+            // document-level cell enclosing them.
             if at_document_level {
                 for rw in parser.take_owned_cell_warnings() {
                     warnings.push(Warning::with_origin(
@@ -2028,21 +2050,23 @@ fn parse_asciidoc_cell_body<'src>(
     let saved_pending_block_title = parser.pending_block_title.take();
 
     // Mark that we are inside an AsciiDoc cell (a nested document) for the
-    // duration of the parse, so a table found within defaults its cell separator
-    // to `!` rather than `|` (matching Asciidoctor's `Document#nested?`).
+    // duration of the parse, so a table found within defaults its cell
+    // separator to `!` rather than `|` (matching Asciidoctor's
+    // `Document#nested?`).
     parser.nested_document_depth += 1;
 
-    // The cell body parses from its own owned source (whether include-expanded or
-    // a borrowed `a|` cell), whose offsets do not map to the document. Mark that
-    // so a footnote defined inside records no (misleading) document location; see
-    // `Parser::owned_subsource_depth`.
+    // The cell body parses from its own owned source (whether include-expanded
+    // or a borrowed `a|` cell), whose offsets do not map to the document.
+    // Mark that so a footnote defined inside records no (misleading)
+    // document location; see `Parser::owned_subsource_depth`.
     parser.owned_subsource_depth += 1;
 
     // An AsciiDoc cell is a nested document, where a section heading is again
     // valid — it is not a delimited-block body. Clear `in_delimited_block` for
     // the cell parse (saved and restored) so a `== …` line inside the cell is
-    // recognized as a section even when the table itself sits inside a delimited
-    // block, whose flag the parser would otherwise still be carrying.
+    // recognized as a section even when the table itself sits inside a
+    // delimited block, whose flag the parser would otherwise still be
+    // carrying.
     let previously_in_delimited_block = parser.in_delimited_block;
     parser.in_delimited_block = false;
 
@@ -2168,10 +2192,11 @@ impl<'src> TableCell<'src> {
         parser: &mut Parser,
         warnings: &mut Vec<Warning<'src>>,
     ) -> Self {
-        // A cell's own alignment operator overrides the column's alignment; with
-        // no operator, the cell inherits the column's alignment. This applies to
-        // header and body cells alike: only the column *style* is ignored for a
-        // header row (see below), not the column alignment.
+        // A cell's own alignment operator overrides the column's alignment;
+        // with no operator, the cell inherits the column's alignment.
+        // This applies to header and body cells alike: only the column
+        // *style* is ignored for a header row (see below), not the
+        // column alignment.
         let (h_align, v_align) = (
             raw.spec.h_align.unwrap_or(column.h_align),
             raw.spec.v_align.unwrap_or(column.v_align),
@@ -2190,11 +2215,11 @@ impl<'src> TableCell<'src> {
         let trimmed = trim_cell_content(raw.content, style);
 
         // An escaped cell separator (a backslash in front of the table's
-        // separator, e.g. `\|` or `\!`) is unescaped to the bare separator. Only
-        // the active separator is unescaped, so a `\|` in a `!`-separated table
-        // is left untouched. The replacement is computed only for the inline
-        // styles; an AsciiDoc cell parses its content verbatim (see
-        // [`process_content`]).
+        // separator, e.g. `\|` or `\!`) is unescaped to the bare separator.
+        // Only the active separator is unescaped, so a `\|` in a
+        // `!`-separated table is left untouched. The replacement is
+        // computed only for the inline styles; an AsciiDoc cell parses
+        // its content verbatim (see [`process_content`]).
         let escaped = format!("\\{separator}");
         let replacement = if style != ColumnStyle::AsciiDoc && trimmed.data().contains(&escaped) {
             Some(trimmed.data().replace(&escaped, separator))
@@ -2242,9 +2267,10 @@ impl<'src> TableCell<'src> {
             column.style
         };
 
-        // A data field carries no cell specifier, so its alignment comes from the
-        // column. This applies to header and body cells alike: only the column
-        // style is ignored for a header row, not the column alignment.
+        // A data field carries no cell specifier, so its alignment comes from
+        // the column. This applies to header and body cells alike: only
+        // the column style is ignored for a header row, not the column
+        // alignment.
         let (h_align, v_align) = (column.h_align, column.v_align);
 
         let source = field.content;
@@ -2542,9 +2568,10 @@ impl<'src> AsciiDocCell<'src> {
                     block.resolve_references(resolver, renderer, warnings);
                 }
 
-                // A cell footnote records no document location (it is defined in
-                // an owned sub-source), so resolution falls back to `source`,
-                // the cell's span, for any unresolved-reference warning.
+                // A cell footnote records no document location (it is defined
+                // in an owned sub-source), so resolution falls
+                // back to `source`, the cell's span, for any
+                // unresolved-reference warning.
                 for footnote in &mut cell.footnotes {
                     footnote.resolve_references(resolver, renderer, warnings, source);
                 }
@@ -2567,8 +2594,9 @@ impl<'src> AsciiDocCell<'src> {
                         }
 
                         // A cell footnote records no document location, so its
-                        // resolution falls back to the owned source span for any
-                        // warning; those warnings are re-homed to the cell's span
+                        // resolution falls back to the owned source span for
+                        // any warning; those warnings
+                        // are re-homed to the cell's span
                         // in the document below regardless.
                         let owned_root = Span::new(owned_source);
                         for footnote in &mut dependent.footnotes {
@@ -2653,9 +2681,9 @@ fn parse_cols(value: &str) -> Vec<TableColumn> {
         return vec![TableColumn::default(); count];
     }
 
-    // Split on commas when present, otherwise on semicolons (Asciidoctor accepts
-    // either as the column-spec separator, but not a mix). Empty records are
-    // kept: each one contributes a default column.
+    // Split on commas when present, otherwise on semicolons (Asciidoctor
+    // accepts either as the column-spec separator, but not a mix). Empty
+    // records are kept: each one contributes a default column.
     let parts: Vec<&str> = if records.contains(',') {
         records.split(',').collect()
     } else {
@@ -2969,8 +2997,9 @@ fn scan_cells<'src>(
 
                 None => {
                     // No cell has been opened yet, so this is the table's first
-                    // separator. Non-blank content in front of it means the first
-                    // cell is missing its leading separator; recover that content
+                    // separator. Non-blank content in front of it means the
+                    // first cell is missing its leading
+                    // separator; recover that content
                     // as the first cell (with the default specifier) and record
                     // its span so the caller can warn, matching Asciidoctor.
                     let leading = region.slice(0..content_end);
@@ -3033,10 +3062,11 @@ fn parse_cell_spec(token: &str) -> Option<CellSpec> {
     let mut i = 0;
 
     // Optional span/duplication: an optional span factor followed by `+` (span)
-    // or `*` (duplication). The factor is a column count, an optional dot, and an
-    // optional row count (`<n>`, `.<n>`, or `<n>.<n>`). The factor is committed
-    // only when the operator that must follow it is present; otherwise the
-    // leading digits remain and the token fails the full-consumption check below.
+    // or `*` (duplication). The factor is a column count, an optional dot, and
+    // an optional row count (`<n>`, `.<n>`, or `<n>.<n>`). The factor is
+    // committed only when the operator that must follow it is present;
+    // otherwise the leading digits remain and the token fails the
+    // full-consumption check below.
     let mut colspan = 1;
     let mut rowspan = 1;
     let mut repeat = 1;
@@ -3066,8 +3096,8 @@ fn parse_cell_spec(token: &str) -> Option<CellSpec> {
         // column or row count defaults to 1, so `2+` spans two columns, `.3+`
         // spans three rows, and `2.3+` spans a 2x3 block.
         Some(b'+') => {
-            // The factor consists only of ASCII digits and dots, so these ranges
-            // are always valid `str` slices.
+            // The factor consists only of ASCII digits and dots, so these
+            // ranges are always valid `str` slices.
             let col_digits = token.get(col_start..col_end).unwrap_or_default();
             if !col_digits.is_empty() {
                 colspan = col_digits.parse().unwrap_or(1);
@@ -3301,8 +3331,8 @@ mod tests {
             Some(SourceLine(Some("inc.adoc".to_owned()), 3))
         );
 
-        // The cell's own file, first line (pass-relative line 1): resolves to the
-        // cell's own location.
+        // The cell's own file, first line (pass-relative line 1): resolves to
+        // the cell's own location.
         assert_eq!(
             absolute_cell_directive_origin(
                 Some(SourceLine(Some("outer.adoc".to_owned()), 1)),
@@ -3311,8 +3341,9 @@ mod tests {
             Some(SourceLine(Some("outer.adoc".to_owned()), 5))
         );
 
-        // The cell's own file, a later line (pass-relative line 3): translated to
-        // two lines past the cell's first line — not collapsed onto line 5.
+        // The cell's own file, a later line (pass-relative line 3): translated
+        // to two lines past the cell's first line — not collapsed onto
+        // line 5.
         assert_eq!(
             absolute_cell_directive_origin(
                 Some(SourceLine(Some("outer.adoc".to_owned()), 3)),
@@ -3410,9 +3441,10 @@ mod tests {
         };
 
         // The faithful port of Ruby Asciidoctor `tables_test.rb` 1728 (an
-        // unresolved directive in a cell reached via an outer `include::`) lives
-        // in `tests::asciidoctor_rb::tables_test`. These are additional
-        // regression tests for the same fix, kept next to the code under test.
+        // unresolved directive in a cell reached via an outer `include::`)
+        // lives in `tests::asciidoctor_rb::tables_test`. These are
+        // additional regression tests for the same fix, kept next to
+        // the code under test.
 
         // The table is in the primary document itself, so the unresolved
         // directive is attributed to the root file (not an included one).
@@ -3440,11 +3472,12 @@ mod tests {
             );
         }
 
-        // A table nested inside a *borrowed* AsciiDoc cell (one whose own content
-        // is not include-expanded) is still parsed in place from the document
-        // source, so an unresolved directive in the inner cell maps through the
-        // document source map like any other. Here the whole document is the root
-        // file, so the cursor is the root file at the inner directive's line.
+        // A table nested inside a *borrowed* AsciiDoc cell (one whose own
+        // content is not include-expanded) is still parsed in place
+        // from the document source, so an unresolved directive in the
+        // inner cell maps through the document source map like any
+        // other. Here the whole document is the root file, so the
+        // cursor is the root file at the inner directive's line.
         #[test]
         fn nested_table_cell_maps_through_document_source() {
             let doc = Parser::default()
@@ -3468,9 +3501,9 @@ mod tests {
             );
         }
 
-        // Greptile #639: a table nested inside a (borrowed) cell of an *included*
-        // file must attribute an inner unresolved directive to that included
-        // file, not the root file.
+        // Greptile #639: a table nested inside a (borrowed) cell of an
+        // *included* file must attribute an inner unresolved directive
+        // to that included file, not the root file.
         #[test]
         fn nested_table_cell_in_included_file_reports_include_cursor() {
             let handler = InlineFileHandler::from_pairs([(
@@ -3555,19 +3588,21 @@ mod tests {
             assert_rendered_contains(&doc, "Deepest content.");
         }
 
-        // A table nested inside an *owned* (include-expanded) cell is parsed from
-        // that cell's private source, whose spans index the cell's own source map
-        // rather than the document's. An unresolved directive in the inner cell
-        // is resolved against that owned source map: it is rendered naming the
-        // file it came from, and its warning carries a pre-resolved origin
-        // (`Warning::origin`) pointing at that file and line, anchored to the
+        // A table nested inside an *owned* (include-expanded) cell is parsed
+        // from that cell's private source, whose spans index the cell's
+        // own source map rather than the document's. An unresolved
+        // directive in the inner cell is resolved against that owned
+        // source map: it is rendered naming the file it came from, and
+        // its warning carries a pre-resolved origin (`Warning::origin`)
+        // pointing at that file and line, anchored to the
         // enclosing document-level cell's directive line. Fixes
         // https://github.com/asciidoc-rs/asciidoc-parser/issues/641.
         #[test]
         fn unresolved_directive_inside_owned_cell_source_reports_origin() {
-            // `cell.adoc` is pulled in as the top cell's owned source; it holds a
-            // nested table (so its cells use the `!` separator) whose own cell has
-            // an unresolvable include on its line 2.
+            // `cell.adoc` is pulled in as the top cell's owned source; it holds
+            // a nested table (so its cells use the `!` separator)
+            // whose own cell has an unresolvable include on its
+            // line 2.
             let handler = InlineFileHandler::from_pairs([(
                 "cell.adoc",
                 "!===\na!include::does-not-exist.adoc[]\n!===",
@@ -3685,15 +3720,17 @@ mod tests {
         #[test]
         fn leading_anchor_in_asciidoc_body_cell_is_cataloged() {
             // Two `|` rows with no blank line between them defeat the implicit-
-            // header heuristic (which requires a blank line after the first row),
-            // so both cells are AsciiDoc-style *body* cells rather than a header.
+            // header heuristic (which requires a blank line after the first
+            // row), so both cells are AsciiDoc-style *body* cells
+            // rather than a header.
             let doc = Parser::default()
                 .parse("[cols=1a]\n|===\n|[[foo,Foo]]body anchor\n|second cell\n|===");
 
             // Guard the premise: the anchored cell is a genuine AsciiDoc-style
-            // body cell (each `a` cell renders its content as a nested document in
-            // `div.content`), not a header cell — no `th` is produced, and the
-            // anchor renders as a target inside the cell.
+            // body cell (each `a` cell renders its content as a nested document
+            // in `div.content`), not a header cell — no `th` is
+            // produced, and the anchor renders as a target inside
+            // the cell.
             assert_css(&doc, "th", 0);
             assert_css(&doc, "table.tableblock td.tableblock > div.content", 2);
             assert_xpath(&doc, "//td//div[@class=\"content\"]//a[@id=\"foo\"]", 1);

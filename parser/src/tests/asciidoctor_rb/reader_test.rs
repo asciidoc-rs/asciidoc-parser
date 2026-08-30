@@ -947,9 +947,9 @@ fn should_not_skip_front_matter_by_default() {
     );
 
     // With `skip-front-matter` unset, the leading `---` keeps its ordinary
-    // meaning: nothing is stripped, no `front-matter` attribute is recorded, and
-    // the `= Document Title` line — no longer the first line — is not read as the
-    // document title.
+    // meaning: nothing is stripped, no `front-matter` attribute is recorded,
+    // and the `= Document Title` line — no longer the first line — is not
+    // read as the document title.
     let doc = Parser::default().parse(
         "---\nlayout: post\ntitle: Document Title\nauthor: username\ntags: [ first, second ]\n---\n= Document Title\nAuthor Name\n\npreamble\n",
     );
@@ -1029,9 +1029,9 @@ fn should_skip_front_matter_if_specified_by_skip_front_matter_attribute() {
 
     // `skip-front-matter` is set and the block is well-formed: its content
     // (delimiters excluded, lines joined by LF) is captured in the
-    // `front-matter` attribute, and parsing resumes at `= Document Title`, which
-    // — thanks to the blank lines left in place of the removed block — is still
-    // reported at its original line 7.
+    // `front-matter` attribute, and parsing resumes at `= Document Title`,
+    // which — thanks to the blank lines left in place of the removed block
+    // — is still reported at its original line 7.
     let doc = Parser::default()
         .with_intrinsic_attribute_bool("skip-front-matter", true, ModificationContext::ApiOnly)
         .parse(
@@ -4274,7 +4274,8 @@ fn line_is_skipped_by_default_if_target_of_include_directive_resolves_to_empty()
         output,
         "Unresolved directive in (root file) - include::{blank}[]\n"
     );
-    // The blank target was still handed to the handler (as the empty string) ...
+    // The blank target was still handed to the handler (as the empty string)
+    // ...
     assert_eq!(probe.calls(), vec![(None, "".to_owned(), None)]);
     // ... which reported no such file, yielding the not-found warning.
     assert_eq!(warnings.len(), 1);

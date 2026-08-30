@@ -86,8 +86,8 @@ mod tests {
 
     #[test]
     fn encodes_full_byte_range() {
-        // A run of bytes spanning the high bit confirms the `+` and `/` alphabet
-        // slots and that no line breaks are emitted.
+        // A run of bytes spanning the high bit confirms the `+` and `/`
+        // alphabet slots and that no line breaks are emitted.
         let bytes: Vec<u8> = (0u8..=255).collect();
         let encoded = strict_encode(&bytes);
 

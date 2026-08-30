@@ -125,7 +125,8 @@ fn fallback() {
 
     // The `fallback` image is nested inside the interactive SVG `<object>` for
     // user agents that cannot render the object. (Interactive SVG handling is
-    // security sensitive, so it only takes effect below the `Secure` safe mode.)
+    // security sensitive, so it only takes effect below the `Secure` safe
+    // mode.)
     let doc = Parser::default()
         .with_safe_mode(SafeMode::Server)
         .parse("image:tiger.svg[Tiger,fallback=tiger.png,opts=interactive]");

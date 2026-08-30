@@ -125,8 +125,8 @@ include::example$checklist.adoc[tag=check-int]
     assert!(checklist.has_option("interactive"));
 
     // Each checklist item renders an interactive `<input type="checkbox">`. The
-    // `data-item-complete` attribute is 1 (with `checked`) for checked items and
-    // 0 for unchecked ones; no checkbox is disabled.
+    // `data-item-complete` attribute is 1 (with `checked`) for checked items
+    // and 0 for unchecked ones; no checkbox is disabled.
     assert_css(&doc, ".ulist.checklist", 1);
     assert_css(&doc, ".ulist.checklist li input[type=\"checkbox\"]", 3);
     assert_css(

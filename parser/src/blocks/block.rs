@@ -224,9 +224,10 @@ impl<'src> Block<'src> {
         parent_list_markers: Option<&[ListItemMarker<'src>]>,
         is_continuation: bool,
     ) -> MatchAndWarnings<'src, BlockParseOutcome<'src>> {
-        // The span at which the block's content begins, once its metadata (title,
-        // anchor, attribute list) has been read. `parse_internal_inner` fills this
-        // in so an unknown-style diagnostic can anchor at the block's delimiter or
+        // The span at which the block's content begins, once its metadata
+        // (title, anchor, attribute list) has been read.
+        // `parse_internal_inner` fills this in so an unknown-style
+        // diagnostic can anchor at the block's delimiter or
         // first content line rather than at the preceding style-attribute line.
         let mut content_start: Option<Span<'src>> = None;
 
@@ -248,11 +249,13 @@ impl<'src> Block<'src> {
             && let Some(warning) = unknown_block_style_warning(&matched_item.item)
         {
             // Anchor the diagnostic at the block's first content line — the
-            // delimiter of a delimited block, or the opening line of a paragraph
-            // — matching Asciidoctor, which reports `unknown style for …` at that
-            // line rather than at the `[style]` line above it. `content_start` is
-            // always set when a block carries a declared style (that requires an
-            // attribute list, which only the metadata path parses).
+            // delimiter of a delimited block, or the opening line of a
+            // paragraph — matching Asciidoctor, which reports
+            // `unknown style for …` at that line rather than at the
+            // `[style]` line above it. `content_start` is
+            // always set when a block carries a declared style (that requires
+            // an attribute list, which only the metadata path
+            // parses).
             let span = content_start
                 .unwrap_or_else(|| matched_item.item.span())
                 .take_normalized_line()
@@ -272,13 +275,15 @@ impl<'src> Block<'src> {
         is_continuation: bool,
         content_start: &mut Option<Span<'src>>,
     ) -> MatchAndWarnings<'src, BlockParseOutcome<'src>> {
-        // Optimization: If the first line doesn't match any of the early indications
-        // for delimited blocks, titles, or attrlists, we can skip directly to treating
-        // this as a simple block. That saves quite a bit of parsing time.
+        // Optimization: If the first line doesn't match any of the early
+        // indications for delimited blocks, titles, or attrlists, we
+        // can skip directly to treating this as a simple block. That
+        // saves quite a bit of parsing time.
         let first_line = source.take_line().item.discard_whitespace();
 
-        // If it does contain any of those markers, we fall through to the more costly
-        // tests below which can more accurately classify the upcoming block.
+        // If it does contain any of those markers, we fall through to the more
+        // costly tests below which can more accurately classify the
+        // upcoming block.
         if let Some(first_char) = first_line.chars().next()
             && !matches!(
                 first_char,
@@ -313,8 +318,9 @@ impl<'src> Block<'src> {
             let mut warnings = vec![];
             let block = Self::Simple(simple_block);
 
-            // This fast path only handles a metadata-free simple block, so there
-            // is no `[[id,reftext]]` anchor reftext to resolve.
+            // This fast path only handles a metadata-free simple block, so
+            // there is no `[[id,reftext]]` anchor reftext to
+            // resolve.
             Self::register_block_id(
                 block.id(),
                 Self::block_reftext(&block, None).as_deref(),
@@ -330,7 +336,8 @@ impl<'src> Block<'src> {
             };
         }
 
-        // Look for document attributes first since these don't support block metadata.
+        // Look for document attributes first since these don't support block
+        // metadata.
         if first_line.starts_with(':')
             && (first_line.ends_with(':') || first_line.contains(": "))
             && let Some(attr) = Attribute::parse(source, parser)
@@ -347,8 +354,8 @@ impl<'src> Block<'src> {
             };
         }
 
-        // Optimization not possible; start by looking for block metadata (title,
-        // attrlist, etc.).
+        // Optimization not possible; start by looking for block metadata
+        // (title, attrlist, etc.).
         let MatchAndWarnings {
             item: mut metadata,
             mut warnings,
@@ -395,25 +402,28 @@ impl<'src> Block<'src> {
         // Expose the content start (past the metadata) so `parse_internal` can
         // anchor an unknown-style diagnostic at the block's delimiter or first
         // content line. Every block-type dispatch below reads its content from
-        // here, so this is the block's true starting line whichever branch wins.
+        // here, so this is the block's true starting line whichever branch
+        // wins.
         *content_start = Some(metadata.block_start);
 
-        // Resolve attribute references in a `[[id,reftext]]` anchor reftext now,
-        // while the parser still holds the attributes in effect where the anchor
-        // appears. A compound block's body (parsed below) can redefine those
-        // attributes, so deferring this to registration — after the body — would
-        // record the wrong value. The result is threaded into `block_reftext`.
+        // Resolve attribute references in a `[[id,reftext]]` anchor reftext
+        // now, while the parser still holds the attributes in effect
+        // where the anchor appears. A compound block's body (parsed
+        // below) can redefine those attributes, so deferring this to
+        // registration — after the body — would record the wrong value.
+        // The result is threaded into `block_reftext`.
         let anchor_reftext = metadata
             .anchor_reftext
             .as_ref()
             .map(|span| substitute_attributes_in_reftext(*span, parser));
 
         // The `[literal]` block style normally marks a literal *paragraph*,
-        // which is handled directly as a simple (literal) block below, bypassing
-        // the delimited-block parsers. The exception is when `[literal]` is set
-        // on the delimiter line of a structural container, where it masquerades
-        // over that container (e.g. `[literal]` on a `----` listing, on a `....`
-        // literal, or on a `--` open block); those cases must fall through to the
+        // which is handled directly as a simple (literal) block below,
+        // bypassing the delimited-block parsers. The exception is when
+        // `[literal]` is set on the delimiter line of a structural
+        // container, where it masquerades over that container (e.g.
+        // `[literal]` on a `----` listing, on a `....` literal, or on a
+        // `--` open block); those cases must fall through to the
         // delimited-block parsers.
         let is_literal =
             metadata.attrlist.as_ref().and_then(|a| a.block_style()) == Some("literal") && {
@@ -425,8 +435,8 @@ impl<'src> Block<'src> {
 
         // A simple block may be parsed speculatively inside the `!is_literal`
         // branch below (to detect the "metadata with no block" edge case). When
-        // that speculative parse succeeds it is reused as the final result rather
-        // than re-parsed, so that the captioning side effect of
+        // that speculative parse succeeds it is reused as the final result
+        // rather than re-parsed, so that the captioning side effect of
         // `SimpleBlock::parse` (which can consume a caption counter) happens at
         // most once per block.
         let mut simple_block_mi = None;
@@ -577,8 +587,9 @@ impl<'src> Block<'src> {
                 let mut media_block_maw = MediaBlock::parse(&metadata, parser);
 
                 if let Some(mut media_block) = media_block_maw.item {
-                    // Only propagate warnings from media block parsing if we think this
-                    // *is* a media block. Otherwise, there would likely be too many false
+                    // Only propagate warnings from media block parsing if we
+                    // think this *is* a media block.
+                    // Otherwise, there would likely be too many false
                     // positives.
                     if !media_block_maw.warnings.is_empty() {
                         warnings.append(&mut media_block_maw.warnings);
@@ -627,8 +638,9 @@ impl<'src> Block<'src> {
                 let mut toc_block_maw = TocBlock::parse(&metadata, parser);
 
                 if let Some(toc_block) = toc_block_maw.item {
-                    // Only propagate warnings from TOC block parsing if we think
-                    // this *is* a TOC block. Otherwise, there would likely be too
+                    // Only propagate warnings from TOC block parsing if we
+                    // think this *is* a TOC block.
+                    // Otherwise, there would likely be too
                     // many false positives.
                     if !toc_block_maw.warnings.is_empty() {
                         warnings.append(&mut toc_block_maw.warnings);
@@ -662,8 +674,9 @@ impl<'src> Block<'src> {
                 && let Some(mi_section_block) =
                     SectionBlock::parse(&metadata, parser, &mut warnings)
             {
-                // A line starting with `=` or `#` might be some other kind of block, so we
-                // continue quietly if `SectionBlock` parser rejects this block.
+                // A line starting with `=` or `#` might be some other kind of
+                // block, so we continue quietly if
+                // `SectionBlock` parser rejects this block.
 
                 return MatchAndWarnings {
                     item: BlockParseOutcome::Parsed(MatchedItem {
@@ -692,9 +705,10 @@ impl<'src> Block<'src> {
                 };
             }
 
-            // Only try to parse as a new list if we're NOT inside a list item context.
-            // If we are inside a list context, lists can only be created when the first
-            // line is a list item marker (handled above).
+            // Only try to parse as a new list if we're NOT inside a list item
+            // context. If we are inside a list context, lists can
+            // only be created when the first line is a list item
+            // marker (handled above).
             if parent_list_markers.is_none()
                 && let Some(mi_list) = ListBlock::parse(&metadata, parser, &mut warnings)
             {
@@ -707,9 +721,10 @@ impl<'src> Block<'src> {
                 };
             }
 
-            // First, let's look for a fun edge case. Perhaps the text contains block
-            // metadata but no block immediately following. If we're not careful, we could
-            // spin in a loop (for example, `parse_blocks_until`) thinking there will be
+            // First, let's look for a fun edge case. Perhaps the text contains
+            // block metadata but no block immediately following. If
+            // we're not careful, we could spin in a loop (for
+            // example, `parse_blocks_until`) thinking there will be
             // another block, but there isn't.
 
             // The following check disables that spin loop.
@@ -721,16 +736,17 @@ impl<'src> Block<'src> {
 
             if simple_block_mi.is_none() {
                 if !metadata.is_empty() {
-                    // We have a metadata with no block. Treat it as a simple block but issue a
-                    // warning.
+                    // We have a metadata with no block. Treat it as a simple
+                    // block but issue a warning.
 
                     warnings.push(Warning::new(
                         metadata.source,
                         WarningType::MissingBlockAfterTitleOrAttributeList,
                     ));
 
-                    // Remove the metadata content so that SimpleBlock will read the title/attrlist
-                    // line(s) as regular content. The speculative parse failed, so the
+                    // Remove the metadata content so that SimpleBlock will read
+                    // the title/attrlist line(s) as regular
+                    // content. The speculative parse failed, so the
                     // block is re-parsed below with this stripped metadata.
                     metadata.title_source = None;
                     metadata.title = None;
@@ -742,8 +758,9 @@ impl<'src> Block<'src> {
                     // (e.g. a lone empty `[[]]` anchor) that produced no title,
                     // anchor, or attribute list, and no block follows them. The
                     // lines are still consumed, so report the source as dropped
-                    // (resuming at `block_start`) rather than falling through to
-                    // `NoMatch`: a non-blank source left unadvanced would spin
+                    // (resuming at `block_start`) rather than falling through
+                    // to `NoMatch`: a non-blank source left
+                    // unadvanced would spin
                     // the block-collection loop.
                     //
                     // The test is that `block_start` actually moved past the
@@ -763,9 +780,10 @@ impl<'src> Block<'src> {
             }
         }
 
-        // If no other block kind matches, we can always use SimpleBlock. Reuse the
-        // speculative parse from the `!is_literal` branch when it succeeded;
-        // otherwise (a literal block, or metadata stripped above) parse now.
+        // If no other block kind matches, we can always use SimpleBlock. Reuse
+        // the speculative parse from the `!is_literal` branch when it
+        // succeeded; otherwise (a literal block, or metadata stripped
+        // above) parse now.
         let simple_block_mi = match simple_block_mi {
             Some(mi) => Some(mi),
             None => {
@@ -827,9 +845,10 @@ impl<'src> Block<'src> {
 
         // Exclude explicit caption overrides, which are not numbered. This is
         // *not* the same as `block.number().is_none()`: an auto-numbered block
-        // whose context counter holds a non-integer value (e.g. `:figure-number:
-        // A`, rendering "Figure B") also has no bare integer number, yet it is
-        // genuinely numbered and must keep its signifier ("Figure B").
+        // whose context counter holds a non-integer value (e.g.
+        // `:figure-number: A`, rendering "Figure B") also has no bare
+        // integer number, yet it is genuinely numbered and must keep
+        // its signifier ("Figure B").
         if Self::has_caption_override(block, parser) {
             return None;
         }
@@ -915,7 +934,8 @@ impl<'src> Block<'src> {
                     }
                 }
                 Err(_duplicate_error) => {
-                    // If registration fails due to duplicate ID, issue a warning.
+                    // If registration fails due to duplicate ID, issue a
+                    // warning.
                     warnings.push(Warning::new(span, WarningType::DuplicateId(id.to_string())));
                 }
             }
@@ -1210,17 +1230,18 @@ impl<'src> IsBlock<'src> for Block<'src> {
     fn id(&'src self) -> Option<&'src str> {
         // Three variants override the trait default:
         //
-        // * A `MediaBlock` additionally recognizes a named `id=` _inside_ its macro
-        //   attribute list (e.g. `image::sunset.jpg[id=sunset-img]`).
+        // * A `MediaBlock` additionally recognizes a named `id=` _inside_ its
+        //   macro attribute list (e.g. `image::sunset.jpg[id=sunset-img]`).
         //
-        // * A `TocBlock` likewise recognizes a named `id=` _inside_ its macro attribute
-        //   list (e.g. `toc::[id=contents]`).
+        // * A `TocBlock` likewise recognizes a named `id=` _inside_ its macro
+        //   attribute list (e.g. `toc::[id=contents]`).
         //
-        // * A `SectionBlock` falls back to its auto-generated (`_slug`) ID when no
-        //   explicit ID was supplied, so `block.id()` yields the same ID the section is
-        //   registered and cross-referenced under. Delegating here (rather than
-        //   applying the trait default) avoids the footgun of `block.id()` silently
-        //   returning `None` for a section that plainly has an ID.
+        // * A `SectionBlock` falls back to its auto-generated (`_slug`) ID when
+        //   no explicit ID was supplied, so `block.id()` yields the same ID the
+        //   section is registered and cross-referenced under. Delegating here
+        //   (rather than applying the trait default) avoids the footgun of
+        //   `block.id()` silently returning `None` for a section that plainly
+        //   has an ID.
         //
         // Every other variant keeps the trait default (explicit anchor or block
         // attribute list only).
@@ -1404,13 +1425,14 @@ fn unknown_block_style_warning(block: &Block<'_>) -> Option<WarningType> {
     let context = block.raw_context();
     let context = context.as_ref();
 
-    // Only diagnose something that actually looks like a style name. A malformed
-    // attribute list (for example a mangled `[[anchor]`, or a positional whose
-    // value is `-foo = bar`) can leave debris in the first positional slot that
-    // is not a plausible style; reporting it as an "unknown style" would be
-    // noise. Asciidoctor only reaches this check with a properly-parsed style
-    // token, so a value carrying spaces, brackets, or other punctuation is not
-    // one this diagnostic is meant for.
+    // Only diagnose something that actually looks like a style name. A
+    // malformed attribute list (for example a mangled `[[anchor]`, or a
+    // positional whose value is `-foo = bar`) can leave debris in the first
+    // positional slot that is not a plausible style; reporting it as an
+    // "unknown style" would be noise. Asciidoctor only reaches this check
+    // with a properly-parsed style token, so a value carrying spaces,
+    // brackets, or other punctuation is not one this diagnostic is meant
+    // for.
     if !is_plausible_style_name(style) {
         return None;
     }
@@ -1591,9 +1613,9 @@ mod tests {
             // arm with a document that contains one of each block kind, and
             // confirm the forwarded value: none of these blocks acquires an
             // implicit style, so the resolved style equals the declared style
-            // for every one. (The one case where the two differ — a bibliography
-            // list that inherits its style from its section — is covered by the
-            // list block's own tests.)
+            // for every one. (The one case where the two differ — a
+            // bibliography list that inherits its style from its
+            // section — is covered by the list block's own tests.)
             let doc = Parser::default().parse(
                 "= Doc Title\n\nPreamble para.\n\nimage::pic.png[]\n\n'''\n\ntoc::[]\n\n== Section One\n\n:body-attr: x\n\nA paragraph.\n\n* list item\n\n[quote]\n____\nA quote.\n____\n\n[NOTE]\n====\nAn admonition.\n====\n\n----\nlisting\n----\n\n|===\n| cell\n|===\n\n--\nopen block\n--\n",
             );
@@ -1604,8 +1626,8 @@ mod tests {
                 count += 1;
             }
 
-            // Guard against the document silently parsing into fewer blocks than
-            // the variants it is meant to cover.
+            // Guard against the document silently parsing into fewer blocks
+            // than the variants it is meant to cover.
             assert!(
                 count >= 14,
                 "expected the sample document to yield every block variant, saw {count} blocks"

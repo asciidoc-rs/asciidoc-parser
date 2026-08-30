@@ -804,9 +804,10 @@ mod basic_styling {
         assert_xpath(&doc, "//em", 1);
         assert_xpath(&doc, "//code[@class=\"role\"]", 1);
 
-        // The test xpath engine has no `not(@class)`, so the Ruby assertion that
-        // exactly one `<code>` has no class is instead pinned by asserting the
-        // full rendered output (which also subsumes the checks above).
+        // The test xpath engine has no `not(@class)`, so the Ruby assertion
+        // that exactly one `<code>` has no class is instead pinned by
+        // asserting the full rendered output (which also subsumes the
+        // checks above).
         assert_eq!(
             rendered_paragraphs(&doc)[0],
             r#"<strong>B</strong><em>I</em><code>M</code><code class="role">M</code>"#

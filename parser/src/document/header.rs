@@ -94,9 +94,10 @@ impl<'src> Header<'src> {
                 // Once a title has been seen, a `////` block comment delimiter
                 // opens a comment block within the header. Skip every line
                 // through the matching closing delimiter (or to the end of the
-                // input if the block is never closed), retaining the whole block
-                // as a single comment so it is not mistaken for the author or
-                // revision line. Blank lines inside the block do not terminate
+                // input if the block is never closed), retaining the whole
+                // block as a single comment so it is not
+                // mistaken for the author or revision line.
+                // Blank lines inside the block do not terminate
                 // the header.
                 //
                 // Before a title is seen there is no header author/revision
@@ -134,8 +135,8 @@ impl<'src> Header<'src> {
                         !matches!(attr.item.value(), InterpretedValue::Unset);
                 }
 
-                // Special handling for :author: attribute to populate individual author
-                // attributes.
+                // Special handling for :author: attribute to populate
+                // individual author attributes.
                 //
                 // When the value is a plain name, the partitioned name replaces
                 // the stored `author` value. This condenses repeated interior
@@ -143,15 +144,17 @@ impl<'src> Header<'src> {
                 // Asciidoctor.
                 //
                 // Asciidoctor runs an attribute-entry value through the
-                // substitution pipeline *before* partitioning it into name parts
-                // (`process_authors`, `names_only`). When that substitution
-                // produced inline HTML — for example a `pass:[…]` macro whose
-                // content resolves to a link and inline formatting — the rendered
-                // markup is stripped before partitioning so it does not leak into
+                // substitution pipeline *before* partitioning it into name
+                // parts (`process_authors`, `names_only`). When
+                // that substitution produced inline HTML — for
+                // example a `pass:[…]` macro whose
+                // content resolves to a link and inline formatting — the
+                // rendered markup is stripped before
+                // partitioning so it does not leak into
                 // `firstname`/`middlename`/`lastname`, while the `author` value
                 // keeps the rendered markup. A value that produced no markup
-                // keeps the original raw-value partitioning, so every other form
-                // is unchanged.
+                // keeps the original raw-value partitioning, so every other
+                // form is unchanged.
                 let mut author_name_override: Option<String> = None;
                 if attr.item.name().data().eq_ignore_ascii_case("author")
                     && let Some(raw_value) = attr.item.raw_value()
@@ -190,11 +193,12 @@ impl<'src> Header<'src> {
                     // reconstructed name (the rendered markup with name-joiner
                     // underscores turned to spaces) replaces the stored value.
                     // Otherwise the value is overridden only for a plain name
-                    // that was partitioned by the fallback whitespace split (four
-                    // or more parts, or punctuation such as a comma); a value that
+                    // that was partitioned by the fallback whitespace split
+                    // (four or more parts, or punctuation
+                    // such as a comma); a value that
                     // matches the pattern, carries an inline email (`<…>`), or
-                    // holds an attribute reference (`{…}`) keeps the substituted
-                    // entry value set below.
+                    // holds an attribute reference (`{…}`) keeps the
+                    // substituted entry value set below.
                     let raw = raw_value.data();
 
                     if is_attribute_entry_pass_macro(raw)
@@ -218,9 +222,10 @@ impl<'src> Header<'src> {
                     parser.set_attribute_by_value_from_header("author", author_name);
                 }
 
-                // A `:doctitle:` entry below the document title is a candidate to
-                // override the implicit section title (resolved after the header
-                // is fully parsed; see below).
+                // A `:doctitle:` entry below the document title is a candidate
+                // to override the implicit section title
+                // (resolved after the header is fully parsed;
+                // see below).
                 if title.is_some() && attr.item.name().data().eq_ignore_ascii_case("doctitle") {
                     doctitle_entry_after_title = true;
                 }
@@ -235,25 +240,30 @@ impl<'src> Header<'src> {
             {
                 warnings.extend(metadata_warnings);
 
-                // A block attribute line directly above the document title assigns
-                // metadata to the *document* — its `id`, `reftext`, `role`, and
-                // options — mirroring Asciidoctor's `parse_document_header`. Each
-                // recognized value folds into the document's attributes at this
-                // point in the header, so it follows document order alongside any
+                // A block attribute line directly above the document title
+                // assigns metadata to the *document* — its
+                // `id`, `reftext`, `role`, and
+                // options — mirroring Asciidoctor's `parse_document_header`.
+                // Each recognized value folds into the
+                // document's attributes at this point in the
+                // header, so it follows document order alongside any
                 // equivalent header attribute entry (e.g. `:reftext:`).
                 //
                 // A `separator` sets the subtitle separator; it behaves exactly
-                // like assigning the `title-separator` document attribute here, so
-                // both mechanisms share the same partitioning logic and the same
-                // modification-context lock check (an API-locked `title-separator`
-                // is not overwritten by this block attribute).
+                // like assigning the `title-separator` document attribute here,
+                // so both mechanisms share the same
+                // partitioning logic and the same
+                // modification-context lock check (an API-locked
+                // `title-separator` is not overwritten by this
+                // block attribute).
                 //
                 // The line is only intercepted when a document title eventually
-                // follows — possibly after further stacked block attribute lines,
-                // each folded on its own pass through this loop, mirroring
-                // Asciidoctor's `parse_block_metadata_lines`. Otherwise it is
-                // block metadata for the body (e.g. a table's `separator`) and is
-                // left for the block parser.
+                // follows — possibly after further stacked block attribute
+                // lines, each folded on its own pass through
+                // this loop, mirroring Asciidoctor's
+                // `parse_block_metadata_lines`. Otherwise it is
+                // block metadata for the body (e.g. a table's `separator`) and
+                // is left for the block parser.
                 if let Some(doc_id) = metadata.id {
                     id = Some(doc_id);
                 }
@@ -265,11 +275,13 @@ impl<'src> Header<'src> {
                 }
                 if !metadata.roles.is_empty() {
                     // Fold the role(s) into the `role` document attribute
-                    // (space-joined, as Asciidoctor stores `attributes['role']`)
-                    // and also retain them on the header so `Document::roles()`
+                    // (space-joined, as Asciidoctor stores
+                    // `attributes['role']`) and also retain
+                    // them on the header so `Document::roles()`
                     // agrees with the document attribute (see #820). Roles from
-                    // separate stacked block attribute lines accumulate, just as
-                    // multiple roles within a single line combine (see #821).
+                    // separate stacked block attribute lines accumulate, just
+                    // as multiple roles within a single
+                    // line combine (see #821).
                     roles.extend(metadata.roles);
                     parser.set_attribute_by_value_from_header("role", roles.join(" "));
                 }
@@ -282,9 +294,10 @@ impl<'src> Header<'src> {
                 && document_title_follows_block_metadata(source, parser.level_offset())
             {
                 // A block title (`.Title`) directly above the document title is
-                // not a title *of* the document — a document has no block title.
-                // Its presence demotes the following `= …` line: the document
-                // has no title, and `= …` is a level-0 section heading in the
+                // not a title *of* the document — a document has no block
+                // title. Its presence demotes the following `=
+                // …` line: the document has no title, and `= …`
+                // is a level-0 section heading in the
                 // body rather than the document title (matching Asciidoctor,
                 // which logs "level 0 sections can only be used when doctype is
                 // book").
@@ -301,9 +314,10 @@ impl<'src> Header<'src> {
                 //
                 // `source` is left pointing at the block-title line (it is not
                 // advanced), so the header span ends above it and the body
-                // begins there. `document_title_follows_block_metadata` confirms
-                // a `= …` title actually follows — possibly past further stacked
-                // block metadata lines — so an ordinary body block title (with
+                // begins there. `document_title_follows_block_metadata`
+                // confirms a `= …` title actually follows —
+                // possibly past further stacked block metadata
+                // lines — so an ordinary body block title (with
                 // no document title beneath it) is not caught here.
                 break;
             } else if title.is_none()
@@ -382,11 +396,12 @@ impl<'src> Header<'src> {
 
         // Finalize the document (section) title, mirroring Asciidoctor's
         // `parse_document_header` doctitle handling. The `doctitle` attribute
-        // retains the eager, at-title-line substitution; the section title below
-        // is (re)derived from the *final* attribute state so that:
+        // retains the eager, at-title-line substitution; the section title
+        // below is (re)derived from the *final* attribute state so
+        // that:
         //
-        //   - an implicit `= Title` referencing an attribute defined later in the
-        //     header still resolves ("lazy" resolution),
+        //   - an implicit `= Title` referencing an attribute defined later in
+        //     the header still resolves ("lazy" resolution),
         //   - a `:doctitle:` attribute entry (above or below the title, or in a
         //     document with no title line at all) can supply or override it.
         let final_doctitle_attr = match parser.attribute_value("doctitle") {
@@ -396,21 +411,24 @@ impl<'src> Header<'src> {
 
         title = if saw_implicit_title {
             // The base section title is normally the eager (at-title-line)
-            // substitution already held in `title`. It is re-resolved against the
-            // final attribute set only when that eager substitution left an
-            // unresolved attribute reference — an attribute defined later in the
-            // header — so that one-shot substitutions such as a `{counter:…}` in
-            // the title are not evaluated a second time. When the implicit title
-            // was overridden by a `doctitle` set above it, `title` already holds
-            // that (resolved) value and is not re-substituted.
+            // substitution already held in `title`. It is re-resolved against
+            // the final attribute set only when that eager
+            // substitution left an unresolved attribute reference —
+            // an attribute defined later in the header — so that
+            // one-shot substitutions such as a `{counter:…}` in the
+            // title are not evaluated a second time. When the implicit title
+            // was overridden by a `doctitle` set above it, `title` already
+            // holds that (resolved) value and is not
+            // re-substituted.
             //
             // Residual edge: a title that *mixes* a stateful, one-shot
             // substitution with a later-defined reference (e.g. `= {counter:n}
-            // {project-name}`) still contains a `{` after the eager pass, so the
-            // re-resolution runs that one-shot substitution a second time.
-            // Re-resolving is done from the raw title (not the eager result) so
-            // that escaped `\{…}` and specialchars stay correct; the duplicated
-            // side effect here is the price of that. Since the eager pass now
+            // {project-name}`) still contains a `{` after the eager pass, so
+            // the re-resolution runs that one-shot substitution a
+            // second time. Re-resolving is done from the raw title
+            // (not the eager result) so that escaped `\{…}` and
+            // specialchars stay correct; the duplicated side effect
+            // here is the price of that. Since the eager pass now
             // uses the `Title` group, this extends beyond a `{counter:…}`
             // advancing twice to any stateful macro sharing the title with a
             // later-defined reference — an anchor
@@ -447,15 +465,15 @@ impl<'src> Header<'src> {
                 base
             }
         } else {
-            // No `= Title` line: a `:doctitle:` attribute entry, if any, supplies
-            // the implicit document title.
+            // No `= Title` line: a `:doctitle:` attribute entry, if any,
+            // supplies the implicit document title.
             final_doctitle_attr
         };
 
-        // Partition the (fully substituted) document title into a main title and
-        // an optional subtitle. This happens after the header has been fully
-        // parsed so that a `title-separator` attribute takes effect even when it
-        // is defined below the document title line.
+        // Partition the (fully substituted) document title into a main title
+        // and an optional subtitle. This happens after the header has
+        // been fully parsed so that a `title-separator` attribute takes
+        // effect even when it is defined below the document title line.
         let (main_title, subtitle) = match &title {
             Some(title) => {
                 let (main_title, subtitle) = partition_title(title, parser);
@@ -464,9 +482,10 @@ impl<'src> Header<'src> {
             None => (None, None),
         };
 
-        // The value returned by `Document::doctitle()`: a `title` attribute entry
-        // overrides the section title (Asciidoctor's `Document#doctitle`), even
-        // when it is blank; otherwise the section title is the doctitle.
+        // The value returned by `Document::doctitle()`: a `title` attribute
+        // entry overrides the section title (Asciidoctor's
+        // `Document#doctitle`), even when it is blank; otherwise the
+        // section title is the doctitle.
         let doctitle = match parser.attribute_value("title") {
             InterpretedValue::Value(v) => Some(v),
             InterpretedValue::Set => Some(String::new()),
@@ -508,8 +527,8 @@ impl<'src> Header<'src> {
 
         // Asciidoctor exposes the number of resolved authors via the
         // `authorcount` document attribute. It defaults to `0` (a built-in
-        // default), so only a non-zero count is materialized here — this keeps an
-        // author-less parse from touching the attribute map at all.
+        // default), so only a non-zero count is materialized here — this keeps
+        // an author-less parse from touching the attribute map at all.
         if !authors.is_empty() {
             parser.set_attribute_by_value_from_header("authorcount", authors.len().to_string());
         }
@@ -794,9 +813,10 @@ fn document_title_follows_block_metadata(source: Span<'_>, level_offset: i32) ->
             return !effective_style_is_discrete;
         }
 
-        // A block title (`.Title`) may appear anywhere in the metadata run above
-        // the document title; it carries no block style, so it leaves the
-        // running effective style unchanged and the scan continues.
+        // A block title (`.Title`) may appear anywhere in the metadata run
+        // above the document title; it carries no block style, so it
+        // leaves the running effective style unchanged and the scan
+        // continues.
         if block_title_text(line).is_some() {
             next = line_mi.after;
             continue;
@@ -883,9 +903,9 @@ fn is_document_metadata_line(line: Span<'_>) -> bool {
         return false;
     }
 
-    // A `[[anchor]]` block anchor is document metadata when it names a non-empty
-    // anchor; the empty `[[]]` form is not (`inner` would be the two-character
-    // `[]`).
+    // A `[[anchor]]` block anchor is document metadata when it names a
+    // non-empty anchor; the empty `[[]]` form is not (`inner` would be the
+    // two-character `[]`).
     if inner.starts_with('[') && inner.ends_with(']') {
         return inner.len() > 2;
     }
@@ -976,8 +996,9 @@ fn parse_document_metadata_anchor<'src>(
     parser: &Parser,
 ) -> Option<(DocumentMetadata, Vec<Warning<'src>>)> {
     // Split an optional reftext off at the first comma (`id,reftext`). A comma
-    // in the final position leaves the whole span — trailing comma included — as
-    // the ID, which then fails XML-name validation, matching the block parser.
+    // in the final position leaves the whole span — trailing comma included —
+    // as the ID, which then fails XML-name validation, matching the block
+    // parser.
     let (id, reftext) = match anchor.position(|c| c == ',') {
         Some(comma) if comma < anchor.len() - 1 => (
             anchor.slice(0..comma),
@@ -1185,11 +1206,12 @@ fn resolve_authors(
         let author = author.with_email(attribute_string(parser, "email"));
 
         // Mirror Asciidoctor's `process_authors`, which sets the combined
-        // `authors` attribute to the single author's name. The remaining derived
-        // keys (`firstname`, `authorinitials`, …) were populated inline as the
-        // `:author:` entry was parsed — deliberately, so an explicit
-        // `:authorinitials:` override survives — but `authors` was still left
-        // unset there (see issue #1027).
+        // `authors` attribute to the single author's name. The remaining
+        // derived keys (`firstname`, `authorinitials`, …) were
+        // populated inline as the `:author:` entry was parsed —
+        // deliberately, so an explicit `:authorinitials:` override
+        // survives — but `authors` was still left unset there (see
+        // issue #1027).
         parser.set_attribute_by_value_from_header("authors", author.name());
 
         return vec![author];
@@ -1348,7 +1370,8 @@ mod tests {
         let doc = Parser::default().parse(":alpha: 1\n:bravo: 2\n:charlie: 3\n\nbody\n");
         let header = doc.header();
 
-        // Collect once to learn the order and length without hard-coding a count.
+        // Collect once to learn the order and length without hard-coding a
+        // count.
         let names: Vec<_> = header
             .attributes()
             .map(|a| a.name().data().to_string())
@@ -1818,7 +1841,8 @@ mod tests {
             InterpretedValue::Value("john@example.com")
         );
 
-        // Also verify the original author attribute is still set (with HTML encoding).
+        // Also verify the original author attribute is still set (with HTML
+        // encoding).
         assert_eq!(
             parser.attribute_value("author"),
             InterpretedValue::Value("John Q. Smith &lt;john@example.com&gt;")
@@ -1859,8 +1883,8 @@ mod tests {
     #[test]
     fn author_attribute_two_part_fallback_partitions_lastname() {
         // A two-part value that does not match the author pattern (here because
-        // of the comma attached to the first part) still partitions into a first
-        // and last name via the whitespace split.
+        // of the comma attached to the first part) still partitions into a
+        // first and last name via the whitespace split.
         let mut parser = Parser::default();
         let _doc = parser.parse(":author: Jane, Doe");
 
@@ -1884,8 +1908,8 @@ mod tests {
 
     #[test]
     fn author_attribute_single_part_fallback_is_firstname_only() {
-        // A single-token value that does not match the author pattern partitions
-        // to `firstname` alone, with no middle or last name.
+        // A single-token value that does not match the author pattern
+        // partitions to `firstname` alone, with no middle or last name.
         let mut parser = Parser::default();
         let _doc = parser.parse(":author: Jane,");
 
@@ -1906,9 +1930,9 @@ mod tests {
 
     #[test]
     fn author_attribute_four_or_more_parts_with_inline_email() {
-        // A four-plus-part fallback value that carries a trailing `<email>` must
-        // split the email off before partitioning, so it lands in `email` rather
-        // than being absorbed into `lastname`.
+        // A four-plus-part fallback value that carries a trailing `<email>`
+        // must split the email off before partitioning, so it lands in
+        // `email` rather than being absorbed into `lastname`.
         let mut parser = Parser::default();
         let _doc = parser.parse(":author: Leroy  Harold  Scherer,  Jr. <leroy@example.com>");
 
@@ -1936,9 +1960,10 @@ mod tests {
 
     #[test]
     fn author_attribute_reference_expands_and_partitions() {
-        // A `:author:` value given entirely as an attribute reference is expanded
-        // and then partitioned by the names-only rules, so it yields the same
-        // metadata as the equivalent literal four-plus-part name.
+        // A `:author:` value given entirely as an attribute reference is
+        // expanded and then partitioned by the names-only rules, so it
+        // yields the same metadata as the equivalent literal
+        // four-plus-part name.
         let mut parser = Parser::default();
         let _doc = parser.parse(":full-name: Leroy Harold Scherer, Jr.\n:author: {full-name}");
 
@@ -1963,8 +1988,8 @@ mod tests {
     #[test]
     fn author_attribute_reference_within_larger_value_expands_and_partitions() {
         // The same partitioning applies when the reference is only part of the
-        // value (so the single-attribute fast path is not taken) and the expanded
-        // result still fails the author pattern.
+        // value (so the single-attribute fast path is not taken) and the
+        // expanded result still fails the author pattern.
         let mut parser = Parser::default();
         let _doc = parser.parse(":rest: Harold Scherer, Jr.\n:author: Leroy {rest}");
 
@@ -1985,8 +2010,8 @@ mod tests {
     #[test]
     fn author_attribute_non_breaking_space_is_not_a_name_separator() {
         // Only ASCII whitespace separates name parts. A non-breaking space
-        // (U+00A0) joining two words keeps them as a single first name, matching
-        // Ruby's whitespace split.
+        // (U+00A0) joining two words keeps them as a single first name,
+        // matching Ruby's whitespace split.
         let mut parser = Parser::default();
         let _doc = parser.parse(":author: John\u{a0}Doe Scherer, Jr.");
 
@@ -2166,8 +2191,8 @@ mod tests {
             InterpretedValue::Value("DOC")
         );
 
-        // A second `:author:` entry after the explicit initials does not clobber
-        // them.
+        // A second `:author:` entry after the explicit initials does not
+        // clobber them.
         let doc = Parser::default()
             .parse(":author: Jane Roe\n:authorinitials: DOC\n:author: Doc Writer\n\nBody.");
 
@@ -2195,9 +2220,9 @@ mod tests {
 
     #[test]
     fn single_author_entry_sets_combined_authors_attribute() {
-        // A single `:author:` entry sets the combined `authors` attribute to the
-        // author's name, matching Asciidoctor (`{authors}` equals `{author}`),
-        // just as the implicit author line already does.
+        // A single `:author:` entry sets the combined `authors` attribute to
+        // the author's name, matching Asciidoctor (`{authors}` equals
+        // `{author}`), just as the implicit author line already does.
         let doc = Parser::default().parse(":author: Doc Writer\n\nBody.");
 
         assert_eq!(
@@ -2209,10 +2234,10 @@ mod tests {
             InterpretedValue::Value("Doc Writer")
         );
 
-        // The name is reconstructed the same way in the `authors` string, and an
-        // explicit `:authorinitials:` override is still preserved (the reason
-        // this path populates `authors` inline rather than via the shared
-        // metadata routine).
+        // The name is reconstructed the same way in the `authors` string, and
+        // an explicit `:authorinitials:` override is still preserved
+        // (the reason this path populates `authors` inline rather than
+        // via the shared metadata routine).
         let doc = Parser::default()
             .parse("= T\n:authorinitials: DOC\n:author: Kismet R. Chameleon\n\nBody.");
 
@@ -2291,8 +2316,8 @@ mod tests {
     #[test]
     fn authors_attribute_attaches_companion_emails_and_base_middlename() {
         // Companion `:email_N:` entries attach to each split author (`email_1`
-        // also fills the base `email`), and the first author's middle name lands
-        // on the unsuffixed `middlename`.
+        // also fills the base `email`), and the first author's middle name
+        // lands on the unsuffixed `middlename`.
         let doc = Parser::default().parse(
             ":authors: Jane Q. Doe; John Smith\n:email_1: jane@example.com\n:email_2: john@example.com\n\nBody.",
         );
@@ -2362,8 +2387,9 @@ mod tests {
 
     #[test]
     fn authors_attribute_with_only_empty_entries_yields_no_authors() {
-        // An `:authors:` value that splits into only empty entries resolves to no
-        // authors, so the derived attributes stay unset and `authorcount` is 0.
+        // An `:authors:` value that splits into only empty entries resolves to
+        // no authors, so the derived attributes stay unset and
+        // `authorcount` is 0.
         let doc = Parser::default().parse(":authors: ;\n\nBody.");
 
         assert!(doc.authors().is_empty());
@@ -2374,8 +2400,9 @@ mod tests {
         );
 
         // With no authors resolved, the raw `authors` value is left as written
-        // (never rewritten to a comma-joined list) — matching Asciidoctor, whose
-        // `process_authors` returns only `authorcount` for an all-empty value.
+        // (never rewritten to a comma-joined list) — matching Asciidoctor,
+        // whose `process_authors` returns only `authorcount` for an
+        // all-empty value.
         assert_eq!(doc.attribute_value("authors"), InterpretedValue::Value(";"));
     }
 
@@ -2407,20 +2434,22 @@ mod tests {
 
     #[test]
     fn authors_entry_replacing_a_longer_implicit_list_leaves_stale_attributes() {
-        // When a differing `:authors:` entry replaces a *longer* implicit author
-        // line, the reconciliation re-derives only the replacement authors'
-        // attributes. Attributes the implicit line set that the replacement does
-        // not are left in place: a trailing `author_N` (and its name parts)
-        // beyond the shorter list, and the base `email` / `middlename` when the
+        // When a differing `:authors:` entry replaces a *longer* implicit
+        // author line, the reconciliation re-derives only the
+        // replacement authors' attributes. Attributes the implicit line
+        // set that the replacement does not are left in place: a
+        // trailing `author_N` (and its name parts) beyond the shorter
+        // list, and the base `email` / `middlename` when the
         // replacement's first author omits them.
         //
         // This is not a gap in the port — it is exactly Asciidoctor's behavior.
         // Its `parse_header_metadata` reconciles with `doc_attrs.update
         // author_metadata`, a merge that overwrites the keys the replacement
-        // supplies and never deletes the ones it omits, so `{author_3}` (and the
-        // stale `email` / `middlename`) survive alongside an `authorcount` that
-        // reflects the shorter list. Verified byte-for-byte against Asciidoctor
-        // 2.0.26; there is no upstream test for this shrinking case, so this one
+        // supplies and never deletes the ones it omits, so `{author_3}` (and
+        // the stale `email` / `middlename`) survive alongside an
+        // `authorcount` that reflects the shorter list. Verified
+        // byte-for-byte against Asciidoctor 2.0.26; there is no
+        // upstream test for this shrinking case, so this one
         // pins the parity to guard against a future "cleanup" that would clear
         // the stale keys and diverge.
         let mut parser = Parser::default();
@@ -2453,9 +2482,9 @@ mod tests {
             InterpretedValue::Value("Dan Allen")
         );
 
-        // Stale attributes from the longer/richer implicit list survive, exactly
-        // as they do in Asciidoctor: the third author, the first implicit
-        // author's email, and its middle name.
+        // Stale attributes from the longer/richer implicit list survive,
+        // exactly as they do in Asciidoctor: the third author, the
+        // first implicit author's email, and its middle name.
         assert_eq!(
             parser.attribute_value("author_3"),
             InterpretedValue::Value("Third Author")
@@ -2549,8 +2578,8 @@ mod tests {
 
     #[test]
     fn subtitle_available_on_document() {
-        // The subtitle is reachable directly from `Document` as well as from its
-        // `Header`.
+        // The subtitle is reachable directly from `Document` as well as from
+        // its `Header`.
         let doc = Parser::default().parse("= Main Title: Subtitle");
 
         assert_eq!(doc.doctitle(), Some("Main Title: Subtitle"));
@@ -2690,8 +2719,8 @@ mod tests {
         assert_eq!(rendered_paragraphs(&doc), vec!["content"]);
 
         // The `[[id,reftext]]` form additionally folds its reference text into
-        // the document's `reftext` attribute, resolving attribute references the
-        // way a section/block anchor reftext does.
+        // the document's `reftext` attribute, resolving attribute references
+        // the way a section/block anchor reftext does.
         let doc = Parser::default()
             .parse(":product: Widgets\n[[guide,{product} Guide]]\n= User Guide\n\ncontent");
         let header = doc.header();
@@ -2706,9 +2735,9 @@ mod tests {
 
     #[test]
     fn bracket_anchor_above_title_requires_a_valid_name() {
-        // A `[[…]]` line whose anchor name is not a valid XML name is not folded
-        // as document metadata; the header terminates as it does for any other
-        // unrecognized line.
+        // A `[[…]]` line whose anchor name is not a valid XML name is not
+        // folded as document metadata; the header terminates as it does
+        // for any other unrecognized line.
         let doc = Parser::default().parse("[[bad name]]\n= Document Title\n\ncontent");
         let header = doc.header();
 
@@ -2829,10 +2858,11 @@ mod tests {
 
     #[test]
     fn role_block_attribute_above_title() {
-        // A `[role=…]` block attribute above the title folds into the document's
-        // `role` attribute; multiple roles are space-joined. The same role(s)
-        // are surfaced through the block API, so `Header::roles()` and
-        // `Document::roles()` agree with the document attribute (see #820).
+        // A `[role=…]` block attribute above the title folds into the
+        // document's `role` attribute; multiple roles are space-joined.
+        // The same role(s) are surfaced through the block API, so
+        // `Header::roles()` and `Document::roles()` agree with the
+        // document attribute (see #820).
         let doc = Parser::default().parse("[role=special]\n= Document Title\n\nBody.");
         let header = doc.header();
 
@@ -2856,8 +2886,8 @@ mod tests {
 
     #[test]
     fn roles_empty_without_block_attribute() {
-        // With no role assigned above the title, both the block accessor and the
-        // header accessor report no roles.
+        // With no role assigned above the title, both the block accessor and
+        // the header accessor report no roles.
         let doc = Parser::default().parse("= Document Title\n\nBody.");
 
         assert!(doc.header().roles().is_empty());
@@ -2881,10 +2911,10 @@ mod tests {
     #[test]
     fn bracketed_line_that_is_not_a_separator_attribute_list() {
         // A `[...]` line above the title that isn't a well-formed block
-        // attribute list carrying `separator` is not consumed as a separator. An
-        // empty block anchor (`[[]]`) and a leading-space form are both rejected,
-        // so the line terminates the header exactly as any other unrecognized
-        // line would.
+        // attribute list carrying `separator` is not consumed as a separator.
+        // An empty block anchor (`[[]]`) and a leading-space form are
+        // both rejected, so the line terminates the header exactly as
+        // any other unrecognized line would.
         let doc = Parser::default().parse("[[]]\n= Some Title: Subtitle");
         let header = doc.header();
 
@@ -2912,10 +2942,10 @@ mod tests {
     #[test]
     fn counter_does_not_shadow_title_separator() {
         // A counter that happens to be named `title-separator` must not be
-        // mistaken for the configured separator: partitioning reads the document
-        // attribute directly, ignoring the counter overlay. Here the title
-        // creates such a counter, but the default `:{sp}` separator still
-        // applies.
+        // mistaken for the configured separator: partitioning reads the
+        // document attribute directly, ignoring the counter overlay.
+        // Here the title creates such a counter, but the default
+        // `:{sp}` separator still applies.
         let doc = Parser::default().parse("= Main Title: Subtitle {counter:title-separator}");
         let header = doc.header();
 
@@ -2944,8 +2974,9 @@ mod tests {
 
     #[test]
     fn skips_block_comment_with_blank_lines() {
-        // Blank lines inside a header block comment do not terminate the header;
-        // the whole block is skipped and the author line is still recognized.
+        // Blank lines inside a header block comment do not terminate the
+        // header; the whole block is skipped and the author line is
+        // still recognized.
         let doc = Parser::default().parse("= Title\n////\n\nAsciidoctor\n\n////\nRyan Waldron");
         let header = doc.header();
 
@@ -3094,8 +3125,9 @@ mod tests {
 
         #[test]
         fn separator_block_attribute_above_title() {
-            // The `[separator=…]` line is only intercepted when a document title
-            // follows it; a `#` title qualifies just as an `=` title does.
+            // The `[separator=…]` line is only intercepted when a document
+            // title follows it; a `#` title qualifies just as an
+            // `=` title does.
             let doc = Parser::default().parse("[separator=::]\n# Main Title:: Subtitle");
             let header = doc.header();
 

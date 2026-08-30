@@ -62,8 +62,9 @@ mod default_post_replacements_substitution {
         );
 
         // The post replacements step is _not_ applied when an attribute entry
-        // value is parsed. A xref:attributes:wrap-values.adoc#hard[hard-wrapped]
-        // attribute value therefore stores the line-break marker (` +`)
+        // value is parsed. A
+        // xref:attributes:wrap-values.adoc#hard[hard-wrapped] attribute
+        // value therefore stores the line-break marker (` +`)
         // verbatim rather than converting it to a `<br>`. The marker is only
         // interpreted as a line break later, if and when the value is used in a
         // block whose substitutions include post_replacements.
@@ -144,7 +145,8 @@ mod default_post_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -268,7 +270,8 @@ mod default_post_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -349,7 +352,8 @@ mod default_post_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -376,7 +380,8 @@ mod default_post_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {

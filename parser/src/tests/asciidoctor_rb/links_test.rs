@@ -1908,8 +1908,8 @@ fn does_not_match_bibliography_anchor_in_prose_when_scanning_for_inline_anchor()
 
     // A bibliography-style anchor (`[[[label]]]`) in ordinary prose (not as the
     // prefix of a bibliography list item) is rendered like Asciidoctor — the
-    // inner `[[label]]` becomes an empty anchor, leaving a literal `[]` — but the
-    // id is *not* registered in the catalog. See #769.
+    // inner `[[label]]` becomes an empty anchor, leaving a literal `[]` — but
+    // the id is *not* registered in the catalog. See #769.
     let doc = Parser::default().parse(
         "Use [[[label]]] to assign a label to a bibliography entry, but not in a paragraph.",
     );
@@ -3734,9 +3734,9 @@ fn internal_anchor_for_inter_document_xref_to_file_outside_base_directory() {
 "###
     );
 
-    // A file included from outside the base directory registers under the target
-    // as written (`../section-a`), and the reference to it collapses just the
-    // same.
+    // A file included from outside the base directory registers under the
+    // target as written (`../section-a`), and the reference to it collapses
+    // just the same.
     let doc = doc_with_includes(
         "= Document Title\n\nSee <<../section-a.adoc#section-a>>.\n\ninclude::../section-a.adoc[]\n",
         [("../section-a.adoc", "[#section-a]\n== Section A\n")],
@@ -3958,8 +3958,8 @@ fn should_drop_nested_anchor_in_xreftext() {
 
     // `a`'s title cross-references `b`, whose reference text is its own title:
     // `Consult <a href="https://google.com">Google</a>`. Splicing that in as the
-    // link text of `a`'s cross-reference would nest an anchor inside another, so
-    // the inner link's tags are dropped, leaving `Consult Google`.
+    // link text of `a`'s cross-reference would nest an anchor inside another,
+    // so the inner link's tags are dropped, leaving `Consult Google`.
     assert_eq!(
         sections[0].section_title(),
         r##"See <a href="#b">Consult Google</a>"##

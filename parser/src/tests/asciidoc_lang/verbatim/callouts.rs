@@ -54,8 +54,9 @@ The sections that follow detail these features.
     // one item per callout number.
     assert_css(&doc, ".colist ol li", 2);
 
-    // The `subs=-callouts` modifier used in the syntax examples above suppresses
-    // callout processing, so the callout numbers are shown literally.
+    // The `subs=-callouts` modifier used in the syntax examples above
+    // suppresses callout processing, so the callout numbers are shown
+    // literally.
     let raw = Parser::default().parse("[source,subs=-callouts]\n----\nrequire 'x' # <1>\n----\n");
     refute_output_contains(&raw, "conum");
     assert_output_contains(&raw, "# &lt;1&gt;");
@@ -124,8 +125,9 @@ The risk of this approach is that you have to keep track of which numbers are be
     );
 
     // The automatic numbering is not aware of the explicit `<1>`: the `<.>`
-    // markers are numbered 1 and 2 in sequence, while the explicit `<1>` repeats
-    // callout number 1. Asserted at the substitution level for an exact match.
+    // markers are numbered 1 and 2 in sequence, while the explicit `<1>`
+    // repeats callout number 1. Asserted at the substitution level for an
+    // exact match.
     let mut content = crate::content::Content::from(crate::Span::new(
         "first &lt;.&gt;\nsecond &lt;.&gt;\nrepeat &lt;1&gt;",
     ));
@@ -293,7 +295,8 @@ Now both you and the reader can copy and paste XML source code containing callou
     );
 
     // An XML callout places the angle brackets around the XML comment and
-    // number; the rendered output keeps the comment delimiters around the conum.
+    // number; the rendered output keeps the comment delimiters around the
+    // conum.
     let doc = Parser::default().parse(
         "[source,xml]\n----\n<section>\n  <title>Section Title</title> <!--1-->\n</section>\n----\n<1> The title is required.\n",
     );

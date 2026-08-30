@@ -171,8 +171,8 @@ A style operator is always placed in the last position on a column's specifier o
     assert_eq!(columns[1].width(), 3);
     assert_eq!(columns[1].style(), ColumnStyle::Strong);
 
-    // When a column width isn't specified, the style operator can represent both
-    // the column and its content style.
+    // When a column width isn't specified, the style operator can represent
+    // both the column and its content style.
     let table = parse_table("[cols=\"h,e\"]\n|===\n|a |b\n|===");
     let columns = table.columns();
     assert_eq!(

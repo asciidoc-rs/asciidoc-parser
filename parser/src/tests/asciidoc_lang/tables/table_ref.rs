@@ -97,11 +97,11 @@ d|specifiers
 "#
     );
 
-    // A comma-separated list of column specifiers sets the number of columns, the
-    // per-column distribution ratio, and the default formatting for each column.
-    // The page's own spec, `1m,2,1m,2,2`, declares five columns: the first and
-    // third are width 1 with the monospace style, the rest are width 2 with the
-    // default style.
+    // A comma-separated list of column specifiers sets the number of columns,
+    // the per-column distribution ratio, and the default formatting for
+    // each column. The page's own spec, `1m,2,1m,2,2`, declares five
+    // columns: the first and third are width 1 with the monospace style,
+    // the rest are width 2 with the default style.
     let table = parse_table("[cols=\"1m,2,1m,2,2\"]\n|===\n|a |b |c |d |e\n|===");
     assert_eq!(table.columns().len(), 5);
 
@@ -139,9 +139,9 @@ fn format_attribute() {
 "#
     );
 
-    // The `format` attribute selects the data format. PSV is the default, and its
-    // cells are delimited by the `separator` (default `|`), placed in front of
-    // each cell.
+    // The `format` attribute selects the data format. PSV is the default, and
+    // its cells are delimited by the `separator` (default `|`), placed in
+    // front of each cell.
     assert_eq!(
         parse_table("|===\n|a |b\n|===").data_format(),
         DataFormat::Psv
@@ -201,11 +201,11 @@ _Ideally a character not found in the cell content._
     assert_eq!(simple_text(&inner.body_rows()[0].cells()[1]), "y");
 
     // A user-defined separator can be any single character (here `%`), after
-    // which the original cell separator (`|`) is ordinary text within a cell. As
-    // in Asciidoctor's PSV, the separator only begins a new cell when it follows
-    // whitespace, so that boundary whitespace is necessarily trimmed from the
-    // preceding cell; the explicit assertion messages make a trimming regression
-    // fail loudly rather than silently.
+    // which the original cell separator (`|`) is ordinary text within a cell.
+    // As in Asciidoctor's PSV, the separator only begins a new cell when it
+    // follows whitespace, so that boundary whitespace is necessarily
+    // trimmed from the preceding cell; the explicit assertion messages make
+    // a trimming regression fail loudly rather than silently.
     let table = parse_table("[separator=%]\n|===\n%a | b %c\n|===");
     assert_eq!(table.body_rows()[0].cells().len(), 2);
     assert_eq!(
@@ -242,9 +242,9 @@ fn frame_attribute() {
 "#
     );
 
-    // The `frame` attribute draws a border around the table. `all` (the default)
-    // borders every side; `ends` borders the top and bottom; `none` removes the
-    // border; `sides` borders the left and right.
+    // The `frame` attribute draws a border around the table. `all` (the
+    // default) borders every side; `ends` borders the top and bottom;
+    // `none` removes the border; `sides` borders the left and right.
     assert_eq!(parse_table("|===\n|a\n|===").frame(), Frame::All);
     assert_eq!(
         parse_table("[frame=all]\n|===\n|a\n|===").frame(),
@@ -286,9 +286,9 @@ fn grid_attribute() {
 "#
     );
 
-    // The `grid` attribute draws boundary lines between cells. `all` (the default)
-    // borders every cell; `cols` borders between columns; `rows` borders between
-    // rows; `none` removes the boundary lines.
+    // The `grid` attribute draws boundary lines between cells. `all` (the
+    // default) borders every cell; `cols` borders between columns; `rows`
+    // borders between rows; `none` removes the boundary lines.
     assert_eq!(parse_table("|===\n|a\n|===").grid(), Grid::All);
     assert_eq!(parse_table("[grid=all]\n|===\n|a\n|===").grid(), Grid::All);
     assert_eq!(
@@ -330,9 +330,10 @@ fn stripes_attribute() {
 "#
     );
 
-    // The `stripes` attribute controls which rows are shaded. `none` (the default)
-    // shades nothing; `even` and `odd` shade alternating rows; `hover` shades the
-    // row under the mouse cursor; `all` shades every row.
+    // The `stripes` attribute controls which rows are shaded. `none` (the
+    // default) shades nothing; `even` and `odd` shade alternating rows;
+    // `hover` shades the row under the mouse cursor; `all` shades every
+    // row.
     assert_eq!(parse_table("|===\n|a\n|===").stripes(), Stripes::None);
     assert_eq!(
         parse_table("[stripes=none]\n|===\n|a\n|===").stripes(),
@@ -378,11 +379,11 @@ Alignment roles and the `float` attributes are mutually exclusive.
 "#
     );
 
-    // `align` is not recognized by Asciidoctor, and this crate matches that: the
-    // attribute is accepted but given no special meaning. Whatever value it is
-    // set to, the table's structure is unchanged and its columns keep their
-    // default left alignment (alignment is expressed instead with a role or with
-    // column/cell specifiers).
+    // `align` is not recognized by Asciidoctor, and this crate matches that:
+    // the attribute is accepted but given no special meaning. Whatever
+    // value it is set to, the table's structure is unchanged and its
+    // columns keep their default left alignment (alignment is expressed
+    // instead with a role or with column/cell specifiers).
     for value in ["left", "right", "center"] {
         let src = format!("[align={value}]\n|===\n|a |b\n|===");
         let table = parse_table(&src);
@@ -410,8 +411,9 @@ The `float` and `align` attributes are mutually exclusive.
 "#
     );
 
-    // `float` only floats the table in HTML output; this crate does no rendering,
-    // so the attribute is accepted but leaves the parsed table unchanged.
+    // `float` only floats the table in HTML output; this crate does no
+    // rendering, so the attribute is accepted but leaves the parsed table
+    // unchanged.
     for value in ["left", "right"] {
         let src = format!("[float={value},width=50%]\n|===\n|a |b\n|===");
         let table = parse_table(&src);
@@ -472,8 +474,8 @@ Define instead using column or cell specifiers (e.g., `3*.>`), which take preced
     );
 
     // `valign` is not recognized by Asciidoctor, and this crate matches that:
-    // whatever value it is set to, the columns retain their default top alignment
-    // (a column or cell specifier must be used instead).
+    // whatever value it is set to, the columns retain their default top
+    // alignment (a column or cell specifier must be used instead).
     for value in ["top", "bottom", "middle"] {
         let src = format!("[valign={value}]\n|===\n|a |b\n|===");
         let table = parse_table(&src);
@@ -497,8 +499,8 @@ DocBook only.
     );
 
     // `orientation` only rotates the table in the DocBook backend (it sets
-    // `orient="land"`); this crate does no rendering, so the attribute is accepted
-    // but leaves the parsed table unchanged.
+    // `orient="land"`); this crate does no rendering, so the attribute is
+    // accepted but leaves the parsed table unchanged.
     let table = parse_table("[orientation=landscape]\n|===\n|a |b\n|===");
     assert_eq!(table.columns().len(), 2);
 }
@@ -520,7 +522,8 @@ fn options_attribute() {
     );
 
     // Header and footer rows are omitted by default: a table whose rows run
-    // together (no blank line that would implicitly promote a header) has neither.
+    // together (no blank line that would implicitly promote a header) has
+    // neither.
     let plain = parse_table("|===\n|a |b\n|c |d\n|===");
     assert!(plain.header_row().is_none());
     assert!(plain.footer_row().is_none());
@@ -546,9 +549,9 @@ DocBook only (specifically for generating PDF output).
 "#
     );
 
-    // The `breakable`/`unbreakable` options only control page splitting in DocBook
-    // PDF output; this crate does no rendering, so either option is accepted but
-    // leaves the parsed table unchanged.
+    // The `breakable`/`unbreakable` options only control page splitting in
+    // DocBook PDF output; this crate does no rendering, so either option is
+    // accepted but leaves the parsed table unchanged.
     for option in ["breakable", "unbreakable"] {
         let src = format!("[%{option}]\n|===\n|a |b\n|===");
         let table = parse_table(&src);
@@ -585,7 +588,8 @@ DocBook only.
 
     // The `rotate` option only prints the table in landscape in the DocBook
     // backend (equivalent to `orientation=landscape`); this crate does no
-    // rendering, so the option is accepted but leaves the parsed table unchanged.
+    // rendering, so the option is accepted but leaves the parsed table
+    // unchanged.
     let table = parse_table("[%rotate]\n|===\n|a |b\n|===");
     assert_eq!(table.columns().len(), 2);
 }
@@ -641,8 +645,8 @@ d|user defined value
 "#
     );
 
-    // The `width` attribute sets the table width as a user-defined percentage of
-    // the available page width. The trailing `%` is optional.
+    // The `width` attribute sets the table width as a user-defined percentage
+    // of the available page width. The trailing `%` is optional.
     assert_eq!(parse_table("[width=50%]\n|===\n|a\n|===").width(), Some(50));
     assert_eq!(parse_table("[width=75]\n|===\n|a\n|===").width(), Some(75));
     assert_eq!(

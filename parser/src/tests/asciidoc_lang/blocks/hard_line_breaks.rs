@@ -539,10 +539,11 @@ Then each dialog will appear on its own line.
     );
 
     // No hard line break is generated here, matching Asciidoctor. The spaced em
-    // dash replacement for the ` -- ` at the start of the second line matches (and
-    // consumes) the preceding newline, so both source lines render on one output
-    // line. Because the newline is gone, the trailing ` +` is no longer at the end
-    // of a line and is left literal rather than becoming a `<br>`.
+    // dash replacement for the ` -- ` at the start of the second line matches
+    // (and consumes) the preceding newline, so both source lines render on
+    // one output line. Because the newline is gone, the trailing ` +` is no
+    // longer at the end of a line and is left literal rather than becoming
+    // a `<br>`.
     let doc =
         Parser::default().parse("-- Come here! -- I said. +\n-- What is it? -- replied Lance.");
 

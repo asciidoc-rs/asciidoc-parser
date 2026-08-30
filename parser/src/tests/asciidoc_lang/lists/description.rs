@@ -43,8 +43,8 @@ If a term has an anchor, the anchor must be defined at the start of the same lin
     let items: Vec<&crate::blocks::Block<'_>> = list.child_blocks().collect();
     assert_eq!(items.len(), 1);
 
-    // The `::` term is still recognized even though the term line begins with an
-    // anchor, and the anchor becomes part of the rendered term.
+    // The `::` term is still recognized even though the term line begins with
+    // an anchor, and the anchor becomes part of the rendered term.
     assert_eq!(term_delimiter(items[0]), "::");
     assert_eq!(term_rendered(items[0]), "<a id=\"cpu\"></a>CPU");
 
@@ -110,8 +110,8 @@ The available term delimiters you can use for this purpose are as follows:
     let list = top_list(&doc);
     assert_eq!(list.type_(), ListType::Description);
 
-    // Changing the delimiter means the second term is not a sibling; it begins a
-    // new description list nested inside the first item.
+    // Changing the delimiter means the second term is not a sibling; it begins
+    // a new description list nested inside the first item.
     let outer: Vec<&crate::blocks::Block<'_>> = list.child_blocks().collect();
     assert_eq!(outer.len(), 1);
     assert_eq!(term_delimiter(outer[0]), "::");
@@ -2414,7 +2414,8 @@ fn ordered_list_nests_under_second_level_term() {
     assert_eq!(outer_items.len(), 1);
     assert_eq!(term_delimiter(outer_items[0]), "::");
 
-    // The `OS` term nests a `:::` description list whose single term is `Linux`.
+    // The `OS` term nests a `:::` description list whose single term is
+    // `Linux`.
     let inner = nested_list(outer_items[0]);
     let inner_items: Vec<_> = inner.child_blocks().collect();
     assert_eq!(inner_items.len(), 1);
