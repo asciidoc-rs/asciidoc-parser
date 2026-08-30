@@ -49,16 +49,10 @@ impl<'src> ListBlock<'src> {
     /// This narrow seam exists for the document-order title resolution pass
     /// (see `document::title_refs`), which installs the re-rendered title
     /// after resolving any cross-references embedded in it. All other access
-    /// goes through the read-only [`IsBlock::title`] accessor.
+    /// goes through the read-only [`IsBlock::title`]/[`IsBlock::title_content`]
+    /// accessors.
     pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         self.title.as_mut()
-    }
-
-    /// Returns the block's title as a read-only [`Content`], if the block has
-    /// one. Used by the inline-tree tests to inspect a block title's own tree.
-    #[cfg(test)]
-    pub(crate) fn title_content(&self) -> Option<&Content<'src>> {
-        self.title.as_ref()
     }
 
     pub(crate) fn parse(
@@ -468,6 +462,10 @@ impl<'src> IsBlock<'src> for ListBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_ref().map(Content::rendered_str)
+    }
+
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
     }
 
     fn anchor(&'src self) -> Option<Span<'src>> {
@@ -1642,10 +1640,13 @@ mod tests {
     }
 
     mod has_empty_principal_text {
-        use crate::blocks::{Block, FindBlocks};
+        use crate::{
+            Document,
+            blocks::{Block, FindBlocks, ListItem},
+        };
 
         /// Returns the child list items of the first (list) block in `doc`.
-        fn items<'a>(doc: &'a crate::Document<'a>) -> Vec<&'a crate::blocks::ListItem<'a>> {
+        fn items<'a>(doc: &'a Document<'a>) -> Vec<&'a ListItem<'a>> {
             let Some(Block::List(list)) = doc.child_blocks().next() else {
                 panic!("expected a list block");
             };

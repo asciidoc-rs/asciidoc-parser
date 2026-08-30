@@ -4,8 +4,43 @@ Frozen, checked-in golden recordings for the `inline-ast` branch's differential 
 corpora. Each file is a **recording**, not a fixture list: it holds output that was once
 produced by the old string-substitution pipeline, captured before that pipeline was
 deleted (as part of [#1059](https://github.com/asciidoc-rs/asciidoc-parser/pull/1059)).
-Tests now read these files as a fixed oracle instead of re-deriving the expected output 
+Tests now read these files as a fixed oracle instead of re-deriving the expected output
 at test time.
+
+## Background: the string pipeline these corpora replaced
+
+This crate used to implement inline content (bold, links, images, footnotes, cross
+references, …) as **string rewriting**: `Content` held one mutable rendered string, and
+each substitution step edited it in place, calling straight into a renderer that wrote
+final HTML into a `&mut String` as it went. There was no point at which inline structure
+existed as data — recognizing a construct and rendering it to a string happened in the
+same motion. Three things that don't fit in a flat string were smuggled through it with
+Unicode sentinel characters:
+
+- **Passthroughs** (`+++…+++`, `pass:[…]`, `$$…$$`) — extracted before substitution and
+  re-spliced after, tracked by a `\u{96}`/`\u{97}` sentinel pair.
+- **Deferred cross-references** (`<<...>>`, `xref:`) — captured as a placeholder template
+  using a `\u{E000}`/`\u{E001}` sentinel pair (Private-Use-Area codepoints), resolved
+  against the document's reference catalog in a later pass.
+- **Footnote markers** — a third sentinel pair, `\u{E002}`/`\u{E003}`.
+
+The `inline-ast` branch ([#1059](https://github.com/asciidoc-rs/asciidoc-parser/pull/1059))
+replaced that model with a first-class inline AST (`InlineNode`, in `parser/src/inlines/`),
+built directly from source in a single forward pass by the builder in
+`parser/src/content/inline_builder/`. Rendering (`rendered_html()`) is now a pure fold
+over that tree, not something that happens during parsing. Each of the three sentinel systems
+became an ordinary node instead of a string hack: a passthrough is a `Raw` node, a deferred
+cross-reference is a `Ref { variant: Xref, resolved: None }` node that resolution fills in
+**in place**, and a footnote marker is a `Footnote` node — all three sentinel systems, and
+the string pipeline itself, are now fully retired from production code.
+
+While both the string pipeline and the tree builder existed side by side, every corpus in
+this directory was a genuine **differential test**: a fixture was rendered both ways, and
+the test asserted the two matched byte-for-byte. That comparison is what these files
+originally recorded. Once the string pipeline was deleted, there was no second
+implementation left to differential-test against, so each corpus's expected side was
+frozen as a point-in-time recording of what the (now-gone) string pipeline used to
+produce — see "Why these are frozen rather than generated" below.
 
 ## Format
 
@@ -23,13 +58,11 @@ One `<corpus>.txt` file per corpus. Each line is one fixture:
 
 ## Why these are frozen rather than generated
 
-Every corpus here started life as a genuine differential test: a fixture was rendered two
-ways — through the old string-substitution pipeline and through the new inline-AST
-builder — and the test asserted the two matched. Once the AST's HTML fold became the
-*only* pipeline (the string pipeline was deleted), that comparison would have become
-tautological (the fold compared against itself). So each corpus's expected side was
-recorded once, checked in, and is now read rather than re-derived — exactly like the
-crate's ~277 golden-HTML string assertions elsewhere in the test suite.
+Once the string pipeline was deleted, re-deriving a corpus's "expected" side at test time
+would just compare the tree's HTML fold against itself — tautological, and worthless as a
+regression check. So each corpus's expected side was recorded once, checked in, and is now
+read rather than re-derived — exactly like the crate's ~277 golden-HTML string assertions
+elsewhere in the test suite.
 
 **A recording is edited by hand, and reviewed like the behavior change it records.**
 Adding or changing a line is asserting "this rendering is correct" — treat it as an
@@ -107,7 +140,3 @@ any other expected-output string in a test — it is now the specification for t
 | `whole_pipeline.txt` | A broad general sweep through the full normal-order pipeline |
 | `xref_macros.txt`, `xref_normal.txt`, `xref_whole_pipeline.txt` | Cross-reference (`<<...>>`, `xref:`) recognition and resolution |
 | `xref_passthrough_divergence.txt` | A **documented divergence**: a passthrough body inside an xref target, where the tree deliberately does not match the old pipeline's output |
-
-For the deeper "why" — the sentinel systems these corpora replaced, the step-6 cutover
-that froze them, and the branch's overall architecture — see
-[`docs/design/inline-ast-architecture.md`](../../docs/design/inline-ast-architecture.md).

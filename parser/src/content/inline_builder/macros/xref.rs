@@ -21,7 +21,7 @@ use crate::{
     content::{
         INLINE_XREF, document_xrefstyle,
         inline_builder::{
-            quotes::{LevelContext, Piece, build_match_string, source_slice},
+            quotes::{LevelContext, Piece, build_match_string, single_text_value, source_slice},
             special_chars::Masked,
         },
         xref_target::{
@@ -89,6 +89,17 @@ fn xref_target_and_derived(
     }
 }
 
+/// Both the `xref:` macro form and the `<<id>>` shorthand (seen here as
+/// `&lt;&lt;id&gt;&gt;`, since specials run before macros) are recognized.
+/// Triggers on either the macro prefix or the shorthand's `&lt;&lt;` opener,
+/// mirroring the string step's `text.contains("&lt;&lt;") ||
+/// (found_macroish && text.contains("xref:"))` guard. Shared between
+/// [`xref_macros_level`]'s pre-build sniff and its post-build one, so the two
+/// answers cannot drift apart.
+fn xref_prefilter(s: &str) -> bool {
+    s.contains("xref:") || s.contains("&lt;&lt;")
+}
+
 /// Matches `INLINE_XREF` at this level's escaped text, replacing each
 /// recognized `xref:` macro with the [`Ref`](InlineNode::Ref)`{Xref}` node it
 /// produces and leaving everything else in place.
@@ -100,6 +111,14 @@ pub(super) fn xref_macros_level<'src>(
     masked: Masked<'_>,
     specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // single, unsplit `Text` node's match string is its own value, so the
+    // check below can run against that directly. A level already split by
+    // an earlier step falls back to the build, exactly as before.
+    if single_text_value(&nodes).is_some_and(|value| !xref_prefilter(value)) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter: both the `xref:` macro form and the `<<id>>` shorthand
@@ -108,7 +127,7 @@ pub(super) fn xref_macros_level<'src>(
     // shorthand's `&lt;&lt;` opener, mirroring the string step's
     // `text.contains("&lt;&lt;") || (found_macroish && text.contains("xref:"))`
     // guard.
-    if !s.contains("xref:") && !s.contains("&lt;&lt;") {
+    if !xref_prefilter(&s) {
         return nodes;
     }
 

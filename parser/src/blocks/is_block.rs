@@ -335,6 +335,18 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
     /// Returns the rendered title for this block, if present.
     fn title(&self) -> Option<&str>;
 
+    /// Returns this block's title as the structured, read-only [`Content`]
+    /// [`title`](Self::title) renders to a string, if the block has one.
+    ///
+    /// This is the structured counterpart of [`title`](Self::title) — the
+    /// same blocks carry each — for a caller that wants the title's own
+    /// inline tree (nesting, node kinds, per-node spans) rather than its
+    /// rendered HTML. The default returns `None`; block types that carry a
+    /// `.Title` decoration or a heading override it.
+    fn title_content(&self) -> Option<&Content<'src>> {
+        None
+    }
+
     /// Returns the caption prefix for this block, if it has one.
     ///
     /// A *captionable* block (e.g. an example block or a table) that has a

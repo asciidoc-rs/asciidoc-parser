@@ -1,7 +1,7 @@
 //! The post-replacements substitution step (hard line breaks).
 
 use super::{
-    quotes::{Piece, build_match_string, emit_range, source_slice},
+    quotes::{Piece, build_match_string, emit_range, single_text_value, source_slice},
     special_chars::Masked,
 };
 use crate::{
@@ -25,6 +25,16 @@ pub(super) fn apply_post_replacements<'src>(
     apply_level(nodes, root, parser, attrlist, true)
 }
 
+/// A break needs a `+`, and — off the root level, where an end-of-level
+/// match is discarded (see [`apply_level`]) — a `\n` for the pattern's `$` to
+/// anchor against. The string pipeline's own pre-check is the root form of
+/// this: it guards on a `+` alone, since its haystack is the whole rendered
+/// string. Shared between [`apply_level`]'s pre-build sniff and its
+/// post-build one, so the two answers cannot drift apart.
+fn level_prefilter(s: &str, is_root: bool) -> bool {
+    s.contains('+') && (is_root || s.contains('\n'))
+}
+
 /// One level of the post-replacement pass. `is_root` marks the content's own
 /// top level, which is the only level whose end coincides with the end of the
 /// string pipeline's haystack — see the match filter below for why that
@@ -37,28 +47,45 @@ fn apply_level<'src>(
     is_root: bool,
 ) -> Vec<InlineNode<'src>> {
     // Descend into spans/refs first, matching the string pipeline's
-    // whole-string pass. A nested level is never the root.
-    let nodes: Vec<InlineNode<'src>> = nodes
-        .into_iter()
-        .map(|node| match node {
-            InlineNode::Styled(mut styled) => {
-                styled.children = apply_level(styled.children, root, parser, attrlist, false);
-                InlineNode::Styled(styled)
-            }
+    // whole-string pass. A nested level is never the root. A level with
+    // neither — the common leaf-only case — has nothing to descend into, so
+    // it skips the rebuild of its node vector entirely.
+    let nodes: Vec<InlineNode<'src>> = if nodes
+        .iter()
+        .any(|node| matches!(node, InlineNode::Styled(_) | InlineNode::Ref(_)))
+    {
+        nodes
+            .into_iter()
+            .map(|node| match node {
+                InlineNode::Styled(mut styled) => {
+                    styled.children = apply_level(styled.children, root, parser, attrlist, false);
+                    InlineNode::Styled(styled)
+                }
 
-            InlineNode::Ref(mut reference) => {
-                reference.children = apply_level(reference.children, root, parser, attrlist, false);
-                InlineNode::Ref(reference)
-            }
+                InlineNode::Ref(mut reference) => {
+                    reference.children =
+                        apply_level(reference.children, root, parser, attrlist, false);
+                    InlineNode::Ref(reference)
+                }
 
-            other => other,
-        })
-        .collect();
+                other => other,
+            })
+            .collect()
+    } else {
+        nodes
+    };
 
     if parser.is_attribute_set("hardbreaks-option")
         || attrlist.is_some_and(|attrlist| attrlist.has_option("hardbreaks"))
     {
         return apply_hardbreaks(nodes, root);
+    }
+
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // single, unsplit `Text` node's match string is its own value, so the
+    // check below can run against that directly.
+    if single_text_value(&nodes).is_some_and(|value| !level_prefilter(value, is_root)) {
+        return nodes;
     }
 
     let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
@@ -67,7 +94,7 @@ fn apply_level<'src>(
     // match is discarded below — a `\n` for the pattern's `$` to anchor
     // against. The string pipeline's own pre-check is the root form of this: it
     // guards on a `+` alone, since its haystack is the whole rendered string.
-    if !(s.contains('+') && (is_root || s.contains('\n'))) {
+    if !level_prefilter(&s, is_root) {
         return nodes;
     }
 
@@ -118,6 +145,12 @@ fn apply_level<'src>(
 /// there is none) never gets one, matching the string pipeline leaving the
 /// popped last line unbroken.
 fn apply_hardbreaks<'src>(nodes: Vec<InlineNode<'src>>, root: Span<'src>) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: see
+    // `apply_level`'s own copy of this comment.
+    if single_text_value(&nodes).is_some_and(|value| !value.contains('\n')) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     if !s.contains('\n') {
@@ -476,6 +509,18 @@ mod tests {
         );
 
         assert_hardbreaks_parity("line one\nline two", "", &parser);
+    }
+
+    #[test]
+    fn hardbreaks_option_on_a_multi_node_single_line_breaks_nothing() {
+        // The single-`Text`-node pre-filter (`single_text_value`) is silent
+        // once the quotes step has already split this level into more than
+        // one node (`Styled` plus the trailing text), so this level's "does
+        // it have a newline?" answer still has to come from the built match
+        // string — the same declined answer
+        // `hardbreaks_option_on_a_single_line_breaks_nothing` pins for a
+        // single node, reached by a different path here.
+        assert_hardbreaks_parity("*bold* one line", "%hardbreaks", &Parser::default());
     }
 
     #[test]

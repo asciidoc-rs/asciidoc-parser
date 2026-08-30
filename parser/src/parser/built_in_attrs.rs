@@ -1,7 +1,9 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, LazyLock},
-};
+use std::sync::{Arc, LazyLock};
+
+// See the matching comment in `parser.rs` for why this table (looked up on
+// every `attribute_value`/`is_attribute_set`/`has_attribute` miss against a
+// parser's own overrides) uses `ahash` rather than `std`'s `HashMap`.
+use ahash::{HashMap, HashMapExt};
 
 use crate::{
     ASCIIDOCTOR_VERSION,
