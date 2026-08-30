@@ -14,7 +14,10 @@ use super::{
 };
 use crate::{
     Parser, Span,
-    attributes::{Attrlist, AttrlistContext},
+    attributes::{
+        Attrlist, AttrlistContext,
+        element_attribute::{MASKED_PIECE_PLACEHOLDER_END, MASKED_PIECE_PLACEHOLDER_START},
+    },
     content::{
         INLINE_XREF, document_xrefstyle,
         inline_builder::{
@@ -448,27 +451,29 @@ fn attrlist_text_carries_its_opaque_pieces(
 }
 
 /// Whether `raw_text` — a macro's own **match-string** bytes, before any
-/// tokening — carries a byte a [`tokened_text`] token is built from.
+/// tokening — carries either byte of the
+/// [`MASKED_PIECE_PLACEHOLDER`](crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER)
+/// pair a [`tokened_text`] occurrence is built from.
 ///
 /// It should not: [`build_match_string`] stands an opaque piece in as
 /// [`SPAN_PLACEHOLDER`](super::super::quotes), a private-use codepoint, so
-/// every `\u{96}` / `\u{97}` reaching here is one the **author** wrote.
+/// every occurrence of either codepoint reaching here is one the **author**
+/// wrote — checked individually, not as the adjacent pair, since a stray
+/// half sitting beside the *other* half completed by a real placeholder
+/// nearby would be just as ambiguous as a whole stray pair.
 ///
 /// Those bytes make the whole tokening ambiguous, and the ambiguity bites
-/// precisely where a value is read as a *string*. A token is found by
+/// precisely where a value is read as a *string*. An occurrence is found by
 /// searching the parsed value for its bytes, and the search cannot tell an
-/// author's `\u{96}0\u{97}` from the one this pass emitted: it would splice a
-/// node's source into the author's text and leave the real token standing.
-/// (`Passthroughs::restore_to` has the same blind spot — the wart the image
-/// bracket's own sibling test pins — but the string pipeline reaches it over
-/// the *finished* string, where a `role=` it never restores into simply keeps
-/// the author's bytes.)
+/// author's own copy from the one this pass emitted: it would splice a node's
+/// source into the author's text and leave the real occurrence standing (or,
+/// past it, misattribute every occurrence after it).
 ///
-/// So a text carrying one defers, which is what the per-slot check this
+/// So a text carrying either defers, which is what the per-slot check this
 /// replaced did for the same bytes. It is a deferral, not a rewrite: the tree
-/// claims no construct, and the string pipeline's own reading stands.
+/// claims no construct.
 fn text_carries_author_written_token_bytes(raw_text: &str) -> bool {
-    raw_text.contains('\u{96}') || raw_text.contains('\u{97}')
+    raw_text.contains([MASKED_PIECE_PLACEHOLDER_START, MASKED_PIECE_PLACEHOLDER_END])
 }
 
 /// The match-string range of a `<<…>>` shorthand's **id half**: its inner up to
@@ -635,23 +640,48 @@ fn xref_macro_text<'src>(
         if first.as_deref() != Some(normalized.as_str()) {
             // The three values this family reads as **strings**. Each is read
             // off the *tokened* parse, so a value enclosing a rendered span or
-            // a masked passthrough holds that piece's token rather than any
-            // bytes of its own; `untranslated_value` puts the author's source
-            // back in its place (see its own doc comment for the two rules and
-            // for the deliberate divergence from Asciidoctor that follows).
-            let window = attrlist
-                .named_attribute("window")
-                .map(|a| CowStr::from(untranslated_value(a.value(), &carried)));
+            // a masked passthrough holds a placeholder occurrence rather than
+            // any bytes of its own; `untranslated_value` puts the author's
+            // source back in its place (see its own doc comment for the two
+            // rules and for the deliberate divergence from Asciidoctor that
+            // follows). Each is a *different* attribute from `carried`'s own
+            // global sequence, so each needs its own starting offset (see
+            // `untranslated_value`'s doc comment for why a bare occurrence
+            // cannot re-align itself).
+            let window = attrlist.named_attribute("window").map(|a| {
+                let start = attrlist.named_attribute_token_offset("window").unwrap_or(0);
 
+                CowStr::from(untranslated_value(
+                    a.value(),
+                    carried.get(start..).unwrap_or_default(),
+                ))
+            });
+
+            // A role from the first positional attribute's own shorthand
+            // items and one from a named `role=` attribute are two different
+            // attributes, so each needs its own starting offset (see
+            // `Attrlist::roles_with_token_offset`'s own doc comment).
             let roles = attrlist
-                .roles()
-                .iter()
-                .map(|r| CowStr::from(untranslated_value(r, &carried)))
+                .roles_with_token_offset()
+                .into_iter()
+                .map(|(r, start)| {
+                    CowStr::from(untranslated_value(
+                        r,
+                        carried.get(start..).unwrap_or_default(),
+                    ))
+                })
                 .collect();
 
-            let xrefstyle = attrlist
-                .named_attribute("xrefstyle")
-                .map(|a| XrefStyle::parse(&untranslated_value(a.value(), &carried)));
+            let xrefstyle = attrlist.named_attribute("xrefstyle").map(|a| {
+                let start = attrlist
+                    .named_attribute_token_offset("xrefstyle")
+                    .unwrap_or(0);
+
+                XrefStyle::parse(&untranslated_value(
+                    a.value(),
+                    carried.get(start..).unwrap_or_default(),
+                ))
+            });
 
             let children = match first.filter(|s| !s.is_empty()) {
                 None => vec![],
@@ -665,11 +695,18 @@ fn xref_macro_text<'src>(
                     // establishes.
                     let location = source_slice(pieces, text_range.start()..text_range.end(), root);
 
-                    // Each token this value still holds becomes the node it
-                    // stands for, so an enclosed span is carried as the
+                    // Each occurrence this value still holds becomes the node
+                    // it stands for, so an enclosed span is carried as the
                     // construct itself and rendered at fold time; the bytes
-                    // around it take the same rebuild a token-free value does.
-                    restored_value_children(&text, &carried, location, specials)
+                    // around it take the same rebuild an occurrence-free value
+                    // does.
+                    let start = attrlist.nth_attribute_token_offset(1).unwrap_or(0);
+                    restored_value_children(
+                        &text,
+                        carried.get(start..).unwrap_or_default(),
+                        location,
+                        specials,
+                    )
                 }
             };
 
@@ -2116,6 +2153,41 @@ mod tests {
         let reference = assert_xref(&nodes[0]);
         assert_eq!(reference.roles.len(), 1);
         assert_eq!(reference.roles[0].as_ref(), "myrole");
+    }
+
+    #[test]
+    fn a_masked_piece_in_a_preceding_named_attribute_does_not_misattribute_a_later_one() {
+        // `role=` and `window=` are two different named attributes, tokened
+        // by the same shared `carried` sequence. Asciidoctor's own attribute
+        // numbering (every comma-delimited entry consumes a position,
+        // including named ones) means the *display text* can only ever be
+        // the bracket's first entry — so it is never actually reachable
+        // after a preceding named attribute, and cannot exercise this —
+        // but two named attributes, in either order, both carrying their own
+        // masked construct, are exactly the shape
+        // `Attrlist::named_attribute_token_offset` exists to keep straight:
+        // without it, `window`'s own restore would read off a `carried`
+        // slice that starts too early, splicing `role`'s body into `window`
+        // and leaving `window`'s own body stranded (or the other way
+        // around, in the reverse order).
+        for (source, roles, window) in [
+            ("xref:sec[role=++r++,window=++w++]", ["r"], "w"),
+            ("xref:sec[window=++w++,role=++r++]", ["r"], "w"),
+        ] {
+            let nodes = build_src(Span::new(source));
+            let reference = assert_xref(&nodes[0]);
+
+            assert_eq!(
+                reference
+                    .roles
+                    .iter()
+                    .map(|r| r.as_ref())
+                    .collect::<Vec<_>>(),
+                roles,
+                "for {source:?}"
+            );
+            assert_eq!(reference.window.as_deref(), Some(window), "for {source:?}");
+        }
     }
 
     #[test]

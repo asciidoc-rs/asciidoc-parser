@@ -54,8 +54,8 @@ pub struct ElementAttribute<'src> {
     /// every other attribute. A consumer that re-processes the value as a
     /// *path* — the built-in renderer's `web_path` resolution of a `fallback=`
     /// or macro-level `imagesdir=` — masks these ranges around that resolution
-    /// and splices them back afterwards, reproducing the string pipeline's own
-    /// restore-after-resolve order (its resolver only ever sees the sentinel).
+    /// and splices them back afterwards, so a STEM body's backslash or a
+    /// passthrough's own bytes never reach that resolution.
     restored_value_ranges: Vec<std::ops::Range<usize>>,
 }
 
@@ -94,52 +94,59 @@ impl<'src> ElementAttribute<'src> {
     }
 
     /// [`into_owned`](Self::into_owned), first substituting each
-    /// `\u{96}`*n*`\u{97}` **token** in this attribute's name and value with
-    /// `bodies[n]`.
+    /// [`MASKED_PIECE_PLACEHOLDER`] occurrence in this attribute's name and
+    /// value with the next of `bodies`, in the order `cursor` finds them.
     ///
     /// This is the *after the split* half of restoring a masked construct
     /// inside a parsed attribute list. A caller that parses an attribute list
     /// whose text still holds a masked passthrough cannot restore the body
-    /// first: the string pipeline's own
-    /// [`Attrlist::parse`](crate::attributes::Attrlist::parse) reads the
-    /// sentinel — an opaque token carrying none of the `,`/`=`/`"` bytes the
-    /// split reads — so a body holding one of those characters must not
-    /// influence how the list divides (`image:x.png[++a,b++]` is one
-    /// positional whose value is `a,b`, not two). Restoring per *parsed value*
-    /// reproduces that, exactly as
-    /// `Passthroughs::restore_to`
-    /// splices each body over whatever sentinel reached the rendered
-    /// string.
+    /// first: [`Attrlist::parse`](crate::attributes::Attrlist::parse) has to
+    /// see the placeholder — an opaque run carrying none of the `,`/`=`/`"`
+    /// bytes the split reads — so a body holding one of those characters must
+    /// not influence how the list divides (`image:x.png[++a,b++]` is one
+    /// positional whose value is `a,b`, not two). Restoring per *parsed
+    /// value*, after the split, is what keeps that true.
     ///
     /// [`shorthand_item_indices`](Self::shorthand_item_indices) are byte
     /// offsets into `value`, so each is **shifted** past every substitution
-    /// that ends at or before it — a token is one opaque run holding none of
-    /// the `#`/`.`/`%` delimiters the shorthand scan keys off, so the items it
-    /// found stay the same items, only further along
+    /// that ends at or before it — a placeholder is one opaque character
+    /// holding none of the `#`/`.`/`%` delimiters the shorthand scan keys off,
+    /// so the items it found stay the same items, only further along
     /// (`image:x.png[++abc++.myrole]` keeps the `myrole` role while its value
     /// becomes `abc.myrole`). Re-deriving them over the restored text would
-    /// instead find a delimiter *inside* a body, which the string pipeline
-    /// never sees.
+    /// instead find a delimiter *inside* a body, which the placeholder never
+    /// exposes.
     ///
-    /// Substitution is **index-keyed**, as `restore_to` is, so a token whose
-    /// index the caller did not supply is left as written rather than
-    /// renumbering the ones that follow.
+    /// `cursor` is shared across every attribute
+    /// [`Attrlist::into_owned_restoring`](crate::attributes::Attrlist::into_owned_restoring)
+    /// restores, in the same left-to-right order
+    /// [`Attrlist::parse`](crate::attributes::Attrlist::parse) found them in,
+    /// so a placeholder's position — not an index carried in the text — says
+    /// which of `bodies` it stands for. A placeholder `cursor`
+    /// finds past the end of `bodies` (more occurrences than the caller
+    /// tokened) is left as written rather than panicking or misattributing a
+    /// later one.
     ///
     /// Each splice's resulting byte range in the restored value is recorded
     /// in [`restored_value_ranges`](Self::restored_value_ranges), so a
     /// consumer that re-processes the value as a path can keep the restored
     /// bytes out of that resolution's way (see the field's own doc comment).
-    pub(crate) fn into_owned_restoring<'dst>(self, bodies: &[&str]) -> ElementAttribute<'dst> {
+    pub(crate) fn into_owned_restoring<'dst>(
+        self,
+        bodies: &[&str],
+        cursor: &mut usize,
+    ) -> ElementAttribute<'dst> {
         let mut shorthand_item_indices = self.shorthand_item_indices;
         let mut restored_value_ranges = Vec::new();
 
         ElementAttribute {
             name: self
                 .name
-                .map(|name| restore_into(name, bodies, &mut [], &mut Vec::new())),
+                .map(|name| restore_into(name, bodies, cursor, &mut [], &mut Vec::new())),
             value: restore_into(
                 self.value,
                 bodies,
+                cursor,
                 &mut shorthand_item_indices,
                 &mut restored_value_ranges,
             ),
@@ -790,41 +797,79 @@ fn is_shorthand_delimiter(c: char) -> bool {
     c == '#' || c == '%' || c == '.'
 }
 
-/// Substitutes each `\u{96}`*n*`\u{97}` token in `text` with `bodies[n]`,
-/// shifting every offset in `indices` past the substitutions that end at or
-/// before it.
+/// The opaque placeholder `tokened_bracket` (and its sibling `tokened_text`,
+/// both in the macros substitution step) rewrites each masked passthrough,
+/// STEM expression, or other already-recognized construct to inside a macro
+/// bracket's own text, one occurrence per piece, so
+/// [`Attrlist::parse`](crate::attributes::Attrlist::parse) sees an atomic run
+/// carrying none of the `,`/`=`/`"` bytes at that position instead of the
+/// piece's own.
 ///
-/// The token spelling is the string pipeline's own passthrough sentinel (see
-/// `Passthroughs`), which is what
-/// makes this the faithful restore: a caller hands over the very text
-/// `Attrlist::parse` would have seen there, and each body lands where
-/// `Passthroughs::restore_to`
-/// splices it.
+/// Carries no index — which piece a given occurrence stands for is recovered
+/// by *position*: the Nth occurrence, scanned left to right, is `bodies[N]`,
+/// never by parsing anything back out of the placeholder's own bytes.
+/// [`restore_into`] is what walks that position order.
 ///
-/// A run that is not a well-formed token, or whose index `bodies` does not
-/// supply, is copied through verbatim — the same index-keyed leniency
-/// `restore_to` has, so an unsupplied index never renumbers the tokens after
-/// it. Each splice's byte range in the restored text is appended to
-/// `restored_ranges`, in ascending order. See
-/// [`ElementAttribute::into_owned_restoring`] for why the shift is
+/// Two fixed codepoints, adjacent, rather than one: a single reserved
+/// codepoint alone is indistinguishable from an ordinary control character a
+/// document happens to type in the clear (not spliced through an attribute
+/// reference, so the escape guard covering that seam never sees it) sitting
+/// beside a real masked construct in the same bracket — a two-codepoint run
+/// needs both, adjacent, which is exactly as unlikely for ordinary authoring
+/// to produce by accident as the digit-carrying shape this replaced. Kept as
+/// two separate consts too ([`MASKED_PIECE_PLACEHOLDER_START`],
+/// [`MASKED_PIECE_PLACEHOLDER_END`]) for the escape guard, which has to
+/// escape each codepoint on its own — a forged value contributing only one
+/// half, beside the other half from an unrelated source, would complete the
+/// same pair.
+pub(crate) const MASKED_PIECE_PLACEHOLDER_START: char = '\u{96}';
+
+/// See [`MASKED_PIECE_PLACEHOLDER`].
+pub(crate) const MASKED_PIECE_PLACEHOLDER_END: char = '\u{97}';
+
+/// See [`MASKED_PIECE_PLACEHOLDER_START`] / [`MASKED_PIECE_PLACEHOLDER_END`].
+/// Must spell the same two codepoints, adjacent and in the same order.
+pub(crate) const MASKED_PIECE_PLACEHOLDER: &str = "\u{96}\u{97}";
+
+/// Substitutes each [`MASKED_PIECE_PLACEHOLDER`] occurrence in `text` with the
+/// next of `bodies` `*cursor` finds, shifting every offset in `indices` past
+/// the substitutions that end at or before it.
+///
+/// `cursor` is shared across every call this restore makes (see
+/// [`ElementAttribute::into_owned_restoring`] for why), so it is threaded
+/// through rather than reset here: a placeholder's *position* in the whole
+/// attribute list — not an index carried in its own bytes — says which body
+/// it stands for.
+///
+/// An occurrence `*cursor` finds past the end of `bodies` is copied through
+/// verbatim rather than panicking or misattributing a later one — the same
+/// leniency an unsupplied index used to get, for the same reason: it should
+/// never be reachable in practice (every caller tokens exactly as many
+/// pieces as it supplies bodies for), but a caller that someday doesn't
+/// should fail closed, not corrupt a neighboring restore. Each splice's byte
+/// range in the restored text is appended to `restored_ranges`, in ascending
+/// order. See [`ElementAttribute::into_owned_restoring`] for why the shift is
 /// right where a re-derivation would not be.
+///
 /// [`restore_tokens`] over a [`CowStr`], keeping the plain
 /// [`into_owned`](CowStr::into_owned) conversion — and with it the inline
 /// representation a short string prefers — for the overwhelmingly common text
-/// that holds no token at all.
+/// that holds no placeholder at all.
 pub(super) fn restore_into<'dst>(
     text: CowStr<'_>,
     bodies: &[&str],
+    cursor: &mut usize,
     indices: &mut [usize],
     restored_ranges: &mut Vec<std::ops::Range<usize>>,
 ) -> CowStr<'dst> {
-    if bodies.is_empty() || !text.contains('\u{96}') {
+    if bodies.is_empty() || !text.contains(MASKED_PIECE_PLACEHOLDER) {
         return text.into_owned();
     }
 
     CowStr::from(restore_tokens(
         text.as_ref(),
         bodies,
+        cursor,
         indices,
         restored_ranges,
     ))
@@ -833,52 +878,38 @@ pub(super) fn restore_into<'dst>(
 fn restore_tokens(
     text: &str,
     bodies: &[&str],
+    cursor: &mut usize,
     indices: &mut [usize],
     restored_ranges: &mut Vec<std::ops::Range<usize>>,
 ) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut cursor = 0usize;
+    let mut scan_cursor = 0usize;
 
-    // `(offset just past a substituted token, cumulative delta)`, in the
-    // *original* text's coordinates and in increasing order.
+    // `(offset just past a substituted placeholder, cumulative delta)`, in
+    // the *original* text's coordinates and in increasing order.
     let mut shifts: Vec<(usize, isize)> = vec![];
     let mut delta: isize = 0;
 
-    while let Some(rel) = text.get(cursor..).and_then(|rest| rest.find('\u{96}')) {
-        let start = cursor.saturating_add(rel);
-        let digits_start = start.saturating_add('\u{96}'.len_utf8());
+    while let Some(rel) = text
+        .get(scan_cursor..)
+        .and_then(|rest| rest.find(MASKED_PIECE_PLACEHOLDER))
+    {
+        let start = scan_cursor.saturating_add(rel);
+        let end = start.saturating_add(MASKED_PIECE_PLACEHOLDER.len());
 
-        let digits = text
-            .get(digits_start..)
-            .map(|rest| {
-                let len = rest
-                    .find(|c: char| !c.is_ascii_digit())
-                    .unwrap_or(rest.len());
-
-                rest.get(..len).unwrap_or_default()
-            })
-            .unwrap_or_default();
-
-        let digits_end = digits_start.saturating_add(digits.len());
-        let end = digits_end.saturating_add('\u{97}'.len_utf8());
-
-        let body = if digits.is_empty() || text.get(digits_end..end) != Some("\u{97}") {
-            None
-        } else {
-            digits.parse::<usize>().ok().and_then(|n| bodies.get(n))
-        };
-
-        let Some(body) = body else {
-            // Not a token this caller supplied: copy the `\u{96}` through and
-            // resume scanning after it, so a later token in the same text is
-            // still found.
-            let next = start.saturating_add('\u{96}'.len_utf8());
-            out.push_str(text.get(cursor..next).unwrap_or_default());
-            cursor = next;
+        let Some(body) = bodies.get(*cursor).copied() else {
+            // More occurrences than the caller supplied bodies for: copy this
+            // one through and keep scanning, so a body-bearing occurrence
+            // later in the same text is still found. See this function's own
+            // doc comment for why this should be unreachable in practice.
+            out.push_str(text.get(scan_cursor..end).unwrap_or_default());
+            scan_cursor = end;
             continue;
         };
 
-        out.push_str(text.get(cursor..start).unwrap_or_default());
+        *cursor += 1;
+
+        out.push_str(text.get(scan_cursor..start).unwrap_or_default());
         restored_ranges.push(out.len()..out.len() + body.len());
         out.push_str(body);
 
@@ -887,16 +918,16 @@ fn restore_tokens(
             .saturating_sub(isize::try_from(end.saturating_sub(start)).unwrap_or(isize::MAX));
 
         shifts.push((end, delta));
-        cursor = end;
+        scan_cursor = end;
     }
 
-    out.push_str(text.get(cursor..).unwrap_or_default());
+    out.push_str(text.get(scan_cursor..).unwrap_or_default());
 
     for index in indices.iter_mut() {
-        // A token holds none of the `#`/`.`/`%` delimiters the shorthand scan
-        // keys off, so no offset ever falls *inside* one: each is either
-        // before every substitution or after some, and takes that one's
-        // cumulative delta.
+        // A placeholder holds none of the `#`/`.`/`%` delimiters the
+        // shorthand scan keys off, so no offset ever falls *inside* one: each
+        // is either before every substitution or after some, and takes that
+        // one's cumulative delta.
         if let Some((_, delta)) = shifts.iter().rev().find(|(end, _)| *end <= *index) {
             *index = index.saturating_add_signed(*delta);
         }

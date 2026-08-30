@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use super::{MacroMatch, MacroMatchKind, links::restore_masked_passthroughs, rebuild_macro_level};
 use crate::{
     Parser, Span,
-    attributes::{Attrlist, AttrlistContext},
+    attributes::{Attrlist, AttrlistContext, element_attribute::MASKED_PIECE_PLACEHOLDER},
     content::{
         INLINE_IMAGE_MACRO, basename,
         inline_builder::{
@@ -968,30 +968,31 @@ pub(in crate::content::inline_builder) enum Tokened {
 }
 
 /// Rewrites a macro **bracket**'s own match-string bytes so each masked piece
-/// in it becomes an index-keyed `\u{96}`*n*`\u{97}` token, returning that text
-/// alongside the [`MaskedPiece`]s those tokens stand for.
+/// in it becomes one [`MASKED_PIECE_PLACEHOLDER`] occurrence, returning that
+/// text alongside the [`MaskedPiece`]s those occurrences stand for, in
+/// left-to-right order.
 ///
-/// This is the *before the split* half of every bracket restore, and it exists
-/// so the text handed to [`Attrlist::parse`] is the same **shape** the string
-/// pipeline's own haystack has there. Two spellings have to be normalized into
-/// one: [`widen_masked_pieces`] has already rewritten a masked piece to a
-/// sentinel-shaped token for the image family's *recognition*, but its
-/// numbering is per level, and for the link families' display-text list a
+/// This is the *before the split* half of every bracket restore, and it
+/// exists so [`Attrlist::parse`] sees an atomic, delimiter-free run at each
+/// masked piece's position instead of the piece's own `,`/`=`/`"` bytes. Two
+/// spellings have to be normalized into one: [`widen_masked_pieces`] has
+/// already rewritten a masked piece to a sentinel-shaped token for the image
+/// family's *recognition*, and for the link families' display-text list a
 /// masked piece is still the bare one-character
-/// [`SPAN_PLACEHOLDER`](super::super::quotes). Renumbering every restorable
-/// piece from zero, per bracket, is what lets the restore be **index-keyed**
-/// on the way back out ([`Attrlist::into_owned_restoring`]) — the parse can
-/// drop a token (a blank slot, a value the split discards) without shifting
-/// the ones that survive, exactly as
-/// `Passthroughs::restore_to` is
-/// unshifted by a sentinel that never reached the rendered string.
+/// [`SPAN_PLACEHOLDER`](super::super::quotes). Both become the same
+/// placeholder here, in the order they occur, which is what lets the restore
+/// find them **by position** on the way back out
+/// ([`Attrlist::into_owned_restoring`]) — a value the split discards simply
+/// never reaches a restore, and every occurrence after it keeps its own
+/// place in the sequence, unaffected.
 ///
 /// Shared by the two families whose bracket comes back from a parse — the
 /// `image:`/`icon:` bracket here, and the link families' display-text list
 /// ([`text_attrlist`](super::links)) — so the two cannot disagree about what
-/// a token may stand for: both masked kinds, the set [`node_is_restorable`]
-/// names. (The image bracket's one `web_path`-bound value, an interactive
-/// SVG's `fallback=`, resolves over its restored ranges *masked* — see
+/// a placeholder may stand for: both masked kinds, the set
+/// [`node_is_restorable`] names. (The image bracket's one `web_path`-bound
+/// value, an interactive SVG's `fallback=`, resolves over its restored ranges
+/// *masked* — see
 /// [`ElementAttribute::into_owned_restoring`](crate::attributes::ElementAttribute) —
 /// so a STEM body's backslash never reaches the resolver there either.)
 pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
@@ -1058,7 +1059,7 @@ pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
 
         match masked {
             Some(masked) => {
-                tokened.push_str(&format!("\u{96}{n}\u{97}", n = masked_pieces.len()));
+                tokened.push_str(MASKED_PIECE_PLACEHOLDER);
                 masked_pieces.push(masked);
             }
 
