@@ -11,7 +11,8 @@ use crate::{
         inline_builder::{
             fold::{fold_html, fold_stem, render_char},
             quotes::{
-                LevelContext, Piece, build_match_string, charref_entity, source_slice, text_slice,
+                LevelContext, Piece, build_match_string, charref_entity, single_text_value,
+                source_slice, text_slice,
             },
             special_chars::Masked,
         },
@@ -23,6 +24,14 @@ use crate::{
     warnings::WarningType,
 };
 
+/// Mirrors the string step's `found_macroish`: an image or icon macro needs
+/// its name prefix and an opening bracket. Shared between
+/// [`image_macros_level`]'s pre-build sniff and its post-build one, so the
+/// two answers cannot drift apart.
+fn image_macro_prefilter(s: &str) -> bool {
+    (s.contains("image:") || s.contains("icon:")) && s.contains('[')
+}
+
 /// Matches `INLINE_IMAGE_MACRO` at this level's escaped text, replacing each
 /// recognized match with the [`Image`](InlineNode::Image) node it produces and
 /// leaving everything else in place.
@@ -33,11 +42,19 @@ pub(super) fn image_macros_level<'src>(
     ctx: LevelContext,
     masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // single, unsplit `Text` node's match string is its own value, so the
+    // check below can run against that directly. A level already split by
+    // an earlier step falls back to the build, exactly as before.
+    if single_text_value(&nodes).is_some_and(|value| !image_macro_prefilter(value)) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter mirroring the string step's `found_macroish`: an image
     // or icon macro needs its name prefix and an opening bracket.
-    if !((s.contains("image:") || s.contains("icon:")) && s.contains('[')) {
+    if !image_macro_prefilter(&s) {
         return nodes;
     }
 

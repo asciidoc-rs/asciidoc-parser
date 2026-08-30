@@ -4,7 +4,7 @@ use std::{borrow::Cow, collections::HashMap};
 
 use super::{
     passthrough_step::is_special,
-    quotes::{Piece, build_match_string, emit_range, source_slice},
+    quotes::{Piece, build_match_string, emit_range, single_text_value, source_slice},
     special_chars::Masked,
 };
 use crate::{
@@ -266,26 +266,36 @@ fn apply_attribute_references_recursive<'src>(
     specials: SplicedSpecials,
     diagnostics: &mut Vec<(Span<'src>, String)>,
 ) -> Vec<InlineNode<'src>> {
-    let nodes: Vec<InlineNode<'src>> = nodes
-        .into_iter()
-        .map(|node| match node {
-            InlineNode::Styled(mut styled) => {
-                styled.children = apply_attribute_references_recursive(
-                    styled.children,
-                    root,
-                    parser,
-                    counters,
-                    missing.nested(),
-                    &[],
-                    specials,
-                    diagnostics,
-                );
-                InlineNode::Styled(styled)
-            }
+    // A level with no `Styled` child — the common leaf-only case — has
+    // nothing to descend into, so it skips the rebuild of its node vector
+    // entirely.
+    let nodes: Vec<InlineNode<'src>> = if nodes
+        .iter()
+        .any(|node| matches!(node, InlineNode::Styled(_)))
+    {
+        nodes
+            .into_iter()
+            .map(|node| match node {
+                InlineNode::Styled(mut styled) => {
+                    styled.children = apply_attribute_references_recursive(
+                        styled.children,
+                        root,
+                        parser,
+                        counters,
+                        missing.nested(),
+                        &[],
+                        specials,
+                        diagnostics,
+                    );
+                    InlineNode::Styled(styled)
+                }
 
-            other => other,
-        })
-        .collect();
+                other => other,
+            })
+            .collect()
+    } else {
+        nodes
+    };
 
     attribute_references_level(
         nodes,
@@ -423,6 +433,14 @@ fn resolve_counters<'nodes, 'src>(
     parser: &Parser,
     out: &mut HashMap<usize, String>,
 ) {
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // lone `Text` node has no `Styled` sibling to recurse into, so a `{`-free
+    // one carries neither a counter nor a nested one to resolve — there is
+    // nothing this call could add to `out`.
+    if single_text_value(nodes).is_some_and(|value| !value.contains('{')) {
+        return;
+    }
+
     let (s, pieces) = build_match_string(nodes, Masked::UNKNOWN);
 
     // A counter match's `name`/`seed` borrow from `s`, a local match string
@@ -558,6 +576,14 @@ fn attribute_references_level<'src>(
     specials: SplicedSpecials,
     diagnostics: &mut Vec<(Span<'src>, String)>,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // lone `Text` node has no `Styled` sibling of its own, so `span_drops`
+    // (which only ever names one) is necessarily empty here too — nothing to
+    // splice and nothing to drop.
+    if single_text_value(&nodes).is_some_and(|value| !value.contains('{')) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // A span that forces a line drop is named by node index; the line decision
@@ -662,6 +688,13 @@ fn styled_drop_indices(nodes: &[InlineNode<'_>], parser: &Parser) -> Vec<usize> 
 /// Recognition is [`find_attribute_matches`]'s own, so the two cannot disagree
 /// about what counts as a missing reference.
 fn subtree_has_missing_reference(nodes: &[InlineNode<'_>], parser: &Parser) -> bool {
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // lone `Text` node has no `Styled` child to recurse into either, so a
+    // `{`-free one carries no missing reference at any depth.
+    if single_text_value(nodes).is_some_and(|value| !value.contains('{')) {
+        return false;
+    }
+
     let (s, _) = build_match_string(nodes, Masked::UNKNOWN);
 
     if s.contains('{')

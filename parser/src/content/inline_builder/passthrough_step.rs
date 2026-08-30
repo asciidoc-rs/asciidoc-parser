@@ -6,7 +6,7 @@ use super::{
         image::{node_is_restorable, range_is_restorable, range_is_verbatim, restorable_body},
         rebuild_macro_level,
     },
-    quotes::{Piece, attributes_of, build_match_string, source_slice},
+    quotes::{Piece, attributes_of, build_match_string, single_text_value, source_slice},
     special_chars::Masked,
 };
 use crate::{
@@ -187,6 +187,14 @@ pub(super) fn apply_passthroughs<'src>(
     apply_bare_attrlisted_pass_level(nodes, root, parser)
 }
 
+/// Mirrors `Passthroughs::extract_from`'s own guard for `INLINE_PASS_MACRO`:
+/// a recognized form always contains `++`, `$$`, or (for `pass:`) `ss:`.
+/// Shared between [`apply_pass_macro_level`]'s pre-build sniff and its
+/// post-build one, so the two answers cannot drift apart.
+fn pass_macro_prefilter(s: &str) -> bool {
+    s.contains("++") || s.contains("$$") || s.contains("ss:")
+}
+
 /// The `INLINE_PASS_MACRO` pass: `+++…+++`, `++…++`, `$$…$$`, and `pass:[…]`,
 /// with or without an attribute list ahead of the delimiters.
 fn apply_pass_macro_level<'src>(
@@ -194,11 +202,19 @@ fn apply_pass_macro_level<'src>(
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // single, unsplit `Text` node's match string is its own value, so the
+    // check below can run against that directly. A level already split by
+    // an earlier step falls back to the build, exactly as before.
+    if single_text_value(&nodes).is_some_and(|value| !pass_macro_prefilter(value)) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // Cheap pre-filter mirroring `Passthroughs::extract_from`'s own guard: a
     // recognized form always contains `++`, `$$`, or (for `pass:`) `ss:`.
-    if !(s.contains("++") || s.contains("$$") || s.contains("ss:")) {
+    if !pass_macro_prefilter(&s) {
         return nodes;
     }
 
@@ -211,6 +227,13 @@ fn apply_pass_macro_level<'src>(
     rebuild_macro_level(&nodes, &pieces, &s, matches)
 }
 
+/// Mirrors `Passthroughs::extract_from`'s own guard for `INLINE_PASS`.
+/// Shared between [`apply_bare_attrlisted_pass_level`]'s pre-build sniff and
+/// its post-build one, so the two answers cannot drift apart.
+fn bare_attrlisted_pass_prefilter(s: &str) -> bool {
+    s.contains('+') || s.contains("-]")
+}
+
 /// The `INLINE_PASS` pass: the attribute-list-prefixed bare forms
 /// (`` [x-]`text` ``, `[attrs]+text+`). The bare unconstrained form with no
 /// attribute list (`+text+`) is deferred — see
@@ -220,11 +243,17 @@ fn apply_bare_attrlisted_pass_level<'src>(
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: see
+    // `apply_pass_macro_level`'s own copy of this comment.
+    if single_text_value(&nodes).is_some_and(|value| !bare_attrlisted_pass_prefilter(value)) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // Cheap pre-filter mirroring `Passthroughs::extract_from`'s own guard for
     // `INLINE_PASS`.
-    if !(s.contains('+') || s.contains("-]")) {
+    if !bare_attrlisted_pass_prefilter(&s) {
         return nodes;
     }
 

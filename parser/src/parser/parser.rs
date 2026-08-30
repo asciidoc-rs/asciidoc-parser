@@ -1,11 +1,20 @@
 use std::{
     borrow::Cow,
     cell::{Cell, RefCell},
-    collections::{HashMap, HashSet},
     rc::Rc,
     sync::{Arc, LazyLock},
 };
 
+// `ahash`'s `HashMap`/`HashSet`, not `std`'s: a drop-in replacement (same API,
+// same per-process-random keying and so the same resistance to a
+// crafted-input hash-flooding attack — `ahash::RandomState`'s default seeds
+// itself from `getrandom`, exactly as `std`'s `RandomState` does) that is
+// substantially faster to hash into for the short string keys an attribute
+// name always is. `attribute_value`/`is_attribute_set`/`has_attribute` are
+// among the hottest calls in the crate — every substitution step queries a
+// document attribute at least once per level — so the table these three read
+// is worth the one non-`std` dependency.
+use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use regex::Regex;
 
 use crate::{

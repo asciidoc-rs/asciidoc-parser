@@ -1,4 +1,9 @@
-use std::{borrow::Cow, collections::HashMap, sync::Arc};
+use std::{borrow::Cow, sync::Arc};
+
+// See the matching comment in `parser.rs` for why these tables use `ahash`
+// rather than `std`'s `HashMap` — they are the same tables, shared with the
+// parser by `Arc` (see the fields below).
+use ahash::HashMap;
 
 use crate::{
     SafeMode,
@@ -523,7 +528,9 @@ impl ResolvedAttributes {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
+    use std::sync::Arc;
+
+    use ahash::{HashMap, HashMapExt};
 
     use crate::{
         SafeMode,
@@ -802,7 +809,9 @@ mod tests {
     }
 
     mod resolve_show_title {
-        use std::{collections::HashMap, sync::Arc};
+        use std::sync::Arc;
+
+        use ahash::{HashMap, HashMapExt};
 
         use crate::{
             SafeMode,

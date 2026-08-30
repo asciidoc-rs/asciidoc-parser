@@ -6,7 +6,10 @@ use crate::{
     content::{
         INLINE_KBD_BTN_MACRO, INLINE_MENU_MACRO,
         inline_builder::{
-            quotes::{LevelContext, Piece, build_match_string, source_slice, text_slice},
+            quotes::{
+                LevelContext, Piece, build_match_string, single_text_value, source_slice,
+                text_slice,
+            },
             special_chars::Masked,
         },
         normalize_index_text, split_kbd_keys,
@@ -30,15 +33,31 @@ const SUBMENU_DELIMITER: &str = "&gt;";
 /// [`apply_macros`](super::apply_macros)); a cheap prefilter still skips the
 /// pattern sweep when no `kbd:`/`btn:` prefix with a `:[` is present, mirroring
 /// the string step's `found_macroish_short` guard.
+/// Mirrors the string step's `found_macroish_short` guard: a `kbd:`/`btn:`
+/// macro needs its name prefix and a `:[`. Shared between
+/// [`kbd_btn_macros_level`]'s pre-build sniff and its post-build one, so the
+/// two answers cannot drift apart.
+fn kbd_btn_prefilter(s: &str) -> bool {
+    s.contains(":[") && (s.contains("kbd:") || s.contains("btn:"))
+}
+
 pub(super) fn kbd_btn_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     ctx: LevelContext,
     masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // single, unsplit `Text` node's match string is its own value, so the
+    // check below can run against that directly. A level already split by
+    // an earlier step falls back to the build, exactly as before.
+    if single_text_value(&nodes).is_some_and(|value| !kbd_btn_prefilter(value)) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, masked);
 
-    if !(s.contains(":[") && (s.contains("kbd:") || s.contains("btn:"))) {
+    if !kbd_btn_prefilter(&s) {
         return nodes;
     }
 
@@ -197,15 +216,28 @@ fn build_kbd_btn_node<'src>(
 /// a masked passthrough — the one boundary every macro family keeps. (A
 /// typographic replacement, `menu:File[Save (C) Exit]`, is admitted too, for
 /// the same reason a restored entity is: it carries its own bytes.)
+/// A `menu:` macro needs its name prefix and an opening bracket. Shared
+/// between [`menu_macros_level`]'s pre-build sniff and its post-build one, so
+/// the two answers cannot drift apart.
+fn menu_prefilter(s: &str) -> bool {
+    s.contains("menu:") && s.contains('[')
+}
+
 pub(super) fn menu_macros_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     ctx: LevelContext,
     masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: see
+    // `kbd_btn_macros_level`'s own copy of this comment.
+    if single_text_value(&nodes).is_some_and(|value| !menu_prefilter(value)) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, masked);
 
-    if !(s.contains("menu:") && s.contains('[')) {
+    if !menu_prefilter(&s) {
         return nodes;
     }
 

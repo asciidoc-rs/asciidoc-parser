@@ -14,15 +14,18 @@
 //! builder's tree as production builds, resolves, and re-folds it.
 
 use crate::{
-    Parser, Span,
-    blocks::FindBlocks,
+    Document, Parser, Span,
+    blocks::{Block, FindBlocks},
     content::Content,
-    inlines::{CharRef, InlineNode, RefVariant, SpanForm, StyleVariant},
+    inlines::{CharRef, Footnote, InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
+    parser::{
+        InlineRenderer, ReferenceResolver, ResolutionContext, ResolvedReference, SpecialCharacter,
+    },
 };
 
 /// Collects the rendered inline content of every content-bearing location in
 /// `doc`, in a fixed document order.
-fn collect_rendered(doc: &crate::Document<'_>) -> Vec<String> {
+fn collect_rendered(doc: &Document<'_>) -> Vec<String> {
     use crate::blocks::{Block, IsBlock, TableCellContent, TableRow};
 
     fn cells(row: &TableRow<'_>, out: &mut Vec<String>) {
@@ -78,7 +81,7 @@ fn collect_rendered(doc: &crate::Document<'_>) -> Vec<String> {
 }
 
 /// Collects the first simple block's content from a parsed document.
-fn first_simple_inlines<'a>(doc: &'a crate::Document<'a>) -> &'a [InlineNode<'a>] {
+fn first_simple_inlines<'a>(doc: &'a Document<'a>) -> &'a [InlineNode<'a>] {
     use crate::blocks::Block;
 
     for block in doc.child_blocks() {
@@ -93,7 +96,7 @@ fn first_simple_inlines<'a>(doc: &'a crate::Document<'a>) -> &'a [InlineNode<'a>
 /// The rendered (string-pipeline) content of the first simple block in `doc` —
 /// the counterpart of [`first_simple_inlines`], for a test that pins both
 /// views of the same content.
-fn first_simple_rendered<'a>(doc: &'a crate::Document<'a>) -> &'a str {
+fn first_simple_rendered<'a>(doc: &'a Document<'a>) -> &'a str {
     use crate::blocks::Block;
 
     for block in doc.child_blocks() {
@@ -135,8 +138,8 @@ struct OrdinalRenderer {
     calls: std::cell::Cell<usize>,
 }
 
-impl crate::parser::InlineRenderer for OrdinalRenderer {
-    fn render_special_character(&self, _type_: crate::parser::SpecialCharacter, dest: &mut String) {
+impl InlineRenderer for OrdinalRenderer {
+    fn render_special_character(&self, _type_: SpecialCharacter, dest: &mut String) {
         self.calls.set(self.calls.get() + 1);
         dest.push_str(&format!("[{}]", self.calls.get()));
     }
@@ -421,7 +424,7 @@ fn is_block_inlines_is_none_for_a_block_without_direct_content() {
 
 /// Names the [`Block`](crate::blocks::Block) variant, so a test can assert its
 /// fixture reaches every one.
-fn block_variant_name(block: &crate::blocks::Block<'_>) -> &'static str {
+fn block_variant_name(block: &Block<'_>) -> &'static str {
     use crate::blocks::Block;
 
     match block {
@@ -904,7 +907,7 @@ fn a_footnote_subtree_that_defers_a_reference_form_still_mirrors_what_it_holds()
 
 /// Collects every cross-reference/link node found inside footnote subtrees of
 /// simple blocks in `doc`.
-fn collect_footnote_refs<'a>(doc: &'a crate::Document<'a>) -> Vec<crate::inlines::Ref<'a>> {
+fn collect_footnote_refs<'a>(doc: &'a Document<'a>) -> Vec<Ref<'a>> {
     use crate::blocks::Block;
 
     fn walk<'a>(
@@ -982,7 +985,7 @@ fn inline_tree_numbers_footnotes_in_document_order() {
 
 /// Collects every [`Ref`](InlineNode::Ref) node from the simple blocks of
 /// `doc`, recursing into formatting spans and reference children.
-fn collect_refs<'a>(doc: &'a crate::Document<'a>) -> Vec<crate::inlines::Ref<'a>> {
+fn collect_refs<'a>(doc: &'a Document<'a>) -> Vec<Ref<'a>> {
     use crate::blocks::Block;
 
     fn walk<'a>(nodes: &[InlineNode<'a>], out: &mut Vec<crate::inlines::Ref<'a>>) {
@@ -1227,12 +1230,8 @@ fn inline_tree_build_tolerates_a_stateful_renderer() {
         flipped: std::cell::Cell<bool>,
     }
 
-    impl crate::parser::InlineRenderer for FlipRenderer {
-        fn render_special_character(
-            &self,
-            _type_: crate::parser::SpecialCharacter,
-            dest: &mut String,
-        ) {
+    impl InlineRenderer for FlipRenderer {
+        fn render_special_character(&self, _type_: SpecialCharacter, dest: &mut String) {
             if self.flipped.replace(true) {
                 dest.push_str("[second]");
             } else {
@@ -1293,7 +1292,7 @@ fn inline_tree_build_tolerates_a_stateful_renderer() {
 /// Collects every cross-reference/link node from the inline tree of every
 /// section heading in `doc`, recursing into nested sections and into formatting
 /// spans and reference children within each title.
-fn collect_section_title_refs<'a>(doc: &'a crate::Document<'a>) -> Vec<crate::inlines::Ref<'a>> {
+fn collect_section_title_refs<'a>(doc: &'a Document<'a>) -> Vec<Ref<'a>> {
     use crate::blocks::{Block, FindBlocks};
 
     fn refs_in<'a>(nodes: &[InlineNode<'a>], out: &mut Vec<crate::inlines::Ref<'a>>) {
@@ -1405,7 +1404,7 @@ fn block_title_xref_is_resolved_in_the_tree() {
     let doc =
         parser.parse("[[tgt]]The target paragraph.\n\n.See <<tgt>>\nA captioned paragraph.\n");
 
-    use crate::blocks::Block;
+    use crate::blocks::{Block, IsBlock};
 
     let title = doc
         .child_blocks()
@@ -1467,7 +1466,7 @@ fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
 
     /// The resolved `href` of the first cross-reference in any section heading,
     /// scoped so the tree borrow is released before the next resolution.
-    fn title_xref_href(doc: &crate::Document<'_>) -> Option<String> {
+    fn title_xref_href(doc: &Document<'_>) -> Option<String> {
         collect_section_title_refs(doc)
             .iter()
             .find(|r| r.variant == RefVariant::Xref)
@@ -1515,10 +1514,10 @@ fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
 
 /// The first [`Footnote`](InlineNode::Footnote) node found anywhere in the
 /// simple blocks of `doc`, in document order.
-fn first_footnote<'a>(doc: &'a crate::Document<'a>) -> crate::inlines::Footnote<'a> {
+fn first_footnote<'a>(doc: &'a Document<'a>) -> Footnote<'a> {
     use crate::blocks::Block;
 
-    fn find<'a>(nodes: &[InlineNode<'a>]) -> Option<crate::inlines::Footnote<'a>> {
+    fn find<'a>(nodes: &[InlineNode<'a>]) -> Option<Footnote<'a>> {
         for node in nodes {
             let found = match node {
                 InlineNode::Footnote(footnote) => Some(footnote.clone()),
@@ -1832,7 +1831,7 @@ fn re_resolving_clears_a_now_unresolved_footnote_tree_destination() {
     /// The resolved `href` of the first cross-reference in the first footnote's
     /// subtree, scoped so the tree borrow is released before the next
     /// resolution.
-    fn footnote_xref_href(doc: &crate::Document<'_>) -> Option<String> {
+    fn footnote_xref_href(doc: &Document<'_>) -> Option<String> {
         refs_in(&first_footnote(doc).children)
             .into_iter()
             .find(|r| r.variant == RefVariant::Xref)
@@ -1878,11 +1877,8 @@ fn a_footnotes_rendering_is_refolded_from_its_subtree_at_resolution() {
     // the two readings below would be equal and this test would fail.
     struct FixedResolver(Option<&'static str>);
 
-    impl crate::parser::ReferenceResolver for FixedResolver {
-        fn resolve(
-            &self,
-            _context: &crate::parser::ResolutionContext<'_>,
-        ) -> Option<crate::parser::ResolvedReference> {
+    impl ReferenceResolver for FixedResolver {
+        fn resolve(&self, _context: &ResolutionContext<'_>) -> Option<ResolvedReference> {
             self.0
                 .map(|href| crate::parser::ResolvedReference::new(href.to_string(), None))
         }
@@ -2214,7 +2210,7 @@ fn a_terms_default_reftext_folds_before_nested_references_resolve() {
 }
 
 /// The inline tree of the first description-list term in `doc`.
-fn description_term_tree<'a>(doc: &'a crate::Document<'a>) -> Vec<InlineNode<'a>> {
+fn description_term_tree<'a>(doc: &'a Document<'a>) -> Vec<InlineNode<'a>> {
     use crate::blocks::{Block, FindBlocks, ListItemMarker};
 
     for block in doc.descendant_blocks() {
