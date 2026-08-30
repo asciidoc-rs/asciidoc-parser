@@ -2191,6 +2191,30 @@ mod tests {
     }
 
     #[test]
+    fn two_masked_roles_in_the_same_attribute_do_not_misattribute_each_other() {
+        // `role=++a++ ++b++` is one attribute, not two — `roles()` (and
+        // `roles_with_token_offset`) split its value on the space into two
+        // roles, each carrying its own placeholder. Both start from the same
+        // attribute-level offset, so the second role's own restore has to
+        // additionally skip past the first role's own occurrence rather than
+        // reusing that shared starting point (Greptile
+        // https://github.com/asciidoc-rs/asciidoc-parser/pull/1349#discussion_r3890749214) —
+        // otherwise both roles would come back as `"a"`, and `"b"` would
+        // never be reached.
+        let nodes = build_src(Span::new("xref:sec[a,role=++a-role++ ++b-role++]"));
+        let reference = assert_xref(&nodes[0]);
+
+        assert_eq!(
+            reference
+                .roles
+                .iter()
+                .map(|r| r.as_ref())
+                .collect::<Vec<_>>(),
+            ["a-role", "b-role"]
+        );
+    }
+
+    #[test]
     fn an_untranslated_string_attribute_is_escaped_by_the_renderer() {
         // What the slot holds is *text*, and the renderer escapes it for the
         // attribute it is building — so a body carrying a `"` or an `&` lands

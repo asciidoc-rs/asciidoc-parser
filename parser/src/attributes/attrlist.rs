@@ -761,27 +761,45 @@ impl<'src> Attrlist<'src> {
     }
 
     /// [`roles`](Self::roles), pairing each role with the offset into a
-    /// global body/node list where *its own* source attribute's placeholder
-    /// occurrences begin (see
-    /// [`token_offset_before`](Self::token_offset_before)) — a role from the
-    /// first positional attribute's own shorthand items and one from a named
-    /// `role=` attribute are two different attributes in this list's own
-    /// parse order, so a caller restoring a role read off a still-tokened
-    /// list (e.g. `untranslated_value` in the macros step) cannot use one
-    /// starting offset for both.
+    /// global body/node list where *its own* placeholder occurrences begin
+    /// (see [`token_offset_before`](Self::token_offset_before)) — a role
+    /// from the first positional attribute's own shorthand items and one
+    /// from a named `role=` attribute are two different attributes in this
+    /// list's own parse order, so a caller restoring a role read off a
+    /// still-tokened list (e.g. `untranslated_value` in the macros step)
+    /// cannot use one starting offset for both.
+    ///
+    /// Nor can two roles split out of the *same* source attribute
+    /// (`role=++a++ ++b++` is one attribute, two space-separated roles, each
+    /// with its own placeholder): each role after the first has to skip past
+    /// every placeholder occurrence the roles *before* it, in the same
+    /// value, already account for — so the offset is a running count, seeded
+    /// from the source attribute's own base offset and advanced by each
+    /// role's own occurrence count as the split walks left to right, not one
+    /// shared starting point per attribute.
     pub(crate) fn roles_with_token_offset(&'src self) -> Vec<(&'src str, usize)> {
-        let mut roles: Vec<(&'src str, usize)> = match self.nth_attribute_token_offset(1) {
-            Some(offset) => self
-                .nth_attribute(1)
-                .map(|attr1| attr1.roles().into_iter().map(|r| (r, offset)).collect())
-                .unwrap_or_default(),
-            None => vec![],
-        };
+        let mut roles: Vec<(&'src str, usize)> = vec![];
 
-        if let Some(offset) = self.named_attribute_token_offset("role")
+        if let Some(base) = self.nth_attribute_token_offset(1)
+            && let Some(attr1) = self.nth_attribute(1)
+        {
+            let mut offset = base;
+
+            for role in attr1.roles() {
+                roles.push((role, offset));
+                offset += role.matches(MASKED_PIECE_PLACEHOLDER).count();
+            }
+        }
+
+        if let Some(base) = self.named_attribute_token_offset("role")
             && let Some(role_attr) = self.named_attribute("role")
         {
-            roles.extend(split_role_value(role_attr.value()).map(|r| (r, offset)));
+            let mut offset = base;
+
+            for role in split_role_value(role_attr.value()) {
+                roles.push((role, offset));
+                offset += role.matches(MASKED_PIECE_PLACEHOLDER).count();
+            }
         }
 
         roles
@@ -1065,6 +1083,35 @@ mod tests {
              (offset 0); the named `role=` attribute — still unrestored, so its \
              value is the placeholder itself — is the second attribute, past the \
              shorthand's own one placeholder occurrence (offset 1)"
+        );
+    }
+
+    #[test]
+    fn roles_with_token_offset_advances_past_each_earlier_role_in_the_same_attribute() {
+        // Two space-separated roles inside the *same* `role=` attribute
+        // (`role=++a++ ++b++`), each carrying its own placeholder — a single
+        // attribute, not two, so `named_attribute_token_offset` gives both
+        // roles the same *base*, and the second role's own offset has to
+        // additionally skip past the first role's own one occurrence, not
+        // reuse the base as if only one role were there (Greptile
+        // https://github.com/asciidoc-rs/asciidoc-parser/pull/1349#discussion_r3890749214).
+        use crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER;
+
+        let source = format!("role={MASKED_PIECE_PLACEHOLDER} {MASKED_PIECE_PLACEHOLDER}");
+        let p = Parser::default();
+        let attrlist = crate::attributes::Attrlist::parse(
+            crate::Span::new(&source),
+            &p,
+            AttrlistContext::Inline,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        assert_eq!(
+            attrlist.roles_with_token_offset(),
+            vec![(MASKED_PIECE_PLACEHOLDER, 0), (MASKED_PIECE_PLACEHOLDER, 1),],
+            "the first role's own occurrence is offset 0; the second role's own \
+             occurrence must skip past it rather than reusing offset 0"
         );
     }
 
