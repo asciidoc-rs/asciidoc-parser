@@ -2649,8 +2649,9 @@ mod tests {
             }
 
             // Orders that run a step *after* the escaping one, so the
-            // flattened text is what that later step reads — exactly as the
-            // string pipeline's later steps read the escaped tags. The
+            // flattened text is what that later step reads — matching the
+            // escaped tags Asciidoctor's own substitution would hand that
+            // later step. The
             // extraction pass runs for each of these (they name `macros`), so
             // they also exercise the masked/unmasked split
             // `flatten_prior_markup` draws.
@@ -2679,15 +2680,15 @@ mod tests {
         /// escaped: the tree a late-escaping order produces carries no
         /// [`Styled`](crate::inlines::Styled) node at all, and the tags are
         /// ordinary [`Text`](InlineNode::Text) runs and
-        /// [`CharRef`](InlineNode::CharRef) leaves the fold escapes once
-        /// (§3.4). That is what the document genuinely says under such an
+        /// [`CharRef`](InlineNode::CharRef) leaves the fold escapes once.
+        /// That is what the document genuinely says under such an
         /// order — the content is no longer a strong span, it is text that
         /// reads like a tag.
         ///
         /// The whole node list is asserted rather than only the text it folds
         /// to, so it pins the spans as well: a flattened node's value is the
         /// fold, which has no `'src` slice of its own, so every fragment the
-        /// escaping step splits it into takes design §4.4's coarse
+        /// escaping step splits it into takes the coarse
         /// enclosing-span fallback — here the `*bold*` the quotes step
         /// consumed, which is this fixture's whole source.
         #[test]
@@ -2724,22 +2725,24 @@ mod tests {
             );
         }
 
-        /// A documented divergence, not a bug: a construct the string
-        /// pipeline is holding as a **placeholder** at escaping time, nested
+        /// A documented divergence, not a bug: a construct held as a
+        /// **placeholder** at escaping time, nested
         /// *inside* a node an earlier step turned into markup.
         ///
         /// There are two such constructs, and the fixtures pin one of each: a
         /// passthrough (or inline-STEM) body, extracted ahead of every step
         /// and restored after the last one, and a deferred cross-reference,
-        /// recorded by the macros step and rendered by
-        /// [`Content::finalize_deferred`](crate::content::Content) once every
-        /// step has run. The string pipeline's escaping step acts on neither,
+        /// recorded by the macros step as an
+        /// [`XrefSegment`](crate::content::XrefSegment) and resolved once
+        /// every
+        /// step has run. The escaping step acts on neither,
         /// so it escapes *around* the placeholder and the construct comes back
         /// unescaped: `&lt;strong&gt;a <x> b&lt;/strong&gt;`.
         ///
         /// Folding the enclosing span whole would inline the construct into
         /// the escaped text instead. Splitting one node's fold back around its
-        /// placeholder descendants is the sentinel mechanism itself, which
+        /// placeholder descendants would need its own placeholder-aware
+        /// mechanism, which
         /// this module deliberately does not have — so such a node is left
         /// alone, exactly as an unrecognized construct is elsewhere here.
         ///

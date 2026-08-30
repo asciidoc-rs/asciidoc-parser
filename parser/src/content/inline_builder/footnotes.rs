@@ -1552,15 +1552,16 @@ mod tests {
         // exercises: nesting an *earlier*-running macro inside a footnote's
         // content is fine (by the time footnotes run, that macro's brackets
         // are already consumed into a node), but nesting *footnote* syntax
-        // inside an earlier macro's argument is not, in the string pipeline
-        // or otherwise.
+        // inside an earlier macro's argument is not — for either this crate
+        // or Asciidoctor.
         //
-        // In the *string* pipeline, the footnote pass runs over the
+        // Asciidoctor's own footnote substitution runs over the
         // *already-rendered* flat string, where the link's `</a>` is just
-        // literal text no different from any other — so the footnote regex,
+        // literal text no different from any other — so its footnote regex,
         // finding only one `]` left in the whole string, matches straight
         // through the `</a>` and consumes it as part of its own (nonsensical)
-        // content, producing malformed, never-closed markup. That is a direct
+        // content, producing malformed, never-closed markup: the golden
+        // recording below preserves exactly that output. That is a direct
         // consequence of matching over *rendered* text rather than structure
         // — exactly the class of divergence
         // `crossed_delimiters_are_a_documented_divergence` documents for
@@ -1568,8 +1569,7 @@ mod tests {
         // tree (it exists only as fold *output*, not as node content), so
         // the builder's footnote pass has no way to "reach into" it, and
         // correctly does not: the link's label stays literal, unrecognized
-        // text, and the tree never reproduces the string pipeline's
-        // malformed markup here.
+        // text, and the tree never reproduces that malformed markup here.
         let source = "link:https://example.org[footnote:[note]]";
         let nodes = build_src(Span::new(source));
 
@@ -1582,10 +1582,11 @@ mod tests {
             "<a href=\"https://example.org\">footnote:[note</a>]"
         );
 
-        // The string pipeline, by contrast, produces unclosed markup: the
-        // link's own closing `</a>` is consumed into the footnote's content,
-        // and the footnote's own numbered marker (with its *own*, unrelated
-        // `<a>…</a>`) takes its place.
+        // The golden recording, by contrast, holds the unclosed markup
+        // Asciidoctor itself produces here: the link's own closing `</a>` is
+        // consumed into the footnote's content, and the footnote's own
+        // numbered marker (with its *own*, unrelated `<a>…</a>`) takes its
+        // place.
         assert_eq!(
             golden_macros(source),
             "<a href=\"https://example.org\"><sup class=\"footnote\">\
@@ -1616,7 +1617,7 @@ mod tests {
             )
     }
 
-    /// The real, public pipeline's output for `source` — the golden for the
+    /// The frozen golden recording for `source` — the golden for the
     /// expanded-value fixtures, which need the `AttributeReferences` step the
     /// module's own [`golden_macros`] helper deliberately omits.
     fn golden_normal(source: &str, _parser: &crate::Parser) -> String {
@@ -1635,9 +1636,10 @@ mod tests {
         // registered and looked up under) one that renumbered every later
         // reference to it.
         //
-        // Each fixture uses its own pair of *independent* parsers (design
-        // §5.3's discipline), since both `build` and the real pipeline
-        // advance the `footnote-number` counter for real.
+        // Each fixture builds its own `expanding_parser()` for `build`, so
+        // its `footnote-number` counter never crosses fixtures; the
+        // comparison target (`golden_normal`) is a frozen recording, not a
+        // second live parse.
         use crate::content::inline_builder::build;
 
         let fixtures = [
@@ -1682,7 +1684,7 @@ mod tests {
         // The id is exact — recovered from the expansion's own bytes by
         // `footnote_id_text`, and necessarily owned — while only the node's
         // `location` falls back to the enclosing synthesized run's coarse
-        // span (design §4.4), since an expanded value's bytes have no `'src`
+        // span, since an expanded value's bytes have no `'src`
         // counterpart of their own.
         use crate::content::inline_builder::build;
 
@@ -1757,8 +1759,8 @@ and another.footnote:[note two]",
         // cross an escaped special. `text_slice` declines such a range (the
         // source holds one character where the match string holds an entity),
         // so `footnote_id_text` falls back to the match string's own bytes:
-        // exactly what the string replacer's `raw.split_once(',')` reads out
-        // of its own escaped haystack, and registers.
+        // exactly what Asciidoctor's own `footnoteref:` parsing reads out
+        // of its escaped haystack, and registers.
         let source = "footnoteref:[a&b,a note] then footnoteref:[a&b]";
         let nodes = build_src(Span::new(source));
 
@@ -1781,11 +1783,11 @@ and another.footnote:[note two]",
     fn a_footnoteref_id_crossing_a_rendered_span_is_a_documented_divergence() {
         // The one piece class `footnote_id_text` cannot recover: a rendered
         // span, whose markup exists only at fold time, is one opaque
-        // placeholder here where the string replacer's own haystack holds the
+        // placeholder here where Asciidoctor's own haystack holds the
         // `<strong>…</strong>` tags it happily splits on and registers as the
         // id. Such a macro is left unrecognized — literal text, never a wrong
-        // node — the boundary every macro family keeps. (If a later increment
-        // lifts it, fold this fixture into the parity corpus above.)
+        // node — the boundary every macro family keeps. (If this limitation
+        // is ever lifted, fold this fixture into the parity corpus above.)
         let source = "footnoteref:[*bold*,a note]";
         let nodes = build_src(Span::new(source));
 
@@ -1794,7 +1796,7 @@ and another.footnote:[note two]",
             "a footnoteref: id crossing a rendered span must be left unrecognized: {nodes:?}"
         );
 
-        // The string pipeline, by contrast, does build a footnote here.
+        // Asciidoctor, by contrast, does build a footnote here.
         assert!(golden_macros(source).contains("class=\"footnote\""));
     }
 

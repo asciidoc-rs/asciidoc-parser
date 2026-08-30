@@ -54,8 +54,8 @@ impl Passthrough {
     /// [`Content::passthroughs`](crate::content::Content::passthroughs)
     /// returns by walking the
     /// content's inline tree — the tree being authoritative for what the
-    /// content *is*, exactly as it already is for what the content renders to
-    /// (design §5.2 Phase 4, step 6).
+    /// content *is*, exactly as it already is for what the content renders
+    /// to.
     ///
     /// # Which nodes are entries
     ///
@@ -83,8 +83,8 @@ impl Passthrough {
     /// pulled out in a second pass and STEM in a third, so
     /// `+++A+++ and stem:[B] and [x-]++C++ and ++D++` extracts as `A, C, D, B`
     /// where the author wrote `A, B, C, D`. Document order is the deliberate
-    /// choice; extraction order is an artifact of the two-pass implementation
-    /// step 6 deletes.
+    /// choice; extraction order is simply an artifact of the multi-pass
+    /// extraction implementation.
     pub(crate) fn from_tree(nodes: &[InlineNode<'_>]) -> Vec<Self> {
         let mut out = vec![];
         collect_from_tree(nodes, &mut out);

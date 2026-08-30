@@ -19,13 +19,9 @@ use crate::{
 /// Resolves the [`SubstitutionGroup`] a STEM macro's expression runs
 /// through: [`SubstitutionGroup::Stem`] (special characters only) for a bare
 /// macro, or the group an explicit substitution list (`stem:c,q[…]`)
-/// resolves to — mirroring [`SubstitutionGroup::from_custom_string`]/
-/// [`InlineStemMacroReplacer`](crate::content::passthroughs)'s own
-/// resolution exactly, including its "skip and keep going" handling of an
-/// unrecognized name. As throughout this module, this does *not* raise the
-/// string pipeline's own `InvalidSubstitutionTypeForStemMacro` warning for
-/// an invalid name, deferring that side effect to the cutover (design §5.2
-/// Phase 4, step 6), since it does not change the fold's output bytes.
+/// resolves to — via [`SubstitutionGroup::from_custom_string`], including its
+/// "skip and keep going" handling of an unrecognized name and the
+/// `InvalidSubstitutionTypeForStemMacro` warning it raises for one.
 fn resolve_stem_subs(
     subs_list: Option<&str>,
     root: Span<'_>,
@@ -70,9 +66,9 @@ fn resolve_stem_subs(
 /// `--`/arrow replacement, or a macro's own delimiters — so a construct whose
 /// halves fall on either side of the `Raw` (`stem:q[*a +++x+++ b*]`) would
 /// escape recognition when matched against each fragment separately, even
-/// though the string pipeline (which substitutes the whole expression as one
-/// string, the `Raw` content merely *protected* rather than *absent*) finds
-/// it. An empty step list (`SubstitutionGroup::None`, or an explicit list
+/// though matching the whole expression as one string — with the `Raw`
+/// content merely *protected* rather than *absent* from the match — would
+/// find it. An empty step list (`SubstitutionGroup::None`, or an explicit list
 /// naming only unrecognized steps) is trivially safe too: with nothing to
 /// match, per-fragment and whole-string substitution agree by construction.
 fn subs_are_local(subs: &SubstitutionGroup) -> bool {
@@ -93,10 +89,9 @@ fn subs_are_local(subs: &SubstitutionGroup) -> bool {
 /// ahead of every other step — so a STEM expression's content is never
 /// touched by specialcharacters, quotes, replacements, or macros, exactly
 /// like a `+++…+++`/`++…++`/`$$…$$`/`pass:[…]` passthrough. It reuses the
-/// string pipeline's *exact* recognition — [`INLINE_STEM_MACRO`] is now
-/// shared `pub(crate)`, alongside the [`stem_notation`] helper that resolves
-/// a bare `stem:[…]` macro's notation from the `stem` document attribute —
-/// so only the recognition *sink* differs (§4.1).
+/// [`INLINE_STEM_MACRO`] pattern, alongside the [`stem_notation`] helper that
+/// resolves a bare `stem:[…]` macro's notation from the `stem` document
+/// attribute.
 ///
 /// Because it runs immediately after `apply_passthroughs`, the *only* node
 /// kinds `apply_stem` can ever see are `Text` and [`Raw`](InlineNode::Raw)
@@ -109,13 +104,12 @@ fn subs_are_local(subs: &SubstitutionGroup) -> bool {
 ///
 /// A recognized macro's expression is unescaped (`\]` → `]`), has its legacy
 /// enclosing `$…$` dropped for `latexmath` (backwards compatibility with
-/// AsciiDoc.py, mirroring [`InlineStemMacroReplacer`]), and is then run
-/// through the real substitution pipeline under its resolved substitution
-/// group — [`SubstitutionGroup::Stem`] (special characters only) for a bare
-/// macro — via [`passthrough_text`], so a custom
+/// AsciiDoc.py), and is then run through the real substitution pipeline under
+/// its resolved substitution group — [`SubstitutionGroup::Stem`] (special
+/// characters only) for a bare macro — via [`passthrough_text`], so a custom
 /// [`InlineRenderer`](crate::parser::InlineRenderer)'s
-/// escaping is honored exactly as it would be for the string pipeline's own
-/// restore step. The result becomes the node's `value`; the cost is an owned
+/// escaping is honored consistently. The result becomes the node's `value`; the
+/// cost is an owned
 /// value rather than a `'src` borrow, since the pipeline's output is not
 /// guaranteed to coincide with the source (the same trade-off
 /// [`apply_passthroughs`](super::passthrough_step::apply_passthroughs) makes
@@ -304,21 +298,19 @@ fn build_stem_node<'src>(
 /// body's [`emit_range`]-recovered nodes.
 ///
 /// The common case — the whole expression is one `Text` run, no nested
-/// passthrough — matches the string pipeline exactly: the raw source is
-/// unescaped (`\]` → `]`), has its legacy `latexmath` `$…$` wrapper dropped
-/// (AsciiDoc.py backward-compat), and is run through the resolved
-/// substitution group ([`SubstitutionGroup::Stem`] for a bare macro).
+/// passthrough — is straightforward: the raw source is unescaped (`\]` →
+/// `]`), has its legacy `latexmath` `$…$` wrapper dropped (AsciiDoc.py
+/// backward-compat), and is run through the resolved substitution group
+/// ([`SubstitutionGroup::Stem`] for a bare macro).
 ///
 /// When the expression embeds one or more already-extracted
 /// [`Raw`](InlineNode::Raw) passthroughs, each `Text` run around them is
-/// unescaped and substituted the same way and each `Raw` run is spliced in
-/// **verbatim, with no further substitution** — mirroring how the string
-/// pipeline's passthrough-restore recursion re-splices a nested passthrough
-/// into an outer construct's already-substituted text
-/// (`PassthroughRestoreReplacer`'s own recursive `if … contains('\u{96}')`
-/// branch). The legacy `$…$` wrapper is dropped only in the single-`Text`-run
-/// case; a `$` immediately beside a nested passthrough is a narrower
-/// divergence, documented and pinned by a test.
+/// unescaped and substituted the same way, and each `Raw` run is spliced in
+/// **verbatim, with no further substitution** — an already-extracted
+/// passthrough's content must never be substituted a second time. The legacy
+/// `$…$` wrapper is dropped only in the single-`Text`-run case; a `$`
+/// immediately beside a nested passthrough is a narrower divergence,
+/// documented and pinned by a test.
 ///
 /// `subs` is the group the expression's `Text` runs are substituted through —
 /// [`SubstitutionGroup::Stem`] for a bare macro, or the group an explicit
@@ -471,9 +463,9 @@ mod tests {
         // The legacy `$…$` wrapper is dropped only on the common
         // single-`Text`-run case; a `$` immediately beside a nested
         // passthrough is a narrower, honestly-labeled divergence from the
-        // string pipeline (which strips it even here, since its `$…$` check
-        // runs on the raw captured text before the nested passthrough's
-        // sentinel is ever resolved).
+        // frozen recording (which strips it even here, since its `$…$` check
+        // ran on the raw captured text before the nested passthrough was
+        // substituted back in).
         let source = "latexmath:[$+++x+++$]";
         let nodes = build_src(Span::new(source));
 
@@ -678,15 +670,14 @@ mod tests {
     #[test]
     fn a_non_local_explicit_subs_list_beside_a_nested_passthrough_is_a_documented_divergence() {
         // `stem:q[*a +++x+++ b*]`: the quote pair's delimiters fall on either
-        // side of the embedded, already-extracted `+++x+++` passthrough. The
-        // string pipeline substitutes the *whole* expression as one string
-        // (the passthrough's content merely protected, not absent), so it
-        // recognizes the pair; this builder would otherwise have to apply
-        // `Quotes` to each `Text` run around the `Raw` independently, and
-        // neither run contains a complete pair on its own. Rather than
-        // silently diverge, `subs_are_local` rejects a non-local explicit
-        // list here and the whole macro is left unrecognized (see
-        // `build_stem_node`).
+        // side of the embedded, already-extracted `+++x+++` passthrough.
+        // Matching the *whole* expression as one string (the passthrough's
+        // content merely protected, not absent) would recognize the pair;
+        // this builder would otherwise have to apply `Quotes` to each `Text`
+        // run around the `Raw` independently, and neither run contains a
+        // complete pair on its own. Rather than silently diverge,
+        // `subs_are_local` rejects a non-local explicit list here and the
+        // whole macro is left unrecognized (see `build_stem_node`).
         let source = "stem:q[*a +++x+++ b*]";
         let nodes = build_src(Span::new(source));
 
@@ -695,7 +686,7 @@ mod tests {
             "a non-local subs list beside a nested passthrough must be left unrecognized: {nodes:?}"
         );
 
-        // The string pipeline, by contrast, *does* recognize the quote pair.
+        // The frozen recording, by contrast, *does* recognize the quote pair.
         let golden = golden_passthroughs(source);
         assert!(golden.contains("<strong>"), "golden: {golden}");
         assert_ne!(fold_html(&nodes, &HtmlInlineRenderer {}), golden);
@@ -704,9 +695,8 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_stem() {
         // For each fixture, folding the single-pass tree (all steps, STEM
-        // included) reproduces the string pipeline's output byte-for-byte.
-        // This is the differential corpus (design §5.3) that pins the STEM
-        // increment.
+        // included) reproduces the frozen recording's output byte-for-byte.
+        // This is the differential corpus that pins STEM extraction.
         let fixtures = [
             "stem:[x^2]",
             "asciimath:[x != 0]",

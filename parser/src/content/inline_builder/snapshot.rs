@@ -1,25 +1,10 @@
 //! A **frozen, checked-in oracle** for this module's differential corpora.
 //!
-//! # Why this exists
-//!
-//! Every corpus on this branch was born a differential: it rendered a fixture
-//! two ways — through the string pipeline and through the tree — and asserted
-//! the two agree. The step 6 cutover ended the independence that rested on
-//! (once `rendered_html()` is a fold of the tree, a golden computed at test
-//! time is the fold), so each corpus's golden became a **recording**:
-//! `snapshots/<corpus>.txt`, checked in, reviewed like any other file, and
-//! read rather than derived. The fold is compared against bytes that were
-//! settled before it ran — which no amount of rearranging the fold can satisfy
-//! tautologically.
-//!
-//! The string pipeline that produced those bytes is gone, so the recordings
-//! now **stand alone**, exactly as the ~277 golden-HTML assertions (§5.3)
-//! always have. While the pipeline existed, every checking run re-derived the
-//! golden and asserted it still matched the recording (the drift guard), and
-//! `ASCIIDOC_UPDATE_SNAPSHOTS=1` could regenerate a corpus from it; both went
-//! with the pipeline. What remains is the read side, and one rule: **a
-//! recording is edited by hand, reviewed like the behavior change it
-//! records.**
+//! See `parser/snapshots/README.md` for why these recordings are frozen
+//! rather than generated and what each corpus covers. In short: each
+//! `snapshots/<corpus>.txt` file is checked in, reviewed like any other file,
+//! and read rather than derived — **a recording is edited by hand, reviewed
+//! like the behavior change it records.**
 //!
 //! # Adding or changing a fixture
 //!
@@ -31,10 +16,10 @@
 //! `Debug`-escaped so a record is always exactly one physical line.
 //!
 //! A corpus of **documented divergences** (read through
-//! [`matches_recording`]) records what the string pipeline used to produce,
-//! and is the one kind that must never be "refreshed" from current behavior:
-//! its rows are the frozen half of a comparison whose whole point is that the
-//! fold may differ.
+//! [`matches_recording`]) records a rendering the tree deliberately does not
+//! reproduce, and is the one kind that must never be "refreshed" from current
+//! behavior: its rows are the frozen half of a comparison whose whole point is
+//! that the fold may differ.
 
 // Test-only harness: a malformed or missing recording is a broken corpus, and
 // failing loudly at the point of breakage beats threading a `Result` through a
@@ -160,8 +145,9 @@ fn load_from(file: &Path, corpus: &str) -> BTreeMap<String, String> {
 ///
 /// Hand-rolled rather than pulled from a crate: the escapes `{:?}` emits for
 /// the strings a corpus holds are a small, closed set (`\"`, `\\`, `\n`, `\r`,
-/// `\t`, `\0`, and `\u{...}` for the Private-Use-Area sentinels and any other
-/// non-printable), and a dependency in the dev graph for that is a poor trade.
+/// `\t`, `\0`, and `\u{...}` for the Private-Use-Area characters some frozen
+/// recordings still carry, and any other non-printable), and a dependency in
+/// the dev graph for that is a poor trade.
 /// An apostrophe is deliberately *not* in that set: `{:?}` on a `&str` leaves
 /// it bare, so a `\'` branch here would be unreachable.
 pub(crate) fn unquote(corpus: &str, field: &str) -> String {
@@ -255,8 +241,8 @@ pub(super) fn assert_recorded(corpus: &str, source: &str, folded: &str) {
 ///
 /// For the corpora whose subject is a **documented divergence** or a set of
 /// them (the cross-product sweep): a fixture diverges exactly when the fold
-/// differs from the recorded rendering — the bytes the string pipeline
-/// produced while it existed, which is what such a corpus deliberately keeps.
+/// differs from the recorded rendering, which is what such a corpus
+/// deliberately keeps as its fixed point of comparison.
 pub(super) fn matches_recording(corpus: &str, source: &str, folded: &str) -> bool {
     Store::real().matches_recording(corpus, source, folded)
 }
@@ -269,11 +255,9 @@ pub(super) fn matches_recording(corpus: &str, source: &str, folded: &str) -> boo
 /// several dozen call sites then uses that string however it likes — comparing
 /// a fold against it, comparing it against a literal, asserting a *documented
 /// divergence* from it with `assert_ne!`, or merely testing it with
-/// `contains`. Routing the helper's return value through the recording covers
-/// all of them at once, and is what made the string pipeline's deletion a
-/// *local* change: each helper's body became this lookup, its callers did not
-/// move, and every corpus goes on asserting exactly what it asserted before —
-/// against bytes settled while the pipeline still existed.
+/// `contains`. Routing the helper's return value through this lookup keeps
+/// every corpus asserting exactly what it always has, against bytes settled
+/// once and checked in.
 pub(crate) fn recorded(corpus: &str, source: &str) -> String {
     Store::real().recorded(corpus, source)
 }
@@ -285,8 +269,8 @@ mod tests {
     use super::{Store, load_from, quote, unquote};
 
     /// The strings a recording actually has to survive: the escapes `{:?}`
-    /// emits, and the Private-Use-Area sentinels the string pipeline's own
-    /// output carried.
+    /// emits, and the Private-Use-Area characters some frozen recordings
+    /// still carry from the retired sentinel mechanisms that produced them.
     const TRICKY: &[&str] = &[
         "",
         "plain",

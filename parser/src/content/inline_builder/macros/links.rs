@@ -1279,18 +1279,18 @@ pub(super) fn build_link_node<'src>(
     //
     // The check reads the *restored* target, which for a scheme smuggled
     // inside a passthrough (`link:++javascript:...++[]`) is deliberately
-    // **stricter** than the string pipeline: its replacer checks the masked
-    // haystack, where the sentinel hides the scheme, so it emits a live
-    // dangerous link the restore then completes. That is the one place this
+    // **stricter** than checking the masked bytes directly would be: the
+    // placeholder there hides the scheme, so a check against it would treat
+    // the link as safe and emit a live dangerous link, which the restore
+    // would then complete. That is the one place this
     // increment chooses the safe reading over byte parity — see
     // `a_dangerous_scheme_inside_a_passthrough_is_a_documented_divergence`.
     if !is_mailto && has_dangerous_scheme(&target) {
-        // Reported where `InlineLinkMacroReplacer` reports it. This is the
-        // recognition diagnostic design §5.2's survey singled out as needing "a
-        // node-level fact the way `RawOrigin` was one": a rejected macro stays
-        // literal, so there is no `Ref` node to hang it on and nothing for a
-        // tree walk to replay. Recording it at the rejection site — the site
-        // that already holds `parser` — is what that fact would have been for.
+        // Reported at the recognition site itself: a rejected macro stays
+        // literal, so there is no `Ref` node to hang the diagnostic on
+        // afterward and nothing for a tree walk to replay it from. Recording
+        // it here, where `parser` is already in scope, is what makes that
+        // possible.
         parser.record_builder_diagnostic(
             root,
             crate::warnings::WarningType::UnsafeLinkSchemeRejected(target),
@@ -1433,16 +1433,15 @@ pub(super) fn build_link_node<'src>(
                 // `URI_SNIFF` is `^`-anchored, so `replace_all` strips exactly
                 // one prefix and the shown text is always a suffix of the
                 // target. A strip that would leave nothing falls back to the
-                // whole target, mirroring the string replacer's own
-                // `if lt.is_empty()` guard.
+                // whole target instead.
                 //
                 // Sniffed over the bytes as *matched* (`target_str`, not the
-                // restored `target`): the string replacer sniffs its own
-                // haystack, where a scheme inside a passthrough is hidden
-                // behind the sentinel — so `link:++https://x++[]` shows its
-                // scheme even under `hide-uri-scheme`, and the strip offset,
-                // being a match of literal ASCII the placeholder cannot take
-                // part in, indexes the restored bytes identically.
+                // restored `target`): a scheme inside a passthrough is hidden
+                // behind its placeholder there — so `link:++https://x++[]`
+                // shows its scheme even under `hide-uri-scheme` — and the
+                // strip offset, being a match of literal ASCII the
+                // placeholder cannot take part in, indexes the restored
+                // bytes identically.
                 URI_SNIFF
                     .find(target_str)
                     .map(|m| m.end())
@@ -1539,17 +1538,17 @@ struct TextAttrlist<'src> {
 
     /// The list itself, which rides on the node's own
     /// [`attrs`](Ref::attrs) so the fold can hand `render_link` the same
-    /// `id`/`title`/`nofollow`/`noopener` the string replacer hands it.
+    /// `id`/`title`/`nofollow`/`noopener` Asciidoctor's own rendering does.
     attrs: Attrlist<'src>,
 
     /// Whether [`text`](Self::text) came back from a parse of the level's
-    /// **match string** (the string replacer's own bytes) rather than of the
+    /// **match string** (already-escaped bytes) rather than of the
     /// source's own (logical text). The caller rebuilds the former through
     /// [`computed_value_children`] so an entity in it is not escaped twice.
     escaped: bool,
 
-    /// Whether a real named attribute actually split off — the string
-    /// replacers' own `lt != link_text_for_attrlist` guard, which
+    /// Whether a real named attribute actually split off, mirroring the
+    /// `lt != link_text_for_attrlist` guard that
     /// [`InlineLinkReplacer`](crate::content::macros) applies and
     /// `InlineLinkMacroReplacer` does not (see this module's two call sites).
     /// `false` means the `=` was incidental and the whole text is the sole
@@ -1564,16 +1563,16 @@ struct TextAttrlist<'src> {
     /// ([`Attrlist::into_owned_restoring`]), but the display text becomes the
     /// node's **children**, where the honest reading is the node itself: a
     /// [`Raw`](InlineNode::Raw) or [`Stem`](InlineNode::Stem) child folds to
-    /// the very bytes `Passthroughs::restore_to` splices into the string
-    /// pipeline's own display text, where the same bytes spliced into a
-    /// [`Text`](InlineNode::Text) would be escaped a second time (design
-    /// §3.4). The caller re-splits [`text`](Self::text) on these tokens in
+    /// the very bytes `Passthroughs::restore_to` splices into the display
+    /// text, where the same bytes spliced into a
+    /// [`Text`](InlineNode::Text) node would be escaped a second time. The
+    /// caller re-splits [`text`](Self::text) on these tokens in
     /// [`restored_value_children`].
     restores: Vec<InlineNode<'src>>,
 }
 
 /// Parses a link's bracketed **display text** as the [`Attrlist`]`<'src>` its
-/// node carries, mirroring what the string replacers parse: a
+/// node carries, mirroring Asciidoctor's own parse: a
 /// newline-normalized copy of the (pre-`\]`-unescape) bracketed text, joined
 /// with spaces so `link:x[Foo\nBar,role=hl]` reads as `Foo Bar`.
 ///
@@ -1583,17 +1582,18 @@ struct TextAttrlist<'src> {
 /// contiguous, single-line `'src` slice and deferred every other shape. It no
 /// longer does, by the same move the image family's own bracket made
 /// ([`bracket_attrlist`](super::image)): the list is parsed from the level's
-/// **match string** — which is exactly what the replacer parses, out of its own
-/// escaped, already-expanded haystack — and
+/// **match string** — the same escaped, already-expanded bytes Asciidoctor's
+/// own parse reads — and
 /// [`into_owned`](Attrlist::into_owned)ed onto the text's coarse source span
-/// (design §4.4, the fallback the node's `location` already takes). So a text
+/// (the same coarse whole-content-span fallback the node's `location`
+/// already takes). So a text
 /// crossing an escaped special (`link:index.html[a < b,role=hl]`), a restored
 /// entity (`mailto:a@b.com[Tom &copy; Jerry,Subject]`), an expanded attribute
 /// value (`link:index.html[{label},role=hl]`), or a line break
 /// (`link:index.html[Docs\nmore,role=hl]`) is now recognized.
 ///
 /// A **verbatim** text whose source slice *is* those same bytes keeps the
-/// `'src` parse, and with it the borrow (§4.5) — the shape every ordinary
+/// `'src` parse, and with it the borrow — the shape every ordinary
 /// `link:index.html[Docs,role=hl]` takes. Both halves of that test are load
 /// bearing. The range must be verbatim because bytes can coincide without the
 /// text being the source's: [`build_match_string`] gives a *restored* entity
@@ -1606,9 +1606,9 @@ struct TextAttrlist<'src> {
 ///
 /// A **masked** construct — a passthrough or a STEM expression — is admitted
 /// too, and restored the way the image family's own bracket is: the text is
-/// put into the string pipeline's own *shape* before the parse
-/// ([`tokened_bracket`], each masked piece rewritten to the
-/// `\u{96}`*n*`\u{97}` token whose shape the sentinel has), so the split sees
+/// put into that same tokened *shape* before the parse
+/// ([`tokened_bracket`], each masked piece rewritten to its own
+/// `\u{96}`*n*`\u{97}` token), so the split sees
 /// one opaque run carrying none of the `,`/`=`/`"` bytes it reads, and each
 /// body is spliced into the parsed values after it
 /// ([`Attrlist::into_owned_restoring`]). What the *display text* keeps is the
@@ -1620,22 +1620,20 @@ struct TextAttrlist<'src> {
 /// A **rendered** piece — a span the quotes step made, an
 /// earlier-recognized macro node — is admitted the same way, in every slot,
 /// and its token's body is the *build-time fold* with the parser's own
-/// renderer ([`MaskedPiece`](super::image::MaskedPiece)). Those are the bytes
-/// the string replacer reads out of its own already-rendered haystack there, so
-/// a slot `render_link` writes out reproduces the string pipeline's answer
-/// (`link:x[Docs,title=*Pause*]` keeps its `<strong>`), which is the whole
-/// point: a frozen body is what makes the markup an author wrote survive into
-/// the attribute. Freezing costs one thing — a *later* fold with some other
-/// renderer sees the parse-time renderer's markup in those slots — and that is
+/// renderer ([`MaskedPiece`](super::image::MaskedPiece)), so a slot
+/// `render_link` writes out carries the same markup Asciidoctor's own
+/// rendering does (`link:x[Docs,title=*Pause*]` keeps its `<strong>`), which
+/// is the whole point: a frozen body is what makes the markup an author wrote
+/// survive into the attribute. Freezing costs one thing — a *later* fold with
+/// some other renderer sees the parse-time renderer's markup in those slots —
+/// and that is
 /// the same trade the image family's bracket makes for every value it holds
 /// ([`bracket_attrlist`](super::image)), so the three
 /// [`Attrlist`]-bearing families now agree on it. It is safe because a value
 /// reaching an attribute is escaped for the `"` delimiter where it lands
 /// (`encode_attribute_value`, applied by `render_link` to every slot it
 /// writes), so markup carried into a `title`/`class`/`id`/`target` cannot
-/// close the attribute it sits in — the guarantee the string pipeline cannot
-/// make, since it splices a passthrough's body into the *finished* string
-/// after every escape has run (asciidoctor#2661).
+/// close the attribute it sits in (asciidoctor#2661).
 ///
 /// The **display text** is exempt from the freeze rather than from the escape:
 /// it becomes the node's children, so the fold renders each piece itself,
@@ -1645,19 +1643,20 @@ struct TextAttrlist<'src> {
 /// **before** that restore, and a token reaching one of them defers the whole
 /// match. There is exactly one such caller: a `mailto:`'s comma list, whose
 /// second and third positionals become the `?subject=`/`&amp;body=` query
-/// through [`encode_uri_component`]. The string pipeline percent-encodes its
-/// own sentinel there (`%C2%960%C2%97`), which
+/// through [`encode_uri_component`], which would percent-encode the
+/// placeholder token itself (`%C2%960%C2%97`) — bytes
 /// `Passthroughs::restore_to`
-/// then cannot find in the finished `href` — so its golden *leaks* the encoded
-/// sentinel, and no restore here can reproduce that. This is the same boundary
+/// can then no longer find in the finished `href`. The frozen golden
+/// recording for that shape captures exactly that leaked, still-encoded
+/// token, and no restore here can reproduce it. This is the same boundary
 /// the cross-reference family's own pre-restore target keeps, drawn per slot
 /// rather than per family so that a masked piece in the display text beside a
 /// plain subject still restores.
 ///
 /// Returns `None` for that one shape alone: a `pre_restore` slot holding a
 /// token. A list whose two parses disagree about the match's own extent used to
-/// return `None` here too; the tree's own split is what stands now (design
-/// §5.2's deferral divergence).
+/// return `None` here too; the tree's own split is what stands now — a
+/// documented divergence from a markup-based reading, not a deferral.
 fn text_attrlist<'src>(
     raw_text: &str,
     text_range: std::ops::Range<usize>,
@@ -1698,11 +1697,11 @@ fn text_attrlist<'src>(
     let (text, attrs) = extract_attributes_from_text(Span::new(&tokened), parser, None);
 
     // One thing has to hold before a token may stand for a **rendered** piece:
-    // the *split* must land where the string replacer's own parse of the
-    // markup lands. A token carries none of the `,` / `=` / `"` the split
-    // reads, and the replacer's markup may (`link:x[a *b, c* d,role=hl]`), so
-    // the tree's own split is the one that stands (design §5.2's deferral
-    // divergence).
+    // the *split* must land where a parse of the rendered
+    // markup would land. A token carries none of the `,` / `=` / `"` the split
+    // reads, and the rendered markup may (`link:x[a *b, c* d,role=hl]`), so
+    // the tree's own split is the one that stands — a documented divergence
+    // from the markup-based reading.
     let _carried: Vec<InlineNode<'src>> = masked.iter().map(|piece| piece.node.clone()).collect();
 
     if masked.is_empty() {
@@ -1747,11 +1746,11 @@ fn text_attrlist<'src>(
 /// # Scope
 ///
 /// This is the **last** of the link family's spellings: a bare address written
-/// in the flow (`doc.writer@example.com`), which the string pipeline turns into
+/// in the flow (`doc.writer@example.com`), turned into
 /// a `mailto:` link whose display text is the address itself (no `bare` role,
-/// unlike an auto-linked URL — see [`build_email_node`]). It reuses the string
-/// pipeline's *exact* recognition, so only the recognition *sink* differs
-/// (design §4.1), including the pattern's own "prefix that causes a mismatch"
+/// unlike an auto-linked URL — see [`build_email_node`]). It reuses
+/// [`INLINE_EMAIL`]'s *exact* recognition pattern,
+/// including the pattern's own "prefix that causes a mismatch"
 /// group: a `\` escape drops its backslash and leaves the address literal,
 /// while a `>`, `:`, or `/` before the address means it is not a bare address
 /// at all (it is the tail of a URL, or a `mailto:` macro's own target) and the
@@ -1769,14 +1768,16 @@ fn text_attrlist<'src>(
 /// - An address **abutting an already-recognized construct**
 ///   (`**bold**doc@example.org`, `link:x[y]doc@example.org`,
 ///   `image:x.png[]doc@example.org`). The mismatch-prefix group reads the
-///   character immediately before the address; in the string pipeline that is
-///   the preceding construct's *rendered* last character (`</strong>`, `</a>`,
-///   and `<img …>` all end in `>`, a mismatch character, so the address stays
-///   literal there), while here [`build_match_string`] stands the construct in
+///   character immediately before the address; matching over the *rendered*
+///   markup, that would be the preceding construct's rendered last character
+///   (`</strong>`, `</a>`,
+///   and `<img …>` all end in `>`, a mismatch character, so the address would
+///   stay
+///   literal), while here [`build_match_string`] stands the construct in
 ///   as one opaque [`SPAN_PLACEHOLDER`] belonging to no mismatch class. A tree
 ///   whose markup exists only at fold time cannot reproduce that decision, so
-///   the address is left literal rather than recognized into a link the string
-///   pipeline does not build. The sibling auto-link family reaches the same
+///   the address is left literal rather than recognized into a link matching
+///   the rendered markup would not build. The sibling auto-link family reaches the same
 ///   outcome structurally — [`INLINE_LINK`]'s own boundary-prefix group is
 ///   *required*, so a placeholder simply fails its match
 ///   (`**bold**https://example.org` is already deferred for exactly this
@@ -1784,7 +1785,7 @@ fn text_attrlist<'src>(
 ///   unconditional rather than keyed on what the preceding node *would* render
 ///   to: a construct that renders to nothing (a concealed index term) or to
 ///   text not ending in a mismatch character (a STEM expression, a
-///   passthrough) is one the string pipeline *does* link, so those defer too —
+///   passthrough) is one matching the rendered markup *would* link, so those defer too —
 ///   reading that would mean invoking a renderer while building the tree.
 ///
 /// An address's bytes *may*, by contrast, come from a
@@ -1800,10 +1801,10 @@ fn text_attrlist<'src>(
 /// boundary, after the cross-reference, `link:`/`mailto:` macro, and
 /// auto-link/formal-URL families, and the last of the link family's own
 /// spellings to lift it. The match string carries such a leaf's canonical
-/// entity — the very bytes the string replacer's own escaped haystack holds
+/// entity — the same escaped bytes `apply_special_characters` always produces
 /// there — so the target this pass computes off that string
-/// (`mailto:a&amp;b@example.org`) *is* the one the replacer computed and
-/// registered, and no value on the node needs the source's own `&`. The
+/// (`mailto:a&amp;b@example.org`) is the correctly escaped one, and
+/// no value on the node needs the source's own `&`. The
 /// display text, which is the address itself, then becomes **structured
 /// children** rather than one baked `Text` (see [`macro_text_children`]), so
 /// the special folds back to its own entity instead of being escaped twice.
@@ -1885,8 +1886,7 @@ fn find_email_matches<'src>(
         if !prefix.is_empty() {
             if prefix == "\\" {
                 // The escape drops its single backslash and keeps the rest of
-                // the match literal, mirroring the string replacer's
-                // `caps[0][1..]`.
+                // the match literal.
                 matches.push(MacroMatch {
                     kind: MacroMatchKind::Unescape {
                         backslash: full.start,
@@ -1895,23 +1895,23 @@ fn find_email_matches<'src>(
                 });
             }
 
-            // Any other prefix (`>`, `:`, `/`) makes the string replacer emit
-            // the whole match unchanged — which is exactly what recording no
-            // match at all does here.
+            // Any other prefix (`>`, `:`, `/`) means this is not a bare
+            // address at all — which is exactly what recording no
+            // match at all leaves unchanged.
             continue;
         }
 
         // The mismatch-prefix group above read an *empty* prefix — but that
         // decision is only faithful when the tree can actually see the
-        // character the string pipeline reads there. When the address abuts an
+        // character a markup-based reading would see there. When the address abuts an
         // already-recognized construct (`**bold**doc@example.org`,
-        // `link:x[y]doc@example.org`), the string pipeline reads that
+        // `link:x[y]doc@example.org`), the
         // construct's *rendered* last character — `</strong>`, `</a>`, and
-        // `<img …>` all end in `>`, one of the three mismatch characters — and
-        // suppresses the address, while [`build_match_string`] stands the
+        // `<img …>` all end in `>`, one of the three mismatch characters — would
+        // suppress the address, while [`build_match_string`] stands the
         // construct in as one opaque [`SPAN_PLACEHOLDER`], which no mismatch
-        // class contains. Recognizing here would build a link the string
-        // pipeline does not, so this defers instead — leaving the address as
+        // class contains. Recognizing here would build a link a markup-based
+        // reading would not, so this defers instead — leaving the address as
         // literal text, never a wrong node, exactly as the sibling auto-link
         // family already behaves for the same input ([`INLINE_LINK`]'s own
         // boundary-prefix group is *required*, so a placeholder simply fails
@@ -1937,38 +1937,37 @@ fn find_email_matches<'src>(
 }
 
 /// Builds one [`Ref`](InlineNode::Ref)`{Link}` node from a bare e-mail match,
-/// computing the target and display text exactly as `InlineEmailReplacer` does
-/// so the fold reproduces the same bytes: the target is the address prefixed
+/// computing the target and display text so the fold reproduces the bytes
+/// Asciidoctor's own rendering does: the target is the address prefixed
 /// with `mailto:`, and the display text is the address as written. Unlike a
 /// bare *URL* auto-link, no `bare` role is added and `hide-uri-scheme` plays no
-/// part — the string replacer passes `extra_roles: vec![]` and the raw address
-/// as its `link_text`.
+/// part.
 ///
-/// The target is read straight off the level's **match string**, exactly as
-/// `InlineEmailReplacer` reads `caps[2]` off its own escaped haystack — the
+/// The target is read straight off the level's **match string** — the
 /// same bytes, whether the address is verbatim `'src`, comes from a
 /// [`synthesized`](Piece::synthesized) run (an attribute expansion), or
 /// carries an escaped special (`a&amp;b@example.org`). An e-mail node holds no
 /// `Span`-typed field (no [`Attrlist`] parsed out of `'src`), only plain text,
-/// so only the node's `location` needs design §4.4's coarse fallback.
+/// so only the node's `location` needs the coarse whole-content-span
+/// fallback.
 ///
 /// The display text is that same address, so it is a *slice* of the match's own
 /// range rather than a value this builder computes: [`macro_text_children`]
-/// recovers it, borrowing from `'src` in the common case (§4.5) and rebuilding
+/// recovers it, borrowing from `'src` in the common case and rebuilding
 /// it as structured children — each escaped special staying the
 /// [`CharRef`](InlineNode::CharRef) it already is — when it crosses one, rather
 /// than baking the already-escaped address into one `Text` node the fold would
-/// escape a second time (design §3.4). There is no `\]` bracket unescape: this
+/// escape a second time. There is no `\]` bracket unescape: this
 /// text comes from the address, which the pattern's own character classes never
 /// let a bracket into.
 ///
 /// This is **total**: what the family defers is decided entirely by the gate
 /// [`find_email_matches`] applies before calling it.
 ///
-/// As in the additive builder generally, this performs *no* recognition side
-/// effect: it does **not** `register_link` the target, which
-/// `InlineEmailReplacer` does. [`apply_link_side_effects`] is that deferred
-/// piece, staged for the cutover alongside the other link forms'.
+/// This performs *no* recognition side
+/// effect: it does **not** `register_link` the target itself.
+/// [`apply_link_side_effects`] does that separately, once per parse, after
+/// the tree is built and folded, alongside the other link forms'.
 fn build_email_node<'src>(
     caps: &regex::Captures<'_>,
     pieces: &[Piece],
@@ -2000,39 +1999,32 @@ fn build_email_node<'src>(
     })
 }
 
-/// Performs the recognition side effect the string pipeline's five link
-/// replacers (`InlineLinkReplacer`'s angle/formal/bare branches,
-/// `InlineLinkMacroReplacer`, and `InlineEmailReplacer`) attach to a matched
-/// link — registering the target in the document's asset catalog — by walking
-/// an already-built tree and reading each [`Ref`](InlineNode::Ref)`{Link}`
+/// Performs the recognition side effect a matched link needs —
+/// registering the target in the document's asset catalog — by walking
+/// the already-built tree and reading each [`Ref`](InlineNode::Ref)`{Link}`
 /// node's own stored `target` instead of a regex capture. `target` already
-/// holds exactly the string the string pipeline registers (see
+/// holds the fully computed string (see
 /// [`build_inline_link_node`], [`build_link_node`], and [`build_email_node`]),
 /// so no recomputation is needed.
 ///
-/// Every macro family this module recognizes defers exactly this kind of side
-/// effect (see
+/// Every macro family in this module recognizes its construct without
+/// performing this kind of side effect itself (see
 /// [`image::apply_image_side_effects`](super::image::apply_image_side_effects)'
-/// s own note): while the additive builder runs *alongside* the authoritative
-/// string pipeline — each against its own, independent [`Parser`] — performing
-/// it from every additive pass would risk double-counting a registration once
-/// the two paths ever share one `Parser`. This function is that deferred piece
-/// for the link family, staged as its own building block for the eventual
-/// cutover (design §5.2, Phase 4 step 6): re-attaching it for real means
-/// calling it exactly once per parse, after the single-pass builder replaces
-/// the recorder as `Content`'s tree source. That is now done: this runs once
-/// per content from the tree, and the string replacers' own `register_link`
-/// calls are suppressed for that content (see
-/// `Parser::suppress_macro_side_effects`).
+/// s own note) — recognition and registration are kept separate so each
+/// family's tests can build and inspect a tree without a full
+/// `Parser`/`Content` round trip. This function is the link family's own
+/// registration pass, called exactly once per parse, after the tree is built
+/// and folded, from [`apply_macro_side_effects`](super::apply_macro_side_effects).
 ///
 /// # Registration order across the three link forms
 ///
-/// The string pipeline registers a link's target *when its own replacer's
-/// regex pass matches it* — `InlineLinkReplacer` (auto-links and formal-URL
-/// links, `INLINE_LINK`'s non-angle branch) runs as one whole-string pass, then
-/// `InlineLinkMacroReplacer` (`link:`/`mailto:`, `INLINE_LINK_MACRO`) runs as a
-/// *second*, later pass, then `InlineEmailReplacer` (a bare address,
-/// `INLINE_EMAIL`) as a *third* — exactly the order [`inline_link_level`],
+/// The registration order follows Asciidoctor's own substitution passes,
+/// which run whole-string over the content one family at a time: auto-links
+/// and formal-URL
+/// links (`INLINE_LINK`'s non-angle branch) register first, then
+/// `link:`/`mailto:` macros (`INLINE_LINK_MACRO`) as a
+/// *second*, later pass, then a bare address
+/// (`INLINE_EMAIL`) as a *third* — exactly the order [`inline_link_level`],
 /// [`link_macro_level`], and [`email_level`] apply the three families in. So
 /// the catalog ends up in **family-pass order, not true source order**: every
 /// auto-link/formal-URL link in the content registers before every
@@ -2251,7 +2243,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -2297,7 +2289,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros_in("macros_hide_uri_scheme", fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -2358,7 +2350,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -2400,7 +2392,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs_in("passthroughs_hide_uri_scheme", fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -2461,7 +2453,7 @@ mod tests {
                 "the fold must not emit a live link: {folded:?}"
             );
 
-            // The string pipeline, by contrast, emits one.
+            // The frozen golden recording, by contrast, emits one.
             let golden = golden_passthroughs(source);
 
             assert!(
@@ -2528,7 +2520,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -2719,7 +2711,7 @@ mod tests {
     #[test]
     fn a_link_window_suffix_opens_blank() {
         // A trailing `^` in the text is stripped and selects the `_blank`
-        // window, exactly as the string replacer does.
+        // window, matching Asciidoctor's own behavior.
         let nodes = build_src(Span::new("link:index.html[Open^]"));
 
         let reference = assert_link(&nodes[0]);
@@ -2960,7 +2952,7 @@ mod tests {
         // A `link:` text carrying an `=` splits into an attribute list (here a
         // role): the first positional attribute becomes the display text, and
         // the parsed `Attrlist<'src>` rides on the node's own `attrs` field, so
-        // the fold reproduces the role exactly as the string replacer does.
+        // the fold reproduces the role matching Asciidoctor's own behavior.
         let source = "link:index.html[Docs,role=hl]";
         let nodes = build_src(Span::new(source));
 
@@ -3168,7 +3160,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -3224,7 +3216,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros_in("macros_hide_uri_scheme", fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -3303,7 +3295,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -3348,7 +3340,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs_in("passthroughs_hide_uri_scheme", fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -3488,7 +3480,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -3669,7 +3661,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -3915,7 +3907,7 @@ mod tests {
     #[test]
     fn a_bare_auto_link_strips_trailing_punctuation() {
         // A trailing ';' is stripped off the target and kept as literal text
-        // after the link, exactly as the string replacer does.
+        // after the link, matching Asciidoctor's own behavior.
         let nodes = build_src(Span::new("https://example.org; done"));
 
         let reference = assert_link(&nodes[0]);
@@ -4055,7 +4047,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the frozen golden recording for {source:?}"
             );
         }
     }
@@ -4173,7 +4165,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -4308,7 +4300,7 @@ mod tests {
             "an angle URL crossing a rendered span must stay literal: {nodes:?}"
         );
 
-        // The string pipeline, by contrast, *does* build a link here.
+        // The frozen golden recording, by contrast, *does* build a link here.
         assert!(golden_macros(source).contains("<a href"));
     }
 
@@ -4384,7 +4376,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
 
@@ -4407,7 +4399,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros_in("macros_experimental", fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -4468,7 +4460,7 @@ mod tests {
                 "a target crossing a rendered span must stay literal: {nodes:?}"
             );
 
-            // The string pipeline, by contrast, *does* build a link here.
+            // The frozen golden recording, by contrast, *does* build a link here.
             assert!(golden_macros(source).contains("<a href"));
         }
     }
@@ -4500,7 +4492,7 @@ mod tests {
             assert_ne!(
                 fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_macros(source),
-                "{source:?} now agrees with the string pipeline; fold it into the parity corpus"
+                "{source:?} now agrees with the frozen golden recording; fold it into the parity corpus"
             );
 
             // The tree's own reading is the well-formed one: one link node
@@ -4679,7 +4671,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(fixture)), &HtmlInlineRenderer {}),
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -4765,7 +4757,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -4823,7 +4815,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -5077,7 +5069,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -5133,7 +5125,7 @@ mod tests {
                 "a target crossing a rendered span must stay literal: {nodes:?}"
             );
 
-            // The string pipeline, by contrast, *does* build a link here.
+            // The frozen golden recording, by contrast, *does* build a link here.
             assert!(golden_macros(source).contains("<a href"));
         }
     }
@@ -5177,7 +5169,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(fixture)), &HtmlInlineRenderer {}),
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -5215,7 +5207,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the frozen golden recording for {source:?}"
             );
 
             // Not vacuous: each fixture really is a link now, and the slot
@@ -5328,7 +5320,7 @@ mod tests {
             assert_ne!(
                 fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
-                "{source:?} now agrees with the string pipeline; fold it into the parity corpus"
+                "{source:?} now agrees with the frozen golden recording; fold it into the parity corpus"
             );
 
             // The tree's own reading is the well-formed one: one link node
@@ -5729,7 +5721,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the frozen golden recording for {source:?}"
             );
         }
     }
@@ -5804,7 +5796,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_passthroughs(source),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the frozen golden recording for {source:?}"
             );
         }
     }
@@ -5915,7 +5907,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the frozen golden recording for {source:?}"
             );
         }
     }
@@ -6660,7 +6652,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_normal(fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }
@@ -6721,7 +6713,7 @@ mod tests {
                     &HtmlInlineRenderer {}
                 ),
                 golden_normal(fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen golden recording for {fixture:?}"
             );
         }
     }

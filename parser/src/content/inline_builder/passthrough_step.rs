@@ -22,20 +22,18 @@ use crate::{
 /// for [`apply_special_characters`](super::special_chars::apply_special_characters)
 /// and the later steps to refine.
 ///
-/// This is the **first** step [`build`](super::build) runs — mirroring
-/// `Passthroughs::extract_from`,
-/// which the string pipeline runs *before* its own step loop — so a
-/// passthrough's content is never touched by specialcharacters, quotes,
-/// replacements, or macros: it is a leaf, and every later step's
-/// [`build_match_string`] already treats a node it does not specifically
-/// handle (an already-built [`Styled`] span, and now a
-/// [`Raw`](InlineNode::Raw) leaf) as a
-/// single opaque placeholder.
+/// This is the **first** step [`build`](super::build) runs, matching
+/// Asciidoctor's own order, which extracts passthroughs before any other
+/// substitution runs — so a passthrough's content is never touched by
+/// specialcharacters, quotes, replacements, or macros: it is a leaf, and
+/// every later step's [`build_match_string`] already treats a node it does
+/// not specifically handle (an already-built [`Styled`] span, and now a
+/// [`Raw`](InlineNode::Raw) leaf) as a single opaque placeholder.
 ///
-/// It reuses the string pipeline's *exact* recognition —
-/// [`INLINE_PASS_MACRO`] is now shared `pub(crate)` — so only the recognition
-/// *sink* differs (§4.1). Two forms fold through a [`Raw`](InlineNode::Raw)
-/// node whose `value`
+/// Recognition uses the same [`INLINE_PASS_MACRO`] pattern this construct
+/// has always been matched with, now shared as `pub(crate)`, so only the
+/// recognition *sink* (a tree node instead of a rendered string) differs.
+/// Two forms fold through a [`Raw`](InlineNode::Raw) node whose `value`
 /// is the *content itself*, since their substitution list applies nothing:
 /// the triple-plus (`+++text+++`) and bare `pass:[…]` macro (with no
 /// substitution list) both resolve to [`SubstitutionGroup::None`], and the
@@ -47,10 +45,9 @@ use crate::{
 /// run through the real substitution pipeline
 /// ([`passthrough_text`]) so a custom
 /// [`InlineRenderer`](crate::parser::InlineRenderer)'s
-/// escaping is honored, exactly as it would be for the string pipeline's own
-/// restore step — the cost is an owned [`Raw`](InlineNode::Raw) value rather
-/// than a `'src` borrow, since the pipeline's output is not guaranteed to
-/// coincide with the source.
+/// escaping is honored — the cost is an owned [`Raw`](InlineNode::Raw) value
+/// rather than a `'src` borrow, since the pipeline's output is not
+/// guaranteed to coincide with the source.
 ///
 /// An **attribute-list-prefixed** passthrough (`[quotes]++text++`,
 /// `` [x-]`text` ``, `[attrs]+text+`) folds through a [`Styled`] node instead:
@@ -59,11 +56,11 @@ use crate::{
 /// an attributed quote does ([`attributes_of`]) and wrap the body — itself a
 /// `Raw` leaf under `SubstitutionGroup::None`/`Verbatim`, unless the legacy
 /// `x-` compatibility marker switches it to a full `Normal`-order subtree
-/// ([`apply_normal_subs`]) — in `Code` (monospace) or `Unquoted`, mirroring
-/// `PassthroughRestoreReplacer`'s own `render_styled` call for a
-/// stored passthrough whose `type_` is `Some`. This runs as a **second pass**
+/// ([`apply_normal_subs`]) — in `Code` (monospace) or `Unquoted`, matching
+/// how Asciidoctor itself renders a passthrough carrying a stored type. This
+/// runs as a **second pass**
 /// ([`apply_bare_attrlisted_pass_level`]) after the delimited forms above,
-/// mirroring `Passthroughs::extract_from`'s own order (`INLINE_PASS_MACRO`
+/// matching Asciidoctor's own recognition order (`INLINE_PASS_MACRO`
 /// before [`INLINE_PASS`]).
 ///
 /// Running as a genuine second pass has one consequence worth calling out: a
@@ -83,8 +80,9 @@ use crate::{
 /// The **bare unconstrained form** (`+text+`, no attribute list) folds
 /// through a plain [`Raw`](InlineNode::Raw) leaf — like the double-plus/
 /// double-dollar forms, an absent attrlist means no stored `type_`, so
-/// `PassthroughRestoreReplacer` never wraps the restored text in a rendered
-/// span. Unlike the two attribute-list-prefixed bare forms above (matched via
+/// the restored text is never wrapped in a rendered span, matching
+/// Asciidoctor's own passthrough-restore behavior. Unlike the two
+/// attribute-list-prefixed bare forms above (matched via
 /// `\b{start-half}`, which does not by itself exclude a `\`/`:`/`;` prefix and
 /// so needs the retry below), this form's own pattern already excludes that
 /// "prohibited prefix" — and the word-boundary rule the doc comment on
@@ -97,14 +95,14 @@ use crate::{
 /// sub-range the auto-link increment introduced. Because it runs in the
 /// *second* pass, its body may enclose a construct the first pass already
 /// replaced (`+a $$b$$ c+`, `` +you feel pass:q[`mono`].+ ``): the verbatim
-/// substitution runs over the placeholder as the string pipeline runs it over
-/// its own sentinel, and the inner body is spliced in **after** — see
+/// substitution runs over the node's own opaque placeholder text, and the
+/// inner body is spliced in **after** — see
 /// [`build_bare_unconstrained_match`]. The attribute-list-prefixed forms keep
 /// their verbatim gate, so `[method x-]+pass:[<b>]+` stays deferred.
 ///
 /// A **prohibited prefix** ahead of either attribute-list-prefixed bare form
-/// (`index:[attrs]+text+`, `` \[x-]`text` ``) is answered the way the string
-/// replacer answers it, for want of a lookbehind: the match's first character
+/// (`index:[attrs]+text+`, `` \[x-]`text` ``) is answered the way
+/// Asciidoctor's own regex answers it, for want of a lookbehind: the match's first character
 /// — always its `[` — is written back verbatim and the *rest of that same
 /// match* is scanned again ([`collect_bare_pass_matches`], recursively). The
 /// second scan routinely recognizes a different, shorter construct the
@@ -155,7 +153,7 @@ use crate::{
 /// *second* pass ([`INLINE_PASS`]) legitimately re-scans that same de-escaped
 /// text and consumes its leading `+++`/`++` as a bare passthrough wrapping a
 /// shorter run (`+text` / `text`, one `+` left over as trailing literal
-/// text), exactly as the string pipeline's own second regex pass does over
+/// text), exactly as Asciidoctor's own second regex pass does over
 /// its own once-substituted text: parity, not a divergence
 /// (`an_escaped_triple_plus_reveals_a_nested_bare_passthrough`,
 /// `an_escaped_double_plus_reveals_a_nested_bare_passthrough`). An escaped
@@ -176,13 +174,12 @@ pub(super) fn apply_passthroughs<'src>(
 ) -> Vec<InlineNode<'src>> {
     let nodes = apply_pass_macro_level(nodes, root, parser);
 
-    // The bare-form pass runs second, mirroring `Passthroughs::extract_from`'s
-    // own order: the string pipeline runs `INLINE_PASS_MACRO` first, then
-    // `INLINE_PASS` over what it left behind, so a construct the macro pass
-    // already replaced (now an opaque placeholder in the rebuilt match
-    // string) is untouched by this second pass. A bare `+…+` may still
-    // *enclose* one, which the string pipeline reads as ordinary body text
-    // around its own sentinel and restores last; see
+    // The bare-form pass runs second, so a construct the macro pass already
+    // replaced (now an opaque placeholder in the rebuilt match string) is
+    // untouched by this second pass, matching Asciidoctor's own two-pass
+    // recognition order (`INLINE_PASS_MACRO` before `INLINE_PASS`). A bare
+    // `+…+` may still *enclose* one, in which case its content is treated as
+    // ordinary body text around that placeholder and restored last; see
     // [`build_bare_unconstrained_match`] for how that order is reproduced.
     apply_bare_attrlisted_pass_level(nodes, root, parser)
 }
@@ -276,7 +273,7 @@ fn apply_bare_attrlisted_pass_level<'src>(
 /// unattrlisted delimiter escape. A *bracket* escape (`\[attrs]++text++`)
 /// becomes a **pair**: an [`Unescape`](MacroMatchKind::Unescape) over the
 /// bracket, then a [`Node`](MacroMatchKind::Node) over the delimited
-/// remainder, which the string replacer stores without its attribute list.
+/// remainder, which Asciidoctor stores without its attribute list.
 fn find_passthrough_matches<'src>(
     s: &str,
     pieces: &[Piece],
@@ -426,7 +423,7 @@ fn find_passthrough_matches<'src>(
 /// [`build_bare_unconstrained_match`]).
 ///
 /// The scan is [`collect_bare_pass_matches`], which is recursive so that the
-/// two attribute-list-prefixed options can reproduce the string replacer's
+/// two attribute-list-prefixed options can reproduce Asciidoctor's
 /// own **prohibited-prefix retry**; see its doc comment.
 fn find_bare_attrlisted_matches<'src>(
     s: &str,
@@ -622,16 +619,16 @@ fn collect_bare_pass_matches<'src>(
 /// This pass runs second, over what the [`INLINE_PASS_MACRO`] pass left
 /// behind, so a `+…+` body can enclose a construct that pass already replaced
 /// — `+a $$b$$ c+`, `+you feel pass:q[`mono`].+`, both documented AsciiDoc
-/// idioms. The string pipeline sees its own **sentinel** there and treats it
-/// as ordinary body text: it applies the verbatim substitution to the body
-/// *with the sentinel still in it*, stores the result as this passthrough's
-/// own entry, and lets the final restore splice the inner body in afterwards.
+/// idioms. Matching Asciidoctor's own output requires the same *restore-last*
+/// order: the verbatim substitution runs over the body with the inner
+/// construct still an opaque placeholder in it, producing this passthrough's
+/// own stored value, and only then is the inner body's own restored text
+/// spliced back in.
 ///
 /// The tree reproduces that order exactly. The body is read from the level's
 /// **match string** — where an already-built [`Raw`](InlineNode::Raw) or
 /// [`Stem`](crate::inlines::Stem) leaf stands as one
-/// [`SPAN_PLACEHOLDER`](super::quotes::SPAN_PLACEHOLDER), the same shape the
-/// sentinel has —
+/// [`SPAN_PLACEHOLDER`](super::quotes::SPAN_PLACEHOLDER) —
 /// [`passthrough_text`] runs over those bytes as written, and each placeholder
 /// in the *result* is then replaced by what the fold of that node emits
 /// ([`restorable_body`]). Substituting first and splicing after is what keeps
@@ -642,7 +639,7 @@ fn collect_bare_pass_matches<'src>(
 /// The gate is correspondingly [`range_is_restorable`]: a masked construct is
 /// admitted, and so is a [`synthesized`](Piece::synthesized) run (the match
 /// string carries its bytes exactly, and this no longer slices `'src` for the
-/// body). Only the node's `location` keeps design §4.4's coarse span. Nothing
+/// body). Only the node's `location` falls back to a coarse span. Nothing
 /// else can reach this pass — it runs before the escaping, quotes, and macros
 /// steps, so a [`CharRef`](InlineNode::CharRef) leaf or a rendered span does
 /// not exist yet.
@@ -694,8 +691,8 @@ fn build_bare_unconstrained_match<'src>(
                 // siblings; `substitute_and_restore` has already applied it,
                 // so `value` is the author's body (or, for a body enclosing an
                 // already-extracted construct, that body with each inner
-                // node's own fold bytes spliced in — which is what the string
-                // pipeline's own restore produces there too).
+                // node's own fold bytes spliced in — matching what
+                // Asciidoctor's own restore produces there too).
                 origin: RawOrigin::Passthrough {
                     subs: SubstitutionGroup::Verbatim,
                     source_text: None,
@@ -708,9 +705,9 @@ fn build_bare_unconstrained_match<'src>(
 }
 
 /// Applies the verbatim substitution to a bare `+…+` body and splices each
-/// already-extracted node's own fold bytes back in — the restore-last order
-/// the string pipeline itself performs, where the sentinel it holds for such a
-/// node is ordinary body text until the final restore.
+/// already-extracted node's own fold bytes back in — the same restore-last
+/// order Asciidoctor performs, where its own placeholder for such a node is
+/// ordinary body text until the final restore.
 ///
 /// `body_text` is the body as it stands in the level's **match string** and
 /// `range` is where that body sits in it, so the overlapping [`Piece`]s say
@@ -855,8 +852,7 @@ fn build_passthrough_node<'src>(
         // ([`RawForm::Escaped`]). Rendering it here instead would freeze it
         // against whichever renderer the parse carried, which is a different
         // renderer from the one a later `render_with` fold is handed, and
-        // (while the string pipeline still runs) invokes that renderer a
-        // second time for a value nothing reads.
+        // would invoke that renderer a second time for a value nothing reads.
         let content = source_slice(pieces, m.start()..m.end(), root);
 
         return InlineNode::Raw {
@@ -877,8 +873,7 @@ fn build_passthrough_node<'src>(
     // not a richer node subtree) is the safe shape for this increment.
     // Without one (the bare `pass:[…]` form), `SubstitutionGroup::None`
     // applies nothing. Either way, an escaped closing bracket (`\]`)
-    // unescapes first, mirroring the string replacer's
-    // `text.replace("\\]", "]")` — the same treatment every other macro
+    // unescapes first — the same treatment every other macro
     // family's bracket content gets.
     #[allow(clippy::unwrap_used)]
     let m = caps.get(15).unwrap();
@@ -911,12 +906,11 @@ fn build_passthrough_node<'src>(
     //
     // `passthrough_text` — already used for `++…++`/`$$…$$`/the bare
     // unconstrained form — sidesteps both failure modes: it renders `text`
-    // through the **real, string-based** substitution pipeline
-    // (`SubstitutionGroup::apply`, the same call `PassthroughRestoreReplacer`
-    // makes for a stored `Passthrough`), producing an already-final HTML string
+    // through the **real** substitution pipeline (`SubstitutionGroup::apply`),
+    // producing an already-final HTML string
     // that this arm wraps in a single `Raw` leaf. A `Raw` leaf is *opaque* to
     // every later step in this module (never descended into, never re-matched —
-    // design §4.2's passthrough-as-leaf convention), so it is immune to both
+    // this module's own passthrough-as-leaf convention), so it is immune to both
     // failure modes above: nothing in `build`'s own remaining steps can touch
     // it, whether or not the author's list included that step.
     //
@@ -931,8 +925,8 @@ fn build_passthrough_node<'src>(
         let (subs, invalid) = SubstitutionGroup::from_custom_string(None, subs_list.as_str());
 
         // An unrecognized name in the list (`pass:bogus[…]`) is skipped while
-        // the recognized ones are still honored — and reported, exactly as
-        // `InlinePassMacroReplacer` reports it, against the content's own span.
+        // the recognized ones are still honored — and reported, against the
+        // content's own span, matching Asciidoctor's own reporting.
         // Recorded here rather than replayed from the tree because the node
         // carries no trace of it: an invalid name leaves the value it produces
         // indistinguishable from a valid list's.
@@ -1191,8 +1185,8 @@ fn build_bare_attrlisted_passthrough_node<'src>(
 }
 
 /// Splits an old-behavior-eligible attrlist span into its final attrlist body
-/// and whether the legacy `x-` compatibility marker was present — mirroring
-/// the string replacer's own check (`handle_quoted_text` and
+/// and whether the legacy `x-` compatibility marker was present — matching
+/// Asciidoctor's own check (`handle_quoted_text` and
 /// `InlinePassReplacer` both apply it identically): an attrlist of exactly
 /// `x-` clears entirely; one *ending* in ` x-` drops that suffix; anything
 /// else is kept as written and is not old-behavior.
