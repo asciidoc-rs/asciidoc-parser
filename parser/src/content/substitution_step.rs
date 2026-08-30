@@ -5,7 +5,7 @@ use regex::{Captures, Regex, RegexBuilder, Replacer};
 use crate::{
     Parser, Span,
     attributes::Attrlist,
-    content::{Content, escape_sentinels},
+    content::Content,
     document::InterpretedValue,
     parser::{
         CharacterReplacementType, InlineRenderer, QuoteScope, QuoteType, SpecialCharacter,
@@ -109,8 +109,9 @@ struct SpecialCharacterReplacer<'r> {
 
 impl Replacer for SpecialCharacterReplacer<'_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        // The SPECIAL_CHARS regex only matches '<', '>', and '&'. This sequence is
-        // specifically constructed to avoid having any unreachable code.
+        // The SPECIAL_CHARS regex only matches '<', '>', and '&'. This sequence
+        // is specifically constructed to avoid having any unreachable
+        // code.
         let ch = &caps[0];
 
         if ch == "<" {
@@ -128,11 +129,6 @@ impl Replacer for SpecialCharacterReplacer<'_> {
         // not writing anything into dest.
     }
 }
-
-static QUOTED_TEXT_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
-    #[allow(clippy::unwrap_used)]
-    Regex::new("[*_`#^~]").unwrap()
-});
 
 /// One quoted-text recognition rule: a [`QuoteType`]/[`QuoteScope`] pairing and
 /// the [`Regex`] that recognizes it.
@@ -152,14 +148,6 @@ pub(crate) struct QuoteSub {
 /// significant: it encodes Asciidoctor's precedence (see [`QUOTE_SUBS`]).
 pub(crate) fn quote_subs() -> &'static [QuoteSub] {
     &QUOTE_SUBS
-}
-
-/// Reports whether `text` contains any character that could open a quoted-text
-/// construct. A cheap pre-filter (shared with the single-pass builder) that
-/// lets a caller skip the full pattern sweep when nothing quote-like is
-/// present.
-pub(crate) fn maybe_has_quotes(text: &str) -> bool {
-    QUOTED_TEXT_SNIFF.is_match(text)
 }
 
 // Adapted from QUOTE_SUBS in Ruby Asciidoctor implementation,
@@ -328,7 +316,8 @@ pub(crate) static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     //
     // The counter expression is matched non-greedily (`+?`) so a trailing
     // escape backslash (`{counter:n\}`) is left for group 5 rather than being
-    // swallowed into the expression, again matching Asciidoctor's `#{CC_ANY}+?`.
+    // swallowed into the expression, again matching Asciidoctor's
+    // `#{CC_ANY}+?`.
     //
     // The attribute-name class `\w` (Unicode `\p{Word}`) accepts any Unicode
     // word character, matching Asciidoctor's `#{CG_WORD}[#{CC_WORD}-]*`, so
@@ -426,12 +415,6 @@ struct AttributeReplacer<'p> {
     /// whole line in `drop-line` mode, or a line the dropped reference left
     /// empty in `drop` mode (Asciidoctor's `reject_if_empty`).
     missing_on_line: bool,
-
-    /// Whether a substituted attribute value should have its reserved sentinel
-    /// codepoints escaped on the way in. Set only when replacing references in
-    /// content being substituted, which is held in escaped form (see
-    /// [`escape_sentinels`]).
-    escape_sentinels: bool,
 }
 
 impl<'p> AttributeReplacer<'p> {
@@ -444,7 +427,6 @@ impl<'p> AttributeReplacer<'p> {
             fallback_source,
             haystack_is_source: false,
             missing_on_line: false,
-            escape_sentinels: false,
         }
     }
 
@@ -453,13 +435,6 @@ impl<'p> AttributeReplacer<'p> {
     /// whole span: the match offsets the regex reports are source offsets.
     fn over_its_own_source(mut self) -> Self {
         self.haystack_is_source = true;
-        self
-    }
-
-    /// Escapes the reserved sentinel codepoints of every attribute value this
-    /// replacer splices in, for the content path (see the field docs).
-    fn escaping_sentinels(mut self) -> Self {
-        self.escape_sentinels = true;
         self
     }
 
@@ -500,16 +475,17 @@ impl<'p> AttributeReplacer<'p> {
 
 impl Replacer for AttributeReplacer<'_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        // A backslash immediately before the opening brace (`\{name}`) or before
-        // the closing brace (`{name\}`) — or both, as in `\{name\}` — escapes
-        // the reference: it is emitted literally with the escaping backslash(es)
-        // removed and left unexpanded, whether or not the attribute is set. An
-        // escaped reference is never treated as a missing reference, so it
-        // neither drops the line nor warns, and an escaped counter directive
+        // A backslash immediately before the opening brace (`\{name}`) or
+        // before the closing brace (`{name\}`) — or both, as in
+        // `\{name\}` — escapes the reference: it is emitted literally
+        // with the escaping backslash(es) removed and left unexpanded,
+        // whether or not the attribute is set. An escaped reference is
+        // never treated as a missing reference, so it neither drops the
+        // line nor warns, and an escaped counter directive
         // does not advance the counter. This mirrors Asciidoctor, whose
-        // `sub_attributes` returns `{#{name}}` when either its leading (`$1`) or
-        // trailing (`$4`) backslash capture is present, before any counter,
-        // missing-attribute, or resolution handling runs.
+        // `sub_attributes` returns `{#{name}}` when either its leading (`$1`)
+        // or trailing (`$4`) backslash capture is present, before any
+        // counter, missing-attribute, or resolution handling runs.
         if caps.get(1).is_some() || caps.get(5).is_some() {
             dest.push('{');
 
@@ -592,17 +568,7 @@ impl Replacer for AttributeReplacer<'_> {
         // A value-less `Set` attribute (e.g. `:foo:` with no `=value`)
         // substitutes to an empty string, matching Asciidoctor.
         if let InterpretedValue::Value(value) = value {
-            // An attribute's value is stored as the document wrote it, so a
-            // reserved sentinel codepoint in it enters the text being
-            // substituted unescaped unless it is escaped here (see
-            // `escape_sentinels`). Only the content path asks for this: a value
-            // spliced into a macro target or an attribute list is not part of
-            // the escaped text and is restored by no one.
-            if self.escape_sentinels {
-                dest.push_str(&escape_sentinels(value.as_ref()));
-            } else {
-                dest.push_str(value.as_ref());
-            }
+            dest.push_str(value.as_ref());
         }
     }
 }
@@ -647,7 +613,7 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
             continue;
         }
 
-        let mut replacer = AttributeReplacer::new(parser, mode, source).escaping_sentinels();
+        let mut replacer = AttributeReplacer::new(parser, mode, source);
 
         let replaced = ATTRIBUTE_REFERENCE.replace_all(line, replacer.by_ref());
 
@@ -1272,10 +1238,10 @@ mod tests {
 
         #[test]
         fn escaped_reference_with_both_braces_escaped_drops_backslashes() {
-            // `\{name\}` escapes the reference the same way `\{name}` does: both
-            // backslashes are removed and the reference is left unexpanded, even
-            // when the attribute is set. This is the form Asciidoctor produces
-            // for `\{group-id\}`.
+            // `\{name\}` escapes the reference the same way `\{name}` does:
+            // both backslashes are removed and the reference is
+            // left unexpanded, even when the attribute is set. This
+            // is the form Asciidoctor produces for `\{group-id\}`.
             let p = Parser::default().with_intrinsic_attribute(
                 "group-id",
                 "42",
@@ -1292,8 +1258,9 @@ mod tests {
 
         #[test]
         fn escaped_reference_with_only_trailing_brace_escaped_drops_backslash() {
-            // A backslash before the closing brace alone (`{name\}`) also escapes
-            // the reference, matching Asciidoctor's trailing-backslash capture.
+            // A backslash before the closing brace alone (`{name\}`) also
+            // escapes the reference, matching Asciidoctor's
+            // trailing-backslash capture.
             let p = Parser::default().with_intrinsic_attribute(
                 "group-id",
                 "42",
@@ -1310,9 +1277,10 @@ mod tests {
 
         #[test]
         fn escaped_counter_with_trailing_backslash_is_literal_and_does_not_advance() {
-            // A trailing escape backslash on a counter directive (`{counter:n\}`)
-            // emits the reference literally (without the backslash) and does not
-            // advance the counter, so the following unescaped reference is `1`.
+            // A trailing escape backslash on a counter directive
+            // (`{counter:n\}`) emits the reference literally
+            // (without the backslash) and does not advance the
+            // counter, so the following unescaped reference is `1`.
             let mut content = Content::from(crate::Span::new("{counter:n\\} {counter:n}"));
             let p = Parser::default();
             SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
@@ -1482,8 +1450,9 @@ mod tests {
 
             #[test]
             fn drop_line_records_one_warning_per_missing_reference() {
-                // Two missing references on the same dropped line each produce a
-                // diagnostic, matching Asciidoctor's per-reference logging.
+                // Two missing references on the same dropped line each produce
+                // a diagnostic, matching Asciidoctor's
+                // per-reference logging.
                 let p = parser_with_mode("drop-line");
                 assert_eq!(render("a {x} b {y} c\ntail", &p), "tail");
                 assert_eq!(p.take_substitution_warnings().len(), 2);
@@ -1492,7 +1461,8 @@ mod tests {
             #[test]
             fn drop_line_does_not_warn_for_a_line_without_a_missing_reference() {
                 // Only the line carrying the missing reference is dropped and
-                // warned about; a line whose references all resolve is untouched.
+                // warned about; a line whose references all resolve is
+                // untouched.
                 let p = parser_with_mode("drop-line");
                 assert_eq!(
                     render("first {sp}line\nsecond {missing} line\nthird line", &p),
@@ -1510,7 +1480,8 @@ mod tests {
             #[test]
             fn drop_line_points_at_the_precise_reference() {
                 // With per-line source spans retained, the drop-line diagnostic
-                // names the exact offending reference rather than the whole line.
+                // names the exact offending reference rather than the whole
+                // line.
                 let p = parser_with_mode("drop-line");
                 let text = "first {alpha} line\nsecond {beta} line";
                 let mut content = Content::from(Span::new(text));
@@ -1562,9 +1533,9 @@ mod tests {
             #[test]
             fn escaped_missing_reference_drops_the_backslash_and_never_drops_the_line() {
                 // An escaped reference has its backslash removed and is passed
-                // through literally; it is never treated as a missing reference,
-                // so even under `drop-line` the line survives and no warning is
-                // recorded.
+                // through literally; it is never treated as a missing
+                // reference, so even under `drop-line` the line
+                // survives and no warning is recorded.
                 let p = parser_with_mode("drop-line");
                 assert_eq!(
                     render("In the path /items/\\{id}, x.", &p),
@@ -1646,9 +1617,10 @@ mod tests {
             #[test]
             fn warn_span_survives_earlier_special_character_expansion() {
                 // The key regression guard: special characters run before the
-                // attributes step and lengthen the rendered text (`<` -> `&lt;`),
-                // so a naive rendered-offset would be wrong. The warning must
-                // still name the reference's *original* source offset.
+                // attributes step and lengthen the rendered text (`<` ->
+                // `&lt;`), so a naive rendered-offset would be
+                // wrong. The warning must still name the
+                // reference's *original* source offset.
                 let p = parser_with_mode("warn");
                 let text = "a < b {foo} c";
                 let mut content = Content::from(Span::new(text));

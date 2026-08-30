@@ -258,8 +258,9 @@ include::example$source.adoc[tag=src-inc]
         .parse("[,ruby]\n----\ninclude::app.rb[]\n----");
 
     // The structure is asserted at the block level (rather than via a full
-    // `Document` fixture) because the unresolved-include warning below carries an
-    // owned target string, which the `&'static` warnings fixture can't express.
+    // `Document` fixture) because the unresolved-include warning below carries
+    // an owned target string, which the `&'static` warnings fixture can't
+    // express.
     assert_eq!(doc.child_blocks().count(), 1);
 
     let block = doc.child_blocks().next().unwrap();

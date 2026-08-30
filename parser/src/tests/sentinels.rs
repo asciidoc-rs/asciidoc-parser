@@ -1,13 +1,20 @@
-//! Regression tests for documents that type the codepoints the substitution
-//! pipeline uses as in-band control sentinels (issue #1235).
+//! Regression tests for documents that type the codepoints the string
+//! substitution pipeline used as in-band control sentinels (issue #1235).
 //!
-//! The pipeline marks its own work inside the text it is substituting: a
-//! deferred cross-reference leaves `U+E000 <index> U+E001` behind, a footnote
-//! marker in a section title is bracketed with `U+E002`/`U+E003`, and an
-//! extracted passthrough is stood in for by `U+0096 <index> U+0097`. Those
+//! That pipeline marked its own work inside the text it was substituting: a
+//! deferred cross-reference left `U+E000 <index> U+E001` behind, a footnote
+//! marker in a section title was bracketed with `U+E002`/`U+E003`, and an
+//! extracted passthrough was stood in for by `U+0096 <index> U+0097`. Those
 //! codepoints are unassigned (Private Use Area) or non-printing (C1), but a
-//! document can type them, so they are escaped out of the document's own text
-//! before substitution begins and restored on the way out.
+//! document can type them, so the pipeline escaped them out of the document's
+//! own text before substituting and restored them on the way out. The
+//! single-pass builder needs none of that — it recognizes constructs by range
+//! over the source, and a carried title's deferred template (the splice that
+//! outlives the parse) is a structured piece list rather than a marked
+//! string — so these tests now pin the simpler invariant that a typed
+//! sentinel is ordinary content. The one in-band form left in production is a
+//! footnote's deferred template (see `FootnoteDeferred::render`); retiring it
+//! is the remaining slice of design §4.2's third sentinel system.
 //!
 //! Two properties are covered:
 //!
@@ -110,6 +117,61 @@ fn a_placeholder_from_an_attribute_value_cannot_forge_a_cross_reference() {
 }
 
 #[test]
+fn a_placeholder_from_an_attribute_value_cannot_forge_an_image_restore() {
+    // `image:`/`icon:` and the link families' display-text list are the one
+    // place left where a masked passthrough or STEM expression is restored
+    // by scanning parsed text for its own `\u{96}`*n*`\u{97}` token
+    // (`tokened_bracket`/`Attrlist::into_owned_restoring`), rather than by
+    // node structure. An attribute reference is substituted into the bracket
+    // *before* the image macro is even recognized, so an attribute whose
+    // value happens to spell that same byte pattern — sitting in the same
+    // bracket as a real passthrough — would otherwise be indistinguishable
+    // from the pipeline's own token and splice the passthrough's rendered
+    // body into `alt` instead of the literal text the document defined.
+    let doc = Parser::default().parse(concat!(
+        ":forge: \u{96}0\u{97}\n",
+        "\n",
+        "image:x.png[++real++,alt={forge}]\n",
+    ));
+
+    let rendered = last_paragraph(&doc);
+
+    assert!(
+        !rendered.contains("alt=\"real\""),
+        "the forged attribute value must not restore the passthrough's body: {rendered:?}"
+    );
+    assert_eq!(
+        rendered,
+        "<span class=\"image\"><img src=\"x.png\" alt=\"\u{e005}s0\u{e005}e\"></span>"
+    );
+}
+
+#[test]
+fn a_placeholder_from_an_attribute_value_cannot_forge_a_link_display_text_restore() {
+    // The `link:` macro's display-text list shares `tokened_bracket` and
+    // `Attrlist::into_owned_restoring` with the image family's bracket (see
+    // `a_placeholder_from_an_attribute_value_cannot_forge_an_image_restore`),
+    // so the same forgery reaches it through a `role=` attribute sitting
+    // beside a real passthrough in the same display-text list.
+    let doc = Parser::default().parse(concat!(
+        ":forge: \u{96}0\u{97}\n",
+        "\n",
+        "link:x[++real++,role={forge}]\n",
+    ));
+
+    let rendered = last_paragraph(&doc);
+
+    assert!(
+        !rendered.contains("class=\"real\""),
+        "the forged attribute value must not restore the passthrough's body: {rendered:?}"
+    );
+    assert_eq!(
+        rendered,
+        "<a href=\"x\" class=\"\u{e005}s0\u{e005}e\">real</a>"
+    );
+}
+
+#[test]
 fn a_typed_passthrough_placeholder_cannot_forge_a_passthrough() {
     // The passthrough placeholders are the same kind of in-band mark, and are
     // escaped alongside the cross-reference ones: this document's `<b>` is
@@ -142,13 +204,12 @@ fn a_typed_placeholder_inside_a_passthrough_cannot_forge_a_cross_reference() {
 #[test]
 fn a_typed_placeholder_in_a_carried_title_cannot_forge_a_cross_reference() {
     // A block title carried across a section heading is the one content that
-    // renders from a placeholder template in production, and that template is
-    // synthesized from the title's inline tree (`carried_title_template`)
-    // rather than captured from the escaped string pipeline. The synthesis must
-    // therefore do its own escaping: each gap between placeholders passes
-    // through `escape_sentinels`, or the typed sequence here would be
-    // byte-identical to the real placeholder beside it and the splice could not
-    // tell them apart.
+    // renders from a deferred template in production, synthesized from the
+    // title's inline tree (`carried_title_template`). The template is a
+    // structured piece list — a splice point is a variant, not a byte pattern
+    // — so the typed sequence here is just bytes inside a literal piece:
+    // nothing scans it, and no escaping is needed to keep it apart from the
+    // real cross-reference spliced beside it.
     let doc = Parser::default().parse(concat!(
         "[[a]]anchor\n",
         "\n",

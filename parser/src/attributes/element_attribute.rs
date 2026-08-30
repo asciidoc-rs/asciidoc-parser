@@ -166,9 +166,10 @@ impl<'src> ElementAttribute<'src> {
 
             // Skip any leading, non-semantic whitespace before this entry
             // (Asciidoctor's `skip_blank`). Name detection has to run first, so
-            // without this a name with leading blanks — e.g. `[  first = value]`
-            // or the second/third entries once a comma is consumed — would fail
-            // to be recognized and fall through to a positional literal.
+            // without this a name with leading blanks — e.g. `[  first =
+            // value]` or the second/third entries once a comma is
+            // consumed — would fail to be recognized and fall
+            // through to a positional literal.
             source = source.take_whitespace_with_newline().after;
 
             let (name, after): (Option<Span<'_>>, Span) = match source.take_attr_name() {
@@ -178,11 +179,13 @@ impl<'src> ElementAttribute<'src> {
                         Some(equals) => {
                             let space = equals.after.take_whitespace_with_newline();
 
-                            // `name=` with nothing (or only a comma) after the `=`
-                            // is a named attribute with an empty value, not a
+                            // `name=` with nothing (or only a comma) after the
+                            // `=` is a named
+                            // attribute with an empty value, not a
                             // positional one. The empty value falls out of the
-                            // value scan below (`take_while(c != ',')` yields the
-                            // empty string), so the name is all we need to keep.
+                            // value scan below (`take_while(c != ',')` yields
+                            // the empty string), so
+                            // the name is all we need to keep.
                             (Some(name.item), space.after)
                         }
                         None => (None, source),
@@ -1583,9 +1586,10 @@ mod tests {
         fn named_with_empty_value() {
             let p = Parser::default();
 
-            // `name=` with nothing after the `=` is a named attribute whose value
-            // is the empty string (e.g. `[caption=]` clears a label), not a
-            // positional attribute with the literal value "abc=".
+            // `name=` with nothing after the `=` is a named attribute whose
+            // value is the empty string (e.g. `[caption=]` clears a
+            // label), not a positional attribute with the literal
+            // value "abc=".
             let (element_attr, offset, warning_types) = crate::attributes::ElementAttribute::parse(
                 &CowStr::from("abc="),
                 0,

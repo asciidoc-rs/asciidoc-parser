@@ -114,8 +114,9 @@ How these options values work and when each should be used is described below:
 "#
         );
 
-        // With no option (and in the default `Secure` safe mode) an SVG image is
-        // referenced with a plain `<img>` element, exactly like any other image.
+        // With no option (and in the default `Secure` safe mode) an SVG image
+        // is referenced with a plain `<img>` element, exactly like any
+        // other image.
         let doc = Parser::default().parse("image:sample.svg[Static,300]");
 
         assert_eq!(
@@ -136,10 +137,11 @@ How these options values work and when each should be used is described below:
 "#
         );
 
-        // The `interactive` option references the SVG with an `<object>` element
-        // so its embedded scripting and links stay live. It is security
-        // sensitive, so it only takes effect below the `Secure` safe mode; the
-        // alt text becomes the object's fallback content.
+        // The `interactive` option references the SVG with an `<object>`
+        // element so its embedded scripting and links stay live. It is
+        // security sensitive, so it only takes effect below the
+        // `Secure` safe mode; the alt text becomes the object's
+        // fallback content.
         let doc = Parser::default()
             .with_safe_mode(SafeMode::Server)
             .parse("image:sample.svg[Interactive,300,opts=interactive]");
@@ -152,11 +154,12 @@ How these options values work and when each should be used is described below:
 
     #[test]
     fn interactive_is_ignored_in_secure_mode() {
-        // Because the `interactive` option is security sensitive, in the default
-        // `Secure` safe mode it is ignored and the SVG is referenced with a plain
-        // `<img>`, exactly as Ruby Asciidoctor does. (The page itself does not
-        // discuss safe mode, so this is behavior coverage rather than a
-        // `verifies!` of normative page text.)
+        // Because the `interactive` option is security sensitive, in the
+        // default `Secure` safe mode it is ignored and the SVG is
+        // referenced with a plain `<img>`, exactly as Ruby Asciidoctor
+        // does. (The page itself does not discuss safe mode, so this is
+        // behavior coverage rather than a `verifies!` of normative page
+        // text.)
         let doc = Parser::default().parse("image:sample.svg[Interactive,300,opts=interactive]");
 
         assert_eq!(
@@ -205,8 +208,9 @@ To allow SVG content reachable by JavaScript in the main DOM or to inherit style
     #[test]
     fn inline_is_ignored_in_secure_mode() {
         // Like `interactive`, the `inline` option is disabled in the default
-        // `Secure` safe mode: the registered `SvgFileHandler` is never consulted
-        // and a plain `<img>` is emitted instead of the embedded `<svg>`.
+        // `Secure` safe mode: the registered `SvgFileHandler` is never
+        // consulted and a plain `<img>` is emitted instead of the
+        // embedded `<svg>`.
         let doc = Parser::default()
             .with_svg_file_handler(SvgFileHandlerFixture::from_pairs([(
                 "sample.svg",
@@ -232,8 +236,8 @@ If the value of the fallback attribute is a relative path, it will be prefixed w
         );
 
         // The `fallback` image nests inside the `<object>` as an `<img>`. Its
-        // relative path (`fallback.png`) is prefixed with `imagesdir` (`images`),
-        // just like the object's own `data` target.
+        // relative path (`fallback.png`) is prefixed with `imagesdir`
+        // (`images`), just like the object's own `data` target.
         let doc = Parser::default()
             .with_safe_mode(SafeMode::Server)
             .with_intrinsic_attribute("imagesdir", "images", ModificationContext::Anywhere)
@@ -262,18 +266,19 @@ When using the `inline` option, if you specify a width or height on the image ma
         );
 
         // The fixture's opening `<svg>` tag carries `width`, `height`, and
-        // `style` attributes. Supplying a width (and here a height) on the image
-        // macro removes all three from the tag and appends the requested
-        // dimensions instead; the required `viewBox` is preserved.
+        // `style` attributes. Supplying a width (and here a height) on the
+        // image macro removes all three from the tag and appends the
+        // requested dimensions instead; the required `viewBox` is
+        // preserved.
         //
         // This test exercises only the attribute-stripping clause of the spec
         // line above. The trailing "cannot have a namespace" clause is an
         // authoring constraint on the SVG *source* — its element names must not
-        // be namespace-prefixed (e.g. `<svg:svg>`/`<svg:circle>`) — not a parser
-        // behavior: the parser embeds the SVG verbatim and never rewrites element
-        // names. The preserved `xmlns="…"` here is a default-namespace
-        // *declaration*, which is unrelated to (and not prohibited by) that
-        // clause; Asciidoctor keeps it as well.
+        // be namespace-prefixed (e.g. `<svg:svg>`/`<svg:circle>`) — not a
+        // parser behavior: the parser embeds the SVG verbatim and never
+        // rewrites element names. The preserved `xmlns="…"` here is a
+        // default-namespace *declaration*, which is unrelated to (and
+        // not prohibited by) that clause; Asciidoctor keeps it as well.
         let doc = Parser::default()
             .with_safe_mode(SafeMode::Server)
             .with_svg_file_handler(SvgFileHandlerFixture::from_pairs([(

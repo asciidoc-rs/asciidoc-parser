@@ -404,11 +404,22 @@ impl Footnote {
     /// one would see every callback for this footnote twice if both ran and one
     /// answer were discarded.
     ///
-    /// `None` is the template path. One class of footnote still takes it: one
-    /// defined in a **section heading**, whose content is resolved by the
-    /// document-order title pass rather than by `Content::resolve_references`,
-    /// and so is not folded here yet. Measured across the suite, 49 of 55
-    /// resolved footnotes fold and the 6 that do not are that case.
+    /// `None` is the template path. It used to have a live class of footnote
+    /// behind it — one defined in a **section heading**, whose content was
+    /// resolved by the document-order title pass rather than by
+    /// `Content::resolve_references` and so went unfolded here — but the
+    /// title pass now collects its own folds too (see
+    /// `title_refs::write_back`'s `collect_own_folded_footnotes` calls), and
+    /// an instrumented run of the whole suite (5,477 tests,
+    /// `--test-threads=1`) found `folded: None` reached exactly once: this
+    /// module's own
+    /// `a_footnote_folds_when_given_one_and_renders_its_template_otherwise`,
+    /// which builds a bare `Footnote` by hand precisely to exercise this arm.
+    /// No production parse takes it. It is kept regardless — a footnote
+    /// whose defining content retained no render attributes would still land
+    /// here, and rendering its template is the honest answer to that, better
+    /// than leaving the parse-time fallback standing as though resolution
+    /// had never run.
     pub(crate) fn resolve_references<'src>(
         &mut self,
         resolver: &dyn crate::parser::ReferenceResolver,
@@ -580,7 +591,7 @@ mod tests {
     fn a_footnote_folds_when_given_one_and_renders_its_template_otherwise() {
         use crate::{
             Span,
-            content::FootnoteDeferred,
+            content::{FootnoteDeferred, XrefTemplatePiece},
             parser::{CatalogResolver, HtmlInlineRenderer, ReferenceWarnings},
         };
 
@@ -590,7 +601,7 @@ mod tests {
                 id: None,
                 text: "the parse-time fallback".to_string(),
                 deferred: Some(Box::new(FootnoteDeferred::new(
-                    "the template".to_string(),
+                    vec![XrefTemplatePiece::Literal("the template".to_string())],
                     vec![],
                 ))),
                 location: None,

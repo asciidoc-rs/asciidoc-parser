@@ -183,10 +183,11 @@ mod assignment {
 "#
         );
 
-        // A name ending with a colon isn't a valid attribute entry; `:foo:: bar`
-        // is instead a description list (`foo` is the term, `bar` the
-        // description). This crate models a description list as a `list` block
-        // whose type is `Description`, the equivalent of Asciidoctor's `:dlist`.
+        // A name ending with a colon isn't a valid attribute entry; `:foo::
+        // bar` is instead a description list (`foo` is the term, `bar`
+        // the description). This crate models a description list as a
+        // `list` block whose type is `Description`, the equivalent of
+        // Asciidoctor's `:dlist`.
         let doc = Parser::default().parse(":foo:: bar");
         assert!(!doc.has_attribute("foo:"));
 
@@ -535,12 +536,13 @@ mod assignment {
 "#
         );
 
-        // The legacy `+` continuation fuses the `{version}` line into the header
-        // value (`Asciidoctor {version}`); the unresolved `{version}` reference
-        // then drops the line under `attribute-missing=drop-line`, leaving the
-        // empty string and recording the drop as a
-        // `SkippingReferenceToMissingAttribute` warning naming `version`
-        // (the crate's analogue of Asciidoctor's INFO log).
+        // The legacy `+` continuation fuses the `{version}` line into the
+        // header value (`Asciidoctor {version}`); the unresolved
+        // `{version}` reference then drops the line under
+        // `attribute-missing=drop-line`, leaving the empty string and
+        // recording the drop as a `SkippingReferenceToMissingAttribute`
+        // warning naming `version` (the crate's analogue of
+        // Asciidoctor's INFO log).
         let doc = Parser::default()
             .with_intrinsic_attribute(
                 "attribute-missing",
@@ -701,9 +703,9 @@ mod assignment {
 "#
         );
 
-        // The limit of 8 falls in the middle of the third (3-byte) character, so
-        // that character is dropped whole rather than split: the truncated value
-        // is 6 bytes, not 8.
+        // The limit of 8 falls in the middle of the third (3-byte) character,
+        // so that character is dropped whole rather than split: the
+        // truncated value is 6 bytes, not 8.
         let doc = Parser::default()
             .with_intrinsic_attribute(
                 "max-attribute-value-size",
@@ -737,10 +739,10 @@ mod assignment {
 "#
         );
 
-        // Asciidoctor disables the limit with a `nil` value; this crate models a
-        // disabled limit as a non-positive value (Ruby's `String#to_i` coerces
-        // `nil`/empty to `0`), so `0` turns it off and the full 5000-byte value
-        // is preserved.
+        // Asciidoctor disables the limit with a `nil` value; this crate models
+        // a disabled limit as a non-positive value (Ruby's
+        // `String#to_i` coerces `nil`/empty to `0`), so `0` turns it
+        // off and the full 5000-byte value is preserved.
         let input = format!(":name: {}\n\n{{name}}", "a".repeat(5000));
         let doc = Parser::default()
             .with_intrinsic_attribute(
@@ -812,9 +814,9 @@ mod assignment {
 "#
         );
 
-        // At `SafeMode::Server` (and above, including the default `Secure`), the
-        // real home path is masked and `user-home` resolves to `.`, so the
-        // reference expands to a relative path.
+        // At `SafeMode::Server` (and above, including the default `Secure`),
+        // the real home path is masked and `user-home` resolves to `.`,
+        // so the reference expands to a relative path.
         let doc = Parser::default()
             .with_safe_mode(SafeMode::Server)
             .parse(":imagesdir: {user-home}/etc/images\n\n{imagesdir}");
@@ -1034,8 +1036,8 @@ mod assignment {
 "#
         );
 
-        // The Ruby `@` modifier (soft set) maps to a value that the document may
-        // override anywhere, i.e. `ModificationContext::Anywhere`.
+        // The Ruby `@` modifier (soft set) maps to a value that the document
+        // may override anywhere, i.e. `ModificationContext::Anywhere`.
         let doc = Parser::default()
             .with_intrinsic_attribute("cash", "heroes", ModificationContext::Anywhere)
             .parse(":cash: money");
@@ -1126,8 +1128,9 @@ mod assignment {
 "#
         );
 
-        // The three Ruby forms (`cash!`, `!cash`, `cash => nil`) all mean "unset
-        // via API, locked", which maps to a single locked boolean-false intrinsic.
+        // The three Ruby forms (`cash!`, `!cash`, `cash => nil`) all mean
+        // "unset via API, locked", which maps to a single locked
+        // boolean-false intrinsic.
         let doc = Parser::default()
             .with_intrinsic_attribute_bool("cash", false, ModificationContext::ApiOnly)
             .parse(":cash: money");
@@ -1154,8 +1157,9 @@ mod assignment {
 "#
         );
 
-        // All five Ruby forms are a soft unset (unset via API, overridable by the
-        // document), which maps to a boolean-false intrinsic modifiable anywhere.
+        // All five Ruby forms are a soft unset (unset via API, overridable by
+        // the document), which maps to a boolean-false intrinsic
+        // modifiable anywhere.
         let doc = Parser::default()
             .with_intrinsic_attribute_bool("cash", false, ModificationContext::Anywhere)
             .parse(":cash: money");
@@ -1246,8 +1250,8 @@ mod assignment {
 
         // The derived backend / basebackend / filetype / doctype family is
         // materialized as queryable document attributes. A `''` Ruby value maps
-        // to an empty [`InterpretedValue::Value`] here; each key must be present
-        // (`has_attribute`) and resolve to the expected value.
+        // to an empty [`InterpretedValue::Value`] here; each key must be
+        // present (`has_attribute`) and resolve to the expected value.
         let doc = Parser::default().parse("= Document Title\nAuthor Name\n\ncontent");
         for (key, value) in [
             ("backend", "html5"),
@@ -1365,10 +1369,10 @@ mod assignment {
 "#
         );
 
-        // The API-set `backend` value (locked, `ApiOnly`) wins over the document
-        // `:backend: docbook5` assignment, and the derived `backend-html5` /
-        // `basebackend` / `basebackend-html` attributes are synthesized from the
-        // winning value.
+        // The API-set `backend` value (locked, `ApiOnly`) wins over the
+        // document `:backend: docbook5` assignment, and the derived
+        // `backend-html5` / `basebackend` / `basebackend-html`
+        // attributes are synthesized from the winning value.
         let doc = Parser::default()
             .with_safe_mode(SafeMode::Safe)
             .with_intrinsic_attribute("backend", "html5", ModificationContext::ApiOnly)
@@ -1399,8 +1403,8 @@ mod assignment {
 "#
     );
 
-    // Out of scope: exercises Ruby's node `attr` document-fallback API, which this
-    // crate does not expose.
+    // Out of scope: exercises Ruby's node `attr` document-fallback API, which
+    // this crate does not expose.
     non_normative!(
         r#"
     test 'attr should not retrieve attribute from document if not set on block' do
@@ -1412,8 +1416,8 @@ mod assignment {
 "#
     );
 
-    // Out of scope: exercises Ruby's node `attr` document-fallback API, which this
-    // crate does not expose.
+    // Out of scope: exercises Ruby's node `attr` document-fallback API, which
+    // this crate does not expose.
     non_normative!(
         r#"
     test 'attr looks for attribute on document if fallback name is true' do
@@ -1425,8 +1429,8 @@ mod assignment {
 "#
     );
 
-    // Out of scope: exercises Ruby's node `attr` document-fallback API, which this
-    // crate does not expose.
+    // Out of scope: exercises Ruby's node `attr` document-fallback API, which
+    // this crate does not expose.
     non_normative!(
         r#"
     test 'attr uses fallback name when looking for attribute on document' do
@@ -1438,8 +1442,8 @@ mod assignment {
 "#
     );
 
-    // Out of scope: exercises Ruby's node `attr?` document-fallback API, which this
-    // crate does not expose.
+    // Out of scope: exercises Ruby's node `attr?` document-fallback API, which
+    // this crate does not expose.
     non_normative!(
         r#"
     test 'attr? should not check for attribute on document if not set on block' do
@@ -1451,8 +1455,8 @@ mod assignment {
 "#
     );
 
-    // Out of scope: exercises Ruby's node `attr?` document-fallback API, which this
-    // crate does not expose.
+    // Out of scope: exercises Ruby's node `attr?` document-fallback API, which
+    // this crate does not expose.
     non_normative!(
         r#"
     test 'attr? checks for attribute on document if fallback name is true' do
@@ -1464,8 +1468,8 @@ mod assignment {
 "#
     );
 
-    // Out of scope: exercises Ruby's node `attr?` document-fallback API, which this
-    // crate does not expose.
+    // Out of scope: exercises Ruby's node `attr?` document-fallback API, which
+    // this crate does not expose.
     non_normative!(
         r#"
     test 'attr? checks for fallback name when looking for attribute on document' do
@@ -1477,8 +1481,8 @@ mod assignment {
 "#
     );
 
-    // Out of scope: exercises Ruby's mutable node `set_attr` API, which this crate
-    // does not expose.
+    // Out of scope: exercises Ruby's mutable node `set_attr` API, which this
+    // crate does not expose.
     non_normative!(
         r#"
     test 'set_attr should set value to empty string if no value is specified' do
@@ -1504,8 +1508,8 @@ mod assignment {
 "#
     );
 
-    // Out of scope: exercises Ruby's mutable node `set_attr` API, which this crate
-    // does not expose.
+    // Out of scope: exercises Ruby's mutable node `set_attr` API, which this
+    // crate does not expose.
     non_normative!(
         r#"
     test 'set_attr should not overwrite existing key if overwrite is false' do
@@ -1518,8 +1522,8 @@ mod assignment {
 "#
     );
 
-    // Out of scope: exercises Ruby's mutable node `set_attr` API, which this crate
-    // does not expose.
+    // Out of scope: exercises Ruby's mutable node `set_attr` API, which this
+    // crate does not expose.
     non_normative!(
         r#"
     test 'set_attr should overwrite existing key by default' do
@@ -1552,8 +1556,8 @@ mod assignment {
 "#
     );
 
-    // Out of scope: exercises Ruby's mutable `Document#set_attribute` API, which
-    // this crate does not expose.
+    // Out of scope: exercises Ruby's mutable `Document#set_attribute` API,
+    // which this crate does not expose.
     non_normative!(
         r#"
     test 'set_attribute should set attribute if key is not locked' do
@@ -1567,8 +1571,8 @@ mod assignment {
 "#
     );
 
-    // Out of scope: exercises Ruby's mutable `Document#set_attribute` API, which
-    // this crate does not expose.
+    // Out of scope: exercises Ruby's mutable `Document#set_attribute` API,
+    // which this crate does not expose.
     non_normative!(
         r#"
     test 'set_attribute should not set key if key is locked' do
@@ -1582,8 +1586,8 @@ mod assignment {
 "#
     );
 
-    // Out of scope: exercises Ruby's mutable `Document#set_attribute` API, which
-    // this crate does not expose.
+    // Out of scope: exercises Ruby's mutable `Document#set_attribute` API,
+    // which this crate does not expose.
     non_normative!(
         r#"
     test 'set_attribute should update backend attributes' do
@@ -1648,15 +1652,16 @@ mod assignment {
         // `toc-placement` / `toc-position`, and materializes it even for the
         // legacy `toc2` alias. This crate instead keeps the author's raw `toc`
         // value (and never materializes `toc` for the `toc2` alias), exposing
-        // the placement through `toc_mode()`. Every row enables a TOC — what the
-        // matrix's `toc` column asserts — so that column is checked here via the
-        // resolved `toc_mode()`.
+        // the placement through `toc_mode()`. Every row enables a TOC — what
+        // the matrix's `toc` column asserts — so that column is checked
+        // here via the resolved `toc_mode()`.
         use crate::document::TocMode;
 
-        // (spec, toc-position, toc-placement, toc-class, toc_mode). Each spec is
-        // parsed the way Ruby parses the vendored matrix: space-separated
-        // entries, `name=value`, or `name!` for a soft unset. A `None` column is
-        // an attribute Asciidoctor leaves unset (its `nil`).
+        // (spec, toc-position, toc-placement, toc-class, toc_mode). Each spec
+        // is parsed the way Ruby parses the vendored matrix:
+        // space-separated entries, `name=value`, or `name!` for a soft
+        // unset. A `None` column is an attribute Asciidoctor leaves
+        // unset (its `nil`).
         type Row = (
             &'static str,
             Option<&'static str>,
@@ -1820,8 +1825,8 @@ mod interpolation {
 
         // An attribute-entry name and an API-supplied attribute name are both
         // stored lower-cased; a reference is folded the same way before lookup,
-        // so `{He-Man}` resolves the `:He-Man:` entry and `{She-Ra}` resolves the
-        // API attribute stored as `she-ra`.
+        // so `{He-Man}` resolves the `:He-Man:` entry and `{She-Ra}` resolves
+        // the API attribute stored as `she-ra`.
         let doc = Parser::default()
             .with_intrinsic_attribute(
                 "She-Ra",
@@ -2025,9 +2030,9 @@ mod interpolation {
 "#
         );
 
-        // Intentional divergence: this crate does not implement the `{set:…}` attribute
-        // assignment/unassignment reference, so `{set:a!}` is left literal and
-        // its line is not dropped.
+        // Intentional divergence: this crate does not implement the `{set:…}`
+        // attribute assignment/unassignment reference, so `{set:a!}` is
+        // left literal and its line is not dropped.
         let doc = Parser::default().parse(
             ":a:\n\nLine 1: This line should appear in the output.\nLine 2: {set:a!}This line should not appear in the output.",
         );
@@ -2057,8 +2062,8 @@ mod interpolation {
 "#
         );
 
-        // Intentional divergence: `{set:…}` is not implemented, so `{set:a!}` remains
-        // literal in the output rather than being consumed.
+        // Intentional divergence: `{set:…}` is not implemented, so `{set:a!}`
+        // remains literal in the output rather than being consumed.
         let doc = Parser::default().parse(
             ":attribute-undefined: drop\n:a:\n\nLine 1: This line should appear in the output.\nLine 2: {set:a!}This line should appear in the output.",
         );
@@ -2085,8 +2090,8 @@ mod interpolation {
 "#
         );
 
-        // Intentional divergence: `{set:…}` is not implemented, so the `{set:a}` line
-        // is kept literally instead of being dropped.
+        // Intentional divergence: `{set:…}` is not implemented, so the
+        // `{set:a}` line is kept literally instead of being dropped.
         let doc = Parser::default().parse("Line 1\n{set:a}\nLine 2");
         assert_xpath(&doc, "//p[text()=\"Line 1\n{set:a}\nLine 2\"]", 1);
     }
@@ -2358,11 +2363,12 @@ mod interpolation {
         // A block title is exposed via the `title()` accessor (rendered with
         // inline substitutions applied) rather than as a queryable DOM node.
         //
-        // The modern backtick form (`` `{gem_name}` ``) substitutes and wraps in
-        // `<code>` as Asciidoctor does. The compat-mode `+…+` monospace form is
-        // an intentional divergence — compat mode is not supported, so the `+…+`
-        // markers are dropped and the attribute reference is left unsubstituted;
-        // that first case is recorded as the crate's actual output.
+        // The modern backtick form (`` `{gem_name}` ``) substitutes and wraps
+        // in `<code>` as Asciidoctor does. The compat-mode `+…+`
+        // monospace form is an intentional divergence — compat mode is
+        // not supported, so the `+…+` markers are dropped and the
+        // attribute reference is left unsubstituted; that first case is
+        // recorded as the crate's actual output.
         let doc = Parser::default()
             .with_intrinsic_attribute("compat-mode", "", ModificationContext::Anywhere)
             .parse(
@@ -2447,9 +2453,9 @@ mod interpolation {
                 ":foo: bar\n\n[[paragraph-a]]\n`{foo}`\n\n:compat-mode!:\n\n[[paragraph-b]]\n`{foo}`\n\n:compat-mode:\n\n[[paragraph-c]]\n`{foo}`",
             );
         // Intentional divergence: this crate does not change backtick/monospace
-        // attribute substitution based on compat-mode, so `{foo}` resolves to `bar` in
-        // all three paragraphs (Asciidoctor keeps it literal where compat-mode
-        // is on, i.e. paragraphs a and c).
+        // attribute substitution based on compat-mode, so `{foo}` resolves to
+        // `bar` in all three paragraphs (Asciidoctor keeps it literal
+        // where compat-mode is on, i.e. paragraphs a and c).
         assert_xpath(&doc, "//*[@id=\"paragraph-a\"]//code[text()=\"bar\"]", 1);
         assert_xpath(&doc, "//*[@id=\"paragraph-b\"]//code[text()=\"bar\"]", 1);
         assert_xpath(&doc, "//*[@id=\"paragraph-c\"]//code[text()=\"bar\"]", 1);
@@ -2626,9 +2632,10 @@ mod interpolation {
 "#
         );
 
-        // Intentional divergence: this crate does not implement the `{set:…}` attribute
-        // assignment reference, so it stays literal and `{foo}` is never
-        // assigned (it remains an unresolved reference).
+        // Intentional divergence: this crate does not implement the `{set:…}`
+        // attribute assignment reference, so it stays literal and
+        // `{foo}` is never assigned (it remains an unresolved
+        // reference).
         let doc = Parser::default().parse("{set:foo:bar}{foo}");
         assert_xpath(&doc, "//p", 1);
         assert_xpath(&doc, "//p[text()=\"{set:foo:bar}{foo}\"]", 1);
@@ -2696,9 +2703,9 @@ mod interpolation {
 "#
         );
 
-        // Intentional divergence: `{set:foo!}` unassignment is not implemented; it
-        // stays literal, and because `foo` is still set (to empty) `{foo}`
-        // resolves to nothing, so no line is dropped.
+        // Intentional divergence: `{set:foo!}` unassignment is not implemented;
+        // it stays literal, and because `foo` is still set (to empty)
+        // `{foo}` resolves to nothing, so no line is dropped.
         let doc =
             Parser::default().parse(":attribute-missing: drop-line\n:foo:\n\n{set:foo!}\n{foo}yes");
         assert_eq!(
@@ -2741,8 +2748,8 @@ mod intrinsic_attributes {
 
 "#
     );
-    // Out of scope: iterates Ruby's `Asciidoctor::INTRINSIC_ATTRIBUTES` constant,
-    // which this crate does not expose as an enumerable set.
+    // Out of scope: iterates Ruby's `Asciidoctor::INTRINSIC_ATTRIBUTES`
+    // constant, which this crate does not expose as an enumerable set.
     non_normative!(
         r#"
     test "substitute intrinsics" do
@@ -3252,9 +3259,9 @@ mod intrinsic_attributes {
         // This crate exposes a block's caption/number via the `caption()` /
         // `number()` accessors rather than as a `<div class="title">` DOM node,
         // so the shared-counter behavior is verified through those accessors.
-        // The figure counter is shared with the nested table-cell documents: the
-        // two top-level images are numbered 1 and 4, leaving 2 and 3 for the
-        // images inside the table cells.
+        // The figure counter is shared with the nested table-cell documents:
+        // the two top-level images are numbered 1 and 4, leaving 2 and
+        // 3 for the images inside the table cells.
         let blocks: Vec<_> = doc.child_blocks().collect();
         assert_eq!(blocks[0].title(), Some("Title for Foo"));
         assert_eq!(blocks[0].caption(), Some("Figure 1. "));
@@ -3279,8 +3286,8 @@ mod intrinsic_attributes {
         );
 
         // A counter reads and increments the current value (`bar` → `bas`) for
-        // display, but the API-locked `foo` is not overwritten, so `{foo}` still
-        // reads `bar`.
+        // display, but the API-locked `foo` is not overwritten, so `{foo}`
+        // still reads `bar`.
         let doc = Parser::default()
             .with_intrinsic_attribute("foo", "bar", ModificationContext::ApiOnly)
             .parse("{counter:foo:ignored} is not {foo}");
@@ -3329,9 +3336,10 @@ mod intrinsic_attributes {
 "#
         );
 
-        // The counter reads and increments the locked built-in `max-include-depth`
-        // (64 → 65) for display — its seed `128` is ignored while a current value
-        // exists — but the stored value is not overwritten, so it stays 64.
+        // The counter reads and increments the locked built-in
+        // `max-include-depth` (64 → 65) for display — its seed `128` is
+        // ignored while a current value exists — but the stored value
+        // is not overwritten, so it stays 64.
         let doc = Parser::default()
             .parse("{counter:max-include-depth:128} is one more than {max-include-depth}");
         assert_xpath(&doc, "//p[text()=\"65 is one more than 64\"]", 1);
@@ -3549,9 +3557,10 @@ mod block_attributes {
 "#
         );
 
-        // The block title is exposed via the `title()` accessor rather than as a
-        // `<div class="title">` DOM node; the single-quoted title has normal
-        // substitutions applied once (`*title*` → `<strong>title</strong>`).
+        // The block title is exposed via the `title()` accessor rather than as
+        // a `<div class="title">` DOM node; the single-quoted title has
+        // normal substitutions applied once (`*title*` →
+        // `<strong>title</strong>`).
         let doc = Parser::default().parse("[title='*title*']\ncontent");
         assert_eq!(first_block(&doc).title(), Some("<strong>title</strong>"));
     }
@@ -3672,8 +3681,8 @@ mod block_attributes {
 "#
         );
 
-        // As with the double-quoted form, a single-quoted style token produces a
-        // quote block whose `declared_style()` is `None`.
+        // As with the double-quoted form, a single-quoted style token produces
+        // a quote block whose `declared_style()` is `None`.
         let doc = Parser::default()
             .parse("['quote', 'author', 'source', role='famous']\n____\nA famous quote.\n____");
         let qb = first_quote(&doc);
@@ -3892,8 +3901,8 @@ mod block_attributes {
         assert!(first_block(&doc).roles().is_empty());
     }
 
-    // Out of scope: exercises Ruby's mutable `role=` setter on a node, which this
-    // crate does not expose.
+    // Out of scope: exercises Ruby's mutable `role=` setter on a node, which
+    // this crate does not expose.
     non_normative!(
         r#"
     test 'roles= sets the role attribute on the node' do
@@ -3906,8 +3915,8 @@ mod block_attributes {
 "#
     );
 
-    // Out of scope: exercises Ruby's mutable `role=` setter on a node, which this
-    // crate does not expose.
+    // Out of scope: exercises Ruby's mutable `role=` setter on a node, which
+    // this crate does not expose.
     non_normative!(
         r#"
     test 'roles= coerces array value to a space-separated string' do
@@ -4143,8 +4152,8 @@ mod block_attributes {
         assert_eq!(p.roles(), vec!["role"]);
     }
 
-    // Out of scope: exercises Ruby's mutable `add_role` API, which this crate does
-    // not expose.
+    // Out of scope: exercises Ruby's mutable `add_role` API, which this crate
+    // does not expose.
     non_normative!(
         r#"
     test 'a role can be added using add_role when the node has no roles' do
@@ -4160,8 +4169,8 @@ mod block_attributes {
 "#
     );
 
-    // Out of scope: exercises Ruby's mutable `add_role` API, which this crate does
-    // not expose.
+    // Out of scope: exercises Ruby's mutable `add_role` API, which this crate
+    // does not expose.
     non_normative!(
         r#"
     test 'a role can be added using add_role when the node already has a role' do
@@ -4181,8 +4190,8 @@ mod block_attributes {
 "#
     );
 
-    // Out of scope: exercises Ruby's mutable `add_role` API, which this crate does
-    // not expose.
+    // Out of scope: exercises Ruby's mutable `add_role` API, which this crate
+    // does not expose.
     non_normative!(
         r#"
     test 'a role is not added using add_role if the node already has that role' do
@@ -4201,8 +4210,8 @@ mod block_attributes {
 "#
     );
 
-    // Out of scope: exercises Ruby's mutable `remove_role` API, which this crate
-    // does not expose.
+    // Out of scope: exercises Ruby's mutable `remove_role` API, which this
+    // crate does not expose.
     non_normative!(
         r#"
     test 'an existing role can be removed using remove_role' do
@@ -4222,8 +4231,8 @@ mod block_attributes {
 "#
     );
 
-    // Out of scope: exercises Ruby's mutable `remove_role` API, which this crate
-    // does not expose.
+    // Out of scope: exercises Ruby's mutable `remove_role` API, which this
+    // crate does not expose.
     non_normative!(
         r#"
     test 'roles are removed when last role is removed using remove_role' do
@@ -4243,8 +4252,8 @@ mod block_attributes {
 "#
     );
 
-    // Out of scope: exercises Ruby's mutable `remove_role` API, which this crate
-    // does not expose.
+    // Out of scope: exercises Ruby's mutable `remove_role` API, which this
+    // crate does not expose.
     non_normative!(
         r#"
     test 'roles are not changed when a non-existent role is removed using remove_role' do
@@ -4264,8 +4273,8 @@ mod block_attributes {
 "#
     );
 
-    // Out of scope: exercises Ruby's mutable `remove_role` API, which this crate
-    // does not expose.
+    // Out of scope: exercises Ruby's mutable `remove_role` API, which this
+    // crate does not expose.
     non_normative!(
         r#"
     test 'roles are not changed when using remove_role if the node has no roles' do
@@ -4406,9 +4415,9 @@ mod block_attributes {
         );
 
         // Of consecutive block anchors the last wins (`[[bar]]` / `[[foo]]`
-        // resolves to `foo`), and an `[id=…]` attribute list following a `[[id]]`
-        // anchor likewise wins (`[[baz]]` / `[id='coolio']` resolves to
-        // `coolio`).
+        // resolves to `foo`), and an `[id=…]` attribute list following a
+        // `[[id]]` anchor likewise wins (`[[baz]]` / `[id='coolio']`
+        // resolves to `coolio`).
         let doc = Parser::default().parse(
             "[[bar]]\n[[foo]]\n== Section\n\nparagraph\n\n[[baz]]\n[id='coolio']\n=== Section",
         );

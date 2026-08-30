@@ -35,6 +35,10 @@ name = "inline_macro"
 
 [[bench]]
 harness = false
+name = "inline_throughput"
+
+[[bench]]
+harness = false
 name = "repeated_delimiters"
 
 [[bench]]

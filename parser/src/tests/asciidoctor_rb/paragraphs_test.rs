@@ -1313,8 +1313,8 @@ mod normal {
         );
     }
 
-    // No planned support for DocBook output, so these tests were not ported from
-    // asciidoctor_rb:
+    // No planned support for DocBook output, so these tests were not ported
+    // from asciidoctor_rb:
     //
     // * test 'automatically promotes index terms in DocBook output if
     //   indexterm-promotion-option is set'
@@ -3274,8 +3274,8 @@ mod special {
 "#
     );
 
-    // An `[open]` styled paragraph renders as an open block whose inline content
-    // sits directly in the content wrapper, with no wrapping `<p>`.
+    // An `[open]` styled paragraph renders as an open block whose inline
+    // content sits directly in the content wrapper, with no wrapping `<p>`.
     #[test]
     fn should_convert_open_paragraph_to_open_block() {
         verifies!(
@@ -3309,9 +3309,9 @@ mod special {
         );
     }
 
-    // Backend-specific test omitted: DocBook `simpara` wrapping of titled styled
-    // paragraphs. (This block also closes the Ruby `Styled Paragraphs` context
-    // and opens `Inline doctype`.)
+    // Backend-specific test omitted: DocBook `simpara` wrapping of titled
+    // styled paragraphs. (This block also closes the Ruby `Styled
+    // Paragraphs` context and opens `Inline doctype`.)
     non_normative!(
         r#"
       test 'should wrap text in simpara for styled paragraphs with title when converted to DocBook' do
@@ -3478,16 +3478,16 @@ mod special {
         }
 
         // A document title followed by a paragraph and a section wraps the
-        // paragraph in a compound preamble, which is the first block. A compound
-        // candidate has no inline content, so the parse-time warning and the
-        // (empty) rendered output stay in agreement — the preamble never masks a
-        // silently-dropped candidate.
+        // paragraph in a compound preamble, which is the first block. A
+        // compound candidate has no inline content, so the parse-time
+        // warning and the (empty) rendered output stay in agreement —
+        // the preamble never masks a silently-dropped candidate.
         //
         // This matches Asciidoctor 2.0.26 exactly: `= Title\n\nfirst
         // paragraph\n\n== Section` under `-d inline` logs `no inline candidate`
-        // and emits nothing (the preamble is `@blocks[0]`, and its content model
-        // is compound). Rendering the inner paragraph instead would diverge from
-        // Asciidoctor.
+        // and emits nothing (the preamble is `@blocks[0]`, and its content
+        // model is compound). Rendering the inner paragraph instead
+        // would diverge from Asciidoctor.
         #[test]
         fn preamble_is_a_compound_candidate() {
             let doc = Parser::default()
@@ -3503,11 +3503,12 @@ mod special {
         }
 
         // A title with a paragraph but *no* section creates no preamble (this
-        // crate, like Asciidoctor, only wraps a preamble when a section follows),
-        // so the paragraph is itself the first block and is rendered as inline
-        // content with no warning. Asciidoctor 2.0.26 emits `first paragraph`
-        // for `= Title\n\nfirst paragraph` under `-d inline`. This is the
-        // boundary that distinguishes the candidate from the compound-preamble
+        // crate, like Asciidoctor, only wraps a preamble when a section
+        // follows), so the paragraph is itself the first block and is
+        // rendered as inline content with no warning. Asciidoctor
+        // 2.0.26 emits `first paragraph` for `= Title\n\nfirst
+        // paragraph` under `-d inline`. This is the boundary that
+        // distinguishes the candidate from the compound-preamble
         // case above.
         #[test]
         fn titled_paragraph_without_section_is_rendered_html() {
@@ -3563,10 +3564,11 @@ mod custom {
         assert_eq!(block.declared_style(), Some("foo"));
         assert_eq!(block.rendered_html_content(), Some("bar"));
 
-        // Asciidoctor asserts no messages at its *default* (WARN) severity. This
-        // crate surfaces the unknown style as a `WarningSeverity::Debug`
-        // diagnostic (see the debug-level test below), which a host suppresses
-        // by default, so the default-severity view is empty.
+        // Asciidoctor asserts no messages at its *default* (WARN) severity.
+        // This crate surfaces the unknown style as a
+        // `WarningSeverity::Debug` diagnostic (see the debug-level test
+        // below), which a host suppresses by default, so the
+        // default-severity view is empty.
         assert_eq!(
             doc.warnings()
                 .filter(|w| w.severity >= WarningSeverity::Warning)
@@ -3593,9 +3595,10 @@ mod custom {
         );
 
         // Asciidoctor logs this only at DEBUG severity (below its default WARN
-        // threshold). This crate records it as a single `WarningSeverity::Debug`
-        // warning, observable via `Document::warnings()`. The paragraph keeps
-        // its default context; the style `foo` is retained but otherwise
+        // threshold). This crate records it as a single
+        // `WarningSeverity::Debug` warning, observable via
+        // `Document::warnings()`. The paragraph keeps its default
+        // context; the style `foo` is retained but otherwise
         // ignored. The warning anchors at the paragraph's first content line
         // (`bar`, line 2) — not the `[foo]` style line above it — matching the
         // `line 2` Asciidoctor reports.

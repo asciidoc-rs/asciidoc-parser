@@ -130,14 +130,15 @@ A best practice is to only use lowercase letters in the name and avoid starting 
 
     #[test]
     fn only_contain_word_characters_and_hyphens() {
-        // The prose above describes what a *well-formed* user-defined name looks
-        // like. Like the lower-case normalization (see `may_contain_uppercase`),
-        // enforcement of this rule is deferred: rather than reject a name that
-        // contains other characters, the parser captures the raw name and it is
+        // The prose above describes what a *well-formed* user-defined name
+        // looks like. Like the lower-case normalization (see
+        // `may_contain_uppercase`), enforcement of this rule is
+        // deferred: rather than reject a name that contains other
+        // characters, the parser captures the raw name and it is
         // sanitized before being stored as an attribute key — every character
         // outside `[a-z0-9_-]` is dropped and the rest is lower-cased. This
-        // mirrors Asciidoctor (where `:abc def:` sets `abcdef`) and is what lets
-        // `:Author Initials:` set `authorinitials`. See
+        // mirrors Asciidoctor (where `:abc def:` sets `abcdef`) and is what
+        // lets `:Author Initials:` set `authorinitials`. See
         // https://github.com/asciidoc-rs/asciidoc-parser/issues/761 and
         // https://github.com/asciidoc-rs/asciidoc-parser/issues/726.
         let mi =

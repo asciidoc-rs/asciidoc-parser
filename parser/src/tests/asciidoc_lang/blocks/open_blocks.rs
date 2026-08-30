@@ -22,7 +22,8 @@ The only notable limitation is that an open block cannot be nested inside of ano
     );
 
     // An open block is a generic structural container: the `--` delimiters wrap
-    // their content in `div.openblock > div.content`, adding no other semantics.
+    // their content in `div.openblock > div.content`, adding no other
+    // semantics.
     let doc = Parser::default().parse("--\nGeneric content.\n--");
     assert_css(&doc, "div.openblock > div.content", 1);
     assert_css(&doc, "div.openblock > div.content > div.paragraph", 1);
@@ -219,15 +220,15 @@ fn open_block_masquerading_as_a_listing_or_literal_block() {
 
 #[test]
 fn open_block_masquerading_as_a_quote_or_verse_block() {
-    // A `[quote]` style on an open block makes it act as a quote block: the body
-    // is a compound (nested-block) content model rendered inside a
+    // A `[quote]` style on an open block makes it act as a quote block: the
+    // body is a compound (nested-block) content model rendered inside a
     // `div.quoteblock > blockquote`, with the attribution surfaced.
     let doc = Parser::default().parse("[quote,Author]\n--\nQuoted open block.\n--");
     assert_css(&doc, ".openblock", 0);
     assert_css(&doc, "div.quoteblock > blockquote", 1);
 
-    // A `[verse]` style on an open block makes it act as a verse block, with the
-    // body preserved verbatim inside `pre.content`.
+    // A `[verse]` style on an open block makes it act as a verse block, with
+    // the body preserved verbatim inside `pre.content`.
     let doc = Parser::default().parse("[verse]\n--\nverse line\n--");
     assert_css(&doc, ".openblock", 0);
     assert_css(&doc, "div.verseblock > pre.content", 1);
@@ -235,9 +236,10 @@ fn open_block_masquerading_as_a_quote_or_verse_block() {
 
 #[test]
 fn masquerade_style_only_applies_to_an_open_block() {
-    // A masquerade style replaces the context only on an open block. On any other
-    // delimited block the delimiter's own context wins and the style is ignored:
-    // a `[quote]` style on an example block (`====`) stays an example block.
+    // A masquerade style replaces the context only on an open block. On any
+    // other delimited block the delimiter's own context wins and the style
+    // is ignored: a `[quote]` style on an example block (`====`) stays an
+    // example block.
     let doc = Parser::default().parse("[quote]\n====\nx\n====");
     assert_css(&doc, "div.exampleblock", 1);
     assert_css(&doc, "div.quoteblock", 0);

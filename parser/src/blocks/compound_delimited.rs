@@ -167,10 +167,10 @@ impl<'src> CompoundDelimitedBlock<'src> {
         let inside_delimiters = delimiter.after.trim_remainder(closing_delimiter);
 
         // A `== …` line inside a delimited block is literal content, not a
-        // section heading (sections are only recognized at the document level or
-        // within a section body). Flag the nested parse so `SectionBlock::parse`
-        // declines; the flag is saved and restored so nested delimited blocks
-        // compose correctly.
+        // section heading (sections are only recognized at the document level
+        // or within a section body). Flag the nested parse so
+        // `SectionBlock::parse` declines; the flag is saved and
+        // restored so nested delimited blocks compose correctly.
         let previously_in_delimited_block = parser.in_delimited_block;
         parser.in_delimited_block = true;
 
@@ -2225,7 +2225,8 @@ mod tests {
         fn assert_literal_heading(input: &str) {
             let doc = Parser::default().parse(input);
 
-            // No section heading was recognized, so nothing renders as an `<h2>`.
+            // No section heading was recognized, so nothing renders as an
+            // `<h2>`.
             assert_xpath(&doc, "//h2", 0);
 
             // The line survives as ordinary paragraph content.
@@ -2250,7 +2251,8 @@ mod tests {
         #[test]
         fn discrete_heading_is_still_recognized() {
             // A discrete heading is an ordinary block, not a section, so it is
-            // still recognized inside a delimited block and renders as a heading.
+            // still recognized inside a delimited block and renders as a
+            // heading.
             let doc = Parser::default().parse("====\n[discrete]\n== Sub\n====\n");
             assert_xpath(&doc, "//h2", 1);
         }

@@ -56,8 +56,8 @@ impl<'src> ListItem<'src> {
         let marker_mi = ListItemMarker::parse(source, parser)?;
         let mut marker = marker_mi.item;
 
-        // Register any leading inline anchors in the description list term and apply
-        // macros substitution to render the anchor.
+        // Register any leading inline anchors in the description list term and
+        // apply macros substitution to render the anchor.
         marker.register_leading_anchors(parser, warnings);
 
         let mut list_markers_including_peer = parent_list_markers.to_vec();
@@ -65,12 +65,13 @@ impl<'src> ListItem<'src> {
 
         let mut blocks: Vec<Block<'src>> = vec![];
 
-        // Detect checklist (i.e. task list) syntax on unordered list items. When
-        // the principal text begins with `[ ] `, `[x] `, or `[*] ` (the closing
-        // bracket immediately followed by a single space character), the item is
-        // a checklist item. `[ ]` is unchecked; `[x]`/`[*]` are checked. The
-        // four-character checkbox marker is then stripped from the principal text.
-        // This mirrors Asciidoctor's `parse_list_item`.
+        // Detect checklist (i.e. task list) syntax on unordered list items.
+        // When the principal text begins with `[ ] `, `[x] `, or `[*] `
+        // (the closing bracket immediately followed by a single space
+        // character), the item is a checklist item. `[ ]` is unchecked;
+        // `[x]`/`[*]` are checked. The four-character checkbox marker
+        // is then stripped from the principal text. This mirrors
+        // Asciidoctor's `parse_list_item`.
         let checkbox: Option<bool> = if matches!(
             marker,
             ListItemMarker::Hyphen(_) | ListItemMarker::Asterisks(_) | ListItemMarker::Bullet(_)
@@ -88,16 +89,18 @@ impl<'src> ListItem<'src> {
         };
 
         // When a checkbox marker is present, the principal text begins four
-        // characters later (after `[x] `). Any whitespace re-exposed by stripping
-        // the checkbox is discarded so the principal text never starts indented
-        // (which would otherwise be misread as a literal block).
+        // characters later (after `[x] `). Any whitespace re-exposed by
+        // stripping the checkbox is discarded so the principal text
+        // never starts indented (which would otherwise be misread as a
+        // literal block).
         let principal_start = if checkbox.is_some() {
             marker_mi.after.slice_from(4..).discard_whitespace()
         } else {
             marker_mi.after
         };
 
-        // Text after list item marker is always a simple block with no metadata.
+        // Text after list item marker is always a simple block with no
+        // metadata.
         let no_metadata = BlockMetadata {
             title_source: None,
             title: None,
@@ -109,10 +112,11 @@ impl<'src> ListItem<'src> {
         };
 
         // In a bibliography list, the principal text may begin with a
-        // bibliography anchor (`[[[id]]]`). Flag the parser so the inline macros
-        // substitution applied while parsing this principal text recognizes it.
-        // The flag is cleared immediately afterward so it never leaks into any
-        // nested blocks (e.g. a nested list) attached to this item.
+        // bibliography anchor (`[[[id]]]`). Flag the parser so the inline
+        // macros substitution applied while parsing this principal text
+        // recognizes it. The flag is cleared immediately afterward so
+        // it never leaks into any nested blocks (e.g. a nested list)
+        // attached to this item.
         parser.in_bibliography_list_item.set(is_bibliography);
 
         // For description lists, the content after the marker can be empty.
@@ -130,11 +134,12 @@ impl<'src> ListItem<'src> {
 
         let mut next = if let Some(simple_block_mi) = simple_block_for_list_item {
             // If the principal text is present but renders empty (e.g. from an
-            // `{empty}` attribute reference), the node for the principal text is
-            // dropped from the parse tree rather than emitted as an empty child
-            // block. We record that it was present, however: the item still has
-            // an (empty) principal text distinct from a list item that carries
-            // no principal text at all. A renderer uses this to emit the empty
+            // `{empty}` attribute reference), the node for the principal text
+            // is dropped from the parse tree rather than emitted as
+            // an empty child block. We record that it was present,
+            // however: the item still has an (empty) principal text
+            // distinct from a list item that carries no principal
+            // text at all. A renderer uses this to emit the empty
             // principal paragraph ahead of any continuation-attached blocks,
             // matching Asciidoctor (whose `text?` is true with `text` empty).
             if simple_block_mi.item.content().is_empty() {
@@ -145,12 +150,13 @@ impl<'src> ListItem<'src> {
 
             simple_block_mi.after
         } else if matches!(marker, ListItemMarker::DefinedTerm { .. }) {
-            // Description list items can have empty content on the same line as the marker.
-            // The content may be on subsequent lines, so we try to parse from the next
-            // non-empty line.
+            // Description list items can have empty content on the same line as
+            // the marker. The content may be on subsequent lines,
+            // so we try to parse from the next non-empty line.
             let mut next_source = marker_mi.after.discard_empty_lines();
 
-            // Skip comment lines (// but not ///) between term and continuation/content.
+            // Skip comment lines (// but not ///) between term and
+            // continuation/content.
             loop {
                 let peek = next_source.take_normalized_line();
                 if peek.item.data().starts_with("//") && !peek.item.data().starts_with("///") {
@@ -160,17 +166,20 @@ impl<'src> ListItem<'src> {
                 }
             }
 
-            // Check for continuation marker before parsing. If a continuation marker is
-            // present, skip directly to the main loop which handles continuations properly.
+            // Check for continuation marker before parsing. If a continuation
+            // marker is present, skip directly to the main loop
+            // which handles continuations properly.
             let next_line_mi = next_source.take_normalized_line();
 
             if next_line_mi.item.data() == "+" {
                 // Continuation marker found; skip straight to the main loop.
-                // Use next_source (not marker_mi.after) since we already skipped empty lines.
+                // Use next_source (not marker_mi.after) since we already
+                // skipped empty lines.
                 next_source
             } else if ListItemMarker::parse(next_source, parser).is_some() {
-                // Next line is another list item marker (possibly a sibling term).
-                // Don't parse it as content; let the list parser handle it.
+                // Next line is another list item marker (possibly a sibling
+                // term). Don't parse it as content; let the
+                // list parser handle it.
                 marker_mi.after
             } else if RawDelimitedBlock::is_valid_delimiter(&next_line_mi.item)
                 || CompoundDelimitedBlock::is_valid_delimiter(&next_line_mi.item)
@@ -199,8 +208,9 @@ impl<'src> ListItem<'src> {
                     block_start: next_source,
                 };
 
-                // For definition lists, indented content is treated as a paragraph
-                // (not literal), with the indentation stripped.
+                // For definition lists, indented content is treated as a
+                // paragraph (not literal), with the indentation
+                // stripped.
                 if let Some(simple_block_mi) =
                     SimpleBlock::parse_for_definition_list(&next_line_metadata, parser)
                 {
@@ -227,10 +237,10 @@ impl<'src> ListItem<'src> {
             let next_line_mi: MatchedItem<'_, Span<'_>> = next.take_normalized_line();
 
             // Don't consume `+` as continuation if:
-            // - A continuation is already active (consecutive `+` - second one becomes
-            //   content)
-            // - We've already had a block that started with `+` as content (trailing `+`
-            //   markers)
+            // - A continuation is already active (consecutive `+` - second one
+            //   becomes content)
+            // - We've already had a block that started with `+` as content
+            //   (trailing `+` markers)
             if next_line_mi.item.data() == "+"
                 && !continuation_active
                 && !had_content_starting_with_plus
@@ -252,11 +262,12 @@ impl<'src> ListItem<'src> {
                     // Asciidoctor). Leave `next` at the blank line so
                     // `ListBlock::parse` stops here.
                     //
-                    // Existing content is required so the phantom line-end after
-                    // an empty description-list term - not a real blank line -
-                    // still lets that term's own metadata-prefixed nested list
-                    // attach. A continuation marker likewise keeps such metadata
-                    // as part of this item.
+                    // Existing content is required so the phantom line-end
+                    // after an empty description-list term
+                    // - not a real blank line - still lets
+                    // that term's own metadata-prefixed nested list
+                    // attach. A continuation marker likewise keeps such
+                    // metadata as part of this item.
                     if !continuation_active
                         && !blocks.is_empty()
                         && !BlockMetadata::parse(after_blanks, parser).item.is_empty()
@@ -303,12 +314,13 @@ impl<'src> ListItem<'src> {
             if let Some(list_item_marker_mi) =
                 ListItemMarker::parse(metadata.item.block_start, parser)
             {
-                // We've found a new list item. How does it compare with the existing item in
-                // the hierarchy?
+                // We've found a new list item. How does it compare with the
+                // existing item in the hierarchy?
                 let new_item_marker = list_item_marker_mi.item;
 
                 if marker.is_match_for(&new_item_marker) {
-                    // New item is a peer to this item; nothing further for the current item.
+                    // New item is a peer to this item; nothing further for the
+                    // current item.
                     break;
                 }
 
@@ -316,19 +328,21 @@ impl<'src> ListItem<'src> {
                     .iter()
                     .any(|parent| parent.is_match_for(&new_item_marker))
                 {
-                    // We matched a parent marker type. This list is complete; roll up the
-                    // hierarchy.
+                    // We matched a parent marker type. This list is complete;
+                    // roll up the hierarchy.
                     break;
                 }
 
-                // We haven't encountered this marker before. Add a new nesting level. The new
-                // list will be a child block of this list item.
+                // We haven't encountered this marker before. Add a new nesting
+                // level. The new list will be a child block of
+                // this list item.
 
                 // But if we're after a blank line and the block is not indented
-                // (and no continuation is active), and there is a block attribute
-                // line or anchor before the new list marker, break the list
-                // instead of nesting. A blank line followed by a block attribute
-                // line signals the start of a new, separate list.
+                // (and no continuation is active), and there is a block
+                // attribute line or anchor before the new list
+                // marker, break the list instead of nesting. A
+                // blank line followed by a block attribute line
+                // signals the start of a new, separate list.
                 if next_block_must_be_indented
                     && !is_indented
                     && !continuation_active
@@ -351,8 +365,9 @@ impl<'src> ListItem<'src> {
                 let mut nested_list_markers = parent_list_markers.to_owned();
                 nested_list_markers.push(marker.clone());
 
-                // NOTE: The call to `ListBlock::parse` *should* succeed (as in I can't think of
-                // a test case where it would fail). We use the `?` to provide a safe escape in
+                // NOTE: The call to `ListBlock::parse` *should* succeed (as in
+                // I can't think of a test case where it would
+                // fail). We use the `?` to provide a safe escape in
                 // case it doesn't.
                 parser.block_nesting_depth += 1;
                 let nested_list_result = ListBlock::parse_inside_list(
@@ -430,7 +445,8 @@ impl<'src> ListItem<'src> {
                         break;
                     }
 
-                    // Found a nested list after metadata separated by empty lines.
+                    // Found a nested list after metadata separated by empty
+                    // lines.
                     let ext_metadata = BlockMetadata {
                         title_source: ext_title_source,
                         title: ext_title,
@@ -484,15 +500,16 @@ impl<'src> ListItem<'src> {
                 }
             }
 
-            // A block attribute line or block anchor without a continuation marker
-            // breaks the list.
+            // A block attribute line or block anchor without a continuation
+            // marker breaks the list.
             if !continuation_active
                 && (metadata.item.attrlist.is_some() || metadata.item.anchor.is_some())
             {
                 break;
             }
 
-            // If there's block metadata but no block, just discard it and continue.
+            // If there's block metadata but no block, just discard it and
+            // continue.
             if metadata
                 .item
                 .block_start
@@ -504,8 +521,8 @@ impl<'src> ListItem<'src> {
                 continue;
             }
 
-            // A list item does not terminate if subsequent blocks are indented (i.e. use
-            // literal syntax).
+            // A list item does not terminate if subsequent blocks are indented
+            // (i.e. use literal syntax).
             let indented_block_maw = Block::parse_for_list_item(
                 next,
                 parser,
@@ -542,15 +559,17 @@ impl<'src> ListItem<'src> {
                 break;
             };
 
-            // After a continuation marker, subsequent blocks don't need to be indented.
-            // However, document attributes don't consume the continuation status.
+            // After a continuation marker, subsequent blocks don't need to be
+            // indented. However, document attributes don't consume
+            // the continuation status.
             let is_document_attribute =
                 matches!(indented_block_mi.item, Block::DocumentAttribute(_));
 
             // Document attributes should not be added to the list item blocks.
-            // They're processed for their side effects but don't appear in the output.
-            // Similarly, orphaned metadata blocks shouldn't be added; they'll be
-            // re-parsed on the next iteration where they can attach to a real block.
+            // They're processed for their side effects but don't appear in the
+            // output. Similarly, orphaned metadata blocks shouldn't
+            // be added; they'll be re-parsed on the next iteration
+            // where they can attach to a real block.
             if !is_document_attribute {
                 blocks.push(indented_block_mi.item);
             }
@@ -562,11 +581,12 @@ impl<'src> ListItem<'src> {
                 // and next_block_must_be_indented unchanged.
             } else if continuation_active {
                 // This block consumed the continuation.
-                // The next block after this one will need to be indented (or have another
-                // continuation).
+                // The next block after this one will need to be indented (or
+                // have another continuation).
                 //
-                // If the block started with `+` as content (not as continuation), mark it
-                // so we don't allow more continuation markers. This handles odd input like
+                // If the block started with `+` as content (not as
+                // continuation), mark it so we don't allow more
+                // continuation markers. This handles odd input like
                 // consecutive `+` markers.
                 if next_line_mi.item.data() == "+" {
                     had_content_starting_with_plus = true;

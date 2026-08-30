@@ -237,8 +237,8 @@ This time, `imagesdir` is used since the image target is not a URL (the value of
             r#"<span class="image"><img src="https://upload.wikimedia.org/wikipedia/commons/3/35/Tux.svg" alt="Tux" width="250" height="350"></span>"#
         );
 
-        // Per the NOTE above, the `imagesdir` base is ignored when the target is
-        // itself a URL: the absolute target is used verbatim.
+        // Per the NOTE above, the `imagesdir` base is ignored when the target
+        // is itself a URL: the absolute target is used verbatim.
         let doc = Parser::default()
             .with_intrinsic_attribute(
                 "imagesdir",

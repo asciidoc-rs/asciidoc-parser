@@ -893,10 +893,113 @@ populate in two stages:
    is already a `Span`, this is a matter of *which* `Span` a node is given — not a type
    change — so precision can improve later with no public churn.
 2. **Precision stage (#944):** the single-pass builder assigns each construct the source
-   range it consumed and slices interstitial `Text` directly from `'src`. The hard cases
-   #944 enumerates — attribute expansion, passthrough mask/restore, synthesized text,
-   lookahead/retry — get explicit policies there. Landing this lets the `attribute-missing`
-   diagnostic (#564) drop its per-line correlation hack and use the offending node's span.
+   range it consumed and slices interstitial `Text` directly from `'src`. Landing this lets
+   the `attribute-missing` diagnostic (#564) drop its per-line correlation hack and use the
+   offending node's span (closed in step 6/7 — see §5.2's own "landed as" notes).
+
+**The mechanism behind every fallback.** A match-string range maps back to a source `Span`
+through one function,
+[`source_slice`](../../parser/src/content/inline_builder/quotes.rs) (and the byte-offset
+mapper underneath it, `s_to_src`). A boundary inside an ordinary verbatim `Text` piece maps
+one-to-one — its match-string position *is* its source position. A boundary inside an
+**atomic** piece (a rendered span, an escaped special, a masked passthrough/STEM sentinel, an
+earlier-recognized macro node) has no honest position of its own, so it snaps to that piece's
+*nearer* edge — such a boundary never legitimately lands there in the first place. A boundary
+inside a **synthesized** piece (a run with no single contiguous `'src` slice of its own — an
+expanded attribute value, a filtered multi-line block's joined seed) snaps to that piece's
+*whole* span regardless of exactly where inside it the boundary falls. This one mechanism is
+what every hard case below falls back to; none of them needed a policy of its own so much as
+a place where the general one applies. #944 names four:
+
+1. **Attribute expansion.** A resolved `{attribute}` reference's (or a `counter`/`counter2`
+   directive's) value is spliced into the node stream as one or more `Text`/`Raw` nodes —
+   split at any literal `<`, `>`, `&` it carries (§3.4.1) — and **every** node the splice
+   produces carries the *whole reference's own span* as its `location`, not some sub-range of
+   it: `{name}` is a five-byte match that might expand to a much longer (or a zero-length)
+   value, and there is no source position inside that expansion for a byte to honestly claim.
+   ([`split_attribute_value`](../../parser/src/content/inline_builder/attribute_refs.rs);
+   pinned by `a_reference_to_a_set_attribute_expands_to_a_text_node`, which asserts
+   `location.data() == "{greeting}"` for the expanded `"Hello"` text.) A macro recognized
+   *inside* such an expansion (`image:{logo}[Logo]`) inherits the same fallback one level up:
+   its target and attribute-list *values* are still recovered exactly (via the match string,
+   or [`text_slice`](../../parser/src/content/inline_builder/quotes.rs)), but the node's own
+   `location` is the whole macro's own bytes as written, not the expansion's
+   (`an_image_inside_an_expanded_value_keeps_a_coarse_location`).
+
+2. **Passthrough mask/restore.** A passthrough construct's own node — `+++text+++`,
+   `++text++`, `$$text$$`, `pass:[text]`, or the bare `+text+` form — gets a **precise** span
+   covering its whole delimited construct, delimiters included, sliced straight from `'src`
+   exactly like any other macro node
+   ([`build_passthrough_node`](../../parser/src/content/inline_builder/passthrough_step.rs);
+   pinned by `triple_plus_borrows_its_content_unescaped`, whose own comment states the rule:
+   "`location` covers the whole `+++…+++` construct (delimiters included), matching every
+   other macro node; only `value` is the unwrapped content"). Only when that passthrough's
+   own body encloses *another*, already-extracted masked construct — `+a $$b$$ c+` — does its
+   *value* need restoring, each inner sentinel-shaped placeholder replaced by that
+   construct's own rendered body
+   ([`substitute_and_restore`](../../parser/src/content/inline_builder/passthrough_step.rs));
+   the value comes back exact either way, and it is only the *outer* node's own `location`
+   that can fall to this section's coarse policy, for the same structural reason as any other
+   range straddling a synthesized or atomic piece.
+
+   The same split shows up one layer further out, in the `image:`/`icon:` bracket and the
+   link families' display-text list: a masked construct there is *tokened* to the sentinel's
+   own shape before the bracket is parsed as an `Attrlist`, and each surviving token is
+   restored with that construct's own body once the parse returns
+   ([`tokened_bracket`](../../parser/src/content/inline_builder/macros/image.rs),
+   [`Attrlist::into_owned_restoring`](../../parser/src/attributes/attrlist.rs)). The
+   *values* this produces are exact — an `alt` recovers the passthrough's own rendered text
+   byte-for-byte — but the `Attrlist` itself is `into_owned`'d onto the bracket's own coarse
+   span, exactly the trade `Attrlist::into_owned`'s own doc comment names for every
+   non-verbatim bracket ("passing the coarser source span the text corresponds to as the
+   list's own location tag").
+
+3. **Synthesized text.** The builder's own seed can itself be synthesized — a filtered
+   multi-line block whose surviving lines were joined with `\n` has no single contiguous
+   `'src` slice of its own — and
+   [`build_from_value`](../../parser/src/content/inline_builder.rs) draws the same line
+   `apply_special_characters`'s `split_text` already draws one node deeper in the tree: when
+   the seed `value` is exactly `location.data()`, every node built from it gets an honest,
+   precise span; when it differs, every node gets `location`'s own coarse span — "the same
+   fallback an attribute-reference expansion or a `counter` directive's resolved value
+   already receives," in the function's own words. Nothing downstream needed to know the
+   difference: `source_slice`'s piece walk treats a synthesized seed's `Text` node exactly
+   like it treats any other synthesized piece, at any depth — the same mechanism case 1
+   above already pins with a direct `location.data()` assertion
+   (`an_image_inside_an_expanded_value_keeps_a_coarse_location`). What is specific to a
+   *wholly*-synthesized seed, and has its own test, is that recognition itself still
+   succeeds from one: `a_macro_construct_is_recognized_when_the_whole_seed_is_synthesized`
+   asserts a `link:` macro folds correctly when built entirely from a seed whose `value`
+   differs from its `location` — a recognition guarantee, not a `location` assertion of its
+   own, since that half rests on the shared mechanism rather than needing a second test of
+   it.
+
+4. **Lookahead/retry.** Two passes re-scan a slice of their own match string rather than
+   accepting or rejecting a match outright: the passthrough-extraction pass's
+   *prohibited-prefix* retry — an attribute-list-prefixed bare form
+   (`index:[attrs]+text+`, `` \[x-]`text` ``) that turns out to sit behind a `\`, `:`, or `;`
+   writes that first character back verbatim and rescans the rest of the same match,
+   recursively — and the quotes step's own monospace-before-quote retry, which slices the
+   haystack forward and re-searches on a rejected look-ahead. Both retries follow the same
+   pattern: every capture offset the retry reads is relative to the sub-range it rescanned,
+   not the level's own match string, and is rebased (`offset + …`) back to that match
+   string's coordinates before `source_slice`/`s_to_src` ever see it, so no error from the
+   retry's own bookkeeping survives into the node's `location`. This is pinned directly for
+   the passthrough pass's own retry by
+   `a_prohibited_prefix_before_a_bare_attrlisted_form_keeps_its_source_offsets`, whose own
+   comment states the invariant — "the `Raw` leaf's location must be the body's own source
+   bytes, not a range shifted left by the retry's start" — verified over
+   `"see index:[foo]+bar+ end"`, where the retry recognizes `+bar+` only after rejecting the
+   `]`-prefixed match, and the leaf's span is still exactly `source.slice(15..20)`. The
+   quotes step's retry rebases offsets the identical way but has no test of its own naming
+   the invariant this explicitly — a gap the consolidated span/location test file this row
+   still lacks (see below) would be the place to close.
+
+   A **failed** lookahead is a different, simpler case: the verbatim-content callout pass's
+   own trailing-position lookahead (`tail_rx`) either matches or it does not, and a lookahead
+   that fails is not retried — the candidate match is simply left out of the level's match
+   list, so the surrounding gap logic re-emits the original nodes unchanged. No node is ever
+   born from a failed lookahead, so there is no span policy for one to need.
 
 ### 4.5 Lifetimes and allocation
 
@@ -11592,15 +11695,73 @@ failed**, 68 ignored.
 | Phase | Criterion | Verdict | Evidence |
 | ----- | --------- | ------- | -------- |
 | 2 | ~277 golden `.rendered()` assertions pass unchanged | ✅ | Suite green, and the §5.3 rename left every asserted string untouched. The renamed accessors have 324 `.rendered_html()` and 173 `.rendered_html_content()` call sites (`git grep -cF` at `25ad4070`). Those are *accessor call sites*, not a recount of §5.3's ~277 golden assertions — most are ordinary reads rather than golden string comparisons — so they evidence the rename's reach, not the size of the oracle. |
-| 2 | sentinels deleted | ⚠️ **2 of 3** | See below. |
+| 2 | sentinels deleted | ✅ | See below — the table itself and its last reader are gone. |
 | 2 | benchmarks within an agreed budget of `main` | ❓ **no budget on record** | CodSpeed reports no alteration across 5 benchmarks, but no *agreed budget* is written down anywhere in this document, so the criterion cannot be checked as stated. |
 | 3 | node vocabulary reviewed against the `asciidoctor` port's needs (§6.6) | ❌ **not started, and gated on Landing** | See below. |
 | 3 | purely-structural navigation sugar kept minimal | ✅ | The `inlines` module exposes no navigation helpers at all — no `walk`, `descendants`, `children`, `iter`, `visit`, or `find`; the node types are plain public fields (§3.2's sketch). Minimal by construction. |
-| 3 | doc + README updated (the security section gets its `Raw`-node anchor) | ❌ | [`README.md`](../../README.md)'s "Security: rendering untrusted input" section names the two by-design raw-HTML mechanisms (attribute-reference substitution and passthroughs) but never mentions `Raw`, `InlineNode`, or the tree. The anchor the gate asks for does not exist. |
-| 4 | #944 hard-case policies documented and tested | ⚠️ **tested, not documented** | Spans are asserted per-construct across ten `inline_builder` modules. But §4.4 only *promises* the four hard cases "get explicit policies there" — attribute expansion, passthrough mask/restore, synthesized text, lookahead/retry are nowhere written down as policies, and there is no consolidated span/location test file. |
+| 3 | doc + README updated (the security section gets its `Raw`-node anchor) | ✅ | [`README.md`](../../README.md)'s "Security: rendering untrusted input" section now names `InlineNode::Raw` and its `RawOrigin` (`Passthrough`/`Substitution`) as the tree-level home of each by-design raw-HTML mechanism, pointing at `Content::inlines()` as the accessor a caller matches a node's `origin` through. See below. |
+| 4 | #944 hard-case policies documented and tested | ⚠️ **documented; still no consolidated test file** | §4.4 now spells out all four hard cases' policies (attribute expansion, passthrough mask/restore, synthesized text, lookahead/retry), each traced to the one shared mechanism (`source_slice`/`s_to_src`) and cited against an existing pinning test. See below. Spans are still asserted per-construct across ten `inline_builder` modules rather than from one consolidated span/location test file — that consolidation is real but separable work, not attempted here. |
 | 4 | #564 hack removed | ✅ | Landed in step 7; `Content::source_lines`, `from_filtered_lines`'s `line_spans`, and `simple.rs`'s per-paragraph `Vec<Span>` went with it. |
 | 5 | seam documented | ⚠️ | [`README.md`](../../README.md)'s back-end bullet is current: it names `InlineRenderer` and `Content::render_with` and states the seam is *inline*-scoped. §4.6's own prose is stale, though — see below. |
 | 5 | a smoke-test alternate renderer (in tests) walks the tree | ✅ | `BracketStrong` in [`inline_builder_document_parity.rs`](../../parser/src/tests/inline_builder_document_parity.rs) is folded via `content.render_with(&BracketStrong, &parser)`; `OrdinalRenderer` and `FlipRenderer` in [`inline_tree.rs`](../../parser/src/tests/inline_tree.rs) do the same. |
+
+##### Phase 3's README gate landed (2026-08-30)
+
+The one item above the table still marked outstanding that needed no design decision, only
+writing: the security section's missing `Raw`-node anchor. `README.md`'s "Security: rendering
+untrusted input" section named the two by-design raw-HTML mechanisms but never connected them to
+anything in the public tree API, so a reader auditing untrusted input had no pointer from "these
+two things happen" to "here is where they land in `InlineNode`." Fixed by naming
+`InlineNode::Raw` and its `RawOrigin` variants (`Passthrough` for the passthrough forms,
+`Substitution` for an expanded attribute value's own unescaped specials) as the concrete
+representation, and pointing at [`Content::inlines()`](../../parser/src/content/content.rs) —
+the read-only accessor for the tree itself — as where a caller matches on a node's `origin`
+directly.
+
+*Caught and corrected before landing:* the first draft of this fix pointed at
+`Content::render_with`/`InlineRenderer` instead, on the assumption that "the seam a caller
+already has for walking the tree" would surface a `Raw` node's origin the way it surfaces every
+other node kind. Greptile's review of the PR (confidence 3/5, correctly withheld) traced the
+fold's own `Raw` arm
+([`fold.rs`](../../parser/src/content/inline_builder/fold.rs)) and found it writes
+`RawForm::AsIs`'s bytes straight through (`out.push_str(value)`) without a renderer callback at
+all — `InlineRenderer`'s trait has no method a `Raw` node's origin could reach, for *any* form,
+so the guidance was actively wrong: a caller following it would get no signal back for exactly
+the spans the section exists to warn about. `Content::inlines()` is the accessor that actually
+carries `RawOrigin` out to a caller, and is what the corrected text points at instead. A good
+illustration of why "no new API, just a cross-reference" is not the same as "no way to get this
+wrong" — the cross-reference itself needs to name a real capability.
+
+##### Phase 4's #944 hard-case policies landed (2026-08-30)
+
+The remaining half of Phase 4's own exit gate that needed no design decision, only writing
+down what the code already does: §4.4 promised that attribute expansion, passthrough
+mask/restore, synthesized text, and lookahead/retry "get explicit policies there," and never
+delivered them. All four turn out to be one mechanism wearing four names —
+[`source_slice`](../../parser/src/content/inline_builder/quotes.rs)'s piece walk, which
+already snaps an **atomic** piece's boundary to its nearer edge and a **synthesized** piece's
+boundary to its own whole span — so §4.4 now states that once, then traces each hard case to
+where the general rule applies: `split_attribute_value`'s splice (attribute expansion),
+`build_passthrough_node`/`tokened_bracket`/`Attrlist::into_owned_restoring` (passthrough
+mask/restore — precise for the construct's own node, coarse only for an *enclosing* node its
+restored value lands inside), `build_from_value`'s seed split (synthesized text), and the
+passthrough-extraction and quotes steps' own retries (lookahead/retry — exact despite the
+retry's temporary sub-range, because every offset is rebased before `source_slice` sees it;
+a *failed*, non-retrying lookahead such as the callout pass's `tail_rx` simply drops the
+candidate match, so no node — and no span question — ever arises from it). Each claim is
+tied to an existing test that already pinned it (`a_reference_to_a_set_attribute_expands_to_a_text_node`,
+`triple_plus_borrows_its_content_unescaped`,
+`an_image_inside_an_expanded_value_keeps_a_coarse_location`,
+`a_macro_construct_is_recognized_when_the_whole_seed_is_synthesized`,
+`a_prohibited_prefix_before_a_bare_attrlisted_form_keeps_its_source_offsets`) — a documentation
+increment in the fullest sense: no code changed, and every sentence is one an existing test or
+doc comment already made true.
+
+*What still doesn't close the row:* the audit's other named gap, "no consolidated span/location
+test file" — the assertions above still live scattered across ten `inline_builder` modules
+rather than in one file a reader could audit in one pass. Real, separable work (a test file that
+imports and re-asserts each case, or at minimum an index pointing at each existing test), left
+for its own increment rather than bundled here.
 
 ##### Phase 2's third sentinel system is still live
 
@@ -11624,6 +11785,189 @@ template synthesized from `carried_title_template`, and renders through
 `render_xref_template`. The code says so in as many words. Retiring it is a real increment,
 not a bookkeeping fix, and it is what stands between Phase 2 and its exit gate.
 
+*The carried-title half landed as (`XrefTemplatePiece` — the template made structural):*
+surveying the increment corrected this audit's own record first: "one case" was an
+under-count, because the placeholders had **two** independent live producers. The carried
+title was one; the other is the footnote path —
+[`fold_deferring_xrefs`](../../parser/src/content/inline_builder/fold.rs) writes a
+placeholder per cross-reference into the fold a footnote's catalog entry is built from, and
+[`FootnoteDeferred::render`](../../parser/src/content/content.rs) reads them back, at
+registration (`Parser::define_footnote`'s unresolved-fallback text) and again at resolution
+for any footnote no tree fold reaches (`Footnote::resolve_references` with `folded: None`).
+
+What landed is the carried-title half, and it retired the *encoding* rather than the
+template: [`DeferredContent::template`](../../parser/src/content/content.rs) is now a
+`Vec<XrefTemplatePiece>` — literal runs interleaved with typed `Xref(index)` splice points —
+so `carried_title_template` writes no sentinel bytes and escapes nothing (a splice point is
+a variant, not a byte pattern a document could forge; the `sentinels` suite's carried-title
+fixture now holds by construction), and `render_xref_template` is a piece walk that scans
+and decodes nothing. The escaped-template form went with it: `unescape_sentinels` and
+`document_text` are deleted, and **no production pass reads escaped form back any more** —
+`escape_sentinels` survives only where the four legacy string-step paths (an attrlist value,
+an author line, a reftext, a list-item marker) splice attribute values into strings nothing
+ever scans, a protection with nothing left to protect, whose deletion is now a separate,
+purely mechanical increment. Verified by a title-level differential: every resolved title in
+the suite logged on both sides, 64 unique `(source, rendered)` pairs, byte-identical sets;
+coverage per changed file unchanged (content.rs 5 missed regions before and after,
+title_refs.rs 5 and 5).
+
+*What still defers* is the footnote half — the last production sentinels anywhere. It did
+not come along, for two concrete reasons rather than scope thrift. First, a footnote's
+placeholder can sit **inside renderer-produced markup**: the deferring fold hands
+`render_styled` a body string, so `footnote:[*<<tgt>>*]` puts the placeholder inside the
+span's rendered bytes, where a flat piece list cannot represent it — top-level pieces would
+bake a *nested* reference's unresolved fallback, the narrowing the carried title documents
+and measures at zero but footnotes demonstrably exercise (that source is a
+`side_effect_parity` corpus fixture). Second, the frozen side-effect corpus
+([`side_effects.txt`](../../parser/snapshots/side_effects.txt)) pins `FootnoteDeferred`'s
+`Debug` spelling byte-for-byte, template included, against recordings of the deleted string
+pipeline — and the nested fixtures' spellings are not reconstructible from a piece
+representation, so the corpus's `deferred` comparison needs redesigning (segments compared
+structurally, literal bytes delegated to the already-compared `text` field, or an equivalent
+that keeps the freeze meaningful). The honest shape of that increment: a render-and-capture
+fold mode (segments recorded while the unresolved rendering is written in place), top-level
+pieces with the nested narrowing measured first (which footnotes reach `folded: None` — the
+carried-title-defined ones, plus whatever remains of the "6 of 55" the catalog's comment
+records from before the title pass collected its own folds), and the corpus codec change.
+One increment, but with those three decisions inside it; only after it can Phase 2's
+"sentinels deleted" gate close and the reserved-codepoint table shrink to nothing.
+
+*The footnote half landed as (a render-and-capture `fold_deferring_xrefs` plus a measured
+narrowing):* the increment's own first decision — measure before narrowing — reversed the
+audit's expectation. An instrumented `Footnote::resolve_references` (a throwaway probe
+logging every `folded: None` call) ran across the whole suite (5,477 tests,
+`--test-threads=1`) and found it reached **exactly once**: this crate's own
+`a_footnote_folds_when_given_one_and_renders_its_template_otherwise` unit test, which builds
+a bare `Footnote` by hand precisely to exercise that arm. No production parse takes it —
+`document::title_refs::write_back` now calls `collect_own_folded_footnotes` for every titled
+content, including the section-heading case the "6 of 55" comment recorded before that pass
+existed, so `FootnoteDeferred`'s template is *never* the source of a production `text` after
+resolution; it only ever renders once, at registration, before any reference has a resolved
+destination to lose. That measurement is what makes the nested-reference narrowing free rather
+than merely accepted: `fold_deferring_xrefs` ([`fold.rs`](../../parser/src/content/inline_builder/fold.rs))
+now walks a footnote's own top-level children the same way `carried_title_template` walks a
+title's — a top-level `Xref` node becomes an `XrefTemplatePiece::Xref` splice point with its
+own segment; every other top-level node folds to one `Literal` piece, and a cross-reference
+*nested* inside one (`footnote:[*<<tgt>>*]`) bakes into that literal as its unresolved
+fallback rather than becoming addressable. Unlike the carried title, though, the nested
+reference's **segment is not dropped**: `fold_xref`'s `Xrefs::Deferred` branch records it and
+renders its fallback in place (through the now-`pub(crate)` `render_xref_segment`) rather than
+writing a placeholder, so `FootnoteDeferred::xrefs` still carries every cross-reference the
+footnote's text holds, top-level and nested alike — `FootnoteDeferred::resolve`'s warning pass
+is the *only* place a footnote-embedded reference is ever warned about (the enclosing
+content's own resolution deliberately resolves but does not warn on its complementary list),
+so dropping the nested ones the way the carried title does would have silently stopped warning
+about an unresolvable `<<nowhere>>` inside a footnote's span — a real regression the carried
+title's own narrowing does not carry, pinned by
+`an_unresolvable_reference_nested_in_a_footnote_is_still_warned_about` alongside the rendering
+boundary in `a_reference_nested_in_a_span_of_a_footnote_stays_its_fallback` (and its
+complement, `a_reference_nested_in_a_footnote_resolves_once_the_document_does`, showing the
+tree refold resolves it anyway once a real parse's resolution pass runs). One byte-identical
+subtlety is *not* preserved: summed across a footnote's registration, every reference is still
+rendered exactly once (so a stateful renderer sees the same call count), but a footnote mixing
+a top-level and a nested reference no longer renders them in strict document order — every
+nested one's call happens during the fold, ahead of every top-level one's, which happens later
+via `render_xref_template`. No golden source mixes the two forms in one footnote, so this is
+documented in `fold_deferring_xrefs`'s own doc comment as unmeasured rather than exercised.
+`render_template` (the byte-placeholder decoder) and `Content::xref_placeholder` (its producer)
+are deleted outright — `FootnoteDeferred::render` is now `render_xref_template`, the same piece
+walk the carried title uses. `XREF_PLACEHOLDER_START`/`_END` are not: they stay in
+`RESERVED_SENTINELS`/`is_reserved_sentinel`, reserved-but-unproduced exactly as the passthrough
+pair already was, since retiring that table (with `escape_sentinels`, its last reader) is the
+separate, purely mechanical increment named above and stays out of scope here. The frozen
+`side_effects.txt` corpus's `deferred` comparison is redesigned per the increment's third
+decision: `snapshot()` now records `FootnoteDeferred::xrefs()`'s own `Debug` spelling (a
+`#[cfg(test)]`-only accessor) rather than the whole struct's, so the freeze compares the
+segment list structurally and leaves the template's literal bytes to the entry's
+already-compared `text` field — the sixteen affected recorded lines were mechanically
+re-derived (a script reproducing the store's own `quote`/`unquote` escaping, not hand-typed) to
+hold just the `xrefs` portion of what they held before. `cargo test --workspace` is green
+(5,477 tests passing, unchanged from before this increment beyond the three deleted
+`render_template` unit tests and the five new ones), and coverage on every changed file is
+diff-neutral against a baseline worktree of this same commit (`fold.rs`, `footnotes.rs`,
+`content.rs`, `catalog.rs`, `parser.rs` — same missed-region and missed-line counts before and
+after, confirmed line-for-line for the files whose miss counts hold from unrelated pre-existing
+gaps rather than shrinking).
+
+With this landed, `RESERVED_SENTINELS` holds five entries and every one of them is
+reserved-but-unproduced — no production code anywhere in the crate emits an in-band control
+sentinel any more. Phase 2's "sentinels deleted" gate is not yet closed on the letter of its
+own wording (the table itself, and `escape_sentinels`'s four legacy string-step callers, are
+still there), but every *producer* the gate's name refers to is retired; what remains is the
+purely mechanical follow-up named throughout this section.
+
+*The follow-up landed as (delete `escape_sentinels` and `RESERVED_SENTINELS`):* the
+mechanical retirement every prior increment's own note deferred, now done. All four call
+sites shared one function, `apply_attributes` (`content/substitution_step.rs`) — reached from
+an attrlist value (`Attrlist::parse`), an author line (`document::author`), a reftext
+(`substitute_attributes_in_reftext`), and a list-item marker (`blocks::list_item_marker`), all
+through `SubstitutionStep::AttributeReferences.apply`, the one arm of that match that still
+has a string implementation; every other step is `unreachable!` since step 6. Grepping for a
+decoder confirmed there was none left to break: no production pass anywhere in the crate reads
+`SENTINEL_ESCAPE`'s tagged form back, so `AttributeReplacer`'s `escape_sentinels` field and
+`.escaping_sentinels()` builder method are deleted along with the call, and the four call
+sites now splice a substituted attribute value unescaped — a behavior-preserving deletion, not
+a behavior change, since nothing downstream ever scanned for or decoded the escaped form.
+`escape_sentinels`, `is_reserved_sentinel`, `SENTINEL_ESCAPE`, `RESERVED_SENTINELS`, and the
+four codepoint consts that fed it (`XREF_PLACEHOLDER_START`/`_END`,
+`PASSTHROUGH_PLACEHOLDER_START`/`_END`) are gone from `content.rs`, and the `escape_sentinels`
+test module goes with them — each of its three tests pinned a mechanism that no longer exists.
+The `sentinels.rs` regression suite (issue #1235) needed no changes at all: those tests assert
+on rendered output, and a typed sentinel was always content there and remains so — the
+escaping and decoding this increment removes were internal machinery, invisible either way.
+Phase 2's "sentinels deleted" gate now closes on the letter of its own wording, not just its
+producers: no production code emits an in-band control sentinel, and the table that used to
+reserve codepoints for one no longer exists either.
+
+##### The retirement's own audit missed one splice point (found 2026-08-30)
+
+"No production code emits an in-band control sentinel any more" turned out to overstate what
+the retirement actually surveyed: `tokened_bracket` (`inline_builder/macros/image.rs`) still
+writes the passthrough pair's own `\u{96}`*n*`\u{97}` shape, transiently, to give
+`Attrlist::parse` the same haystack shape the string pipeline held there for an `image:`/`icon:`
+bracket or a link family's display-text list — and `Attrlist::into_owned_restoring`
+(`restore_into`, `attributes/element_attribute.rs`) still restores each token **by byte
+pattern** once that parse returns. Neither is `RESERVED_SENTINELS`-tracked (both predate this
+increment and neither was in scope for it), so the retirement's own claim was true of what it
+audited and false of the crate as a whole: this pair's scan-and-restore is the one form the
+tree builder still shares with the string pipeline's own vulnerability, and it needed the same
+counterpart the string pipeline had.
+
+It did not have one. `apply_attribute_references`'s own splice
+(`inline_builder/attribute_refs.rs`, `split_attribute_value`) runs *before* macro recognition,
+content-level, exactly where `AttributeReplacer::escaping_sentinels` used to guard the string
+pipeline's equivalent splice — but nothing on the tree-builder side ever called an equivalent
+of `escape_sentinels` for it, because by the time this increment retired that function, every
+*other* consumer it had guarded (the deferred cross-reference and footnote-marker templates)
+had already moved to structured piece lists nothing scans. A document defining an attribute
+whose value spells the passthrough pair (`:forge: \u{96}0\u{97}`) and referencing it inside an
+`image:`/`icon:` bracket or a `link:` display-text list that also holds a genuine masked
+passthrough or STEM expression (`image:x.png[++real++,alt={forge}]`) could therefore forge the
+restore: the reference's value is spliced in before the bracket is even recognized, so by the
+time it is tokened the forged bytes are indistinguishable from the pipeline's own token at that
+index, and the attribute ends up holding the passthrough's *rendered body* instead of the
+literal text the document defined. Confirmed present on this branch before this increment
+landed (the retirement here only deleted a string-pipeline mechanism nothing downstream read,
+which is orthogonal), so this is a pre-existing gap the retirement's audit did not introduce and
+did not close either.
+
+*Fixed as* `escape_passthrough_sentinels` (`inline_builder/attribute_refs.rs`): the
+`split_attribute_value` splice's own counterpart to the retired `escape_sentinels`, covering
+just this one pair (the other three retired codepoints have no scanning consumer left to
+forge). One-way and unconditional, for the same reasons its predecessor was — this splice
+cannot know whether its value will end up beside a masked construct in some later bracket, and
+nothing downstream ever needs to reverse it. Pinned end-to-end by
+`a_placeholder_from_an_attribute_value_cannot_forge_an_image_restore` and
+`a_placeholder_from_an_attribute_value_cannot_forge_a_link_display_text_restore`
+(`tests/sentinels.rs`), and at the unit level by
+`a_reference_expanding_to_a_passthrough_sentinel_is_escaped`
+(`inline_builder/attribute_refs.rs`), which also covers the escape's own introducer codepoint
+folding back on itself. `cargo test --workspace` is green (5,479 tests, three more than
+before), and `attribute_refs.rs`'s coverage is diff-neutral against a baseline worktree of the
+commit this fix branched from once its own new "author literally typed the escape introducer"
+branch is exercised — every other newly-uncovered line in the file is a pre-existing
+`other => panic!` test-assertion fallback, not a gap this change opened.
+
 ##### Phase 3's first criterion cannot close before Landing
 
 "Node vocabulary reviewed against the `asciidoctor` port's needs (§6.6)" and Landing's
@@ -11645,11 +11989,13 @@ in place by this audit; the remaining struct is Phase 5's own outstanding work.
 ##### What this means for "how much further"
 
 Firm, enumerated, and cheap: Phase 3's README `Raw`-node anchor; Phase 4's four hard-case
-policies written down; §4.6's stale sentence (done here). Firm and substantial: retiring the
-xref template mechanism (Phase 2), and the last `XrefRenderParams` fold (Phase 5). Open-ended:
-the `asciidoctor`-port review, which gates both Phase 3 and Landing and whose cost is unknown
-from inside this repository. Any session count that does not separate those three tiers is
-guessing.
+policies written down; §4.6's stale sentence (done here); the `escape_sentinels` pass and the
+`RESERVED_SENTINELS` table under it (done — see the sentinel table's own landed-as note
+above). Firm and substantial: the last
+`XrefRenderParams` fold (Phase 5) — the xref template mechanism itself is retired now, both
+halves. Open-ended: the `asciidoctor`-port review, which gates both Phase 3 and Landing and
+whose cost is unknown from inside this repository. Any session count that does not separate
+those three tiers is guessing.
 
 ### 5.3 The golden-HTML oracle (the safety net)
 

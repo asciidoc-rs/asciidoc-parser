@@ -1,6 +1,6 @@
 //! The attribute-references substitution step.
 
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 use super::{
     passthrough_step::is_special,
@@ -1132,12 +1132,20 @@ fn rebuild_attribute_level<'src>(
 /// fallback span (design §4.4: a synthesized value has no source of its own).
 /// A run is never emitted empty, and an empty `value` (a value-less
 /// `InterpretedValue::Set` attribute) emits no node at all.
+///
+/// Before either branch runs, `value` has its passthrough-sentinel bytes
+/// escaped by [`escape_passthrough_sentinels`] — see that function's doc
+/// comment for why a value reaching this splice point needs that
+/// unconditionally, regardless of which branch it then takes.
 fn split_attribute_value<'src>(
     value: &str,
     location: Span<'src>,
     specials: SplicedSpecials,
     out: &mut Vec<InlineNode<'src>>,
 ) {
+    let value = escape_passthrough_sentinels(value);
+    let value = value.as_ref();
+
     if specials == SplicedSpecials::EscapedLater {
         if !value.is_empty() {
             out.push(InlineNode::Text {
@@ -1179,6 +1187,68 @@ fn split_attribute_value<'src>(
             location,
         });
     }
+}
+
+/// Escapes a document's own copies of the passthrough-sentinel pair
+/// (`\u{96}`/`\u{97}`) out of a resolved attribute (or `counter`/`counter2`)
+/// value before [`split_attribute_value`] splices it into the node stream.
+///
+/// Those two C1 codepoints are the private-use-shaped token
+/// [`tokened_bracket`](super::macros::image::tokened_bracket) writes for a
+/// masked passthrough or STEM expression inside an `image:`/`icon:` bracket
+/// or a link family's display-text list, and
+/// [`Attrlist::into_owned_restoring`](crate::attributes::Attrlist::into_owned_restoring)
+/// (via [`restore_into`](crate::attributes::element_attribute)) restores
+/// **by byte pattern** once that bracket has been parsed: it cannot tell the
+/// pipeline's own token from a document-typed copy of the same two bytes at
+/// the same index. A macro bracket that mixes a genuine masked construct with
+/// an attribute reference whose resolved value happens to spell
+/// `\u{96}`*n*`\u{97}` — `image:x.png[++real++,alt={forge}]` with `:forge:
+/// \u{96}0\u{97}` defined — is exactly that mix: the reference is spliced
+/// here, by this step, *before* the image macro is even recognized, so by
+/// the time the bracket is tokened its forged bytes are indistinguishable
+/// from the passthrough's own restore token, and `alt` ends up holding the
+/// passthrough's rendered body instead of the literal text the document
+/// defined.
+///
+/// This is the same forgery the string pipeline's own attribute-reference
+/// splice guarded against with `escape_sentinels` (since retired) — see
+/// `AttributeReplacer::escaping_sentinels` — for this pair among the five it
+/// covered; the other three guarded a deferred cross-reference's and a
+/// footnote marker's own in-band templates, which the tree builder replaced
+/// with structured piece lists nothing scans, so only this pair still needs
+/// a counterpart here. The escape is unconditional, for the same reason the
+/// string pipeline's was: this step splices at the content level, ahead of
+/// macro recognition, so it cannot know whether its value will end up beside
+/// a masked construct in some later bracket. It is also one-way, like its
+/// predecessor — nothing downstream unescapes it — so a document attribute
+/// whose value happens to hold one of these two rare C1 control codepoints
+/// (or the escape introducer itself) sees it come back escaped rather than
+/// silently enabling a forged restore.
+///
+/// Text with none of the three reserved codepoints — the overwhelming
+/// majority — is borrowed through unchanged.
+fn escape_passthrough_sentinels(value: &str) -> Cow<'_, str> {
+    const START: char = '\u{96}';
+    const END: char = '\u{97}';
+    const ESCAPE: char = '\u{E005}';
+
+    if !value.contains([START, END, ESCAPE]) {
+        return Cow::Borrowed(value);
+    }
+
+    let mut out = String::with_capacity(value.len());
+
+    for c in value.chars() {
+        match c {
+            START => out.push_str("\u{E005}s"),
+            END => out.push_str("\u{E005}e"),
+            ESCAPE => out.push_str("\u{E005}g"),
+            other => out.push(other),
+        }
+    }
+
+    Cow::Owned(out)
 }
 
 #[cfg(test)]
@@ -1353,6 +1423,31 @@ mod tests {
     }
 
     #[test]
+    fn a_reference_expanding_to_a_passthrough_sentinel_is_escaped() {
+        // A value carrying the passthrough-sentinel pair, or a literal copy
+        // of the escape introducer this step's own escaping uses, is escaped
+        // out rather than spliced in verbatim — see
+        // `escape_passthrough_sentinels`. This test exercises the function
+        // directly (through the one seam that calls it) for all three
+        // codepoints its match arms cover, independent of any macro bracket:
+        // the regression this guards against is pinned end-to-end, over an
+        // actual `image:`/`link:` bracket, by the `sentinels` test module's
+        // own `a_placeholder_from_an_attribute_value_cannot_forge_*` tests.
+        let parser = parser_with_attribute("v", "a\u{96}b\u{97}c\u{e005}d");
+        let nodes = build(Span::new("{v}"), &parser, None);
+
+        assert_eq!(nodes.len(), 1);
+
+        match &nodes[0] {
+            InlineNode::Text { value, .. } => {
+                assert_eq!(value.as_ref(), "a\u{e005}sb\u{e005}ec\u{e005}gd");
+            }
+
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn a_reference_to_a_missing_attribute_stays_literal() {
         let nodes = build(Span::new("{undefined-thing}"), &Parser::default(), None);
 
@@ -1513,6 +1608,25 @@ mod tests {
         // `quotes::tests::s_to_src_resolves_a_synthesized_pieces_own_edges_exactly`).
         let parser = parser_with_attribute("word", "hello");
         let source = "{word}--world";
+        let nodes = build(Span::new(source), &parser, None);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlInlineRenderer {}),
+            golden_attributes_with(source, &parser),
+        );
+    }
+
+    #[test]
+    fn a_replacement_split_one_character_per_piece_is_recognized() {
+        // The same em-dash rule with its two dashes split one-per-piece
+        // across the synthesized/verbatim junction, so *neither* piece's own
+        // text holds a sniffable construct. This is the shape the piecewise
+        // pre-filter (`level_may_have_replacements`) cannot see inside either
+        // contribution and must admit through its straddle rule — a pre-filter
+        // that probed pieces alone would skip the level and leave the em dash
+        // unreplaced.
+        let parser = parser_with_attribute("dashed", "hello-");
+        let source = "{dashed}-world";
         let nodes = build(Span::new(source), &parser, None);
 
         assert_eq!(

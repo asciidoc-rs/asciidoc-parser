@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     Parser, Span,
-    content::INLINE_FOOTNOTE_MACRO,
+    content::{INLINE_FOOTNOTE_MACRO, XrefTemplatePiece},
     inlines::{Footnote, InlineNode},
     strings::CowStr,
 };
@@ -766,10 +766,10 @@ fn footnote_children<'src>(
 /// does three things to the string replacer's raw content: trims it, collapses
 /// each embedded newline to a space, and unescapes `\]` to `]`. The first two
 /// apply here unchanged — they are about the *text*, whichever pipeline
-/// produced it. The third does **not**: [`footnote_children`] already dropped
-/// each such backslash while emitting the subtree (see its doc comment), so
-/// re-applying the unescape here would be a second pass over an
-/// already-unescaped string.
+/// produced it — via [`normalize_footnote_template`], their piece-list reading.
+/// The third does **not**: [`footnote_children`] already dropped each such
+/// backslash while emitting the subtree (see its doc comment), so re-applying
+/// the unescape here would be a second pass over an already-unescaped string.
 fn register_footnote_number(
     parser: &Parser,
     id: Option<&str>,
@@ -779,12 +779,36 @@ fn register_footnote_number(
     let (template, xrefs) =
         fold_deferring_xrefs(children, &*parser.renderer, &parser.render_context());
 
-    // Trim and collapse, but do not unescape — see the doc comment above.
-    let template = template.trim().replace('\n', " ");
+    let template = normalize_footnote_template(template);
 
     // The builder folds this entry from the footnote's own subtree, which
     // never enters the string pipeline's escaped sentinel form.
     parser.define_footnote(id, template, xrefs, root)
+}
+
+/// Trims and collapses a footnote's structured template exactly as the string
+/// replacer's `normalize_footnote_text` did its flat one: a leading or
+/// trailing literal piece is trimmed of surrounding whitespace, and every
+/// literal piece has each embedded newline collapsed to a space. An
+/// [`Xref`](XrefTemplatePiece::Xref) piece is untouched either way — a splice
+/// point carries no bytes of its own to trim or collapse — so only whichever
+/// piece a footnote's own literal text actually populates ever changes.
+fn normalize_footnote_template(mut template: Vec<XrefTemplatePiece>) -> Vec<XrefTemplatePiece> {
+    for piece in template.iter_mut() {
+        if let XrefTemplatePiece::Literal(text) = piece {
+            *text = text.replace('\n', " ");
+        }
+    }
+
+    if let Some(XrefTemplatePiece::Literal(text)) = template.first_mut() {
+        *text = text.trim_start().to_string();
+    }
+
+    if let Some(XrefTemplatePiece::Literal(text)) = template.last_mut() {
+        *text = text.trim_end().to_string();
+    }
+
+    template
 }
 
 #[cfg(test)]
@@ -1492,7 +1516,8 @@ mod tests {
         // `link_macro_level`), the link's brackets are already consumed into
         // a `Ref` node (no literal `[`/`]` left to collide with) by the time
         // the footnote's own lazy bracket match runs, unlike the reverse
-        // nesting (see `a_footnote_nested_in_link_text_is_a_documented_divergence`
+        // nesting (see
+        // `a_footnote_nested_in_link_text_is_a_documented_divergence`
         // just below, which explains why that direction can never be clean).
         let source = "footnote:[outer] footnote:[see link:https://example.org[inner]]";
         let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});

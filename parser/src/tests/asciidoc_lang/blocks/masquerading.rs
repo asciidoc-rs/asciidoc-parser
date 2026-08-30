@@ -46,8 +46,8 @@ When masquerading the context of a structural container, only contexts that pres
     );
 
     // The declared block style modifies the context of a paragraph: `[sidebar]`
-    // on a paragraph changes its context to `sidebar`, and the block retains the
-    // simple content model.
+    // on a paragraph changes its context to `sidebar`, and the block retains
+    // the simple content model.
     let (_, resolved, model, _) = facts("[sidebar]\nA short aside.");
     assert_eq!(resolved, "sidebar");
     assert_eq!(model, ContentModel::Simple);
@@ -124,9 +124,10 @@ The resolved block style of the block remains unset.
 "#
     );
 
-    // The `....` delimiters mark a literal structural container; the `[listing]`
-    // block style changes its context to `listing`. The default (raw) context
-    // remains `literal`, and the resolved context is `listing`.
+    // The `....` delimiters mark a literal structural container; the
+    // `[listing]` block style changes its context to `listing`. The default
+    // (raw) context remains `literal`, and the resolved context is
+    // `listing`.
     let (raw, resolved, _, _) = facts("[listing]\n....\na > b\n....");
     assert_eq!(raw, "literal");
     assert_eq!(resolved, "listing");
@@ -159,8 +160,8 @@ This sidebar is short, so a styled paragraph will do.
 "#
     );
 
-    // A `[sidebar]` style on a contiguous paragraph turns it into a sidebar that
-    // still retains the simple content model.
+    // A `[sidebar]` style on a contiguous paragraph turns it into a sidebar
+    // that still retains the simple content model.
     let (_, resolved, model, _) =
         facts("[sidebar]\nThis sidebar is short, so a styled paragraph will do.");
     assert_eq!(resolved, "sidebar");
@@ -189,9 +190,10 @@ Remember the milk.
 "#
     );
 
-    // The `NOTE` block style on a `====` example container transforms it into an
-    // admonition block (context `admonition`). Because the example container has
-    // the compound content model, the resulting admonition is also compound.
+    // The `NOTE` block style on a `====` example container transforms it into
+    // an admonition block (context `admonition`). Because the example
+    // container has the compound content model, the resulting admonition is
+    // also compound.
     let (raw, _, model, _) = facts("[NOTE]\n====\nRemember the milk.\n====");
     assert_eq!(raw, "admonition");
     assert_eq!(model, ContentModel::Compound);
@@ -381,9 +383,9 @@ fn permutations_table() {
     assert_eq!(model, ContentModel::Simple);
 
     // The `abstract`, `comment`, and `partintro` masquerades over an open block
-    // are doctype- and converter-specific (e.g. `partintro` is valid only inside
-    // a book part); the parser preserves the declared style for a downstream
-    // converter to act on.
+    // are doctype- and converter-specific (e.g. `partintro` is valid only
+    // inside a book part); the parser preserves the declared style for a
+    // downstream converter to act on.
     for style in ["abstract", "comment", "partintro"] {
         let (_, _, _, declared) = facts(&format!("[{style}]\n--\nx\n--"));
         assert_eq!(declared.as_deref(), Some(style));
@@ -433,10 +435,10 @@ A paragraph also access the `normal` style, which can be applied to revert a lit
     assert_eq!(raw, "verse");
     assert_eq!(model, ContentModel::Simple);
 
-    // The `normal` style reverts an (indentation-induced) literal paragraph back
-    // to a normal paragraph: the content model stays simple, the context is
-    // `paragraph`, and the block is parsed with the paragraph (not literal)
-    // style.
+    // The `normal` style reverts an (indentation-induced) literal paragraph
+    // back to a normal paragraph: the content model stays simple, the
+    // context is `paragraph`, and the block is parsed with the paragraph
+    // (not literal) style.
     let doc =
         Parser::default().parse("[normal]\n  This would be a literal paragraph without the style.");
     let normal = doc.child_blocks().next().expect("expected a block");
@@ -448,7 +450,8 @@ A paragraph also access the `normal` style, which can be applied to revert a lit
         panic!("expected a simple block, got {normal:?}");
     }
 
-    // Without the `normal` style, the same indented text is a literal paragraph.
+    // Without the `normal` style, the same indented text is a literal
+    // paragraph.
     let doc = Parser::default().parse("  This is a literal paragraph.");
     let literal = doc.child_blocks().next().expect("expected a block");
     if let crate::blocks::Block::Simple(simple) = literal {

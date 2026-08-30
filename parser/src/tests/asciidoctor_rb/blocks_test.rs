@@ -1267,8 +1267,8 @@ mod quote_and_verse_blocks {
         assert_css(&doc, ".quoteblock > blockquote", 1);
         assert_css(&doc, ".quoteblock > blockquote > *", 0);
         assert_css(&doc, ".quoteblock > .attribution", 1);
-        // The xpath engine does not implement `contains(text(), ..)`; assert the
-        // attribution text via the rendered output instead.
+        // The xpath engine does not implement `contains(text(), ..)`; assert
+        // the attribution text via the rendered output instead.
         assert_rendered_contains(&doc, "Anonymous");
     }
 
@@ -1825,10 +1825,11 @@ mod example_blocks {
         let doc = Parser::default().parse(
             ":example-number: @\n\n.Writing Docs with AsciiDoc\n====\nHere's how you write AsciiDoc.\n\nYou just write.\n====\n\n.Writing Docs with DocBook\n====\nHere's how you write DocBook.\n\nYou futz with XML.\n====\n",
         );
-        // NOTE: divergence from Asciidoctor: Ruby's `numeral`/`number` carry the
-        // character sequence ('A', 'B'); this crate's `number()` is a `usize` and
-        // returns `None` for character captions. The character caption itself is
-        // rendered in the title and reflected in the `example-number` attribute.
+        // NOTE: divergence from Asciidoctor: Ruby's `numeral`/`number` carry
+        // the character sequence ('A', 'B'); this crate's `number()` is
+        // a `usize` and returns `None` for character captions. The
+        // character caption itself is rendered in the title and
+        // reflected in the `example-number` attribute.
         let blocks = example_blocks(&doc);
         assert_eq!(blocks[0].number(), None);
         assert_eq!(blocks[1].number(), None);
@@ -2494,8 +2495,9 @@ mod preformatted_blocks {
 
         let doc = Parser::default().parse("outside\n\n----\ninside\n\nstill inside\n\neof\n");
         assert_xpath(&doc, "/*[@class=\"listingblock\"]", 1);
-        // This crate emits a single generic `UnterminatedDelimitedBlock` warning
-        // rather than Asciidoctor's block-type-specific message text.
+        // This crate emits a single generic `UnterminatedDelimitedBlock`
+        // warning rather than Asciidoctor's block-type-specific message
+        // text.
         let warnings: Vec<_> = doc
             .warnings()
             .filter(|w| w.warning == WarningType::UnterminatedDelimitedBlock)
@@ -3186,7 +3188,8 @@ mod preformatted_blocks {
     // NOTE: divergence from Asciidoctor. This crate does not treat a block
     // title whose first character is a period (`..gitignore`) as a title;
     // Asciidoctor renders the title ".gitignore". Kept `#[ignore]`d.
-    // TODO: allow a leading period in a block title when not followed by a space.
+    // TODO: allow a leading period in a block title when not followed by a
+    // space.
     #[ignore]
     #[test]
     fn first_character_of_block_title_may_be_a_period_if_not_followed_by_space() {
@@ -4685,10 +4688,11 @@ mod custom_blocks {
 
         let doc = Parser::default().parse("[foo]\n--\nbar\n--\n");
 
-        // Asciidoctor asserts no messages at its *default* (WARN) severity. This
-        // crate surfaces the unknown style as a `WarningSeverity::Debug`
-        // diagnostic (see the debug-level test below), which a host suppresses
-        // by default. The default-severity view — warnings at WARN or above — is
+        // Asciidoctor asserts no messages at its *default* (WARN) severity.
+        // This crate surfaces the unknown style as a
+        // `WarningSeverity::Debug` diagnostic (see the debug-level test
+        // below), which a host suppresses by default. The
+        // default-severity view — warnings at WARN or above — is
         // therefore empty, mirroring Asciidoctor.
         assert_eq!(
             doc.warnings()
@@ -4719,9 +4723,10 @@ mod custom_blocks {
         );
 
         // Asciidoctor logs this only at DEBUG severity (below its default WARN
-        // threshold). This crate records it as a single `WarningSeverity::Debug`
-        // warning, observable via `Document::warnings()`. The block keeps its
-        // default `open` context; the style `foo` is retained but otherwise
+        // threshold). This crate records it as a single
+        // `WarningSeverity::Debug` warning, observable via
+        // `Document::warnings()`. The block keeps its default `open`
+        // context; the style `foo` is retained but otherwise
         // ignored. The warning anchors at the block's delimiter line (the `--`,
         // line 2) — not the `[foo]` style line above it — matching the `line 2`
         // Asciidoctor reports, and naming the offending style directly.
@@ -4791,16 +4796,17 @@ mod metadata {
         assert_xpath(&doc, "//*[@class=\"paragraph\"]/p[text()=\"paragraph\"]", 1);
     }
 
-    // NOTE: the DOM-framing assertions are out of scope. Both tests below demote
-    // a body-level document title (`= Title`) to a level-0 section: a block title
-    // directly above a `= …` line means the line is *not* the document title, so
-    // the header is empty and `= …` is a level-0 section heading in the body.
-    // This crate now honors the demotion *and* models the `= …` line as a
-    // level-0 section (Asciidoctor's `sect0`) that a renderer emits as an `<h1>`
-    // heading, with the block title forwarded into that section's first block —
-    // matching Asciidoctor's structure. What the crate does not reproduce is the
-    // converter's page framing (`#header` / `#content` / `#preamble` wrappers)
-    // nor the exact `h1.sect0` class placement (the test virtual DOM carries the
+    // NOTE: the DOM-framing assertions are out of scope. Both tests below
+    // demote a body-level document title (`= Title`) to a level-0 section:
+    // a block title directly above a `= …` line means the line is *not* the
+    // document title, so the header is empty and `= …` is a level-0 section
+    // heading in the body. This crate now honors the demotion *and* models
+    // the `= …` line as a level-0 section (Asciidoctor's `sect0`) that a
+    // renderer emits as an `<h1>` heading, with the block title forwarded
+    // into that section's first block — matching Asciidoctor's structure.
+    // What the crate does not reproduce is the converter's page framing
+    // (`#header` / `#content` / `#preamble` wrappers) nor the exact
+    // `h1.sect0` class placement (the test virtual DOM carries the
     // `sect0` class on the section's container, not the `<h1>`), so the Ruby
     // tests stay `non_normative!` for those framing assertions.
     //
@@ -4854,9 +4860,9 @@ mod metadata {
     // section heading in the body. Asciidoctor renders that heading as
     // `<h1 class="sect0">`; this crate models it as a level-0 section (rendered
     // as an `<h1>` inside a `sect0` container), raising
-    // `Level0SectionHeadingNotSupported` under the default (non-`book`) doctype.
-    // The block title is forwarded into that section's first block — the
-    // `section paragraph` — exactly as Asciidoctor forwards it.
+    // `Level0SectionHeadingNotSupported` under the default (non-`book`)
+    // doctype. The block title is forwarded into that section's first block
+    // — the `section paragraph` — exactly as Asciidoctor forwards it.
     #[test]
     fn block_title_above_document_title_demotes_it() {
         let doc = Parser::default().parse(".Block title\n= Section Title\n\nsection paragraph\n");
@@ -4875,7 +4881,8 @@ mod metadata {
         assert_eq!(warnings[0].source.line(), 2);
 
         // `= Section Title` is modeled as a level-0 section, rendered as an
-        // `<h1>` heading inside a `sect0` container — not as a literal paragraph.
+        // `<h1>` heading inside a `sect0` container — not as a literal
+        // paragraph.
         assert_xpath(&doc, "//*[@class=\"sect0\"]", 1);
         assert_xpath(
             &doc,
@@ -4904,8 +4911,8 @@ mod metadata {
     // *part*, so — unlike the default-doctype case — no
     // `Level0SectionHeadingNotSupported` warning is raised. The part has no
     // direct content before `== First Section`, so the forwarded block title
-    // travels through the empty part onto the first block of that first section,
-    // matching Asciidoctor.
+    // travels through the empty part onto the first block of that first
+    // section, matching Asciidoctor.
     #[test]
     fn block_title_above_document_title_demotes_it_in_book_doctype() {
         let doc = Parser::default().parse(
@@ -5330,7 +5337,8 @@ mod images {
     // whose target has a leading or trailing space and renders it as an image
     // block; Asciidoctor does not treat such a line as a block image. Kept
     // `#[ignore]`d with the Ruby-intended assertion (no `<img>`).
-    // TODO: reject a block image macro whose target has leading/trailing spaces.
+    // TODO: reject a block image macro whose target has leading/trailing
+    // spaces.
     #[ignore]
     #[test]
     fn should_not_recognize_block_image_if_target_has_leading_or_trailing_spaces() {
@@ -5496,9 +5504,10 @@ mod images {
         );
 
         // This crate does not apply a `style` named attribute as the block
-        // style (`declared_style()` is `None`), matching `assert_nil img.style`.
-        // NOTE: divergence — Asciidoctor also removes the `style` key from the
-        // block's attributes; this crate retains it as a plain named attribute.
+        // style (`declared_style()` is `None`), matching `assert_nil
+        // img.style`. NOTE: divergence — Asciidoctor also removes the
+        // `style` key from the block's attributes; this crate retains
+        // it as a plain named attribute.
         let doc = Parser::default().parse("[style=value]\nimage::images/tiger.png[Tiger]\n");
         let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.declared_style(), None);
@@ -6295,8 +6304,8 @@ mod images {
         );
     }
 
-    // Safe-mode jail / ancestor-directory cleaning during data-uri file reads is
-    // out of scope.
+    // Safe-mode jail / ancestor-directory cleaning during data-uri file reads
+    // is out of scope.
     non_normative!(
         r#"
     test 'cleans reference to ancestor directories in imagesdir before reading image if safe mode level is at least SAFE' do
@@ -6587,10 +6596,11 @@ mod media {
     }
 
     // The vimeo/youtube service video tests below require rendering a custom
-    // `<iframe>` embed (with a service-specific URL and query string) instead of
-    // a `<video>` element. This crate does not model service video embedding, so
-    // they are kept `#[ignore]`d with the Ruby-intended assertions.
-    // TODO: render vimeo/youtube service videos as `<iframe>` embeds.
+    // `<iframe>` embed (with a service-specific URL and query string) instead
+    // of a `<video>` element. This crate does not model service video
+    // embedding, so they are kept `#[ignore]`d with the Ruby-intended
+    // assertions. TODO: render vimeo/youtube service videos as `<iframe>`
+    // embeds.
     #[ignore]
     #[test]
     fn video_macro_should_output_custom_html_with_iframe_for_vimeo_service() {
@@ -6982,7 +6992,8 @@ mod admonition_icons {
         );
     }
 
-    // TODO: render image-based admonition icons (custom icon, icontype variations).
+    // TODO: render image-based admonition icons (custom icon, icontype
+    // variations).
     #[ignore]
     #[test]
     fn should_allow_icontype_to_be_specified_when_using_custom_admonition_icon() {
@@ -7088,8 +7099,8 @@ mod admonition_icons {
         );
     }
 
-    // Safe-mode ancestor-directory cleaning during icon data-uri reads is out of
-    // scope.
+    // Safe-mode ancestor-directory cleaning during icon data-uri reads is out
+    // of scope.
     non_normative!(
         r#"
     test 'cleans reference to ancestor directories before reading icon if safe mode level is at least SAFE' do
@@ -7280,10 +7291,10 @@ mod source_code {
 "#
     );
 
-    // NOTE: divergence from Asciidoctor. A fenced code block with no language is
-    // not given the `source` style by this crate (its `declared_style()` is
-    // `None`), so no `<code>` element is rendered. Kept `#[ignore]`d with the
-    // Ruby-intended assertions.
+    // NOTE: divergence from Asciidoctor. A fenced code block with no language
+    // is not given the `source` style by this crate (its `declared_style()`
+    // is `None`), so no `<code>` element is rendered. Kept `#[ignore]`d
+    // with the Ruby-intended assertions.
     // TODO: assign the `source` style to a language-less fenced code block.
     #[ignore]
     #[test]

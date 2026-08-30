@@ -1359,15 +1359,16 @@ mod tests {
             // Regression for https://github.com/asciidoc-rs/asciidoc-parser/issues/503:
             // a bare URL abutting `>;` (rendered to `&gt;;`) with NO matching
             // leading `<`. Ruby Asciidoctor treats the whole run as a bare link
-            // (keeping the literal `&gt;` in the URL) and strips a single trailing
-            // `;`.
+            // (keeping the literal `&gt;` in the URL) and strips a single
+            // trailing `;`.
             //
             // Reference (Ruby Asciidoctor 2.0.23):
             //   $ printf '%s' 'foo https://example.org>;' | asciidoctor -e -o - -
             //   <p>foo <a href="https://example.org&gt;" class="bare">https://example.org&gt;</a>;</p>
             //
             // Previously the ungated angle-URL alternative fired for the stray
-            // `&gt;` and split the run, dropping the `;` from the `&gt;` entity.
+            // `&gt;` and split the run, dropping the `;` from the `&gt;`
+            // entity.
             let doc = Parser::default().parse("foo https://example.org>;");
 
             let rendered = doc
@@ -1387,8 +1388,9 @@ mod tests {
         fn angle_bracketed_url_still_matches() {
             // Companion to `stray_gt_followed_by_punctuation` (issue #503): the
             // genuine angle-bracketed autolink (`<url>`) must keep working. The
-            // `&lt;` prefix gates the angle-URL alternative back on, so the `&gt;`
-            // delimiter is consumed and the brackets are dropped from the link.
+            // `&lt;` prefix gates the angle-URL alternative back on, so the
+            // `&gt;` delimiter is consumed and the brackets are
+            // dropped from the link.
             let doc = Parser::default().parse("See <https://example.org> for details.");
 
             let rendered = doc
@@ -2340,9 +2342,10 @@ mod tests {
         #[test]
         fn recognized_only_when_it_prefixes_the_entry() {
             // A `[[[id]]]` that does not prefix the entry is not a bibliography
-            // anchor: it falls through to the regular inline-anchor pass (matching
-            // Asciidoctor), rendering as `[<a id="mid"></a>]` rather than the
-            // bibliography form `<a id="mid"></a>[mid]`.
+            // anchor: it falls through to the regular inline-anchor pass
+            // (matching Asciidoctor), rendering as `[<a
+            // id="mid"></a>]` rather than the bibliography form `<a
+            // id="mid"></a>[mid]`.
             let doc = Parser::default().parse("[bibliography]\n* Smith. See [[[mid]]] inline.\n");
 
             let rendered = &rendered_paragraphs(&doc)[0];
@@ -2353,18 +2356,19 @@ mod tests {
             assert!(!rendered.contains("<a id=\"mid\"></a>[mid]"));
 
             // The inner `[[mid]]` is preceded by a `[`, so — like Asciidoctor's
-            // inline-anchor scan (`InlineAnchorScanRx`) — the id is rendered but
-            // not registered in the catalog, neither as a bibliography anchor nor
-            // as a normal one. See #769.
+            // inline-anchor scan (`InlineAnchorScanRx`) — the id is rendered
+            // but not registered in the catalog, neither as a
+            // bibliography anchor nor as a normal one. See #769.
             assert!(doc.catalog().get_ref("mid").is_none());
         }
 
         #[test]
         fn leading_backslash_is_not_a_bibliography_escape() {
-            // A leading backslash does not escape a bibliography anchor (the only
-            // documented escape is `[\[[id]]]`). `\[[[id]]]` does not begin with
-            // `[[[`, so it is not a bibliography anchor; the backslash stays
-            // literal and the inner `[[id]]` becomes a normal inline anchor,
+            // A leading backslash does not escape a bibliography anchor (the
+            // only documented escape is `[\[[id]]]`). `\[[[id]]]`
+            // does not begin with `[[[`, so it is not a
+            // bibliography anchor; the backslash stays literal and
+            // the inner `[[id]]` becomes a normal inline anchor,
             // matching Asciidoctor's `\[<a id="x"></a>]`.
             let doc = Parser::default().parse("[bibliography]\n* \\[[[x]]] Leading backslash.\n");
 
@@ -2377,9 +2381,10 @@ mod tests {
 
         #[test]
         fn explicit_style_applies_to_an_ordered_list() {
-            // An explicit `[bibliography]` attribute applies to any list type, so
-            // an ordered list's entries are recognized as bibliography anchors,
-            // matching Asciidoctor (`<div class="olist bibliography">`).
+            // An explicit `[bibliography]` attribute applies to any list type,
+            // so an ordered list's entries are recognized as
+            // bibliography anchors, matching Asciidoctor (`<div
+            // class="olist bibliography">`).
             let doc = Parser::default().parse("[bibliography]\n. [[[ord]]] Ordered entry.\n");
 
             assert_css(&doc, ".olist.bibliography", 1);
@@ -2390,7 +2395,8 @@ mod tests {
         fn section_style_does_not_apply_to_an_ordered_list() {
             // The style inherited from a `bibliography` section applies only to
             // unordered lists, so an ordered list in that section is not a
-            // bibliography list; its leading `[[[id]]]` is a regular inline anchor.
+            // bibliography list; its leading `[[[id]]]` is a regular inline
+            // anchor.
             let doc = Parser::default()
                 .parse("[bibliography]\n== References\n\n. [[[ord]]] Ordered entry.\n");
 

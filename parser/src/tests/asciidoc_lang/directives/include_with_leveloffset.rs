@@ -85,9 +85,9 @@ This allows you to publish each chapter as a standalone document (complete with 
     );
 
     // Without the offset the level-0 document title of the included file is not
-    // shifted, so it stays at level 0: a body-level `= Chapter Title` modeled as
-    // a level-0 section (Asciidoctor's `sect0`) that contains the level-1
-    // `== A Section`.
+    // shifted, so it stays at level 0: a body-level `= Chapter Title` modeled
+    // as a level-0 section (Asciidoctor's `sect0`) that contains the
+    // level-1 `== A Section`.
     let handler = InlineFileHandler::from_pairs([(
         "chapter01.adoc",
         "= Chapter Title\n\nChapter intro.\n\n== A Section\n\nSection body.",
@@ -262,8 +262,8 @@ fn absolute_offset_set_in_header_shifts_body_headings() {
     // The spec's "Alternatively, you could use absolute levels" note applies an
     // absolute `:leveloffset:` (here in the document header) rather than a
     // relative one. An absolute offset is stored verbatim and applied to every
-    // following heading: `= Chapter One` (level 0) becomes a level-1 section and
-    // its `== A Section` (level 1) becomes level 2.
+    // following heading: `= Chapter One` (level 0) becomes a level-1 section
+    // and its `== A Section` (level 1) becomes level 2.
     let doc = Parser::default().parse(concat!(
         "= My Book\n",
         ":leveloffset: 1\n",
@@ -282,8 +282,9 @@ fn absolute_offset_set_in_header_shifts_body_headings() {
 #[test]
 fn malformed_relative_offset_is_ignored() {
     // A `leveloffset` whose relative form has no valid integer (`+x`) cannot be
-    // resolved, so it is left as-is and read back as a zero offset: headings are
-    // not shifted. `== Real Section` (level 1) therefore stays at level 1.
+    // resolved, so it is left as-is and read back as a zero offset: headings
+    // are not shifted. `== Real Section` (level 1) therefore stays at level
+    // 1.
     let doc = Parser::default().parse(concat!(
         "= My Book\n",
         "\n",
@@ -297,11 +298,11 @@ fn malformed_relative_offset_is_ignored() {
 
 #[test]
 fn absolute_offset_near_i32_max_does_not_overflow() {
-    // A hostile absolute `:leveloffset:` at `i32::MAX` must not overflow when it
-    // is folded into a heading's syntactic level (here 5, from `======`). The
-    // effective level saturates instead of panicking (debug) or wrapping
-    // (release), then clamps into the supported 1-5 range: the heading is still
-    // a section, at level 5.
+    // A hostile absolute `:leveloffset:` at `i32::MAX` must not overflow when
+    // it is folded into a heading's syntactic level (here 5, from
+    // `======`). The effective level saturates instead of panicking (debug)
+    // or wrapping (release), then clamps into the supported 1-5 range: the
+    // heading is still a section, at level 5.
     let src = format!(
         "= My Book\n:leveloffset: {}\n\n====== Deep Heading",
         i32::MAX
@@ -326,8 +327,8 @@ fn absolute_offset_near_i32_max_does_not_overflow() {
 fn relative_offset_accumulation_near_i32_max_does_not_overflow() {
     // Accumulating a relative `+1` on top of an offset already at `i32::MAX`
     // must not overflow while resolving the assignment. The offset saturates at
-    // `i32::MAX`, so the following heading is still parsed as a section, clamped
-    // to level 5.
+    // `i32::MAX`, so the following heading is still parsed as a section,
+    // clamped to level 5.
     let src = format!(
         "= My Book\n:leveloffset: {}\n\n:leveloffset: +1\n\n====== Deep Heading",
         i32::MAX

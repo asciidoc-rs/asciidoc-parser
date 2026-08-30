@@ -559,8 +559,9 @@ mod psv {
 
         let doc = Parser::default().parse("|===\nA | here| a | there\n| x\n| y\n| z\n| end\n|===");
 
-        // The content before the first separator (`A`) is recovered as the first
-        // cell, so the first row has four cells and the table four columns.
+        // The content before the first separator (`A`) is recovered as the
+        // first cell, so the first row has four cells and the table
+        // four columns.
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table > tbody > tr", 2);
         assert_css(&doc, "table > tbody > tr > td", 8);
@@ -632,8 +633,9 @@ mod psv {
 
         let doc = Parser::default().parse("|===\nl|one\n*two*\nthree\n<four>\n|===");
 
-        // Ruby compares the serialized `<pre>one\n*two*\nthree\n&lt;four&gt;</pre>`;
-        // the test DOM decodes entities in `text()`, so this asserts the decoded
+        // Ruby compares the serialized
+        // `<pre>one\n*two*\nthree\n&lt;four&gt;</pre>`; the test DOM
+        // decodes entities in `text()`, so this asserts the decoded
         // content (formatting markup left literal, specialchars escaped then
         // decoded back).
         assert_css(&doc, "table pre", 1);
@@ -701,9 +703,9 @@ mod psv {
         let doc =
             Parser::default().parse("[cols=2*]\n|===\nv|\n  one\n  two\nthree\n\n  | normal\n|===");
 
-        // The unrecognized `v` style is ignored, so the cell renders as a normal
-        // paragraph (`p.tableblock`) with leading newlines and trailing spaces
-        // stripped but interior indentation preserved.
+        // The unrecognized `v` style is ignored, so the cell renders as a
+        // normal paragraph (`p.tableblock`) with leading newlines and
+        // trailing spaces stripped but interior indentation preserved.
         assert_xpath(
             &doc,
             "(/table/tbody/tr/td)[1]/p[@class=\"tableblock\"][text()=\"one\n  two\nthree\"]",
@@ -788,10 +790,10 @@ mod psv {
         assert_xpath(&doc, "(/table/colgroup/col)[1][@width=\"15%\"]", 1);
         assert_xpath(&doc, "(/table/colgroup/col)[1][@autowidth-option]", 0);
 
-        // Each autowidth column still has a computed `colpcwidth` (the remaining
-        // space shared three ways, truncated to four places with the balance
-        // donated to the last column) and the `autowidth-option` marker, but no
-        // HTML `width` attribute.
+        // Each autowidth column still has a computed `colpcwidth` (the
+        // remaining space shared three ways, truncated to four places
+        // with the balance donated to the last column) and the
+        // `autowidth-option` marker, but no HTML `width` attribute.
         for i in 2..=3 {
             assert_xpath(
                 &doc,
@@ -809,8 +811,9 @@ mod psv {
             assert_xpath(&doc, &format!("(/table/colgroup/col)[{i}][@width]"), 0);
         }
 
-        // The HTML-output expectations from the Ruby test: every column renders a
-        // `<col>`, but only the single fixed column carries a `width` attribute.
+        // The HTML-output expectations from the Ruby test: every column renders
+        // a `<col>`, but only the single fixed column carries a `width`
+        // attribute.
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table colgroup col", 4);
         assert_css(&doc, "table colgroup col[width]", 1);
@@ -853,8 +856,9 @@ mod psv {
         );
 
         // Every column is autowidth, so each takes an equal 25% share in
-        // `colpcwidth` and carries the `autowidth-option` marker; none carries an
-        // HTML `width` attribute even though the table itself has a width.
+        // `colpcwidth` and carries the `autowidth-option` marker; none carries
+        // an HTML `width` attribute even though the table itself has a
+        // width.
         for i in 1..=4 {
             assert_xpath(
                 &doc,
@@ -1411,8 +1415,8 @@ mod psv {
 "#
     );
 
-    // Out of scope: DocBook backend. ("should convert frame value ends to topbot
-    // when converting to DocBook")
+    // Out of scope: DocBook backend. ("should convert frame value ends to
+    // topbot when converting to DocBook")
     non_normative!(
         r#"
     test 'should convert frame value ends to topbot when converting to DocBook' do
@@ -2220,8 +2224,8 @@ mod psv {
         assert_css(&doc, "table > tbody > tr", 4);
         assert_css(&doc, "table > tbody > tr > td", 10);
 
-        // Ruby uses `tr:nth-child(N)` / `td:nth-child(N)`; the indexed XPath form
-        // is equivalent and supported by the test DOM.
+        // Ruby uses `tr:nth-child(N)` / `td:nth-child(N)`; the indexed XPath
+        // form is equivalent and supported by the test DOM.
         assert_xpath(&doc, "(/table/tbody/tr)[1]/td", 4);
         assert_xpath(&doc, "(/table/tbody/tr)[2]/td", 3);
         assert_xpath(&doc, "(/table/tbody/tr)[3]/td", 1);
@@ -2320,9 +2324,10 @@ mod psv {
 
         assert_xpath(&doc, "(/table/tbody/tr)[1]/td", 2);
         assert_xpath(&doc, "((/table/tbody/tr)[1]/td)[1][@colspan=\"2\"]", 1);
-        // Ruby uses `td:nth-child(1)[colspan]` / `td:nth-child(2):not([colspan])`;
-        // since row 1 has exactly one cell carrying a colspan, asserting the row
-        // has a single colspanned cell is equivalent.
+        // Ruby uses `td:nth-child(1)[colspan]` /
+        // `td:nth-child(2):not([colspan])`; since row 1 has exactly one
+        // cell carrying a colspan, asserting the row has a single
+        // colspanned cell is equivalent.
         assert_xpath(&doc, "(/table/tbody/tr)[1]/td[@colspan]", 1);
         assert_xpath(&doc, "(/table/tbody/tr)[2]/td", 3);
         assert_xpath(&doc, "(/table/tbody/tr)[2]/td[@colspan]", 0);
@@ -2738,11 +2743,12 @@ mod psv {
         assert_css(&doc, "table > tbody > tr", 1);
         assert_css(&doc, "table > tbody > tr > td", 2);
 
-        // The duplicated cell (`2*|`) is cloned into both columns, and each clone
-        // takes its own column's style: the first (default) column renders the
-        // content as seven paragraphs, the second (`^l`) column as a single
-        // centered literal block. (Ruby uses `td:nth-child(N)`; the equivalent
-        // positional `td[N]` is expressed in XPath here.)
+        // The duplicated cell (`2*|`) is cloned into both columns, and each
+        // clone takes its own column's style: the first (default)
+        // column renders the content as seven paragraphs, the second
+        // (`^l`) column as a single centered literal block. (Ruby uses
+        // `td:nth-child(N)`; the equivalent positional `td[N]` is
+        // expressed in XPath here.)
         assert_xpath(
             &doc,
             "/table/tbody/tr/td[1][@class=\"halign-left valign-top\"]/p[@class=\"tableblock\"]",
@@ -2754,8 +2760,8 @@ mod psv {
             1,
         );
 
-        // The literal block preserves every line of the cell, including the blank
-        // lines between paragraphs (26 lines total).
+        // The literal block preserves every line of the cell, including the
+        // blank lines between paragraphs (26 lines total).
         let vdom = doc.to_virtual_dom();
         let pre = query_xpath(&vdom, "/table/tbody/tr/td[2]//pre");
         assert_eq!(pre.len(), 1);
@@ -2991,13 +2997,13 @@ mod psv {
     fn asciidoc_table_cell_cannot_override_the_derived_doctype_flag() {
         // The active `backend-html5-doctype-*` flag is a read-only intrinsic
         // (empty value), so a cell-body assignment to it is silently ignored:
-        // `{backend-html5-doctype-article}` still resolves to the empty intrinsic
-        // value rather than the cell's attempted override.
+        // `{backend-html5-doctype-article}` still resolves to the empty
+        // intrinsic value rather than the cell's attempted override.
         //
         // The parent is a `book`, so the cell's active flag
-        // (`backend-html5-doctype-article`, after the cell resets to the default
-        // doctype) differs from the parent's — the case a lock computed from the
-        // parent's doctype would miss.
+        // (`backend-html5-doctype-article`, after the cell resets to the
+        // default doctype) differs from the parent's — the case a lock
+        // computed from the parent's doctype would miss.
         let doc = Parser::default().parse(
             "= Book Title\n:doctype: book\n\n== Chapter 1\n\n|===\na|\n= AsciiDoc Table Cell\n:backend-html5-doctype-article: custom\n\nflag=[{backend-html5-doctype-article}]\n|===",
         );
@@ -3008,13 +3014,14 @@ mod psv {
 
     #[test]
     fn asciidoc_table_cell_cannot_stash_a_derived_doctype_flag_while_it_is_inactive() {
-        // Assigning `:backend-html5-doctype-article:` while the cell's doctype is
-        // `book` (so that flag is not the active synthesized intrinsic) must not
-        // stash a per-parser override that later shadows the intrinsic once the
-        // cell switches its doctype back to `article`. The whole
-        // `backend-html5-doctype-*` namespace is read-only, so the assignment is
-        // ignored and `{backend-html5-doctype-article}` still resolves to the
-        // empty intrinsic value.
+        // Assigning `:backend-html5-doctype-article:` while the cell's doctype
+        // is `book` (so that flag is not the active synthesized
+        // intrinsic) must not stash a per-parser override that later
+        // shadows the intrinsic once the cell switches its doctype back
+        // to `article`. The whole `backend-html5-doctype-*` namespace
+        // is read-only, so the assignment is ignored and
+        // `{backend-html5-doctype-article}` still resolves to the empty
+        // intrinsic value.
         let doc = Parser::default().parse(
             "= Doc Title\n\n== Chapter 1\n\n|===\na|\n= AsciiDoc Table Cell\n:doctype: book\n:backend-html5-doctype-article: custom\n:doctype: article\n\nflag=[{backend-html5-doctype-article}]\n|===",
         );
@@ -3431,18 +3438,19 @@ mod psv {
 
     #[test]
     fn asciidoc_table_cell_hides_its_title_by_default() {
-        // An AsciiDoc table cell that opens with a level-0 title but sets neither
-        // `showtitle` nor `notitle` behaves like embedded output: its doctitle is
-        // hidden. Asciidoctor 2.0.26 emits no `<h1>` for such a cell (the "neither
-        // set" default), whereas enabling `showtitle` in the cell renders it.
+        // An AsciiDoc table cell that opens with a level-0 title but sets
+        // neither `showtitle` nor `notitle` behaves like embedded
+        // output: its doctitle is hidden. Asciidoctor 2.0.26 emits no
+        // `<h1>` for such a cell (the "neither set" default), whereas
+        // enabling `showtitle` in the cell renders it.
         let default_doc = Parser::default()
             .parse("= Document Title\n\n|===\na|\n= Nested Document Title\n\ncontent\n|===");
 
         // Neither attribute set: the cell hides its title.
         assert_css(&default_doc, ".tableblock h1", 0);
 
-        // With `showtitle` enabled in the cell, the same title renders — proving
-        // only the "neither set" default changed.
+        // With `showtitle` enabled in the cell, the same title renders —
+        // proving only the "neither set" default changed.
         let shown_doc = Parser::default().parse(
             "= Document Title\n\n|===\na|\n= Nested Document Title\n:showtitle:\n\ncontent\n|===",
         );
@@ -3607,8 +3615,8 @@ mod psv {
             .with_include_file_handler(handler);
         let doc = parser.parse("|===\na|include::fixtures/include-file.adoc[]\n|===");
 
-        // The `include::` on the cell's first line is expanded, so the cell holds
-        // the included content rather than the literal directive.
+        // The `include::` on the cell's first line is expanded, so the cell
+        // holds the included content rather than the literal directive.
         assert_rendered_contains(&doc, "included content");
     }
 
@@ -3650,11 +3658,12 @@ mod psv {
 "#
         );
 
-        // The table (with a cell whose first line is an unresolvable `include::`)
-        // lives in `outer.adoc`, which the primary document reaches via its own
-        // `include::`. The error about the unresolved cell directive must be
-        // attributed to `outer.adoc` at the line the directive appears on there
-        // (line 5), not to the primary document or the synthesized cell content.
+        // The table (with a cell whose first line is an unresolvable
+        // `include::`) lives in `outer.adoc`, which the primary
+        // document reaches via its own `include::`. The error about the
+        // unresolved cell directive must be attributed to `outer.adoc`
+        // at the line the directive appears on there (line 5), not to
+        // the primary document or the synthesized cell content.
         let handler = InlineFileHandler::from_pairs([(
             "outer.adoc",
             "|===\n|A |B\n\n|text\na|include::does-not-exist.adoc[]\n|===",
@@ -3664,8 +3673,8 @@ mod psv {
             .with_include_file_handler(handler);
         let doc = parser.parse("first\n\ninclude::outer.adoc[]\n\nlast");
 
-        // The unresolved directive is replaced (in the cell) with a message that
-        // names the file the directive came from.
+        // The unresolved directive is replaced (in the cell) with a message
+        // that names the file the directive came from.
         assert_rendered_contains(&doc, "Unresolved directive in outer.adoc");
 
         // A single warning is reported, and its cursor maps — through the
@@ -3712,9 +3721,9 @@ mod psv {
         let doc =
             Parser::default().parse("== Some\n\n|===\na|See <<_more>>\n|===\n\n== More\n\ncontent");
 
-        // The cross-reference inside the AsciiDoc cell resolves against the main
-        // document's catalog, even though its target section is defined *after*
-        // the table.
+        // The cross-reference inside the AsciiDoc cell resolves against the
+        // main document's catalog, even though its target section is
+        // defined *after* the table.
         assert_xpath(&doc, "//a[@href=\"#_more\"]", 1);
         assert_xpath(&doc, "//a[@href=\"#_more\"][text()=\"More\"]", 1);
     }
@@ -3883,8 +3892,8 @@ mod psv {
         assert_css(&doc, "a#_footnoteref_1", 1);
 
         // It is *not* shared with the enclosing document: the main document's
-        // footnote registry stays empty, so the footnote would not appear in the
-        // main document's footnote list.
+        // footnote registry stays empty, so the footnote would not appear in
+        // the main document's footnote list.
         assert!(
             doc.catalog().footnotes().is_empty(),
             "cell footnote leaked into the main document's registry"
@@ -3913,9 +3922,9 @@ mod psv {
         assert_eq!(footnotes[0].text, "A lightweight markup language.");
     }
 
-    // Out of scope: DocBook backend. ("callout numbers should be globally unique,
-    // including AsciiDoc table cells" — asserts only against DocBook `//co` /
-    // `//callout` output)
+    // Out of scope: DocBook backend. ("callout numbers should be globally
+    // unique, including AsciiDoc table cells" — asserts only against
+    // DocBook `//co` / `//callout` output)
     non_normative!(
         r#"
     test 'callout numbers should be globally unique, including AsciiDoc table cells' do
@@ -4085,8 +4094,8 @@ mod psv {
 
         assert_css(&doc, "table", 2);
         assert_css(&doc, "table table", 1);
-        // Ruby uses `td:nth-child(2) table`; the nested table sits in the second
-        // cell of the (single) outer row.
+        // Ruby uses `td:nth-child(2) table`; the nested table sits in the
+        // second cell of the (single) outer row.
         assert_xpath(&doc, "/table/tbody/tr/td[2]//table", 1);
         assert_xpath(&doc, "/table/tbody/tr/td[2]//table/tbody/tr/td", 2);
     }
@@ -4154,19 +4163,20 @@ mod psv {
         // document, asserts it is `nested?` and that its `options[:to_dir]`
         // matches the parent's.
         //
-        // This crate has no options bag: a document's configuration is carried by
-        // its attributes, and Asciidoctor itself surfaces the `to_dir` option as
-        // the `outdir` document attribute. So the faithful analog is to configure
-        // the parent with an `outdir` attribute (as if from the API, the way an
-        // option is supplied) and confirm the nested AsciiDoc-cell document both
+        // This crate has no options bag: a document's configuration is carried
+        // by its attributes, and Asciidoctor itself surfaces the
+        // `to_dir` option as the `outdir` document attribute. So the
+        // faithful analog is to configure the parent with an `outdir`
+        // attribute (as if from the API, the way an option is supplied)
+        // and confirm the nested AsciiDoc-cell document both
         // reports itself as nested and has inherited that value.
         let doc = Parser::default()
             .with_intrinsic_attribute("outdir", "/path/to/output", ModificationContext::ApiOnly)
             .parse("|===\na|\nAsciiDoc table cell\n|===");
 
-        // Locate the nested document: the single table's single cell, which is an
-        // AsciiDoc cell (`a|`) and therefore a nested, standalone document. This
-        // is the crate's equivalent of Ruby's
+        // Locate the nested document: the single table's single cell, which is
+        // an AsciiDoc cell (`a|`) and therefore a nested, standalone
+        // document. This is the crate's equivalent of Ruby's
         // `doc.blocks[0].find_by context: :document, traverse_documents: true`.
         let table = match doc.child_blocks().next() {
             Some(crate::blocks::Block::Table(table)) => table,
@@ -4181,9 +4191,9 @@ mod psv {
         // `assert nested_doc.nested?`
         assert!(nested_doc.is_nested());
 
-        // `assert_equal doc.options[:to_dir], nested_doc.options[:to_dir]` — the
-        // inherited option (here the `outdir` attribute) is visible on the nested
-        // document and equals the parent's.
+        // `assert_equal doc.options[:to_dir], nested_doc.options[:to_dir]` —
+        // the inherited option (here the `outdir` attribute) is visible
+        // on the nested document and equals the parent's.
         assert!(nested_doc.is_attribute_set("outdir"));
         assert_eq!(
             nested_doc.attribute_value("outdir"),
@@ -4261,8 +4271,8 @@ mod psv {
             "= Document Title\n\n== Section A\n\n|===\na|\n= Subdocument Title\n:toc:\n\n== Subdocument Section A\n\ncontent\n|===",
         );
 
-        // The outer document has no TOC; the cell enables its own, so the single
-        // TOC is the one inside the table.
+        // The outer document has no TOC; the cell enables its own, so the
+        // single TOC is the one inside the table.
         assert_css(&doc, ".toc", 1);
         assert_css(&doc, "table .toc", 1);
     }
@@ -4270,16 +4280,18 @@ mod psv {
     #[test]
     fn asciidoc_table_cell_renders_a_positional_toc() {
         // A cell that enables an automatically placed *positional* TOC (`top` /
-        // `bottom`, like `left` / `right`) still renders it: the nested-cell path
-        // must treat these the same as an `auto` TOC, not silently drop them. The
-        // positional placement gives the container the `toc2` class.
+        // `bottom`, like `left` / `right`) still renders it: the nested-cell
+        // path must treat these the same as an `auto` TOC, not silently
+        // drop them. The positional placement gives the container the
+        // `toc2` class.
         for value in ["^", "v", "top", "bottom", "<", ">"] {
             let doc = Parser::default().parse(&format!(
                 "= Document Title\n\n== Section A\n\n|===\na|\n= Subdocument Title\n:toc: {value}\n\n== Subdocument Section A\n\ncontent\n|==="
             ));
 
             // The outer document has no TOC; the cell's positional TOC is the
-            // single one, and it renders inside the table with the `toc2` class.
+            // single one, and it renders inside the table with the `toc2`
+            // class.
             assert_css(&doc, "#toc.toc2", 1);
             assert_css(&doc, "table #toc.toc2", 1);
         }
@@ -4405,9 +4417,10 @@ mod psv {
         assert_css(&doc, "table", 1);
         assert_css(&doc, "table > tbody > tr > td", 1);
 
-        // The cell is its own (nested) document and does not inherit the parent's
-        // doctitle, so its lone paragraph is not promoted into a preamble: the
-        // cell renders a bare `.paragraph`, never a `#preamble`.
+        // The cell is its own (nested) document and does not inherit the
+        // parent's doctitle, so its lone paragraph is not promoted into
+        // a preamble: the cell renders a bare `.paragraph`, never a
+        // `#preamble`.
         assert_css(&doc, "table > tbody > tr > td #preamble", 0);
         assert_css(&doc, "table > tbody > tr > td .paragraph", 1);
     }
@@ -4481,10 +4494,10 @@ mod psv {
     }
 
     #[test]
-    // An unterminated example block inside an AsciiDoc table cell that is itself
-    // attached to a list item — Asciidoctor reports the warning at the inner
-    // block's line (9). The cursor/line of nested-cell warnings is tracked via
-    // the nested-cell source-map work landed for #542.
+    // An unterminated example block inside an AsciiDoc table cell that is
+    // itself attached to a list item — Asciidoctor reports the warning at
+    // the inner block's line (9). The cursor/line of nested-cell warnings
+    // is tracked via the nested-cell source-map work landed for #542.
     fn should_show_correct_line_number_in_warning_about_unterminated_block_inside_asciidoc_table_cell()
      {
         verifies!(
@@ -4592,7 +4605,8 @@ mod psv {
 "#
     );
 
-    // Out of scope: DocBook backend. ("table with unbreakable option docbook 5")
+    // Out of scope: DocBook backend. ("table with unbreakable option docbook
+    // 5")
     non_normative!(
         r#"
     test 'table with unbreakable option docbook 5' do
@@ -4970,8 +4984,8 @@ mod csv {
         );
 
         // The `1\t2\t` record ends with a tab, so its third field is empty. The
-        // include is the delivery mechanism; the behavior under test is that the
-        // trailing empty cell survives.
+        // include is the delivery mechanism; the behavior under test is that
+        // the trailing empty cell survives.
         let handler = InlineFileHandler::from_pairs([(
             "fixtures/data.tsv",
             "First\tSecond\tThird\na\tb\tc\n1\t2\t\nx\ty\tz\n",

@@ -6,9 +6,9 @@
 mod content;
 pub use content::Content;
 pub(crate) use content::{
-    DeferredParts, FootnoteDeferred, OwnedTitle, XrefSegment, escape_sentinels,
-    fold_resolved_title, render_xref_template, resolved_destinations, sanitize_title,
-    xref_segment_from_node,
+    DeferredParts, FootnoteDeferred, OwnedTitle, XrefSegment, XrefTemplatePiece,
+    fold_resolved_title, render_xref_segment, render_xref_template, resolved_destinations,
+    sanitize_title, xref_segment_from_node,
 };
 pub(crate) mod inline_builder;
 
@@ -34,7 +34,7 @@ mod substitution_step;
 pub use substitution_step::SubstitutionStep;
 pub(crate) use substitution_step::{
     ATTRIBUTE_REFERENCE, AttributeMissing, CharacterReplacement, QuoteSub, build_callout_regexes,
-    character_replacements, hard_line_break_pattern, maybe_has_quotes, maybe_has_replacements,
-    quote_subs, restored_entity_pattern, substitute_attributes_in_macro_target,
+    character_replacements, hard_line_break_pattern, maybe_has_replacements, quote_subs,
+    restored_entity_pattern, substitute_attributes_in_macro_target,
     substitute_attributes_in_reftext,
 };

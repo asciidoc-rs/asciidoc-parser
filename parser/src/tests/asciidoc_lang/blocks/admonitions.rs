@@ -329,8 +329,8 @@ It's possible to use Unicode glyphs as admonition icons.
     );
 
     // The character reference is assigned with substitutions disabled (via the
-    // `pass` macro), so it reaches the label as written; the rendered HTML shows
-    // the referenced glyph.
+    // `pass` macro), so it reaches the label as written; the rendered HTML
+    // shows the referenced glyph.
     let doc = Parser::default().parse(
         ":tip-caption: pass:[&#128161;]\n\n[TIP]\nIt's possible to use Unicode glyphs as admonition icons.",
     );
