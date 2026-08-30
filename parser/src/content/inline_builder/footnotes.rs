@@ -403,27 +403,28 @@ fn build_candidate_node<'src>(
 }
 
 /// Builds one [`Footnote`](InlineNode::Footnote) node from a `footnote:` match,
-/// resolving it into the same three (id, content) cases the string
-/// replacer's `InlineFootnoteMacroReplacer` distinguishes, so the fold —
-/// which hands the node straight to
+/// resolving it into the three (id, content) cases Asciidoctor's own footnote
+/// macro distinguishes, so the fold — which hands the node straight to
 /// [`render_footnote`](crate::parser::InlineRenderer::render_footnote) (see
 /// `fold_footnote`) — reproduces the same bytes. Returns `None` for
-/// a form this increment defers, or for `footnote:[]` (neither an id nor
-/// content), which is not a footnote at all.
+/// a form this family leaves unrecognized, or for `footnote:[]` (neither an
+/// id nor content), which is not a footnote at all.
 ///
 /// # The one *required* recognition side effect
 ///
 /// Every other macro family in this module performs *no* recognition side
-/// effect (no catalog registration, no warning), deferring that to the
-/// cutover (design §5.2 Phase 4, step 6) because omitting it does not change
-/// the fold's output bytes. A footnote's own marker is the one exception: its
-/// rendered digits (`[1]`, `[2]`, …) *are* the assigned footnote number, so
-/// this builder must call [`Parser::footnote_index_for_id`] /
-/// [`Parser::define_footnote`] — the same document-counter-advancing calls
-/// the string replacer makes — or the differential corpus below could never
-/// pass. The two code paths never share a `Parser` (each independently
-/// numbers footnotes over the same source in the same left-to-right order),
-/// so this never double-counts a registration; see the module's test helpers.
+/// effect (no catalog registration, no warning) — that happens once per
+/// parse, after the tree is built and folded, via `apply_macro_side_effects`
+/// (see this module's `README.md`, "Recognition side effects"), since
+/// omitting it here does not change the fold's output bytes. A footnote's own
+/// marker is the one exception: its rendered digits (`[1]`, `[2]`, …) *are*
+/// the assigned footnote number, so this builder must call
+/// [`Parser::footnote_index_for_id`] / [`Parser::define_footnote`] directly,
+/// advancing the document's footnote counter as each occurrence is
+/// recognized, or the differential corpus below could never pass. Each test
+/// fixture's `build_src` call gets its own `Parser` (each independently
+/// numbers footnotes over its own source in left-to-right order), so no two
+/// fixtures' counters ever cross; see the module's test helpers.
 ///
 /// The registered catalog `text` is the footnote's **own subtree, folded** —
 /// see [`register_footnote_number`], which is where the entry a
@@ -432,11 +433,10 @@ fn build_candidate_node<'src>(
 ///
 /// # Content carrying an escaped closing bracket
 ///
-/// A content bracket may carry an escaped closing bracket (`\]`), which the
-/// string replacer unescapes to a literal `]`
-/// (`normalize_footnote_text`).
-/// The subtree carries it the same way: [`footnote_children`] emits the
-/// content through the reference-bearing families' own
+/// A content bracket may carry an escaped closing bracket (`\]`), which is
+/// unescaped to a literal `]`, matching Asciidoctor's own footnote-text
+/// normalization. The subtree carries it the same way: [`footnote_children`]
+/// emits the content through the reference-bearing families' own
 /// [`emit_range_unescaping_brackets`], which drops each backslash as a *gap*
 /// in the ranges it emits rather than rebuilding the pieces around it — see
 /// that helper for why a per-node `replace` cannot express the same unescape.
@@ -493,8 +493,8 @@ fn build_footnote_node<'src>(
                 }))
             }
 
-            // A reference to an id that was never defined, reported exactly
-            // where the string replacer reports it. Recorded rather than
+            // A reference to an id that was never defined, reported right
+            // here. Recorded rather than
             // replayed: the node is a reference with no number, which is also
             // what a *forward* reference looks like mid-parse, so the tree
             // cannot tell the two apart after the fact.
@@ -535,8 +535,8 @@ fn build_footnote_node<'src>(
 /// Unlike `footnote:id[…]`, which takes its id from the macro target,
 /// `footnoteref:[id,text]` / `footnoteref:[id]` packs both into one bracket
 /// (`raw`, group 3 of [`INLINE_FOOTNOTE_MACRO`]), split on the **first**
-/// comma — mirroring `InlineFootnoteMacroReplacer`'s own `raw.split_once(',')`
-/// exactly, including that an id is *always* present (a bracket with no
+/// comma — matching Asciidoctor's own `footnoteref:` parsing exactly,
+/// including that an id is *always* present (a bracket with no
 /// comma is the id alone, with no text — a bare reference) and that a
 /// trailing comma (`footnoteref:[id,]`) yields an *empty*, not absent,
 /// content (a defining occurrence with empty text), unlike `footnote:id[]`'s
@@ -548,9 +548,10 @@ fn build_footnote_node<'src>(
 /// required `footnote_index_for_id`/`define_footnote` side effect, and how a
 /// content-side `\]` is unescaped, which applies here identically since `raw`
 /// is matched by the very same bracket group). The **id** half is the one
-/// place the two differ: the string replacer splits the *raw* bracket on its
-/// first comma and never normalizes what precedes it, so an id carrying a `\]`
-/// keeps its backslash — as the id [`footnote_id_text`] recovers does.
+/// place the two differ: Asciidoctor's own `footnoteref:` handling splits
+/// the *raw* bracket on its first comma and never normalizes what precedes
+/// it, so an id carrying a `\]` keeps its backslash — as the id
+/// [`footnote_id_text`] recovers does.
 ///
 /// The deprecation warning `InlineFootnoteMacroReplacer` records outside
 /// `compat-mode` is raised here too, from the whole match's own text, exactly
@@ -594,11 +595,11 @@ fn build_footnoteref_node<'src>(
 
     // Unlike the `footnote:` form's own `[\w-]+` id — which no opaque piece
     // can reach — this id is *whatever precedes the first comma* in an
-    // arbitrary bracket, so it can cross a rendered span, whose markup the
-    // string replacer splits on and reads as the id while this side sees one
-    // placeholder standing in for it. Such a macro is left unrecognized (the
-    // boundary every macro family keeps), rather than built with an id no
-    // pipeline would produce.
+    // arbitrary bracket, so it can cross a rendered span, whose raw markup
+    // Asciidoctor splits on and reads as the id, while this side sees one
+    // opaque placeholder standing in for it. Such a macro is left unrecognized
+    // (the boundary every macro family keeps), rather than built with an id
+    // that has no faithful source-text reading.
     if !range_has_no_opaque_piece(nodes, pieces, &id_range) {
         return None;
     }
@@ -652,14 +653,13 @@ fn build_footnoteref_node<'src>(
 }
 
 /// Recovers a footnote **id** from the level's match-string `range` — the
-/// *already-substituted* text the string replacer itself reads out of its own
-/// escaped haystack (`caps[2]`, or the first half of a `footnoteref:`
-/// bracket), and the exact string it looks the footnote up by, registers under,
-/// and — for an unresolved reference — renders.
+/// already-substituted text (`caps[2]`, or the first half of a
+/// `footnoteref:` bracket) — and the exact string the footnote is looked up
+/// by, registered under, and — for an unresolved reference — rendered as.
 ///
 /// [`text_slice`] recovers that text precisely wherever the range's pieces are
-/// [`Text`](InlineNode::Text) runs: borrowed from `'src` for a verbatim one
-/// (design §4.5), and the expansion's own bytes for a
+/// [`Text`](InlineNode::Text) runs: borrowed from `'src` for a verbatim one,
+/// and the expansion's own bytes for a
 /// [`synthesized`](Piece::synthesized) one — an attribute reference
 /// (`{fn-disclaimer}` expanding to `footnote:disclaimer[…]`), or a filtered
 /// multi-line block's own joined seed. That is the lift this helper exists for:
@@ -672,8 +672,8 @@ fn build_footnoteref_node<'src>(
 /// `'src` slice at all (the source holds one character where the match string
 /// holds an entity), which is exactly what `text_slice` declines to recover, so
 /// it falls back to the match string's own bytes: `footnoteref:[a&b,…]`
-/// registers `a&amp;b`, precisely what the string replacer's
-/// `raw.split_once(',')` reads from its own haystack. Only an **opaque** piece
+/// registers `a&amp;b`, matching what Asciidoctor's own `footnoteref:`
+/// parsing reads from its escaped haystack. Only an **opaque** piece
 /// cannot be recovered this way, and its one reachable call site rejects such a
 /// range before calling here.
 fn footnote_id_text<'src>(
@@ -692,22 +692,21 @@ fn footnote_id_text<'src>(
 /// becomes structured children rather than a literal attribute value, so a
 /// range crossing an already-recognized construct is not a boundary to defer
 /// on; it is the whole point — the emitter clones that construct's node
-/// whole into the footnote's subtree, exactly mirroring how the string
-/// pipeline's footnote text captures an already-substituted macro verbatim
+/// whole into the footnote's subtree, matching Asciidoctor's own behavior,
+/// whose footnote text captures an already-rendered macro verbatim
 /// (see [`apply_footnotes`]'s doc comment on ordering). It emits through the
 /// plain [`emit_range`](super::quotes::emit_range), not the recursing
-/// [`emit_range_recursing_footnotes`] — footnotes do not nest (the string
-/// pipeline's own lazy bracket match cannot recognize one inside another's
+/// [`emit_range_recursing_footnotes`] — footnotes do not nest (this family's
+/// own lazy bracket match cannot recognize one inside another's
 /// content either, since it always stops at the *first* unescaped `]`), so a
 /// footnote's own content is captured as-is.
 ///
 /// # The `\]` unescape
 ///
 /// A bracket's content may carry an **escaped closing bracket** (`\]`), which
-/// `normalize_footnote_text`
-/// — the string replacer's own normalization — turns back into a literal `]`.
-/// The subtree must carry the same text, so the shared
-/// [`emit_range_unescaping_brackets`] drops
+/// is unescaped back into a literal `]`, matching Asciidoctor's own
+/// footnote-text normalization. The subtree must carry the same text, so the
+/// shared [`emit_range_unescaping_brackets`] drops
 /// each backslash as a *gap* in the ranges it emits: `footnote:[a \] b]`
 /// becomes the two `'src`-borrowing [`Text`](InlineNode::Text) children `a `
 /// and `] b`, never an owned rebuild. Sharing the reference-bearing families'
@@ -744,43 +743,37 @@ fn footnote_children<'src>(
 /// placeholder **template** the entry stores and the cross-reference
 /// **segments** that fill it, which is exactly the pair `define_footnote`
 /// turns into a
-/// [`FootnoteDeferred`](crate::content::FootnoteDeferred). The string
-/// replacer reaches the same pair from the other direction — it re-homes the
-/// block template's placeholders out of the already-substituted text it cut
-/// the footnote from
-/// (`rehome_xref_placeholders`) —
-/// so a footnote's own `<<tgt>>` resolves on either side.
+/// [`FootnoteDeferred`](crate::content::FootnoteDeferred), so a footnote's
+/// own `<<tgt>>` resolves the same way any other deferred cross-reference
+/// does.
 ///
-/// Folding the subtree is also what makes the entry's `text` byte-faithful at
-/// all: the raw bracket content this used to register is the *match string*,
-/// in which an already-recognized construct is one opaque `SPAN_PLACEHOLDER`
-/// codepoint, so `footnote:[see https://github.com[GitHub\]]` registered
-/// `"see \u{e0f0}"` where the string pipeline registers
-/// `"see <a href=\"https://github.com\">GitHub</a>"`.
+/// Folding the subtree is also what makes the entry's `text` byte-faithful:
+/// registering the raw *match string* instead — in which an already-recognized
+/// construct is one opaque `SPAN_PLACEHOLDER` codepoint — would register
+/// `footnote:[see https://github.com[GitHub\]]` as `"see \u{e0f0}"` rather
+/// than the correct `"see <a href=\"https://github.com\">GitHub</a>"`.
 ///
 /// # Why the anchor is `root`, not the macro's own span
 ///
 /// `define_footnote` records where the *enclosing content* was written, not
 /// where the macro sits: the entry's location anchors an unresolved-reference
 /// warning raised much later, when the catalog resolves the footnote's own
-/// cross-references, and the string replacer passes its whole `self.source`
-/// there (paragraph granularity, matching how a non-footnote reference is
-/// anchored at its `Content` — see the field's own docs). `root` is that same
-/// span; it is what this pass already passes to
+/// cross-references, at paragraph granularity — matching how a non-footnote
+/// reference is anchored at its `Content` (see the field's own docs). `root`
+/// is that same span; it is what this pass already passes to
 /// [`Parser::record_builder_diagnostic`] for the two diagnostics it raises.
 /// The macro's own span is the *node's* `location`, a different question with
 /// a different answer.
 ///
 /// # Normalization
 ///
-/// `normalize_footnote_text`
-/// does three things to the string replacer's raw content: trims it, collapses
-/// each embedded newline to a space, and unescapes `\]` to `]`. The first two
-/// apply here unchanged — they are about the *text*, whichever pipeline
-/// produced it — via [`normalize_footnote_template`], their piece-list reading.
-/// The third does **not**: [`footnote_children`] already dropped each such
-/// backslash while emitting the subtree (see its doc comment), so re-applying
-/// the unescape here would be a second pass over an already-unescaped string.
+/// Footnote text normalization does three things to a footnote's raw content:
+/// trims it, collapses each embedded newline to a space, and unescapes `\]`
+/// to `]`. The first two apply here unchanged, via
+/// [`normalize_footnote_template`], their piece-list reading. The third does
+/// **not**: [`footnote_children`] already dropped each such backslash while
+/// emitting the subtree (see its doc comment), so re-applying the unescape
+/// here would be a second pass over an already-unescaped string.
 fn register_footnote_number(
     parser: &Parser,
     id: Option<&str>,
@@ -792,14 +785,14 @@ fn register_footnote_number(
 
     let template = normalize_footnote_template(template);
 
-    // The builder folds this entry from the footnote's own subtree, which
-    // never enters the string pipeline's escaped sentinel form.
+    // The builder folds this entry from the footnote's own subtree directly,
+    // with no intermediate escaped-placeholder encoding.
     parser.define_footnote(id, template, xrefs, root)
 }
 
-/// Trims and collapses a footnote's structured template exactly as the string
-/// replacer's `normalize_footnote_text` did its flat one: a leading or
-/// trailing literal piece is trimmed of surrounding whitespace, and every
+/// Trims and collapses a footnote's structured template the same way
+/// Asciidoctor's own footnote-text normalization treats a flat one: a leading
+/// or trailing literal piece is trimmed of surrounding whitespace, and every
 /// literal piece has each embedded newline collapsed to a space. An
 /// [`Xref`](XrefTemplatePiece::Xref) piece is untouched either way — a splice
 /// point carries no bytes of its own to trim or collapse — so only whichever
@@ -875,7 +868,7 @@ mod tests {
         );
 
         // The macro stays literal bytes: the level folds back to the source
-        // (the unescaped `<`/`>` as §3.4.1 `Raw` leaves, emitted as-is).
+        // (the unescaped `<`/`>` as `Raw` leaves, emitted as-is).
         assert_eq!(
             fold_html(&macros_only, &HtmlInlineRenderer {}),
             "x footnote:[note]</a>"
@@ -949,10 +942,9 @@ mod tests {
         // source (`"{produ"`) instead of the resolved value.
         use crate::{Parser, content::inline_builder::build, parser::ModificationContext};
 
-        // Two *independent* parsers (design §5.3's discipline, established by
-        // this module's own differential corpus below): `build` and the real
-        // pipeline each advance the footnote registry for real, so sharing
-        // one parser would double-count the footnote's assigned number.
+        // `configure` builds a fresh `Parser`; the comparison target below is
+        // a frozen recording (`snapshot::recorded`), not a second live parse,
+        // so only this one `Parser` ever advances the footnote registry.
         let configure = || {
             Parser::default().with_intrinsic_attribute(
                 "product",
@@ -979,20 +971,19 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_footnotes() {
         // For each fixture, folding the single-pass tree (all five steps)
-        // reproduces the string pipeline's output byte-for-byte. This is the
-        // differential corpus (design §5.3) that pins the footnote increment —
-        // the last of the macro families (part 4c). Each fixture uses its own
-        // pair of *independent* default parsers (one inside `build_src`, one
-        // inside `golden_macros`), so the `footnote-number` counter each one
-        // advances never crosses over; as long as both recognize the same
-        // occurrences in the same left-to-right order, their numbering stays in
-        // lockstep.
+        // reproduces the frozen golden recording byte-for-byte — the
+        // differential corpus that pins footnote recognition, the last of
+        // the macro families. `build_src` uses its own default `Parser` per
+        // fixture, so the `footnote-number` counter it advances never
+        // crosses fixtures; the numbering only has to match the recording's
+        // own left-to-right order.
         let fixtures = [
             // No footnote despite macro-ish characters.
             "plain text without a footnote",
             "a footnote without a bracket footnote:foo stays literal",
             // `footnote:[]` (neither an id nor content) is not a footnote at
-            // all — left untouched by both the string replacer and the builder.
+            // all — left untouched by the builder, matching Asciidoctor's
+            // own behavior.
             "footnote:[]",
             // An anonymous defining occurrence, and one whose text needs no
             // further substitution.
@@ -1066,8 +1057,8 @@ mod tests {
             "footnote:[a \\] b \\] c]",
             "footnoteref:[disc,a note ending in a\\]bracket]",
             // No comma at all: the whole (still-escaped) bracket is the id of
-            // an unresolved reference, which the string replacer never
-            // normalizes.
+            // an unresolved reference, which is never normalized (matching
+            // Asciidoctor's own behavior).
             "footnoteref:[a note ending in a\\]bracket]",
             "footnote:[the *strong* \\] evidence]",
             "footnote:[an escaped \\] beside a < special]",
@@ -1099,9 +1090,8 @@ mod tests {
     fn a_footnote_nested_in_a_child_numbers_in_source_order() {
         // The property this pass exists for, asserted where it is actually
         // decided: a footnote nested in a child that falls **between** two of
-        // its level's own footnotes is numbered between them, because the
-        // string pipeline recognizes in one left-to-right sweep over one flat
-        // string.
+        // its level's own footnotes is numbered between them, because
+        // footnotes are numbered in one left-to-right sweep over the source.
         //
         // Every fixture here places a nested footnote in that position — after
         // one sibling and before another — since that is the only arrangement
@@ -1143,11 +1133,10 @@ mod tests {
     #[test]
     fn an_anchors_reference_text_is_not_scanned_for_footnotes() {
         // The complement, and the reason the walk descends into an index term
-        // but not into an anchor's reference text: the anchor replacer
+        // but not into an anchor's reference text: the anchor family
         // *consumes* that text rather than emitting it, so a `footnote:[…]`
-        // written there never reaches the string pipeline's footnote pass
-        // either. Both sides agree that nothing is numbered — and a real
-        // footnote beside it still takes number 1.
+        // written there is never recognized either — nothing is numbered,
+        // and a real footnote beside it still takes number 1.
         let renderer = HtmlInlineRenderer {};
 
         for fixture in [
@@ -1288,8 +1277,8 @@ mod tests {
     #[test]
     fn an_empty_footnote_macro_stays_literal() {
         // `footnote:[]` carries neither an id nor content, so it is not a
-        // footnote at all — left as literal text, exactly as the string
-        // replacer's `next $&` branch leaves it.
+        // footnote at all — left as literal text, matching Asciidoctor's own
+        // behavior for this form.
         let nodes = build_src(Span::new("footnote:[]"));
 
         assert_eq!(nodes.len(), 1);
@@ -1303,10 +1292,9 @@ mod tests {
         // from `footnote:id[text]`'s own (id from the macro target, text
         // from the bracket) — but resolves into the same node shape and
         // folds through the same `render_footnote`, so its output is
-        // byte-for-byte identical to the golden pipeline's (the deprecation
-        // warning itself remains deferred to the cutover; it does not affect
-        // the fold's output bytes — see `build_footnoteref_node`'s doc
-        // comment).
+        // byte-for-byte identical to the golden recording's (the deprecation
+        // warning is raised directly too and does not affect the fold's
+        // output bytes — see `build_footnoteref_node`'s doc comment).
         let source = "footnoteref:[disc,a discussion]";
         let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
@@ -1342,10 +1330,9 @@ mod tests {
     #[test]
     fn a_deprecated_footnoteref_macro_referencing_an_undefined_id_falls_back_to_it() {
         // A comma-free `footnoteref:[id]` whose id was never defined resolves
-        // through the same unresolved fallback `footnote:id[]` does (the
-        // string replacer's own `InvalidFootnoteReference` warning is a
-        // diagnostic, deferred to the cutover like every other one this
-        // builder skips).
+        // through the same unresolved fallback `footnote:id[]` does, raising
+        // the same `InvalidFootnoteReference` diagnostic (see
+        // `build_footnoteref_node`'s doc comment).
         let source = "footnoteref:[missing]";
         let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
 
@@ -1378,8 +1365,8 @@ mod tests {
     #[test]
     fn an_empty_footnoteref_macro_stays_literal() {
         // `footnoteref:[]` carries no bracketed text at all, so it is left
-        // unrecognized — mirroring the string replacer's `next $&` branch,
-        // the same way `footnote:[]` is.
+        // unrecognized, matching Asciidoctor's own behavior, the same way
+        // `footnote:[]` is.
         let nodes = build_src(Span::new("footnoteref:[]"));
 
         assert_eq!(nodes.len(), 1);
@@ -1443,8 +1430,8 @@ mod tests {
     #[test]
     fn a_footnote_with_an_escaped_bracket_unescapes_it_into_the_subtree() {
         // Content carrying an escaped closing bracket (`\]`) is recognized:
-        // the string replacer unescapes it to a literal `]`
-        // (`normalize_footnote_text`) and the subtree carries the same text,
+        // it is unescaped to a literal `]`, matching Asciidoctor's own
+        // footnote-text normalization, and the subtree carries the same text,
         // `footnote_children` dropping the backslash as a *gap* in the ranges
         // it emits (see `emit_range_unescaping_brackets`). Both the anonymous
         // form and the id-carrying form share that path, so both are

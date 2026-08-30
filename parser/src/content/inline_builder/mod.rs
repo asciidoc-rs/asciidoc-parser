@@ -37,32 +37,30 @@
 //!   [`quote_subs`] patterns the crate uses for quoted text everywhere. An
 //!   attributed span's own attribute list (`['a<b']*bold*`) is parsed from the
 //!   level's **match string** — the escaped bytes recovered from the level's
-//!   own haystack, since `specialcharacters` has already run — so
-//!   the entity, not the author's raw `<`, reaches the rendered `class`/`id`
-//!   (see [`quote_attributes`](quotes)).
+//!   own haystack, since `specialcharacters` has already run — so the entity,
+//!   not the author's raw `<`, reaches the rendered `class`/`id` (see
+//!   [`quote_attributes`](quotes)).
 //! - [`apply_attribute_references`] recognizes attribute references (`{name}`),
 //!   splicing a set attribute's resolved value into the node stream, classified
 //!   into [`Text`](InlineNode::Text) and [`Raw`](InlineNode::Raw) runs — a
-//!   literal `<`/`>`/`&` in the value is *not* re-escaped,
-//!   since [`apply_special_characters`] has already run, unless the group's
-//!   effective order puts that step *after* this one (only a `subs=` list can,
-//!   and `subs=attributes+` does), in which case the value is spliced as one
+//!   literal `<`/`>`/`&` in the value is *not* re-escaped, since
+//!   [`apply_special_characters`] has already run, unless the group's effective
+//!   order puts that step *after* this one (only a `subs=` list can, and
+//!   `subs=attributes+` does), in which case the value is spliced as one
 //!   ordinary `Text` run for it to escape (see [`SplicedSpecials`]). It uses
 //!   the shared [`ATTRIBUTE_REFERENCE`](crate::content::ATTRIBUTE_REFERENCE)
-//!   pattern. A `counter`/`counter2`
-//!   directive resolves *and advances* the named counter via
-//!   [`Parser::counter`], the same required side effect [`apply_footnotes`]
-//!   performs for footnote numbering. A missing-attribute reference under
-//!   `AttributeMissing::Drop` / `::DropLine` is deferred (see
+//!   pattern. A `counter`/`counter2` directive resolves *and advances* the
+//!   named counter via [`Parser::counter`], the same required side effect
+//!   [`apply_footnotes`] performs for footnote numbering. A missing-attribute
+//!   reference under `AttributeMissing::Drop` / `::DropLine` is deferred (see
 //!   [`apply_attribute_references`] for why). A character replacement *inside*
 //!   an expanded value ((C) → ©, `--`, …) is recognized too:
-//!   [`build_match_string`](quotes::build_match_string) looks
-//!   inside a [`synthesized`](quotes::Piece::synthesized) run rather than
-//!   treating it as opaque, and no **macro** family defers there. An
-//!   [`Attrlist`] a node carries needs no `'src` slice of its own — an image's
-//!   bracket, both link families' attribute-list-bearing display texts, and an
-//!   attributed span's own list are parsed from the level's own match string
-//!   and
+//!   [`build_match_string`](quotes::build_match_string) looks inside a
+//!   [`synthesized`](quotes::Piece::synthesized) run rather than treating it as
+//!   opaque, and no **macro** family defers there. An [`Attrlist`] a node
+//!   carries needs no `'src` slice of its own — an image's bracket, both link
+//!   families' attribute-list-bearing display texts, and an attributed span's
+//!   own list are parsed from the level's own match string and
 //!   [`into_owned`](Attrlist::into_owned)ed off it — so
 //!   [`range_is_verbatim`](macros::image::range_is_verbatim) survives only
 //!   where a *borrow* is still preferred, not as a boundary. And a macro
@@ -269,24 +267,22 @@
 //!   not guarantee (see [`apply_footnotes`]'s doc comment). Registering the
 //!   number cannot be deferred to the post-fold side-effect pass the way every
 //!   other family's catalog/warning side effect is, without breaking output
-//!   parity (see
-//!   `build_footnote_node`). Its content becomes structured children via
-//!   [`emit_range`](quotes::emit_range) rather than a literal attribute value,
-//!   so — unlike the other families — a content crossing an already-recognized
-//!   construct is not deferred: nesting is the point. A content carrying an
-//!   **escaped closing bracket** (`\]`) is recognized too, the backslash
-//!   dropped as a *gap* in the emitted ranges by the reference-bearing
-//!   families' own
+//!   parity (see `build_footnote_node`). Its content becomes structured
+//!   children via [`emit_range`](quotes::emit_range) rather than a literal
+//!   attribute value, so — unlike the other families — a content crossing an
+//!   already-recognized construct is not deferred: nesting is the point. A
+//!   content carrying an **escaped closing bracket** (`\]`) is recognized too,
+//!   the backslash dropped as a *gap* in the emitted ranges by the
+//!   reference-bearing families' own
 //!   [`emit_range_unescaping_brackets`](macros::emit_range_unescaping_brackets),
 //!   so the subtree carries the literal `]`, matching Asciidoctor's own
-//!   footnote-text normalization. The deprecated `footnoteref:[id,text]`
-//!   / `footnoteref:[id]` form (`build_footnoteref_node`) is recognized too,
+//!   footnote-text normalization. The deprecated `footnoteref:[id,text]` /
+//!   `footnoteref:[id]` form (`build_footnoteref_node`) is recognized too,
 //!   splitting its one bracket on the first comma rather than taking an id from
 //!   the macro target (an id, unlike the text half, keeps its own literal
-//!   `\]`); only its own deprecation warning (a
-//!   diagnostic, deferred to that post-fold side-effect pass like every other
-//!   family's) remains
-//!   deferred. The bibliography-anchor form is a later increment.
+//!   `\]`); only its own deprecation warning (a diagnostic, deferred to that
+//!   post-fold side-effect pass like every other family's) remains deferred.
+//!   The bibliography-anchor form is a later increment.
 //! - [`apply_stem`] recognizes **inline STEM macros** (`stem:[…]`,
 //!   `asciimath:[…]`, `latexmath:[…]`), replacing each with a
 //!   [`Stem`](InlineNode::Stem) leaf. Like [`apply_passthroughs`], it is an
@@ -473,14 +469,13 @@ pub(crate) fn build<'src>(
 /// - **`value` differs from `location.data()`** (a multi-line block whose
 ///   surviving lines were joined with `\n`, or any other filtered value with no
 ///   single contiguous `'src` slice of its own): the seed is *synthesized* —
-///   every node the builder produces from it still gets a real `InlineNode`, but
-///   one whose `location` coarsely falls back to the whole of `location`,
-///   the same fallback an
-///   attribute-reference expansion or a `counter` directive's resolved value
-///   already receives. This is what lets the single-pass builder process a
-///   real, multi-line, filtered block's content — not just a single contiguous
-///   source span — while every already-landed step's shared
-///   [`build_match_string`](quotes::build_match_string) /
+///   every node the builder produces from it still gets a real `InlineNode`,
+///   but one whose `location` coarsely falls back to the whole of `location`,
+///   the same fallback an attribute-reference expansion or a `counter`
+///   directive's resolved value already receives. This is what lets the
+///   single-pass builder process a real, multi-line, filtered block's content —
+///   not just a single contiguous source span — while every already-landed
+///   step's shared [`build_match_string`](quotes::build_match_string) /
 ///   [`source_slice`](quotes::source_slice) machinery handles the fallback with
 ///   no further change: it already treats *any* non-verbatim `Text` node this
 ///   way, regardless of where in the tree — or how early — that node was
@@ -513,9 +508,9 @@ pub(crate) fn build_from_value<'src>(
 ///   group's own order, each recast as its node transducer. The
 ///   [`Macros`](SubstitutionStep::Macros) step runs [`apply_macros`] and then
 ///   [`apply_footnotes`] — footnotes are recognized as part of the macros
-///   family in AsciiDoc's own substitution model, but are their own
-///   transducer here so numbering follows true source
-///   order (see [`apply_footnotes`]'s doc comment).
+///   family in AsciiDoc's own substitution model, but are their own transducer
+///   here so numbering follows true source order (see [`apply_footnotes`]'s doc
+///   comment).
 ///
 /// A group whose steps are empty ([`Pass`](SubstitutionGroup::Pass) /
 /// [`None`](SubstitutionGroup::None), or an empty custom list) yields the
@@ -818,11 +813,11 @@ mod tests {
     /// `configure` builds the parser here rather than the caller passing one
     /// in — a signature kept from when this assertion also ran the crate's
     /// retired string-substitution implementation (see this module's
-    /// `README.md`) and each side needed its own identically-configured document
-    /// (both sides advanced footnote numbers and `{counter:...}` values for
-    /// real, so sharing one parser would have doubled them). Only [`built`]'s
-    /// side runs today, but every call site passes a constructor, so the
-    /// shape stays.
+    /// `README.md`) and each side needed its own identically-configured
+    /// document (both sides advanced footnote numbers and `{counter:...}`
+    /// values for real, so sharing one parser would have doubled them).
+    /// Only [`built`]'s side runs today, but every call site passes a
+    /// constructor, so the shape stays.
     fn assert_parity_with(source: &str, configure: impl Fn() -> Parser) {
         assert_parity_in("whole_pipeline", source, configure);
     }
@@ -971,14 +966,12 @@ mod tests {
         );
     }
 
-    /// A broad, general-purpose sweep of inline fixtures — originally reusing
-    /// the shape of the Phase 1 byte-parity corpus (`NORMAL_CORPUS`, retired
-    /// with the Strategy-A recorder it pinned) — run against `build` +
-    /// `fold_html`. Unlike
+    /// A broad, general-purpose sweep of inline fixtures, run against `build`
+    /// + `fold_html`. Unlike
     /// the hand-picked combined-constructs corpus above, this one is not
     /// curated to stay inside `build`'s claimed vocabulary, so it is exactly
-    /// the kind of audit that caught the `hardbreaks` cutover blocker (see the
-    /// design doc's own "step 6 prep" note on that increment): a fixture here
+    /// the kind of audit that finds real gaps (it once caught a `hardbreaks`
+    /// handling bug this way): a fixture here
     /// that turns out to diverge is either a real, previously-unknown blocker
     /// (fix it) or a form some other increment already documents as deferred
     /// (drop it from this sweep and make sure it has its own divergence test
@@ -1124,9 +1117,9 @@ mod tests {
             "https://example.org[a *bold* label] auto-link",
             "<https://example.org[an _angle_ label] auto-link",
             "https://example.org[the image:logo.png[Logo] one] auto-link",
-            // A construct written against an enclosing span's own edge, where
-            // the string pipeline's haystack holds that span's rendered markup
-            // and the tree holds the level's own start or end.
+            // A construct written against an enclosing span's own edge — a
+            // markup-based match would see that span's rendered markup
+            // there, while the tree holds the level's own start or end.
             r#""``end points``""#,
             r#""`_e_`""#,
             r#""`x `code` y`""#,
@@ -1136,8 +1129,8 @@ mod tests {
             r#""`x --`""#,
             "*a -- b*",
             // The same seam one level *out*: a construct written **beside** an
-            // entity-rendered span, where the string pipeline's haystack holds
-            // that span's own closing `&#8221;` and the tree holds one
+            // entity-rendered span — a markup-based match would see
+            // that span's own closing `&#8221;` there, while the tree holds one
             // placeholder.
             r#""`a`"`code`"#,
             r#"'`a`'`code`"#,
@@ -1146,8 +1139,9 @@ mod tests {
             r#""`a`" `code`"#,
             // And the **tag**-rendered half of the same seam, told from the
             // passthrough-extraction pass's own wrapper by the identity the
-            // macros step now carries: the string pipeline reads the `>` that
-            // ends `</strong>` where the tree used to hold a bare placeholder.
+            // macros step now carries: a markup-based match would read the `>`
+            // that ends `</strong>` where the tree used to hold a bare
+            // placeholder.
             "**bold**https://example.org",
             "__em__https://example.org",
             "``code``https://example.org",
@@ -1180,7 +1174,7 @@ mod tests {
             "*x[width=10]###c# d##*",
             // And the same transparent span read *as* a sibling, where what
             // it presents is its own body rather than any markup: the space
-            // `x ` ends with, which the string pipeline's flat haystack holds
+            // `x ` ends with, which a flat markup-based reading would hold
             // beside the construct.
             "[width=10]##x ##https://example.org",
             "[width=10]##x ##doc@example.org",
@@ -1245,8 +1239,8 @@ mod tests {
 
         // The bare unconstrained form whose body encloses a construct this
         // step's *first* pass already extracted: the verbatim substitution
-        // runs over the placeholder and the inner body is spliced after, the
-        // string pipeline's own restore-last order.
+        // runs over the placeholder and the inner body is spliced after —
+        // restore-last order.
         assert_parity("+Sometimes you feel pass:q[`mono`].+ Sometimes you +$$don't$$+ and *bold*.");
 
         // Inline STEM beside a quoted span and a character replacement.
@@ -1311,7 +1305,8 @@ mod tests {
         // live around it: a keyboard macro whose key crosses an escaped
         // special, a menu whose name crosses a restored entity, and a button
         // label crossing one — each read out of the match string, whose bytes
-        // there are the string replacer's own.
+        // there are the same escaped/canonical bytes Asciidoctor's own
+        // substitution produces.
         assert_parity_with(
             "Press kbd:[Ctrl&C] then menu:&#8942;[More Tools, Extensions] in *bold* text.",
             with_experimental,
@@ -1603,10 +1598,10 @@ mod tests {
         // `Attrlist<'src>`. Their targets and display texts come from the
         // match string like every other family's values, and so now does
         // every attribute list they carry: a capture with no `'src` slice is
-        // parsed from that same match string — the bytes the string replacer
-        // parses — and owned off it. What still defers is a wholly expanded
-        // `link:` macro (pinned by its own divergence test in
-        // `macros/links.rs`).
+        // parsed from that same match string — the same escaped bytes
+        // Asciidoctor's own substitution reads — and owned off it. What still
+        // defers is a wholly expanded `link:` macro (pinned by its own
+        // divergence test in `macros/links.rs`).
         let with_link_attributes = || {
             Parser::default()
                 .with_intrinsic_attribute("url", "index.html", ModificationContext::Anywhere)
@@ -1652,7 +1647,8 @@ mod tests {
         // A cross-reference whose reference text crosses a *rendered span*, in
         // both spellings and beside the other families: the text is carried
         // structurally (the span's own node becomes a child), so the fold
-        // re-renders exactly the markup the string replacer captured.
+        // re-renders exactly the markup Asciidoctor's own substitution
+        // would produce.
         assert_parity_with(
             "See xref:{id}[the *bold* steps] and <<{id},a _slanted_ label>> about {product}.",
             with_xref_attributes,
@@ -1667,10 +1663,10 @@ mod tests {
             with_xref_attributes,
         );
 
-        // A **masked** construct in such a text: the string replacer's own
-        // haystack holds a sentinel there too, so the split-agreement check
+        // A **masked** construct in such a text: the passthrough sits behind
+        // an opaque placeholder there too, so the split-agreement check
         // leaves its token alone rather than comparing the tokened split
-        // against a body the replacer only splices at the very end. Driven
+        // against a body only spliced back in at the very end. Driven
         // through the whole pipeline, which is the only harness that runs the
         // passthrough-extraction pass on both sides.
         assert_parity(
@@ -1678,8 +1674,8 @@ mod tests {
         );
 
         // The same lift where the opaque piece is a **masked passthrough** —
-        // the one opaque class the string pipeline also holds as a placeholder
-        // of its own, since it restores passthroughs only after every step.
+        // the one construct every substitution order holds as a placeholder
+        // of its own, since passthroughs are restored only after every step.
         // These need the real `SubstitutionGroup::apply` (which brackets the
         // steps with that extraction), so they cannot live in the family's own
         // step-driven corpus.
@@ -1720,9 +1716,9 @@ mod tests {
         // restore that happens *inside* a parsed attribute-list value, run
         // here through the whole assembled pipeline. The two fixtures that
         // matter are a body carrying the split's own delimiters (which must
-        // stay one value, as it does where the string pipeline's parse reads
-        // its sentinel) and one sitting ahead of a shorthand item (whose
-        // offsets shift with the restore).
+        // stay one value, as it does wherever a passthrough placeholder is
+        // read as a single opaque token) and one sitting ahead of a shorthand
+        // item (whose offsets shift with the restore).
         assert_parity("See image:chart.png[++a, b = c++] and image:x.png[++A & B++].");
         assert_parity("An image:y.png[++abc++.myrole] beside *bold* text.");
 
@@ -1732,8 +1728,8 @@ mod tests {
         assert_parity("image:x.png[title=$$<b>$$ and *c*]");
         assert_parity("image:x.png[title=pass:[<b>] and *c*]");
 
-        // A construct written against an enclosing span's own edge, where the
-        // string pipeline's haystack holds that span's rendered markup and a
+        // A construct written against an enclosing span's own edge, where a
+        // markup-based match would see that span's rendered markup and a
         // level matched in isolation holds its own start or end — the quotes
         // and character-replacements steps' own boundary context, here running
         // through the whole assembled pipeline (so the *other* steps see the
@@ -1748,18 +1744,18 @@ mod tests {
 
         // The same seam one level out, where the construct sits **beside** the
         // span rather than inside it: the monospace and mark subs read the
-        // `;` ending that span's own `&#8221;`, so both pipelines leave them
+        // `;` ending that span's own `&#8221;`, so they leave them
         // literal, and the surrounding constructs still resolve normally.
         assert_parity(r##"He said "`hello`"`code` and then "`bye`"#mark# alone."##);
         assert_parity(r#"Quoting "`one`"'`two`' back to back, plus a *bold* run."#);
 
         // The **tag**-rendered half of that seam, in the one family that can
         // tell a `>` from the placeholder: `INLINE_LINK`'s boundary-prefix
-        // group accepts the `>` a closing tag ends with, so both pipelines
-        // link a URL written straight against a span's outer edge — while the
-        // extraction pass's own wrapper, which the string pipeline is still
-        // holding as a sentinel, presents no such character and leaves it
-        // literal in both.
+        // group accepts the `>` a closing tag ends with, so a URL written
+        // straight against a span's outer edge is linked — while the
+        // extraction pass's own wrapper, which represents a passthrough as an
+        // opaque placeholder, presents no such character and leaves it
+        // literal.
         assert_parity("A **bold**https://example.org run and __em__https://example.org too.");
         assert_parity("Then [quotes]++x++https://example.org stays literal.");
 
@@ -1865,7 +1861,7 @@ mod tests {
             // A construct crossing a *typographic replacement* at a
             // synthesized tree's root: the leaf carries the entity the
             // built-in backend renders it as, so a value read off the match
-            // string is the string replacer's own.
+            // string matches what Asciidoctor's own substitution would read.
             (
                 "  a ((Coffee (C) Beans)) term\n  and <<s(C)c,Tom (C) Jerry>>",
                 "a ((Coffee (C) Beans)) term\nand <<s(C)c,Tom (C) Jerry>>",
@@ -2075,7 +2071,7 @@ mod tests {
             // the fold emits, not about the node kinds: because no
             // `SpecialCharacters` step ever acted on it, a literal `<`/`>`/`&`
             // is a `Raw` leaf the fold emits verbatim, not a `Text` run the
-            // fold would escape (design §3.4.1). Everything between the
+            // fold would escape. Everything between the
             // specials is one borrowed `Text` run, and nothing else is
             // recognized.
             let source = "<b>raw</b> *not bold* {product}";
@@ -2100,7 +2096,7 @@ mod tests {
 
                 // That the leaves rejoin to the *untouched* seed is what the
                 // parity assertion itself pins: neither group runs a step, so
-                // the string pipeline's own output for this content is the
+                // this content's known-good output is the
                 // source verbatim, and the fold must reproduce it.
                 assert_eq!(
                     golden_for_group(&group, source),
@@ -2136,7 +2132,7 @@ mod tests {
         #[test]
         fn a_custom_list_runs_exactly_the_named_steps_in_order() {
             // `subs=quotes` alone: `*bold*` is recognized, `<` is emitted
-            // unescaped (a `Raw` leaf, not a `CharRef` — design §3.4.1, since
+            // unescaped (a `Raw` leaf, not a `CharRef`, since
             // no `SpecialCharacters` step acts on it), and `{product}` stays
             // unexpanded.
             let (group, invalid) = SubstitutionGroup::from_custom_string(None, "quotes");
@@ -2199,14 +2195,14 @@ mod tests {
             assert_group_parity(&group, source);
         }
 
-        /// A differential corpus for the §3.4.1 classification the group-aware
+        /// A differential corpus for the classification the group-aware
         /// entry point applies last: under an effective order whose steps
-        /// **never include** `SpecialCharacters`, a literal `<`/`>`/`&` is
-        /// emitted verbatim by the string pipeline, so it must fold verbatim
-        /// here too.
+        /// **never include** `SpecialCharacters`, a literal `<`/`>`/`&` must
+        /// fold verbatim here too — matching Asciidoctor's own output when
+        /// `specialcharacters` is skipped.
         ///
         /// This is the case a `Text` node cannot express on its own — `Text`
-        /// is logical text the fold *escapes* (design §3.4) — so every fixture
+        /// is logical text the fold *escapes* — so every fixture
         /// below folded to escaped entities before the classification landed,
         /// diverging from the real pipeline. The corpus crosses a set of
         /// specials-bearing fixtures with every real group that takes this
@@ -2256,8 +2252,9 @@ mod tests {
                 "<<tigers>> stays literal",
                 // The converse: a source-written `&lt;&lt;…&gt;&gt;` *is* the
                 // shorthand's escaped spelling, so the group that runs
-                // `macros` recognizes it (the string pipeline matches the very
-                // bytes the author wrote). Its present-but-empty reference
+                // `macros` recognizes it (matching the very
+                // bytes the author wrote, the same way Asciidoctor's own
+                // substitution does). Its present-but-empty reference
                 // text is one empty `Text` child, which the classification
                 // must carry through rather than split away — splitting emits
                 // no empty run, and the fold reads an absent child as "no text
@@ -2412,8 +2409,8 @@ mod tests {
             }
         }
 
-        /// The complement of the corpus above, for the *other* order §3.4.1
-        /// has to answer for: not a group that never escapes, but one that
+        /// The complement of the corpus above, for the *other* order case the
+        /// escaping-order rule has to answer for: not a group that never escapes, but one that
         /// escapes **after** expanding an attribute reference.
         ///
         /// Every built-in group that runs both steps escapes first and expands
@@ -2422,7 +2419,8 @@ mod tests {
         /// list can reverse the two — and `subs=attributes+`, which *prepends*
         /// the step, is the documented AsciiDoc idiom for inspecting what a
         /// `pass:quotes[…]` attribute entry actually stores, so the reversed
-        /// order is a real one. Under it the string pipeline escapes the
+        /// order is a real one. Under it, Asciidoctor's own substitution
+        /// escapes the
         /// spliced value like any other text (`MyApp<sup>2</sup>` renders as
         /// `MyApp&lt;sup&gt;2&lt;/sup&gt;`), which every fixture below folded
         /// verbatim — and so diverged — before `SplicedSpecials` landed.
@@ -2433,8 +2431,9 @@ mod tests {
         /// `Verbatim`), and the explicit `subs=` lists that name the two steps
         /// in that order. Each list keeps `specialcharacters` ahead of every
         /// *markup-producing* step, because a step that emits markup before
-        /// the escaping one is a different question — the string pipeline
-        /// escapes the tags that step already wrote, while a tree's markup
+        /// the escaping one is a different question — escaping the tags that
+        /// step already wrote is what a flat-string reading would do, while a
+        /// tree's markup
         /// exists only at fold time — and is pinned as its own divergence by
         /// [`a_markup_producing_step_before_the_escaping_one_is_a_documented_divergence`].
         #[test]
@@ -2499,8 +2498,8 @@ mod tests {
                 // splicing one here would have hidden the `&` from the macros
                 // step that runs later in the order; a `Text` run the escaping
                 // step turns into a `CharRef` is exactly what that step's own
-                // gate admits, matching the string pipeline (whose macros pass
-                // likewise runs over the already-escaped `a&amp;b.example.org`).
+                // gate admits, matching Asciidoctor's own macros pass, which
+                // likewise runs over the already-escaped `a&amp;b.example.org`.
                 "link:{host}/x[go]",
                 "https://{host}/docs auto-link",
                 // The same, for the two steps that read a spliced run's own
@@ -2520,9 +2519,10 @@ mod tests {
         /// [`flatten_prior_markup`](super::super::special_chars::flatten_prior_markup):
         /// a step that produces **markup** ahead of the escaping one.
         ///
-        /// `subs=quotes,specialcharacters` runs the quotes step first, so the
-        /// string pipeline holds `<strong>bold</strong>` by the time
-        /// `specialcharacters` runs — and escapes those very tags, emitting
+        /// `subs=quotes,specialcharacters` runs the quotes step first, so a
+        /// flat-string reading holds `<strong>bold</strong>` by the time
+        /// `specialcharacters` runs — and Asciidoctor's own substitution
+        /// escapes those very tags, emitting
         /// `&lt;strong&gt;bold&lt;/strong&gt;`. A tree has no rendered tags at
         /// that point: a [`Styled`](crate::inlines::Styled) span's markup
         /// exists only at fold time. The policy is to reach fold time for that

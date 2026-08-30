@@ -3,9 +3,8 @@ use crate::{HasSpan, Span, inlines::InlineNode, strings::CowStr};
 /// An index term (`((term))`, `(((primary, secondary, tertiary)))`,
 /// `indexterm:[…]`, or `indexterm2:[…]`).
 ///
-/// Field set is provisional (Phase 0) and will be refined against the first
-/// consumer. The known gap is [`terms`](Self::terms), which holds less than
-/// its name promises — see that field.
+/// The known gap is [`terms`](Self::terms), which holds less than its name
+/// promises — see that field.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IndexTerm<'src> {
     /// The term levels, from primary to tertiary — the field's *intent*, and
@@ -23,9 +22,9 @@ pub struct IndexTerm<'src> {
     /// So a consumer building an index cannot yet recover the authored
     /// primary/secondary/tertiary levels of an `indexterm:[p, s, t]` or
     /// `(((p, s, t)))` — which are exactly the terms that exist *only* to be
-    /// indexed. Recording them is a change to what the builder parses, and is
-    /// the concrete work behind this type's provisional status; the field is
-    /// named and typed for it so that filling it in later is additive.
+    /// indexed. Recording them is a change to what the builder parses; the
+    /// field is named and typed for it so that filling it in later is
+    /// additive.
     pub terms: Vec<CowStr<'src>>,
 
     /// The shown text of a *visible* term, as the child inline nodes it

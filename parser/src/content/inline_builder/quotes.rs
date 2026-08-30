@@ -423,21 +423,21 @@ fn styled_boundaries(styled: &Styled<'_>) -> Option<(char, char)> {
 /// either way: the extraction pass builds neither smart-quote variant, so a
 /// [`DoubleQuote`](StyleVariant::DoubleQuote) or
 /// [`SingleQuote`](StyleVariant::SingleQuote) node can only have come from the
-/// quotes step, where the string pipeline really does hold `&#8220;…&#8221;`.
+/// quotes step, which really does render `&#8220;…&#8221;`.
 ///
 /// # A transparent span presents its own body
 ///
 /// A span the built-in backend renders with **no markup of its own** — an
 /// unquoted span whose attribute list resolves to neither a role nor an id —
 /// wraps its body in nothing, so what a sibling reads there is that *body*:
-/// the string pipeline's flat haystack holds `x ` where
-/// `[width=10]##x ##https://example.org` stands one opaque placeholder, and
-/// links on the space the body ends with.
+/// rendering `[width=10]##x ##https://example.org` holds `x ` where the span
+/// stands as one opaque placeholder, and links on the space the body ends
+/// with.
 /// [`transparent_sibling_boundaries`] answers that pair from the span's own
 /// children, and the identity gates it for exactly the reason it gates a tag:
 /// `[width=10]++x ++` is an extraction wrapper that renders its body and
-/// nothing else, and what the string pipeline holds *there* is the sentinel a
-/// bare placeholder already reads as.
+/// nothing else, and what a sibling reads *there* is the same placeholder a
+/// bare, unclassified span already reads as.
 ///
 /// # Two halves, answered independently
 ///
@@ -524,8 +524,8 @@ fn probe_styled_sibling_boundaries(styled: &Styled<'_>) -> Option<(char, char)> 
 }
 
 /// The character a level's own match string `s` holds immediately before byte
-/// offset `at`, or `None` where this module cannot say what the string pipeline
-/// holds there — because nothing precedes that offset, or because what does is
+/// offset `at`, or `None` where this module cannot say what character is
+/// there — because nothing precedes that offset, or because what does is
 /// an unclassified opaque node.
 ///
 /// This is how a **transparent** span's children learn what precedes the span
@@ -544,8 +544,9 @@ fn probe_styled_sibling_boundaries(styled: &Styled<'_>) -> Option<(char, char)> 
 /// entity-rendered ones. Reporting it here would *manufacture* a
 /// character where the level previously read its own start anchor, which is a
 /// different answer rather than a better one — and for a wrapper it would be
-/// the wrong one, since the string pipeline holds a `\u{97}` sentinel there
-/// that the auto-link's own prefix group rejects exactly as `^` is accepted.
+/// the wrong one, since a sibling there reads the wrapper's own placeholder
+/// character, which the auto-link's own prefix group rejects exactly as `^`
+/// is accepted.
 /// So an unclassified neighbour reports nothing and the span goes on
 /// inheriting, leaving that shape exactly as it already was — the same line
 /// [`styled_sibling_boundaries`] draws, for the same reason.
@@ -638,7 +639,7 @@ pub(super) fn apply_quotes<'src>(
 /// presents — or, for a span that renders no markup of its own, the one its
 /// **siblings** present ([`LevelContext::child_contexts`]) — which is what
 /// keeps a sub matching *inside* an earlier sub's span reading the same
-/// characters the string pipeline's flat haystack holds there.
+/// characters a whole-content match would see there.
 fn apply_quote_sub<'src>(
     sub: &QuoteSub,
     nodes: Vec<InlineNode<'src>>,
@@ -648,7 +649,7 @@ fn apply_quote_sub<'src>(
 ) -> Vec<InlineNode<'src>> {
     // Recurse into the spans produced by earlier subs *before* matching at this
     // level. A span this sub itself creates below is therefore never revisited
-    // by the same sub, matching the string pipeline (a sub runs once). A level
+    // by the same sub (a sub runs once per level). A level
     // with no such span — the common leaf-only case, visited once per sub —
     // has nothing to descend into, so it skips the context derivation and the
     // rebuild of its node vector entirely.
@@ -705,11 +706,11 @@ pub(super) struct Piece {
     /// its `value` differs from `location.data()`, so unlike a verbatim run
     /// its match-string bytes do **not** correspond one-to-one with source
     /// bytes. It contributes its `value` to the match string so a later step
-    /// (design §3.4.1: character replacements, macros) can still recognize a
+    /// (character replacements, macros) can still recognize a
     /// construct inside it, but a match landing here has no honest `'src`
     /// slice: [`emit_range`] slices the node's *value* instead of its
     /// location, and [`s_to_src`] falls back to the piece's whole node span
-    /// (design §4.4's coarse fallback) rather than a proportional one.
+    /// (its coarse fallback) rather than a proportional one.
     pub(super) synthesized: bool,
 }
 
@@ -752,9 +753,8 @@ fn match_level<'src>(
     rebuild_level(&nodes, &pieces, &s, &matches, root, parser)
 }
 
-/// Reports whether a match's attribute list, if it has one, is one this step
-/// can read the same bytes out of that the string pipeline's own quote
-/// replacer reads out of its haystack — i.e. crosses no **opaque** piece (see
+/// Reports whether a match's attribute list, if it has one, is readable from
+/// the level's own match string without crossing an **opaque** piece (see
 /// [`range_has_no_opaque_piece`]).
 ///
 /// A match with no attribute list is always readable, which is the
@@ -763,13 +763,13 @@ fn match_level<'src>(
 /// The one shape this rejects is an attribute list crossing a piece whose
 /// bytes exist only at fold time or behind a placeholder — a rendered span
 /// from an earlier sub, or a masked passthrough or STEM expression
-/// (`[.a+++x+++b]#y#`). The string pipeline parses its attribute list with the
-/// passthrough's own placeholder inside it, restoring the passthrough's text
-/// into the rendered `class` afterwards, which a tree that keeps that text as
-/// its own node cannot reproduce (splicing the text back in at parse time
-/// would let a comma inside it split the attribute list, where the string
-/// pipeline's one atomic placeholder never can). Leaving the whole construct
-/// unrecognized — literal text, never a *wrong* node — is the same boundary
+/// (`[.a+++x+++b]#y#`). A passthrough's own placeholder holds no bytes to
+/// splice an attribute list around: reading the passthrough's real text back
+/// through the placeholder and splicing it into the parsed attribute list
+/// would let a comma inside that text split the list, since the placeholder
+/// is one atomic piece and cannot be read into partway. Leaving the whole
+/// construct unrecognized — literal text, never a *wrong* node — is the same
+/// boundary
 /// every macro family draws, and puts this match back in the same position a
 /// rejected look-ahead leaves one: out of the match list, so the surrounding
 /// gap reproduces its original nodes and a later sub may still match there.
@@ -794,11 +794,11 @@ fn attrlist_is_readable(nodes: &[InlineNode<'_>], pieces: &[Piece], m: &QuoteMat
 /// [`Entity`](CharRef::Entity)), or the entity the built-in backend renders it
 /// as (a typographic [`Replacement`](CharRef::Replacement), via
 /// [`replacement_entity`]), so the boundary classes the quote patterns key off
-/// (`&`, `;`) see exactly what the string pipeline's escaped text presents —
-/// and so does a later step reading a value across one; a *synthesized*
-/// `Text` run (design §3.4.1 — an attribute expansion, a `counter` directive)
+/// (`&`, `;`) see exactly the bytes this content's own escaped rendering
+/// presents — and so does a later step reading a value across one; a
+/// *synthesized* `Text` run (an attribute expansion, a `counter` directive)
 /// contributes its `value` too, so [`apply_character_replacements`]
-/// (design §3.4.1: `replacements` still runs over an expanded value) can
+/// (character replacements still runs over an expanded value) can
 /// recognize a construct inside it, but is flagged
 /// [`synthesized`](Piece::synthesized) since those bytes have no honest
 /// `'src` counterpart; every other node contributes a single opaque
@@ -1048,7 +1048,7 @@ pub(super) fn build_match_string(
                 // A synthesized run (its value has no `'src` slice of its
                 // own): still splittable for matching purposes, but any
                 // resulting node falls back to this node's whole `location`
-                // (design §4.4) rather than a proportional slice of it.
+                // (its coarse fallback) rather than a proportional slice of it.
                 s.push_str(value);
 
                 pieces.push(Piece {
@@ -1087,11 +1087,11 @@ pub(super) fn build_match_string(
                 // A *restored* entity (`&amp;copy;` un-escaped back to
                 // `&copy;` by the character-replacements step) contributes its
                 // own bytes for the same reason a `Special` contributes its
-                // canonical entity: those bytes *are* what the string
-                // pipeline's own haystack holds at that position from the
-                // replacements step onward, and the fold emits them verbatim
-                // (see `fold`'s `CharRef::Entity` arm), so the two agree with
-                // no renderer involved. It stays `atomic` — the leaf is one
+                // canonical entity: those are the bytes this position holds
+                // from the replacements step onward, and the fold emits them
+                // verbatim (see `fold`'s `CharRef::Entity`
+                // arm), so the two agree with no renderer
+                // involved. It stays `atomic` — the leaf is one
                 // indivisible node, never sliced — but is *recoverable*, which
                 // is the distinction
                 // [`range_has_no_opaque_piece`](super::macros::image::range_has_no_opaque_piece)
@@ -1117,12 +1117,11 @@ pub(super) fn build_match_string(
                 // replacements step turned into a copyright sign and a
                 // typographic apostrophe) contributes the entity the built-in
                 // backend renders it as, for the same reason the two other
-                // `CharRef` leaves contribute theirs: those bytes *are* what
-                // the string pipeline's own haystack holds at that position
-                // from the replacements step onward (`&#169;`, `&#8217;`), so
-                // a later step matching across one — or reading a value out of
-                // the match string — sees exactly what the string replacer
-                // sees. It stays `atomic` (the leaf is one indivisible node,
+                // `CharRef` leaves contribute theirs: those are the bytes this
+                // position holds from the replacements step onward (`&#169;`,
+                // `&#8217;`), so a later step matching across one — or reading
+                // a value out of the match string — sees exactly the same
+                // bytes. It stays `atomic` (the leaf is one indivisible node,
                 // never sliced) but is *recoverable*, which is the distinction
                 // [`range_has_no_opaque_piece`](super::macros::image::range_has_no_opaque_piece)
                 // draws.
@@ -1201,10 +1200,11 @@ pub(super) fn build_match_string(
 /// *shown* text straight from the match string (rather than needing an honest
 /// `'src` slice — e.g. an index term's `arg`/`term_src`, already checked
 /// against [`SPAN_PLACEHOLDER`] for a crossed span) still needs this check
-/// too: a synthesized run's bytes have no source counterpart, and design
-/// §3.4.1 leaves recognizing a macro *inside* one for a later increment (see
+/// too: a synthesized run's bytes have no source counterpart, so even once a
+/// construct inside it is recognized, the match still needs the coarse
+/// `location` fallback
 /// [`apply_attribute_references`](super::attribute_refs::apply_attribute_references)'s
-/// doc comment) — distinct from
+/// doc comment describes — distinct from
 /// [`range_is_verbatim`],
 /// which a family needing to *slice* `'src` (a target, an `Attrlist<'src>`)
 /// uses instead and which already rejects a synthesized piece outright.
@@ -1239,7 +1239,7 @@ pub(super) fn special_entity(ch: char) -> &'static str {
 
 /// The entity a [`CharRef::Replacement`] contributes to the match string: the
 /// bytes the **built-in** HTML backend renders that replacement as, which are
-/// exactly what the string pipeline's own haystack holds from the replacements
+/// exactly what this position holds from the replacements
 /// step onward. Returns `None` for a value no replacement rule produces (only a
 /// hand-built node can carry one), which [`build_match_string`] then stands in
 /// as one opaque [`SPAN_PLACEHOLDER`], as it did for every replacement before
@@ -1383,10 +1383,9 @@ enum QuoteMatchKind {
     },
 }
 
-/// Drives `sub` over the match string, mirroring the string pipeline's
-/// look-ahead retry: a rejected monospace-before-quote match slices the
-/// haystack forward and re-searches, exactly as `replace_with_lookahead`
-/// does.
+/// Drives `sub` over the match string with a look-ahead retry: a rejected
+/// monospace-before-quote match slices the haystack forward and re-searches,
+/// rather than giving up on the level.
 fn find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
     let mut matches = Vec::new();
 
@@ -1600,29 +1599,29 @@ fn rebuild_level<'src>(
 }
 
 /// Parses an **attributed quote's** attribute list out of the level's own
-/// match string, returning the id, roles, and the full [`Attrlist`] (kept so
-/// the fold renders exactly as the string pipeline).
+/// match string, returning the id, roles, and the full [`Attrlist`] the
+/// node's fold renders from.
 ///
-/// Those match-string bytes are the ones the string pipeline's quote replacer
-/// parses: by the time the quotes step runs, its haystack holds the *escaped*
-/// text (`['a&lt;b&amp;c']*bold*`), so the role it parses — and renders into
-/// the `class` attribute verbatim — carries the entity, not the author's raw
-/// `<`. Parsing the source slice instead would put an unescaped `<`/`&` into
-/// rendered markup, which is both a divergence and, for a `"`-bearing value,
-/// exactly the injection the escaping is there to prevent (pinned by
+/// By the time the quotes step runs, the match string holds the *escaped*
+/// text (`['a&lt;b&amp;c']*bold*`), so the role parsed out of it — and
+/// rendered into the `class` attribute verbatim — carries the entity, not the
+/// author's raw `<`. Parsing the source slice instead would put an unescaped
+/// `<`/`&` into rendered markup, which is both a divergence from
+/// Asciidoctor's own output and, for a `"`-bearing value, exactly the
+/// injection the escaping is there to prevent (pinned by
 /// `quoted_positional_role_class_does_not_double_escape_special_characters` in
 /// the crate's own security tests).
 ///
 /// A **verbatim** range's match-string bytes *are* its source bytes, so it
-/// parses straight from `'src` and its attribute names and values borrow
-/// (§4.5) — the shape every ordinary `[.role]#text#` takes. Any other range
+/// parses straight from `'src` and its attribute names and values borrow —
+/// the shape every ordinary `[.role]#text#` takes. Any other range
 /// (an escaped special, a restored entity or typographic replacement, or a
 /// [`synthesized`](Piece::synthesized) expansion under an order that runs
 /// `attributes` before `quotes`) has no `'src` slice whose bytes are the
 /// attrlist text, so it parses from a [`Span::new`] over the match-string
 /// slice — whose `line`/`col`/`offset` are meaningless and never escape this
 /// function — and [`into_owned`](Attrlist::into_owned)s the result onto the
-/// range's coarse source span (design §4.4), exactly as
+/// range's coarse source span, exactly as
 /// [`bracket_attrlist`](super::macros::image) does for an image's bracket and
 /// [`text_attrlist`](super::macros::links) for a link's display text.
 ///
@@ -1656,8 +1655,8 @@ fn quote_attributes<'src>(
 /// attrlist the same way and fold through the same [`Styled`] node. Unlike an
 /// attributed quote's (see [`quote_attributes`]), a passthrough's attrlist is
 /// read from the source slice, and correctly so: the extraction pass that
-/// recognizes it runs *before* the escaping step, so the string pipeline
-/// parses the author's raw bytes there too.
+/// recognizes it runs *before* the escaping step, so those are still the
+/// author's raw bytes.
 pub(super) fn attributes_of<'src>(
     source: Span<'src>,
     parser: &Parser,
@@ -1678,15 +1677,12 @@ fn parse_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
 fn attributes_of_attrlist<'src>(
     attrlist: Attrlist<'src>,
 ) -> (Option<CowStr<'src>>, Vec<CowStr<'src>>, Attrlist<'src>) {
-    // Extract owned id/roles before the attrlist is moved into the node,
-    // exactly as the string pipeline's quote replacer does.
+    // Extract owned id/roles before the attrlist is moved into the node.
     //
-    // Unlike that replacer, this deliberately performs *no* side effect: it
-    // does not `register_ref` an assigned id in the catalog, because the
-    // builder is additive and not yet the recognition sink — the
-    // authoritative string pipeline still registers it. The cutover (design
-    // §5.2 Phase 4, step 6) must add that registration so cross-references
-    // to an inline id resolve (tracked by #1087).
+    // This step performs no catalog side effect of its own: recognition and
+    // registration are kept apart, so an assigned id is registered later,
+    // once the tree is built and folded, by `apply_ref_side_effects` (see
+    // `macros::anchors`) rather than here.
     let id = attrlist.id().map(|id| CowStr::from(id.to_string()));
 
     let roles = attrlist
@@ -1750,11 +1746,11 @@ pub(super) fn emit_range<'src>(
             // carrying them folds verbatim, so every partition of the entity
             // folds to the entity, and a caller cutting one (a bare URL whose
             // trailing-punctuation strip lands on an entity's own `;` — see
-            // `build_inline_link_node`) reproduces the string replacer's own
-            // split rather than deferring to it. Neither half has an honest
+            // `build_inline_link_node`) can split it cleanly rather than
+            // declining to handle it. Neither half has an honest
             // `'src` slice of its own (the source holds one character, or
             // `(C)`, where the match string holds an entity), so both keep the
-            // leaf's whole `location` — design §4.4's coarse fallback, the
+            // leaf's whole `location` — its coarse fallback, the
             // same one a synthesized run's slices already take.
             //
             // Every other atomic piece stands in for markup that exists only
@@ -1793,7 +1789,7 @@ pub(super) fn emit_range<'src>(
             if piece.synthesized {
                 // No `'src` slice exists for these bytes: slice the node's
                 // *value* instead, keeping the whole original `location` as
-                // the coarse fallback span (design §4.4) — the same policy
+                // the coarse fallback span — the same policy
                 // `split_attribute_value` already applies to every fragment
                 // of an expanded value.
                 let Some(sliced) = value.get(lo..hi) else {
@@ -1821,8 +1817,8 @@ pub(super) fn emit_range<'src>(
 /// falls inside a [`synthesized`](Piece::synthesized) piece (an attribute
 /// expansion, or — reached at a tree's root — a filtered multi-line block's
 /// own joined seed): unlike [`source_slice`], which snaps a boundary landing
-/// *inside* a synthesized piece to that piece's own coarse edge (design
-/// §4.4) because it must return an honest `'src` [`Span`], this slices the
+/// *inside* a synthesized piece to that piece's own coarse edge because it
+/// must return an honest `'src` [`Span`], this slices the
 /// piece's own `value` instead, so the returned text is precise rather than
 /// approximate — the same recovery [`emit_range`] already gives a kept
 /// [`Text`](InlineNode::Text) run, just concatenated into one value instead
@@ -1878,7 +1874,7 @@ pub(super) fn text_slice<'src>(
 /// A boundary inside a verbatim [`Text`](InlineNode::Text) run maps one-to-one
 /// (its match text is its source text); a boundary inside an atomic or
 /// [`synthesized`](Piece::synthesized) piece has no such honest source
-/// position, so it falls back to that piece's own edges (design §4.4) —
+/// position, so it falls back to that piece's own edges —
 /// snapping to the *nearer* one for an atomic piece (it never legitimately
 /// falls there), or to the edge [`Bias`] names for a synthesized one, so a
 /// range wholly inside a synthesized run maps to that run's *whole* node span
@@ -1955,7 +1951,7 @@ fn s_to_src(pieces: &[Piece], x: usize, bias: Bias) -> usize {
             // `p_start` edge — already excluded `p_end` above, and `p_start`
             // is exact via the plain mapping just like a verbatim piece) has
             // no honest source position, so it falls back to the edge `bias`
-            // names (design §4.4's coarse fallback).
+            // names (its coarse fallback).
             if piece.synthesized && x > p_start {
                 return match bias {
                     Bias::Start => piece.src_offset,
@@ -1975,7 +1971,7 @@ fn s_to_src(pieces: &[Piece], x: usize, bias: Bias) -> usize {
 }
 
 /// Maps a [`QuoteType`] to its [`Styled`] variant, downgrading an attributed
-/// `mark` to an unquoted span exactly as the string pipeline does.
+/// `mark` to an unquoted span, matching Asciidoctor's own behavior.
 fn style_variant(type_: QuoteType, has_attrlist: bool) -> StyleVariant {
     match type_ {
         QuoteType::Strong => StyleVariant::Strong,
@@ -2274,7 +2270,7 @@ mod tests {
         );
 
         // The same body, with the identity in hand: the nested span's own
-        // `<strong>…</strong>` is what the string pipeline holds at both edges.
+        // `<strong>…</strong>` is what a sibling reads at both edges.
         assert_eq!(
             styled_sibling_boundaries(&transparent, Masked::known(&[])),
             (Some('<'), Some('>'))

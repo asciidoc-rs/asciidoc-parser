@@ -102,8 +102,8 @@ use crate::{
 /// A **rendered span** — a [`Styled`](crate::inlines::Styled) span, or an
 /// already-recognized macro node of another family — is *not* recoverable:
 /// [`build_match_string`] stands it in as one
-/// [`SPAN_PLACEHOLDER`] where the string pipeline's haystack holds its markup
-/// inline, and that markup exists only at fold time. It is nonetheless admitted
+/// [`SPAN_PLACEHOLDER`], since that markup exists only at fold time. It is
+/// nonetheless admitted
 /// **inside the bracketed display text** of a formal URL link
 /// (`https://example.org[a *b* c]`, and the angle spelling
 /// `<https://example.org[a *b* c]` that keeps its `&lt;`), because that text is
@@ -153,49 +153,43 @@ use crate::{
 /// third and last family to take [`range_is_restorable`]. (This family's
 /// target reaches the `href` as computed; the `image:`/`icon:` family's is
 /// re-processed by `web_path` at fold time, over its restored ranges masked —
-/// see [`Image::restored_target_ranges`](crate::inlines::Image).) the string
-/// replacer swallows the `\u{96}`*n*`\u{97}` sentinel into its own target (both
-/// target classes admit it exactly as they admit the tree's placeholder, and
-/// the bare branch's trailing-character class admits the last byte of either
-/// spelling, so the two recognize the same extent — this family needs no
-/// widening of its own, unlike the `image:`/`icon:` one), and
-/// `Passthroughs::restore_to`
-/// then splices the extracted body's substituted text over every sentinel in
-/// the rendered string. A `Raw` node's `value` **is** that text, known at build
+/// see [`Image::restored_target_ranges`](crate::inlines::Image).) Both target
+/// classes admit the tree's own placeholder exactly as they would admit its
+/// restored bytes, and the bare branch's trailing-character class admits the
+/// last byte of either spelling, so this family needs no widening of its own
+/// to recognize the same extent, unlike the `image:`/`icon:` one. A `Raw`
+/// node's `value` **is** the passthrough's already-substituted text, known at
+/// build
 /// time, so [`restore_masked_passthroughs`] substitutes it for the placeholder
 /// and the computed target finishes into exactly the restored string's bytes —
 /// `https://++example.org/now_this__link_works.html++` and
 /// `https://example.orgpass:[/a b]`, the two documented idioms, and every
 /// partial mask around them.
 ///
-/// Every *decision* stays on the bytes as matched, where the string
-/// replacer's own haystack answers identically: neither a placeholder nor a
-/// sentinel is the `"`/`'` an invalid quoted URL is rejected on, and neither
+/// Every *decision* stays on the bytes as matched: neither the placeholder
+/// nor a passthrough's restored bytes is the `"`/`'` an invalid quoted URL is
+/// rejected on, and neither
 /// is the `;` or `:` the trailing-punctuation strip keys off — so a `;`
-/// *inside* a passthrough stays in the target in both pipelines while a
-/// literal one after it is stripped in both. The `hide-uri-scheme` strip needs
+/// *inside* a passthrough stays in the target while a
+/// literal one after it is stripped. The `hide-uri-scheme` strip needs
 /// no such care here (see [`build_inline_link_node`]). A **bare** link's shown
 /// text, a slice of the target's own range, carries the `Raw` node itself
 /// through [`macro_text_children`], folding to the same restored bytes without
 /// re-escaping.
 ///
-/// Two readings are deliberately **not** faithful, each pinned by its own
-/// test. A `"` restored into the target is escaped by the fold's
-/// `encode_attribute_value` where the string pipeline encoded its
-/// quote-free sentinel and spliced the raw `"` into the finished `href` — the
-/// well-formed reading, and the one the two sibling families' restores
-/// already take. And the staged [`apply_link_side_effects`] registers the
-/// node's honest restored target where the string pipeline registers the
-/// sentinel bytes verbatim (its restore rewrites only the rendered string,
-/// never the catalog) — the same wart the cutover declines to reproduce
-/// there.
+/// Two readings are deliberately **not** literal restores, each pinned by its
+/// own test. A `"` restored into the target is escaped by the fold's
+/// `encode_attribute_value` — the well-formed reading, and the one the two
+/// sibling families' restores already take — rather than spliced raw into the
+/// finished `href`. And [`apply_link_side_effects`] registers the node's
+/// honest restored target in the catalog, rather than leaving unrestored
+/// placeholder bytes there.
 ///
 /// An invalid quoted bare URL (`"https://example.org`) and a bare scheme with no
-/// body (`http://;`) are left literal by the string step *and* the builder, so
-/// they render identically and are covered by the differential corpus rather
-/// than a divergence test. So is an ANGLE-branch URL with **no** closing `&gt;`
-/// and no `[…]` (`<https://example.org`), which the string replacer's own angle
-/// path emits unchanged.
+/// body (`http://;`) are left literal, so
+/// they render identically to source and are covered by the differential corpus
+/// rather than a divergence test. So is an ANGLE-branch URL with **no** closing
+/// `&gt;` and no `[…]` (`<https://example.org`), which is emitted unchanged.
 pub(super) fn inline_link_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -320,14 +314,13 @@ fn find_inline_link_matches<'src>(
 /// place where the strip's own arithmetic would cut *inside* an escaped
 /// special.
 ///
-/// Like every macro family in this additive builder, it deliberately performs
+/// Like every macro family here, it deliberately performs
 /// *no* recognition side effect: it does **not** `register_link` the target in
-/// the document's asset catalog, because the builder is not yet the
-/// authoritative recognition sink — the string pipeline still registers it, and
-/// registering it here too would double-count it. The cutover (design §5.2
-/// Phase 4, step 6) re-attaches this registration, so
-/// `Document::catalog().links()` stays populated by the string pipeline until
-/// then. (The same applies to the `link:`/`mailto:` macro node built by
+/// the document's asset catalog itself. That registration happens once per
+/// parse, after the tree is built and folded, via [`apply_link_side_effects`]
+/// — which keeps recognition and registration separate so each family's
+/// tests can build and inspect a tree without a full `Parser`/`Content`
+/// round trip. (The same applies to the `link:`/`mailto:` macro node built by
 /// [`build_link_node`].)
 ///
 /// [`InlineLinkReplacer`]: crate::content::macros
@@ -345,9 +338,9 @@ fn build_inline_link_node<'src>(
     let scheme_m = n.scheme_match()?;
     let scheme = scheme_m.as_str();
 
-    // The `<url>` form is a separate computation in the string replacer, taken
-    // on exactly this condition — and, as there, taken before anything else,
-    // including this branch's own escape check and gate.
+    // The `<url>` form is handled separately, on exactly this condition —
+    // checked before anything else, including this branch's own escape check
+    // and gate.
     if n.is_angle() && n.attrlist().is_none() {
         return build_angle_link_node(n, &scheme_m, full, nodes, pieces, root, parser);
     }
@@ -391,10 +384,10 @@ fn build_inline_link_node<'src>(
     //
     // An expanded attribute value and an escaped special are admitted
     // throughout, since every value read here comes off the match string —
-    // whose bytes are, for both, exactly the ones the string replacer's own
-    // haystack carries there. So is a **masked** construct — a passthrough or
-    // a STEM expression — whose bytes the string replacer's own haystack does
-    // *not* carry: the target finishes
+    // whose bytes are, for both, exactly the ones the match string carries
+    // there. So is a **masked** construct — a passthrough or
+    // a STEM expression — whose bytes the match string does
+    // *not* carry directly: the target finishes
     // into the restored ones below (see [`range_is_restorable`] and
     // [`restore_masked_passthroughs`]), while every decision made here —
     // the quoted-prefix rejection, the trailing-punctuation strip, the
@@ -452,8 +445,8 @@ fn build_inline_link_node<'src>(
         }
 
         // Strip a trailing ';' or ':' (and an adjacent ')') off a bare URL,
-        // keeping it as literal text after the link — mirroring the string
-        // replacer, which keys off the target's final character.
+        // keeping it as literal text after the link — keying off the target's
+        // final character, matching Asciidoctor's own behavior.
         let mut stripped = 0usize;
 
         if target.ends_with([';', ':']) {
@@ -501,10 +494,10 @@ fn build_inline_link_node<'src>(
     // bytes — the node's own rendered body ([`restorable_body`]) substituted
     // for its placeholder, the same rewrite `Passthroughs::restore_to`
     // performs on the emitted `href` — and only the node's values take them.
-    // Every *decision* the string replacer makes over the bytes as matched
+    // Every *decision* over the bytes as matched
     // is already behind us (the quoted-prefix rejection and the
-    // trailing-punctuation strip above), each reading a placeholder exactly
-    // as the sentinel-holding haystack reads its own sentinel: neither
+    // trailing-punctuation strip above), each reading the placeholder exactly
+    // as it would read the passthrough's own restored bytes: neither
     // spelling is a quote, and neither ends in the `;` or `:` the strip
     // keys off.
     //
@@ -612,13 +605,13 @@ fn build_inline_link_node<'src>(
         // URL range rather than a value this builder computes, and takes the
         // same structured recovery a bare `link:`/`mailto:` macro's does (see
         // [`build_link_node`]): baking the already-escaped target into one
-        // `Text` would have the fold escape it a second time (design §3.4).
+        // `Text` would have the fold escape it a second time.
         // There is no `\]` unescape here — this text comes from the URL groups,
         // whose own character classes never admit a bracket. A URL crossing a
         // **masked** construct takes that same structured path, carrying the
         // [`Raw`](InlineNode::Raw) or [`Stem`](InlineNode::Stem) node itself —
-        // which folds to the very bytes the restore splices into the string
-        // pipeline's own shown text.
+        // which folds to the very bytes the restore splices into the
+        // shown text.
         //
         // The scheme-hiding offset indexes the match string even when
         // `target` is the restored value, because [`URI_SNIFF`] is
@@ -645,11 +638,12 @@ fn build_inline_link_node<'src>(
         if escaped_computed_text {
             // Parsed out of the level's match string, so it holds an escaped
             // special's canonical entity (and a restored entity's own bytes)
-            // where a node holds logical text: rebuild design §3.4's
-            // trichotomy from those bytes, exactly as the cross-reference
-            // family's own attribute-list value is rebuilt — and each masked
-            // construct the value still holds a token for as the node itself,
-            // whose fold emits the bytes `restore_to` splices there.
+            // where a node holds logical text: rebuild the escaped/entity/
+            // replacement trichotomy from those bytes, exactly as the
+            // cross-reference family's own attribute-list value is
+            // rebuilt — and each masked construct the value still
+            // holds a token for as the node itself, whose fold
+            // emits the bytes `restore_to` splices there.
             restored_value_children(&link_text, &restores, text_location, specials)
         } else {
             // Parsed out of the source's own bytes, which are already logical
@@ -661,7 +655,7 @@ fn build_inline_link_node<'src>(
         }
     } else {
         // A text sliced straight out of the bracket. `macro_text_children`
-        // borrows it from `'src` in the common verbatim case (§4.5), owns it
+        // borrows it from `'src` in the common verbatim case, owns it
         // when it crosses an expanded attribute value, and rebuilds it as
         // structured children — each escaped special staying the `CharRef` it
         // already is, each **opaque** piece staying its own node — when it
@@ -743,10 +737,10 @@ fn build_inline_link_node<'src>(
 /// general path — admits an opaque piece inside its text. The two escape checks
 /// above run ahead of the gate, for the same reason the general path's does.
 ///
-/// Like the rest of this additive builder it performs no `register_link` side
-/// effect; [`apply_link_side_effects`] stages that for the cutover, and needs
-/// no angle-specific case — an angle node is `InlineLinkReplacer`'s own pass,
-/// so it records the same [`AutoOrFormal`](LinkForm::AutoOrFormal)
+/// Like the rest of this builder it performs no `register_link` side
+/// effect itself; [`apply_link_side_effects`] handles that afterward and needs
+/// no angle-specific case, since an angle node records the same
+/// [`AutoOrFormal`](LinkForm::AutoOrFormal)
 /// [`link_form`](crate::inlines::Ref::link_form) its non-angle sibling does.
 ///
 /// [`InlineLinkReplacer`]: crate::content::macros
@@ -798,8 +792,8 @@ fn build_angle_link_node<'src>(
     );
 
     // As in the general path: a **masked** construct in the interior
-    // finishes into the restored bytes, which are what the string pipeline's
-    // own `href` and shown text carry once `Passthroughs::restore_to` runs.
+    // finishes into the restored bytes, which are what the emitted
+    // `href` and shown text carry once `Passthroughs::restore_to` runs.
     // This form makes no decision off the bytes as matched at all — it has
     // neither a quoted-prefix rejection nor a trailing-punctuation strip —
     // and the interior *is* the target's own range, so the restore covers it
@@ -894,22 +888,23 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 /// macro's own `link:`/`mailto:` **marker** included: the target and display
 /// text are read out of the level's match string, which carries an expanded
 /// value's bytes exactly, and only the node's `location` falls back to the
-/// expansion's coarse span (design §4.4). A *wholly* expanded macro
-/// (`:m: link:index.html[Docs]`, then `{m}`) used to defer for that location
-/// alone — it was the signal that told this pass's nodes from the other two
-/// link passes' when [`apply_link_side_effects`] replays the string
-/// pipeline's family-pass registration order — and no longer does: the node
-/// records the spelling itself, on
-/// [`Ref::link_form`](crate::inlines::Ref::link_form).
+/// expansion's coarse span. The node records which of the three link
+/// spellings built it directly, on
+/// [`Ref::link_form`](crate::inlines::Ref::link_form) — the fact
+/// [`apply_link_side_effects`] reads to tell this pass's nodes from the other
+/// two link passes' when it replays the crate's own family-pass registration
+/// order — so a *wholly* expanded macro (`:m: link:index.html[Docs]`, then
+/// `{m}`) is recognized too, with no need to re-derive the spelling from
+/// `location`.
 ///
 /// An **escaped special** ([`CharRef`](InlineNode::CharRef)`::Special`) is
 /// admitted too, in an attribute-list text as much as anywhere else
 /// (`link:a&b.html[]`,
 /// `link:index.html[a < b]`, `link:index.html[a < b,role=hl]`). The match
 /// string carries such a leaf's canonical
-/// entity — the very bytes the string replacer's own escaped haystack holds
+/// entity — the same escaped bytes `apply_special_characters` always produces
 /// there — so the target this pass computes off that string (`a&amp;b.html`)
-/// *is* the one the replacer computed, and no value on the node needs the
+/// is the correctly escaped one, and no value on the node needs the
 /// source's own `<`/`>`/`&`. The display text then becomes **structured
 /// children** rather than one baked `Text` (see [`macro_text_children`]), so
 /// the special folds back to its own entity instead of being escaped twice —
@@ -921,15 +916,15 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 /// A **rendered span** — a [`Styled`](crate::inlines::Styled) span, or an
 /// already-recognized macro node of another family — is *not* recoverable:
 /// [`build_match_string`] stands it in as one
-/// [`SPAN_PLACEHOLDER`] where the string pipeline's haystack holds its markup
-/// inline, and that markup exists only at fold time. It is nonetheless admitted
+/// [`SPAN_PLACEHOLDER`], since that markup exists only at fold time. It is
+/// nonetheless admitted
 /// **inside the bracketed display text**, because that text is the one capture
 /// this family never reads as bytes: it becomes the node's children through
 /// [`macro_text_children`], whose
 /// [`emit_range`](super::super::quotes::emit_range) path clones the opaque
 /// piece's own node whole into them — so the text is carried *structurally*,
-/// and the fold re-renders exactly the markup the string replacer captured
-/// there. The **target** stays gated, since it is a value this pass computes
+/// and the fold re-renders that markup exactly. The **target** stays gated,
+/// since it is a value this pass computes
 /// off the match string. An **attribute-list text** takes a different route
 /// again: its display text comes back from an [`Attrlist`] parse rather than
 /// from a range, so [`text_attrlist`] gives every opaque piece there an
@@ -939,24 +934,24 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 /// renderer writes out. This is the second family to take that lift, after the
 /// cross-reference one (see `xref::find_xref_matches`).
 ///
-/// What the admission cannot do is make the *recognition* agree in every case,
-/// because the string replacer matches over the markup itself where this
-/// matches over one placeholder standing in for it — and this pass cannot know
-/// what that markup carries without folding, which building a tree must never
-/// do. The two read the same extent unless the markup carries a character the
-/// pattern (or the replacer's own probe) is sensitive to, which leaves three
-/// documented divergences of *extent*, each pinned by its own test and each one
-/// where the string pipeline's reading is the markup-perturbed one and the
-/// tree's the well-formed one — exactly as the quotes step's own
-/// crossed-delimiter divergence is:
+/// What the admission cannot do is make the *recognition* agree with matching
+/// over the fully rendered markup in every case, because this pass cannot know
+/// what a span's markup carries without folding it first, which building a
+/// tree must never do — so it matches over one placeholder standing in for
+/// the span instead. The two extents coincide unless the markup carries a
+/// character the pattern (or an attribute-list probe reading the rendered
+/// text) is sensitive to, which leaves three documented divergences of
+/// *extent*, each pinned by its own test and each one where matching the
+/// rendered markup gives the perturbed reading and the tree's is the
+/// well-formed one — exactly as the quotes step's own crossed-delimiter
+/// divergence is:
 ///
-/// - a `]` inside the span (`link:x[a *b ] c* d]`), which ends
-///   [`INLINE_LINK_MACRO`]'s own lazy text capture early for the string
-///   replacer but not here;
+/// - a `]` inside the span (`link:x[a *b ] c* d]`), which would end
+///   [`INLINE_LINK_MACRO`]'s own lazy text capture early if matched over the
+///   rendered markup, but not here;
 /// - markup carrying an `=` beside a comma elsewhere in a `link:` text
-///   (`link:x[one, [.hl]#two#]`): the replacer's attribute-list probe fires on
-///   the markup's own `=`, and the parse then keeps only what precedes that
-///   comma;
+///   (`link:x[one, [.hl]#two#]`): an attribute-list probe reading the rendered
+///   markup fires on its own `=`, keeping only what precedes that comma;
 /// - a comma inside the span of a `mailto:` text (`mailto:a@x.org[a *b, c*
 ///   d]`), which is that spelling's own attribute-list probe, read the same
 ///   way.
@@ -1064,7 +1059,7 @@ fn find_link_macro_matches<'src>(
         // one value this family computes off the match string is its **target**
         // (group 3; group 2 is the empty-target alternative, which has no bytes
         // to gate), so only that range needs a match string whose bytes the
-        // builder can finish into the string replacer's own — which for this
+        // builder can finish honestly — which for this
         // family includes a **masked** construct (a passthrough or a STEM
         // expression), restored into the computed
         // target exactly as `Passthroughs::restore_to` rewrites the emitted
@@ -1081,7 +1076,7 @@ fn find_link_macro_matches<'src>(
         // ([`Ref::link_form`](crate::inlines::Ref::link_form)) rather than
         // having it re-derived from `location` — so a *wholly* expanded macro
         // (`:m: link:index.html[Docs]`, then `{m}`) is recognized, with only
-        // its `location` taking design §4.4's coarse span. A text carrying an
+        // its `location` taking the coarse whole-content-span fallback. A text carrying an
         // attribute list is handled inside `text_attrlist`, since its display
         // text comes back from a *parse*: every opaque piece is tokened
         // through that parse and restored after it.
@@ -1119,11 +1114,7 @@ fn find_link_macro_matches<'src>(
 /// already has).
 ///
 /// This is `Passthroughs::restore_to`'s own
-/// rewrite, applied to a *computed value* instead of the rendered string: the
-/// string pipeline's replacer reads the `\u{96}`*n*`\u{97}` sentinel into the
-/// value (a `link:` macro's target, and with it the emitted `href` and a bare
-/// macro's shown text), and the restore pass then splices the extracted
-/// body's text over every sentinel in the rendered string.
+/// rewrite, applied to a *computed value* instead of the rendered string.
 /// [`restorable_body`] is the build-time counterpart of that splice, for both
 /// kinds the one extraction pass masks: a
 /// [`Raw`](InlineNode::Raw) node's `value` **is** the substituted text
@@ -1132,8 +1123,7 @@ fn find_link_macro_matches<'src>(
 /// `render_styled` call `PassthroughRestoreReplacer` makes for a
 /// STEM entry — so substituting either for the placeholder here finishes the
 /// value into exactly the restored string's bytes. Every other byte is kept
-/// as matched, which is what restore does too — it rewrites the sentinels and
-/// nothing else.
+/// as matched — only the masked placeholders change, nothing else.
 pub(super) fn restore_masked_passthroughs(
     masked: &str,
     range: &std::ops::Range<usize>,
@@ -1199,8 +1189,8 @@ pub(super) fn restore_masked_passthroughs(
 
 /// Builds one [`Ref`](InlineNode::Ref) link node from a recognized
 /// `link:`/`mailto:` match, computing the target, display text, window, and
-/// roles exactly as the string replacer does so the fold reproduces the same
-/// bytes. Returns `None` for a form this increment defers (see
+/// roles so the fold reproduces the bytes Asciidoctor's own rendering does.
+/// Returns `None` for a form this increment defers (see
 /// [`link_macro_level`]): a rejected dangerous `link:` scheme, a link text
 /// that carries an attribute list *and* crosses an opaque piece, or a
 /// `mailto:` whose subject or body carries a masked construct (see
@@ -1209,7 +1199,7 @@ pub(super) fn restore_masked_passthroughs(
 /// The display text becomes the node's children, so the fold recovers
 /// `link_text` by folding them and needs no build-time state
 /// (bare-vs-labeled, `hide-uri-scheme`, `mailto:`) at fold time; the `bare`
-/// role, when the string step would add one, rides on the node's `roles`.
+/// role, when one applies, rides on the node's `roles`.
 /// Which shape those children take follows what the text *is*:
 ///
 /// - a **bracketed text** is sliced out of the bracket by
@@ -1221,23 +1211,23 @@ pub(super) fn restore_masked_passthroughs(
 ///   the whole target group, or (under `hide-uri-scheme`) its scheme-stripped
 ///   tail, always a *suffix* since [`URI_SNIFF`] is `^`-anchored — so it takes
 ///   the same treatment rather than baking the already-escaped target into one
-///   `Text` the fold would escape a second time (design §3.4);
+///   `Text` the fold would escape a second time;
 /// - an **attribute list's positional value** is the one text this builder
 ///   *computes*, out of an [`Attrlist`] parse (see [`text_attrlist`]). A parse
 ///   of the bracket's own verbatim `'src` slice yields logical text, so it
 ///   stays a single synthesized `Text` (that slice carries no entity to undo);
-///   a parse of the level's **match string** yields the bytes the string
-///   replacer parsed instead, so it is rebuilt through
-///   [`computed_value_children`] — design §3.4's trichotomy under an order that
-///   has already escaped, and §3.4.1's literal reading under one that has not —
+///   a parse of the level's **match string** yields already-escaped bytes
+///   instead, so it is rebuilt through
+///   [`computed_value_children`] — the escaped/entity/replacement trichotomy under an order that
+///   has already escaped, and the literal reading under one that has not —
 ///   exactly as the cross-reference family's own attribute-list value is, with
 ///   each **masked** construct that value still holds a token for spliced back
 ///   in as its own node ([`restored_value_children`]).
 ///
-/// As in the additive builder generally, this performs *no* recognition side
+/// This performs *no* recognition side
 /// effect — notably it does **not** `register_link` the target in the asset
-/// catalog, which the string replacer does; the cutover (design §5.2 Phase 4,
-/// step 6) re-attaches that (see [`build_inline_link_node`]).
+/// catalog itself; [`apply_link_side_effects`] does that separately, once per
+/// parse, after the tree is built and folded (see [`build_inline_link_node`]).
 pub(super) fn build_link_node<'src>(
     caps: &regex::Captures<'_>,
     full: &std::ops::Range<usize>,
@@ -1258,10 +1248,10 @@ pub(super) fn build_link_node<'src>(
     // expression — finishes into the restored bytes: the node's own rendered
     // body substituted for its placeholder, the same rewrite
     // `Passthroughs::restore_to` performs on the emitted `href`, and only the
-    // node's computed values take them. Every *decision* the string replacer
-    // makes over the bytes as matched (the `URI_SNIFF` strip below) stays on
-    // `target_str`, whose placeholder the sentinel-holding haystack answers
-    // the same way.
+    // node's computed values take them. Every *decision* over the bytes as
+    // matched (the `URI_SNIFF` strip below) stays on
+    // `target_str`, reading the placeholder the same way it would read the
+    // passthrough's own restored bytes.
     let restored = caps.get(3).and_then(|m| {
         restore_masked_passthroughs(
             m.as_str(),
@@ -1491,11 +1481,12 @@ pub(super) fn build_link_node<'src>(
         if escaped_computed_text {
             // Parsed out of the level's match string, so it holds an escaped
             // special's canonical entity (and a restored entity's own bytes)
-            // where a node holds logical text: rebuild design §3.4's
-            // trichotomy from those bytes, exactly as the cross-reference
-            // family's own attribute-list value is rebuilt — and each masked
-            // construct the value still holds a token for as the node itself,
-            // whose fold emits the bytes `restore_to` splices there.
+            // where a node holds logical text: rebuild the escaped/entity/
+            // replacement trichotomy from those bytes, exactly as the
+            // cross-reference family's own attribute-list value is
+            // rebuilt — and each masked construct the value still
+            // holds a token for as the node itself, whose fold
+            // emits the bytes `restore_to` splices there.
             restored_value_children(&link_text, &restores, text_location, specials)
         } else {
             // Parsed out of the source's own bytes, which are already logical
@@ -1507,7 +1498,7 @@ pub(super) fn build_link_node<'src>(
         }
     } else {
         // A text sliced straight out of the bracket. `macro_text_children`
-        // borrows it from `'src` in the common verbatim case (§4.5), owns it
+        // borrows it from `'src` in the common verbatim case, owns it
         // when it crosses an expanded attribute value, and rebuilds it as
         // structured children — each escaped special staying the `CharRef` it
         // already is, each **opaque** piece staying its own node — when it

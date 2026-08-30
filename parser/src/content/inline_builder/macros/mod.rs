@@ -30,7 +30,7 @@ use crate::{
 /// Whether the escaping step has already run by the time the macros step reads
 /// a value off the level's match string.
 ///
-/// Design §3.4.1 decides what a fragment is worth by *where the steps sit* in
+/// What a fragment is worth is decided by *where the steps sit* in
 /// the group's effective order, not by where the fragment came from. The
 /// attribute-references step already makes that decision for the value it
 /// splices in

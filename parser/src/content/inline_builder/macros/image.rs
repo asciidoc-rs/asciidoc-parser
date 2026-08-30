@@ -167,10 +167,10 @@ fn find_image_matches<'src>(
 /// (an attribute-expanded value, a `counter` directive) is rejected here too:
 /// [`apply_character_replacements`](super::super::char_replacements::apply_character_replacements)
 /// can recognize a construct inside one (it produces a leaf needing no `'src`
-/// slice of its own, falling back to the piece's coarse `location`), but a macro node bakes
-/// its target/attribute list straight from source, so it still needs a real
-/// `'src` slice a synthesized run cannot provide — the same boundary an
-/// escaped-special or a rendered span already documents.
+/// slice of its own, falling back to the piece's coarse `location`), but a
+/// macro node bakes its target/attribute list straight from source, so it still
+/// needs a real `'src` slice a synthesized run cannot provide — the same
+/// boundary an escaped-special or a rendered span already documents.
 pub(in crate::content::inline_builder) fn range_is_verbatim(
     pieces: &[Piece],
     range: &std::ops::Range<usize>,
@@ -304,8 +304,8 @@ fn atomic_piece_is_recoverable(nodes: &[InlineNode<'_>], piece: &Piece) -> bool 
 
 /// [`range_has_no_opaque_piece`], further admitting a
 /// [`Raw`](InlineNode::Raw) leaf a **substitution produced in place** — an
-/// expanded attribute value's literal `<`, `>`, or `&`, which §3.4.1 leaves
-/// unescaped because the value expands *after* `specialcharacters` ran
+/// expanded attribute value's literal `<`, `>`, or `&`, left unescaped
+/// because the value expands *after* `specialcharacters` ran
 /// ([`RawOrigin::Substitution`]).
 ///
 /// The match string stands such a leaf in as one placeholder, so a value
@@ -316,14 +316,15 @@ fn atomic_piece_is_recoverable(nodes: &[InlineNode<'_>], piece: &Piece) -> bool 
 ///
 /// - A **masked passthrough** is restored by a later pass. A deferred
 ///   cross-reference's target is captured into its segment *before* that pass
-///   runs, so the string pipeline's own `href` holds the sentinel — and a tree
-///   that read the restored bytes would diverge from it (see
+///   runs, so the captured segment still holds the placeholder — and a tree
+///   that read the restored bytes instead would diverge from that documented
+///   behavior (see
 ///   `a_deferred_xref_target_over_a_passthrough_is_a_documented_divergence`).
 ///   [`range_is_restorable`] admits it; this does not.
 ///
 /// - A **substitution-produced** leaf was never extracted and is never
-///   restored. Its bytes are simply *there*, in the very haystack the string
-///   replacer reads, so filling the placeholder in reaches parity rather than
+///   restored. Its bytes are simply *there*, in the match string's own
+///   haystack, so filling the placeholder in reaches parity rather than
 ///   departing from it.
 ///
 /// Deciding this from the node's own [`RawOrigin`] rather than from the
@@ -368,41 +369,40 @@ pub(in crate::content::inline_builder) fn range_is_substitution_restorable(
 
 /// [`range_has_no_opaque_piece`], further admitting a **masked** piece — a
 /// passthrough or a STEM expression — for a value the caller *restores*
-/// rather than reads: the placeholder's bytes are not the string pipeline's
-/// (its haystack holds the `\u{96}`*n*`\u{97}` sentinel there), but the
-/// masked construct's own rendered body **is** known at build time — it is
-/// what `Passthroughs::restore_to` splices
-/// over the sentinel after the steps run — so a computed value that
-/// substitutes it for the placeholder (see
+/// rather than reads: the match string represents it only as the
+/// `\u{96}`*n*`\u{97}` placeholder, not its real rendered body, but that body
+/// **is** known at build time — it is what `Passthroughs::restore_to`
+/// splices over the placeholder after the steps run — so a computed value
+/// that substitutes it for the placeholder (see
 /// [`restore_masked_passthroughs`](super::links))
 /// finishes with exactly the restored string's bytes.
 ///
 /// That makes this gate right only for a value whose *recognition* treats the
 /// masked span as one swallowed token and whose *use* happens after restore —
 /// the `link:`/`mailto:` macro family's **target**, whose
-/// `[^\s\[\]]+` body class swallows the sentinel and the placeholder alike,
+/// `[^\s\[\]]+` body class swallows the placeholder like any other byte run,
 /// and whose bytes reach the output (the `href`, and a bare macro's shown
 /// text) only in the restored rendered string; and the `image:`/`icon:`
-/// family's target, whose recognition needs the placeholder widened to the
-/// sentinel's own shape first ([`widen_masked_pieces`]), whose one
+/// family's target, whose recognition needs the placeholder widened to that
+/// same shape first ([`widen_masked_pieces`]), whose one
 /// pre-restore computation, the `default_alt` derivation, runs over the
 /// masked bytes itself ([`masked_default_alt`]), and whose fold-time
 /// `web_path` runs over the restored ranges *masked* (see
-/// [`Image::restored_target_ranges`](crate::inlines::Image) — the string
-/// pipeline's own resolver only ever sees the sentinel); and the auto-link /
-/// formal-URL family's target, whose three URL classes swallow either
-/// spelling with no widening at all and whose two pre-restore decisions —
-/// rejecting a quoted URL, stripping a bare one's trailing punctuation — read
-/// a placeholder exactly as the string replacer's own sentinel reads
-/// (`links::build_inline_link_node`). It is right for a value that comes back
-/// from a **parse** too, once that parse is given the sentinel's own shape
-/// first — the `image:`/`icon:` bracket and the link families' display-text
-/// attribute list, each tokened by [`tokened_bracket`] and restored after the
+/// [`Image::restored_target_ranges`](crate::inlines::Image)); and the
+/// auto-link / formal-URL family's target, whose three URL classes swallow
+/// either spelling with no widening at all and whose two pre-restore
+/// decisions — rejecting a quoted URL, stripping a bare one's trailing
+/// punctuation — read the placeholder token the same way they read ordinary
+/// text (`links::build_inline_link_node`). It is right for a value that
+/// comes back from a **parse** too, once that parse is given the
+/// placeholder's own shape first — the `image:`/`icon:` bracket and the
+/// link families' display-text attribute list, each tokened by
+/// [`tokened_bracket`] and restored after the
 /// split. A family that *matches
 /// over* the masked bytes with a class the two spellings answer differently,
-/// or reads them into a value the string pipeline uses **before** restore (a
+/// or reads them into a value used **before** restore (a
 /// deferred cross-reference's target, captured into its placeholder template
-/// with the sentinel still in it — see
+/// with the placeholder still in it — see
 /// `a_deferred_xref_target_over_a_passthrough_is_a_documented_divergence`),
 /// keeps [`range_has_no_opaque_piece`].
 pub(in crate::content::inline_builder) fn range_is_restorable(
@@ -443,11 +443,10 @@ pub(in crate::content::inline_builder) fn range_is_restorable(
 /// (`Passthroughs::extract_from`)
 /// masks before any substitution step runs — STEM being an implicit
 /// passthrough, as [`Stem::value`](crate::inlines::Stem) documents — so each
-/// stands in the string pipeline's haystack as one `\u{96}`*n*`\u{97}` sentinel
-/// and in this module's match string as one
+/// stands in this module's match string as one
 /// [`SPAN_PLACEHOLDER`](super::super::quotes) character, and each has a body
 /// known at build time that `Passthroughs::restore_to` splices over that
-/// sentinel once the steps have run.
+/// placeholder once the steps have run.
 ///
 /// Every restoring family admits both kinds. The `image:`/`icon:` family's
 /// values are the only restored ones the **fold** re-processes —
@@ -455,9 +454,8 @@ pub(in crate::content::inline_builder) fn range_is_restorable(
 /// the target (and an interactive SVG's `fallback=`) into the `src`, and a
 /// rendered STEM body always carries a backslash `web_path` would posixify
 /// on a Windows-separator resolver — but that re-processing runs over the
-/// restored ranges *masked*, reproducing the string pipeline's own order
-/// (its `web_path` only ever sees the backslash-free sentinel; the restore
-/// splices the body in afterwards). See
+/// restored ranges *masked*: `web_path` only ever sees the backslash-free
+/// placeholder there, and the restore splices the body in afterwards. See
 /// [`Image::restored_target_ranges`](crate::inlines::Image) and
 /// [`ElementAttribute`]'s own restored ranges.
 ///
@@ -473,7 +471,7 @@ pub(in crate::content::inline_builder) fn node_is_restorable(node: &InlineNode<'
 
 /// The bytes a [`node_is_restorable`] node restores to — the very text
 /// `Passthroughs::restore_to`
-/// splices over the string pipeline's own sentinel — or `None` for any other
+/// splices over the placeholder — or `None` for any other
 /// node.
 ///
 /// The invariant both callers rest on is that this returns **exactly what the
@@ -491,11 +489,10 @@ pub(in crate::content::inline_builder) fn node_is_restorable(node: &InlineNode<'
 /// `renderer` is the **parser's** renderer, mirroring `restore_to`'s own
 /// (`Passthroughs::restore_to` renders a STEM entry through `parser.renderer`
 /// before splicing it into the rendered string). A computed target therefore
-/// freezes its STEM bytes at build time, exactly as the string pipeline
-/// freezes them into its `href`, where a `Stem` node standing in the flow is
-/// rendered at fold time instead; the two agree whenever the fold uses the
-/// parser's renderer, which is the seam design §3.3.1 defines and the only
-/// one `Content` uses.
+/// freezes its STEM bytes at build time to match what a `Stem` node standing
+/// in the flow renders at fold time instead; the two agree whenever the fold
+/// uses the parser's renderer, which is the only renderer seam `Content`
+/// uses.
 pub(in crate::content::inline_builder) fn restorable_body<'a>(
     node: &'a InlineNode<'_>,
     renderer: &dyn InlineRenderer,
@@ -508,7 +505,7 @@ pub(in crate::content::inline_builder) fn restorable_body<'a>(
         } => Some(Cow::Borrowed(value.as_ref())),
 
         // An escaped-form body carries the author's logical text, so the bytes
-        // the string pipeline splices over its own sentinel are that text
+        // spliced over the placeholder are that text
         // *escaped* — the same bytes this node's own fold emits, which is the
         // invariant this function exists to hold (see `node_is_restorable`).
         InlineNode::Raw {
@@ -536,8 +533,8 @@ pub(in crate::content::inline_builder) fn restorable_body<'a>(
 }
 
 /// Builds one [`Image`](InlineNode::Image) node from a recognized image/icon
-/// match, pre-extracting the alt/width/height the way the string replacer does
-/// so the fold reproduces the same bytes.
+/// match, pre-extracting the alt/width/height up front so the fold
+/// reproduces the same bytes.
 ///
 /// # What must be verbatim, and what need not be
 ///
@@ -546,17 +543,16 @@ pub(in crate::content::inline_builder) fn restorable_body<'a>(
 /// source slice, so both are exact even when they come from a
 /// [`synthesized`](Piece::synthesized) run — an expanded attribute value
 /// (`image:{logo}[Logo]`) or a filtered multi-line block's own joined seed —
-/// or cross an **escaped special** (`image:a&b.png[]`, whose target the string
-/// replacer reads as `a&amp;b.png` out of its own escaped haystack: the very
+/// or cross an **escaped special** (`image:a&b.png[]`, whose target reads as
+/// `a&amp;b.png` out of the match string's own escaped haystack: the very
 /// bytes this match string carries, and the ones
 /// [`apply_image_side_effects`] registers). Only the node's `location` then
-/// takes design §4.4's coarse fallback. A target crossing a masked
-/// **passthrough** or **STEM** expression finishes into the restored bytes
-/// instead — see
+/// falls back to the enclosing piece's coarse span. A target crossing a
+/// masked **passthrough** or **STEM** expression finishes into the restored
+/// bytes instead — see
 /// [`restore_masked_passthroughs`] and [`masked_default_alt`] — and the side
-/// effect registers that honest restored value where the string pipeline
-/// registers its own sentinel bytes verbatim (a wart the cutover deliberately
-/// will not reproduce; see
+/// effect registers that honest restored value rather than the raw
+/// placeholder bytes (see
 /// `registers_the_restored_target_for_an_image_over_a_passthrough`).
 ///
 /// The **attribute list** follows the same rule, one step removed. An
@@ -566,12 +562,12 @@ pub(in crate::content::inline_builder) fn restorable_body<'a>(
 /// (`image:sunset.jpg[{caption}]`), an escaped special
 /// (`image:x.png[a < b]`), or a restored entity (`image:x.png[Tom &amp;
 /// Jerry]`) — cannot be parsed from the source. It is parsed from the **match
-/// string** instead, through [`bracket_attrlist`], which is what the string
-/// replacer itself parses (`Attrlist::parse(Span::new(&caps[2]), …)`, over its
-/// own escaped, already-expanded haystack); the resulting list is then
+/// string** instead, through [`bracket_attrlist`]
+/// (`Attrlist::parse(Span::new(&caps[2]), …)`, over the match string's own
+/// escaped, already-expanded haystack); the resulting list is then
 /// [`into_owned`](Attrlist::into_owned)ed off that temporary and tagged with
-/// design §4.4's coarse span. A bracket that *is* verbatim keeps its `'src`
-/// slice, so its attribute values still borrow (§4.5).
+/// the enclosing piece's coarse span. A bracket that *is* verbatim keeps its
+/// `'src` slice, so its attribute values still borrow.
 fn build_image_node<'src>(
     caps: &regex::Captures<'_>,
     whole: &str,
@@ -599,18 +595,18 @@ fn build_image_node<'src>(
     // wonder about.
     let (target, restored_target_ranges) = caps.get(1).map_or(
         (CowStr::from(""), Vec::new()),
-        // Borrowed from `'src` for a verbatim target (§4.5), the expansion's
+        // Borrowed from `'src` for a verbatim target, the expansion's
         // own exact bytes for a synthesized one. A target crossing an escaped
         // special has no `'src` slice at all — the source holds one character
         // where the match string holds an entity — so it falls back to the
         // match string's own bytes, which is what `text_slice` declines to
-        // recover and precisely what the string replacer reads as `caps[1]`.
+        // recover and precisely what `caps[1]` holds.
         // A target crossing a masked **passthrough** or **STEM** expression
         // finishes into the restored bytes — the node's own rendered body
         // substituted for its placeholder, the same rewrite
         // `Passthroughs::restore_to` performs on the rendered `src` — while
         // the `default_alt` *arithmetic* below stays on the bytes as
-        // matched, where the string replacer's own runs (see
+        // matched (see
         // [`masked_default_alt`]), and the node records which ranges of the
         // restored target came from a masked body, so the fold-time
         // `web_path` can keep them out of its own way (see
@@ -639,10 +635,9 @@ fn build_image_node<'src>(
     let attrlist = bracket_attrlist(bracket_text, bracket_range, nodes, pieces, root, parser);
 
     // The default alt text derives from the target's basename, with `_`/`-`
-    // read as spaces — exactly the string replacer's `default_alt`, which
-    // runs over the *masked* bytes (its haystack holds the passthrough or
-    // STEM sentinel), with the masked bodies restored into whatever survives
-    // the arithmetic.
+    // read as spaces, running over the *masked* bytes (the haystack holds the
+    // passthrough or STEM placeholder there), with the masked bodies restored
+    // into whatever survives the arithmetic.
     let default_alt = caps.get(1).map_or_else(String::new, |m| {
         masked_default_alt(
             m.as_str(),
@@ -695,22 +690,21 @@ fn build_image_node<'src>(
 }
 
 /// Rewrites this level's match string so each masked **passthrough** or
-/// **STEM** expression's placeholder becomes a sentinel-shaped token —
-/// `\u{96}`*n*`\u{97}`, the very bytes the string pipeline's own haystack
-/// holds there — moving the pieces into the rewritten string's coordinates
-/// (each [`node_is_restorable`] piece keeps its node, wider; every other
-/// piece keeps its bytes).
+/// **STEM** expression's placeholder becomes a three-byte token —
+/// `\u{96}`*n*`\u{97}` — moving the pieces into the rewritten string's
+/// coordinates (each [`node_is_restorable`] piece keeps its node, wider;
+/// every other piece keeps its bytes).
 ///
 /// This family alone needs the widening because [`INLINE_IMAGE_MACRO`]'s
 /// target class is the one in this module that requires **two** characters
 /// (`[^:\s\[\n][^\[\n]*?[^\s\[\n]`): a target written wholly inside a
 /// passthrough (`image:++sunset.jpg++[]`) or a STEM expression
 /// (`image:stem:[x][]`) is a single placeholder character, which that class
-/// cannot match — where the string replacer's three-byte sentinel matches it
-/// exactly. Widening the placeholder to the sentinel's own shape makes
-/// recognition agree byte-for-byte with the string step without touching the
-/// shared pattern. (The `link:`/`mailto:` family's one-or-more target class
-/// never faced this, so its increment left the placeholder bare.)
+/// cannot match — where the three-byte token matches it exactly. Widening
+/// the placeholder to that shape makes recognition agree byte-for-byte with
+/// [`INLINE_IMAGE_MACRO`]'s own pattern without touching the shared regex.
+/// (The `link:`/`mailto:` family's one-or-more target class never faced
+/// this, so its increment left the placeholder bare.)
 ///
 /// The token's bytes never reach an output node: an unmatched token sits in
 /// a gap [`rebuild_macro_level`] re-emits from the piece's own *node*, a
@@ -719,8 +713,7 @@ fn build_image_node<'src>(
 /// node's own body over, and no match boundary can cut one (no byte of
 /// `\u{96}`, a digit, `\u{97}` can begin or end an image match, whose ends
 /// are the literal macro name and `]`). The numbering is per level and
-/// exists only to keep tokens distinct; the string pipeline's own sentinel
-/// numbers are global to the content, and neither survives into any output.
+/// exists only to keep tokens distinct across this level's own placeholders.
 fn widen_masked_pieces(
     s: String,
     pieces: Vec<Piece>,
@@ -770,22 +763,21 @@ fn widen_masked_pieces(
     (out, out_pieces)
 }
 
-/// The string replacer's `default_alt` derivation —
+/// This family's `default_alt` derivation —
 /// `basename(&target.replace(['_', '-'], " "))` — performed over the
 /// **masked** bytes, with each masked passthrough's or STEM expression's
 /// body restored into whatever survives the arithmetic.
 ///
-/// The string pipeline computes `default_alt` from its own haystack, where a
-/// masked construct is the `\u{96}`*n*`\u{97}` sentinel: an opaque token
-/// carrying none of the bytes the arithmetic acts on (no `_`/`-` for the
-/// replace, no `/` or `.` for [`basename`]'s stem cut), so the derivation
-/// treats it as one indivisible character and the restore pass then splices
-/// the extracted body over whatever sentinel reaches the rendered `alt` —
-/// which is how `image:++a_b-c.jpg++[]` keeps `alt="a_b-c.jpg"` where the
-/// verbatim spelling shows `a b c`, its underscores hidden from the replace
-/// inside the sentinel. This reproduces that byte-for-byte: each overlapping
-/// [`node_is_restorable`] piece's placeholder becomes the same
-/// sentinel-shaped token, the arithmetic runs, and each *surviving* token is
+/// A masked construct sits in the haystack as the `\u{96}`*n*`\u{97}`
+/// token: an opaque run carrying none of the bytes the arithmetic acts on
+/// (no `_`/`-` for the replace, no `/` or `.` for [`basename`]'s stem cut),
+/// so the derivation treats it as one indivisible run and the restore then
+/// splices the extracted body over whatever token reaches the derived
+/// `alt` — which is how `image:++a_b-c.jpg++[]` keeps `alt="a_b-c.jpg"`
+/// where the verbatim spelling shows `a b c`, its underscores hidden from
+/// the replace inside the token. Each overlapping
+/// [`node_is_restorable`] piece's placeholder becomes that same
+/// token, the arithmetic runs, and each *surviving* token is
 /// restored with its own node's body ([`restorable_body`]) — index-keyed, as
 /// `Passthroughs::restore_to` is,
 /// so a token the basename cut dropped (a masked construct wholly inside a
@@ -794,9 +786,8 @@ fn widen_masked_pieces(
 /// [`basename`] reads (the last `/`, the last `.`) are bytes no token contains.
 ///
 /// A range holding no masked construct takes the plain derivation over the
-/// match-string bytes — exactly what this family computed before the restore
-/// existed, since `masked` here is the same `caps[1]` the string replacer
-/// reads.
+/// match-string bytes, since `masked` here is the same value `caps[1]`
+/// holds.
 fn masked_default_alt(
     masked: &str,
     range: &std::ops::Range<usize>,
@@ -879,7 +870,7 @@ fn masked_default_alt(
 /// Parses the macro's bracket into the [`Attrlist`]`<'src>` its node carries.
 ///
 /// A **verbatim** bracket is parsed straight from its `'src` slice, so its
-/// attribute names and values borrow from the source (§4.5) — the shape every
+/// attribute names and values borrow from the source — the shape every
 /// ordinary `image:x.png[Alt,200]` takes.
 ///
 /// Any other bracket has no `'src` slice whose bytes are the attrlist text: a
@@ -892,7 +883,7 @@ fn masked_default_alt(
 /// parses the same bytes — from a [`Span::new`] over the capture, whose
 /// `line`/`col`/`offset` are meaningless and never escape this function —
 /// and [`into_owned`](Attrlist::into_owned)s the result onto the bracket's
-/// coarse source span (design §4.4), the same fallback the node's `location`
+/// coarse source span, the same fallback the node's `location`
 /// takes.
 ///
 /// An **empty** bracket carries no bytes either way and parses from a
@@ -940,7 +931,7 @@ fn bracket_attrlist<'src>(
 /// attribute values ([`Attrlist::into_owned_restoring`]), while the link
 /// families' display text — which becomes a node's *children* rather than a
 /// string — splices the **node**, so the fold emits those same bytes without
-/// re-escaping them (design §3.4). Pairing them here rather than re-deriving
+/// re-escaping them. Pairing them here rather than re-deriving
 /// one from the other is what keeps the two spellings of "what this token
 /// restores to" from drifting.
 pub(in crate::content::inline_builder) struct MaskedPiece<'a, 'src> {
@@ -952,13 +943,11 @@ pub(in crate::content::inline_builder) struct MaskedPiece<'a, 'src> {
     /// What the token restores to: exactly what the fold of
     /// [`node`](Self::node) emits (see [`restorable_body`]).
     ///
-    /// For a *masked* construct those bytes are known at build time in the
-    /// same sense the string pipeline knows them —
+    /// For a *masked* construct those bytes are known at build time —
     /// `Passthroughs::restore_to` splices exactly these into its own finished
     /// string. For a **rendered** piece (admitted under
     /// [`Tokened::MaskedOrRendered`]) they are the build-time fold with the
-    /// parser's own renderer, which is what the string replacer's
-    /// already-rendered haystack holds there; freezing them is what lets a
+    /// parser's own renderer; freezing them is what lets a
     /// slot a renderer writes out carry markup the author wrote, at the cost
     /// of a *later* fold with some other renderer seeing the parse-time
     /// renderer's bytes in that slot.
