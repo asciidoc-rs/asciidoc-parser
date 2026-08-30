@@ -40,20 +40,18 @@ pub(super) fn apply_character_replacements<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
 ) -> Vec<InlineNode<'src>> {
-    let mut nodes = nodes;
-
-    for repl in character_replacements() {
-        nodes = apply_one_replacement(repl, nodes, root, LevelContext::ROOT);
-    }
-
-    nodes
+    apply_replacements_recursive(nodes, root, LevelContext::ROOT)
 }
 
-/// Applies one [`CharacterReplacement`] rule to `nodes`, first descending into
+/// Applies every [`character_replacements`] rule to `nodes`, descending into
 /// the [`Styled`](crate::inlines::Styled)/[`Ref`](InlineNode::Ref) children
-/// earlier steps created (a replacement inside a span is recognized just as the
-/// string pipeline recognizes one inside a rendered tag), then matching and
-/// replacing at this level.
+/// earlier steps created exactly once (a replacement inside a span is
+/// recognized just as the string pipeline recognizes one inside a rendered
+/// tag) rather than once per rule: every rule shares the same
+/// [`level_may_have_replacements`] sniff, so descending, and sniffing, once
+/// per level reaches the same leaves the string pipeline's own per-rule
+/// `replace_all` sweep does, without redoing either for every rule in the
+/// `character_replacements` list in turn.
 ///
 /// `ctx` is the boundary context this level sits in
 /// ([`LevelContext`]): "just as the string pipeline recognizes one inside a
@@ -62,15 +60,13 @@ pub(super) fn apply_character_replacements<'src>(
 /// against either edge of a span (`*x --*` renders `<strong>x --</strong>`,
 /// the `--` staying literal because `<` follows it in that haystack, not the
 /// end of a line).
-fn apply_one_replacement<'src>(
-    repl: &CharacterReplacement,
+fn apply_replacements_recursive<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     // A level with no parent node to descend into — the common leaf-only
-    // case, visited once per rule — skips the rebuild of its node vector
-    // entirely.
+    // case — skips the rebuild of its node vector entirely.
     let nodes = if nodes
         .iter()
         .any(|node| matches!(node, InlineNode::Styled(_) | InlineNode::Ref(_)))
@@ -80,13 +76,12 @@ fn apply_one_replacement<'src>(
             .map(|node| match node {
                 InlineNode::Styled(mut styled) => {
                     let inner = LevelContext::inside_styled(&styled, ctx);
-                    styled.children = apply_one_replacement(repl, styled.children, root, inner);
+                    styled.children = apply_replacements_recursive(styled.children, root, inner);
                     InlineNode::Styled(styled)
                 }
 
                 InlineNode::Ref(mut reference) => {
-                    reference.children = apply_one_replacement(
-                        repl,
+                    reference.children = apply_replacements_recursive(
                         reference.children,
                         root,
                         LevelContext::INSIDE_REF,
@@ -101,7 +96,23 @@ fn apply_one_replacement<'src>(
         nodes
     };
 
-    replace_level(repl, nodes, root, ctx)
+    // Cheap pre-filter, shared by every rule below: none of them can match
+    // when this level has nothing replaceable at all, so this skips all of
+    // them at once rather than letting each rediscover the same answer over
+    // `nodes` on its own turn. `replace_level` does not repeat this check
+    // itself — see its own doc comment for why one pass here already covers
+    // every rule's turn.
+    if !level_may_have_replacements(&nodes) {
+        return nodes;
+    }
+
+    let mut nodes = nodes;
+
+    for repl in character_replacements() {
+        nodes = replace_level(repl, nodes, root, ctx);
+    }
+
+    nodes
 }
 
 /// One character-replacement match at a level, in absolute match-string byte
@@ -164,21 +175,25 @@ enum ReplacementKind {
 
 /// Matches `repl` over this level's escaped text, replacing each match with the
 /// leaf node(s) it produces and leaving everything else in place.
+///
+/// Takes no [`level_may_have_replacements`] pre-filter of its own: the caller
+/// ([`apply_replacements_recursive`]) already took it once for `nodes` before
+/// entering the rule loop this is called from, and every rule's own leaf —
+/// [`Replace`](ReplacementKind::Replace),
+/// [`Unescape`](ReplacementKind::Unescape),
+/// or [`Entity`](ReplacementKind::Entity) alike — either keeps the matched
+/// text's own trigger characters in place or produces a [`CharRef`] whose
+/// [`charref_entity`](super::quotes::charref_entity) form always starts with
+/// `&`, which the sniff's own `[&']` alternative always answers `true` for.
+/// So once true for a level, the sniff cannot go false again for the rest of
+/// that level's rule loop, and re-taking it on every rule's own turn would
+/// only ever confirm what the caller already established.
 fn replace_level<'src>(
     repl: &CharacterReplacement,
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
-    // Cheap pre-filter, taken *before* the match string is materialized: skip
-    // the pattern sweep (and the build's allocations) when nothing replaceable
-    // can be present at this level. Conservative — see
-    // [`level_may_have_replacements`] — so a level it passes still sniffs
-    // nothing more than the built string would.
-    if !level_may_have_replacements(&nodes) {
-        return nodes;
-    }
-
     let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // The rule runs over the level wrapped in its enclosing construct's own
