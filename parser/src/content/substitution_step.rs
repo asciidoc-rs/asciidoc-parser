@@ -5,7 +5,7 @@ use regex::{Captures, Regex, RegexBuilder, Replacer};
 use crate::{
     Parser, Span,
     attributes::Attrlist,
-    content::{Content, escape_sentinels},
+    content::Content,
     document::InterpretedValue,
     parser::{
         CharacterReplacementType, InlineRenderer, QuoteScope, QuoteType, SpecialCharacter,
@@ -428,12 +428,6 @@ struct AttributeReplacer<'p> {
     /// whole line in `drop-line` mode, or a line the dropped reference left
     /// empty in `drop` mode (Asciidoctor's `reject_if_empty`).
     missing_on_line: bool,
-
-    /// Whether a substituted attribute value should have its reserved sentinel
-    /// codepoints escaped on the way in. Set only when replacing references in
-    /// content being substituted, which is held in escaped form (see
-    /// [`escape_sentinels`]).
-    escape_sentinels: bool,
 }
 
 impl<'p> AttributeReplacer<'p> {
@@ -446,7 +440,6 @@ impl<'p> AttributeReplacer<'p> {
             fallback_source,
             haystack_is_source: false,
             missing_on_line: false,
-            escape_sentinels: false,
         }
     }
 
@@ -455,13 +448,6 @@ impl<'p> AttributeReplacer<'p> {
     /// whole span: the match offsets the regex reports are source offsets.
     fn over_its_own_source(mut self) -> Self {
         self.haystack_is_source = true;
-        self
-    }
-
-    /// Escapes the reserved sentinel codepoints of every attribute value this
-    /// replacer splices in, for the content path (see the field docs).
-    fn escaping_sentinels(mut self) -> Self {
-        self.escape_sentinels = true;
         self
     }
 
@@ -595,17 +581,7 @@ impl Replacer for AttributeReplacer<'_> {
         // A value-less `Set` attribute (e.g. `:foo:` with no `=value`)
         // substitutes to an empty string, matching Asciidoctor.
         if let InterpretedValue::Value(value) = value {
-            // An attribute's value is stored as the document wrote it, so a
-            // reserved sentinel codepoint in it enters the text being
-            // substituted unescaped unless it is escaped here (see
-            // `escape_sentinels`). Only the content path asks for this: a value
-            // spliced into a macro target or an attribute list is not part of
-            // the escaped text and is restored by no one.
-            if self.escape_sentinels {
-                dest.push_str(&escape_sentinels(value.as_ref()));
-            } else {
-                dest.push_str(value.as_ref());
-            }
+            dest.push_str(value.as_ref());
         }
     }
 }
@@ -650,7 +626,7 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
             continue;
         }
 
-        let mut replacer = AttributeReplacer::new(parser, mode, source).escaping_sentinels();
+        let mut replacer = AttributeReplacer::new(parser, mode, source);
 
         let replaced = ATTRIBUTE_REFERENCE.replace_all(line, replacer.by_ref());
 

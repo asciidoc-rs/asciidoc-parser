@@ -6,7 +6,7 @@
 mod content;
 pub use content::Content;
 pub(crate) use content::{
-    DeferredParts, FootnoteDeferred, OwnedTitle, XrefSegment, XrefTemplatePiece, escape_sentinels,
+    DeferredParts, FootnoteDeferred, OwnedTitle, XrefSegment, XrefTemplatePiece,
     fold_resolved_title, render_xref_segment, render_xref_template, resolved_destinations,
     sanitize_title, xref_segment_from_node,
 };

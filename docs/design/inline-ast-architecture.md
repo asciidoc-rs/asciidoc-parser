@@ -11592,7 +11592,7 @@ failed**, 68 ignored.
 | Phase | Criterion | Verdict | Evidence |
 | ----- | --------- | ------- | -------- |
 | 2 | ~277 golden `.rendered()` assertions pass unchanged | ✅ | Suite green, and the §5.3 rename left every asserted string untouched. The renamed accessors have 324 `.rendered_html()` and 173 `.rendered_html_content()` call sites (`git grep -cF` at `25ad4070`). Those are *accessor call sites*, not a recount of §5.3's ~277 golden assertions — most are ordinary reads rather than golden string comparisons — so they evidence the rename's reach, not the size of the oracle. |
-| 2 | sentinels deleted | ⚠️ **producers retired, table not yet deleted** | See below. |
+| 2 | sentinels deleted | ✅ | See below — the table itself and its last reader are gone. |
 | 2 | benchmarks within an agreed budget of `main` | ❓ **no budget on record** | CodSpeed reports no alteration across 5 benchmarks, but no *agreed budget* is written down anywhere in this document, so the criterion cannot be checked as stated. |
 | 3 | node vocabulary reviewed against the `asciidoctor` port's needs (§6.6) | ❌ **not started, and gated on Landing** | See below. |
 | 3 | purely-structural navigation sugar kept minimal | ✅ | The `inlines` module exposes no navigation helpers at all — no `walk`, `descendants`, `children`, `iter`, `visit`, or `find`; the node types are plain public fields (§3.2's sketch). Minimal by construction. |
@@ -11735,6 +11735,29 @@ own wording (the table itself, and `escape_sentinels`'s four legacy string-step 
 still there), but every *producer* the gate's name refers to is retired; what remains is the
 purely mechanical follow-up named throughout this section.
 
+*The follow-up landed as (delete `escape_sentinels` and `RESERVED_SENTINELS`):* the
+mechanical retirement every prior increment's own note deferred, now done. All four call
+sites shared one function, `apply_attributes` (`content/substitution_step.rs`) — reached from
+an attrlist value (`Attrlist::parse`), an author line (`document::author`), a reftext
+(`substitute_attributes_in_reftext`), and a list-item marker (`blocks::list_item_marker`), all
+through `SubstitutionStep::AttributeReferences.apply`, the one arm of that match that still
+has a string implementation; every other step is `unreachable!` since step 6. Grepping for a
+decoder confirmed there was none left to break: no production pass anywhere in the crate reads
+`SENTINEL_ESCAPE`'s tagged form back, so `AttributeReplacer`'s `escape_sentinels` field and
+`.escaping_sentinels()` builder method are deleted along with the call, and the four call
+sites now splice a substituted attribute value unescaped — a behavior-preserving deletion, not
+a behavior change, since nothing downstream ever scanned for or decoded the escaped form.
+`escape_sentinels`, `is_reserved_sentinel`, `SENTINEL_ESCAPE`, `RESERVED_SENTINELS`, and the
+four codepoint consts that fed it (`XREF_PLACEHOLDER_START`/`_END`,
+`PASSTHROUGH_PLACEHOLDER_START`/`_END`) are gone from `content.rs`, and the `escape_sentinels`
+test module goes with them — each of its three tests pinned a mechanism that no longer exists.
+The `sentinels.rs` regression suite (issue #1235) needed no changes at all: those tests assert
+on rendered output, and a typed sentinel was always content there and remains so — the
+escaping and decoding this increment removes were internal machinery, invisible either way.
+Phase 2's "sentinels deleted" gate now closes on the letter of its own wording, not just its
+producers: no production code emits an in-band control sentinel, and the table that used to
+reserve codepoints for one no longer exists either.
+
 ##### Phase 3's first criterion cannot close before Landing
 
 "Node vocabulary reviewed against the `asciidoctor` port's needs (§6.6)" and Landing's
@@ -11756,9 +11779,9 @@ in place by this audit; the remaining struct is Phase 5's own outstanding work.
 ##### What this means for "how much further"
 
 Firm, enumerated, and cheap: Phase 3's README `Raw`-node anchor; Phase 4's four hard-case
-policies written down; §4.6's stale sentence (done here); the now-inert `escape_sentinels`
-pass and the `RESERVED_SENTINELS` table under it (a purely mechanical follow-up, left for its
-own increment when the xref template retirement landed). Firm and substantial: the last
+policies written down; §4.6's stale sentence (done here); the `escape_sentinels` pass and the
+`RESERVED_SENTINELS` table under it (done — see the sentinel table's own landed-as note
+above). Firm and substantial: the last
 `XrefRenderParams` fold (Phase 5) — the xref template mechanism itself is retired now, both
 halves. Open-ended: the `asciidoctor`-port review, which gates both Phase 3 and Landing and
 whose cost is unknown from inside this repository. Any session count that does not separate
