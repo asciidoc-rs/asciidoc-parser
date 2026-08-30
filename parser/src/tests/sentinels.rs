@@ -120,14 +120,15 @@ fn a_placeholder_from_an_attribute_value_cannot_forge_a_cross_reference() {
 fn a_placeholder_from_an_attribute_value_cannot_forge_an_image_restore() {
     // `image:`/`icon:` and the link families' display-text list are the one
     // place left where a masked passthrough or STEM expression is restored
-    // by scanning parsed text for its own `\u{96}`*n*`\u{97}` token
-    // (`tokened_bracket`/`Attrlist::into_owned_restoring`), rather than by
-    // node structure. An attribute reference is substituted into the bracket
-    // *before* the image macro is even recognized, so an attribute whose
-    // value happens to spell that same byte pattern — sitting in the same
+    // by scanning parsed text for its own [`MASKED_PIECE_PLACEHOLDER`]
+    // occurrence (`tokened_bracket`/`Attrlist::into_owned_restoring`), rather
+    // than by node structure. An attribute reference is substituted into the
+    // bracket *before* the image macro is even recognized, so an attribute
+    // whose value happens to spell that same byte — sitting in the same
     // bracket as a real passthrough — would otherwise be indistinguishable
-    // from the pipeline's own token and splice the passthrough's rendered
-    // body into `alt` instead of the literal text the document defined.
+    // from the pipeline's own placeholder and splice the passthrough's
+    // rendered body into `alt` instead of the literal text the document
+    // defined.
     let doc = Parser::default().parse(concat!(
         ":forge: \u{96}0\u{97}\n",
         "\n",
@@ -151,8 +152,9 @@ fn a_placeholder_from_an_attribute_value_cannot_forge_a_link_display_text_restor
     // The `link:` macro's display-text list shares `tokened_bracket` and
     // `Attrlist::into_owned_restoring` with the image family's bracket (see
     // `a_placeholder_from_an_attribute_value_cannot_forge_an_image_restore`),
-    // so the same forgery reaches it through a `role=` attribute sitting
-    // beside a real passthrough in the same display-text list.
+    // so the same forgery would reach it through a `role=` attribute sitting
+    // beside a real passthrough in the same display-text list, absent the
+    // same escape guard.
     let doc = Parser::default().parse(concat!(
         ":forge: \u{96}0\u{97}\n",
         "\n",

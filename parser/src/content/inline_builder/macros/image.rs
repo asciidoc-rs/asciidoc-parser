@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use super::{MacroMatch, MacroMatchKind, links::restore_masked_passthroughs, rebuild_macro_level};
 use crate::{
     Parser, Span,
-    attributes::{Attrlist, AttrlistContext},
+    attributes::{Attrlist, AttrlistContext, element_attribute::MASKED_PIECE_PLACEHOLDER},
     content::{
         INLINE_IMAGE_MACRO, basename,
         inline_builder::{
@@ -985,30 +985,31 @@ pub(in crate::content::inline_builder) enum Tokened {
 }
 
 /// Rewrites a macro **bracket**'s own match-string bytes so each masked piece
-/// in it becomes an index-keyed `\u{96}`*n*`\u{97}` token, returning that text
-/// alongside the [`MaskedPiece`]s those tokens stand for.
+/// in it becomes one [`MASKED_PIECE_PLACEHOLDER`] occurrence, returning that
+/// text alongside the [`MaskedPiece`]s those occurrences stand for, in
+/// left-to-right order.
 ///
-/// This is the *before the split* half of every bracket restore, and it exists
-/// so the text handed to [`Attrlist::parse`] is the same **shape** the string
-/// pipeline's own haystack has there. Two spellings have to be normalized into
-/// one: [`widen_masked_pieces`] has already rewritten a masked piece to a
-/// sentinel-shaped token for the image family's *recognition*, but its
-/// numbering is per level, and for the link families' display-text list a
+/// This is the *before the split* half of every bracket restore, and it
+/// exists so [`Attrlist::parse`] sees an atomic, delimiter-free run at each
+/// masked piece's position instead of the piece's own `,`/`=`/`"` bytes. Two
+/// spellings have to be normalized into one: [`widen_masked_pieces`] has
+/// already rewritten a masked piece to a sentinel-shaped token for the image
+/// family's *recognition*, and for the link families' display-text list a
 /// masked piece is still the bare one-character
-/// [`SPAN_PLACEHOLDER`](super::super::quotes). Renumbering every restorable
-/// piece from zero, per bracket, is what lets the restore be **index-keyed**
-/// on the way back out ([`Attrlist::into_owned_restoring`]) — the parse can
-/// drop a token (a blank slot, a value the split discards) without shifting
-/// the ones that survive, exactly as
-/// `Passthroughs::restore_to` is
-/// unshifted by a sentinel that never reached the rendered string.
+/// [`SPAN_PLACEHOLDER`](super::super::quotes). Both become the same
+/// placeholder here, in the order they occur, which is what lets the restore
+/// find them **by position** on the way back out
+/// ([`Attrlist::into_owned_restoring`]) — a value the split discards simply
+/// never reaches a restore, and every occurrence after it keeps its own
+/// place in the sequence, unaffected.
 ///
 /// Shared by the two families whose bracket comes back from a parse — the
 /// `image:`/`icon:` bracket here, and the link families' display-text list
 /// ([`text_attrlist`](super::links)) — so the two cannot disagree about what
-/// a token may stand for: both masked kinds, the set [`node_is_restorable`]
-/// names. (The image bracket's one `web_path`-bound value, an interactive
-/// SVG's `fallback=`, resolves over its restored ranges *masked* — see
+/// a placeholder may stand for: both masked kinds, the set
+/// [`node_is_restorable`] names. (The image bracket's one `web_path`-bound
+/// value, an interactive SVG's `fallback=`, resolves over its restored ranges
+/// *masked* — see
 /// [`ElementAttribute::into_owned_restoring`](crate::attributes::ElementAttribute) —
 /// so a STEM body's backslash never reaches the resolver there either.)
 pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
@@ -1075,7 +1076,7 @@ pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
 
         match masked {
             Some(masked) => {
-                tokened.push_str(&format!("\u{96}{n}\u{97}", n = masked_pieces.len()));
+                tokened.push_str(MASKED_PIECE_PLACEHOLDER);
                 masked_pieces.push(masked);
             }
 
@@ -2164,20 +2165,19 @@ mod tests {
     fn a_bracket_body_carrying_sentinel_shaped_bytes_is_not_re_matched() {
         // The bracket restore is one left-to-right pass, like
         // `Passthroughs::restore_to`'s own: a body that itself contains the
-        // bytes of a *later* token must not have that token spliced into it,
-        // and a token index the bracket never issued is left as written
-        // rather than renumbering the ones after it.
+        // bytes of a *later* placeholder must not have that placeholder
+        // spliced into it.
         let source = "image:x.png[++x\u{96}1\u{97}y++ ++b++]";
         let nodes = build_src(Span::new(source));
 
         let image = assert_image(&nodes[0]);
         assert_eq!(image.alt.as_deref(), Some("x\u{96}1\u{97}y b"));
 
-        // The leniency the index-keyed restore rests on, in both spellings a
-        // bracket can present: a run that is not a well-formed token (no
-        // digits) and one whose index the bracket never issued are each left
-        // exactly as the author wrote them, rather than renumbering — or
-        // consuming — the real tokens around them.
+        // The leniency the positional restore rests on, in both spellings a
+        // bracket can present: a run that is not the well-formed placeholder
+        // pair (a lone `\u{96}` or `\u{97}`, or the two separated by other
+        // bytes) is left exactly as the author wrote it, rather than being
+        // mistaken for a real occurrence.
         let nodes = build_src(Span::new(
             "image:x.png[++a++ \u{96}x\u{97} \u{96}9\u{97} ++b++]",
         ));
@@ -2188,13 +2188,27 @@ mod tests {
             Some("a \u{96}x\u{97} \u{96}9\u{97} b")
         );
 
-        // The string pipeline reads this one differently, and the difference
-        // is its own wart rather than something to reproduce: `restore_to`
-        // is a `replace_all` over the *finished* rendered string, so it also
-        // rewrites the sentinel-shaped bytes the author wrote — splicing
-        // passthrough 1's body into the middle of passthrough 0's. The tree
-        // restores per token, into the value each token actually stands in,
-        // so an author's own bytes survive. Its sibling
+        // And the leniency on the *other* side of the same shape: an
+        // author-typed **adjacent** pair — the well-formed placeholder shape
+        // itself, with no real masked piece behind it — is left as written
+        // too, rather than consuming a body meant for a later real
+        // occurrence. Only one passthrough (`++a++`) supplies a body here, so
+        // the cursor is already past `bodies.len()` by the time the typed
+        // pair is reached, and `restore_tokens`' own leniency for that case
+        // is what keeps it literal instead of panicking or misattributing.
+        let nodes = build_src(Span::new("image:x.png[++a++ \u{96}\u{97}]"));
+        let image = assert_image(&nodes[0]);
+
+        assert_eq!(image.alt.as_deref(), Some("a \u{96}\u{97}"));
+
+        // The string pipeline reads the first fixture differently, and the
+        // difference is its own wart rather than something to reproduce:
+        // `restore_to` is a `replace_all` over the *finished* rendered
+        // string, so it also rewrites the sentinel-shaped bytes the author
+        // wrote — splicing passthrough 1's body into the middle of
+        // passthrough 0's. The tree restores per occurrence, into the value
+        // each one actually stands in, so an author's own bytes survive. Its
+        // sibling
         // `a_restored_body_carrying_sentinel_shaped_bytes_is_not_re_matched`
         // pins the same reading for a target.
         use super::super::super::test_support::golden_passthroughs;

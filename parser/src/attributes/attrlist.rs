@@ -2,7 +2,7 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::{
         ElementAttribute,
-        element_attribute::{ParseShorthand, restore_into},
+        element_attribute::{MASKED_PIECE_PLACEHOLDER, ParseShorthand, restore_into},
     },
     content::{Content, SubstitutionStep},
     internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
@@ -94,30 +94,46 @@ impl<'src> Attrlist<'src> {
     }
 
     /// [`into_owned`](Self::into_owned), first substituting each
-    /// `\u{96}`*n*`\u{97}` **token** in every parsed value — and in the
-    /// anchor and the retained
-    /// [`source_text`](Self::source_text) — with `bodies[n]`.
+    /// [`MASKED_PIECE_PLACEHOLDER`] occurrence in every parsed value — and in
+    /// the retained [`source_text`](Self::source_text) — with the next of
+    /// `bodies`, in left-to-right document order.
     ///
     /// This is how a caller restores a masked construct that its attribute
     /// list text still holds. The restore has to happen **after** the parse,
-    /// not before it: the string pipeline parses its own haystack with the
-    /// passthrough sentinel still in place, so the body's own bytes never
-    /// reach the split that divides the list into entries, names, and values.
-    /// See [`ElementAttribute::into_owned_restoring`] for the per-attribute
-    /// half, including what it does to the shorthand offsets.
+    /// not before it: [`Attrlist::parse`] has to see the placeholder still in
+    /// place, so the body's own bytes never reach the split that divides the
+    /// list into entries, names, and values.
+    ///
+    /// A single shared cursor, starting at `0`, walks
+    /// [`self.attributes`](Self) in the same order [`Attrlist::parse`] found
+    /// them in — which is left-to-right document order, the same order a
+    /// placeholder's own position in `bodies` was assigned in — so no index
+    /// needs to be carried in the placeholder's own bytes. `source_text` is
+    /// an independent full copy of the same text and is restored with a
+    /// fresh cursor of its own, from `0` again, for the same reason. See
+    /// [`ElementAttribute::into_owned_restoring`] for the per-attribute half,
+    /// including what it does to the shorthand offsets, and
+    /// [`nth_attribute_token_offset`](Self::nth_attribute_token_offset) /
+    /// [`named_attribute_token_offset`](Self::named_attribute_token_offset)
+    /// for a caller that needs to restore one attribute's value against a
+    /// *slice* of a global body/node list instead of the whole list this
+    /// method walks.
     pub(crate) fn into_owned_restoring<'dst>(
         self,
         source: Span<'dst>,
         bodies: &[&str],
     ) -> Attrlist<'dst> {
         let source_text = CowStr::from(self.source_text().to_string());
+        let mut cursor = 0usize;
+
+        let attributes = self
+            .attributes
+            .into_iter()
+            .map(|attribute| attribute.into_owned_restoring(bodies, &mut cursor))
+            .collect();
 
         Attrlist {
-            attributes: self
-                .attributes
-                .into_iter()
-                .map(|attribute| attribute.into_owned_restoring(bodies))
-                .collect(),
+            attributes,
             // The anchor takes the plain conversion rather than a restoring
             // one. An anchor is only ever set for the `[…]`-delimited whole
             // -bracket form, and no restoring caller can present one: each
@@ -125,8 +141,64 @@ impl<'src> Attrlist<'src> {
             // match at the first `]`, so `[x]` never arrives here intact.
             anchor: self.anchor.map(CowStr::into_owned),
             source,
-            source_text: Some(restore_into(source_text, bodies, &mut [], &mut Vec::new())),
+            source_text: Some(restore_into(
+                source_text,
+                bodies,
+                &mut 0usize,
+                &mut [],
+                &mut Vec::new(),
+            )),
         }
+    }
+
+    /// The number of [`MASKED_PIECE_PLACEHOLDER`] occurrences in every
+    /// attribute's name and value that come before `self.attributes[index]`,
+    /// in this list's own parse order.
+    ///
+    /// A caller restoring one attribute's own value against a **slice** of a
+    /// global body/node list — rather than the whole list
+    /// [`into_owned_restoring`](Self::into_owned_restoring) walks — uses this
+    /// to find where that attribute's own occurrences begin: the same
+    /// position `into_owned_restoring`'s own shared cursor would be at once
+    /// it reached this attribute. Counting occurrences needs no restore of
+    /// its own — it reads the still-tokened `name`/`value` text directly — so
+    /// this works before any restore has run.
+    fn token_offset_before(&self, index: usize) -> usize {
+        self.attributes
+            .get(..index)
+            .unwrap_or_default()
+            .iter()
+            .map(|attr| {
+                attr.name()
+                    .map_or(0, |name| name.matches(MASKED_PIECE_PLACEHOLDER).count())
+                    + attr.value().matches(MASKED_PIECE_PLACEHOLDER).count()
+            })
+            .sum()
+    }
+
+    /// [`nth_attribute`](Self::nth_attribute), plus the offset into a global
+    /// body/node list where that attribute's own placeholder occurrences
+    /// begin (see [`token_offset_before`](Self::token_offset_before)).
+    pub(crate) fn nth_attribute_token_offset(&self, n: usize) -> Option<usize> {
+        let index = self
+            .attributes
+            .iter()
+            .position(|attr| attr.positional_index() == Some(n))?;
+
+        Some(self.token_offset_before(index))
+    }
+
+    /// [`named_attribute`](Self::named_attribute), plus the offset into a
+    /// global body/node list where that attribute's own placeholder
+    /// occurrences begin (see
+    /// [`token_offset_before`](Self::token_offset_before)).
+    pub(crate) fn named_attribute_token_offset(&self, name: &str) -> Option<usize> {
+        let index = self
+            .attributes
+            .iter()
+            .position(|attr| attr.name() == Some(name))?;
+
+        Some(self.token_offset_before(index))
     }
 
     /// **IMPORTANT:** This `source` span passed to this function should NOT
@@ -688,6 +760,51 @@ impl<'src> Attrlist<'src> {
         roles
     }
 
+    /// [`roles`](Self::roles), pairing each role with the offset into a
+    /// global body/node list where *its own* placeholder occurrences begin
+    /// (see [`token_offset_before`](Self::token_offset_before)) — a role
+    /// from the first positional attribute's own shorthand items and one
+    /// from a named `role=` attribute are two different attributes in this
+    /// list's own parse order, so a caller restoring a role read off a
+    /// still-tokened list (e.g. `untranslated_value` in the macros step)
+    /// cannot use one starting offset for both.
+    ///
+    /// Nor can two roles split out of the *same* source attribute
+    /// (`role=++a++ ++b++` is one attribute, two space-separated roles, each
+    /// with its own placeholder): each role after the first has to skip past
+    /// every placeholder occurrence the roles *before* it, in the same
+    /// value, already account for — so the offset is a running count, seeded
+    /// from the source attribute's own base offset and advanced by each
+    /// role's own occurrence count as the split walks left to right, not one
+    /// shared starting point per attribute.
+    pub(crate) fn roles_with_token_offset(&'src self) -> Vec<(&'src str, usize)> {
+        let mut roles: Vec<(&'src str, usize)> = vec![];
+
+        if let Some(base) = self.nth_attribute_token_offset(1)
+            && let Some(attr1) = self.nth_attribute(1)
+        {
+            let mut offset = base;
+
+            for role in attr1.roles() {
+                roles.push((role, offset));
+                offset += role.matches(MASKED_PIECE_PLACEHOLDER).count();
+            }
+        }
+
+        if let Some(base) = self.named_attribute_token_offset("role")
+            && let Some(role_attr) = self.named_attribute("role")
+        {
+            let mut offset = base;
+
+            for role in split_role_value(role_attr.value()) {
+                roles.push((role, offset));
+                offset += role.matches(MASKED_PIECE_PLACEHOLDER).count();
+            }
+        }
+
+        roles
+    }
+
     /// The attrlist text this list was parsed from.
     ///
     /// For every list parsed straight from the source it describes, that is
@@ -899,6 +1016,103 @@ mod tests {
 
         let b2 = b1.item.clone();
         assert_eq!(b1.item, b2);
+    }
+
+    #[test]
+    fn token_offset_helpers_count_placeholders_before_the_target_attribute() {
+        // Two masked pieces (each one `MASKED_PIECE_PLACEHOLDER` occurrence,
+        // as `tokened_bracket`/`tokened_text` would leave it before a
+        // restore): one inside a named `role=` attribute, first in this
+        // list's own parse order, and one inside the third (positional)
+        // entry. A caller restoring the third entry's own value against a
+        // *slice* of a global body/node list has to start past the role's
+        // own occurrence, not at the whole list's first one — this is the
+        // scenario the two `_token_offset` accessors exist for.
+        use crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER;
+
+        let source = format!("role={MASKED_PIECE_PLACEHOLDER},x,{MASKED_PIECE_PLACEHOLDER}");
+        let p = Parser::default();
+        let attrlist = crate::attributes::Attrlist::parse(
+            crate::Span::new(&source),
+            &p,
+            AttrlistContext::Inline,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        // Nothing precedes `role=` itself.
+        assert_eq!(attrlist.named_attribute_token_offset("role"), Some(0));
+
+        // The third entry (positional index 3) is the *third* attribute in
+        // vec order (role, then the blank `x`... no, `x` is itself
+        // positional index 2) — one placeholder (role's own) precedes it.
+        assert_eq!(attrlist.nth_attribute_token_offset(3), Some(1));
+
+        // A name with no matching attribute finds nothing to offset.
+        assert_eq!(attrlist.named_attribute_token_offset("nope"), None);
+        assert_eq!(attrlist.nth_attribute_token_offset(99), None);
+    }
+
+    #[test]
+    fn roles_with_token_offset_pairs_each_role_with_its_own_source_attributes_offset() {
+        // A role from the first positional's own shorthand items and one
+        // from a named `role=` attribute are two different attributes, and
+        // `roles()` merges them into one flat list with no way back to
+        // either source — which is exactly why a restoring caller
+        // (`untranslated_value`) needs the offset alongside each role rather
+        // than one shared starting point.
+        use crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER;
+
+        let source =
+            format!("{MASKED_PIECE_PLACEHOLDER}.shorthand,role={MASKED_PIECE_PLACEHOLDER}");
+        let p = Parser::default();
+        let attrlist = crate::attributes::Attrlist::parse(
+            crate::Span::new(&source),
+            &p,
+            AttrlistContext::Inline,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        let roles = attrlist.roles_with_token_offset();
+
+        assert_eq!(
+            roles,
+            vec![("shorthand", 0), (MASKED_PIECE_PLACEHOLDER, 1)],
+            "the shorthand role's own attribute is first, so nothing precedes it \
+             (offset 0); the named `role=` attribute — still unrestored, so its \
+             value is the placeholder itself — is the second attribute, past the \
+             shorthand's own one placeholder occurrence (offset 1)"
+        );
+    }
+
+    #[test]
+    fn roles_with_token_offset_advances_past_each_earlier_role_in_the_same_attribute() {
+        // Two space-separated roles inside the *same* `role=` attribute
+        // (`role=++a++ ++b++`), each carrying its own placeholder — a single
+        // attribute, not two, so `named_attribute_token_offset` gives both
+        // roles the same *base*, and the second role's own offset has to
+        // additionally skip past the first role's own one occurrence, not
+        // reuse the base as if only one role were there (Greptile
+        // https://github.com/asciidoc-rs/asciidoc-parser/pull/1349#discussion_r3890749214).
+        use crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER;
+
+        let source = format!("role={MASKED_PIECE_PLACEHOLDER} {MASKED_PIECE_PLACEHOLDER}");
+        let p = Parser::default();
+        let attrlist = crate::attributes::Attrlist::parse(
+            crate::Span::new(&source),
+            &p,
+            AttrlistContext::Inline,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        assert_eq!(
+            attrlist.roles_with_token_offset(),
+            vec![(MASKED_PIECE_PLACEHOLDER, 0), (MASKED_PIECE_PLACEHOLDER, 1),],
+            "the first role's own occurrence is offset 0; the second role's own \
+             occurrence must skip past it rather than reusing offset 0"
+        );
     }
 
     #[test]
