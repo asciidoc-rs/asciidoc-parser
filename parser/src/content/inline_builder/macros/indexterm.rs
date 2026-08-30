@@ -56,21 +56,24 @@ pub(super) fn indexterm_macros_level<'src>(
         return nodes;
     }
 
-    // The string replacer runs the shorthand through [`replace_with_lookahead`],
-    // whose look-ahead retry (a shorthand absorbing trailing parens) has a subtle
-    // consequence: if the whole substitution accumulates *no* output and the last
-    // event is such a retry, the helper returns `Cow::Borrowed` and the caller
-    // keeps the original text **unchanged**. Concretely, content that is nothing
-    // but concealed shorthand terms (`(((coffee)))`, `(((a)))(((b)))`) is left
-    // *literal*, where the same terms with any surrounding output render to
-    // nothing. Detect that no-op and mirror it: leave the level untouched.
+    // The string replacer runs the shorthand through
+    // [`replace_with_lookahead`], whose look-ahead retry (a shorthand
+    // absorbing trailing parens) has a subtle consequence: if the whole
+    // substitution accumulates *no* output and the last event is such a
+    // retry, the helper returns `Cow::Borrowed` and the caller
+    // keeps the original text **unchanged**. Concretely, content that is
+    // nothing but concealed shorthand terms (`(((coffee)))`,
+    // `(((a)))(((b)))`) is left *literal*, where the same terms with any
+    // surrounding output render to nothing. Detect that no-op and mirror
+    // it: leave the level untouched.
     //
     // This mirrors a **known string-pipeline bug**
     // (asciidoc-rs/asciidoc-parser#1123): a whole-content concealed term should
     // render empty, not literal. The additive builder reproduces it here to
     // keep byte-for-byte parity (design §5.3); the fix for both is to drop this
     // call at the cutover (design §5.2, Phase 4, step 6),
-    // where `rendered_html()` becomes the fold and the golden output is updated.
+    // where `rendered_html()` becomes the fold and the golden output is
+    // updated.
     if indexterm_substitution_is_a_noop(&matches) {
         return nodes;
     }
@@ -229,12 +232,13 @@ fn find_indexterm_matches<'src>(
         }
 
         // Shorthand form: group 3 is the text enclosed by the outermost `((` …
-        // `))`. Absorb any `)` immediately after the matched `))` so the closing
-        // pair is the *last* in the run, mirroring the string replacer's
-        // `(?!\))` look-ahead re-creation. `captures_iter` cannot skip ahead, so
-        // the absorbed parens are folded into this match's `full` range instead;
-        // a run of `)` never starts a new match, so the next `captures_iter`
-        // match still lands past them.
+        // `))`. Absorb any `)` immediately after the matched `))` so the
+        // closing pair is the *last* in the run, mirroring the string
+        // replacer's `(?!\))` look-ahead re-creation. `captures_iter`
+        // cannot skip ahead, so the absorbed parens are folded into
+        // this match's `full` range instead; a run of `)` never starts
+        // a new match, so the next `captures_iter` match still lands
+        // past them.
         #[allow(clippy::unwrap_used)]
         let inner = caps.get(3).unwrap().range();
 
@@ -536,9 +540,10 @@ fn build_indexterm_macro_match<'src>(
     root: Span<'src>,
     parser: &Parser,
 ) -> Option<RecognizedIndexterm<'src>> {
-    // An escape (`\indexterm:…`) drops the backslash and keeps the rest literal,
-    // mirroring the string replacer's `caps[0][1..]`. A macro form always
-    // `Continue`s (no look-ahead retry), and the unescaped literal is non-empty.
+    // An escape (`\indexterm:…`) drops the backslash and keeps the rest
+    // literal, mirroring the string replacer's `caps[0][1..]`. A macro form
+    // always `Continue`s (no look-ahead retry), and the unescaped literal
+    // is non-empty.
     if escaped {
         return Some(RecognizedIndexterm {
             macro_match: MacroMatch {
@@ -751,8 +756,8 @@ fn push_indexterm_shorthand_matches<'src>(
     root: Span<'src>,
     matches: &mut Vec<RecognizedIndexterm<'src>>,
 ) {
-    // `encl_text` = the enclosed text plus any absorbed trailing parens, exactly
-    // as the string replacer builds it before classifying.
+    // `encl_text` = the enclosed text plus any absorbed trailing parens,
+    // exactly as the string replacer builds it before classifying.
     let encl_text = encl.text(s);
 
     if escaped {
@@ -791,9 +796,10 @@ fn push_indexterm_shorthand_matches<'src>(
             is_skip: false,
         });
 
-        // Everything after it: the nested term, with the wrapping parenthesis at
-        // each end left outside `consumed` so `rebuild_macro_level` emits both
-        // as the literal text the replacer pushes around the rendered term.
+        // Everything after it: the nested term, with the wrapping parenthesis
+        // at each end left outside `consumed` so `rebuild_macro_level`
+        // emits both as the literal text the replacer pushes around the
+        // rendered term.
         let term_full = (full.start + 1)..full.end;
         let consumed = (term_full.start + 1)..(term_full.end - 1);
 
@@ -826,10 +832,10 @@ fn push_indexterm_shorthand_matches<'src>(
         return;
     }
 
-    // Classify the term, mirroring the string replacer's paren stripping. `term`
-    // is the inner text whose primary term is shown (visible) or indexed only
-    // (concealed); `before`/`after` flag a single literal parenthesis kept
-    // beside the term.
+    // Classify the term, mirroring the string replacer's paren stripping.
+    // `term` is the inner text whose primary term is shown (visible) or
+    // indexed only (concealed); `before`/`after` flag a single literal
+    // parenthesis kept beside the term.
     let len = encl_text.len();
 
     let (term_sub, visible, before, after): (std::ops::Range<usize>, bool, bool, bool) =
@@ -881,9 +887,9 @@ fn push_indexterm_shorthand_matches<'src>(
         )
     };
 
-    // A kept literal parenthesis is left outside the node's `consumed` sub-range
-    // so [`rebuild_macro_level`] emits it as literal text: a `before` keeps the
-    // match's first `(`; an `after` keeps its last `)`.
+    // A kept literal parenthesis is left outside the node's `consumed`
+    // sub-range so [`rebuild_macro_level`] emits it as literal text: a
+    // `before` keeps the match's first `(`; an `after` keeps its last `)`.
     let consumed = (full.start + usize::from(before))..(full.end - usize::from(after));
 
     matches.push(RecognizedIndexterm {
@@ -1078,9 +1084,10 @@ mod tests {
         //
         // Note the `(((coffee))) trailing` case: **trailing** text does *not*
         // rescue recognition, because it is appended only on the replacer's
-        // normal completion — the `Cow::Borrowed` early-return on the empty-`new`
-        // retry happens first and discards it. Only output emitted *before* the
-        // retry (a leading/between gap, or a shown term) makes `new` non-empty;
+        // normal completion — the `Cow::Borrowed` early-return on the
+        // empty-`new` retry happens first and discards it. Only output
+        // emitted *before* the retry (a leading/between gap, or a shown
+        // term) makes `new` non-empty;
         // see `a_concealed_term_after_leading_output_is_consumed` for that
         // contrast. (Both mirror the string pipeline exactly — verified below.)
         for source in [
@@ -1109,11 +1116,12 @@ mod tests {
     #[test]
     fn a_concealed_term_after_leading_output_is_consumed() {
         // The contrast to the all-concealed no-op: **leading** text makes the
-        // replacer's accumulator non-empty *before* the look-ahead retry, so the
-        // substitution is `Cow::Owned` and the concealed term is recognized and
-        // consumed (renders nothing) — leaving only the leading text. The builder
-        // reproduces this byte-for-byte, so `leading (((coffee)))` folds to
-        // `leading `, not the literal source.
+        // replacer's accumulator non-empty *before* the look-ahead retry, so
+        // the substitution is `Cow::Owned` and the concealed term is
+        // recognized and consumed (renders nothing) — leaving only the
+        // leading text. The builder reproduces this byte-for-byte, so
+        // `leading (((coffee)))` folds to `leading `, not the literal
+        // source.
         for source in ["leading (((coffee)))", "((a)) (((b)))"] {
             let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
             assert_eq!(

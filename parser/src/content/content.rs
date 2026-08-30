@@ -150,26 +150,31 @@ struct DeferredContent {
     /// subtrees instead.
     footnote: Vec<XrefSegment>,
 
-    /// The placeholder template, in escaped sentinel form: every
-    /// document-derived byte escaped, every raw `U+E000 <index> U+E001` a real
-    /// placeholder.
+    /// The deferred template: the content's rendering as a list of
+    /// [`XrefTemplatePiece`]s — literal runs of already-rendered text,
+    /// interleaved with the positions of the cross-references to splice in
+    /// between them.
     ///
-    /// Two producers wrote one, and only one survives. The string pipeline
-    /// captured its own through its `finalize_deferred` step, deleted with the
-    /// pipeline (design §5.2 step 6's tail).
+    /// This used to be one `String` in *escaped sentinel form*: a raw
+    /// `U+E000 <index> U+E001` marked each splice point, and every
+    /// document-derived byte was escaped so a typed copy of that sequence
+    /// could not forge one (see [`escape_sentinels`]). The structure makes
+    /// both halves of that machinery unnecessary — a splice point is a
+    /// [`Xref`](XrefTemplatePiece::Xref) variant rather than a byte pattern,
+    /// so nothing scans the literal text and nothing in it needs escaping.
+    ///
     /// The one content that *renders* from a template in production — a block
     /// title carried across a section heading, which travels through
     /// `Parser::pending_block_title` as an [`OwnedTitle`] because the parser it
     /// rides on has no `'src` lifetime, and so arrives at the claiming block
     /// with its inline nodes dropped — carries a template synthesized **from
-    /// its own tree** at the hop instead (see [`Content::to_owned_title`] and
+    /// its own tree** at the hop (see [`Content::to_owned_title`] and
     /// [`carried_title_template`]). Its rendering cannot be a fold, so it
     /// stays a splice — the document-order title pass renders it through
-    /// [`render_xref_template`] — but the splice's inputs no longer come from
-    /// the string pipeline.
+    /// [`render_xref_template`].
     ///
     /// Empty for every production content but the carried title above.
-    template: String,
+    template: Vec<XrefTemplatePiece>,
 }
 
 /// A read-only view of a [`Content`]'s deferred cross-references — the shape
@@ -182,9 +187,9 @@ pub(crate) struct DeferredParts<'a> {
     /// The cross-references this content's footnotes carry.
     pub(crate) footnote: &'a [XrefSegment],
 
-    /// The placeholder template, for a content that renders from one — see
+    /// The deferred template, for a content that renders from one — see
     /// [`DeferredContent::template`].
-    pub(crate) template: &'a str,
+    pub(crate) template: &'a [XrefTemplatePiece],
 }
 
 /// A single deferred cross-reference.
@@ -221,15 +226,39 @@ pub(crate) struct XrefSegment {
     pub(crate) resolved: Option<crate::parser::ResolvedReference>,
 }
 
+/// One piece of a [`DeferredContent::template`]: a literal run of
+/// already-rendered text, or the position of a cross-reference to splice.
+///
+/// This is the **out-of-band** replacement for the in-band placeholder
+/// sentinels (`U+E000 <index> U+E001`) the template used to be written in.
+/// In-band marks needed the escaping pass on [`escape_sentinels`] to stay
+/// unforgeable — a document-typed copy of the byte sequence was otherwise
+/// byte-identical to a real placeholder. A splice point that is a variant
+/// rather than a byte pattern cannot be typed at all: a document's own
+/// `U+E000 0 U+E001` is content inside a [`Literal`](Self::Literal), and
+/// nothing reads placeholders back out of text.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum XrefTemplatePiece {
+    /// Already-rendered literal text, emitted verbatim by the splice.
+    Literal(String),
+
+    /// The cross-reference at this index in the template's segment list,
+    /// rendered from the segment's current (resolved or unresolved) state at
+    /// splice time.
+    Xref(usize),
+}
+
 /// Sentinel codepoints (Unicode Private Use Area) bracketing a placeholder
-/// index in [`DeferredContent::template`].
+/// index in a [`FootnoteDeferred`] template — the last template still written
+/// as an in-band string. (A [`DeferredContent::template`] is a structured
+/// [`XrefTemplatePiece`] list and involves no sentinels.)
 ///
 /// A document can type these codepoints — they are unassigned by Unicode, but
 /// perfectly valid in a `&str` — so they are *not* self-evidently the parser's
-/// own. What keeps them unambiguous is the escaping pass described on
-/// [`escape_sentinels`]: a document's own copies are replaced before
-/// substitution begins, so every occurrence the readers below see was written
-/// by the substitution pipeline itself.
+/// own. The escaping pass described on [`escape_sentinels`] was what kept the
+/// string pipeline's own uses unambiguous; a footnote's template is the
+/// builder's fold, which that pass never covered (see
+/// [`FootnoteDeferred::render`]).
 const XREF_PLACEHOLDER_START: char = '\u{E000}';
 const XREF_PLACEHOLDER_END: char = '\u{E001}';
 
@@ -263,31 +292,29 @@ const RESERVED_SENTINELS: [(char, char); 5] = [
 /// form, so that the only unescaped sentinels in the text being substituted are
 /// the ones the substitution pipeline wrote itself.
 ///
-/// The sentinels are in-band: they are spliced into the same string as the
-/// document's text, so the passes that read them back — [`render_template`],
-/// the string pipeline's `rehome_xref_placeholders`, and the passthrough
-/// restore — cannot otherwise
-/// tell a sentinel the parser wrote from one the document did. Without this
-/// pass, a document that types `U+E000 0 U+E001` alongside a real
-/// cross-reference has that text read back as a placeholder, forging a second
-/// cross-reference into the output.
+/// This was the **string pipeline's** own protection: its sentinels were
+/// in-band, spliced into the same string as the document's text, so the passes
+/// that read them back could not otherwise tell a sentinel the parser wrote
+/// from one the document did. The single-pass builder needs no counterpart —
+/// it recognizes constructs by range over the source rather than by scanning a
+/// rendered string for its own marks — and the carried title's template, the
+/// last escaped-form data to cross a seam, is a structured
+/// [`XrefTemplatePiece`] list now, so no production pass unescapes anything
+/// any more.
 ///
-/// This is the **string pipeline's** own protection, and it needs no
-/// counterpart in the single-pass builder: the builder recognizes constructs by
-/// range over the source rather than by scanning a rendered string for its own
-/// marks, so a codepoint the document typed is never read as one of the
-/// parser's. What escaped form still reaches past `run_pipeline` is marked as
-/// such — see [`document_text`].
-///
-/// Escaped text is an internal representation: every path that hands rendered
-/// text back to a caller reverses it with [`unescape_sentinels`], so a
-/// document's private-use characters survive to the output unchanged. The two
-/// passes are exact inverses, so applying them in matched pairs nests safely
-/// (a passthrough's text, for example, is substituted by a nested
-/// escape/unescape pair while it is itself held in escaped form).
+/// What survives is this pass itself, on the string-substitution steps the
+/// builder does not own: [`SubstitutionStep::AttributeReferences`] applied to
+/// an attrlist value, an author line, or a reftext still escapes each
+/// substituted attribute value on the way in (see
+/// `AttributeReplacer::escaping_sentinels`). Nothing scans those strings for
+/// sentinels and nothing reverses the escape, so the pass no longer protects
+/// anything — it is a byte-for-byte-preserved vestige, and retiring it (with
+/// the [`RESERVED_SENTINELS`] table under it) is its own increment.
 ///
 /// Text with no reserved codepoint — the overwhelming majority — is borrowed
 /// through unchanged.
+///
+/// [`SubstitutionStep::AttributeReferences`]: crate::content::SubstitutionStep::AttributeReferences
 pub(crate) fn escape_sentinels(text: &str) -> Cow<'_, str> {
     if !text.contains(is_reserved_sentinel) {
         return Cow::Borrowed(text);
@@ -309,68 +336,6 @@ pub(crate) fn escape_sentinels(text: &str) -> Cow<'_, str> {
     }
 
     Cow::Owned(out)
-}
-
-/// Restores the document's own sentinel codepoints, reversing
-/// [`escape_sentinels`].
-///
-/// Applied once to each string as it leaves the substitution machinery. A
-/// dangling escape introducer cannot occur in text this pass is given (escaping
-/// always emits a tag), but is passed through literally rather than dropped if
-/// it somehow does.
-pub(crate) fn unescape_sentinels(text: &str) -> Cow<'_, str> {
-    if !text.contains(SENTINEL_ESCAPE) {
-        return Cow::Borrowed(text);
-    }
-
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        if c != SENTINEL_ESCAPE {
-            out.push(c);
-            continue;
-        }
-
-        match chars
-            .peek()
-            .and_then(|tag| RESERVED_SENTINELS.iter().find(|(_, t)| t == tag))
-        {
-            Some((sentinel, _)) => {
-                out.push(*sentinel);
-                chars.next();
-            }
-            None => out.push(SENTINEL_ESCAPE),
-        }
-    }
-
-    Cow::Owned(out)
-}
-
-/// `text` as the document wrote it: reverses [`escape_sentinels`] when `text`
-/// is held in that form, and borrows it through untouched when it is not.
-///
-/// Which it is cannot be recovered from the text, and guessing is the whole
-/// hazard — unescaping something that was never escaped corrupts a value that
-/// legitimately contains the escape introducer, which is precisely the
-/// confusion the escaping exists to end. So every caller says.
-///
-/// The two answers in this module: a placeholder template's own literal text
-/// is escaped for a `DeferredContent` (see [`carried_title_template`]) and not
-/// for a [`FootnoteDeferred`], whose fold never enters escaped form; and a
-/// segment's fields, a **resolved** and a **derived** destination are never
-/// escaped — the tree reads carry the document's own text, and the resolver
-/// was handed that text and answered in kind. The latter is why the decoding
-/// happens here, piece by
-/// piece, rather than over a completed rendering: a rendering splices the
-/// resolver's answer into the template, and a pass over the result would decode
-/// bytes the resolver supplied.
-pub(crate) fn document_text(text: &str, escaped: bool) -> Cow<'_, str> {
-    if escaped {
-        unescape_sentinels(text)
-    } else {
-        Cow::Borrowed(text)
-    }
 }
 
 /// Returns `true` if `c` is one of the codepoints the substitution pipeline
@@ -529,7 +494,7 @@ impl<'src> Content<'src> {
     /// borrow (see [`OwnedTitle`]).
     ///
     /// A title that defers a cross-reference and still holds its tree swaps its
-    /// placeholder template — and the segment list the template's indices point
+    /// deferred template — and the segment list the template's pieces point
     /// into — for the **tree's own**, synthesized here by
     /// [`carried_title_template`]. The snapshot travels across the
     /// `'src`-erasing hop (`Parser::pending_block_title`) with its inline nodes
@@ -801,10 +766,10 @@ impl<'src> Content<'src> {
     /// Returns the deferred cross-reference template and segments, if this
     /// content carries any.
     ///
-    /// The template is the placeholder-bearing text — synthesized from the
+    /// The template is the [`XrefTemplatePiece`] list — synthesized from the
     /// tree by [`carried_title_template`] for the one production content that
     /// renders from one; the segments are the
-    /// cross-references in placeholder order. Used by the document-order title
+    /// cross-references in splice order. Used by the document-order title
     /// resolution pass, which re-renders a title's cross-references with
     /// cross-title (including circular) coordination that the per-content
     /// [`resolve_references`](Self::resolve_references) cannot provide.
@@ -886,11 +851,15 @@ impl<'src> Content<'src> {
         self.deferred = Some(Box::new(DeferredContent {
             block,
             footnote,
-            template: String::new(),
+            template: Vec::new(),
         }));
     }
 
-    /// Returns the placeholder token for the cross-reference at `index`.
+    /// Returns the placeholder token for the cross-reference at `index`, in
+    /// the in-band form a [`FootnoteDeferred`] template is written in — its
+    /// one remaining producer is the deferring fold
+    /// ([`fold_deferring_xrefs`](crate::content::inline_builder::fold_deferring_xrefs)),
+    /// and its one remaining reader is [`render_template`].
     pub(crate) fn xref_placeholder(index: usize) -> String {
         format!("{XREF_PLACEHOLDER_START}{index}{XREF_PLACEHOLDER_END}")
     }
@@ -898,7 +867,7 @@ impl<'src> Content<'src> {
     /// Resolves any deferred cross-references using `resolver`, then rebuilds
     /// the rendered text.
     ///
-    /// This is non-destructive: the placeholder template is retained, so a
+    /// This is non-destructive: the deferred template is retained, so a
     /// document may be resolved more than once (e.g. for incremental builds or
     /// multiple output targets).
     ///
@@ -1545,29 +1514,26 @@ pub(crate) fn xref_segment_from_node(
     }
 }
 
-/// Synthesizes the placeholder template — and the segment list its indices
-/// point into — that a **carried block title** takes across the `'src`-erasing
-/// hop (see [`Content::to_owned_title`]), from the title's own inline tree.
+/// Synthesizes the deferred template — and the segment list its
+/// [`Xref`](XrefTemplatePiece::Xref) pieces index into — that a **carried
+/// block title** takes across the `'src`-erasing hop (see
+/// [`Content::to_owned_title`]), from the title's own inline tree.
 ///
 /// The construction is a walk over the tree's **top-level** nodes: a
-/// cross-reference node contributes a raw `U+E000 <index> U+E001` placeholder
+/// cross-reference node contributes an [`Xref`](XrefTemplatePiece::Xref) piece
 /// and its [`XrefSegment`] (via [`xref_segment_from_node`], the same reading
 /// every other segment derivation uses), and every other node contributes its
-/// own fold, passed through [`escape_sentinels`]. That escape is what makes the
-/// template's two byte populations distinguishable — the property the whole
-/// splice rests on, and the reason the template is *not* one
-/// [`fold_deferring_xrefs`](crate::content::inline_builder::fold_deferring_xrefs)
-/// call: in that fold's output a document-typed `U+E000 0 U+E001` (see the
-/// `sentinels` test module, issue #1235) is byte-identical to a real
-/// placeholder, and nothing downstream can tell them apart. Here every
-/// document-derived byte is escaped and every raw sentinel is the fold's own —
-/// exactly the escaped form the string pipeline's templates have always been
-/// in, so the render path ([`render_template`] with `template_escaped`) needs
-/// no new case.
+/// own fold to a [`Literal`](XrefTemplatePiece::Literal) piece. The structure
+/// is what keeps the template's two populations apart — a splice point is a
+/// variant, not a byte pattern — where the string-form template this replaces
+/// had to write in-band `U+E000 <index> U+E001` sentinels and pass every
+/// document-derived byte through [`escape_sentinels`] so a document-typed copy
+/// of that sequence (see the `sentinels` test module, issue #1235) could not
+/// forge a placeholder. Nothing here scans text, so nothing needs escaping.
 ///
 /// The price of reading only the top level is a cross-reference **nested**
 /// inside another top-level construct (a styled span's children, a visible
-/// index term's shown text): its enclosing node folds as a gap, so the
+/// index term's shown text): its enclosing node folds as one literal, so the
 /// reference is baked into the template as its unresolved fallback rendering
 /// rather than spliced — and, having no segment, it is neither resolved nor
 /// reported by the title pass. The string pipeline's template did splice those
@@ -1581,8 +1547,8 @@ fn carried_title_template(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineRenderer,
     context: &crate::parser::RenderContext,
-) -> (String, Vec<XrefSegment>) {
-    let mut template = String::new();
+) -> (Vec<XrefTemplatePiece>, Vec<XrefSegment>) {
+    let mut template: Vec<XrefTemplatePiece> = Vec::new();
     let mut segments = Vec::new();
 
     for node in nodes {
@@ -1590,7 +1556,7 @@ fn carried_title_template(
             InlineNode::Ref(reference) if reference.variant == RefVariant::Xref => {
                 let index = segments.len();
                 segments.push(xref_segment_from_node(reference, renderer, context));
-                template.push_str(&Content::xref_placeholder(index));
+                template.push(XrefTemplatePiece::Xref(index));
             }
 
             other => {
@@ -1600,7 +1566,13 @@ fn carried_title_template(
                     context,
                 );
 
-                template.push_str(&escape_sentinels(&folded));
+                // Adjacent non-reference nodes coalesce into one literal run,
+                // so the piece list mirrors the splice structure rather than
+                // the node count.
+                match template.last_mut() {
+                    Some(XrefTemplatePiece::Literal(text)) => text.push_str(&folded),
+                    _ => template.push(XrefTemplatePiece::Literal(folded)),
+                }
             }
         }
     }
@@ -1696,49 +1668,81 @@ fn assign_footnote_tree_xrefs(
     }
 }
 
-/// Splices resolved (or fallback) cross-reference renderings into a placeholder
-/// template, producing the final rendered text.
+/// Splices resolved (or fallback) cross-reference renderings into a
+/// structured [`XrefTemplatePiece`] template, producing the final rendered
+/// text.
 ///
 /// This is the seam used by the document-order title resolution pass: it hands
 /// in a title's captured template together with a set of [`XrefSegment`]s whose
 /// [`resolved`](XrefSegment::resolved) fields it has filled in with cross-title
 /// (including circular) coordination, and receives the final rendered title.
 ///
-/// A [`DeferredContent`] template's literal text is in escaped sentinel form
-/// (see [`carried_title_template`]), so it is rendered `template_escaped`.
+/// A [`Literal`](XrefTemplatePiece::Literal) is emitted verbatim: the pieces
+/// carry already-rendered text in the document's own bytes (never in escaped
+/// sentinel form — see [`carried_title_template`]), so there is nothing to
+/// scan for and nothing to decode. An [`Xref`](XrefTemplatePiece::Xref) piece
+/// whose index names no segment renders nothing; the synthesis assigns each
+/// index from the position in the very list it travels with, so no producer
+/// can write one (`an_xref_piece_past_the_segment_list_renders_nothing` pins
+/// the behavior).
 pub(crate) fn render_xref_template(
-    template: &str,
+    template: &[XrefTemplatePiece],
     xrefs: &[XrefSegment],
     renderer: &dyn InlineRenderer,
 ) -> String {
-    render_template(template, xrefs, renderer, true)
+    let mut out = String::new();
+
+    for piece in template {
+        match piece {
+            XrefTemplatePiece::Literal(text) => out.push_str(text),
+
+            XrefTemplatePiece::Xref(index) => {
+                if let Some(xref) = xrefs.get(*index) {
+                    render_xref_segment(xref, renderer, &mut out);
+                }
+            }
+        }
+    }
+
+    out
 }
 
-/// Splices resolved (or fallback) cross-reference renderings into a placeholder
-/// template, producing the final rendered text.
-fn render_template(
-    template: &str,
-    xrefs: &[XrefSegment],
-    renderer: &dyn InlineRenderer,
-    template_escaped: bool,
-) -> String {
+/// Renders one deferred cross-reference from its segment's current (resolved
+/// or unresolved) state, through the same `render_xref` a fold feeds.
+///
+/// A segment's fields are the tree's reads — the document's own text, never in
+/// escaped form; `derived` and `resolved` never entered it either.
+fn render_xref_segment(xref: &XrefSegment, renderer: &dyn InlineRenderer, out: &mut String) {
+    renderer.render_xref(
+        &XrefRenderParams {
+            target: &xref.target,
+            provided_text: xref.provided_text.as_deref(),
+            window: xref.window.as_deref(),
+            roles: &xref.roles,
+            xrefstyle: xref.xrefstyle,
+            derived: xref.derived.as_ref(),
+            resolved: xref.resolved.as_ref(),
+        },
+        out,
+    );
+}
+
+/// Splices resolved (or fallback) cross-reference renderings into an in-band
+/// placeholder template, producing the final rendered text.
+///
+/// This is the last reader of the `U+E000 <index> U+E001` placeholder form,
+/// and [`FootnoteDeferred::render`] is its last caller: a footnote's template
+/// is the deferring fold's output, in which each placeholder can sit **inside**
+/// renderer-produced markup (a cross-reference nested in a styled span folds
+/// into the span's rendered body), so it cannot become a flat
+/// [`XrefTemplatePiece`] list without giving those nested references up. See
+/// [`fold_deferring_xrefs`](crate::content::inline_builder::fold_deferring_xrefs).
+fn render_template(template: &str, xrefs: &[XrefSegment], renderer: &dyn InlineRenderer) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
 
-    // The template's own literal text leaves escaped form as it is emitted,
-    // rather than the finished rendering being decoded in one pass at the end.
-    // That distinction is the whole point: the renderer splices the
-    // **resolver's** answer — a destination, a reference text — into this
-    // string, and the resolver was handed the document's own text and answered
-    // in kind. A pass over the result would decode those bytes too, turning a
-    // catalog id that happens to hold the escape introducer into some other
-    // sentinel entirely. See [`document_text`].
-    let push_literal = |out: &mut String, text: &str| {
-        out.push_str(&document_text(text, template_escaped));
-    };
-
     while let Some(start) = rest.find(XREF_PLACEHOLDER_START) {
-        push_literal(&mut out, &rest[..start]);
+        out.push_str(&rest[..start]);
         let after = &rest[start + XREF_PLACEHOLDER_START.len_utf8()..];
 
         let Some(end) = after.find(XREF_PLACEHOLDER_END) else {
@@ -1757,21 +1761,7 @@ fn render_template(
             .and_then(|index| xrefs.get(index))
         {
             Some(xref) => {
-                // A segment's fields are the tree's reads — the document's
-                // own text, never in escaped form; `derived` and `resolved`
-                // never entered it either.
-                renderer.render_xref(
-                    &XrefRenderParams {
-                        target: &xref.target,
-                        provided_text: xref.provided_text.as_deref(),
-                        window: xref.window.as_deref(),
-                        roles: &xref.roles,
-                        xrefstyle: xref.xrefstyle,
-                        derived: xref.derived.as_ref(),
-                        resolved: xref.resolved.as_ref(),
-                    },
-                    &mut out,
-                );
+                render_xref_segment(xref, renderer, &mut out);
             }
 
             None => {
@@ -1783,13 +1773,13 @@ fn render_template(
                 // looks like a placeholder is content, and content is passed
                 // through.
                 out.push(XREF_PLACEHOLDER_START);
-                push_literal(&mut out, body);
+                out.push_str(body);
                 out.push(XREF_PLACEHOLDER_END);
             }
         }
     }
 
-    push_literal(&mut out, rest);
+    out.push_str(rest);
     out
 }
 
@@ -1825,10 +1815,9 @@ impl FootnoteDeferred {
     /// unresolved) state of its cross-references.
     ///
     /// The template is the builder's fold of the footnote's subtree, which
-    /// never enters escaped sentinel form — unlike a [`DeferredContent`]'s
-    /// synthesized carried-title template.
+    /// never enters escaped sentinel form.
     pub(crate) fn render(&self, renderer: &dyn InlineRenderer) -> String {
-        render_template(&self.template, &self.xrefs, renderer, false)
+        render_template(&self.template, &self.xrefs, renderer)
     }
 
     /// Resolves the footnote's cross-references using `resolver`, reporting any
@@ -1984,9 +1973,9 @@ mod tests {
 
         #[test]
         fn borrows_source_when_filter_is_a_no_op() {
-            // A filtered view byte-identical to the source span is borrowed from
-            // the span rather than allocating an owned copy of text we already
-            // hold.
+            // A filtered view byte-identical to the source span is borrowed
+            // from the span rather than allocating an owned copy of
+            // text we already hold.
             let content = Content::from_filtered(Span::new("plain text"), "plain text");
 
             assert!(matches!(content.rendered, CowStr::Borrowed(_)));
@@ -1995,8 +1984,8 @@ mod tests {
 
         #[test]
         fn owns_rendered_text_when_filter_changes_it() {
-            // A filtered view that differs from the source is materialized as an
-            // owned copy.
+            // A filtered view that differs from the source is materialized as
+            // an owned copy.
             let content = Content::from_filtered(Span::new("a|b"), "ab");
 
             assert!(matches!(content.rendered, CowStr::Boxed(_)));
@@ -2035,7 +2024,7 @@ mod tests {
         use super::super::{
             PASSTHROUGH_PLACEHOLDER_END, PASSTHROUGH_PLACEHOLDER_START, RESERVED_SENTINELS,
             SENTINEL_ESCAPE, XREF_PLACEHOLDER_END, XREF_PLACEHOLDER_START, escape_sentinels,
-            is_reserved_sentinel, unescape_sentinels,
+            is_reserved_sentinel,
         };
 
         #[test]
@@ -2064,15 +2053,14 @@ mod tests {
                 escape_sentinels("plain text"),
                 Cow::Borrowed("plain text")
             ));
-
-            assert!(matches!(
-                unescape_sentinels("plain text"),
-                Cow::Borrowed("plain text")
-            ));
         }
 
         #[test]
         fn escaped_text_holds_no_reserved_codepoint() {
+            // No production pass reads the escaped form back any more (the
+            // decoder went with the carried title's escaped template), so what
+            // this pins is the escaping's own output: distinct tags per
+            // codepoint, behind an introducer that is itself escaped.
             let typed = format!(
                 "a{XREF_PLACEHOLDER_START}0{XREF_PLACEHOLDER_END}b\
                  {PASSTHROUGH_PLACEHOLDER_START}1{PASSTHROUGH_PLACEHOLDER_END}\
@@ -2097,29 +2085,14 @@ mod tests {
             // and every occurrence of it is one the escaping wrote.
             assert_eq!(escaped.matches(SENTINEL_ESCAPE).count(), 5, "{escaped:?}");
 
-            assert_eq!(unescape_sentinels(&escaped), typed);
-        }
-
-        #[test]
-        fn round_trips_an_escape_introducer_followed_by_a_tag() {
-            // The sequence a document is most likely to be mangled by: its own
-            // escape introducer followed by a character that is also an escape
-            // tag. Escaping the introducer keeps the pair distinguishable.
-            let typed = format!("x{SENTINEL_ESCAPE}ay");
-
-            assert_eq!(unescape_sentinels(&escape_sentinels(&typed)), typed);
-        }
-
-        #[test]
-        fn passes_a_dangling_escape_introducer_through() {
-            // Cannot arise from `escape_sentinels` (which always writes a tag),
-            // so this only pins down that a malformed sequence is content, not a
-            // dropped character.
-            let dangling = format!("x{SENTINEL_ESCAPE}");
-            assert_eq!(unescape_sentinels(&dangling), dangling);
-
-            let unknown_tag = format!("x{SENTINEL_ESCAPE}zy");
-            assert_eq!(unescape_sentinels(&unknown_tag), unknown_tag);
+            assert_eq!(
+                escaped,
+                format!(
+                    "a{SENTINEL_ESCAPE}a0{SENTINEL_ESCAPE}bb\
+                     {SENTINEL_ESCAPE}e1{SENTINEL_ESCAPE}f\
+                     e{SENTINEL_ESCAPE}gf"
+                )
+            );
         }
     }
     mod sanitize_title {
@@ -2198,7 +2171,7 @@ mod tests {
         }
 
         fn render(template: &str, xrefs: &[XrefSegment]) -> String {
-            render_template(template, xrefs, &HtmlInlineRenderer {}, true)
+            render_template(template, xrefs, &HtmlInlineRenderer {})
         }
 
         #[test]
@@ -2213,10 +2186,9 @@ mod tests {
 
         #[test]
         fn passes_an_unterminated_placeholder_through_literally() {
-            // A start sentinel with no end cannot arise from the substitution
-            // (which always writes both), and a document's own copy is escaped
-            // before it gets here, so this only pins down that the text is
-            // emitted rather than swallowed.
+            // A start sentinel with no end cannot arise from the deferring
+            // fold (which always writes both), so this only pins down that the
+            // text is emitted rather than swallowed.
             let unterminated = format!("a{XREF_PLACEHOLDER_START}0 no end");
 
             assert_eq!(render(&unterminated, &[segment("a")]), unterminated);
@@ -2232,6 +2204,71 @@ mod tests {
 
             let non_numeric = format!("x{XREF_PLACEHOLDER_START}xyz{XREF_PLACEHOLDER_END}y");
             assert_eq!(render(&non_numeric, &[segment("a")]), non_numeric);
+        }
+    }
+
+    mod render_xref_template {
+        use super::super::{XrefSegment, XrefTemplatePiece, render_xref_template};
+        use crate::parser::HtmlInlineRenderer;
+
+        fn segment(target: &str) -> XrefSegment {
+            XrefSegment {
+                target: target.to_string(),
+                provided_text: None,
+                window: None,
+                roles: vec![],
+                xrefstyle: None,
+                derived: None,
+                resolved: None,
+            }
+        }
+
+        #[test]
+        fn splices_a_reference_between_literal_pieces() {
+            let template = [
+                XrefTemplatePiece::Literal("see ".to_string()),
+                XrefTemplatePiece::Xref(0),
+                XrefTemplatePiece::Literal(" here".to_string()),
+            ];
+
+            assert_eq!(
+                render_xref_template(&template, &[segment("a")], &HtmlInlineRenderer {}),
+                r##"see <a href="#a">[a]</a> here"##
+            );
+        }
+
+        #[test]
+        fn a_literal_needs_no_escaping_to_stay_literal() {
+            // The point of the structured template: a literal that happens to
+            // hold the old in-band placeholder byte sequence is just bytes,
+            // spliced around rather than read back — so the escaping the
+            // string form needed has nothing left to protect here.
+            let template = [
+                XrefTemplatePiece::Literal("x\u{e000}0\u{e001}y ".to_string()),
+                XrefTemplatePiece::Xref(0),
+            ];
+
+            assert_eq!(
+                render_xref_template(&template, &[segment("a")], &HtmlInlineRenderer {}),
+                "x\u{e000}0\u{e001}y <a href=\"#a\">[a]</a>"
+            );
+        }
+
+        #[test]
+        fn an_xref_piece_past_the_segment_list_renders_nothing() {
+            // Unreachable from `carried_title_template`, which assigns each
+            // index from its position in the very list it travels with; pinned
+            // so the guard is a defined behavior rather than a dead branch.
+            let template = [
+                XrefTemplatePiece::Literal("a".to_string()),
+                XrefTemplatePiece::Xref(9),
+                XrefTemplatePiece::Literal("b".to_string()),
+            ];
+
+            assert_eq!(
+                render_xref_template(&template, &[segment("a")], &HtmlInlineRenderer {}),
+                "ab"
+            );
         }
     }
 

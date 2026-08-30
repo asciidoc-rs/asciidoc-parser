@@ -383,7 +383,8 @@ A leading inclusion implicitly starts by selecting no lines.
 "#
     );
 
-    // A leading exclusion (`!foo`) implies a `**` base: untagged lines are kept.
+    // A leading exclusion (`!foo`) implies a `**` base: untagged lines are
+    // kept.
     assert_eq!(tag_select(FOOBAR, "tags=!foo"), "before\nafter");
     // A leading inclusion (`foo`) implies a `!**` base: untagged lines dropped.
     assert_eq!(tag_select(FOOBAR, "tags=foo"), "foo1\nbar1\nfoo2");

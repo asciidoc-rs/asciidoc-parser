@@ -95,8 +95,8 @@ If the `tabsize` attribute is set on the block or the document, tabs are also re
         "----\ndef names\n  @name\nend\n----"
     );
 
-    // With no `indent` attribute, tabs are still expanded to spaces (tab stop of
-    // 4), but the block indentation is left untouched.
+    // With no `indent` attribute, tabs are still expanded to spaces (tab stop
+    // of 4), but the block indentation is left untouched.
     assert_eq!(
         listing_include_with_tabsize("", "\tdef names\n\t  @name\n\tend"),
         "----\n    def names\n      @name\n    end\n----"

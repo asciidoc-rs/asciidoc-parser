@@ -239,8 +239,8 @@ fn an_empty_renderer_matches_the_html_renderer_for_every_substitution() {
     };
 
     // One case per default method body, driving the substitution step that
-    // reaches it. Each exercises the inherited default and confirms it delegates
-    // to the built-in HTML renderer.
+    // reaches it. Each exercises the inherited default and confirms it
+    // delegates to the built-in HTML renderer.
     assert_inherits_html("a < b & c > d", SubstitutionStep::SpecialCharacters, plain);
     assert_inherits_html(
         "(C) (R) (TM) -- ... -> <- => <= it's",

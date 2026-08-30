@@ -587,15 +587,15 @@ pub(crate) fn build_for_group<'src>(
     // alone. Two consumers read it, which is why it is taken unconditionally
     // rather than only for the order that needs the first:
     //
-    //   - `flatten_prior_markup`, for a `subs=` list that puts the escaping step
-    //     *after* a step that already produced markup: the string pipeline escapes
-    //     the tags that step wrote, and this is what tells those from a passthrough
-    //     body the escaping step never touches.
+    //   - `flatten_prior_markup`, for a `subs=` list that puts the escaping
+    //     step *after* a step that already produced markup: the string pipeline
+    //     escapes the tags that step wrote, and this is what tells those from a
+    //     passthrough body the escaping step never touches.
     //
-    //   - recognition itself (`build_match_string`, via `Masked`), for every order:
-    //     a sibling reads a rendered span's own markup, and a wrapper — which the
-    //     string pipeline is still holding as a `\u{96}…\u{97}` placeholder —
-    //     presents no markup to read.
+    //   - recognition itself (`build_match_string`, via `Masked`), for every
+    //     order: a sibling reads a rendered span's own markup, and a wrapper —
+    //     which the string pipeline is still holding as a `\u{96}…\u{97}`
+    //     placeholder — presents no markup to read.
     let masked = masked_locations(&nodes);
 
     for (position, step) in steps.iter().enumerate() {

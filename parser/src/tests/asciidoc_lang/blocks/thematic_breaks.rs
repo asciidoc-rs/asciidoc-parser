@@ -76,8 +76,8 @@ As with Markdown, spaces between the characters is optional.
         );
     }
 
-    // Only 3 repeating characters are recognized: a run of four or more is not a
-    // thematic break (four dashes is a listing delimiter instead).
+    // Only 3 repeating characters are recognized: a run of four or more is not
+    // a thematic break (four dashes is a listing delimiter instead).
     let doc = Parser::default().parse("----");
     let block = doc.child_blocks().next().expect("expected a block");
     assert_eq!(block.resolved_context().as_ref(), "listing");

@@ -40,7 +40,8 @@ Verses are defined by setting `verse` on a paragraph or an excerpt block delimit
         "Roses are red,\n  violets are blue."
     );
 
-    // A verse can also be set on an excerpt block delimited by four underscores.
+    // A verse can also be set on an excerpt block delimited by four
+    // underscores.
     let doc = Parser::default().parse("[verse]\n____\nRoses are red,\n\nviolets are blue.\n____");
     let block = doc.child_blocks().next().unwrap();
     let quote = as_quote(block);

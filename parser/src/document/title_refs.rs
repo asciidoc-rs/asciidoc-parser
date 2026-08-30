@@ -25,7 +25,10 @@ use std::collections::HashMap;
 use crate::{
     HasSpan, Span,
     blocks::{Block, IsBlock},
-    content::{XrefSegment, fold_resolved_title, render_xref_template, resolved_destinations},
+    content::{
+        XrefSegment, XrefTemplatePiece, fold_resolved_title, render_xref_template,
+        resolved_destinations,
+    },
     document::Catalog,
     inlines::InlineNode,
     parser::{
@@ -66,10 +69,10 @@ struct TitleNode<'src> {
     /// The cross-references the title's footnotes carry.
     footnote: Vec<XrefSegment>,
 
-    /// The placeholder template, which a title renders from when it cannot
+    /// The deferred template, which a title renders from when it cannot
     /// fold: one whose nodes did not survive the `'src`-erasing hop a carried
     /// block title travels on (see `carried_title_template`).
-    template: String,
+    template: Vec<XrefTemplatePiece>,
 
     /// The ID under which other cross-references reach this title's reference
     /// text — present only when the title *is* the target's reference text (no
@@ -165,7 +168,7 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
 
                 let block = deferred.block.to_vec();
                 let footnote = deferred.footnote.to_vec();
-                let template = deferred.template.to_string();
+                let template = deferred.template.to_vec();
 
                 nodes.push(TitleNode {
                     block,
@@ -197,7 +200,7 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
             {
                 let block = deferred.block.to_vec();
                 let footnote = deferred.footnote.to_vec();
-                let template = deferred.template.to_string();
+                let template = deferred.template.to_vec();
 
                 nodes.push(TitleNode {
                     block,

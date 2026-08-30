@@ -94,8 +94,8 @@ fn split_authors(data: &str) -> Vec<&str> {
             continue;
         }
 
-        // A semicolon is a separator only when followed by a space or the end of
-        // the line.
+        // A semicolon is a separator only when followed by a space or the end
+        // of the line.
         let is_separator = match bytes.get(index + 1) {
             Some(next) => *next == b' ',
             None => true,
@@ -147,10 +147,10 @@ mod tests {
     fn implicit_author_name_is_always_header_substituted() {
         // The header substitution group (special characters + attribute
         // references) is applied to the implicit author-line name consistently,
-        // whether or not the line contains an attribute reference. Previously the
-        // name was returned raw unless it happened to carry an attribute
-        // reference, which forced a downstream converter to guess whether the
-        // value was already substituted.
+        // whether or not the line contains an attribute reference. Previously
+        // the name was returned raw unless it happened to carry an
+        // attribute reference, which forced a downstream converter to
+        // guess whether the value was already substituted.
         let author_name = |src: &str| {
             let mut parser = Parser::default();
             let doc = parser.parse(src);
@@ -183,9 +183,10 @@ mod tests {
     #[test]
     fn attr_reference_value_is_inserted_verbatim() {
         // The header substitution group runs special characters *before*
-        // attribute references (Asciidoctor's `HEADER_SUBS = [:specialcharacters,
-        // :attributes]`), so an attribute reference's value is inserted verbatim
-        // rather than being escaped a second time. Here the literal text carries
+        // attribute references (Asciidoctor's `HEADER_SUBS =
+        // [:specialcharacters, :attributes]`), so an attribute
+        // reference's value is inserted verbatim rather than being
+        // escaped a second time. Here the literal text carries
         // no special characters, so the resolved value's `<`, `>`, and `&` are
         // left as they are.
         let mut parser = Parser::default().with_intrinsic_attribute(
@@ -350,10 +351,11 @@ mod tests {
 
     #[test]
     fn fallback_condenses_whitespace_and_keeps_underscores_literal() {
-        // A line that does not match the author pattern (here because of the comma)
-        // is stored verbatim as the author with runs of spaces condensed. Unlike the
-        // matching path, underscores are left literal rather than replaced with
-        // spaces (matching Asciidoctor's `tr_s ' ', ' '` fallback).
+        // A line that does not match the author pattern (here because of the
+        // comma) is stored verbatim as the author with runs of spaces
+        // condensed. Unlike the matching path, underscores are left
+        // literal rather than replaced with spaces (matching
+        // Asciidoctor's `tr_s ' ', ' '` fallback).
         let mut parser = Parser::default();
 
         let al =
@@ -583,10 +585,10 @@ mod tests {
             &mut parser,
         );
 
-        // Note: This test documents the current behavior where attribute substitution
-        // happens after parsing, which results in HTML encoding of the angle brackets.
-        // The underscore replacement should still work on the attribute-substituted
-        // values.
+        // Note: This test documents the current behavior where attribute
+        // substitution happens after parsing, which results in HTML
+        // encoding of the angle brackets. The underscore replacement
+        // should still work on the attribute-substituted values.
         assert_eq!(
             al,
             AuthorLine {
@@ -661,10 +663,11 @@ mod tests {
 
     #[test]
     fn attr_sub_applied_after_parsing() {
-        // This is to demonstrate compatibility with Ruby asciidoctor behavior. In that
-        // implementation, the attribute substitution is applied *after* parsing for
-        // individual authors, which results in the unexpected treatment that the entire
-        // list is one author with mangled results.
+        // This is to demonstrate compatibility with Ruby asciidoctor behavior.
+        // In that implementation, the attribute substitution is applied
+        // *after* parsing for individual authors, which results in the
+        // unexpected treatment that the entire list is one author with
+        // mangled results.
         let mut parser = Parser::default().with_intrinsic_attribute(
             "author-list",
             "Jane Smith <jane@example.com>; John Doe <john@example.com>",
@@ -1122,8 +1125,8 @@ mod tests {
 
     #[test]
     fn character_reference_followed_by_space_not_treated_as_separator() {
-        // The terminating `;` of a character reference must not split the author
-        // even when it is followed by a space.
+        // The terminating `;` of a character reference must not split the
+        // author even when it is followed by a space.
         let mut parser = Parser::default();
 
         let al = crate::document::AuthorLine::parse(
@@ -1207,7 +1210,8 @@ mod tests {
     #[test]
     fn comprehensive_author_attribute_test() {
         // This test verifies that all author attribute types work correctly for
-        // multiple authors, including edge cases like missing middle names and emails.
+        // multiple authors, including edge cases like missing middle names and
+        // emails.
 
         let mut parser = Parser::default();
         let doc = parser.parse("= Document Title\nFirst Second Last <first@example.com>; Only First; A B C <abc@example.com>; No Email Guy");

@@ -365,8 +365,8 @@ To force the use of UTC, set the `TZ=UTC` environment variable when invoking Asc
 /// configured [`SafeMode`], so their values are asserted directly here.
 #[test]
 fn safe_mode_attributes() {
-    // (safe mode, `safe-mode-level`, `safe-mode-name`, active `safe-mode-<name>`
-    // flag)
+    // (safe mode, `safe-mode-level`, `safe-mode-name`, active
+    // `safe-mode-<name>` flag)
     let cases = [
         (SafeMode::Unsafe, "0", "unsafe", "safe-mode-unsafe"),
         (SafeMode::Safe, "1", "safe", "safe-mode-safe"),
@@ -1387,9 +1387,10 @@ fn relfilesuffix_tracks_outfilesuffix_counter_overlay() {
     let mut parser = Parser::default();
     let _ = parser.parse("= Title\n\nSuffix is {counter:outfilesuffix}.\n");
 
-    // Resolving the counter overlays `outfilesuffix`: the counter increments its
-    // last character, so `.html` becomes `.htmm`. An unset `relfilesuffix` must
-    // read that overlaid value, not the raw `.html` attribute underneath it.
+    // Resolving the counter overlays `outfilesuffix`: the counter increments
+    // its last character, so `.html` becomes `.htmm`. An unset
+    // `relfilesuffix` must read that overlaid value, not the raw `.html`
+    // attribute underneath it.
     let outfilesuffix = parser.attribute_value("outfilesuffix");
     assert_eq!(outfilesuffix.as_maybe_str(), Some(".htmm"));
     assert_eq!(parser.attribute_value("relfilesuffix"), outfilesuffix);
@@ -1884,8 +1885,8 @@ Since attributes can reference attributes, it's possible to create an output doc
     assert_default("max-include-depth", "64");
 
     // `max-attribute-value-size` is only assigned its `4096` default in SECURE
-    // mode. `SafeMode::Secure` is the default mode, so a pristine parser resolves
-    // it to `4096`; a relaxed safe mode leaves it unset (see
+    // mode. `SafeMode::Secure` is the default mode, so a pristine parser
+    // resolves it to `4096`; a relaxed safe mode leaves it unset (see
     // `SafeMode`-relaxed coverage below).
     assert_default("max-attribute-value-size", "4096");
 
@@ -1942,7 +1943,8 @@ fn explicit_max_attribute_value_size_survives_safe_mode_change() {
     };
 
     // Explicit value set *before* the safe-mode change (the order the reviewer
-    // flagged) is preserved, whether the mode is relaxed or (redundantly) Secure.
+    // flagged) is preserved, whether the mode is relaxed or (redundantly)
+    // Secure.
     let set_then_relax = Parser::default()
         .with_intrinsic_attribute(
             "max-attribute-value-size",

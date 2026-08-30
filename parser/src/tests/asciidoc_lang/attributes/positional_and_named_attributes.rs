@@ -1162,7 +1162,8 @@ In these rules, `name` consists of a word character (letter or numeral) followed
 
     #[test]
     fn attrlist_cant_start_with_space() {
-        // NOTE: The requirement about parsing an attribute is covered elsewhere.
+        // NOTE: The requirement about parsing an attribute is covered
+        // elsewhere.
         verifies!(
             r#"
 * Parsing an attribute proceeds from the beginning of the attribute list string or after a previously identified delimiter (`,`).

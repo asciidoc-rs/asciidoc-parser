@@ -501,7 +501,8 @@ fn break_with_attrlist() {
 
 #[test]
 fn break_trait_methods_without_metadata() {
-    // Test that IsBlock trait methods work correctly for a break without metadata.
+    // Test that IsBlock trait methods work correctly for a break without
+    // metadata.
     let mut parser = Parser::default();
 
     let mi = crate::blocks::Block::parse(crate::Span::new("<<<"), &mut parser)

@@ -118,9 +118,10 @@ TIP: The header row ignores any style operators assigned via column and cell spe
     // every cell (header or body), copying the column's `halign`/`valign` onto
     // the cell; the header-specific handling only skips
     // `cell_style = column.style`, so the header ignores the column *style*,
-    // not its alignment. Because the SDD coverage tool matches whole spec lines,
-    // the honored and contradicted rules cannot be split, so the line is marked
-    // non-normative rather than falsely reporting rule (1) as verified.
+    // not its alignment. Because the SDD coverage tool matches whole spec
+    // lines, the honored and contradicted rules cannot be split, so the
+    // line is marked non-normative rather than falsely reporting rule (1)
+    // as verified.
     non_normative!(
         r#"
 It also ignores alignment operators assigned to the table's column specifiers; however, any alignment operators assigned to a cell specifier in the header row are applied.
@@ -265,8 +266,8 @@ In <<ex-short>>, `header` is assigned to using the shorthand syntax for `options
 "#
     );
 
-    // The `ex-short` example assigns `header` using the `%` shorthand syntax, so
-    // the first row is promoted to the header. (The callout `<.>` on the
+    // The `ex-short` example assigns `header` using the `%` shorthand syntax,
+    // so the first row is promoted to the header. (The callout `<.>` on the
     // attribute line is doc-authoring markup, not part of the table source.)
     let ex_short = parse_table(
         "[%header,cols=\"2,2,1\"]\n|===\n|Column 1, header row\n|Column 2, header row\n|Column 3, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n|Cell in column 3, row 2\n|===",
@@ -364,7 +365,8 @@ include::example$row.adoc[tag=opt-h]
 "#
     );
 
-    // The rendered result of <<ex-formal>>: the first row renders as the header.
+    // The rendered result of <<ex-formal>>: the first row renders as the
+    // header.
     let ex_formal_result = parse_table(
         "[cols=\"2*\",options=\"header\"]\n|===\n|Column 1, header row\n|Column 2, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n\n|Cell in column 1, row 3\n|Cell in column 2, row 3\n|===",
     );
@@ -422,8 +424,9 @@ include::example$row.adoc[tag=impl-h]
 "#
     );
 
-    // The `ex-implicit` example (`impl-h` from row.adoc) relies on layout alone:
-    // a non-empty first line followed by a blank line promotes the first row.
+    // The `ex-implicit` example (`impl-h` from row.adoc) relies on layout
+    // alone: a non-empty first line followed by a blank line promotes the
+    // first row.
     let ex_implicit = parse_table(
         "|===\n|Column 1, header row |Column 2, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n\n|Cell in column 1, row 3\n|Cell in column 2, row 3\n|===",
     );
@@ -439,7 +442,8 @@ include::example$row.adoc[tag=impl-h]
 "#
     );
 
-    // The rendered result of <<ex-implicit>>: the first row renders as the header.
+    // The rendered result of <<ex-implicit>>: the first row renders as the
+    // header.
     let ex_implicit_result = parse_table(
         "|===\n|Column 1, header row |Column 2, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n\n|Cell in column 1, row 3\n|Cell in column 2, row 3\n|===",
     );
@@ -479,8 +483,8 @@ In <<ex-noheader>>, `noheader` is assigned using the shorthand syntax.
         parse_table("[options=\"noheader\"]\n|===\n|Cell 1 |Cell 2\n\n|Cell 3 |Cell 4\n|===");
     assert!(table.header_row().is_none());
 
-    // `noheader` only suppresses the *implicit* assignment; an explicit `header`
-    // still wins when both options are present.
+    // `noheader` only suppresses the *implicit* assignment; an explicit
+    // `header` still wins when both options are present.
     let table = parse_table("[%header%noheader]\n|===\n|Cell 1 |Cell 2\n\n|Cell 3 |Cell 4\n|===");
     assert!(table.header_row().is_some());
 
@@ -500,8 +504,9 @@ In <<ex-noheader>>, `noheader` is assigned using the shorthand syntax.
 "#
     );
 
-    // The `ex-noheader` example suppresses the implicit header via the `%noheader`
-    // shorthand, so the first row stays in the body rather than being promoted.
+    // The `ex-noheader` example suppresses the implicit header via the
+    // `%noheader` shorthand, so the first row stays in the body rather than
+    // being promoted.
     let ex_noheader = parse_table(
         "[%noheader]\n|===\n|Cell in column 1, row 1 |Cell in column 2, row 1\n\n|Cell in column 1, row 2 |Cell in column 2, row 2\n|===",
     );

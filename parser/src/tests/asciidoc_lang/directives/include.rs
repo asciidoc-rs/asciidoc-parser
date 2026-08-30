@@ -94,8 +94,9 @@ An include directive must be placed on a line by itself with the following synta
 "#
     );
 
-    // Because an include directive must be on a line by itself, a directive with
-    // trailing content on the same line is not processed as an include.
+    // Because an include directive must be on a line by itself, a directive
+    // with trailing content on the same line is not processed as an
+    // include.
     let handler =
         InlineFileHandler::from_pairs([("part1.adoc", "First"), ("part2.adoc", "Second")]);
 
@@ -389,9 +390,9 @@ If you don't want the include directive to be processed, you must escape it usin
 "#
     );
 
-    // An escaped include directive is not processed: its target is not resolved.
-    // Matching Asciidoctor, the leading backslash is stripped and the remainder
-    // is emitted literally.
+    // An escaped include directive is not processed: its target is not
+    // resolved. Matching Asciidoctor, the leading backslash is stripped and
+    // the remainder is emitted literally.
     let handler = InlineFileHandler::from_pairs([("just-an-example.ext", "SHOULD NOT APPEAR")]);
 
     let doc = Parser::default()
@@ -461,8 +462,8 @@ Escaping the directive is necessary _even if it appears in a verbatim block_ sin
 "#
     );
 
-    // An unescaped include is processed even inside a verbatim block, so escaping
-    // is required there to prevent it from being expanded.
+    // An unescaped include is processed even inside a verbatim block, so
+    // escaping is required there to prevent it from being expanded.
     let handler = InlineFileHandler::from_pairs([("ex.adoc", "IMPORTED")]);
 
     let doc = Parser::default()
@@ -510,8 +511,8 @@ The following message will also be inserted into the output:
 "#
     );
 
-    // When the target cannot be resolved, the directive is replaced in the output
-    // with an "Unresolved directive" message.
+    // When the target cannot be resolved, the directive is replaced in the
+    // output with an "Unresolved directive" message.
     let handler = InlineFileHandler::from_pairs([("other.adoc", "unused")]);
 
     let doc = Parser::default()
@@ -561,8 +562,8 @@ If you don't want the AsciiDoc processor to emit a warning, but rather drop the 
     );
 
     // The handler does not provide content.adoc, but `opts=optional` means the
-    // unresolved directive is dropped silently: no "Unresolved directive" text is
-    // inserted and no warning is emitted.
+    // unresolved directive is dropped silently: no "Unresolved directive" text
+    // is inserted and no warning is emitted.
     let handler = InlineFileHandler::from_pairs([("other.adoc", "unused")]);
 
     let doc = Parser::default()
@@ -600,8 +601,8 @@ A common pattern to help here is to define the paths in attributes defined in th
 "#
     );
 
-    // An attribute reference in the include target is resolved before the target
-    // is looked up.
+    // An attribute reference in the include target is resolved before the
+    // target is looked up.
     let handler = InlineFileHandler::from_pairs([("_includes/fragment1.adoc", "Fragment one.")]);
 
     let doc = Parser::default()
@@ -637,9 +638,9 @@ The content of all included content goes through some form of normalization.
 "#
     );
 
-    // The directive merges any text file's content, not just AsciiDoc: here a CSV
-    // fragment is included verbatim. The content is normalized as it is merged —
-    // the CRLF line ending becomes a Unix line feed.
+    // The directive merges any text file's content, not just AsciiDoc: here a
+    // CSV fragment is included verbatim. The content is normalized as it is
+    // merged — the CRLF line ending becomes a Unix line feed.
     let handler = InlineFileHandler::from_pairs([("results.csv", "Year,Total\r\n2016,1234")]);
 
     let doc = Parser::default()
@@ -674,8 +675,8 @@ If the file is recognized as an AsciiDoc file (i.e., it has one of the following
     );
 
     // An include whose target is recognized as AsciiDoc (by its `.adoc`
-    // extension) is run through the preprocessor, so an include directive nested
-    // within it is itself expanded.
+    // extension) is run through the preprocessor, so an include directive
+    // nested within it is itself expanded.
     let handler = InlineFileHandler::from_pairs([
         ("chapter.adoc", "Chapter intro.\n\ninclude::fragment.adoc[]"),
         ("fragment.adoc", "Fragment body."),
@@ -737,8 +738,8 @@ Running the preprocessor on the included content allows includes to be nested, t
 "#
     );
 
-    // The preprocessor runs on included content, so an include inside an included
-    // file is itself resolved (nested includes).
+    // The preprocessor runs on included content, so an include inside an
+    // included file is itself resolved (nested includes).
     let handler = InlineFileHandler::from_pairs([
         ("outer.adoc", "Outer top.\n\ninclude::inner.adoc[]"),
         ("inner.adoc", "Inner content."),
@@ -779,8 +780,9 @@ The content is inserted as is (after being normalized).
 "#
     );
 
-    // A non-AsciiDoc include (here a `.csv` file) is merged verbatim: an include
-    // directive nested within it is left as literal text, never expanded.
+    // A non-AsciiDoc include (here a `.csv` file) is merged verbatim: an
+    // include directive nested within it is left as literal text, never
+    // expanded.
     let handler = InlineFileHandler::from_pairs([
         ("results.csv", "year,total\ninclude::fragment.adoc[]"),
         ("fragment.adoc", "SHOULD NOT APPEAR"),

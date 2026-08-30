@@ -694,10 +694,11 @@ impl InlineRenderer for HtmlInlineRenderer {
                 .map(|id| id.to_owned())
         }
 
-        // A quote-delimited first positional attribute (e.g. `['role']`) carries
-        // no shorthand role or block style, so the derivation above leaves it
-        // out. Asciidoctor treats such a value as a verbatim role — quotes
-        // included — so recover it here rather than dropping the role.
+        // A quote-delimited first positional attribute (e.g. `['role']`)
+        // carries no shorthand role or block style, so the derivation
+        // above leaves it out. Asciidoctor treats such a value as a
+        // verbatim role — quotes included — so recover it here rather
+        // than dropping the role.
         if roles.is_empty()
             && id.is_none()
             && let Some(role) = attrlist.quoted_text_fallback_role()
@@ -890,10 +891,11 @@ impl InlineRenderer for HtmlInlineRenderer {
             )
             .unwrap_or_else(|| format!(r#"<span class="alt">{alt}</span>"#, alt = alt))
         } else if svg_active && attrlist.has_option("interactive") {
-            // Render an interactive SVG as an `<object>` element so its embedded
-            // scripting and links remain live. A `fallback` image (or, failing
-            // that, the alt text) is nested inside for user agents that can't
-            // display the object.
+            // Render an interactive SVG as an `<object>` element so its
+            // embedded scripting and links remain live. A
+            // `fallback` image (or, failing that, the alt text) is
+            // nested inside for user agents that can't display the
+            // object.
             let fallback = if let Some(fallback) = attrlist.named_attribute("fallback") {
                 // A `fallback=` value restored from a masked construct
                 // resolves over its restored ranges masked, exactly as the
@@ -1094,10 +1096,10 @@ impl InlineRenderer for HtmlInlineRenderer {
             format!("[{alt}&#93;", alt = alt)
         };
 
-        // `src` is only a real image URI in the image-icon branch (icons enabled
-        // and not font-based); the font (`<i>`) and text (`[alt]`) branches have
-        // no `src`, so a `link=self` on them stays literal (see
-        // `render_icon_or_image`).
+        // `src` is only a real image URI in the image-icon branch (icons
+        // enabled and not font-based); the font (`<i>`) and text
+        // (`[alt]`) branches have no `src`, so a `link=self` on them
+        // stays literal (see `render_icon_or_image`).
         let link_self_href = if context.is_attribute_set("icons")
             && context.attribute_value("icons").as_maybe_str() != Some("font")
         {
@@ -1211,8 +1213,9 @@ impl InlineRenderer for HtmlInlineRenderer {
             (Some(resolved), _) => {
                 // Explicit link text always wins; otherwise use the target's
                 // reference text, optionally reformatted by the `xrefstyle`.
-                // Empty explicit text (`<<id,>>`) is treated as absent, matching
-                // Asciidoctor's fallback to the target's reference text.
+                // Empty explicit text (`<<id,>>`) is treated as absent,
+                // matching Asciidoctor's fallback to the
+                // target's reference text.
                 let text = match params.provided_text {
                     Some(provided) if !provided.is_empty() => provided.to_string(),
                     _ => {
@@ -1222,8 +1225,9 @@ impl InlineRenderer for HtmlInlineRenderer {
                         // carries a nested `<a>…</a>`; an anchor cannot legally
                         // nest inside another, so the inner anchor tags are
                         // dropped (keeping their text), mirroring Asciidoctor's
-                        // `DropAnchorRx`. The bracketed fallback (`[id]`) has no
-                        // anchors, so stripping only applies to a resolved
+                        // `DropAnchorRx`. The bracketed fallback (`[id]`) has
+                        // no anchors, so stripping only
+                        // applies to a resolved
                         // reftext.
                         let base = resolved
                             .text
@@ -1329,8 +1333,8 @@ impl InlineRenderer for HtmlInlineRenderer {
         } else {
             // The visual separator is always `+`, even when the source used a
             // comma delimiter (e.g. `kbd:[Ctrl,T]`). This matches Asciidoctor's
-            // HTML5 output, where the delimiter only selects how keys are split,
-            // not how the sequence is displayed.
+            // HTML5 output, where the delimiter only selects how keys are
+            // split, not how the sequence is displayed.
             dest.push_str(&format!(
                 r#"<span class="keyseq"><kbd>{keys}</kbd></span>"#,
                 keys = join_cow_strs(keys, "</kbd>+<kbd>")
@@ -1613,8 +1617,8 @@ pub(crate) fn has_dangerous_self_href(href: &str, from_uri_target: bool) -> bool
         return true;
     }
 
-    // A `data:image/*` source is exempt, except an author-supplied SVG data URI,
-    // whose script runs when the anchor is followed.
+    // A `data:image/*` source is exempt, except an author-supplied SVG data
+    // URI, whose script runs when the anchor is followed.
     from_uri_target && is_svg_data_uri(href)
 }
 

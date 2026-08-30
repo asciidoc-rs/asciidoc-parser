@@ -136,11 +136,12 @@ Here's how the HTML converter converts an icon macro when the `icons` attribute 
 
         // The spec's "not set or empty" wording is loose: with the `icons`
         // attribute genuinely unset the icon renders as bracketed fallback text
-        // (see `how_the_icon_is_resolved` below); the image `<img>` output shown
-        // here is produced when `icons` is *empty* (i.e. image mode). This crate
-        // renders only the inline fragment, so the `<span class="icon">` wrapper
-        // appears without the enclosing `<div class="paragraph"><p>` block markup
-        // shown above. It also uses `class="icon"` (matching Asciidoctor's actual
+        // (see `how_the_icon_is_resolved` below); the image `<img>` output
+        // shown here is produced when `icons` is *empty* (i.e. image
+        // mode). This crate renders only the inline fragment, so the
+        // `<span class="icon">` wrapper appears without the enclosing
+        // `<div class="paragraph"><p>` block markup shown above. It
+        // also uses `class="icon"` (matching Asciidoctor's actual
         // output) rather than the `class="image"` printed in this spec example.
         let doc = Parser::default().parse(":icons:\n\nicon:tags[] ruby, asciidoctor");
 
@@ -152,8 +153,8 @@ Here's how the HTML converter converts an icon macro when the `icons` attribute 
 
     // The DocBook converter is not implemented by this crate, so the
     // `<inlinemediaobject>` rendering below is not verified here. Likewise, the
-    // fallback behavior when an icon image can't be located requires file-system
-    // access this crate leaves to the caller.
+    // fallback behavior when an icon image can't be located requires
+    // file-system access this crate leaves to the caller.
     non_normative!(
         r#"
 Here's how the DocBook converter converts an icon macro.
@@ -223,8 +224,9 @@ WARNING: If you include a file extension in the image target, the icon macro wil
             r#"<span class="icon"><i class="fa fa-heart"></i></span>"#
         );
 
-        // WARNING: a file extension in the target breaks font icon mode, because
-        // the extension is carried into the glyph class (`fa-heart.png`).
+        // WARNING: a file extension in the target breaks font icon mode,
+        // because the extension is carried into the glyph class
+        // (`fa-heart.png`).
         let doc = Parser::default().parse(":icons: font\n\nicon:heart.png[]");
         assert_eq!(
             rendered_paragraphs(&doc).join("\n"),
@@ -285,7 +287,8 @@ icon:tags[role=blue] ruby, asciidoctor
 "#
         );
 
-        // The role is appended to the class of the `<span>` surrounding the icon.
+        // The role is appended to the class of the `<span>` surrounding the
+        // icon.
         let doc =
             Parser::default().parse(":icons: image\n\nicon:tags[role=blue] ruby, asciidoctor");
         assert_eq!(
@@ -368,11 +371,12 @@ icon:tags[Tags,width=16] ruby, asciidoctor
         );
 
         // NOTE: The icon macro's sole positional attribute is `size` (see the
-        // font-mode section below), so in `icon:tags[Tags,width=16]` the leading
-        // `Tags` is parsed as `size`, not `alt`. Because `size` has no effect in
-        // image mode, the alt text falls back to the target-derived default
-        // (`tags`) while `width=16` applies. To set the alt text explicitly, use
-        // the named `alt` attribute as shown above.
+        // font-mode section below), so in `icon:tags[Tags,width=16]` the
+        // leading `Tags` is parsed as `size`, not `alt`. Because `size`
+        // has no effect in image mode, the alt text falls back to the
+        // target-derived default (`tags`) while `width=16` applies. To
+        // set the alt text explicitly, use the named `alt` attribute as
+        // shown above.
         let doc =
             Parser::default().parse(":icons: image\n\nicon:tags[Tags,width=16] ruby, asciidoctor");
         assert_eq!(
