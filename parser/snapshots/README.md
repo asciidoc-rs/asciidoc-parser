@@ -3,8 +3,9 @@
 Frozen, checked-in golden recordings for the `inline-ast` branch's differential test
 corpora. Each file is a **recording**, not a fixture list: it holds output that was once
 produced by the old string-substitution pipeline, captured before that pipeline was
-deleted (design doc §5.2, step 6). Tests now read these files as a fixed oracle instead of
-re-deriving the expected output at test time.
+deleted (as part of [#1059](https://github.com/asciidoc-rs/asciidoc-parser/pull/1059)).
+Tests now read these files as a fixed oracle instead of re-deriving the expected output 
+at test time.
 
 ## Format
 
