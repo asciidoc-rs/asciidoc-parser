@@ -110,11 +110,24 @@ struct FootnoteRecord {
     id: Option<String>,
     text: String,
 
-    /// The entry's deferred cross-reference state, as `FootnoteDeferred`'s
-    /// `Debug` spelling — the template and the segments, in placeholder order.
+    /// The entry's deferred **cross-references**, as
+    /// `FootnoteDeferred::xrefs`'s own `Debug` spelling — every one the
+    /// footnote's text carries, in document order.
     ///
     /// A spelling here for the same reason as `warnings`: an `XrefSegment`
     /// carries seven fields, three of them resolver types of their own.
+    ///
+    /// This is the **segment list alone**, not `FootnoteDeferred`'s whole
+    /// `Debug` (which also has a `template`): the structured
+    /// `XrefTemplatePiece` template a piece-based build produces has no
+    /// spelling the frozen golden — captured from the string pipeline's own
+    /// in-band placeholder template — could ever hold, so comparing the two
+    /// verbatim compares apples to a representation that no longer exists.
+    /// The segment list, unlike the template, is unchanged in shape by that
+    /// switch (an `XrefSegment` is still an `XrefSegment`), so it stays a
+    /// meaningful freeze; the template's own literal bytes are still pinned,
+    /// just via the entry's already-compared [`text`](FootnoteRecord::text)
+    /// rather than via this field.
     deferred: Option<String>,
 
     location: Option<(usize, usize)>,
@@ -155,7 +168,7 @@ fn snapshot(parser: &Parser) -> SideEffects {
                     index: footnote.index,
                     id: footnote.id,
                     text: footnote.text,
-                    deferred: footnote.deferred.map(|d| format!("{d:?}")),
+                    deferred: footnote.deferred.map(|d| format!("{:?}", d.xrefs())),
                     location: footnote.location,
                 })
                 .collect(),
@@ -1463,7 +1476,7 @@ fn the_record_codec_round_trips_every_shape() {
                 index: "2".to_string(),
                 id: Some("fid".to_string()),
                 text: "with a reference".to_string(),
-                deferred: Some("FootnoteDeferred { template: \"x\", xrefs: [] }".to_string()),
+                deferred: Some("[]".to_string()),
                 location: Some((12, 34)),
             },
         ],

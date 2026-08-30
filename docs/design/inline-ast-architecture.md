@@ -11592,7 +11592,7 @@ failed**, 68 ignored.
 | Phase | Criterion | Verdict | Evidence |
 | ----- | --------- | ------- | -------- |
 | 2 | ~277 golden `.rendered()` assertions pass unchanged | ✅ | Suite green, and the §5.3 rename left every asserted string untouched. The renamed accessors have 324 `.rendered_html()` and 173 `.rendered_html_content()` call sites (`git grep -cF` at `25ad4070`). Those are *accessor call sites*, not a recount of §5.3's ~277 golden assertions — most are ordinary reads rather than golden string comparisons — so they evidence the rename's reach, not the size of the oracle. |
-| 2 | sentinels deleted | ⚠️ **2 of 3** | See below. |
+| 2 | sentinels deleted | ⚠️ **producers retired, table not yet deleted** | See below. |
 | 2 | benchmarks within an agreed budget of `main` | ❓ **no budget on record** | CodSpeed reports no alteration across 5 benchmarks, but no *agreed budget* is written down anywhere in this document, so the criterion cannot be checked as stated. |
 | 3 | node vocabulary reviewed against the `asciidoctor` port's needs (§6.6) | ❌ **not started, and gated on Landing** | See below. |
 | 3 | purely-structural navigation sugar kept minimal | ✅ | The `inlines` module exposes no navigation helpers at all — no `walk`, `descendants`, `children`, `iter`, `visit`, or `find`; the node types are plain public fields (§3.2's sketch). Minimal by construction. |
@@ -11671,6 +11671,70 @@ records from before the title pass collected its own folds), and the corpus code
 One increment, but with those three decisions inside it; only after it can Phase 2's
 "sentinels deleted" gate close and the reserved-codepoint table shrink to nothing.
 
+*The footnote half landed as (a render-and-capture `fold_deferring_xrefs` plus a measured
+narrowing):* the increment's own first decision — measure before narrowing — reversed the
+audit's expectation. An instrumented `Footnote::resolve_references` (a throwaway probe
+logging every `folded: None` call) ran across the whole suite (5,477 tests,
+`--test-threads=1`) and found it reached **exactly once**: this crate's own
+`a_footnote_folds_when_given_one_and_renders_its_template_otherwise` unit test, which builds
+a bare `Footnote` by hand precisely to exercise that arm. No production parse takes it —
+`document::title_refs::write_back` now calls `collect_own_folded_footnotes` for every titled
+content, including the section-heading case the "6 of 55" comment recorded before that pass
+existed, so `FootnoteDeferred`'s template is *never* the source of a production `text` after
+resolution; it only ever renders once, at registration, before any reference has a resolved
+destination to lose. That measurement is what makes the nested-reference narrowing free rather
+than merely accepted: `fold_deferring_xrefs` ([`fold.rs`](../../parser/src/content/inline_builder/fold.rs))
+now walks a footnote's own top-level children the same way `carried_title_template` walks a
+title's — a top-level `Xref` node becomes an `XrefTemplatePiece::Xref` splice point with its
+own segment; every other top-level node folds to one `Literal` piece, and a cross-reference
+*nested* inside one (`footnote:[*<<tgt>>*]`) bakes into that literal as its unresolved
+fallback rather than becoming addressable. Unlike the carried title, though, the nested
+reference's **segment is not dropped**: `fold_xref`'s `Xrefs::Deferred` branch records it and
+renders its fallback in place (through the now-`pub(crate)` `render_xref_segment`) rather than
+writing a placeholder, so `FootnoteDeferred::xrefs` still carries every cross-reference the
+footnote's text holds, top-level and nested alike — `FootnoteDeferred::resolve`'s warning pass
+is the *only* place a footnote-embedded reference is ever warned about (the enclosing
+content's own resolution deliberately resolves but does not warn on its complementary list),
+so dropping the nested ones the way the carried title does would have silently stopped warning
+about an unresolvable `<<nowhere>>` inside a footnote's span — a real regression the carried
+title's own narrowing does not carry, pinned by
+`an_unresolvable_reference_nested_in_a_footnote_is_still_warned_about` alongside the rendering
+boundary in `a_reference_nested_in_a_span_of_a_footnote_stays_its_fallback` (and its
+complement, `a_reference_nested_in_a_footnote_resolves_once_the_document_does`, showing the
+tree refold resolves it anyway once a real parse's resolution pass runs). One byte-identical
+subtlety is *not* preserved: summed across a footnote's registration, every reference is still
+rendered exactly once (so a stateful renderer sees the same call count), but a footnote mixing
+a top-level and a nested reference no longer renders them in strict document order — every
+nested one's call happens during the fold, ahead of every top-level one's, which happens later
+via `render_xref_template`. No golden source mixes the two forms in one footnote, so this is
+documented in `fold_deferring_xrefs`'s own doc comment as unmeasured rather than exercised.
+`render_template` (the byte-placeholder decoder) and `Content::xref_placeholder` (its producer)
+are deleted outright — `FootnoteDeferred::render` is now `render_xref_template`, the same piece
+walk the carried title uses. `XREF_PLACEHOLDER_START`/`_END` are not: they stay in
+`RESERVED_SENTINELS`/`is_reserved_sentinel`, reserved-but-unproduced exactly as the passthrough
+pair already was, since retiring that table (with `escape_sentinels`, its last reader) is the
+separate, purely mechanical increment named above and stays out of scope here. The frozen
+`side_effects.txt` corpus's `deferred` comparison is redesigned per the increment's third
+decision: `snapshot()` now records `FootnoteDeferred::xrefs()`'s own `Debug` spelling (a
+`#[cfg(test)]`-only accessor) rather than the whole struct's, so the freeze compares the
+segment list structurally and leaves the template's literal bytes to the entry's
+already-compared `text` field — the sixteen affected recorded lines were mechanically
+re-derived (a script reproducing the store's own `quote`/`unquote` escaping, not hand-typed) to
+hold just the `xrefs` portion of what they held before. `cargo test --workspace` is green
+(5,477 tests passing, unchanged from before this increment beyond the three deleted
+`render_template` unit tests and the five new ones), and coverage on every changed file is
+diff-neutral against a baseline worktree of this same commit (`fold.rs`, `footnotes.rs`,
+`content.rs`, `catalog.rs`, `parser.rs` — same missed-region and missed-line counts before and
+after, confirmed line-for-line for the files whose miss counts hold from unrelated pre-existing
+gaps rather than shrinking).
+
+With this landed, `RESERVED_SENTINELS` holds five entries and every one of them is
+reserved-but-unproduced — no production code anywhere in the crate emits an in-band control
+sentinel any more. Phase 2's "sentinels deleted" gate is not yet closed on the letter of its
+own wording (the table itself, and `escape_sentinels`'s four legacy string-step callers, are
+still there), but every *producer* the gate's name refers to is retired; what remains is the
+purely mechanical follow-up named throughout this section.
+
 ##### Phase 3's first criterion cannot close before Landing
 
 "Node vocabulary reviewed against the `asciidoctor` port's needs (§6.6)" and Landing's
@@ -11692,11 +11756,13 @@ in place by this audit; the remaining struct is Phase 5's own outstanding work.
 ##### What this means for "how much further"
 
 Firm, enumerated, and cheap: Phase 3's README `Raw`-node anchor; Phase 4's four hard-case
-policies written down; §4.6's stale sentence (done here). Firm and substantial: retiring the
-xref template mechanism (Phase 2), and the last `XrefRenderParams` fold (Phase 5). Open-ended:
-the `asciidoctor`-port review, which gates both Phase 3 and Landing and whose cost is unknown
-from inside this repository. Any session count that does not separate those three tiers is
-guessing.
+policies written down; §4.6's stale sentence (done here); the now-inert `escape_sentinels`
+pass and the `RESERVED_SENTINELS` table under it (a purely mechanical follow-up, left for its
+own increment when the xref template retirement landed). Firm and substantial: the last
+`XrefRenderParams` fold (Phase 5) — the xref template mechanism itself is retired now, both
+halves. Open-ended: the `asciidoctor`-port review, which gates both Phase 3 and Landing and
+whose cost is unknown from inside this repository. Any session count that does not separate
+those three tiers is guessing.
 
 ### 5.3 The golden-HTML oracle (the safety net)
 

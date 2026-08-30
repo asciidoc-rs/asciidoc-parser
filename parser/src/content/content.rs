@@ -248,17 +248,17 @@ pub(crate) enum XrefTemplatePiece {
     Xref(usize),
 }
 
-/// Sentinel codepoints (Unicode Private Use Area) bracketing a placeholder
-/// index in a [`FootnoteDeferred`] template — the last template still written
-/// as an in-band string. (A [`DeferredContent::template`] is a structured
-/// [`XrefTemplatePiece`] list and involves no sentinels.)
-///
-/// A document can type these codepoints — they are unassigned by Unicode, but
-/// perfectly valid in a `&str` — so they are *not* self-evidently the parser's
-/// own. The escaping pass described on [`escape_sentinels`] was what kept the
-/// string pipeline's own uses unambiguous; a footnote's template is the
-/// builder's fold, which that pass never covered (see
-/// [`FootnoteDeferred::render`]).
+/// Sentinel codepoints (Unicode Private Use Area) that used to bracket a
+/// placeholder index in a [`FootnoteDeferred`] template — the last template
+/// written as an in-band string, and design §4.2's third and final sentinel
+/// system. Both [`DeferredContent::template`] and [`FootnoteDeferred`]'s own
+/// are structured [`XrefTemplatePiece`] lists now, so nothing in the crate
+/// produces these codepoints any more; they survive only as entries in
+/// [`RESERVED_SENTINELS`] and [`is_reserved_sentinel`], mirroring how
+/// [`PASSTHROUGH_PLACEHOLDER_START`] and [`PASSTHROUGH_PLACEHOLDER_END`]
+/// already stood — reserved codepoints with nothing left producing them.
+/// Retiring the table itself (with [`escape_sentinels`], its last reader) is
+/// a separate, purely mechanical increment.
 const XREF_PLACEHOLDER_START: char = '\u{E000}';
 const XREF_PLACEHOLDER_END: char = '\u{E001}';
 
@@ -853,15 +853,6 @@ impl<'src> Content<'src> {
             footnote,
             template: Vec::new(),
         }));
-    }
-
-    /// Returns the placeholder token for the cross-reference at `index`, in
-    /// the in-band form a [`FootnoteDeferred`] template is written in — its
-    /// one remaining producer is the deferring fold
-    /// ([`fold_deferring_xrefs`](crate::content::inline_builder::fold_deferring_xrefs)),
-    /// and its one remaining reader is [`render_template`].
-    pub(crate) fn xref_placeholder(index: usize) -> String {
-        format!("{XREF_PLACEHOLDER_START}{index}{XREF_PLACEHOLDER_END}")
     }
 
     /// Resolves any deferred cross-references using `resolver`, then rebuilds
@@ -1712,7 +1703,19 @@ pub(crate) fn render_xref_template(
 ///
 /// A segment's fields are the tree's reads — the document's own text, never in
 /// escaped form; `derived` and `resolved` never entered it either.
-fn render_xref_segment(xref: &XrefSegment, renderer: &dyn InlineRenderer, out: &mut String) {
+///
+/// `pub(crate)` rather than private: [`fold_deferring_xrefs`]'s own deferred
+/// fold (crate-internal to `inline_builder`) renders a **nested**
+/// cross-reference's unresolved fallback in place through this same function,
+/// so a footnote's baked-literal reading and [`render_xref_template`]'s
+/// spliced one can never drift apart.
+///
+/// [`fold_deferring_xrefs`]: crate::content::inline_builder::fold_deferring_xrefs
+pub(crate) fn render_xref_segment(
+    xref: &XrefSegment,
+    renderer: &dyn InlineRenderer,
+    out: &mut String,
+) {
     renderer.render_xref(
         &XrefRenderParams {
             target: &xref.target,
@@ -1727,102 +1730,90 @@ fn render_xref_segment(xref: &XrefSegment, renderer: &dyn InlineRenderer, out: &
     );
 }
 
-/// Splices resolved (or fallback) cross-reference renderings into an in-band
-/// placeholder template, producing the final rendered text.
-///
-/// This is the last reader of the `U+E000 <index> U+E001` placeholder form,
-/// and [`FootnoteDeferred::render`] is its last caller: a footnote's template
-/// is the deferring fold's output, in which each placeholder can sit **inside**
-/// renderer-produced markup (a cross-reference nested in a styled span folds
-/// into the span's rendered body), so it cannot become a flat
-/// [`XrefTemplatePiece`] list without giving those nested references up. See
-/// [`fold_deferring_xrefs`](crate::content::inline_builder::fold_deferring_xrefs).
-fn render_template(template: &str, xrefs: &[XrefSegment], renderer: &dyn InlineRenderer) -> String {
-    let mut out = String::with_capacity(template.len());
-    let mut rest = template;
-
-    while let Some(start) = rest.find(XREF_PLACEHOLDER_START) {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + XREF_PLACEHOLDER_START.len_utf8()..];
-
-        let Some(end) = after.find(XREF_PLACEHOLDER_END) else {
-            // Malformed placeholder; emit the sentinel literally and continue.
-            out.push(XREF_PLACEHOLDER_START);
-            rest = after;
-            continue;
-        };
-
-        let body = &after[..end];
-        rest = &after[end + XREF_PLACEHOLDER_END.len_utf8()..];
-
-        match body
-            .parse::<usize>()
-            .ok()
-            .and_then(|index| xrefs.get(index))
-        {
-            Some(xref) => {
-                render_xref_segment(xref, renderer, &mut out);
-            }
-
-            None => {
-                // Not a placeholder this template owns: emit the text
-                // literally. Placeholder indices are assigned sequentially into
-                // the same `Content`'s `xrefs`, so this is unreachable for a
-                // placeholder the substitution wrote; text is never rejected
-                // here (nor asserted against) because a sequence that merely
-                // looks like a placeholder is content, and content is passed
-                // through.
-                out.push(XREF_PLACEHOLDER_START);
-                out.push_str(body);
-                out.push(XREF_PLACEHOLDER_END);
-            }
-        }
-    }
-
-    out.push_str(rest);
-    out
-}
-
 /// The deferred cross-references carried by a footnote's text.
 ///
 /// A footnote's text is extracted out of the flow of the block during the
 /// macros substitution step, so any cross-reference (`<<id>>`, `xref:id[…]`)
 /// inside it cannot be resolved by the document-level pass that resolves
 /// references in block content. Instead, the footnote captures its
-/// cross-references here — as a placeholder template plus the references in
+/// cross-references here — as a structured template plus the references in
 /// placeholder order — and they are resolved alongside the block references
 /// (see [`Footnote::resolve_references`]).
+///
+/// # Every cross-reference is recorded; not every one is a splice point
+///
+/// [`xrefs`](Self::xrefs) holds **every** cross-reference the footnote's text
+/// carries — top-level and nested alike, in document order — because
+/// [`resolve`](Self::resolve)'s warnings have to cover both: a footnote's
+/// embedded cross-references are never independently warned about anywhere
+/// else (`Content::resolve_references` resolves the complementary list it
+/// reads off the *enclosing* content's tree but deliberately does not warn
+/// on it, leaving that to this type alone). [`template`](Self::template),
+/// by contrast, can only splice a **top-level** reference — one directly
+/// among the footnote's own children — because a nested one's placeholder
+/// would sit *inside* a sibling piece's already-rendered markup (a styled
+/// span's body, a link's display text), which a flat piece list cannot
+/// represent; see
+/// [`fold_deferring_xrefs`](crate::content::inline_builder::fold_deferring_xrefs)
+/// for how the two lists diverge in length for such a footnote. A nested
+/// reference is still in `xrefs` — still resolved, still warned about if
+/// unresolvable — it is simply baked into its enclosing piece as its
+/// unresolved-fallback rendering rather than addressable by index.
 ///
 /// [`Footnote::resolve_references`]: crate::document::Footnote::resolve_references
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub(crate) struct FootnoteDeferred {
-    /// The footnote text with opaque placeholder tokens marking where each
-    /// cross-reference will be spliced in.
-    template: String,
+    /// The footnote's structured template: literal runs of already-rendered
+    /// text interleaved with the positions of its **top-level**
+    /// cross-references — see the type's own docs for why only those are
+    /// addressable.
+    template: Vec<XrefTemplatePiece>,
 
-    /// The cross-references, in placeholder order.
+    /// Every cross-reference the footnote's text carries, in document order
+    /// — see the type's own docs for why this is not only the ones
+    /// `template` can splice.
     xrefs: Vec<XrefSegment>,
 }
 
 impl FootnoteDeferred {
-    /// Constructs a footnote's deferred cross-reference state from the
-    /// placeholder-bearing `template` and its `xrefs` (in placeholder order).
-    pub(crate) fn new(template: String, xrefs: Vec<XrefSegment>) -> Self {
+    /// Constructs a footnote's deferred cross-reference state from its
+    /// `template` and `xrefs` (in placeholder order).
+    pub(crate) fn new(template: Vec<XrefTemplatePiece>, xrefs: Vec<XrefSegment>) -> Self {
         Self { template, xrefs }
+    }
+
+    /// Every cross-reference this footnote's text carries, in document order
+    /// — top-level and nested alike; see the type's own docs. Exposed for the
+    /// `inline_builder_side_effect_parity` corpus, which compares this list
+    /// on its own rather than [`FootnoteDeferred`]'s whole `Debug` spelling —
+    /// [`template`](Self::template)'s shape is no longer something the
+    /// string-pipeline-recorded golden can spell, so its literal bytes are
+    /// left to the entry's already-compared `text` field instead.
+    ///
+    /// `#[cfg(test)]`: no production caller needs the list on its own — every
+    /// production reader either walks `self.xrefs` directly (`resolve`) or
+    /// goes through `render`'s combination of it with `template`.
+    #[cfg(test)]
+    pub(crate) fn xrefs(&self) -> &[XrefSegment] {
+        &self.xrefs
     }
 
     /// Renders the footnote text from the template and the current (resolved or
     /// unresolved) state of its cross-references.
     ///
     /// The template is the builder's fold of the footnote's subtree, which
-    /// never enters escaped sentinel form.
+    /// never enters escaped sentinel form — see [`render_xref_template`].
     pub(crate) fn render(&self, renderer: &dyn InlineRenderer) -> String {
-        render_template(&self.template, &self.xrefs, renderer)
+        render_xref_template(&self.template, &self.xrefs, renderer)
     }
 
     /// Resolves the footnote's cross-references using `resolver`, reporting any
     /// unresolved target in `warnings` against `source`. Rendering the resolved
     /// text is left to the caller (via [`render`](Self::render)).
+    ///
+    /// Every cross-reference in [`xrefs`](Self::xrefs) is resolved and
+    /// warned about uniformly here, whether or not `template` can address
+    /// it by index — see the type's own docs.
     pub(crate) fn resolve<'src>(
         &mut self,
         resolver: &dyn ReferenceResolver,
@@ -2152,61 +2143,6 @@ mod tests {
         }
     }
 
-    mod render_template {
-        use super::super::{
-            XREF_PLACEHOLDER_END, XREF_PLACEHOLDER_START, XrefSegment, render_template,
-        };
-        use crate::parser::HtmlInlineRenderer;
-
-        fn segment(target: &str) -> XrefSegment {
-            XrefSegment {
-                target: target.to_string(),
-                provided_text: None,
-                window: None,
-                roles: vec![],
-                xrefstyle: None,
-                derived: None,
-                resolved: None,
-            }
-        }
-
-        fn render(template: &str, xrefs: &[XrefSegment]) -> String {
-            render_template(template, xrefs, &HtmlInlineRenderer {})
-        }
-
-        #[test]
-        fn splices_a_reference_into_its_placeholder() {
-            let template = format!("see {XREF_PLACEHOLDER_START}0{XREF_PLACEHOLDER_END} here");
-
-            assert_eq!(
-                render(&template, &[segment("a")]),
-                r##"see <a href="#a">[a]</a> here"##
-            );
-        }
-
-        #[test]
-        fn passes_an_unterminated_placeholder_through_literally() {
-            // A start sentinel with no end cannot arise from the deferring
-            // fold (which always writes both), so this only pins down that the
-            // text is emitted rather than swallowed.
-            let unterminated = format!("a{XREF_PLACEHOLDER_START}0 no end");
-
-            assert_eq!(render(&unterminated, &[segment("a")]), unterminated);
-        }
-
-        #[test]
-        fn passes_an_unmatched_placeholder_through_literally() {
-            // Likewise for a bracketed body that names no reference this
-            // template owns: a sequence that merely looks like a placeholder is
-            // content, and reaches the output as content.
-            let out_of_range = format!("x{XREF_PLACEHOLDER_START}9{XREF_PLACEHOLDER_END}y");
-            assert_eq!(render(&out_of_range, &[segment("a")]), out_of_range);
-
-            let non_numeric = format!("x{XREF_PLACEHOLDER_START}xyz{XREF_PLACEHOLDER_END}y");
-            assert_eq!(render(&non_numeric, &[segment("a")]), non_numeric);
-        }
-    }
-
     mod render_xref_template {
         use super::super::{XrefSegment, XrefTemplatePiece, render_xref_template};
         use crate::parser::HtmlInlineRenderer;
@@ -2273,7 +2209,7 @@ mod tests {
     }
 
     mod footnote_deferred {
-        use super::super::{FootnoteDeferred, XrefSegment};
+        use super::super::{FootnoteDeferred, XrefSegment, XrefTemplatePiece};
 
         fn segment(target: &str) -> XrefSegment {
             XrefSegment {
@@ -2289,7 +2225,10 @@ mod tests {
 
         #[test]
         fn debug_includes_template_and_xrefs() {
-            let deferred = FootnoteDeferred::new("t".to_string(), vec![segment("a")]);
+            let deferred = FootnoteDeferred::new(
+                vec![XrefTemplatePiece::Literal("t".to_string())],
+                vec![segment("a")],
+            );
             let rendered = format!("{deferred:?}");
             assert!(rendered.contains("FootnoteDeferred"));
             assert!(rendered.contains("template"));

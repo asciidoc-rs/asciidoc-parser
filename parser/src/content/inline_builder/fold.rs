@@ -3,7 +3,7 @@
 use super::{callouts::replacement_type_of, quotes::quote_type_of};
 use crate::{
     attributes::Attrlist,
-    content::{Content, XrefSegment, xref_segment_from_node},
+    content::{XrefSegment, XrefTemplatePiece, render_xref_segment, xref_segment_from_node},
     inlines::{
         Anchor, Callout, CharRef, Footnote, Image, IndexTerm, InlineNode, RawForm, Ref, RefVariant,
         SpanForm, Stem, StemNotation, Ui, UiKind,
@@ -69,35 +69,86 @@ pub(crate) enum Footnotes {
 /// same reason: a tree is folded to more than one string, and which string is
 /// wanted is a question about node kinds rather than about bytes.
 ///
-/// [`Deferred`](Self::Deferred) is the placeholder-emitting mode — see
+/// [`Deferred`](Self::Deferred) is the segment-recording mode — see
 /// [`fold_deferring_xrefs`], which is the only way to reach it.
 pub(crate) enum Xrefs<'a> {
     /// Render each cross-reference in place, through `render_xref`: the
     /// ordinary fold, which is what a block's flow shows.
     Rendered,
 
-    /// Write a placeholder where each cross-reference stands, appending the
-    /// segment that will fill it to this list. The placeholder's index is the
-    /// segment's position in the list, so a template and its list are built in
-    /// one pass and cannot fall out of order.
+    /// Record each cross-reference's segment to this list as it is reached —
+    /// appended in document order, so a reference's position in the list is
+    /// stable regardless of how deep the recursion that reached it — and
+    /// still render it in place, exactly as [`Rendered`](Self::Rendered)
+    /// would. [`fold_deferring_xrefs`] is the one caller: it uses the
+    /// recorded segments to build splice points for a footnote's **top-level**
+    /// references, and relies on this rendering-in-place to give a
+    /// **nested** one's nothing-recorded literal text the same bytes it would
+    /// have under [`Rendered`](Self::Rendered) — see that function's own docs.
     Deferred(&'a mut Vec<XrefSegment>),
 }
 
-/// Folds `nodes` into a **placeholder template** plus the cross-reference
-/// segments that fill it, in placeholder order — the pair
+/// Folds `nodes` — a footnote's own top-level children — into a **structured
+/// template** plus every cross-reference segment the footnote's text carries
+/// (top-level and nested alike, in document order) — the pair
 /// [`FootnoteDeferred`](crate::content::FootnoteDeferred) is built from.
 ///
 /// A footnote's text is lifted out of the block it was written in, so a
 /// cross-reference inside it is never reached by the document-order pass that
 /// resolves the block's own references; the footnote has to carry its
 /// references itself, as a template plus a segment list, and resolve them from
-/// the catalog later ([`Footnote::resolve_references`]). The string pipeline
-/// reaches that pair by *re-homing* the block template's own placeholders,
-/// which are already sitting in the footnote's captured text
-/// (its `rehome_xref_placeholders`).
-/// The tree has no such placeholders to re-home — a cross-reference is a node
-/// — so it writes its own: this fold emits one per
-/// [`Xref`](RefVariant::Xref) node and records that node's segment as it goes.
+/// the catalog later ([`Footnote::resolve_references`]).
+///
+/// # Only a top-level reference becomes a splice point
+///
+/// This walks `nodes` at the **top level** only, exactly as
+/// `carried_title_template` (design's carried-title analog) does: a top-level
+/// [`Xref`](RefVariant::Xref) node contributes an
+/// [`Xref`](XrefTemplatePiece::Xref) piece and its own segment
+/// (via [`xref_segment_from_node`], the same reading every other segment
+/// derivation uses); every other top-level node folds to one
+/// [`Literal`](XrefTemplatePiece::Literal) piece. A
+/// cross-reference **nested** inside that other node — `footnote:[*<<tgt>>*]`,
+/// a `<<tgt>>` inside a styled span's body — cannot itself become a splice
+/// point: its placeholder would sit *inside* the span's own rendered markup,
+/// which a flat piece list cannot represent (the string pipeline's in-band
+/// placeholders could sit anywhere in a byte string; a piece list has no
+/// "inside another piece" position). It is folded in
+/// [`Deferred`](Xrefs::Deferred) mode regardless, though — not
+/// [`Rendered`](Xrefs::Rendered) — so its segment is still recorded: it is
+/// still resolved and, if unresolvable, still warned about by
+/// [`FootnoteDeferred::resolve`](crate::content::FootnoteDeferred::resolve),
+/// the same as a top-level one. Only its *rendering* is narrowed, to the
+/// unresolved fallback baked into its enclosing literal forever — measured, not
+/// assumed: every footnote in the suite reaches
+/// `Content::collect_own_folded_footnotes`, whose tree-fold answer is what
+/// production `text` actually reflects, both before and after any resolution
+/// sweep (see [`Footnote::resolve_references`]'s own docs for the instrumented
+/// count); this template is only ever rendered once, at registration, before
+/// any reference — nested or not — has a resolved destination to lose.
+/// `a_reference_nested_in_a_span_of_a_footnote_stays_its_fallback` pins the
+/// boundary, and the complementary
+/// `an_unresolvable_reference_nested_in_a_footnote_is_still_warned_about` pins
+/// that the segment (and so the warning) survives it.
+///
+/// # Renderer callback count, not order, is preserved
+///
+/// A top-level reference's segment is recorded here but not rendered — its
+/// bytes come later, from
+/// [`render_xref_template`](crate::content::render_xref_template) walking the
+/// piece it became. A nested one is rendered immediately, in this
+/// same pass (`fold_xref`'s [`Deferred`](Xrefs::Deferred) branch renders in
+/// place rather than writing a placeholder). Summed across a footnote's whole
+/// registration (this fold, then the render that computes its initial `text`),
+/// every reference — top-level or nested — is still rendered exactly once, so
+/// a stateful renderer sees the same *number* of `render_xref` calls this
+/// registration always made. What is not preserved is strict document-order
+/// *interleaving* between the two kinds in one footnote that mixes them: every
+/// nested reference's call happens during this fold, ahead of every top-level
+/// one's, which happens afterward. No golden source mixes a top-level and a
+/// nested cross-reference in the same footnote, so this is unmeasured rather
+/// than accepted-and-verified — flag it if a consumer's stateful renderer ever
+/// needs the stronger guarantee.
 ///
 /// # Why the template is built at *registration* time
 ///
@@ -136,25 +187,50 @@ pub(crate) fn fold_deferring_xrefs(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineRenderer,
     context: &RenderContext,
-) -> (String, Vec<XrefSegment>) {
-    let mut out = String::new();
+) -> (Vec<XrefTemplatePiece>, Vec<XrefSegment>) {
+    let mut template: Vec<XrefTemplatePiece> = Vec::new();
     let mut segments = Vec::new();
 
-    // The footnote axis is inert here whichever way it is set: `nodes` is one
-    // footnote's own children, and footnotes do not nest (the string
-    // pipeline's lazy bracket match cannot recognize one inside another's
-    // content either), so no `Footnote` node can be reached. `Marked` is the
-    // ordinary fold, which is the honest default for a mode nothing consults.
-    fold_into_html(
-        nodes,
-        renderer,
-        context,
-        Footnotes::Marked,
-        &mut Xrefs::Deferred(&mut segments),
-        &mut out,
-    );
+    for node in nodes {
+        if let InlineNode::Ref(reference) = node
+            && reference.variant == RefVariant::Xref
+        {
+            let index = segments.len();
+            segments.push(xref_segment_from_node(reference, renderer, context));
+            template.push(XrefTemplatePiece::Xref(index));
+            continue;
+        }
 
-    (out, segments)
+        // Every other top-level node — including one that *contains* a
+        // nested cross-reference — folds to one literal run. `Deferred` is
+        // still the mode threaded through, not `Rendered`: a nested
+        // reference's segment must still be recorded (see this function's
+        // own docs), it is just rendered in place rather than addressable as
+        // its own piece.
+        //
+        // The footnote axis is inert here whichever way it is set: `nodes`
+        // is one footnote's own children, and footnotes do not nest (the
+        // string pipeline's lazy bracket match cannot recognize one inside
+        // another's content either), so no `Footnote` node can be reached.
+        // `Marked` is the ordinary fold, which is the honest default for a
+        // mode nothing consults.
+        let mut literal = String::new();
+        fold_into_html(
+            std::slice::from_ref(node),
+            renderer,
+            context,
+            Footnotes::Marked,
+            &mut Xrefs::Deferred(&mut segments),
+            &mut literal,
+        );
+
+        match template.last_mut() {
+            Some(XrefTemplatePiece::Literal(text)) => text.push_str(&literal),
+            _ => template.push(XrefTemplatePiece::Literal(literal)),
+        }
+    }
+
+    (template, segments)
 }
 
 /// The fold a **section title** contributes as its reference text and as the
@@ -508,15 +584,20 @@ fn fold_xref(
     xrefs: &mut Xrefs<'_>,
     out: &mut String,
 ) {
-    // A deferring fold writes a placeholder here instead of a rendering, and
-    // captures the segment that will fill it — see [`Xrefs::Deferred`]. The
-    // children are *not* folded into `out`: they are this reference's own
-    // display text, which the segment carries (rendered, by
-    // [`xref_segment_from_node`]) rather than the flow.
+    // A deferring fold additionally captures this reference's segment before
+    // rendering it — see [`Xrefs::Deferred`]. The rendering itself still goes
+    // straight to `out`, from the segment (not from `reference.children`
+    // again, which the segment already folded once via
+    // [`xref_segment_from_node`] to compute its own `provided_text` — folding
+    // them a second time here would double the renderer's callback count for
+    // every non-trivial display text). This is always the reference's own
+    // *unresolved* fallback: a fold never has a resolved destination to
+    // render instead, since resolution runs later, over the recorded
+    // segment, not over a tree mid-fold.
     if let Xrefs::Deferred(segments) = xrefs {
-        let index = segments.len();
-        segments.push(xref_segment_from_node(reference, renderer, context));
-        out.push_str(&Content::xref_placeholder(index));
+        let segment = xref_segment_from_node(reference, renderer, context);
+        render_xref_segment(&segment, renderer, out);
+        segments.push(segment);
         return;
     }
 
