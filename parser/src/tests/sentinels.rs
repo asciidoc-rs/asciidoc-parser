@@ -117,6 +117,61 @@ fn a_placeholder_from_an_attribute_value_cannot_forge_a_cross_reference() {
 }
 
 #[test]
+fn a_placeholder_from_an_attribute_value_cannot_forge_an_image_restore() {
+    // `image:`/`icon:` and the link families' display-text list are the one
+    // place left where a masked passthrough or STEM expression is restored
+    // by scanning parsed text for its own `\u{96}`*n*`\u{97}` token
+    // (`tokened_bracket`/`Attrlist::into_owned_restoring`), rather than by
+    // node structure. An attribute reference is substituted into the bracket
+    // *before* the image macro is even recognized, so an attribute whose
+    // value happens to spell that same byte pattern — sitting in the same
+    // bracket as a real passthrough — would otherwise be indistinguishable
+    // from the pipeline's own token and splice the passthrough's rendered
+    // body into `alt` instead of the literal text the document defined.
+    let doc = Parser::default().parse(concat!(
+        ":forge: \u{96}0\u{97}\n",
+        "\n",
+        "image:x.png[++real++,alt={forge}]\n",
+    ));
+
+    let rendered = last_paragraph(&doc);
+
+    assert!(
+        !rendered.contains("alt=\"real\""),
+        "the forged attribute value must not restore the passthrough's body: {rendered:?}"
+    );
+    assert_eq!(
+        rendered,
+        "<span class=\"image\"><img src=\"x.png\" alt=\"\u{e005}s0\u{e005}e\"></span>"
+    );
+}
+
+#[test]
+fn a_placeholder_from_an_attribute_value_cannot_forge_a_link_display_text_restore() {
+    // The `link:` macro's display-text list shares `tokened_bracket` and
+    // `Attrlist::into_owned_restoring` with the image family's bracket (see
+    // `a_placeholder_from_an_attribute_value_cannot_forge_an_image_restore`),
+    // so the same forgery reaches it through a `role=` attribute sitting
+    // beside a real passthrough in the same display-text list.
+    let doc = Parser::default().parse(concat!(
+        ":forge: \u{96}0\u{97}\n",
+        "\n",
+        "link:x[++real++,role={forge}]\n",
+    ));
+
+    let rendered = last_paragraph(&doc);
+
+    assert!(
+        !rendered.contains("class=\"real\""),
+        "the forged attribute value must not restore the passthrough's body: {rendered:?}"
+    );
+    assert_eq!(
+        rendered,
+        "<a href=\"x\" class=\"\u{e005}s0\u{e005}e\">real</a>"
+    );
+}
+
+#[test]
 fn a_typed_passthrough_placeholder_cannot_forge_a_passthrough() {
     // The passthrough placeholders are the same kind of in-band mark, and are
     // escaped alongside the cross-reference ones: this document's `<b>` is
