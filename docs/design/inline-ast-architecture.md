@@ -11596,11 +11596,25 @@ failed**, 68 ignored.
 | 2 | benchmarks within an agreed budget of `main` | ❓ **no budget on record** | CodSpeed reports no alteration across 5 benchmarks, but no *agreed budget* is written down anywhere in this document, so the criterion cannot be checked as stated. |
 | 3 | node vocabulary reviewed against the `asciidoctor` port's needs (§6.6) | ❌ **not started, and gated on Landing** | See below. |
 | 3 | purely-structural navigation sugar kept minimal | ✅ | The `inlines` module exposes no navigation helpers at all — no `walk`, `descendants`, `children`, `iter`, `visit`, or `find`; the node types are plain public fields (§3.2's sketch). Minimal by construction. |
-| 3 | doc + README updated (the security section gets its `Raw`-node anchor) | ❌ | [`README.md`](../../README.md)'s "Security: rendering untrusted input" section names the two by-design raw-HTML mechanisms (attribute-reference substitution and passthroughs) but never mentions `Raw`, `InlineNode`, or the tree. The anchor the gate asks for does not exist. |
+| 3 | doc + README updated (the security section gets its `Raw`-node anchor) | ✅ | [`README.md`](../../README.md)'s "Security: rendering untrusted input" section now names `InlineNode::Raw` and its `RawOrigin` (`Passthrough`/`Substitution`) as the tree-level home of each by-design raw-HTML mechanism, linking `Content::render_with`/`InlineRenderer` as the seam a caller walks the tree through. See below. |
 | 4 | #944 hard-case policies documented and tested | ⚠️ **tested, not documented** | Spans are asserted per-construct across ten `inline_builder` modules. But §4.4 only *promises* the four hard cases "get explicit policies there" — attribute expansion, passthrough mask/restore, synthesized text, lookahead/retry are nowhere written down as policies, and there is no consolidated span/location test file. |
 | 4 | #564 hack removed | ✅ | Landed in step 7; `Content::source_lines`, `from_filtered_lines`'s `line_spans`, and `simple.rs`'s per-paragraph `Vec<Span>` went with it. |
 | 5 | seam documented | ⚠️ | [`README.md`](../../README.md)'s back-end bullet is current: it names `InlineRenderer` and `Content::render_with` and states the seam is *inline*-scoped. §4.6's own prose is stale, though — see below. |
 | 5 | a smoke-test alternate renderer (in tests) walks the tree | ✅ | `BracketStrong` in [`inline_builder_document_parity.rs`](../../parser/src/tests/inline_builder_document_parity.rs) is folded via `content.render_with(&BracketStrong, &parser)`; `OrdinalRenderer` and `FlipRenderer` in [`inline_tree.rs`](../../parser/src/tests/inline_tree.rs) do the same. |
+
+##### Phase 3's README gate landed (2026-08-30)
+
+The one item above the table still marked outstanding that needed no design decision, only
+writing: the security section's missing `Raw`-node anchor. `README.md`'s "Security: rendering
+untrusted input" section named the two by-design raw-HTML mechanisms but never connected them to
+anything in the public tree API, so a reader auditing untrusted input had no pointer from "these
+two things happen" to "here is where they land in `InlineNode`." Fixed by naming
+`InlineNode::Raw` and its `RawOrigin` variants (`Passthrough` for the passthrough forms,
+`Substitution` for an expanded attribute value's own unescaped specials) as the concrete
+representation, and pointing at `Content::render_with`/`InlineRenderer` as the seam a caller
+already has for walking the tree to find them — no new API, just the cross-reference the gate
+asked for. A purely mechanical doc fix, landed alongside this audit refresh rather than as its
+own increment.
 
 ##### Phase 2's third sentinel system is still live
 
