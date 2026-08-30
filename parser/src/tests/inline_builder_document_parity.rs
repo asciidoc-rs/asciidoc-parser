@@ -79,10 +79,10 @@ fn locations<'src>(doc: &'src crate::Document<'src>) -> Vec<Location<'src, 'src>
 
         // A **block title** (`.Title`) is substituted content in its own
         // right and carries its own tree, but it is not the block's content,
-        // so neither accessor above reaches it. Every block kind that can
-        // carry one is named by `block_title_content`, which is the mutable
-        // accessor the document-order title pass already uses, read-only.
-        if let Some(title) = block.block_title_content() {
+        // so neither accessor above reaches it. `IsBlock::title_content` is
+        // the read-only counterpart of the mutable accessor the
+        // document-order title pass uses.
+        if let Some(title) = block.title_content() {
             out.push(Location {
                 what: "block title".to_string(),
                 rendered: title.rendered_html().to_string(),
@@ -343,6 +343,17 @@ fn fold_matches_the_rendered_string_after_resolution() {
         // Plain documents, so the harness is not only about references.
         "First *para* here.\n\nSecond _para_ with `code` and (C).",
         "== Heading\n\nBody with an image:x.png[Alt] and a kbd:[Ctrl,T].",
+        // A preamble: content before the first section title, wrapped in its
+        // own compound block. A preamble is only synthesized when the
+        // document has a title (`Document::parse`), which every other
+        // fixture above omits. `Preamble` carries no content and no title
+        // directly (its own `IsBlock::rendered_html_content`/`inlines`/
+        // `title_content` all return `None`), so it contributes no location of
+        // its own — but this is still the only fixture that reaches that arm
+        // of the walk's dispatch. The intro paragraph inside it is what still
+        // shows up as `paragraph`, via the walk's own recursion into its
+        // children.
+        "= Doc Title\n\nIntro *para* before any heading.\n\n== Heading\n\nBody.",
     ] {
         kinds.extend(check_document(source));
     }

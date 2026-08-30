@@ -1405,7 +1405,7 @@ fn block_title_xref_is_resolved_in_the_tree() {
     let doc =
         parser.parse("[[tgt]]The target paragraph.\n\n.See <<tgt>>\nA captioned paragraph.\n");
 
-    use crate::blocks::Block;
+    use crate::blocks::{Block, IsBlock};
 
     let title = doc
         .child_blocks()

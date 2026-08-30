@@ -63,16 +63,10 @@ impl<'src> AdmonitionBlock<'src> {
     /// This narrow seam exists for the document-order title resolution pass
     /// (see `document::title_refs`), which installs the re-rendered title
     /// after resolving any cross-references embedded in it. All other access
-    /// goes through the read-only [`IsBlock::title`] accessor.
+    /// goes through the read-only [`IsBlock::title`]/[`IsBlock::title_content`]
+    /// accessors.
     pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         self.title.as_mut()
-    }
-
-    /// Returns the block's title as a read-only [`Content`], if the block has
-    /// one. Used by the inline-tree tests to inspect a block title's own tree.
-    #[cfg(test)]
-    pub(crate) fn title_content(&self) -> Option<&Content<'src>> {
-        self.title.as_ref()
     }
 
     /// Parse an admonition block, if the given metadata and content describe
@@ -403,6 +397,10 @@ impl<'src> IsBlock<'src> for AdmonitionBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_ref().map(Content::rendered_str)
+    }
+
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
     }
 
     fn anchor(&'src self) -> Option<Span<'src>> {

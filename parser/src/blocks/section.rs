@@ -579,15 +579,6 @@ impl<'src> SectionBlock<'src> {
         self.title.as_mut()
     }
 
-    /// Returns the section's `.Title` decoration as a read-only [`Content`],
-    /// if it has one — the counterpart of
-    /// [`title_content_mut`](Self::title_content_mut), for the inline-tree
-    /// tests that inspect a block title's mirrored cross-reference resolution.
-    #[cfg(test)]
-    pub(crate) fn title_content(&self) -> Option<&Content<'src>> {
-        self.title.as_ref()
-    }
-
     /// The document attributes in force where this heading was written, when
     /// they were retained — the order-dependent half of the render context a
     /// fold of the tree above needs. See
@@ -698,6 +689,10 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_ref().map(Content::rendered_str)
+    }
+
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
     }
 
     fn anchor(&'src self) -> Option<Span<'src>> {
