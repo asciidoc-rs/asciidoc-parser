@@ -491,7 +491,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_callouts(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -528,7 +528,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_callouts_in(corpus, fixture, parser, None),
-                "fold diverged from the string pipeline under a custom `icons` attribute"
+                "fold diverged from golden under a custom `icons` attribute"
             );
         }
     }

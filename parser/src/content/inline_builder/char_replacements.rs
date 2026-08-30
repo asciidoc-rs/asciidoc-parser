@@ -427,7 +427,7 @@ mod tests {
             assert_eq!(
                 golden_replacements(source),
                 fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from golden for {source:?}"
             );
         }
     }
@@ -574,7 +574,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_replacements(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -801,7 +801,7 @@ mod tests {
                     assert_eq!(
                         fold_html(&nodes, &HtmlInlineRenderer {}),
                         golden_replacements(&source),
-                        "fold diverged from the string pipeline for {source:?}"
+                        "fold diverged from golden for {source:?}"
                     );
                 }
             }

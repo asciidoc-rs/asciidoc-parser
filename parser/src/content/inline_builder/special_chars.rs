@@ -1066,7 +1066,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
