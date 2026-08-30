@@ -92,7 +92,13 @@ fn macro_prose() -> String {
         60,
     );
 
-    format!("= Macro prose\n\n[[spec-section]]\n== Specification\n\n{text}")
+    // Both anchors the paragraphs reference are defined, so every repetition
+    // exercises reference *resolution* rather than the unresolved-reference
+    // fallback.
+    format!(
+        "= Macro prose\n\n[[spec-section]]\n== Specification\n\n\
+         [[fig-overview]]\n.Overview\nThe anchored overview figure text.\n\n{text}"
+    )
 }
 
 /// Prose dense in character replacements: typographic apostrophes, dashes,
