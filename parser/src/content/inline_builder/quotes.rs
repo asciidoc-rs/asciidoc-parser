@@ -984,6 +984,30 @@ pub(super) fn level_may_have_replacements(nodes: &[InlineNode<'_>]) -> bool {
     false
 }
 
+/// The level's own text, when `nodes` is *exactly* one verbatim or
+/// synthesized [`Text`](InlineNode::Text) node — the shape
+/// [`build_match_string`] leaves untouched: with nothing else in the level to
+/// contribute a boundary character or a placeholder, its match string is that
+/// one node's `value`, byte for byte (see `build_match_string`'s own `Text`
+/// arms, which just `push_str` it either way).
+///
+/// This is the shape a paragraph is in until *something* has split it —
+/// `specialcharacters` finding a `<`/`>`/`&`, `quotes` wrapping a span,
+/// `attributes` splicing in an expanded value — so a family whose own cheap
+/// `.contains(...)` sniff would otherwise run against the *built* string can
+/// run it against this instead and skip the build (and its `String`/`Vec`
+/// allocations) for the overwhelmingly common level that has nothing for it
+/// to find. A level already split into more than one node falls back to
+/// `None`: multiple nodes are exactly the case a caller's needle can straddle
+/// a boundary the single-node case cannot, so nothing here tries to answer
+/// for it — see each caller's own site for how it stays safe there instead.
+pub(super) fn single_text_value<'src, 'a>(nodes: &'a [InlineNode<'src>]) -> Option<&'a str> {
+    match nodes {
+        [InlineNode::Text { value, .. }] => Some(value.as_ref()),
+        _ => None,
+    }
+}
+
 pub(super) fn build_match_string(
     nodes: &[InlineNode<'_>],
     masked: Masked<'_>,
@@ -2005,6 +2029,32 @@ mod tests {
         parser::HtmlInlineRenderer,
         strings::CowStr,
     };
+
+    #[test]
+    fn single_text_value_answers_only_for_one_lone_text_node() {
+        use super::single_text_value;
+
+        let text = |value: &'static str| InlineNode::Text {
+            value: CowStr::from(value),
+            location: Span::new(value),
+        };
+
+        let charref = || InlineNode::CharRef {
+            value: CharRef::Special('<'),
+            location: Span::new("<"),
+        };
+
+        // The one shape it answers for: exactly one `Text` node.
+        assert_eq!(single_text_value(&[text("abc")]), Some("abc"));
+
+        // Every other shape — none, more than one (even two `Text` nodes),
+        // or a single node of any other kind — answers `None`: a caller
+        // must fall back to building the match string.
+        assert_eq!(single_text_value(&[]), None);
+        assert_eq!(single_text_value(&[text("a"), text("b")]), None);
+        assert_eq!(single_text_value(&[charref()]), None);
+        assert_eq!(single_text_value(&[text("a"), charref()]), None);
+    }
 
     #[test]
     fn every_quote_sub_has_specific_markers() {

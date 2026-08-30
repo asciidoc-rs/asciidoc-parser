@@ -17,7 +17,10 @@ use crate::{
         INLINE_EMAIL, INLINE_LINK, INLINE_LINK_MACRO, NormalizedCaps, URI_SNIFF,
         encode_uri_component, extract_attributes_from_text,
         inline_builder::{
-            quotes::{LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, source_slice},
+            quotes::{
+                LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, single_text_value,
+                source_slice,
+            },
             special_chars::Masked,
         },
     },
@@ -199,6 +202,14 @@ pub(super) fn inline_link_level<'src>(
     masked: Masked<'_>,
     specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // single, unsplit `Text` node's match string is its own value, so the
+    // check below can run against that directly. A level already split by
+    // an earlier step falls back to the build, exactly as before.
+    if single_text_value(&nodes).is_some_and(|value| !value.contains("://")) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter mirroring the string step's guard: an auto-link needs a
@@ -953,6 +964,13 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 /// the string step, which neutralizes it, so it renders identically; the
 /// additive builder simply skips the `record_substitution_warning` side effect
 /// the string step performs there.
+/// A `link:`/`mailto:` macro needs its prefix and an opening bracket. Shared
+/// between [`link_macro_level`]'s pre-build sniff and its post-build one, so
+/// the two answers cannot drift apart.
+fn link_macro_prefilter(s: &str) -> bool {
+    (s.contains("link:") || s.contains("mailto:")) && s.contains('[')
+}
+
 pub(super) fn link_macro_level<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -961,11 +979,19 @@ pub(super) fn link_macro_level<'src>(
     masked: Masked<'_>,
     specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // single, unsplit `Text` node's match string is its own value, so the
+    // check below can run against that directly. A level already split by
+    // an earlier step falls back to the build, exactly as before.
+    if single_text_value(&nodes).is_some_and(|value| !link_macro_prefilter(value)) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter mirroring the string step's guard: a link/mailto macro
     // needs its prefix and an opening bracket.
-    if !((s.contains("link:") || s.contains("mailto:")) && s.contains('[')) {
+    if !link_macro_prefilter(&s) {
         return nodes;
     }
 
@@ -1811,6 +1837,14 @@ pub(super) fn email_level<'src>(
     ctx: LevelContext,
     masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // single, unsplit `Text` node's match string is its own value, so the
+    // check below can run against that directly. A level already split by
+    // an earlier step falls back to the build, exactly as before.
+    if single_text_value(&nodes).is_some_and(|value| !value.contains('@')) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter mirroring the string step's own `text.contains('@')`

@@ -3,7 +3,7 @@
 use regex::Regex;
 
 use super::{
-    quotes::{Piece, build_match_string, emit_range, source_slice},
+    quotes::{Piece, build_match_string, emit_range, single_text_value, source_slice},
     special_chars::Masked,
 };
 use crate::{
@@ -108,6 +108,16 @@ pub(super) fn apply_callouts<'src>(
     parser: &Parser,
     attrlist: Option<&Attrlist<'_>>,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: the
+    // common case of a single, unsplit `Text` node (nothing for the
+    // preceding `SpecialCharacters` step to have escaped) has the same bytes
+    // in its match string as in its own value, so the `&lt;` check below can
+    // run against that directly. A level already split into more than one
+    // node falls back to the build, exactly as before.
+    if single_text_value(&nodes).is_some_and(|value| !value.contains("&lt;")) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // A callout's opening bracket is always rendered as `&lt;` by

@@ -14,7 +14,8 @@ use crate::{
         INLINE_INDEXTERM,
         inline_builder::{
             quotes::{
-                LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, emit_range, source_slice,
+                LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, emit_range,
+                single_text_value, source_slice,
             },
             special_chars::Masked,
         },
@@ -22,6 +23,15 @@ use crate::{
     inlines::{IndexTerm, InlineNode},
     strings::CowStr,
 };
+
+/// Mirrors the string step's guard: a shorthand needs a `((` … `))` pair (its
+/// parens are not special, so they reach the macros step intact), and a
+/// macro form needs a `:[` and `dexterm` (matching both `indexterm:` and
+/// `indexterm2:`). Shared between [`indexterm_macros_level`]'s pre-build
+/// sniff and its post-build one, so the two answers cannot drift apart.
+fn indexterm_prefilter(s: &str) -> bool {
+    (s.contains("((") && s.contains("))")) || (s.contains(":[") && s.contains("dexterm"))
+}
 
 /// Matches [`INLINE_INDEXTERM`] at this level's escaped text, replacing each
 /// recognized index term — the `((term))` / `(((primary, secondary,
@@ -35,13 +45,21 @@ pub(super) fn indexterm_macros_level<'src>(
     ctx: LevelContext,
     masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // single, unsplit `Text` node's match string is its own value, so the
+    // check below can run against that directly. A level already split by
+    // an earlier step falls back to the build, exactly as before.
+    if single_text_value(&nodes).is_some_and(|value| !indexterm_prefilter(value)) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter mirroring the string step's guard: a shorthand needs a
     // `((` … `))` pair (its parens are not special, so they reach the macros
     // step intact), and a macro form needs a `:[` and `dexterm` (matching both
     // `indexterm:` and `indexterm2:`).
-    if !((s.contains("((") && s.contains("))")) || (s.contains(":[") && s.contains("dexterm"))) {
+    if !indexterm_prefilter(&s) {
         return nodes;
     }
 
