@@ -51,9 +51,9 @@ fn main() {
         }
     }
 
-    // `saturating_sub` guards the empty case (e.g. a `ref/` source not present):
-    // the loop below then simply doesn't run, emitting a valid empty coverage
-    // object.
+    // `saturating_sub` guards the empty case (e.g. a `ref/` source not
+    // present): the loop below then simply doesn't run, emitting a valid
+    // empty coverage object.
     let last_index = spec_files.len().saturating_sub(1);
 
     for (count, entry) in spec_files.into_iter().enumerate() {
@@ -120,9 +120,9 @@ fn parse_rs_file(path: &Path) -> Option<(String, Vec<(String, bool)>)> {
 
     // Number of `#` guards in the raw-string delimiter that opened the block we
     // are currently inside (`Some(1)` for `r#"`, `Some(2)` for `r##"`, …), or
-    // `None` when not inside a reproduced Ruby block. The closing delimiter must
-    // match this length, so a reproduced line that merely starts with a shorter
-    // `"#` / `"##` sequence does not close the block early.
+    // `None` when not inside a reproduced Ruby block. The closing delimiter
+    // must match this length, so a reproduced line that merely starts with
+    // a shorter `"#` / `"##` sequence does not close the block early.
     let mut raw_hashes: Option<usize> = None;
 
     for line in rs_file.lines() {
@@ -178,8 +178,9 @@ fn parse_rs_file(path: &Path) -> Option<(String, Vec<(String, bool)>)> {
         }
 
         // Closing delimiter of the current block. It must match the hash length
-        // of the opener (`"#` for `r#"`, `"##` for `r##"`, …); a reproduced line
-        // that merely starts with a shorter guard is left as block content.
+        // of the opener (`"#` for `r#"`, `"##` for `r##"`, …); a reproduced
+        // line that merely starts with a shorter guard is left as block
+        // content.
         if let Some(hashes) = raw_hashes {
             let closer = format!("\"{}", "#".repeat(hashes));
             if line.trim_end() == closer {

@@ -366,9 +366,10 @@ include::example$stem.adoc[tag=multi-a-render]
 "#
         );
 
-        // Inline `latexmath` macro (`example$stem.adoc[tag=multi-l]`): naming the
-        // macro after the notation surrounds the expression with LaTeX inline
-        // delimiters regardless of the document's default `stem` notation.
+        // Inline `latexmath` macro (`example$stem.adoc[tag=multi-l]`): naming
+        // the macro after the notation surrounds the expression with
+        // LaTeX inline delimiters regardless of the document's default
+        // `stem` notation.
         let doc = Parser::default().parse(r"latexmath:[C = \alpha + \beta Y^{\gamma} + \epsilon]");
 
         let block = doc.child_blocks().next().unwrap();

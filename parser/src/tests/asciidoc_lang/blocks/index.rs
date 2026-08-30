@@ -125,10 +125,11 @@ We'll cover that modifier shortly.
         todo!("Redundant: Covered by block_style test below.");
     }
 
-    // Block extensions are out of scope for the 1.0 release, so the block name →
-    // context mapping described here — an arbitrary block name mapped to one or
-    // more contexts by an extension's process method — has no corresponding
-    // parser behavior to verify. Treated as non-normative for now.
+    // Block extensions are out of scope for the 1.0 release, so the block name
+    // → context mapping described here — an arbitrary block name mapped to
+    // one or more contexts by an extension's process method — has no
+    // corresponding parser behavior to verify. Treated as non-normative for
+    // now.
     non_normative!(
         r#"
 For blocks, the context is sometimes referred to as the block name.
@@ -487,8 +488,8 @@ Additional contexts may be introduced through the use of the block, block macro,
 "#
         );
 
-        // Test a few context names that are not built-in contexts as a spot-check
-        // against false positives.
+        // Test a few context names that are not built-in contexts as a
+        // spot-check against false positives.
         assert!(!is_built_in_context("documentx"));
         assert!(!is_built_in_context("sentence"));
         assert!(!is_built_in_context(""));
@@ -627,8 +628,9 @@ One of the five admonition styles (e.g., `[TIP]`) above an example block transfo
 "#
         );
 
-        // A `[TIP]` block style above an example structural container transforms
-        // the example block into an admonition block whose label is `Tip`.
+        // A `[TIP]` block style above an example structural container
+        // transforms the example block into an admonition block whose
+        // label is `Tip`.
         let doc = Parser::default().parse("[TIP]\n====\nPay attention.\n====");
         let block = doc.child_blocks().next().expect("expected a block");
 
@@ -658,8 +660,8 @@ A block style (e.g., `[circle]` or `[loweralpha]`) above an unordered or ordered
 "#
         );
 
-        // A `[circle]` block style above an unordered list declares the `circle`
-        // style on the list.
+        // A `[circle]` block style above an unordered list declares the
+        // `circle` style on the list.
         let doc = Parser::default().parse("[circle]\n* one\n* two");
         let block = doc.child_blocks().next().expect("expected a block");
         assert_eq!(block.raw_context().as_ref(), "list");
@@ -729,9 +731,9 @@ To learn more about how to change the context of a block using the declared bloc
 
         // The `[listing]` block style above the literal (`....`) delimiters
         // changes the context of the block: the raw (default) context is
-        // `literal`, but the declared block style matches the `listing` context,
-        // so the resolved context becomes `listing` and the resolved block style
-        // is left unset.
+        // `literal`, but the declared block style matches the `listing`
+        // context, so the resolved context becomes `listing` and the
+        // resolved block style is left unset.
         let doc = Parser::default().parse("[listing]\n....\na > b\n....");
         let block = doc.child_blocks().next().expect("expected a block");
 
@@ -810,8 +812,8 @@ To workaround this interpretation of the source, you need to move the trailing `
         // A first line that begins with `[` and ends with `]` is consumed as a
         // block attribute line rather than as content, regardless of the text
         // between the brackets. Here it is interpreted as the block's attribute
-        // list (declaring the `sidebar` style) rather than as a description list
-        // term/definition.
+        // list (declaring the `sidebar` style) rather than as a description
+        // list term/definition.
         let doc = Parser::default().parse("[sidebar]\nAn aside.");
         let block = doc.child_blocks().next().expect("expected a block");
 

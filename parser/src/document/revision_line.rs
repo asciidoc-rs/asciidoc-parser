@@ -28,7 +28,8 @@ impl<'src> RevisionLine<'src> {
         };
 
         let (revnumber, revdate) = if let Some((rev, date)) = left_of_colon.split_once(',') {
-            // When there's a comma, we have a revision number followed by a date.
+            // When there's a comma, we have a revision number followed by a
+            // date.
             let rev_trimmed = rev.trim();
             let cleaned_rev = strip_non_numeric_prefix(rev_trimmed);
             (Some(cleaned_rev), date.trim().to_owned())
@@ -47,9 +48,9 @@ impl<'src> RevisionLine<'src> {
 
         // Resolve attribute references *before* recording the built-in
         // `revnumber`/`revdate`/`revremark` document attributes, so a revision
-        // component written as an attribute reference (e.g. `{project-version}`)
-        // is reflected in `doc.attr` with its value resolved rather than as the
-        // raw `{...}` text.
+        // component written as an attribute reference (e.g.
+        // `{project-version}`) is reflected in `doc.attr` with its
+        // value resolved rather than as the raw `{...}` text.
         let revnumber = revnumber.map(|s| {
             let resolved = apply_header_subs(&s, parser);
             parser.set_attribute_by_value_from_header("revnumber", &resolved);
@@ -145,11 +146,12 @@ static STANDALONE_REVISION: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static NON_NUMERIC_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
-    // Strip any leading run of characters that are neither a digit nor the start
-    // of an attribute reference (`{`). Stopping at `{` preserves a revision
-    // number written purely as an attribute reference (e.g. `v{project-version}`
-    // keeps `{project-version}` for later substitution) instead of dropping the
-    // whole value because it contains no literal digit.
+    // Strip any leading run of characters that are neither a digit nor the
+    // start of an attribute reference (`{`). Stopping at `{` preserves a
+    // revision number written purely as an attribute reference (e.g.
+    // `v{project-version}` keeps `{project-version}` for later
+    // substitution) instead of dropping the whole value because it contains
+    // no literal digit.
     #[allow(clippy::unwrap_used)]
     Regex::new(r"^[^0-9{]*(.*)$").unwrap()
 });
@@ -175,8 +177,8 @@ mod tests {
         let mut parser = Parser::default();
         let result = crate::document::RevisionLine::parse(Span::new("1.2.3"), &mut parser);
 
-        // According to Asciidoctor behavior, standalone numbers without "v" are not
-        // revision numbers.
+        // According to Asciidoctor behavior, standalone numbers without "v" are
+        // not revision numbers.
         assert_eq!(result.revnumber(), None);
         assert_eq!(result.revdate(), "1.2.3");
         assert_eq!(result.revremark(), None);
@@ -316,7 +318,8 @@ mod tests {
         let result =
             crate::document::RevisionLine::parse(Span::new("nodigits, 2023-01-01"), &mut parser);
 
-        // When there are no digits, the prefix stripping should leave empty string.
+        // When there are no digits, the prefix stripping should leave empty
+        // string.
         assert_eq!(result.revnumber(), Some(""));
         assert_eq!(result.revdate(), "2023-01-01");
         assert_eq!(result.revremark(), None);
@@ -328,7 +331,8 @@ mod tests {
         // prefix class is `[^\d{]*`: the leading run stops at `{`, so an
         // attribute reference survives prefix removal and is then resolved by
         // the header substitutions. With the referenced attribute undefined the
-        // reference is preserved verbatim (default `attribute-missing` skips it).
+        // reference is preserved verbatim (default `attribute-missing` skips
+        // it).
         let mut parser = Parser::default();
         let result =
             crate::document::RevisionLine::parse(Span::new("v{draft}, 2024-01-01"), &mut parser);

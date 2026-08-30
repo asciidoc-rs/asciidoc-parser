@@ -114,8 +114,9 @@ struct SpecialCharacterReplacer<'r> {
 
 impl Replacer for SpecialCharacterReplacer<'_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        // The SPECIAL_CHARS regex only matches '<', '>', and '&'. This sequence is
-        // specifically constructed to avoid having any unreachable code.
+        // The SPECIAL_CHARS regex only matches '<', '>', and '&'. This sequence
+        // is specifically constructed to avoid having any unreachable
+        // code.
         let ch = &caps[0];
 
         if ch == "<" {
@@ -316,21 +317,22 @@ impl LookaheadReplacer for QuoteReplacer<'_> {
         // Adapted from Asciidoctor#convert_quoted_text, found in
         // https://github.com/asciidoctor/asciidoctor/blob/main/lib/asciidoctor/substitutors.rb#L1419-L1445.
 
-        // The regex crate doesn't have a sophisticated lookahead mode, so we patch
-        // it up here.
+        // The regex crate doesn't have a sophisticated lookahead mode, so we
+        // patch it up here.
 
         if self.type_ == QuoteType::Monospaced
             && self.scope == QuoteScope::Constrained
             && after.starts_with(['"', '\'', '`'])
         {
             // The leading boundary group `[^\w&;:"'`}]` matches any non-word
-            // Unicode scalar, so it can be a multi-byte character. Skip the full
-            // width of that leading character rather than assuming one byte;
-            // otherwise the slice below (and the matching offset in
-            // `SkipAheadAndRetry`) would land inside the character and panic.
+            // Unicode scalar, so it can be a multi-byte character. Skip the
+            // full width of that leading character rather than
+            // assuming one byte; otherwise the slice below (and the
+            // matching offset in `SkipAheadAndRetry`) would land
+            // inside the character and panic.
             let skip_ahead = if caps[0].starts_with('\\') {
-                // Escape case: skip the backslash plus the following byte, which
-                // is always an ASCII `[` or `` ` ``.
+                // Escape case: skip the backslash plus the following byte,
+                // which is always an ASCII `[` or `` ` ``.
                 2
             } else {
                 caps[0].chars().next().map_or(1, char::len_utf8)
@@ -521,7 +523,8 @@ static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     //
     // The counter expression is matched non-greedily (`+?`) so a trailing
     // escape backslash (`{counter:n\}`) is left for group 5 rather than being
-    // swallowed into the expression, again matching Asciidoctor's `#{CC_ANY}+?`.
+    // swallowed into the expression, again matching Asciidoctor's
+    // `#{CC_ANY}+?`.
     //
     // The attribute-name class `\w` (Unicode `\p{Word}`) accepts any Unicode
     // word character, matching Asciidoctor's `#{CG_WORD}[#{CC_WORD}-]*`, so
@@ -728,21 +731,23 @@ impl<'p> AttributeReplacer<'p> {
 
 impl Replacer for AttributeReplacer<'_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        // Consume this reference's position in the line so the next call lines up
-        // with the next source-line match, regardless of which branch handles it.
+        // Consume this reference's position in the line so the next call lines
+        // up with the next source-line match, regardless of which
+        // branch handles it.
         let match_index = self.match_index;
         self.match_index += 1;
 
-        // A backslash immediately before the opening brace (`\{name}`) or before
-        // the closing brace (`{name\}`) — or both, as in `\{name\}` — escapes
-        // the reference: it is emitted literally with the escaping backslash(es)
-        // removed and left unexpanded, whether or not the attribute is set. An
-        // escaped reference is never treated as a missing reference, so it
-        // neither drops the line nor warns, and an escaped counter directive
+        // A backslash immediately before the opening brace (`\{name}`) or
+        // before the closing brace (`{name\}`) — or both, as in
+        // `\{name\}` — escapes the reference: it is emitted literally
+        // with the escaping backslash(es) removed and left unexpanded,
+        // whether or not the attribute is set. An escaped reference is
+        // never treated as a missing reference, so it neither drops the
+        // line nor warns, and an escaped counter directive
         // does not advance the counter. This mirrors Asciidoctor, whose
-        // `sub_attributes` returns `{#{name}}` when either its leading (`$1`) or
-        // trailing (`$4`) backslash capture is present, before any counter,
-        // missing-attribute, or resolution handling runs.
+        // `sub_attributes` returns `{#{name}}` when either its leading (`$1`)
+        // or trailing (`$4`) backslash capture is present, before any
+        // counter, missing-attribute, or resolution handling runs.
         if caps.get(1).is_some() || caps.get(5).is_some() {
             dest.push('{');
 
@@ -1218,7 +1223,8 @@ struct CharacterReplacer<'r> {
 impl Replacer for CharacterReplacer<'_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         if caps[0].contains('\\') {
-            // We have to replace since we aren't sure the backslash is the first char.
+            // We have to replace since we aren't sure the backslash is the
+            // first char.
             let unescaped = &caps[0].replace("\\", "");
             dest.push_str(unescaped);
             return;
@@ -1365,15 +1371,15 @@ fn apply_callouts(content: &mut Content<'_>, parser: &Parser, attrlist: Option<&
         return;
     }
 
-    // The `line-comment` attribute (block-level, falling back to document-level)
-    // customizes or disables line-comment recognition:
+    // The `line-comment` attribute (block-level, falling back to
+    // document-level) customizes or disables line-comment recognition:
     //
     // * absent -> default prefixes (`//`, `#`, `--`, `;;`) and XML callouts are
     //   recognized.
-    // * present (custom) -> only the given prefix is recognized; XML callouts are
-    //   not.
-    // * present but empty -> no line-comment prefix is recognized; XML callouts are
-    //   not.
+    // * present (custom) -> only the given prefix is recognized; XML callouts
+    //   are not.
+    // * present but empty -> no line-comment prefix is recognized; XML callouts
+    //   are not.
     let line_comment: Option<String> = attrlist
         .and_then(|a| a.named_attribute("line-comment"))
         .map(|a| a.value().to_string())
@@ -1524,8 +1530,8 @@ impl LookaheadReplacer for CalloutReplacer<'_> {
         }
 
         // Mirror Asciidoctor's guard resolution: a captured line-comment prefix
-        // takes precedence; otherwise an XML callout uses the XML guard; failing
-        // both, there is no guard.
+        // takes precedence; otherwise an XML callout uses the XML guard;
+        // failing both, there is no guard.
         let guard = match caps.name("prefix") {
             Some(prefix) => CalloutGuard::LineComment(prefix.as_str()),
             None if is_xml => CalloutGuard::Xml,
@@ -1833,10 +1839,10 @@ mod tests {
 
         #[test]
         fn escaped_reference_with_both_braces_escaped_drops_backslashes() {
-            // `\{name\}` escapes the reference the same way `\{name}` does: both
-            // backslashes are removed and the reference is left unexpanded, even
-            // when the attribute is set. This is the form Asciidoctor produces
-            // for `\{group-id\}`.
+            // `\{name\}` escapes the reference the same way `\{name}` does:
+            // both backslashes are removed and the reference is
+            // left unexpanded, even when the attribute is set. This
+            // is the form Asciidoctor produces for `\{group-id\}`.
             let p = Parser::default().with_intrinsic_attribute(
                 "group-id",
                 "42",
@@ -1853,8 +1859,9 @@ mod tests {
 
         #[test]
         fn escaped_reference_with_only_trailing_brace_escaped_drops_backslash() {
-            // A backslash before the closing brace alone (`{name\}`) also escapes
-            // the reference, matching Asciidoctor's trailing-backslash capture.
+            // A backslash before the closing brace alone (`{name\}`) also
+            // escapes the reference, matching Asciidoctor's
+            // trailing-backslash capture.
             let p = Parser::default().with_intrinsic_attribute(
                 "group-id",
                 "42",
@@ -1871,9 +1878,10 @@ mod tests {
 
         #[test]
         fn escaped_counter_with_trailing_backslash_is_literal_and_does_not_advance() {
-            // A trailing escape backslash on a counter directive (`{counter:n\}`)
-            // emits the reference literally (without the backslash) and does not
-            // advance the counter, so the following unescaped reference is `1`.
+            // A trailing escape backslash on a counter directive
+            // (`{counter:n\}`) emits the reference literally
+            // (without the backslash) and does not advance the
+            // counter, so the following unescaped reference is `1`.
             let mut content = Content::from(crate::Span::new("{counter:n\\} {counter:n}"));
             let p = Parser::default();
             SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
@@ -2064,8 +2072,9 @@ mod tests {
 
             #[test]
             fn drop_line_records_one_warning_per_missing_reference() {
-                // Two missing references on the same dropped line each produce a
-                // diagnostic, matching Asciidoctor's per-reference logging.
+                // Two missing references on the same dropped line each produce
+                // a diagnostic, matching Asciidoctor's
+                // per-reference logging.
                 let p = parser_with_mode("drop-line");
                 assert_eq!(render("a {x} b {y} c\ntail", &p), "tail");
                 assert_eq!(p.take_substitution_warnings().len(), 2);
@@ -2074,7 +2083,8 @@ mod tests {
             #[test]
             fn drop_line_does_not_warn_for_a_line_without_a_missing_reference() {
                 // Only the line carrying the missing reference is dropped and
-                // warned about; a line whose references all resolve is untouched.
+                // warned about; a line whose references all resolve is
+                // untouched.
                 let p = parser_with_mode("drop-line");
                 assert_eq!(
                     render("first {sp}line\nsecond {missing} line\nthird line", &p),
@@ -2092,7 +2102,8 @@ mod tests {
             #[test]
             fn drop_line_points_at_the_precise_reference() {
                 // With per-line source spans retained, the drop-line diagnostic
-                // names the exact offending reference rather than the whole line.
+                // names the exact offending reference rather than the whole
+                // line.
                 let p = parser_with_mode("drop-line");
                 let text = "first {alpha} line\nsecond {beta} line";
                 let mut content = content_with_source_lines(text);
@@ -2230,9 +2241,9 @@ mod tests {
             #[test]
             fn escaped_missing_reference_drops_the_backslash_and_never_drops_the_line() {
                 // An escaped reference has its backslash removed and is passed
-                // through literally; it is never treated as a missing reference,
-                // so even under `drop-line` the line survives and no warning is
-                // recorded.
+                // through literally; it is never treated as a missing
+                // reference, so even under `drop-line` the line
+                // survives and no warning is recorded.
                 let p = parser_with_mode("drop-line");
                 assert_eq!(
                     render("In the path /items/\\{id}, x.", &p),
@@ -2312,9 +2323,10 @@ mod tests {
             #[test]
             fn warn_span_survives_earlier_special_character_expansion() {
                 // The key regression guard: special characters run before the
-                // attributes step and lengthen the rendered text (`<` -> `&lt;`),
-                // so a naive rendered-offset would be wrong. The warning must
-                // still name the reference's *original* source offset.
+                // attributes step and lengthen the rendered text (`<` ->
+                // `&lt;`), so a naive rendered-offset would be
+                // wrong. The warning must still name the
+                // reference's *original* source offset.
                 let p = parser_with_mode("warn");
                 let text = "a < b {foo} c";
                 let mut content = content_with_source_lines(text);

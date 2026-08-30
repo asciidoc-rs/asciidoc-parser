@@ -189,10 +189,10 @@ If the text cannot be parsed, an error message will be emitted to the log.
             &mut parser,
         );
 
-        // `style` is a placeholder for a real style name in this doc example, not
-        // a style this parser recognizes, so it records a DEBUG-severity
-        // unknown-style diagnostic. That is incidental to the attribute-list
-        // parsing this test verifies.
+        // `style` is a placeholder for a real style name in this doc example,
+        // not a style this parser recognizes, so it records a
+        // DEBUG-severity unknown-style diagnostic. That is incidental
+        // to the attribute-list parsing this test verifies.
         assert_eq!(parsed.warnings.len(), 1);
         assert_eq!(parsed.warnings[0].severity, WarningSeverity::Debug);
         assert_eq!(
@@ -506,7 +506,8 @@ Specifically, it does not support named attributes, only the attribute shorthand
         );
     }
 
-    // Treated as non-normative because these requirements are covered elsewhere.
+    // Treated as non-normative because these requirements are covered
+    // elsewhere.
     non_normative!(
         r#"
 Attribute lists:

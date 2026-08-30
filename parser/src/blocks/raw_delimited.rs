@@ -80,10 +80,11 @@ impl<'src> RawDelimitedBlock<'src> {
     pub(crate) fn is_valid_delimiter(line: &Span<'src>) -> bool {
         let data = line.data();
 
-        // The fenced code block delimiter is exactly three backticks, optionally
-        // followed by a language on the opening fence (```ruby). Unlike the
-        // four-character verbatim/raw delimiters, its backtick run has a fixed
-        // length (as with the two-character open-block delimiter): a run of four
+        // The fenced code block delimiter is exactly three backticks,
+        // optionally followed by a language on the opening fence
+        // (```ruby). Unlike the four-character verbatim/raw delimiters,
+        // its backtick run has a fixed length (as with the
+        // two-character open-block delimiter): a run of four
         // or more backticks is not a fence.
         if data == "```" || fenced_code_language(line).is_some() {
             return true;
@@ -125,23 +126,26 @@ impl<'src> RawDelimitedBlock<'src> {
         // (```ruby), whose closing fence is a bare ``` — set below.
         let mut close_delimiter = delimiter_data;
 
-        // The attribute list synthesized for a language-aware fenced code block.
-        // For every other block the author's own attribute list (if any) is used.
+        // The attribute list synthesized for a language-aware fenced code
+        // block. For every other block the author's own attribute list
+        // (if any) is used.
         let mut fenced_attrlist: Option<Attrlist<'src>> = None;
 
-        // A `--` open-block delimiter normally forms a compound (open) block, but
-        // a verbatim masquerade style (`source`, `listing`, or `literal`) set on
-        // it turns the block into a verbatim raw block. Every other delimiter
-        // must be at least four characters long.
+        // A `--` open-block delimiter normally forms a compound (open) block,
+        // but a verbatim masquerade style (`source`, `listing`, or
+        // `literal`) set on it turns the block into a verbatim raw
+        // block. Every other delimiter must be at least four characters
+        // long.
         let (content_model, context, mut substitution_group) = if delimiter_data == "--" {
             // A plain or compound-styled open block returns `None` here and is
             // handled by `CompoundDelimitedBlock` instead.
             open_block_verbatim_masquerade(metadata.attrlist.as_ref())?
         } else if delimiter_data == "```" {
-            // A fenced code block (three backticks) is a verbatim listing block.
-            // Its delimiter has a fixed length, so no trailing-character
-            // validity check is required. The closing fence must match the
-            // opening delimiter exactly, which the scan loop below enforces.
+            // A fenced code block (three backticks) is a verbatim listing
+            // block. Its delimiter has a fixed length, so no
+            // trailing-character validity check is required. The
+            // closing fence must match the opening delimiter
+            // exactly, which the scan loop below enforces.
             (
                 ContentModel::Verbatim,
                 "listing",

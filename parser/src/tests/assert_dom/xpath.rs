@@ -112,7 +112,8 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
 
                 // Continue with the remaining path if any.
                 if !remaining.is_empty() {
-                    // Check if remaining starts with another predicate (e.g., [text()="value"])
+                    // Check if remaining starts with another predicate (e.g.,
+                    // [text()="value"])
                     if remaining.starts_with('[') {
                         // Extract consecutive predicates.
                         let (predicates, path_after) = extract_predicates(remaining);
@@ -120,7 +121,8 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
                         // Apply the predicates to filter the results.
                         results.retain(|node| matches_predicate(node, predicates));
 
-                        // If there's more path after the predicates, continue processing.
+                        // If there's more path after the predicates, continue
+                        // processing.
                         if !path_after.is_empty() {
                             let mut final_results = Vec::new();
                             for node in results {
@@ -140,7 +142,8 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
 
                     // Check for axis specifiers first.
                     if let Some(axis_rest) = remaining.strip_prefix("/preceding-sibling::") {
-                        // Parse the axis_rest to see if there's a continuation after the axis.
+                        // Parse the axis_rest to see if there's a continuation
+                        // after the axis.
                         let (axis_selector, continuation) =
                             if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
                                 (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
@@ -170,7 +173,8 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
                     }
 
                     if let Some(axis_rest) = remaining.strip_prefix("/following-sibling::") {
-                        // Parse the axis_rest to see if there's a continuation after the axis.
+                        // Parse the axis_rest to see if there's a continuation
+                        // after the axis.
                         let (axis_selector, continuation) =
                             if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
                                 (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
@@ -200,9 +204,10 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
                     }
 
                     if let Some(axis_rest) = remaining.strip_prefix("/self::") {
-                        // The `self::` axis tests if the current node matches the given selector.
-                        // Parse to separate the selector (with predicates) from any continuation
-                        // path.
+                        // The `self::` axis tests if the current node matches
+                        // the given selector.
+                        // Parse to separate the selector (with predicates) from
+                        // any continuation path.
                         let (selector, predicate, continuation) =
                             parse_selector_with_predicates(axis_rest);
 
@@ -215,7 +220,8 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
                         // Filter results to only nodes matching the selector.
                         results.retain(|node| matches_selector(node, &selector_with_pred));
 
-                        // If there's a continuation path, apply it to the filtered results.
+                        // If there's a continuation path, apply it to the
+                        // filtered results.
                         if let Some(cont) = continuation {
                             let mut final_results = Vec::new();
                             for node in results {
@@ -247,7 +253,8 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
         } else if !rest.is_empty() {
             // Check if rest is a preceding-sibling axis.
             if let Some(axis_rest) = rest.strip_prefix("/preceding-sibling::") {
-                // Parse the axis_rest to see if there's a continuation after the axis.
+                // Parse the axis_rest to see if there's a continuation after
+                // the axis.
                 let (axis_selector, continuation) =
                     if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
                         (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
@@ -277,7 +284,8 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
 
             // Check if rest is a following-sibling axis.
             if let Some(axis_rest) = rest.strip_prefix("/following-sibling::") {
-                // Parse the axis_rest to see if there's a continuation after the axis.
+                // Parse the axis_rest to see if there's a continuation after
+                // the axis.
                 let (axis_selector, continuation) =
                     if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
                         (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
@@ -307,8 +315,9 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
 
             // Check if rest is a `self` axis.
             if let Some(axis_rest) = rest.strip_prefix("/self::") {
-                // The `self::` axis tests if the current node matches the given selector.
-                // Parse to separate the selector (with predicates) from any continuation path.
+                // The `self::` axis tests if the current node matches the given
+                // selector. Parse to separate the selector
+                // (with predicates) from any continuation path.
                 let (selector, predicate, continuation) = parse_selector_with_predicates(axis_rest);
 
                 let selector_with_pred = if let Some(pred) = predicate {
@@ -320,7 +329,8 @@ fn query_parenthesized<'a>(root: &'a VirtualNode, xpath: &str) -> Vec<&'a Virtua
                 // Filter results to only nodes matching the selector.
                 results.retain(|node| matches_selector(node, &selector_with_pred));
 
-                // If there's a continuation path, apply it to the filtered results.
+                // If there's a continuation path, apply it to the filtered
+                // results.
                 if let Some(cont) = continuation {
                     let mut final_results = Vec::new();
                     for node in results {
@@ -487,7 +497,8 @@ fn query_descendant_or_self<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a
             collect_descendants_matching(node, first, &mut results);
             results = apply_numeric_predicate(results, first);
 
-            // Parse axis_rest to separate the sibling selector from any continuation.
+            // Parse axis_rest to separate the sibling selector from any
+            // continuation.
             let (axis_selector, axis_predicate, continuation) =
                 parse_selector_with_predicates(axis_rest);
             let axis_selector_with_pred = if let Some(pred) = axis_predicate {
@@ -516,7 +527,8 @@ fn query_descendant_or_self<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a
                 }
             }
 
-            // Deduplicate results since the same sibling may be found from multiple nodes.
+            // Deduplicate results since the same sibling may be found from
+            // multiple nodes.
             return deduplicate_nodes(final_results);
         }
 
@@ -526,7 +538,8 @@ fn query_descendant_or_self<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a
             collect_descendants_matching(node, first, &mut results);
             results = apply_numeric_predicate(results, first);
 
-            // Parse axis_rest to separate the sibling selector from any continuation.
+            // Parse axis_rest to separate the sibling selector from any
+            // continuation.
             let (axis_selector, axis_predicate, continuation) =
                 parse_selector_with_predicates(axis_rest);
             let axis_selector_with_pred = if let Some(pred) = axis_predicate {
@@ -555,7 +568,8 @@ fn query_descendant_or_self<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a
                 }
             }
 
-            // Deduplicate results since the same sibling may be found from multiple nodes.
+            // Deduplicate results since the same sibling may be found from
+            // multiple nodes.
             return deduplicate_nodes(final_results);
         }
 
@@ -574,20 +588,23 @@ fn query_descendant_or_self<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a
                 let descendants = query_descendant_or_self(matched_node, rest);
                 final_results.extend(descendants);
             } else {
-                // Direct child pattern: continue with rest as a path from this node.
+                // Direct child pattern: continue with rest as a path from this
+                // node.
                 let children_results = query_from_root(matched_node, rest);
                 final_results.extend(children_results);
             }
         }
 
-        // Deduplicate since the same node may be reachable from multiple ancestors.
+        // Deduplicate since the same node may be reachable from multiple
+        // ancestors.
         deduplicate_nodes(final_results)
     } else {
         // Simple tag match or tag with predicate.
         // Extract base selector and predicate parts.
         let pattern = pattern.trim();
 
-        // Parse predicates carefully to stop at // or / that appears outside brackets.
+        // Parse predicates carefully to stop at // or / that appears outside
+        // brackets.
         let (base_selector, predicate_part, continuation) = parse_selector_with_predicates(pattern);
 
         let mut results = Vec::new();
@@ -642,7 +659,8 @@ fn query_from_root<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a VirtualN
 
         // Check if rest is an axis specifier.
         if let Some(axis_rest) = rest.strip_prefix("following-sibling::") {
-            // Parse the axis_rest to see if there's a continuation after the axis.
+            // Parse the axis_rest to see if there's a continuation after the
+            // axis.
             let (axis_selector, continuation) =
                 if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
                     (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
@@ -670,12 +688,14 @@ fn query_from_root<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a VirtualN
                 }
             }
 
-            // Deduplicate results since the same sibling may be found from multiple nodes.
+            // Deduplicate results since the same sibling may be found from
+            // multiple nodes.
             return deduplicate_nodes(final_results);
         }
 
         if let Some(axis_rest) = rest.strip_prefix("preceding-sibling::") {
-            // Parse the axis_rest to see if there's a continuation after the axis.
+            // Parse the axis_rest to see if there's a continuation after the
+            // axis.
             let (axis_selector, continuation) =
                 if let Some(slash_pos) = find_unbracketed_slash(axis_rest) {
                     (&axis_rest[..slash_pos], Some(&axis_rest[slash_pos..]))
@@ -703,7 +723,8 @@ fn query_from_root<'a>(node: &'a VirtualNode, pattern: &str) -> Vec<&'a VirtualN
                 }
             }
 
-            // Deduplicate results since the same sibling may be found from multiple nodes.
+            // Deduplicate results since the same sibling may be found from
+            // multiple nodes.
             return deduplicate_nodes(final_results);
         }
 
@@ -1460,7 +1481,8 @@ mod tests {
         let doc = Parser::default().parse("- Foo\nwrapped content\n");
         let vdom = doc.to_virtual_dom();
 
-        // The text content should be "Foo\nwrapped content" (with actual newline).
+        // The text content should be "Foo\nwrapped content" (with actual
+        // newline).
         let result = query_xpath(&vdom, "//ul/li[1]/p[text() = 'Foo\nwrapped content']");
         assert_eq!(
             result.len(),
@@ -1676,8 +1698,8 @@ mod tests {
 
     #[test]
     fn query_deeply_nested_descendants() {
-        // Test for the failing test case: //ul/li[1]//p should find all p elements
-        // including those nested in divs.
+        // Test for the failing test case: //ul/li[1]//p should find all p
+        // elements including those nested in divs.
         let doc = Parser::default().parse(
             "== Lists\n\n* Item one, paragraph one\n+\nItem one, paragraph two\n+\n* Item two\n",
         );
@@ -1765,7 +1787,8 @@ mod tests {
     #[test]
     fn query_parenthesized_with_predicates_and_child_path() {
         // Test the complex query pattern from the failing test:
-        // (//ul/li[1]/p/following-sibling::*)[1][@id="beck"]/div[@class="title"]
+        // (//ul/li[1]/p/following-sibling::*)[1][@id="beck"]/div[@class="title"
+        // ]
         let doc = Parser::default().parse("== Lists\n\n* Item one, paragraph one\n+\n:foo: bar\n[[beck]]\n.Read the following aloud to yourself\n[source, ruby]\n----\n5.times { print \"Odelay!\" }\n----\n\n* Item two\n");
         let vdom = doc.to_virtual_dom();
 

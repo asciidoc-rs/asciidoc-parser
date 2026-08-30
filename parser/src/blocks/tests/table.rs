@@ -90,8 +90,8 @@ fn multiple_cells_on_one_line() {
 
 #[test]
 fn implicit_header_row() {
-    // From <<ex-header>>: the first line after the delimiter is non-empty and is
-    // followed by a blank line, so it becomes the header row.
+    // From <<ex-header>>: the first line after the delimiter is non-empty and
+    // is followed by a blank line, so it becomes the header row.
     let table = parse_table(
         "[cols=\"1,1\"]\n|===\n|Cell in column 1, header row |Cell in column 2, header row\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n\n|Cell in column 1, row 3\n|Cell in column 2, row 3\n|===",
     );
@@ -110,9 +110,9 @@ fn implicit_header_row() {
 
 #[test]
 fn implicit_columns_from_first_row() {
-    // From add-columns.adoc <<ex-implicit>>: with no `cols` attribute and a blank
-    // line before the first row, the column count comes from the first row's cell
-    // count and there is no header.
+    // From add-columns.adoc <<ex-implicit>>: with no `cols` attribute and a
+    // blank line before the first row, the column count comes from the
+    // first row's cell count and there is no header.
     let table = parse_table(
         "|===\n\n|Cell in column 1, row 1 |Cell in column 2, row 1 |Cell in column 3, row 1\n\n|Cell in column 1, row 2\n|Cell in column 2, row 2\n|Cell in column 3, row 2\n|===",
     );
@@ -210,8 +210,8 @@ fn cell_content_is_substituted() {
 
 #[test]
 fn leading_and_trailing_whitespace_stripped() {
-    // From <<ex-more-cells>>: leading and trailing spaces around cell content are
-    // stripped.
+    // From <<ex-more-cells>>: leading and trailing spaces around cell content
+    // are stripped.
     let table = parse_table("[cols=\"1,1\"]\n|===\n|a |    b spaced\n|===");
 
     assert_eq!(
@@ -273,8 +273,8 @@ fn block_level_accessors() {
 
 #[test]
 fn escaped_cell_separator() {
-    // A backslash-escaped separator (`\|`) is not a cell boundary; the backslash
-    // is stripped from the rendered cell content.
+    // A backslash-escaped separator (`\|`) is not a cell boundary; the
+    // backslash is stripped from the rendered cell content.
     let table = parse_table("|===\n|a \\| b\n|===");
 
     assert_eq!(table.body_rows().len(), 1);
@@ -297,8 +297,9 @@ fn separator_after_backslash_is_escaped() {
 
 #[test]
 fn cols_with_empty_specifier() {
-    // An empty entry in the `cols` list (e.g. from a doubled comma) contributes a
-    // default column, matching Asciidoctor: `cols="1,,1"` yields three columns.
+    // An empty entry in the `cols` list (e.g. from a doubled comma) contributes
+    // a default column, matching Asciidoctor: `cols="1,,1"` yields three
+    // columns.
     let table = parse_table("[cols=\"1,,1\"]\n|===\n|a |b |c\n|===");
 
     assert_eq!(table.columns().len(), 3);
@@ -306,8 +307,9 @@ fn cols_with_empty_specifier() {
 
 #[test]
 fn no_cols_and_first_line_without_a_cell() {
-    // With no `cols` attribute and a first line that contains no cell separator,
-    // the column count is zero and the body loop is skipped entirely.
+    // With no `cols` attribute and a first line that contains no cell
+    // separator, the column count is zero and the body loop is skipped
+    // entirely.
     let table = parse_table("|===\nnot a cell\n|===");
 
     assert!(table.columns().is_empty());
@@ -350,8 +352,8 @@ fn untitled_table_has_no_caption() {
 #[test]
 fn caption_and_number_are_reported_through_the_isblock_trait() {
     // A generic `T: IsBlock` consumer resolves to the trait methods rather than
-    // the inherent ones, so a captioned table must be reported correctly through
-    // the trait interface too (not silently `None`).
+    // the inherent ones, so a captioned table must be reported correctly
+    // through the trait interface too (not silently `None`).
     fn via_trait<'src>(block: &impl IsBlock<'src>) -> (Option<String>, Option<usize>) {
         (block.caption().map(str::to_string), block.number())
     }
@@ -404,8 +406,8 @@ fn table_caption_can_be_relabeled() {
 
 #[test]
 fn unsetting_table_caption_suppresses_the_label() {
-    // When `table-caption` is unset, a titled table keeps its title but receives
-    // no caption (and no number).
+    // When `table-caption` is unset, a titled table keeps its title but
+    // receives no caption (and no number).
     let doc = Parser::default().parse(":!table-caption:\n\n.Numbers\n|===\n|a\n|===");
 
     let table = doc
@@ -423,10 +425,10 @@ fn unsetting_table_caption_suppresses_the_label() {
 #[test]
 fn empty_table_caption_suppresses_the_label() {
     // An explicitly empty `table-caption` value (a distinct AsciiDoc operation
-    // from a hard unset, e.g. `:!table-caption:`) is also treated as "no label":
-    // each titled table keeps its title but receives no caption and does not
-    // consume a table number. This exercises the empty-label guard separately
-    // from the `Unset` path.
+    // from a hard unset, e.g. `:!table-caption:`) is also treated as "no
+    // label": each titled table keeps its title but receives no caption and
+    // does not consume a table number. This exercises the empty-label guard
+    // separately from the `Unset` path.
     let mut parser = Parser::default().with_intrinsic_attribute(
         "table-caption",
         "",
@@ -461,9 +463,9 @@ fn caption_attribute_sets_the_label_verbatim() {
 
 #[test]
 fn caption_attribute_does_not_consume_a_table_number() {
-    // A table labeled with an explicit `caption` is skipped by the document-wide
-    // counter, so a following `table-caption` table is numbered as if the
-    // explicitly captioned table were not there.
+    // A table labeled with an explicit `caption` is skipped by the
+    // document-wide counter, so a following `table-caption` table is
+    // numbered as if the explicitly captioned table were not there.
     let doc = Parser::default().parse(
         ".First\n|===\n|a\n|===\n\n[caption=\"Table A. \"]\n.Custom\n|===\n|b\n|===\n\n.Third\n|===\n|c\n|===",
     );
@@ -489,8 +491,9 @@ fn caption_attribute_does_not_consume_a_table_number() {
 
 #[test]
 fn caption_attribute_applies_even_when_table_caption_is_unset() {
-    // The `caption` attribute is honored independently of `table-caption`, so it
-    // still labels a titled table even when `table-caption` has been unset.
+    // The `caption` attribute is honored independently of `table-caption`, so
+    // it still labels a titled table even when `table-caption` has been
+    // unset.
     let doc = Parser::default()
         .parse(":!table-caption:\n\n[caption=\"Forced. \"]\n.Numbers\n|===\n|a\n|===");
 
@@ -514,9 +517,9 @@ fn caption_attribute_is_ignored_without_a_title() {
 
 #[test]
 fn empty_caption_attribute_suppresses_the_label() {
-    // An explicitly empty `caption` (e.g. `[caption=]`) removes the label on the
-    // table: the title is kept but no caption (and no number) is assigned, so the
-    // title renders with no prefix.
+    // An explicitly empty `caption` (e.g. `[caption=]`) removes the label on
+    // the table: the title is kept but no caption (and no number) is
+    // assigned, so the title renders with no prefix.
     let table = parse_table("[caption=]\n.A table with a title but no label\n|===\n|a\n|===");
 
     assert_eq!(table.title(), Some("A table with a title but no label"));
@@ -526,8 +529,8 @@ fn empty_caption_attribute_suppresses_the_label() {
 #[test]
 fn empty_caption_attribute_does_not_consume_a_table_number() {
     // A table whose label is removed with an empty `caption` is skipped by the
-    // document-wide counter, so a following `table-caption` table is numbered as
-    // if the unlabeled table were not there.
+    // document-wide counter, so a following `table-caption` table is numbered
+    // as if the unlabeled table were not there.
     let doc = Parser::default().parse(
         ".First\n|===\n|a\n|===\n\n[caption=]\n.Unlabeled\n|===\n|b\n|===\n\n.Third\n|===\n|c\n|===",
     );
@@ -552,12 +555,13 @@ fn empty_caption_attribute_does_not_consume_a_table_number() {
 
 #[test]
 fn malformed_vertical_operator_falls_back_to_defaults() {
-    // A dot in a column specifier introduces a vertical alignment operator, which
-    // must be followed by `<`, `>`, or `^`. When the dot is followed by anything
-    // else (here the letter `x`), the operator is malformed; rather than panic,
-    // the parser leaves the dot unconsumed so the column falls back to the
-    // default vertical alignment (top) and default width. The leftover `.x` is
-    // not a recognized single-letter style operator, so the style also defaults.
+    // A dot in a column specifier introduces a vertical alignment operator,
+    // which must be followed by `<`, `>`, or `^`. When the dot is followed
+    // by anything else (here the letter `x`), the operator is malformed;
+    // rather than panic, the parser leaves the dot unconsumed so the column
+    // falls back to the default vertical alignment (top) and default width.
+    // The leftover `.x` is not a recognized single-letter style operator,
+    // so the style also defaults.
     let table = parse_table("[cols=\".x,1\"]\n|===\n|a |b\n|===");
 
     let columns = table.columns();
@@ -616,8 +620,8 @@ fn header_cell_inherits_column_alignment() {
     assert_eq!(header_cells[1].h_align(), HorizontalAlignment::Left);
     assert_eq!(header_cells[1].v_align(), VerticalAlignment::Top);
 
-    // The body cells resolve to the same column alignment, confirming the header
-    // now matches the body.
+    // The body cells resolve to the same column alignment, confirming the
+    // header now matches the body.
     let body_cells = table.body_rows()[0].cells();
 
     assert_eq!(body_cells[0].h_align(), HorizontalAlignment::Center);
@@ -659,8 +663,9 @@ fn csv_header_cell_inherits_column_alignment() {
 
 #[test]
 fn asciidoc_cell_resolves_references_in_nested_blocks() {
-    // Cross-references inside an AsciiDoc cell are resolved during the document's
-    // reference-resolution pass, which descends into the cell's nested blocks.
+    // Cross-references inside an AsciiDoc cell are resolved during the
+    // document's reference-resolution pass, which descends into the cell's
+    // nested blocks.
     let doc = Parser::default()
         .parse("[#target]\nTarget paragraph.\n\n[cols=\"a\"]\n|===\n|See xref:target[].\n|===");
 
@@ -687,8 +692,8 @@ fn asciidoc_cell_resolves_references_in_nested_blocks() {
 #[test]
 fn asciidoc_cell_attributes_are_scoped_to_the_cell() {
     // An AsciiDoc cell inherits the parent document's attributes, but an
-    // attribute it defines is scoped to the cell and does not leak back into the
-    // parent document (matching Asciidoctor).
+    // attribute it defines is scoped to the cell and does not leak back into
+    // the parent document (matching Asciidoctor).
     let mut parser = Parser::default();
     let doc = parser.parse(
         ":parent-attr: inherited\n\n[cols=\"a\"]\n|===\n|\n:cell-attr: leaked\ncell sees: {parent-attr} {cell-attr}\n|===",
@@ -751,11 +756,12 @@ fn asciidoc_cell_is_always_nested() {
 
 #[test]
 fn asciidoc_cell_exposes_inherited_attributes_for_introspection() {
-    // The cell's attribute state is scoped to the cell and restored on the parser
-    // once the cell is parsed, so it can no longer be read from the parser. The
-    // cell nonetheless retains a snapshot of it, letting a caller introspect the
-    // nested document's attributes — both those inherited from the parent and any
-    // the cell set for itself — after parsing has finished.
+    // The cell's attribute state is scoped to the cell and restored on the
+    // parser once the cell is parsed, so it can no longer be read from the
+    // parser. The cell nonetheless retains a snapshot of it, letting a
+    // caller introspect the nested document's attributes — both those
+    // inherited from the parent and any the cell set for itself — after
+    // parsing has finished.
     let doc = Parser::default().parse(
         ":parent-attr: inherited\n\n[cols=\"a\"]\n|===\n|\n:cell-attr: local\ncontent\n|===",
     );
@@ -772,8 +778,8 @@ fn asciidoc_cell_exposes_inherited_attributes_for_introspection() {
         panic!("expected AsciiDoc cell content");
     };
 
-    // The inherited parent attribute is visible on the nested document and equal
-    // to what the parent document sees.
+    // The inherited parent attribute is visible on the nested document and
+    // equal to what the parent document sees.
     assert!(cell.is_attribute_set("parent-attr"));
     assert_eq!(
         cell.attribute_value("parent-attr"),
@@ -901,9 +907,9 @@ fn include_expanded_asciidoc_cell_exposes_its_own_footnotes() {
 
 #[test]
 fn asciidoc_cell_footnote_resolves_cross_reference() {
-    // A cross-reference inside a cell footnote is resolved during the document's
-    // reference-resolution pass, against the shared catalog. The resolved link
-    // is reflected in the exposed footnote text.
+    // A cross-reference inside a cell footnote is resolved during the
+    // document's reference-resolution pass, against the shared catalog. The
+    // resolved link is reflected in the exposed footnote text.
     let doc = Parser::default()
         .parse("[[target]]Anchored text.\n\n|===\na|Cell footnote:[See <<target>>.]\n|===");
 
@@ -942,10 +948,10 @@ fn asciidoc_cell_text(table: &TableBlock<'_>, row: usize, col: usize) -> String 
 
 #[test]
 fn asciidoc_cell_cannot_modify_a_parent_attribute() {
-    // An attribute set in the parent document is locked inside an AsciiDoc cell:
-    // a reassignment is silently ignored, so the inherited value is what the cell
-    // sees. The lock is scoped to the cell, so the parent value is unchanged
-    // afterward.
+    // An attribute set in the parent document is locked inside an AsciiDoc
+    // cell: a reassignment is silently ignored, so the inherited value is
+    // what the cell sees. The lock is scoped to the cell, so the parent
+    // value is unchanged afterward.
     let mut parser = Parser::default();
     let doc = parser.parse(
         ":locked: parent\n\n[cols=\"a\"]\n|===\n|\n:locked: child\n\nvalue is {locked}\n|===",
@@ -967,10 +973,11 @@ fn asciidoc_cell_cannot_modify_a_parent_attribute() {
 
 #[test]
 fn asciidoc_cell_may_set_an_attribute_unset_in_the_parent() {
-    // Only attributes that are *set* in the parent are locked. An attribute that
-    // is explicitly unset in the parent is not locked, so the cell may assign it
-    // and the cell sees its own value (matching Asciidoctor, which here diverges
-    // from the spec's "set or explicitly unset" wording).
+    // Only attributes that are *set* in the parent are locked. An attribute
+    // that is explicitly unset in the parent is not locked, so the cell may
+    // assign it and the cell sees its own value (matching Asciidoctor,
+    // which here diverges from the spec's "set or explicitly unset"
+    // wording).
     let mut parser = Parser::default();
     let doc = parser.parse(
         ":locked: value\n:locked!:\n\n[cols=\"a\"]\n|===\n|\n:locked: child\n\nvalue is {locked}\n|===",
@@ -988,13 +995,13 @@ fn asciidoc_cell_may_set_an_attribute_unset_in_the_parent() {
 
 #[test]
 fn asciidoc_cell_may_set_sectnumlevels() {
-    // `sectnumlevels` has a built-in default value (`3`), but the parent did not
-    // set it, so the built-in default must not lock it inside the cell. An
-    // AsciiDoc cell is a nested, standalone document whose leading attribute lines
-    // are its own header, and `sectnumlevels` is header-settable, so a cell-body
-    // assignment is honored: the cell's resolved `sectnumlevels` reflects the
-    // value the cell set (`1`), not the inherited default (`3`), matching
-    // Asciidoctor.
+    // `sectnumlevels` has a built-in default value (`3`), but the parent did
+    // not set it, so the built-in default must not lock it inside the cell.
+    // An AsciiDoc cell is a nested, standalone document whose leading
+    // attribute lines are its own header, and `sectnumlevels` is
+    // header-settable, so a cell-body assignment is honored: the cell's
+    // resolved `sectnumlevels` reflects the value the cell set (`1`), not
+    // the inherited default (`3`), matching Asciidoctor.
     let doc = Parser::default()
         .parse("|===\na|\n:toc:\n:sectnums:\n:sectnumlevels: 1\n\n== Alpha\n\n=== Beta\n\nx\n|===");
 
@@ -1015,16 +1022,17 @@ fn asciidoc_cell_may_set_sectnumlevels() {
         crate::document::InterpretedValue::Value("1".to_string())
     );
 
-    // The other attributes the cell set are likewise honored (a bare `:sectnums:`
-    // resolves to its `all` default).
+    // The other attributes the cell set are likewise honored (a bare
+    // `:sectnums:` resolves to its `all` default).
     assert_eq!(
         cell.attribute_value("sectnums"),
         crate::document::InterpretedValue::Value("all".to_string())
     );
 
-    // Section numbering within the cell honors the cell-local depth, not just the
-    // resolved attribute: `Alpha` (level 1) is numbered, while `Beta` (level 2)
-    // falls beyond the cell's `sectnumlevels` of 1 and is left unnumbered.
+    // Section numbering within the cell honors the cell-local depth, not just
+    // the resolved attribute: `Alpha` (level 1) is numbered, while `Beta`
+    // (level 2) falls beyond the cell's `sectnumlevels` of 1 and is left
+    // unnumbered.
     let alpha = cell
         .blocks()
         .iter()
@@ -1044,7 +1052,8 @@ fn asciidoc_cell_may_set_sectnumlevels() {
         .unwrap();
     assert!(beta.section_number().is_none());
 
-    // The parent document is unaffected: its `sectnumlevels` stays at the default.
+    // The parent document is unaffected: its `sectnumlevels` stays at the
+    // default.
     assert_eq!(
         doc.attribute_value("sectnumlevels"),
         crate::document::InterpretedValue::Value("3".to_string())
@@ -1053,9 +1062,9 @@ fn asciidoc_cell_may_set_sectnumlevels() {
 
 #[test]
 fn asciidoc_cell_may_modify_an_exempt_attribute() {
-    // A handful of attributes are exempt from the cell lock; `compat-mode` is one
-    // of them, so a cell may modify it even though the parent set it, while a
-    // non-exempt attribute (`locked`) stays at the inherited value.
+    // A handful of attributes are exempt from the cell lock; `compat-mode` is
+    // one of them, so a cell may modify it even though the parent set it,
+    // while a non-exempt attribute (`locked`) stays at the inherited value.
     let mut parser = Parser::default();
     let doc = parser.parse(
         ":compat-mode: parent\n:locked: parent\n\n[cols=\"a\"]\n|===\n|\n:compat-mode: child\n:locked: child\n\nc={compat-mode} l={locked}\n|===",
@@ -1089,10 +1098,11 @@ fn cell_specifier_style_operator_locates_separator() {
 
 #[test]
 fn unrecognized_cell_style_operator_inherits_column_style() {
-    // A single lowercase letter that isn't a recognized style operator (here `z`)
-    // still locates the cell separator, but it leaves the cell's style unset, so
-    // the cell inherits its column's style rather than reverting to the default.
-    // This matches Asciidoctor, which ignores an unrecognized cell style operator.
+    // A single lowercase letter that isn't a recognized style operator (here
+    // `z`) still locates the cell separator, but it leaves the cell's style
+    // unset, so the cell inherits its column's style rather than reverting
+    // to the default. This matches Asciidoctor, which ignores an
+    // unrecognized cell style operator.
     let table = parse_table("[cols=\"m,m\"]\n|===\n|head1 |head2\n\nz|zee s|ess\n|===");
 
     let cells = table.body_rows()[0].cells();
@@ -1102,10 +1112,11 @@ fn unrecognized_cell_style_operator_inherits_column_style() {
 
 #[test]
 fn cell_specifier_span_operator_without_factor_locates_separator() {
-    // The span (`+`) and duplication (`*`) operators may appear without a count.
-    // A bare `+` directly in front of a `|` is still a valid cell specifier, so
-    // `a +|b` is two cells. With no count the span factor defaults to 1, so the
-    // bare `+` cell spans a single column (no layout effect).
+    // The span (`+`) and duplication (`*`) operators may appear without a
+    // count. A bare `+` directly in front of a `|` is still a valid cell
+    // specifier, so `a +|b` is two cells. With no count the span factor
+    // defaults to 1, so the bare `+` cell spans a single column (no layout
+    // effect).
     let table = parse_table("|===\n|a +|b\n|===");
 
     assert_eq!(table.columns().len(), 2);
@@ -1115,10 +1126,10 @@ fn cell_specifier_span_operator_without_factor_locates_separator() {
 
 #[test]
 fn non_specifier_token_is_a_plain_cell_separator() {
-    // A token in front of a `|` that does not parse as a cell specifier (here the
-    // word `foo`, which is more than a single style letter) is ordinary content:
-    // the `|` is still a plain cell separator, so `a foo|b` is two cells (matching
-    // Asciidoctor).
+    // A token in front of a `|` that does not parse as a cell specifier (here
+    // the word `foo`, which is more than a single style letter) is ordinary
+    // content: the `|` is still a plain cell separator, so `a foo|b` is two
+    // cells (matching Asciidoctor).
     let table = parse_table("|===\n|a foo|b\n|===");
 
     let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
@@ -1127,10 +1138,10 @@ fn non_specifier_token_is_a_plain_cell_separator() {
 
 #[test]
 fn dot_not_followed_by_vertical_operator_is_a_plain_cell_separator() {
-    // A vertical alignment operator is a dot followed by `<`, `>`, or `^`. A dot
-    // followed by anything else (here `.x`) is not a valid cell specifier, so the
-    // `.x` is content and the `|` is a plain cell separator: `a .x|b` is two cells
-    // (matching Asciidoctor).
+    // A vertical alignment operator is a dot followed by `<`, `>`, or `^`. A
+    // dot followed by anything else (here `.x`) is not a valid cell
+    // specifier, so the `.x` is content and the `|` is a plain cell
+    // separator: `a .x|b` is two cells (matching Asciidoctor).
     let table = parse_table("|===\n|a .x|b\n|===");
 
     let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
@@ -1140,9 +1151,10 @@ fn dot_not_followed_by_vertical_operator_is_a_plain_cell_separator() {
 #[test]
 fn cell_span_exceeding_columns_drops_overrunning_row() {
     // A span wider than the table overruns the grid. Matching Asciidoctor, the
-    // whole overrunning row is dropped and a warning is emitted: here the leading
-    // `x` cell is discarded along with the `3+|y` cell that overshoots the two
-    // columns, and the following row (`z`, `w`) stays aligned to the grid.
+    // whole overrunning row is dropped and a warning is emitted: here the
+    // leading `x` cell is discarded along with the `3+|y` cell that
+    // overshoots the two columns, and the following row (`z`, `w`) stays
+    // aligned to the grid.
     let mut parser = Parser::default();
     let maw = Block::parse(
         Span::new("[cols=\"2*\"]\n|===\n|x 3+|y\n|z |w\n|==="),
@@ -1164,13 +1176,14 @@ fn cell_span_exceeding_columns_drops_overrunning_row() {
 
 #[test]
 fn row_fully_covered_by_rowspans_drops_following_cell() {
-    // Two row-spanning cells (`.2+`) together cover every column of the next row,
-    // so that row has no cells of its own to close it. The following cell (`c1`)
-    // therefore overruns the pre-filled row and is dropped with it (a column-count
-    // overrun warning), leaving `c2` and `d1` aligned as the second body row. The
-    // trailing `d2` cell can't fill a row of its own, so the table ends on an
-    // incomplete row that is dropped with an end-of-table warning (matching
-    // Asciidoctor, which renders only two rows here).
+    // Two row-spanning cells (`.2+`) together cover every column of the next
+    // row, so that row has no cells of its own to close it. The following
+    // cell (`c1`) therefore overruns the pre-filled row and is dropped with
+    // it (a column-count overrun warning), leaving `c2` and `d1` aligned as
+    // the second body row. The trailing `d2` cell can't fill a row of its
+    // own, so the table ends on an incomplete row that is dropped with an
+    // end-of-table warning (matching Asciidoctor, which renders only two
+    // rows here).
     let mut parser = Parser::default();
     let maw = Block::parse(
         Span::new("[cols=\"2*\"]\n|===\n.2+|a .2+|b\n|c1 |c2\n|d1 |d2\n|==="),
@@ -1215,8 +1228,9 @@ fn row_fully_covered_by_rowspans_drops_following_cell() {
 #[test]
 fn dropped_overrunning_cell_keeps_its_rowspan_carryover() {
     // When a cell that carries a row span is itself part of an overrunning row,
-    // its already-reserved slots in the next rows are *not* rolled back when the
-    // row is dropped. Matching Asciidoctor, the `2.2+|b` cell (colspan 2, rowspan
+    // its already-reserved slots in the next rows are *not* rolled back when
+    // the row is dropped. Matching Asciidoctor, the `2.2+|b` cell (colspan
+    // 2, rowspan
     // 2) overruns the two-column row and is dropped with `a`, but its rowspan
     // still pre-fills the next row, so `c` overruns that pre-filled row and is
     // dropped too. Only `d` and `e` survive.
@@ -1247,12 +1261,12 @@ fn dropped_overrunning_cell_keeps_its_rowspan_carryover() {
 
 #[test]
 fn huge_row_span_factor_does_not_overallocate() {
-    // A row span factor far larger than the table can never carry into rows that
-    // don't exist, so it is clamped for the grid bookkeeping; without the clamp,
-    // `.1000000000+` would resize the `active_rowspans` vector to a billion
-    // entries (a multi-gigabyte allocation). The cell still reports its literal
-    // parsed `rowspan` (matching Asciidoctor), and the following cell, covered by
-    // the span, overruns and is dropped.
+    // A row span factor far larger than the table can never carry into rows
+    // that don't exist, so it is clamped for the grid bookkeeping; without
+    // the clamp, `.1000000000+` would resize the `active_rowspans` vector
+    // to a billion entries (a multi-gigabyte allocation). The cell still
+    // reports its literal parsed `rowspan` (matching Asciidoctor), and the
+    // following cell, covered by the span, overruns and is dropped.
     let mut parser = Parser::default();
     let maw = Block::parse(Span::new("|===\n.1000000000+|a\n|b\n|==="), &mut parser);
 
@@ -1274,10 +1288,10 @@ fn huge_row_span_factor_does_not_overallocate() {
 
 #[test]
 fn duplication_clones_content_and_properties() {
-    // A duplication factor (`<n>*`) clones the cell into `<n>` independent cells,
-    // each an ordinary single-slot cell (colspan and rowspan of 1) that carries
-    // the original's content and style. Here `3*e|x` becomes three emphasized
-    // cells, each holding `x`.
+    // A duplication factor (`<n>*`) clones the cell into `<n>` independent
+    // cells, each an ordinary single-slot cell (colspan and rowspan of 1)
+    // that carries the original's content and style. Here `3*e|x` becomes
+    // three emphasized cells, each holding `x`.
     let table = parse_table("[cols=\"3*\"]\n|===\n3*e|x\n|===");
     let cells = table.body_rows()[0].cells();
     assert_eq!(cells.len(), 3);
@@ -1295,8 +1309,8 @@ fn duplication_clones_content_and_properties() {
 #[test]
 fn duplication_factor_ignores_row_part() {
     // Only the column part of the factor is the duplication count; a row part
-    // (`<n>.<n>*`) is ignored, matching Asciidoctor. So `2.3*` duplicates the cell
-    // twice (not six times), and each clone keeps a rowspan of 1.
+    // (`<n>.<n>*`) is ignored, matching Asciidoctor. So `2.3*` duplicates the
+    // cell twice (not six times), and each clone keeps a rowspan of 1.
     let table = parse_table("[cols=\"4*\"]\n|===\n2.3*|a |b |c\n|===");
     let cells = table.body_rows()[0].cells();
     assert_eq!(cells.len(), 4);
@@ -1314,9 +1328,10 @@ fn duplication_factor_ignores_row_part() {
 
 #[test]
 fn duplication_factor_of_zero_drops_the_cell() {
-    // A duplication factor of zero (`0*`) clones the cell zero times, dropping it
-    // entirely; the following cells flow normally into the grid. Matching
-    // Asciidoctor, `0*|x |a |b |c` yields a single row of `a`, `b`, `c`.
+    // A duplication factor of zero (`0*`) clones the cell zero times, dropping
+    // it entirely; the following cells flow normally into the grid.
+    // Matching Asciidoctor, `0*|x |a |b |c` yields a single row of `a`,
+    // `b`, `c`.
     let table = parse_table("[cols=\"3*\"]\n|===\n0*|x |a |b |c\n|===");
     let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
     assert_eq!(
@@ -1327,8 +1342,9 @@ fn duplication_factor_of_zero_drops_the_cell() {
 
 #[test]
 fn bare_duplication_operator_clones_once() {
-    // A bare duplication operator (`*`) with no factor defaults to a count of 1,
-    // so `*|a` is a single cell and locates the separator just like a plain `|`.
+    // A bare duplication operator (`*`) with no factor defaults to a count of
+    // 1, so `*|a` is a single cell and locates the separator just like a
+    // plain `|`.
     let table = parse_table("|===\n|a *|b\n|===");
     assert_eq!(table.columns().len(), 2);
     let rows: Vec<_> = table.body_rows().iter().map(row_text).collect();
@@ -1340,9 +1356,9 @@ fn huge_duplication_factor_does_not_overallocate() {
     // A duplication factor is an amplifier — `1000000000*` would otherwise
     // materialize a billion cells (a multi-gigabyte allocation). The factor is
     // clamped to `MAX_DUPLICATION_FACTOR` (1,000), so the expansion stays
-    // bounded. This is the one place the implementation diverges from Asciidoctor,
-    // which would expand the literal factor. The table is built from the clamped
-    // cells without hanging or exhausting memory.
+    // bounded. This is the one place the implementation diverges from
+    // Asciidoctor, which would expand the literal factor. The table is
+    // built from the clamped cells without hanging or exhausting memory.
     let table = parse_table("|===\n1000000000*|x\n|===");
     let total: usize = table.body_rows().iter().map(|r| r.cells().len()).sum();
     assert_eq!(total, 1_000);
@@ -1391,8 +1407,8 @@ fn csv_unclosed_quote_is_literal() {
     assert_eq!(table.columns().len(), 2);
     assert_eq!(row_text(&table.body_rows()[0]), ["x", "\"unterminated"]);
 
-    // A bare leading quote leaves the value unclosed, so the following separator
-    // is absorbed into the (single) cell rather than ending it.
+    // A bare leading quote leaves the value unclosed, so the following
+    // separator is absorbed into the (single) cell rather than ending it.
     let table = parse_table("[format=csv]\n|===\n\",a\n|===");
     assert_eq!(table.columns().len(), 1);
     assert_eq!(row_text(&table.body_rows()[0]), ["\",a"]);
@@ -1400,8 +1416,8 @@ fn csv_unclosed_quote_is_literal() {
 
 #[test]
 fn csv_lone_quote_is_unclosed_and_empty_with_warning() {
-    // A cell that is a single bare quote is an unclosed, empty quoted value: it is
-    // set to empty and an error is logged (matching Asciidoctor).
+    // A cell that is a single bare quote is an unclosed, empty quoted value: it
+    // is set to empty and an error is logged (matching Asciidoctor).
     let mut parser = Parser::default();
     let maw = Block::parse(Span::new("[format=csv]\n|===\n\"\n|==="), &mut parser);
 

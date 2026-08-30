@@ -45,13 +45,14 @@ fn apply_macros_internal(
     let found_macroish = found_square_bracket && found_colon;
     let found_macroish_short = found_macroish && text.contains(":[");
 
-    // A bibliography anchor (`[[[id]]]` / `[[[id,xreftext]]]`) is recognized only
-    // when it prefixes the principal text of a bibliography list item; the parser
-    // sets a flag while substituting that text. This runs before the inline-anchor
-    // pass below so the prefix anchor is consumed as a whole rather than being
-    // mistaken for a regular inline anchor (`[[id]]`) wrapped in square brackets.
-    // The regex is `^`-anchored, so a `[[[…]]]` appearing later in the entry falls
-    // through to the inline-anchor pass (matching Asciidoctor).
+    // A bibliography anchor (`[[[id]]]` / `[[[id,xreftext]]]`) is recognized
+    // only when it prefixes the principal text of a bibliography list item;
+    // the parser sets a flag while substituting that text. This runs before
+    // the inline-anchor pass below so the prefix anchor is consumed as a
+    // whole rather than being mistaken for a regular inline anchor
+    // (`[[id]]`) wrapped in square brackets. The regex is `^`-anchored, so
+    // a `[[[…]]]` appearing later in the entry falls through to the
+    // inline-anchor pass (matching Asciidoctor).
     if found_square_bracket && text.contains("[[[") && parser.in_bibliography_list_item.get() {
         let replacer = InlineBiblioAnchorReplacer {
             parser,
@@ -73,9 +74,9 @@ fn apply_macros_internal(
     // Adapted from Asciidoctor's #sub_macros, found in
     // https://github.com/asciidoctor/asciidoctor/blob/main/lib/asciidoctor/substitutors.rb#L349-L411.
     //
-    // NOTE: The shorthand menu syntax (`"File > Save"`, handled by Asciidoctor's
-    // `InlineMenuRx`) is intentionally not implemented; per the spec it is not
-    // on a standards track.
+    // NOTE: The shorthand menu syntax (`"File > Save"`, handled by
+    // Asciidoctor's `InlineMenuRx`) is intentionally not implemented; per
+    // the spec it is not on a standards track.
     if parser.is_attribute_set("experimental") {
         if found_macroish_short && (text.contains("kbd:") || text.contains("btn:")) {
             let replacer = InlineKbdBtnMacroReplacer(parser);
@@ -153,8 +154,8 @@ fn apply_macros_internal(
     if (found_square_bracket && text.contains("[[")) || (found_macroish && text.contains("or:")) {
         // The haystack is captured so the replacer can inspect the character
         // immediately preceding each match (see `InlineAnchorReplacer`); prior
-        // passes above may have mutated the rendered text, so the initial `text`
-        // snapshot cannot be reused here.
+        // passes above may have mutated the rendered text, so the initial
+        // `text` snapshot cannot be reused here.
         let haystack = content.rendered().to_string();
 
         let replacer = InlineAnchorReplacer {
@@ -205,9 +206,9 @@ fn apply_macros_internal(
     // The footnote *text* is extracted out of the flow of text (only a
     // superscript marker is left behind), so any macro inside the footnote that
     // has already been substituted at this point (images, links, anchors, index
-    // terms, and now cross-references) is captured as part of the footnote text.
-    // Any cross-reference placeholders captured this way are re-homed onto the
-    // footnote so they resolve in the document-level pass.
+    // terms, and now cross-references) is captured as part of the footnote
+    // text. Any cross-reference placeholders captured this way are re-homed
+    // onto the footnote so they resolve in the document-level pass.
     if found_macroish && text.contains("tnote") {
         let replacer = InlineFootnoteMacroReplacer {
             parser,
@@ -314,16 +315,18 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
             .item
             .item;
 
-        // A `link=` destination whose scheme could execute script is rejected by
-        // the renderer (the image is emitted without the wrapping link); record
-        // the warning here, where the parser and a document span are available.
-        // `link=self` names the image's own `src`, which resolves from `target`,
-        // so it is checked against the target (exempting a legitimately embedded
+        // A `link=` destination whose scheme could execute script is rejected
+        // by the renderer (the image is emitted without the wrapping
+        // link); record the warning here, where the parser and a
+        // document span are available. `link=self` names the image's
+        // own `src`, which resolves from `target`, so it is checked
+        // against the target (exempting a legitimately embedded
         // `data:image/*`, but not an author-supplied SVG data URI) rather than
-        // the literal `self` — and only when the renderer actually promotes that
-        // `src` into the `href`. A font (`<i>`) or text (`[alt]`) icon has no
-        // `src`, so `link=self` stays the literal `self` there and nothing is
-        // rejected (see `render_icon_or_image`); a warning would be spurious.
+        // the literal `self` — and only when the renderer actually promotes
+        // that `src` into the `href`. A font (`<i>`) or text (`[alt]`)
+        // icon has no `src`, so `link=self` stays the literal `self`
+        // there and nothing is rejected (see `render_icon_or_image`); a
+        // warning would be spurious.
         if let Some(link) = attrlist.named_attribute("link") {
             let rejected = if link.value() == "self" {
                 (self.link_self_resolves_to_src(&caps[0])
@@ -343,9 +346,9 @@ impl Replacer for InlineImageMacroReplacer<'_, '_> {
 
         let default_alt = basename(&target.replace(['_', '-'], " "));
 
-        // IMPORTANT: Implementations of `render_icon` and `render_image` need to
-        // remember to use `default_alt` when attrlist doesn't contain a value for
-        // `alt`.
+        // IMPORTANT: Implementations of `render_icon` and `render_image` need
+        // to remember to use `default_alt` when attrlist doesn't
+        // contain a value for `alt`.
 
         if caps[0].starts_with("image:") {
             // Record the referenced image in the document catalog when
@@ -959,7 +962,8 @@ impl Replacer for InlineLinkReplacer<'_> {
 
         // `INLINE_LINK` has three parallel top-level branches (angle /
         // link-macro / non-angle); resolve which one matched so the logic below
-        // can stay branch-agnostic. See the note on `INLINE_LINK` and issue #503.
+        // can stay branch-agnostic. See the note on `INLINE_LINK` and issue
+        // #503.
         let n = NormalizedCaps::new(caps);
         let prefix_match = n.prefix();
         let scheme_match = n.scheme();
@@ -1028,10 +1032,11 @@ impl Replacer for InlineLinkReplacer<'_> {
         //
         // The angle-bracketed-URL alternative (`angle_url`) only exists in the
         // ANGLE branch, and that case returns above (before an attrlist can be
-        // present), so it never contributes here. A stray `&gt;` with no leading
-        // `&lt;` therefore lands in the bare-link group and keeps its literal
-        // `&gt;`, with any trailing punctuation stripped by the rule below --
-        // matching Ruby Asciidoctor (see issue #503).
+        // present), so it never contributes here. A stray `&gt;` with no
+        // leading `&lt;` therefore lands in the bare-link group and
+        // keeps its literal `&gt;`, with any trailing punctuation
+        // stripped by the rule below -- matching Ruby Asciidoctor (see
+        // issue #503).
         let url_part = n
             .target()
             .or_else(|| n.bare())
@@ -1055,8 +1060,8 @@ impl Replacer for InlineLinkReplacer<'_> {
             // Invalid macro syntax: a URL enclosed in quotes (a `"` or `'`
             // prefix with no trailing square brackets). Asciidoctor also lists
             // a bracket-less `link:` prefix here, but our `INLINE_LINK` routes
-            // that through a dedicated branch that requires a trailing `[…]`, so
-            // a `link:` prefix can never reach this point.
+            // that through a dedicated branch that requires a trailing `[…]`,
+            // so a `link:` prefix can never reach this point.
             if prefix == "\"" || prefix == "'" {
                 dest.push_str(&caps[0]);
                 return;
@@ -1101,10 +1106,11 @@ impl Replacer for InlineLinkReplacer<'_> {
             if link_text.contains('=') {
                 let (lt, attrs) = extract_attributes_from_text(&span_for_attrlist, self.0, None);
 
-                // Only adopt the parsed result when a real named attribute split
-                // off (the positional value differs from the whole text).
-                // Otherwise the `=` was incidental — e.g. `[What You Need\n=
-                // What You Get]` — and the original wrapped text, newline and
+                // Only adopt the parsed result when a real named attribute
+                // split off (the positional value differs from
+                // the whole text). Otherwise the `=` was
+                // incidental — e.g. `[What You Need\n= What You
+                // Get]` — and the original wrapped text, newline and
                 // all, is the link text.
                 if lt != link_text_for_attrlist {
                     link_text = lt.replace("\\\"", "\"");
@@ -1534,10 +1540,11 @@ impl Replacer for InlineBiblioAnchorReplacer<'_, '_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         let id = &caps[1];
 
-        // The displayed reference text is the xreftext if supplied, otherwise the
-        // label itself, always enclosed in square brackets (e.g. `[gof]`). This
-        // same bracketed text is registered as the entry's reftext so a
-        // cross-reference to the entry renders identically.
+        // The displayed reference text is the xreftext if supplied, otherwise
+        // the label itself, always enclosed in square brackets (e.g.
+        // `[gof]`). This same bracketed text is registered as the
+        // entry's reftext so a cross-reference to the entry renders
+        // identically.
         let label = caps.get(2).map(|m| m.as_str()).unwrap_or(id);
         let reftext = format!("[{label}]");
 
@@ -1639,10 +1646,10 @@ impl Replacer for InlineAnchorReplacer<'_, '_, '_> {
         // outside a bibliography list item (a genuine bibliography anchor is
         // consumed by the earlier `INLINE_BIBLIO_ANCHOR` pass). Asciidoctor's
         // inline-anchor *scan* (`InlineAnchorScanRx`) excludes a `[[id]]`
-        // preceded by a `[`, so it renders the anchor but never catalogs the id.
-        // We match that: render below, but skip registration here. This applies
-        // only to the shorthand form (capture group 2), not the `anchor:id[]`
-        // macro form. See #769.
+        // preceded by a `[`, so it renders the anchor but never catalogs the
+        // id. We match that: render below, but skip registration here.
+        // This applies only to the shorthand form (capture group 2),
+        // not the `anchor:id[]` macro form. See #769.
         let is_bibliography_inner = caps.get(2).is_some()
             && caps.get(0).is_some_and(|m| {
                 m.start()
@@ -1749,10 +1756,10 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
                 None => (inner.as_str().trim(), None),
             };
 
-            // A target that already contains rendered inline markup (a `<`, which
-            // can only come from an earlier-substituted macro such as a link) is
-            // not a valid reference id. Asciidoctor leaves such a shorthand
-            // untouched, e.g. `<<link:https://example.com[], Example>>`.
+            // A target that already contains rendered inline markup (a `<`,
+            // which can only come from an earlier-substituted macro
+            // such as a link) is not a valid reference id.
+            // Asciidoctor leaves such a shorthand untouched, e.g. `<<link:https://example.com[], Example>>`.
             if id.contains('<') {
                 dest.push_str(&caps[0]);
                 return;
@@ -1764,10 +1771,11 @@ impl Replacer for InlineXrefReplacer<'_, '_> {
             // the opening bracket.
             let raw_target = caps[3].to_string();
 
-            // The bracketed text is parsed as an attribute list when it contains
-            // an `=` (mirroring the link macro): the first positional attribute
-            // is the link text, and named attributes such as `window` and `role`
-            // are honored. Otherwise the whole text is the link text.
+            // The bracketed text is parsed as an attribute list when it
+            // contains an `=` (mirroring the link macro): the first
+            // positional attribute is the link text, and named
+            // attributes such as `window` and `role` are honored.
+            // Otherwise the whole text is the link text.
             let raw_text = caps.get(4).map(|m| m.as_str()).unwrap_or_default();
 
             let provided_text = if raw_text.is_empty() {
@@ -1963,7 +1971,8 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
                 return LookaheadResult::Continue;
             };
 
-            // The `footnoteref:` macro is deprecated outside compatibility mode.
+            // The `footnoteref:` macro is deprecated outside compatibility
+            // mode.
             if !parser.is_attribute_set("compat-mode") {
                 parser.record_substitution_warning(
                     self.source,
@@ -1983,11 +1992,12 @@ impl LookaheadReplacer for InlineFootnoteMacroReplacer<'_, '_, '_> {
             )
         };
 
-        // While a section title is substituted, bracket a real footnote's marker
-        // with sentinels so it can later be excised from the section's reference
-        // text and auto-generated ID (see `Parser::mark_footnote_spans`). The
-        // footnote is still defined and numbered here, in document order; only
-        // the marker's *placement* is annotated. A bare `footnote:[]` (the
+        // While a section title is substituted, bracket a real footnote's
+        // marker with sentinels so it can later be excised from the
+        // section's reference text and auto-generated ID (see
+        // `Parser::mark_footnote_spans`). The footnote is still defined
+        // and numbered here, in document order; only the marker's
+        // *placement* is annotated. A bare `footnote:[]` (the
         // literal-text branch below) is not a footnote and is left unmarked.
         let mark_span = parser.mark_footnote_spans.get() && (id.is_some() || content.is_some());
         if mark_span {
@@ -2635,15 +2645,16 @@ mod tests {
             // Regression for https://github.com/asciidoc-rs/asciidoc-parser/issues/503:
             // a bare URL abutting `>;` (rendered to `&gt;;`) with NO matching
             // leading `<`. Ruby Asciidoctor treats the whole run as a bare link
-            // (keeping the literal `&gt;` in the URL) and strips a single trailing
-            // `;`.
+            // (keeping the literal `&gt;` in the URL) and strips a single
+            // trailing `;`.
             //
             // Reference (Ruby Asciidoctor 2.0.23):
             //   $ printf '%s' 'foo https://example.org>;' | asciidoctor -e -o - -
             //   <p>foo <a href="https://example.org&gt;" class="bare">https://example.org&gt;</a>;</p>
             //
             // Previously the ungated angle-URL alternative fired for the stray
-            // `&gt;` and split the run, dropping the `;` from the `&gt;` entity.
+            // `&gt;` and split the run, dropping the `;` from the `&gt;`
+            // entity.
             let doc = Parser::default().parse("foo https://example.org>;");
 
             let rendered = doc
@@ -2663,8 +2674,9 @@ mod tests {
         fn angle_bracketed_url_still_matches() {
             // Companion to `stray_gt_followed_by_punctuation` (issue #503): the
             // genuine angle-bracketed autolink (`<url>`) must keep working. The
-            // `&lt;` prefix gates the angle-URL alternative back on, so the `&gt;`
-            // delimiter is consumed and the brackets are dropped from the link.
+            // `&lt;` prefix gates the angle-URL alternative back on, so the
+            // `&gt;` delimiter is consumed and the brackets are
+            // dropped from the link.
             let doc = Parser::default().parse("See <https://example.org> for details.");
 
             let rendered = doc
@@ -3616,9 +3628,10 @@ mod tests {
         #[test]
         fn recognized_only_when_it_prefixes_the_entry() {
             // A `[[[id]]]` that does not prefix the entry is not a bibliography
-            // anchor: it falls through to the regular inline-anchor pass (matching
-            // Asciidoctor), rendering as `[<a id="mid"></a>]` rather than the
-            // bibliography form `<a id="mid"></a>[mid]`.
+            // anchor: it falls through to the regular inline-anchor pass
+            // (matching Asciidoctor), rendering as `[<a
+            // id="mid"></a>]` rather than the bibliography form `<a
+            // id="mid"></a>[mid]`.
             let doc = Parser::default().parse("[bibliography]\n* Smith. See [[[mid]]] inline.\n");
 
             let rendered = &rendered_paragraphs(&doc)[0];
@@ -3629,18 +3642,19 @@ mod tests {
             assert!(!rendered.contains("<a id=\"mid\"></a>[mid]"));
 
             // The inner `[[mid]]` is preceded by a `[`, so — like Asciidoctor's
-            // inline-anchor scan (`InlineAnchorScanRx`) — the id is rendered but
-            // not registered in the catalog, neither as a bibliography anchor nor
-            // as a normal one. See #769.
+            // inline-anchor scan (`InlineAnchorScanRx`) — the id is rendered
+            // but not registered in the catalog, neither as a
+            // bibliography anchor nor as a normal one. See #769.
             assert!(doc.catalog().get_ref("mid").is_none());
         }
 
         #[test]
         fn leading_backslash_is_not_a_bibliography_escape() {
-            // A leading backslash does not escape a bibliography anchor (the only
-            // documented escape is `[\[[id]]]`). `\[[[id]]]` does not begin with
-            // `[[[`, so it is not a bibliography anchor; the backslash stays
-            // literal and the inner `[[id]]` becomes a normal inline anchor,
+            // A leading backslash does not escape a bibliography anchor (the
+            // only documented escape is `[\[[id]]]`). `\[[[id]]]`
+            // does not begin with `[[[`, so it is not a
+            // bibliography anchor; the backslash stays literal and
+            // the inner `[[id]]` becomes a normal inline anchor,
             // matching Asciidoctor's `\[<a id="x"></a>]`.
             let doc = Parser::default().parse("[bibliography]\n* \\[[[x]]] Leading backslash.\n");
 
@@ -3653,9 +3667,10 @@ mod tests {
 
         #[test]
         fn explicit_style_applies_to_an_ordered_list() {
-            // An explicit `[bibliography]` attribute applies to any list type, so
-            // an ordered list's entries are recognized as bibliography anchors,
-            // matching Asciidoctor (`<div class="olist bibliography">`).
+            // An explicit `[bibliography]` attribute applies to any list type,
+            // so an ordered list's entries are recognized as
+            // bibliography anchors, matching Asciidoctor (`<div
+            // class="olist bibliography">`).
             let doc = Parser::default().parse("[bibliography]\n. [[[ord]]] Ordered entry.\n");
 
             assert_css(&doc, ".olist.bibliography", 1);
@@ -3666,7 +3681,8 @@ mod tests {
         fn section_style_does_not_apply_to_an_ordered_list() {
             // The style inherited from a `bibliography` section applies only to
             // unordered lists, so an ordered list in that section is not a
-            // bibliography list; its leading `[[[id]]]` is a regular inline anchor.
+            // bibliography list; its leading `[[[id]]]` is a regular inline
+            // anchor.
             let doc = Parser::default()
                 .parse("[bibliography]\n== References\n\n. [[[ord]]] Ordered entry.\n");
 

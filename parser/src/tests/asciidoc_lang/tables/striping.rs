@@ -58,8 +58,8 @@ When this feature is enabled, the specified rows are shaded using a background c
     // With no `stripes` attribute, a table is not striped.
     assert_eq!(parse_table(BASE).stripes(), Stripes::None);
 
-    // The note below describes a rendering concern (CSS and the stylesheet), not
-    // anything this parser models.
+    // The note below describes a rendering concern (CSS and the stylesheet),
+    // not anything this parser models.
     non_normative!(
         r#"
 NOTE: In the HTML output, table striping is done using CSS and thus depends on the stylesheet to supply the necessary styles.
@@ -94,8 +94,8 @@ You can override the default value by setting the stripes attribute on the table
     let src = format!("[stripes=none]\n{BASE}");
     assert_eq!(parse_table(&src).stripes(), Stripes::None);
 
-    // The `table-stripes` document attribute changes the default for tables that
-    // don't set their own `stripes`.
+    // The `table-stripes` document attribute changes the default for tables
+    // that don't set their own `stripes`.
     let src = format!(":table-stripes: odd\n\n{BASE}");
     let doc = Parser::default().parse(&src);
     assert_eq!(first_table(&doc).stripes(), Stripes::Odd);

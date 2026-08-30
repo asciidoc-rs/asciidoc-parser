@@ -146,9 +146,9 @@ include::example$align-cell.adoc[tag=factor]
 
     // Expansion of `example$align-cell.adoc[tag=factor]`. The `+^+` operator is
     // placed directly after the span (`2+`) and duplication (`2*`) operators;
-    // both cells are centered. The `2+` span fills the two-column row on its own,
-    // so it lands in its own row; the `2*^` duplication clones its centered
-    // content into the two cells of the next row.
+    // both cells are centered. The `2+` span fills the two-column row on its
+    // own, so it lands in its own row; the `2*^` duplication clones its
+    // centered content into the two cells of the next row.
     let table = parse_table(
         "|===\n|Column Name |Column Name\n\n2+^|This cell spans two columns, and its content is horizontally centered because the cell specifier includes the `+^+` operator.\n2*^|This content is duplicated in two adjacent columns.\nIts content is horizontally centered because the cell specifier\nincludes the `+^+` operator.\n|===",
     );
@@ -193,8 +193,8 @@ include::example$align-cell.adoc[tag=right]
     );
 
     // Expansion of `example$align-cell.adoc[tag=right]`. The `>` operator
-    // right-aligns the first cell and the spanned cell (`2+>`); the cell with no
-    // operator falls back to the default (left).
+    // right-aligns the first cell and the spanned cell (`2+>`); the cell with
+    // no operator falls back to the default (left).
     let table = parse_table(
         "|===\n|Column Name |Column Name\n\n>|This content is aligned to the right side of the cell because the cell specifier includes the `>` operator.\n|There isn't a horizontal alignment operator on this cell specifier, so the cell falls back to the default horizontal alignment.\nContent is aligned to the left side of the cell by default.\n\n2+>|This cell spans two columns.\n\nIts content is aligned to the right because the cell specifier includes the `>` operator.\nThe `>` operator must be placed directly after the span operator (`+`).\n|===",
     );
@@ -316,8 +316,8 @@ include::example$align-cell.adoc[tag=vspan]
     // Expansion of `example$align-cell.adoc[tag=vspan]`. The `.>` is placed
     // after the row-span operator (`.2+`); that cell is bottom-aligned, while
     // the cells with no vertical alignment operator stay top-aligned. The `.2+`
-    // cell spans two rows, so it carries its column down into the next row, which
-    // then needs only the one remaining cell.
+    // cell spans two rows, so it carries its column down into the next row,
+    // which then needs only the one remaining cell.
     let table = parse_table(
         "|===\n|Column Name |Column Name\n\n|There isn't a vertical alignment operator on this cell specifier, so the content is aligned to the top of the cell by default.\n\n.2+.>|This cell spans two rows, and its content is aligned to the bottom because the cell specifier includes the `.>` operator.\n\n|This content is aligned to the top of the cell by default.\n|===",
     );
@@ -410,7 +410,8 @@ include::example$align-cell.adoc[tag=combine]
     // operators falls back to the default alignments (left, top). The `3*.>`
     // duplication clones its bottom-aligned content into three cells: the first
     // fills the row alongside the `2.3+` block span, and the next two each land
-    // in a row of their own (alongside the columns the block span carries down).
+    // in a row of their own (alongside the columns the block span carries
+    // down).
     let table = parse_table(
         "|===\n|Column 1 |Column 2 |Column 3\n\n^.>|The specifier for this cell is `^.>`.\nThe content is centered horizontally and aligned to the bottom of the cell.\n|There aren't any alignment operators on this cell's specifier, so the cell falls back to the default alignments.\nThe default horizontal alignment is the left side of the cell.\nThe default vertical alignment is the top of the cell.\n>.^|The specifier for this cell is `>.^`.\nThe content is aligned to the right side of the cell and centered vertically.\n\n2.3+^.^|The specifier for this cell is `pass:[2.3+^.^]`.\nIt spans two columns and three rows.\n\nIts content is centered horizontally and vertically.\n3*.>|The specifier for this cell is `3*.>`.\nThe cell is duplicated in three consecutive rows in the same column.\nIt's content is aligned to the bottom of the cell.\n|===",
     );

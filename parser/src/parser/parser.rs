@@ -714,11 +714,12 @@ impl Parser {
         // attributes. See `baseline_attribute_values`.
         self.attribute_values = Arc::clone(&self.baseline_attribute_values);
 
-        // The time-dependent document attributes (docdate, doctime, docdatetime,
-        // docyear, and their local* siblings) are resolved lazily from a
-        // reference instant captured the first time one is read (see
-        // `resolve_datetime_attribute`). Reset that capture so each parse sees a
-        // fresh "now"; a parse that never references one does no datetime work.
+        // The time-dependent document attributes (docdate, doctime,
+        // docdatetime, docyear, and their local* siblings) are resolved
+        // lazily from a reference instant captured the first time one
+        // is read (see `resolve_datetime_attribute`). Reset that
+        // capture so each parse sees a fresh "now"; a parse that never
+        // references one does no datetime work.
         *self.datetime_context.borrow_mut() = None;
 
         // Strip a leading UTF-8 byte-order mark (U+FEFF), which is valid but
@@ -740,15 +741,16 @@ impl Parser {
         let (preprocessed_source, source_map, preprocessor_warnings, includes) =
             preprocess(source, self);
 
-        // NOTE: `Document::parse` will transfer the catalog to itself at the end of the
-        // parsing operation. Start each parse with a fresh catalog.
+        // NOTE: `Document::parse` will transfer the catalog to itself at the
+        // end of the parsing operation. Start each parse with a fresh
+        // catalog.
         *self.catalog.borrow_mut() = Catalog::new();
 
         // Seed the fresh catalog with the files the preprocessor just expanded,
         // so an inter-document cross reference to an included file can resolve
         // to an internal anchor while the document is parsed. Replaying each
-        // event lets the catalog resolve a file that was included both fully and
-        // partially to a full include.
+        // event lets the catalog resolve a file that was included both fully
+        // and partially to a full include.
         {
             let mut catalog = self.catalog.borrow_mut();
             for (key, full) in includes {
@@ -781,8 +783,8 @@ impl Parser {
         self.block_nesting_depth = 0;
 
         // Resolve the block-nesting cap once, now, so the guard on the hot
-        // `parse_blocks_until` path is a plain integer compare. The attribute is
-        // API-only and so cannot change mid-parse.
+        // `parse_blocks_until` path is a plain integer compare. The attribute
+        // is API-only and so cannot change mid-parse.
         self.block_nesting_limit = self.max_block_nesting();
 
         Document::parse(
@@ -991,8 +993,9 @@ impl Parser {
         }
 
         // `basebackend` / `filetype` are derived on the fly from the current
-        // `backend` (see [`derived_backend_value`]) rather than stored; they are
-        // read-only intrinsics, so no per-parser entry ever shadows this.
+        // `backend` (see [`derived_backend_value`]) rather than stored; they
+        // are read-only intrinsics, so no per-parser entry ever shadows
+        // this.
         if let Some(value) = derived_backend_value(name, &self.attribute_values) {
             return value;
         }
@@ -1050,10 +1053,11 @@ impl Parser {
         }
 
         // `max-attribute-value-size` carries its `4096` default only under
-        // Secure, so it is resolved as a mode-aware synthesized attribute rather
-        // than a fixed built-in. It is consulted here *after* the per-parser map
-        // so a caller-supplied value (always API-only, hence always in that map)
-        // wins regardless of builder-call order, and a `with_safe_mode` change
+        // Secure, so it is resolved as a mode-aware synthesized attribute
+        // rather than a fixed built-in. It is consulted here *after*
+        // the per-parser map so a caller-supplied value (always
+        // API-only, hence always in that map) wins regardless of
+        // builder-call order, and a `with_safe_mode` change
         // never rewrites it.
         if name == "max-attribute-value-size" {
             return Some(max_attribute_value_size_default(
@@ -1570,8 +1574,9 @@ impl Parser {
             // a request to force-hide (or force-show) that a later,
             // unlocked document entry for the partner cannot override (issue
             // #1143). So when the triggering write is `ApiOnly`, the plant
-            // always uses an unlocked ([`Anywhere`](ModificationContext::Anywhere))
-            // context instead of mirroring the trigger's own `ApiOnly`
+            // always uses an unlocked
+            // ([`Anywhere`](ModificationContext::Anywhere)) context
+            // instead of mirroring the trigger's own `ApiOnly`
             // context — letting a later document entry for the partner
             // resolve normally, exactly as if the API call had never
             // touched it.
@@ -1881,18 +1886,19 @@ impl Parser {
 
         // Footnotes are numbered consecutively throughout the document via the
         // `footnote-number` counter, which is seeded to `0` so the first
-        // footnote is numbered `1`. The counter is a document-wide attribute, so
-        // numbering continues across nested documents (AsciiDoc table cells)
-        // even though the footnote *list* does not. The counter honors any seed
-        // the document sets, so a non-integer seed yields a non-integer number
-        // (matching Asciidoctor); the value is therefore kept as a string.
+        // footnote is numbered `1`. The counter is a document-wide attribute,
+        // so numbering continues across nested documents (AsciiDoc
+        // table cells) even though the footnote *list* does not. The
+        // counter honors any seed the document sets, so a non-integer
+        // seed yields a non-integer number (matching Asciidoctor); the
+        // value is therefore kept as a string.
         let index = self.counter("footnote-number", None);
 
-        // Record the defining occurrence's location only when it is locatable in
-        // the document source. A footnote defined inside an owned sub-source
-        // indexes that private source, whose offset would misplace the warning,
-        // so it is left unrecorded (resolution then falls back to the
-        // whole-document span).
+        // Record the defining occurrence's location only when it is locatable
+        // in the document source. A footnote defined inside an owned
+        // sub-source indexes that private source, whose offset would
+        // misplace the warning, so it is left unrecorded (resolution
+        // then falls back to the whole-document span).
         let location = if self.owned_subsource_depth == 0 {
             Some((source.byte_offset(), source.data().len()))
         } else {
@@ -2719,8 +2725,8 @@ impl Parser {
             value,
         };
 
-        // An explicit assignment supersedes (and resets) any counter of the same
-        // name.
+        // An explicit assignment supersedes (and resets) any counter of the
+        // same name.
         Arc::make_mut(&mut self.counter_values.borrow_mut()).remove(&attr_name);
 
         // The derived `backend-html5-doctype-*` attribute tracks `doctype`
@@ -2916,20 +2922,21 @@ impl Parser {
             value,
         };
 
-        // Inside an AsciiDoc table cell (a nested document) the leading attribute
-        // lines act as the cell's own header, so a `sectnumlevels` assignment
-        // there must refresh the cached depth that section numbering reads. The
-        // top-level document freezes that value at the end of its header (see
-        // [`Document::parse`](crate::Document)) and a cell has no separate header
-        // pass, so without this a cell that lowered `sectnumlevels` would still
-        // number its deeper sections at the inherited depth. The enclosing cell
-        // parse saves and restores the field, keeping the change scoped to the
-        // cell.
+        // Inside an AsciiDoc table cell (a nested document) the leading
+        // attribute lines act as the cell's own header, so a
+        // `sectnumlevels` assignment there must refresh the cached
+        // depth that section numbering reads. The top-level document
+        // freezes that value at the end of its header (see
+        // [`Document::parse`](crate::Document)) and a cell has no separate
+        // header pass, so without this a cell that lowered
+        // `sectnumlevels` would still number its deeper sections at the
+        // inherited depth. The enclosing cell parse saves and restores
+        // the field, keeping the change scoped to the cell.
         let refresh_cell_sectnumlevels =
             attr_name == "sectnumlevels" && self.nested_document_depth > 0;
 
-        // An explicit assignment supersedes (and resets) any counter of the same
-        // name. This is what lets `:!name:` reset a counter.
+        // An explicit assignment supersedes (and resets) any counter of the
+        // same name. This is what lets `:!name:` reset a counter.
         Arc::make_mut(&mut self.counter_values.borrow_mut()).remove(&attr_name);
 
         // The derived `backend-html5-doctype-*` attribute tracks `doctype`
@@ -3218,8 +3225,9 @@ fn string_succ(current: &str) -> String {
     for &c in chars.iter().rev() {
         if carrying && c.is_ascii_alphanumeric() {
             // Increment within the character's class, carrying on wrap-around.
-            // The arms are exhaustive over ASCII alphanumerics, so the catch-all
-            // can only be `Z` (the one value not matched above).
+            // The arms are exhaustive over ASCII alphanumerics, so the
+            // catch-all can only be `Z` (the one value not matched
+            // above).
             let (next, carry) = match c {
                 '0'..='8' | 'a'..='y' | 'A'..='Y' => ((c as u8 + 1) as char, false),
                 '9' => ('0', true),
@@ -3271,11 +3279,12 @@ fn remap_attr_name<N: AsRef<str>>(raw_attr_name: N) -> String {
     //
     // The full Unicode case fold (Asciidoctor's `downcase`, not merely ASCII)
     // is what makes an attribute reference case-insensitive: an entry written
-    // `:He-Man:` is reachable as `{he-man}` or `{HE-MAN}`. A reference is folded
-    // through this same `to_lowercase()` before lookup (see `AttributeReplacer`
-    // in `content::substitution_step`), so definition and reference stay
-    // symmetric even when a fold expands a character (e.g. `İ` -> `i` + combining
-    // dot): both sides land on the identical key.
+    // `:He-Man:` is reachable as `{he-man}` or `{HE-MAN}`. A reference is
+    // folded through this same `to_lowercase()` before lookup (see
+    // `AttributeReplacer` in `content::substitution_step`), so definition
+    // and reference stay symmetric even when a fold expands a character
+    // (e.g. `İ` -> `i` + combining dot): both sides land on the identical
+    // key.
     let attr_name: String = INVALID_ATTR_NAME_CHARS
         .replace_all(raw_attr_name.as_ref(), "")
         .to_lowercase();
@@ -3527,7 +3536,8 @@ mod tests {
                 ModificationContext::Anywhere,
             );
 
-            // The first document overrides the API-configured value in its body.
+            // The first document overrides the API-configured value in its
+            // body.
             let _ = parser.parse(":site: dev\n\nText.\n");
             assert_eq!(
                 parser.attribute_value("site"),
@@ -3550,8 +3560,8 @@ mod tests {
             let _ = parser.parse("Text.\n");
             assert_eq!(parser.attribute_value("env"), InterpretedValue::Unset);
 
-            // A builder call between parses re-establishes the baseline for every
-            // subsequent parse.
+            // A builder call between parses re-establishes the baseline for
+            // every subsequent parse.
             parser = parser.with_intrinsic_attribute("env", "ci", ModificationContext::Anywhere);
 
             let _ = parser.parse("Text.\n");
@@ -3713,8 +3723,8 @@ mod tests {
     #[test]
     fn case_insensitive_attribute_reference_resolves_in_preprocessor() {
         // The preprocessor folds a `{name}` reference the same way the main
-        // substitution pass does, so a mismatched-case reference still drives an
-        // `ifeval` condition.
+        // substitution pass does, so a mismatched-case reference still drives
+        // an `ifeval` condition.
         let doc = Parser::default()
             .parse(":Answer: yes\n\nifeval::[\"{answer}\" == \"yes\"]\nShown.\nendif::[]");
         assert_eq!(rendered_paragraphs(&doc), vec!["Shown."]);
@@ -3756,8 +3766,9 @@ mod tests {
             SourceLine(Some("inc.adoc".to_owned()), 3)
         );
 
-        // Publish a cell source map (output line 1 came from `cell.adoc` line 2,
-        // the way the preprocessor would record an include-expanded cell).
+        // Publish a cell source map (output line 1 came from `cell.adoc` line
+        // 2, the way the preprocessor would record an include-expanded
+        // cell).
         let mut sm = SourceMap::default();
         sm.append(1, Some("cell.adoc"), 2, crate::parser::Fidelity::Verbatim);
         p.push_owned_cell_source_map(Rc::new(sm));
@@ -3815,8 +3826,8 @@ mod tests {
 
     #[test]
     fn with_intrinsic_attribute_strips_soft_set_modifier() {
-        // A single trailing `@` on an API value is AsciiDoc's soft-set modifier:
-        // it is stripped from the stored value.
+        // A single trailing `@` on an API value is AsciiDoc's soft-set
+        // modifier: it is stripped from the stored value.
         let mut p = Parser::default().with_intrinsic_attribute(
             "myattr",
             "hello@",
@@ -3851,8 +3862,9 @@ mod tests {
 
     #[test]
     fn without_soft_set_modifier_api_value_is_locked() {
-        // The same value *without* the `@` keeps the caller's `ApiOnly` context,
-        // so the document assignment is rejected and the API value stands.
+        // The same value *without* the `@` keeps the caller's `ApiOnly`
+        // context, so the document assignment is rejected and the API
+        // value stands.
         let doc = Parser::default()
             .with_intrinsic_attribute("cash", "heroes", ModificationContext::ApiOnly)
             .parse(":cash: money");
@@ -3946,8 +3958,9 @@ mod tests {
 
     #[test]
     fn api_unset_flexible_attribute_stays_locked() {
-        // An API-*unset* `sectnums` (here via `numbered!`, i.e. the alias set to
-        // `false`) stays locked: a body `:sectnums:` cannot re-enable numbering.
+        // An API-*unset* `sectnums` (here via `numbered!`, i.e. the alias set
+        // to `false`) stays locked: a body `:sectnums:` cannot
+        // re-enable numbering.
         let mut p = Parser::default().with_intrinsic_attribute_bool(
             "numbered",
             false,
@@ -3971,7 +3984,8 @@ mod tests {
     // crate-specific edge cases not exercised by the single upstream test.
     #[test]
     fn masks_docdir_and_docfile_under_secure_mode() {
-        // Secure (the default) is stricter than Server, so masking also applies.
+        // Secure (the default) is stricter than Server, so masking also
+        // applies.
         let p = Parser::default()
             .with_intrinsic_attribute("docdir", "/some/dir", ModificationContext::ApiOnly)
             .with_intrinsic_attribute(
@@ -4067,8 +4081,9 @@ mod tests {
 
     #[test]
     fn unset_docdir_and_docfile_stay_missing_under_server_mode() {
-        // Masking never conjures a value for an attribute that was never set, so
-        // a reference to an unset `docdir` / `docfile` still resolves as missing.
+        // Masking never conjures a value for an attribute that was never set,
+        // so a reference to an unset `docdir` / `docfile` still
+        // resolves as missing.
         let p = Parser::default().with_safe_mode(SafeMode::Server);
         assert_eq!(p.attribute_value("docdir"), InterpretedValue::Unset);
         assert_eq!(p.attribute_value("docfile"), InterpretedValue::Unset);
@@ -4236,10 +4251,11 @@ mod tests {
     #[test]
     fn asciidoctor_flag_is_predefined() {
         // The crate predefines the always-set `asciidoctor` boolean flag, so a
-        // document guarding Asciidoctor-only content with `ifdef::asciidoctor[]`
-        // behaves the same here. A `////` comment block containing a directive
-        // that would corrupt it once the flag is defined must stay untouched
-        // (see issue #810).
+        // document guarding Asciidoctor-only content with
+        // `ifdef::asciidoctor[]` behaves the same here. A `////`
+        // comment block containing a directive that would corrupt it
+        // once the flag is defined must stay untouched (see issue
+        // #810).
         let mut parser = Parser::default();
 
         assert_eq!(parser.attribute_value("asciidoctor"), InterpretedValue::Set);
@@ -4305,9 +4321,9 @@ mod tests {
     #[test]
     fn silently_locked_intrinsic_rejects_header_and_body_without_warning() {
         // A silently-locked `ApiOnly` intrinsic (as a converter would seed a
-        // safe-mode-restricted attribute) rejects both a header assignment and a
-        // body assignment of the same name, leaving the value unchanged and
-        // recording no warning.
+        // safe-mode-restricted attribute) rejects both a header assignment and
+        // a body assignment of the same name, leaving the value
+        // unchanged and recording no warning.
         let mut parser = Parser::default().with_intrinsic_attribute_silent(
             "backend",
             "html5",
@@ -4776,9 +4792,10 @@ mod tests {
         #[test]
         fn turning_the_toggle_on_leaves_no_partner_tombstone() {
             // `:notitle:` removes `showtitle` outright rather than leaving an
-            // unset tombstone, so a `{showtitle}` reference stays literal (as it
-            // would with the attribute absent) instead of resolving to an empty
-            // string. This guards the interaction flagged in review.
+            // unset tombstone, so a `{showtitle}` reference stays literal (as
+            // it would with the attribute absent) instead of
+            // resolving to an empty string. This guards the
+            // interaction flagged in review.
             let parser = parse_header(":notitle:");
             assert!(!parser.has_attribute("showtitle"));
 
@@ -4793,8 +4810,8 @@ mod tests {
 
         #[test]
         fn unrelated_attributes_are_untouched() {
-            // A document that never assigns either spelling leaves both absent —
-            // the linkage is a no-op for every other attribute.
+            // A document that never assigns either spelling leaves both absent
+            // — the linkage is a no-op for every other attribute.
             let parser = parse_header(":sectnums:");
             assert!(!parser.has_attribute("notitle"));
             assert!(!parser.has_attribute("showtitle"));
@@ -5013,8 +5030,8 @@ mod tests {
         fn tracks_the_active_doctype() {
             let mut parser = Parser::default();
 
-            // The default doctype is `article`, so only its derived attribute is
-            // defined (to an empty value).
+            // The default doctype is `article`, so only its derived attribute
+            // is defined (to an empty value).
             assert_eq!(
                 parser.attribute_value("backend-html5-doctype-article"),
                 InterpretedValue::Value(String::new())
@@ -5069,9 +5086,10 @@ mod tests {
         #[test]
         fn document_header_cannot_assign_a_derived_doctype_flag() {
             // The `backend-html5-doctype-*` namespace is a read-only intrinsic,
-            // so a document header assignment to it is ignored: the flag for the
-            // (inactive) `book` doctype stays undefined rather than taking the
-            // assigned value, so it cannot later shadow the intrinsic.
+            // so a document header assignment to it is ignored: the flag for
+            // the (inactive) `book` doctype stays undefined rather
+            // than taking the assigned value, so it cannot later
+            // shadow the intrinsic.
             let mut parser = Parser::default();
             let _doc = parser.parse("= Title\n:backend-html5-doctype-book: custom\n\nbody");
 
@@ -5112,9 +5130,9 @@ mod tests {
         #[test]
         fn family_tracks_a_non_html_backend() {
             // Setting a different backend re-derives the whole family from it
-            // (basebackend strips the trailing digits, filetype maps through the
-            // Asciidoctor extension table), and the inactive `html5` flags fall
-            // away.
+            // (basebackend strips the trailing digits, filetype maps through
+            // the Asciidoctor extension table), and the inactive
+            // `html5` flags fall away.
             let doc = Parser::default().parse(":backend: docbook5\n\nbody");
 
             assert_eq!(
@@ -5147,8 +5165,8 @@ mod tests {
         #[test]
         fn derived_value_and_flag_attributes_are_read_only() {
             // `basebackend` / `filetype` and the derived flag namespace are
-            // read-only intrinsics; a document assignment is silently ignored and
-            // the synthesized value stands.
+            // read-only intrinsics; a document assignment is silently ignored
+            // and the synthesized value stands.
             let doc = Parser::default().parse(
                 ":basebackend: custom\n:filetype: custom\n:backend-html5: custom\n:doctype-article: custom\n\nbody",
             );
@@ -5222,7 +5240,8 @@ mod tests {
                 assert!(!doc.has_attribute(name), "unexpectedly present: {name:?}");
             }
 
-            // The doctype-only flag does not depend on `backend`, so it remains.
+            // The doctype-only flag does not depend on `backend`, so it
+            // remains.
             assert!(doc.has_attribute("doctype-article"));
         }
     }
@@ -5237,8 +5256,8 @@ mod tests {
 
         #[test]
         fn explicit_attribute_takes_precedence() {
-            // An explicitly-set `docname` attribute is the source of truth, even
-            // when no primary file name has been supplied.
+            // An explicitly-set `docname` attribute is the source of truth,
+            // even when no primary file name has been supplied.
             assert_eq!(
                 Parser::default()
                     .with_intrinsic_attribute("docname", "test", ModificationContext::ApiOnly)
@@ -5250,9 +5269,10 @@ mod tests {
 
         #[test]
         fn explicit_attribute_overrides_primary_file_name() {
-            // When both are present, the attribute wins and is returned verbatim
-            // (no directory/extension stripping), mirroring Asciidoctor's
-            // `doc.attributes['docname']` being the single source of truth.
+            // When both are present, the attribute wins and is returned
+            // verbatim (no directory/extension stripping),
+            // mirroring Asciidoctor's `doc.attributes['docname']`
+            // being the single source of truth.
             assert_eq!(
                 Parser::default()
                     .with_primary_file_name("mydoc.adoc")
@@ -5374,14 +5394,15 @@ mod tests {
 
         #[test]
         fn next_counter_value_trailing_non_alphanumeric() {
-            // The right-most alphanumeric is incremented; trailing punctuation is
-            // left in place.
+            // The right-most alphanumeric is incremented; trailing punctuation
+            // is left in place.
             assert_eq!(next_counter_value("a)"), "b)");
         }
 
         #[test]
         fn next_counter_value_no_alphanumeric() {
-            // With nothing alphanumeric to carry, the final code point advances.
+            // With nothing alphanumeric to carry, the final code point
+            // advances.
             assert_eq!(next_counter_value("{"), "|");
         }
 
@@ -5474,8 +5495,8 @@ mod tests {
 
         #[test]
         fn conditional_directive_sees_a_computed_date_attribute() {
-            // `ifdef` queries `is_attribute_set`, which must report the computed
-            // `docdate` as set.
+            // `ifdef` queries `is_attribute_set`, which must report the
+            // computed `docdate` as set.
             let doc = Parser::default()
                 .with_reference_time(ReferenceTime::from_unix_timestamp(1_420_106_400))
                 .parse("ifdef::docdate[present]");

@@ -98,9 +98,10 @@ impl Passthroughs {
 
         // Inline STEM macros (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) are
         // implicit passthroughs. They are extracted last so that any earlier
-        // passthrough placeholders nested inside a STEM expression are preserved
-        // and recursively restored. (Mirrors the `text.gsub InlineStemMacroRx`
-        // block in Ruby Asciidoctor's substitutors.rb.)
+        // passthrough placeholders nested inside a STEM expression are
+        // preserved and recursively restored. (Mirrors the `text.gsub
+        // InlineStemMacroRx` block in Ruby Asciidoctor's
+        // substitutors.rb.)
         {
             let text = content.rendered.as_ref();
             if text.contains(':') && (text.contains("stem:") || text.contains("math:")) {
@@ -442,10 +443,12 @@ impl Replacer for InlinePassReplacer<'_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         if dest.ends_with('\\') || dest.ends_with(':') || dest.ends_with(';') {
             // Honor the prohibited prefix.
-            // EDGE CASE: Since we don't have lookarounds in Rust's regex, we have to retry
-            // the inline pass replacement here. Possible it might miss a few very obscure
-            // cases, but this should cover most cases where the attrlist is off-limits, but
-            // the quoted text is still subject to inline pass replacement.
+            // EDGE CASE: Since we don't have lookarounds in Rust's regex, we
+            // have to retry the inline pass replacement here.
+            // Possible it might miss a few very obscure cases, but
+            // this should cover most cases where the attrlist is off-limits,
+            // but the quoted text is still subject to inline pass
+            // replacement.
             let replacer = InlinePassReplacer(self.0);
 
             // Split off the first character (a char boundary, since Option 3
@@ -667,19 +670,21 @@ impl Replacer for PassthroughRestoreReplacer<'_> {
         pass.subs.apply(&mut subbed_text, self.1, None);
 
         if let Some(type_) = pass.type_ {
-            // Resolve attribute references in the stored attrlist before parsing
-            // it. Inline passthroughs are extracted before the substitution
-            // pipeline runs, so — unlike the inline quoted-text path, whose
-            // attrlist is a slice of the already-substituted buffer — a reference
-            // embedded in a passthrough role (e.g. `['{myrole}']++x++`) would
+            // Resolve attribute references in the stored attrlist before
+            // parsing it. Inline passthroughs are extracted before
+            // the substitution pipeline runs, so — unlike the
+            // inline quoted-text path, whose attrlist is a slice of
+            // the already-substituted buffer — a reference embedded
+            // in a passthrough role (e.g. `['{myrole}']++x++`) would
             // otherwise render verbatim. This mirrors Asciidoctor's
-            // `parse_quoted_text_attributes`, which runs `sub_attributes` on the
-            // attribute list.
+            // `parse_quoted_text_attributes`, which runs `sub_attributes` on
+            // the attribute list.
             let attrlist_body = pass.attrlist.as_ref().map(|attrlist_body| {
                 // The stored attrlist is owned text whose offsets do not refer
-                // to the document source, so any `warn`/`drop-line` warning this
-                // substitution records cannot be mapped back to a document span.
-                // Discard such warnings rather than surface them mislocated
+                // to the document source, so any `warn`/`drop-line` warning
+                // this substitution records cannot be mapped
+                // back to a document span. Discard such
+                // warnings rather than surface them mislocated
                 // against the document root (mirrors the docinfo text path).
                 let saved = self.1.substitution_warnings_len();
                 let substituted = substitute_attributes_in_text(attrlist_body, self.1);

@@ -758,9 +758,9 @@ mod structure {
             Parser::default().parse(":doctitle: Document Title\n\npreamble\n\n== First Section");
 
         // A `:doctitle:` attribute entry, with no `= Title` line, supplies the
-        // implicit document title. (Ruby's `header.title` and `first_section.title`
-        // both read the section title verified here; asciidoc-parser has no
-        // `has_header?` accessor.)
+        // implicit document title. (Ruby's `header.title` and
+        // `first_section.title` both read the section title verified
+        // here; asciidoc-parser has no `has_header?` accessor.)
         assert_eq!(doc.doctitle(), Some("Document Title"));
         assert_eq!(doc.header().title(), Some("Document Title"));
     }
@@ -790,8 +790,9 @@ mod structure {
         let doc =
             Parser::default().parse(":doctitle: Document Title\n\n.Block title\nBlock content");
 
-        // The `:doctitle:` entry supplies the document title; the `.Block title`
-        // that follows is a block title on the paragraph, not a second doctitle.
+        // The `:doctitle:` entry supplies the document title; the `.Block
+        // title` that follows is a block title on the paragraph, not a
+        // second doctitle.
         assert_eq!(doc.doctitle(), Some("Document Title"));
 
         let blocks = top_blocks(&doc);
@@ -865,8 +866,9 @@ mod structure {
         let doc =
             Parser::default().parse("= Document Title\n:title:\n\n{doctitle}\n\n== First Section");
 
-        // A blank `:title:` entry still overrides the doctitle, which becomes the
-        // empty string; the section title and `doctitle` attribute are untouched.
+        // A blank `:title:` entry still overrides the doctitle, which becomes
+        // the empty string; the section title and `doctitle` attribute
+        // are untouched.
         assert_eq!(doc.doctitle(), Some(""));
         assert_eq!(doc.header().title(), Some("Document Title"));
         assert_eq!(rendered_paragraphs(&doc), ["Document Title"]);
@@ -935,8 +937,9 @@ mod structure {
 
         // A `:title:` entry wins over a `:doctitle:` entry for the `doctitle`
         // accessor, while the `:doctitle:` entry still overrides the section
-        // title. `{snapshot}` captured the implicit doctitle in force when it was
-        // defined; `{doctitle}` in the body resolves to the `:doctitle:` entry.
+        // title. `{snapshot}` captured the implicit doctitle in force when it
+        // was defined; `{doctitle}` in the body resolves to the
+        // `:doctitle:` entry.
         assert_eq!(doc.doctitle(), Some("Override"));
         assert_eq!(doc.header().title(), Some("doctitle"));
         assert_eq!(
@@ -1378,10 +1381,10 @@ mod structure {
         assert_eq!(doc.header().title(), None);
     }
 
-    // Out of scope: most of the remaining structure suite converts to standalone
-    // HTML or DocBook (author/revision bylines, copyright, header/footer,
-    // footnotes-in-footer) or uses the embedded-vs-standalone conversion toggles
-    // and `parse_header_only`.
+    // Out of scope: most of the remaining structure suite converts to
+    // standalone HTML or DocBook (author/revision bylines, copyright,
+    // header/footer, footnotes-in-footer) or uses the
+    // embedded-vs-standalone conversion toggles and `parse_header_only`.
     non_normative!(
         r##"
 
@@ -1694,8 +1697,8 @@ mod structure {
 "##
         );
 
-        // An explicit `:authorinitials:` entry preceding `:author:` is preserved
-        // rather than re-derived from the author name.
+        // An explicit `:authorinitials:` entry preceding `:author:` is
+        // preserved rather than re-derived from the author name.
         let doc = Parser::default().parse(
             ":authorinitials: DOC\n:author: Doc Writer\n\n{lastname}, {firstname} ({authorinitials})",
         );
@@ -1746,8 +1749,8 @@ mod structure {
 "##
         );
 
-        // A semicolon-separated `:authors:` entry splits into individual authors,
-        // populating the base and per-author `_N` attributes.
+        // A semicolon-separated `:authors:` entry splits into individual
+        // authors, populating the base and per-author `_N` attributes.
         let doc = Parser::default().parse(
             ":authors: Doc Writer; Other Author\n\n{lastname}, {firstname} ({authorinitials})",
         );

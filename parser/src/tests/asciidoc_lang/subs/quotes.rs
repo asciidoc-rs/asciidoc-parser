@@ -303,7 +303,8 @@ mod default_quotes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -399,7 +400,8 @@ mod default_quotes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -472,7 +474,8 @@ mod default_quotes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -502,7 +505,8 @@ mod default_quotes_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {

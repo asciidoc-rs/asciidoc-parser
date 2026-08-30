@@ -43,8 +43,8 @@ Taking into account any xref:span-cells.adoc[spans], which are applied via a <<s
     );
 
     // A space (or tab) followed by a `|`, or a `|` at the start of a line, ends
-    // the previous cell and begins a new one. The three cells declared here flow
-    // into a single row because the table has three columns.
+    // the previous cell and begins a new one. The three cells declared here
+    // flow into a single row because the table has three columns.
     let doc = Parser::default().parse(
         "[cols=\"3,2,3\"]\n|===\n|This content is placed in the first cell of column 1\n|This line starts with a vertical bar so this content is placed in a new cell in column 2 |When the processor encounters a whitespace followed by a vertical bar it ends the previous cell and starts a new cell\n|===",
     );
@@ -166,10 +166,10 @@ Taking into account any xref:span-cells.adoc[spans], which are applied via a <<s
     );
 
     // Cell specifiers introduce per-cell spans, duplication, alignment, and
-    // style operators, each specified in detail on a dedicated page (span-cells,
-    // duplicate-cells, align-by-cell, format-cell-content). The span,
-    // duplication, alignment, and style operators (and the override behavior)
-    // are all implemented and verified here.
+    // style operators, each specified in detail on a dedicated page
+    // (span-cells, duplicate-cells, align-by-cell, format-cell-content).
+    // The span, duplication, alignment, and style operators (and the
+    // override behavior) are all implemented and verified here.
     verifies!(
         r#"
 [#specifiers]
@@ -217,9 +217,10 @@ Also, the operator in a cell specifier will override the operator in a xref:add-
     assert_eq!(row.cells()[1].style(), ColumnStyle::Default);
 
     // A cell specifier operator overrides the column specifier operator for the
-    // same property: the column is centered and monospace (`^m`), but the cell's
-    // own `>` and `s` operators win, while a property the cell leaves unset (here
-    // vertical alignment) still falls back to the column.
+    // same property: the column is centered and monospace (`^m`), but the
+    // cell's own `>` and `s` operators win, while a property the cell
+    // leaves unset (here vertical alignment) still falls back to the
+    // column.
     let table = specifier_table("[cols=\"^.^m\"]\n|===\n>s|overridden\n|===");
     let cell = &table.body_rows()[0].cells()[0];
     assert_eq!(cell.h_align(), HorizontalAlignment::Right);
