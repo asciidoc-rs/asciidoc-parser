@@ -2971,10 +2971,10 @@ mod tests {
         // crosses a synthesized run is now recognized: the name and target are
         // read from the level's match string, which carries an expanded value's
         // bytes exactly, so only the node's `location` falls back to the
-        // enclosing piece's coarse span. The macro's own attribute list is the one part that
-        // still needs an honest `'src` slice — see the divergence test below —
-        // so every fixture here either carries a verbatim bracket or an empty
-        // one.
+        // enclosing piece's coarse span. The macro's own attribute list is the
+        // one part that still needs an honest `'src` slice — see the
+        // divergence test below — so every fixture here either carries
+        // a verbatim bracket or an empty one.
         let parser = expanding_parser();
 
         let fixtures = [

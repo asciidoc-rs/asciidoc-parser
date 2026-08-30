@@ -5318,8 +5318,8 @@ mod tests {
         // and in each matching the rendered markup gives the perturbed
         // reading (a truncated text, a text the attribute-list parse cut in
         // half)
-        // and the tree's is the well-formed one, exactly as the quotes step's own
-        // crossed-delimiter divergence is.
+        // and the tree's is the well-formed one, exactly as the quotes step's
+        // own crossed-delimiter divergence is.
         for source in [
             // A `]` inside the span would end `INLINE_LINK_MACRO`'s own lazy
             // text capture early if matched over the rendered markup, but
@@ -5595,8 +5595,9 @@ mod tests {
         // the
         // construct in as one opaque placeholder, which belongs to no mismatch
         // class, so `find_email_matches` defers explicitly instead of building
-        // a link a markup-based reading would not: parity, not a divergence, for
-        // every construct whose rendering ends in one of `\`, `>`, `:`, `/`.
+        // a link a markup-based reading would not: parity, not a divergence,
+        // for every construct whose rendering ends in one of `\`, `>`,
+        // `:`, `/`.
         for source in [
             "**bold**doc@example.com",
             "__em__doc@example.com",

@@ -1197,8 +1197,9 @@ fn tree_defers_xrefs(nodes: &[InlineNode<'_>]) -> bool {
 /// carries every field an [`XrefSegment`] holds but one — `target`, `window`,
 /// `roles`, `xrefstyle` and `derived` are plain values the builder resolved at
 /// recognition time. Only
-/// [`provided_text`](XrefSegment::provided_text) needs deriving, which the segment holds
-/// as a **string** where the node holds its display text as *children*.
+/// [`provided_text`](XrefSegment::provided_text) needs deriving, which the
+/// segment holds as a **string** where the node holds its display text as
+/// *children*.
 ///
 /// That slot takes the **fold of those children**, and it is a different answer
 /// from the one given `role=` / `window=` / `xrefstyle=`
@@ -1214,8 +1215,8 @@ fn tree_defers_xrefs(nodes: &[InlineNode<'_>]) -> bool {
 /// carried. Deriving it
 /// later, at resolution time, would read whatever renderer that caller passed
 /// and hand the resolver a different [`ResolutionContext`]; taking it at
-/// build time keeps this function a pure function of the tree plus the parse's own
-/// renderer.
+/// build time keeps this function a pure function of the tree plus the parse's
+/// own renderer.
 ///
 /// Present-but-empty is preserved, because it is a distinction the renderer
 /// acts on: the `<<id,>>` shorthand records one empty

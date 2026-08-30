@@ -331,20 +331,18 @@ fn apply_attribute_references_recursive<'src>(
 ///   piece in the match string, so its interior `\n`s are invisible here —
 ///   while a flat rendered string, which by this point holds the span's
 ///   rendered markup inline, still shows them and splits on them. The line
-///   correspondence
-///   the drop rests on would therefore be wrong, so
+///   correspondence the drop rests on would therefore be wrong, so
 ///   [`for_content`](Self::for_content) disables dropping for the whole content
 ///   when it finds one. (A masked passthrough or STEM expression is *not*
-///   affected: it too sits in the match string as a single opaque piece with
-///   no embedded `\n`s, so a
-///   multi-line one collapses its lines there too, exactly as the placeholder
-///   does here.)
+///   affected: it too sits in the match string as a single opaque piece with no
+///   embedded `\n`s, so a multi-line one collapses its lines there too, exactly
+///   as the placeholder does here.)
 ///
 /// - A missing reference nested inside a `Styled` span, under
 ///   [`DropLine`](Self::DropLine). Dropping the *enclosing* line is what
-///   line-based processing does, which this level cannot see from inside the span;
-///   [`nested`](Self::nested) therefore leaves such a reference literal. Under
-///   [`DropReference`](Self::DropReference) the nested case *is* handled,
+///   line-based processing does, which this level cannot see from inside the
+///   span; [`nested`](Self::nested) therefore leaves such a reference literal.
+///   Under [`DropReference`](Self::DropReference) the nested case *is* handled,
 ///   because removing the reference is a purely local edit and the span keeps
 ///   its enclosing line non-empty either way.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1067,11 +1065,12 @@ fn rebuild_attribute_level<'src>(
 
     for line in lines {
         // One separator between consecutive survivors — the same "join the
-        // kept lines with `\n`" shape `apply_attributes` uses. The byte emitted is the
-        // `\n` that terminated the *previous survivor*, which is always a real
-        // one: a line range excludes its terminator, and a line followed by
-        // another always has one. Whether lines were dropped in between makes
-        // no difference; exactly one separator belongs here either way.
+        // kept lines with `\n`" shape `apply_attributes` uses. The byte emitted
+        // is the `\n` that terminated the *previous survivor*, which is
+        // always a real one: a line range excludes its terminator, and
+        // a line followed by another always has one. Whether lines were
+        // dropped in between makes no difference; exactly one separator
+        // belongs here either way.
         if let Some(end) = previous_end {
             emit_range(nodes, pieces, end..end + 1, &mut out);
         }
@@ -2127,9 +2126,9 @@ mod tests {
     fn a_counter_directive_survives_a_dropped_neighbouring_line() {
         // A `counter` directive advances during `resolve_counters`, which runs
         // over the whole tree before any line is dropped — exactly as
-        // `AttributeReplacer` advances a counter as its own line loop reaches it.
-        // A directive on a *dropped* line has still advanced, so the survivor
-        // after it numbers from there.
+        // `AttributeReplacer` advances a counter as its own line loop reaches
+        // it. A directive on a *dropped* line has still advanced, so
+        // the survivor after it numbers from there.
         let parser = parser_with_missing_mode("drop-line");
         let source = "{counter:n}\n{undefined-thing} {counter:n}\n{counter:n}";
 
