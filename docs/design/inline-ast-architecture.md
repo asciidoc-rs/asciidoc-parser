@@ -964,26 +964,36 @@ a place where the general one applies. #944 names four:
    fallback an attribute-reference expansion or a `counter` directive's resolved value
    already receives," in the function's own words. Nothing downstream needed to know the
    difference: `source_slice`'s piece walk treats a synthesized seed's `Text` node exactly
-   like it treats any other synthesized piece, at any depth. (Pinned by
-   `a_macro_construct_is_recognized_when_the_whole_seed_is_synthesized`, over a synthesized
-   seed whose text differs from its own `location` — recognizing a `link:` macro built
-   entirely from it.)
+   like it treats any other synthesized piece, at any depth — the same mechanism case 1
+   above already pins with a direct `location.data()` assertion
+   (`an_image_inside_an_expanded_value_keeps_a_coarse_location`). What is specific to a
+   *wholly*-synthesized seed, and has its own test, is that recognition itself still
+   succeeds from one: `a_macro_construct_is_recognized_when_the_whole_seed_is_synthesized`
+   asserts a `link:` macro folds correctly when built entirely from a seed whose `value`
+   differs from its `location` — a recognition guarantee, not a `location` assertion of its
+   own, since that half rests on the shared mechanism rather than needing a second test of
+   it.
 
 4. **Lookahead/retry.** Two passes re-scan a slice of their own match string rather than
    accepting or rejecting a match outright: the passthrough-extraction pass's
    *prohibited-prefix* retry — an attribute-list-prefixed bare form
    (`index:[attrs]+text+`, `` \[x-]`text` ``) that turns out to sit behind a `\`, `:`, or `;`
    writes that first character back verbatim and rescans the rest of the same match,
-   recursively — and the quotes step's own monospace-before-quote retry. Both retries produce
-   **exact** spans despite scanning a temporary sub-range: every capture offset the retry
-   reads is relative to that sub-range and is rebased (`offset + …`) back to the *level's
-   own* match-string coordinates before `source_slice`/`s_to_src` ever see it, so no error
-   from the retry's own bookkeeping survives into the node's `location`. (Pinned by
+   recursively — and the quotes step's own monospace-before-quote retry, which slices the
+   haystack forward and re-searches on a rejected look-ahead. Both retries follow the same
+   pattern: every capture offset the retry reads is relative to the sub-range it rescanned,
+   not the level's own match string, and is rebased (`offset + …`) back to that match
+   string's coordinates before `source_slice`/`s_to_src` ever see it, so no error from the
+   retry's own bookkeeping survives into the node's `location`. This is pinned directly for
+   the passthrough pass's own retry by
    `a_prohibited_prefix_before_a_bare_attrlisted_form_keeps_its_source_offsets`, whose own
    comment states the invariant — "the `Raw` leaf's location must be the body's own source
    bytes, not a range shifted left by the retry's start" — verified over
    `"see index:[foo]+bar+ end"`, where the retry recognizes `+bar+` only after rejecting the
-   `]`-prefixed match, and the leaf's span is still exactly `source.slice(15..20)`.)
+   `]`-prefixed match, and the leaf's span is still exactly `source.slice(15..20)`. The
+   quotes step's retry rebases offsets the identical way but has no test of its own naming
+   the invariant this explicitly — a gap the consolidated span/location test file this row
+   still lacks (see below) would be the place to close.
 
    A **failed** lookahead is a different, simpler case: the verbatim-content callout pass's
    own trailing-position lookahead (`tail_rx`) either matches or it does not, and a lookahead
