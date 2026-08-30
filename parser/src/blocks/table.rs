@@ -3341,7 +3341,7 @@ mod tests {
     };
     use crate::{
         Span,
-        content::FootnoteDeferred,
+        content::{FootnoteDeferred, XrefTemplatePiece},
         document::Footnote,
         parser::{
             HtmlInlineRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
@@ -3437,7 +3437,7 @@ mod tests {
                     id: None,
                     text: "UNRESOLVED".to_string(),
                     deferred: Some(Box::new(FootnoteDeferred::new(
-                        "RESOLVED".to_string(),
+                        vec![XrefTemplatePiece::Literal("RESOLVED".to_string())],
                         vec![],
                     ))),
                     location: None,

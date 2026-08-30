@@ -1867,28 +1867,38 @@ impl Parser {
     /// does not map to the document, so no location is recorded and
     /// resolution falls back to the whole-document span.
     ///
-    /// Takes `&self` so it can be called during substitution. `text` is the
-    /// single-pass builder's fold of the footnote's subtree, which never
-    /// enters the escaped sentinel form the string pipeline's entries were
-    /// held in.
+    /// Takes `&self` so it can be called during substitution. `template` is
+    /// the single-pass builder's structured fold of the footnote's subtree
+    /// (see [`fold_deferring_xrefs`]), which never enters the escaped
+    /// sentinel form the string pipeline's entries were held in.
+    ///
+    /// [`fold_deferring_xrefs`]: crate::content::inline_builder::fold_deferring_xrefs
     pub(crate) fn define_footnote(
         &self,
         id: Option<&str>,
-        text: String,
+        template: Vec<crate::content::XrefTemplatePiece>,
         xrefs: Vec<crate::content::XrefSegment>,
         source: crate::Span<'_>,
     ) -> String {
         // A footnote's text is extracted out of the block during macro
         // substitution, so any cross-reference inside it never reaches the
         // document-level resolution pass over block content. Those
-        // cross-references are captured (as placeholders in `text` plus the
-        // `xrefs` segments) so they can be resolved alongside the block
+        // cross-references are captured (as splice points in `template` plus
+        // the `xrefs` segments) so they can be resolved alongside the block
         // references. The stored `text` is the unresolved fallback rendering
         // until then, so it is always clean.
         let (text, deferred) = if xrefs.is_empty() {
-            (text, None)
+            // No cross-reference to defer: `template` holds no `Xref` piece
+            // either (the fold never emits one without pushing its segment
+            // into `xrefs`), so rendering it is just concatenating its
+            // literal run — cheap enough to do directly, with no
+            // `FootnoteDeferred` to construct or ever resolve again.
+            (
+                crate::content::render_xref_template(&template, &xrefs, &*self.renderer),
+                None,
+            )
         } else {
-            let deferred = crate::content::FootnoteDeferred::new(text, xrefs);
+            let deferred = crate::content::FootnoteDeferred::new(template, xrefs);
 
             let rendered = deferred.render(&*self.renderer);
 

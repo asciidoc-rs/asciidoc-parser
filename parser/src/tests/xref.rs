@@ -1451,6 +1451,70 @@ mod xrefs_in_titles {
     }
 
     #[test]
+    fn a_reference_nested_in_a_span_of_a_footnote_stays_its_fallback() {
+        // The footnote analog of the carried-title boundary above (see
+        // `fold_deferring_xrefs`'s own docs): the deferring fold walks a
+        // footnote's own children at the top level only, so a
+        // cross-reference *nested* inside another construct — here a styled
+        // span — folds with its enclosing node into one literal template
+        // piece rather than contributing its own splice, and is baked as its
+        // unresolved fallback rather than the target's (eventual) resolved
+        // reference text.
+        //
+        // This is checked at *registration* time (`parse_deferred`, before
+        // any reference is resolved), which is the only moment the template
+        // narrowing is observable at all: every production footnote goes on
+        // to fold from its own **tree** once resolution runs
+        // (`Content::collect_own_folded_footnotes`), and the tree's nested
+        // reference *does* pick up its resolved destination there (mirrored
+        // onto the node by the enclosing content's own resolution pass,
+        // independently of `FootnoteDeferred`) — see the complementary
+        // `a_reference_nested_in_a_footnote_resolves_once_the_document_does`.
+        let mut parser = Parser::default();
+        let doc =
+            parser.parse_deferred("See footnote:[x *<<goal>>* done] here.\n\n[#goal]\n== Goal");
+
+        assert_eq!(
+            doc.catalog().footnotes()[0].text,
+            r##"x <strong><a href="#goal">[goal]</a></strong> done"##
+        );
+    }
+
+    #[test]
+    fn a_reference_nested_in_a_footnote_resolves_once_the_document_does() {
+        // The complement of the fixture above: `FootnoteDeferred`'s own
+        // narrowed template only governs the *registration-time* fallback.
+        // Once the document is resolved, this footnote's `text` is folded
+        // fresh from its own tree (`Content::collect_own_folded_footnotes`),
+        // whose nested reference node was mirrored to its resolved
+        // destination by the enclosing content's own resolution pass — so
+        // the nested reference *does* end up resolved in the end, unlike the
+        // carried-title case, which has no tree left to re-fold from at all.
+        let doc =
+            Parser::default().parse("See footnote:[x *<<goal>>* done] here.\n\n[#goal]\n== Goal");
+
+        assert_eq!(
+            doc.catalog().footnotes()[0].text,
+            r##"x <strong><a href="#goal">Goal</a></strong> done"##
+        );
+    }
+
+    #[test]
+    fn an_unresolvable_reference_nested_in_a_footnote_is_still_warned_about() {
+        // Unlike the carried title's own nested-reference narrowing above
+        // (which captures no segment at all for a nested reference, so an
+        // unresolvable one raises no warning), a footnote's nested reference
+        // keeps its segment: `FootnoteDeferred`'s own `xrefs` records every
+        // cross-reference the footnote's text carries, not only the ones its
+        // `template` can splice — see that type's own docs — so it is still
+        // resolved, and still warned about when unresolvable, exactly as a
+        // top-level one would be.
+        let doc = Parser::default().parse("See footnote:[x *<<nowhere>>* done] here.\n");
+
+        assert_eq!(doc.warnings().count(), 1);
+    }
+
+    #[test]
     fn resolver_chosen_text_wins_over_the_local_title() {
         // A caller-supplied resolver may resolve a target to its local `#id`
         // destination while choosing its own display text (e.g. a curated
