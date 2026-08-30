@@ -1640,10 +1640,13 @@ mod tests {
     }
 
     mod has_empty_principal_text {
-        use crate::blocks::{Block, FindBlocks};
+        use crate::{
+            Document,
+            blocks::{Block, FindBlocks, ListItem},
+        };
 
         /// Returns the child list items of the first (list) block in `doc`.
-        fn items<'a>(doc: &'a crate::Document<'a>) -> Vec<&'a crate::blocks::ListItem<'a>> {
+        fn items<'a>(doc: &'a Document<'a>) -> Vec<&'a ListItem<'a>> {
             let Some(Block::List(list)) = doc.child_blocks().next() else {
                 panic!("expected a list block");
             };

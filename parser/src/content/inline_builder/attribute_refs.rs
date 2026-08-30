@@ -9,6 +9,7 @@ use super::{
 };
 use crate::{
     Parser, Span,
+    attributes::element_attribute::{MASKED_PIECE_PLACEHOLDER_END, MASKED_PIECE_PLACEHOLDER_START},
     content::{ATTRIBUTE_REFERENCE, AttributeMissing},
     document::InterpretedValue,
     inlines::{InlineNode, RawForm, RawOrigin},
@@ -1170,10 +1171,10 @@ fn rebuild_attribute_level<'src>(
 /// A run is never emitted empty, and an empty `value` (a value-less
 /// `InterpretedValue::Set` attribute) emits no node at all.
 ///
-/// Before either branch runs, `value` has its passthrough-token bytes
-/// escaped by [`escape_passthrough_sentinels`] — see that function's doc
-/// comment for why a value reaching this splice point needs that
-/// unconditionally, regardless of which branch it then takes.
+/// Before either branch runs, `value` has its own copies of the masked-piece
+/// placeholder escaped by [`escape_passthrough_sentinels`] — see that
+/// function's doc comment for why a value reaching this splice point needs
+/// that unconditionally, regardless of which branch it then takes.
 fn split_attribute_value<'src>(
     value: &str,
     location: Span<'src>,
@@ -1226,27 +1227,35 @@ fn split_attribute_value<'src>(
     }
 }
 
-/// Escapes a document's own copies of the passthrough-token pair
-/// (`\u{96}`/`\u{97}`) out of a resolved attribute (or `counter`/`counter2`)
+/// Escapes a document's own copies of the
+/// [`MASKED_PIECE_PLACEHOLDER`](crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER)
+/// pair's two codepoints out of a resolved attribute (or `counter`/`counter2`)
 /// value before [`split_attribute_value`] splices it into the node stream.
 ///
-/// Those two C1 codepoints are the private-use-shaped token
-/// [`tokened_bracket`](super::macros::image::tokened_bracket) writes for a
-/// masked passthrough or STEM expression inside an `image:`/`icon:` bracket
-/// or a link family's display-text list, and
+/// Those two C1 codepoints, adjacent, are the opaque placeholder
+/// [`tokened_bracket`](super::macros::image::tokened_bracket) (and its
+/// sibling `tokened_text`) writes for a masked passthrough or STEM expression
+/// inside an `image:`/`icon:` bracket or a link/xref family's own computed
+/// value, and both
 /// [`Attrlist::into_owned_restoring`](crate::attributes::Attrlist::into_owned_restoring)
-/// (via [`restore_into`](crate::attributes::element_attribute)) restores
-/// **by byte pattern** once that bracket has been parsed: it cannot tell the
-/// pipeline's own token from a document-typed copy of the same two bytes at
-/// the same index. A macro bracket that mixes a genuine masked construct with
-/// an attribute reference whose resolved value happens to spell
-/// `\u{96}`*n*`\u{97}` — `image:x.png[++real++,alt={forge}]` with `:forge:
-/// \u{96}0\u{97}` defined — is exactly that mix: the reference is spliced
-/// here, by this step, *before* the image macro is even recognized, so by
-/// the time the bracket is tokened its forged bytes are indistinguishable
-/// from the passthrough's own restore token, and `alt` ends up holding the
-/// passthrough's rendered body instead of the literal text the document
-/// defined.
+/// (via [`restore_into`](crate::attributes::element_attribute)) and the
+/// macros step's own `untranslated_value`/`restored_value_children` recover
+/// which piece an occurrence stands for **by position** once that bracket has
+/// been parsed: none of the three re-derive structure from anything but the
+/// bytes actually in front of them, so they cannot tell a real occurrence
+/// from a document-typed copy of the same two bytes at the same position. A
+/// macro bracket that mixes a genuine masked construct with an attribute
+/// reference whose resolved value happens to spell
+/// [`MASKED_PIECE_PLACEHOLDER`](crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER) — `image:x.png[++real++,alt={forge}]` with
+/// `:forge: \u{96}\u{97}` defined — is exactly that mix: the reference is
+/// spliced here, by this step, *before* the image macro is even recognized,
+/// so by the time the bracket is tokened the forged pair is indistinguishable
+/// from the passthrough's own placeholder, and every occurrence from that
+/// point on shifts onto the wrong body. Each codepoint is escaped on its
+/// own, not as a pair: a forged value contributing only *one* half, beside
+/// the other half from an unrelated source (a second reference, or a
+/// document-typed copy) landing adjacent to it, would complete the same
+/// pair otherwise.
 ///
 /// This is the same forgery the old string-substitution implementation's own
 /// attribute-reference splice guarded against with `escape_sentinels` (since
@@ -1266,11 +1275,13 @@ fn split_attribute_value<'src>(
 /// Text with none of the three reserved codepoints — the overwhelming
 /// majority — is borrowed through unchanged.
 fn escape_passthrough_sentinels(value: &str) -> Cow<'_, str> {
-    const START: char = '\u{96}';
-    const END: char = '\u{97}';
     const ESCAPE: char = '\u{E005}';
 
-    if !value.contains([START, END, ESCAPE]) {
+    if !value.contains([
+        MASKED_PIECE_PLACEHOLDER_START,
+        MASKED_PIECE_PLACEHOLDER_END,
+        ESCAPE,
+    ]) {
         return Cow::Borrowed(value);
     }
 
@@ -1278,8 +1289,8 @@ fn escape_passthrough_sentinels(value: &str) -> Cow<'_, str> {
 
     for c in value.chars() {
         match c {
-            START => out.push_str("\u{E005}s"),
-            END => out.push_str("\u{E005}e"),
+            MASKED_PIECE_PLACEHOLDER_START => out.push_str("\u{E005}s"),
+            MASKED_PIECE_PLACEHOLDER_END => out.push_str("\u{E005}e"),
             ESCAPE => out.push_str("\u{E005}g"),
             other => out.push(other),
         }
@@ -1463,15 +1474,16 @@ mod tests {
 
     #[test]
     fn a_reference_expanding_to_a_passthrough_sentinel_is_escaped() {
-        // A value carrying the passthrough-token pair, or a literal copy
-        // of the escape introducer this step's own escaping uses, is escaped
-        // out rather than spliced in verbatim — see
-        // `escape_passthrough_sentinels`. This test exercises the function
-        // directly (through the one seam that calls it) for all three
-        // codepoints its match arms cover, independent of any macro bracket:
-        // the regression this guards against is pinned end-to-end, over an
-        // actual `image:`/`link:` bracket, by the `sentinels` test module's
-        // own `a_placeholder_from_an_attribute_value_cannot_forge_*` tests.
+        // A value carrying either codepoint of the masked-piece placeholder
+        // pair, or a literal copy of the escape introducer this step's own
+        // escaping uses, is escaped out rather than spliced in verbatim —
+        // see `escape_passthrough_sentinels`. This test exercises the
+        // function directly (through the one seam that calls it) for all
+        // three codepoints its match arms cover, independent of any macro
+        // bracket: the regression this guards against is pinned end-to-end,
+        // over an actual `image:`/`link:` bracket, by the `sentinels` test
+        // module's own `a_placeholder_from_an_attribute_value_cannot_forge_*`
+        // tests.
         let parser = parser_with_attribute("v", "a\u{96}b\u{97}c\u{e005}d");
         let nodes = build(Span::new("{v}"), &parser, None);
 

@@ -11968,6 +11968,85 @@ commit this fix branched from once its own new "author literally typed the escap
 branch is exercised — every other newly-uncovered line in the file is a pre-existing
 `other => panic!` test-assertion fallback, not a gap this change opened.
 
+##### The bracket-mask token's own digit-carrying shape was retired too (2026-08-30)
+
+The splice-point gap above and this one are siblings, not the same thing: that fix closed a
+forgery *reachable through* `tokened_bracket`'s token; this one is about the token's own
+*shape*, which carried a design smell independent of whether the escape guard existed. The
+token — `\u{96}`*n*`\u{97}`, an index spelled out in decimal digits between two boundary
+codepoints — dates from when it doubled as the (by this point fully deleted) string
+pipeline's own passthrough sentinel, and `Attrlist::parse` needed to see the *same haystack
+shape* the string pipeline's own text had there. That reason is gone: `SubstitutionGroup::
+apply_inner` says outright "the string pipeline no longer runs here at all," and `content::
+macros`/`content::substitution_step` survive only as a shared regex library the tree builder
+reuses for pattern-matching, not a haystack anything needs to mimic. What was left was a
+bespoke, digit-parsing encoding solving a problem — "an opaque run `Attrlist::parse` won't
+split on" — that the match-string level one layer up (`quotes.rs`'s `SPAN_PLACEHOLDER` +
+`Piece` table) already solves more simply, by recovering which piece an occurrence stands for
+from *position* rather than from an index carried in the text.
+
+*Landed as* (`MASKED_PIECE_PLACEHOLDER`, a fixed two-codepoint pair, restored by position):
+`tokened_bracket` (`image.rs`) and its sibling `tokened_text` (`macros/mod.rs`, shared by the
+link and xref families) now write one `\u{96}\u{97}` occurrence per masked piece — no digits —
+and every reader recovers which piece an occurrence stands for by *counting*, not parsing:
+`Attrlist`/`ElementAttribute::into_owned_restoring` thread a cursor, shared across every
+attribute a list holds, in the same left-to-right order `Attrlist::parse` found them in;
+`untranslated_value`/`restored_value_children` (`macros/mod.rs`) do the same over whichever
+slice of the piece list a caller hands them. That slicing is the one place position-based
+restoration needs help a self-describing index didn't: a caller reading *one* attribute's own
+value out of a larger parsed list (the link family's display text, the xref family's `window`/
+`role`/`xrefstyle`/children) has to know where in the *global* occurrence sequence that one
+attribute's own begin, since a bare occurrence carries nothing to re-align with on its own.
+Three new `Attrlist` accessors answer that by counting placeholder occurrences in the
+still-tokened text of every attribute before the target one —
+`nth_attribute_token_offset`/`named_attribute_token_offset` (by position or by name) and
+`roles_with_token_offset` (`roles()`'s own two sources, the first positional's shorthand items
+and a named `role=`, paired with their own separate offsets, since `roles()` merges them into
+one list with no way back to either). Direct unit coverage of the three accessors lives in
+`attributes/attrlist.rs`'s own test module; end-to-end coverage of the scenario they exist for
+— a named attribute carrying its own masked piece, preceding another one in parse order — is
+`xref.rs`'s `a_masked_piece_in_a_preceding_named_attribute_does_not_misattribute_a_later_one`
+(`role=`/`window=`, both directions). The equivalent scenario for the link family's display
+text turned out to be unconstructible: Asciidoctor's own positional numbering (every
+comma-delimited entry consumes a position, named ones included) means position 1 can only
+ever be a list's literal first entry, so `nth_attribute_token_offset(1)` is provably always
+`0` when non-`None` — the accessor is still called there, correctly, it just never has
+anything to prove it for.
+
+Two things the fixed-pair shape had to get right that a bare single codepoint would not have:
+first, the pair is what keeps the shape's own collision-resistance where the digit-carrying
+one had it — a lone reserved codepoint is indistinguishable from an ordinary control character
+an author types directly in bracket text beside a real masked construct (not reachable through
+`escape_passthrough_sentinels`'s one injection point, since that guards a content-level splice
+this byte never passes through), so `image.rs`'s own
+`a_bracket_body_carrying_sentinel_shaped_bytes_is_not_re_matched` was extended with exactly
+that case (`image:x.png[++a++ \u{96}\u{97}]`) to confirm the pair keeps it as unlikely as the
+digit-carrying shape was, rather than reopening it at a smaller size. Second,
+`escape_passthrough_sentinels` (design note above) is *not* obsoleted by this — it still
+escapes both codepoints, individually rather than as a pair, because a forged value
+contributing only one half, adjacent to the other half from an unrelated source, would still
+complete the pair. Eliminating the guard outright would need the harder structural move: carry
+`tokened_bracket`'s own byte-offset table through `Attrlist::parse`'s split, so restoration
+never re-scans text for the placeholder's byte value at all — the same trick `SPAN_PLACEHOLDER`
+uses one layer up. That was investigated and set aside for this increment: `Attrlist::parse`
+has its own internal attribute-reference re-substitution (for a literal `{missing}` an
+`attribute-missing=skip`/`warn` policy leaves behind), which can in principle shift byte
+offsets inside the very string `tokened_bracket`'s table would be computed against, and ruling
+that out — or handling it — needs more validation than this increment's scope covered. Left as
+open follow-up work, not silently dropped.
+
+`cargo test --workspace` is green (5,485 tests in the library crate, three more than before —
+the same shorthand-role and cross-attribute-offset assertions folded into extended existing
+tests rather than new ones, plus the direct `attrlist.rs` accessor tests). Coverage is
+diff-neutral against a baseline checkout of the commit this increment branched from, file by
+file and in total (region/line/function counts unchanged for every touched file): the one
+file that regressed in an interim pass — `element_attribute.rs`'s own "more occurrences than
+the caller supplied bodies for" leniency branch, newly unreachable once the digit-encoded
+shape's "malformed token" case no longer exists to reach it by a different path — closed once
+`image.rs`'s own sentinel-shaped-bytes test was extended with a case exercising it directly
+(an author-typed adjacent pair after a bracket's only real passthrough already spent the one
+body supplied).
+
 ##### Phase 3's first criterion cannot close before Landing
 
 "Node vocabulary reviewed against the `asciidoctor` port's needs (§6.6)" and Landing's

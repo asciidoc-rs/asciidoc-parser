@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     Parser, Span,
-    attributes::Attrlist,
+    attributes::{Attrlist, element_attribute::MASKED_PIECE_PLACEHOLDER},
     content::{
         INLINE_EMAIL, INLINE_LINK, INLINE_LINK_MACRO, NormalizedCaps, URI_SNIFF,
         encode_uri_component, extract_attributes_from_text,
@@ -1557,8 +1557,12 @@ struct TextAttrlist<'src> {
     adopted: bool,
 
     /// The masked nodes [`text`](Self::text) still holds a
-    /// `\u{96}`*n*`\u{97}` token for, in token-index order — empty for a list
-    /// that crossed none.
+    /// [`MASKED_PIECE_PLACEHOLDER`] occurrence for, in the same left-to-right
+    /// order those occurrences
+    /// appear in [`text`](Self::text) — sliced to start at
+    /// [`text`](Self::text)'s own first occurrence (see
+    /// [`Attrlist::nth_attribute_token_offset`]) — empty for a list that
+    /// crossed none.
     ///
     /// The list's *values* are restored on the way out of the parse
     /// ([`Attrlist::into_owned_restoring`]), but the display text becomes the
@@ -1720,14 +1724,25 @@ fn text_attrlist<'src>(
     if pre_restore.iter().any(|n| {
         attrs
             .nth_attribute(*n)
-            .is_some_and(|attribute| attribute.value().contains('\u{96}'))
+            .is_some_and(|attribute| attribute.value().contains(MASKED_PIECE_PLACEHOLDER))
     }) {
         return None;
     }
 
     let bodies: Vec<&str> = masked.iter().map(|piece| piece.body.as_ref()).collect();
 
-    let restores = masked.iter().map(|piece| piece.node.clone()).collect();
+    // `text` is attribute 1's own value — a substring of `tokened`, not the
+    // whole of it — so `restores` has to start at the same position
+    // `into_owned_restoring`'s own shared cursor would reach attribute 1 at,
+    // not at the whole bracket's own first occurrence. See
+    // [`restored_value_children`]'s doc comment for why.
+    let restores_start = attrs.nth_attribute_token_offset(1).unwrap_or(0);
+    let restores = masked
+        .get(restores_start..)
+        .unwrap_or_default()
+        .iter()
+        .map(|piece| piece.node.clone())
+        .collect();
 
     Some(TextAttrlist {
         adopted: text != tokened,
@@ -3766,11 +3781,16 @@ mod tests {
     #[test]
     fn an_authors_own_sentinel_shaped_bytes_in_a_display_text_are_a_documented_divergence() {
         // The wart the image family's own bracket already pins, reached from
-        // this side: restoring by `replace_all` over the
-        // *finished* string would rewrite an author's own `\u{96}`n`\u{97}`
-        // bytes too (both copies would become the body), while this restore
-        // splices only at the token it placed. Neither reading is reachable
-        // by ordinary authoring — these are C1 control characters.
+        // this side: the frozen golden recording was restored by
+        // `replace_all` over the *finished* string, so an author's own
+        // `\u{96}0\u{97}` bytes were rewritten too (both copies became the
+        // body). This restore instead finds the placeholder **pair**
+        // (`MASKED_PIECE_PLACEHOLDER`) by position, so the author's own bytes
+        // — `\u{96}`, `0`, `\u{97}`, none of them adjacent to their own
+        // matching half in a way that forms the pair — are never mistaken
+        // for one and stay exactly where the author put them, ahead of the
+        // real passthrough's own body. Neither reading is reachable by
+        // ordinary authoring — these are C1 control characters.
         use super::super::super::test_support::golden_passthroughs;
 
         let source = "link:https://example.org[\u{96}0\u{97}++a++,role=hl]";
@@ -3778,7 +3798,7 @@ mod tests {
 
         assert_eq!(
             fold_html(&build_src(Span::new(source)), &renderer),
-            "<a href=\"https://example.org\" class=\"hl\">a\u{96}0\u{97}</a>"
+            "<a href=\"https://example.org\" class=\"hl\">\u{96}0\u{97}a</a>"
         );
 
         assert_eq!(

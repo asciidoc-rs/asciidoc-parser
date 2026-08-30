@@ -22,6 +22,7 @@ use super::{
 };
 use crate::{
     HasSpan, Parser, Span,
+    attributes::element_attribute::MASKED_PIECE_PLACEHOLDER,
     content::restored_entity_pattern,
     inlines::{CharRef, InlineNode},
     strings::CowStr,
@@ -723,15 +724,15 @@ pub(in crate::content::inline_builder) fn emit_range_unescaping_brackets<'src>(
 }
 
 /// Rewrites the **opaque** pieces inside one computed text's own match-string
-/// bytes into index-keyed `\u{96}`*n*`\u{97}` tokens, returning that text
-/// alongside the nodes those tokens stand for.
+/// bytes into [`MASKED_PIECE_PLACEHOLDER`] occurrences, returning that text
+/// alongside the nodes those occurrences stand for, in left-to-right order.
 ///
 /// This is [`tokened_bracket`](image::tokened_bracket)'s counterpart for a
 /// value that is **carried structurally** rather than restored as bytes, and
 /// the two differ in exactly one way. A masked passthrough or STEM expression
-/// has a body known at build time, so `tokened_bracket` pairs each token with
-/// it and the caller can splice those bytes back into a *parsed* value. A
-/// rendered [`Styled`](crate::inlines::Styled) span — or any
+/// has a body known at build time, so `tokened_bracket` pairs each occurrence
+/// with it and the caller can splice those bytes back into a *parsed* value.
+/// A rendered [`Styled`](crate::inlines::Styled) span — or any
 /// earlier-recognized macro node — has no such body: its markup exists only
 /// when the tree is folded. There is still nothing to restore *into bytes*,
 /// but there is something to carry: the **node**. So this tokens every atomic
@@ -739,18 +740,13 @@ pub(in crate::content::inline_builder) fn emit_range_unescaping_brackets<'src>(
 /// as one placeholder, whatever kind it is, and the caller splices each node
 /// back through [`restored_value_children`].
 ///
-/// Why tokening at all, when the placeholder is already one opaque character:
-/// so the split sees the same **shape** an attribute-list parse over the
-/// piece's *rendered markup* would, which carries
-/// no `,`/`=`/`"` the split could read differently than it reads a token —
-/// and a bare placeholder, being a single `Co` character, would be
-/// indistinguishable from one *inside* a value once the parse hands that value
-/// back. The token's index is what makes the walk back out
-/// unambiguous, exactly as it is for
-/// [`tokened_bracket`](image::tokened_bracket).
+/// The placeholder carries no index of its own — [`Attrlist::parse`] just
+/// needs an atomic run at that position, carrying none of the `,`/`=`/`"` a
+/// value's own bytes might. Which node an occurrence stands for is recovered
+/// by *position*, exactly as for [`tokened_bracket`](image::tokened_bracket):
+/// the Nth occurrence, scanned left to right, is `carried[N]`.
 ///
-/// Renumbering is per call, from zero, so a token the parse drops shifts none
-/// of the ones that survive.
+/// [`Attrlist::parse`]: crate::attributes::Attrlist::parse
 pub(super) fn tokened_text<'src>(
     text: &str,
     range: &std::ops::Range<usize>,
@@ -793,7 +789,7 @@ pub(super) fn tokened_text<'src>(
 
         match opaque {
             Some(node) => {
-                tokened.push_str(&format!("\u{96}{n}\u{97}", n = carried.len()));
+                tokened.push_str(MASKED_PIECE_PLACEHOLDER);
                 carried.push(node.clone());
             }
 
@@ -842,26 +838,39 @@ pub(super) fn tokened_text<'src>(
 /// issue #2661, open since 2018 and settled there as intended behavior), which
 /// is a divergence this crate takes deliberately.
 ///
-/// The walk is index-keyed and left to right, exactly like
-/// [`restored_value_children`]'s: each token is sought only in the bytes after
-/// the previous one, and a token the parse dropped is simply not found.
+/// The walk is left to right and **positional**, exactly like
+/// [`restored_value_children`]'s: each [`MASKED_PIECE_PLACEHOLDER`]
+/// occurrence is sought only in the bytes after the previous one, and is
+/// paired with the next of `carried` in turn. `carried` must already be
+/// sliced to start at `text`'s own first occurrence — see
+/// [`Attrlist::nth_attribute_token_offset`]/
+/// [`Attrlist::named_attribute_token_offset`] for how a caller reading `text`
+/// out of a larger parsed [`Attrlist`] finds that starting point — since a bare
+/// occurrence carries no index of its own to re-align with if `carried` starts
+/// anywhere else.
+///
+/// [`Attrlist`]: crate::attributes::Attrlist
+/// [`Attrlist::nth_attribute_token_offset`]: crate::attributes::Attrlist::nth_attribute_token_offset
+/// [`Attrlist::named_attribute_token_offset`]: crate::attributes::Attrlist::named_attribute_token_offset
 pub(super) fn untranslated_value(text: &str, carried: &[InlineNode<'_>]) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
 
-    for (n, node) in carried.iter().enumerate() {
-        let token = format!("\u{96}{n}\u{97}");
+    for node in carried {
+        let Some(pos) = rest.find(MASKED_PIECE_PLACEHOLDER) else {
+            break;
+        };
 
-        if let Some(pos) = rest.find(&token) {
-            out.push_str(rest.get(..pos).unwrap_or_default());
+        out.push_str(rest.get(..pos).unwrap_or_default());
 
-            match node {
-                InlineNode::Raw { value, .. } => out.push_str(value.as_ref()),
-                other => out.push_str(other.span().data()),
-            }
-
-            rest = rest.get(pos + token.len()..).unwrap_or_default();
+        match node {
+            InlineNode::Raw { value, .. } => out.push_str(value.as_ref()),
+            other => out.push_str(other.span().data()),
         }
+
+        rest = rest
+            .get(pos + MASKED_PIECE_PLACEHOLDER.len()..)
+            .unwrap_or_default();
     }
 
     out.push_str(rest);
@@ -885,10 +894,20 @@ pub(super) fn untranslated_value(text: &str, carried: &[InlineNode<'_>]) -> Stri
 /// its markup exists only at fold time — so for it the node *is* the only
 /// honest reading.
 ///
-/// The walk is index-keyed and left to right: each token is sought only in
-/// the bytes after the previous one, and a
-/// token the parse dropped (a value the split discarded) is simply not found,
-/// leaving the ones after it to splice by their own index.
+/// The walk is left to right and **positional**: each
+/// [`MASKED_PIECE_PLACEHOLDER`] occurrence is sought only in the bytes after
+/// the previous one, and is paired with the next of `restores` in turn.
+/// `restores` must already be sliced to start at `text`'s own first
+/// occurrence — see
+/// [`Attrlist::nth_attribute_token_offset`]/
+/// [`Attrlist::named_attribute_token_offset`] for how a caller reading `text`
+/// out of a larger parsed [`Attrlist`] finds that starting point, exactly as
+/// [`untranslated_value`] needs it — since a bare occurrence carries no index
+/// of its own to re-align with if `restores` starts anywhere else.
+///
+/// [`Attrlist`]: crate::attributes::Attrlist
+/// [`Attrlist::nth_attribute_token_offset`]: crate::attributes::Attrlist::nth_attribute_token_offset
+/// [`Attrlist::named_attribute_token_offset`]: crate::attributes::Attrlist::named_attribute_token_offset
 pub(super) fn restored_value_children<'src>(
     text: &str,
     restores: &[InlineNode<'src>],
@@ -898,19 +917,21 @@ pub(super) fn restored_value_children<'src>(
     let mut children: Vec<InlineNode<'src>> = Vec::new();
     let mut rest = text;
 
-    for (n, node) in restores.iter().enumerate() {
-        let token = format!("\u{96}{n}\u{97}");
+    for node in restores {
+        let Some(pos) = rest.find(MASKED_PIECE_PLACEHOLDER) else {
+            break;
+        };
 
-        if let Some(pos) = rest.find(&token) {
-            children.append(&mut computed_value_children(
-                rest.get(..pos).unwrap_or_default(),
-                location,
-                specials,
-            ));
+        children.append(&mut computed_value_children(
+            rest.get(..pos).unwrap_or_default(),
+            location,
+            specials,
+        ));
 
-            children.push(node.clone());
-            rest = rest.get(pos + token.len()..).unwrap_or_default();
-        }
+        children.push(node.clone());
+        rest = rest
+            .get(pos + MASKED_PIECE_PLACEHOLDER.len()..)
+            .unwrap_or_default();
     }
 
     children.append(&mut computed_value_children(rest, location, specials));
