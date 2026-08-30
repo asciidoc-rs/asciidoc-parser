@@ -257,42 +257,66 @@ fn apply_macro_families<'src>(
     // comment); a span the built-in backend renders with no markup of its own
     // is transparent, so `child_contexts` hands its children the character its
     // own *siblings* present instead.
-    let contexts = LevelContext::child_contexts(&nodes, ctx, masked);
+    // A level with no parent node to descend into — the common leaf-only case
+    // — skips the context derivation and the rebuild of its node vector
+    // entirely (the same scan-first shape the shown-term hop below uses).
+    let has_parent = nodes
+        .iter()
+        .any(|node| matches!(node, InlineNode::Styled(_) | InlineNode::Ref(_)));
 
-    let nodes: Vec<InlineNode<'src>> = nodes
-        .into_iter()
-        .zip(contexts)
-        .map(|(node, inner)| match node {
-            // An extraction wrapper's body is **not** this content's to
-            // substitute. The string pipeline holds it as a sentinel for every
-            // step from here on, and the body was already substituted once —
-            // by the separate, nested `Normal` build the `x-` compatibility
-            // form (`[x-]++text++`) runs it through — so descending here would
-            // apply this step's families to it a *second* time
-            // (`[x-]++**b**https://example.org++` grows an `<a>` inside the
-            // `<a>` that build already made). It is also the one place this
-            // level's `masked` could not answer even if it did descend, since
-            // the list is collected from one content's own top level and knows
-            // nothing of a nested build's nodes.
-            InlineNode::Styled(styled) if masked.covers(styled.location) => {
-                InlineNode::Styled(styled)
-            }
+    let nodes: Vec<InlineNode<'src>> = if has_parent {
+        let contexts = LevelContext::child_contexts(&nodes, ctx, masked);
 
-            InlineNode::Styled(mut styled) => {
-                styled.children =
-                    apply_macro_families(styled.children, root, parser, inner, masked, specials);
-                InlineNode::Styled(styled)
-            }
+        nodes
+            .into_iter()
+            .zip(contexts)
+            .map(|(node, inner)| match node {
+                // An extraction wrapper's body is **not** this content's to
+                // substitute. The string pipeline holds it as a sentinel for
+                // every step from here on, and the body was already
+                // substituted once — by the separate, nested `Normal` build
+                // the `x-` compatibility form (`[x-]++text++`) runs it
+                // through — so descending here would apply this step's
+                // families to it a *second* time
+                // (`[x-]++**b**https://example.org++` grows an `<a>` inside
+                // the `<a>` that build already made). It is also the one
+                // place this level's `masked` could not answer even if it did
+                // descend, since the list is collected from one content's own
+                // top level and knows nothing of a nested build's nodes.
+                InlineNode::Styled(styled) if masked.covers(styled.location) => {
+                    InlineNode::Styled(styled)
+                }
 
-            InlineNode::Ref(mut reference) => {
-                reference.children =
-                    apply_macro_families(reference.children, root, parser, inner, masked, specials);
-                InlineNode::Ref(reference)
-            }
+                InlineNode::Styled(mut styled) => {
+                    styled.children = apply_macro_families(
+                        styled.children,
+                        root,
+                        parser,
+                        inner,
+                        masked,
+                        specials,
+                    );
+                    InlineNode::Styled(styled)
+                }
 
-            other => other,
-        })
-        .collect();
+                InlineNode::Ref(mut reference) => {
+                    reference.children = apply_macro_families(
+                        reference.children,
+                        root,
+                        parser,
+                        inner,
+                        masked,
+                        specials,
+                    );
+                    InlineNode::Ref(reference)
+                }
+
+                other => other,
+            })
+            .collect()
+    } else {
+        nodes
+    };
 
     // The UI macros run before image/icon and only under `experimental`,
     // mirroring the string step's order and gate.

@@ -689,8 +689,8 @@ fn build_bare_unconstrained_match<'src>(
 /// [`SPAN_PLACEHOLDER`](super::quotes::SPAN_PLACEHOLDER) and which are ordinary
 /// text. That distinction cannot
 /// be recovered from the substituted string: the placeholder is an ordinary
-/// (private-use) character a source can spell **literally**
-/// (`+b\u{E0F0}c+`), and a scan of the substituted bytes would read the two
+/// (control) character a source can spell **literally**
+/// (`+b\u{10}c+`), and a scan of the substituted bytes would read the two
 /// alike — splicing a body at the literal one, and dropping the real node's.
 ///
 /// So the walk is by piece rather than by character. Each run of ordinary
@@ -2710,19 +2710,19 @@ mod tests {
             "+a `b` c+",
             "+a *b* c+",
             // A body carrying [`SPAN_PLACEHOLDER`] **literally**. The
-            // character is an ordinary private-use one a source can spell, so
+            // character is an ordinary control one a source can spell, so
             // the restore's own split reads a separator where no piece stands;
             // it writes the character back rather than consuming a body that
             // is not there, which is what keeps the rest of the body from
             // being dropped. Covered at either edge, alone, and beside a real
             // restored body on both sides of it.
-            "a +b\u{E0F0}c+ d",
-            "a +\u{E0F0}+ d",
-            "a +\u{E0F0}b+ d",
-            "a +b\u{E0F0}+ d",
-            "a +pass:[<b>]\u{E0F0}tail+ d",
-            "a +head\u{E0F0}pass:[<b>]+ d",
-            "a +b\u{E0F0}c\u{E0F0}d+ e",
+            "a +b\u{10}c+ d",
+            "a +\u{10}+ d",
+            "a +\u{10}b+ d",
+            "a +b\u{10}+ d",
+            "a +pass:[<b>]\u{10}tail+ d",
+            "a +head\u{10}pass:[<b>]+ d",
+            "a +b\u{10}c\u{10}d+ e",
         ] {
             assert_eq!(
                 fold_html(&build_src(Span::new(fixture)), &HtmlInlineRenderer {}),

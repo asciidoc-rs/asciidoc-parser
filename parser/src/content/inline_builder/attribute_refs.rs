@@ -1522,6 +1522,25 @@ mod tests {
     }
 
     #[test]
+    fn a_replacement_split_one_character_per_piece_is_recognized() {
+        // The same em-dash rule with its two dashes split one-per-piece
+        // across the synthesized/verbatim junction, so *neither* piece's own
+        // text holds a sniffable construct. This is the shape the piecewise
+        // pre-filter (`level_may_have_replacements`) cannot see inside either
+        // contribution and must admit through its straddle rule — a pre-filter
+        // that probed pieces alone would skip the level and leave the em dash
+        // unreplaced.
+        let parser = parser_with_attribute("dashed", "hello-");
+        let source = "{dashed}-world";
+        let nodes = build(Span::new(source), &parser, None);
+
+        assert_eq!(
+            fold_html(&nodes, &HtmlInlineRenderer {}),
+            golden_attributes_with(source, &parser),
+        );
+    }
+
+    #[test]
     fn a_construct_immediately_after_a_synthesized_run_keeps_its_own_location() {
         // Regression coverage for the bug the `{sp}`-then-`image:` fixture in
         // `macros::image::tests::matches_the_golden_pipelines_registration_for_a_broad_fixture_set`
