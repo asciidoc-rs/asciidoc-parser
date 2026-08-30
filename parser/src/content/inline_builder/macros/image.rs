@@ -846,7 +846,7 @@ fn masked_default_alt(
     // One left-to-right pass, like `Passthroughs::restore_to`'s own
     // `replace_all`: each token is sought only in the bytes after the
     // previous splice, so a restored body that itself carries
-    // sentinel-shaped bytes can never be matched as a later token. Surviving
+    // placeholder-shaped bytes can never be matched as a later token. Surviving
     // tokens appear in index order (they were emitted in piece order and the
     // arithmetic never reorders), and a dropped token is simply not found —
     // the ones after it still restore, keyed by their own index.
@@ -958,14 +958,13 @@ pub(in crate::content::inline_builder) struct MaskedPiece<'a, 'src> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::content::inline_builder) enum Tokened {
     /// Only a **masked** construct — a passthrough or a STEM expression —
-    /// whose body the string pipeline itself splices over its own sentinel.
+    /// whose body `Passthroughs::restore_to` splices over its own placeholder.
     /// The bracket's parsed values may then be restored wherever they go.
     Masked,
 
     /// Also any other **opaque** piece: a rendered span, an
     /// earlier-recognized macro node. Its body is the build-time **fold** with
-    /// the parser's own renderer — the bytes the string replacer reads out of
-    /// its own already-rendered haystack there — which is what lets a value
+    /// the parser's own renderer, which is what lets a value
     /// carry markup an author wrote into a slot a renderer writes out (see
     /// [`MaskedPiece::body`]).
     MaskedOrRendered,
@@ -975,11 +974,12 @@ pub(in crate::content::inline_builder) enum Tokened {
 /// in it becomes an index-keyed `\u{96}`*n*`\u{97}` token, returning that text
 /// alongside the [`MaskedPiece`]s those tokens stand for.
 ///
-/// This is the *before the split* half of every bracket restore, and it exists
-/// so the text handed to [`Attrlist::parse`] is the same **shape** the string
-/// pipeline's own haystack has there. Two spellings have to be normalized into
+/// This is the *before the split* half of every bracket restore, and it
+/// exists so the text handed to [`Attrlist::parse`] holds the placeholder
+/// token in place of each masked body's own bytes. Two spellings have to be
+/// normalized into
 /// one: [`widen_masked_pieces`] has already rewritten a masked piece to a
-/// sentinel-shaped token for the image family's *recognition*, but its
+/// three-byte token for the image family's *recognition*, but its
 /// numbering is per level, and for the link families' display-text list a
 /// masked piece is still the bare one-character
 /// [`SPAN_PLACEHOLDER`](super::super::quotes). Renumbering every restorable
@@ -988,7 +988,7 @@ pub(in crate::content::inline_builder) enum Tokened {
 /// drop a token (a blank slot, a value the split discards) without shifting
 /// the ones that survive, exactly as
 /// `Passthroughs::restore_to` is
-/// unshifted by a sentinel that never reached the rendered string.
+/// unshifted by a placeholder that never reached the rendered string.
 ///
 /// Shared by the two families whose bracket comes back from a parse — the
 /// `image:`/`icon:` bracket here, and the link families' display-text list
@@ -1035,8 +1035,7 @@ pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
         // (pinned by `restorable_body_agrees_with_node_is_restorable`), so
         // gating on one before producing the other would leave a branch no
         // input can take. A piece this leaves untokened contributes its own
-        // bytes: a `Text` run's, or a `CharRef` leaf's canonical entity, which
-        // are the string replacer's own bytes there.
+        // bytes: a `Text` run's, or a `CharRef` leaf's canonical entity.
         let masked = piece
             .atomic
             .then(|| nodes.get(piece.node_index))
@@ -1089,8 +1088,7 @@ fn parse_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
         .item
 }
 
-/// Performs the recognition side effects the string pipeline's own
-/// `InlineImageMacroReplacer` attaches to an `image:`/`icon:` match —
+/// Performs the recognition side effects an `image:`/`icon:` match needs —
 /// registering the image target in the document's asset catalog (`image:`
 /// only, and only when [`catalog_assets`](Parser::with_catalog_assets) is
 /// enabled) and recording the `link=` dangerous-scheme/self-href warning —
@@ -1100,16 +1098,12 @@ fn parse_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
 ///
 /// Every macro family this module recognizes defers exactly this kind of
 /// side effect (see this file's own `register_image` note, and the anchor,
-/// link, and footnote increments' own): while the additive builder runs
-/// *alongside* the authoritative string pipeline — each against its own,
-/// independent [`Parser`] — performing it from every additive pass would risk
-/// double-counting a registration once the two paths ever share one `Parser`.
-/// This function is that deferred piece, staged as its own building block for
-/// the eventual cutover (design §5.2, Phase 4 step 6): re-attaching it for
-/// real means calling it exactly once per parse, after the single-pass
-/// builder replaces the recorder as `Content`'s tree source, so nothing here
-/// is now wired into the real parse path — see
-/// [`apply_macro_side_effects`](super::apply_macro_side_effects) — and is also
+/// link, and footnote families' own): recognition runs once per level as the
+/// tree is built, but a side effect must run exactly once per parse, so it is
+/// replayed from the finished tree afterward, via
+/// [`apply_macro_side_effects`](super::apply_macro_side_effects), rather than
+/// performed inline as each family recognizes its construct. This function is
+/// that replay for the image/icon family, and is also
 /// exercised directly by this module's own tests, against their own `Parser`.
 ///
 /// Recurses into every container an `Image` node can be nested inside —

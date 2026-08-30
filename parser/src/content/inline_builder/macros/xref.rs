@@ -2155,7 +2155,7 @@ mod tests {
 
             assert!(
                 golden_whole_pipeline(source).contains('\u{96}'),
-                "the string pipeline is expected to leak its sentinel for {source:?}"
+                "the frozen recording is expected to leak its sentinel for {source:?}"
             );
         }
 
@@ -2198,7 +2198,7 @@ mod tests {
             assert_ne!(
                 fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_xref(source),
-                "{source:?} now agrees with the string pipeline; fold it into the parity corpus"
+                "{source:?} now agrees with the frozen recording; fold it into the parity corpus"
             );
         }
     }
@@ -2226,7 +2226,7 @@ mod tests {
 
         assert!(
             golden.contains('\u{96}'),
-            "expected the string pipeline's sentinel leak to still reproduce: {golden:?}"
+            "expected the frozen recording's sentinel leak to still reproduce: {golden:?}"
         );
 
         let nodes = build_src(Span::new(source));

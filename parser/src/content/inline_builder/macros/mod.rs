@@ -1374,7 +1374,7 @@ mod tests {
                     "build_for_group_restored_entity",
                     source
                 ),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the golden output for {source:?}"
             );
         }
     }
@@ -1430,7 +1430,7 @@ mod tests {
                     "build_for_group_recoverable_piece",
                     source
                 ),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the golden output for {source:?}"
             );
         };
 

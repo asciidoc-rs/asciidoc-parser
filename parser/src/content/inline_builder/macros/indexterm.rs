@@ -1004,7 +1004,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the golden output for {fixture:?}"
             );
         }
     }
@@ -1128,7 +1128,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(source),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the golden output for {source:?}"
             );
             assert_ne!(folded, source, "the term should be consumed for {source:?}");
         }
@@ -1246,7 +1246,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the golden output for {fixture:?}"
             );
         }
     }
@@ -1333,7 +1333,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(fixture)), &HtmlInlineRenderer {}),
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the golden output for {fixture:?}"
             );
         }
     }
@@ -1504,7 +1504,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the golden output for {source:?}"
             );
         }
     }
@@ -1576,7 +1576,7 @@ mod tests {
             assert_eq!(
                 fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_macros(source),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the golden output for {source:?}"
             );
 
             assert!(
@@ -1700,7 +1700,7 @@ mod tests {
                     &parser.render_context()
                 ),
                 crate::content::inline_builder::snapshot::recorded("indexterm_expanded", source),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the golden output for {source:?}"
             );
         }
     }
@@ -1803,7 +1803,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(fixture)), &HtmlInlineRenderer {}),
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the golden output for {fixture:?}"
             );
         }
     }

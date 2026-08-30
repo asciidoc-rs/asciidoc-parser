@@ -1081,7 +1081,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the golden recording for {fixture:?}"
             );
         }
     }
@@ -1125,7 +1125,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(fixture)), &renderer),
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the golden recording for {fixture:?}"
             );
         }
     }
@@ -1149,7 +1149,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the golden recording for {fixture:?}"
             );
 
             assert!(
@@ -1445,7 +1445,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(source),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the golden recording for {source:?}"
             );
 
             let nodes = build_src(Span::new(source));
@@ -1674,7 +1674,7 @@ mod tests {
                     &expanding_parser().render_context()
                 ),
                 golden_normal(source, &expanding_parser()),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the golden recording for {source:?}"
             );
         }
     }

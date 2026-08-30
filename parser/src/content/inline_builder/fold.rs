@@ -796,14 +796,12 @@ fn fold_callout(
     renderer.render_callout(callout, context, out);
 }
 
-/// Folds a [`Stem`](InlineNode::Stem) through the same
-/// `render_styled` the string pipeline's passthrough-restore step
-/// calls for a STEM entry (design §3.3.1's fold-time seam). The node's `value`
-/// already carries the resolved substitution group's output (special
+/// Folds a [`Stem`](InlineNode::Stem) through `render_styled`. The node's
+/// `value` already carries the resolved substitution group's output (special
 /// characters only, by default), so the fold passes it straight through as
-/// the body — no further processing is needed, mirroring how a STEM
-/// passthrough is restored with no attribute list or id (`INLINE_STEM_MACRO`
-/// captures neither).
+/// the body — no further processing is needed, matching how Asciidoctor
+/// restores a STEM passthrough with no attribute list or id
+/// (`INLINE_STEM_MACRO` captures neither).
 ///
 /// Shared with the macro families, whose *restore* of a masked STEM
 /// expression into a computed target must emit exactly the bytes this fold
@@ -855,20 +853,22 @@ mod tests {
 
     #[test]
     fn fold_reference_text_omits_a_headings_footnote_markers() {
-        // The tree's answer to the footnote-marker sentinel system this
-        // increment deleted: the two strings `Section::parse` needs — the
+        // The tree's answer to the footnote-marker sentinel system that was
+        // deleted: the two strings `Section::parse` needs — the
         // rendering the heading shows, and the footnote-free text its reference
         // and auto-generated id are derived from — are two *folds of the same
         // tree*, and "which regions were footnote markers" is a question about
         // node kinds rather than about bytes.
         //
         // Every fixture is checked from both ends. The heading's own rendering
-        // is compared against the string pipeline, which still produces it and
-        // is the golden-HTML oracle (§5.3). The footnote-free reference text is
-        // compared against a **literal** expected string: with the sentinel
-        // strip gone there is no second implementation left to differentiate
-        // against, so the expectation is written down instead — these are the
-        // exact bytes that strip produced, captured before it was deleted.
+        // is compared against `Content::rendered_html()` for the same source
+        // under the `Title` group — the public entry point's own
+        // build-and-fold of the same tree, confirming the two paths agree.
+        // The footnote-free reference text is compared against a **literal**
+        // expected string: with the sentinel strip gone there is no second
+        // implementation left to differentiate against, so the expectation is
+        // written down instead — these are the exact bytes that strip
+        // produced, captured before it was deleted.
         let fixtures = [
             // No footnote at all: the two strings are the same.
             ("Plain title", "Plain title"),
@@ -911,7 +911,7 @@ mod tests {
 
         for (fixture, expected_reftext) in fixtures {
             // Two independent parsers, since a footnote's number is document
-            // state: one for each side of the comparison (design §5.3).
+            // state: one for each side of the comparison.
             let golden_parser = Parser::default();
             let mut golden = crate::content::Content::from(Span::new(fixture));
             crate::content::SubstitutionGroup::Title.apply(&mut golden, &golden_parser, None);
@@ -1074,7 +1074,8 @@ mod tests {
         // `xrefstyle` in effect *there* is whatever the last `:xrefstyle:` line
         // in the document left set — not what was in effect where the
         // reference was written. Reading it at fold time would therefore
-        // silently re-style a reference the string pipeline had already styled.
+        // silently re-style a reference that was already styled correctly at
+        // the point it was written.
         let renderer = HtmlInlineRenderer {};
 
         // A parser whose document-wide `xrefstyle` says `full`, which the

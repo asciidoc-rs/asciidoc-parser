@@ -3680,11 +3680,11 @@ mod tests {
         // (`%C2%960%C2%97`), which `Passthroughs::restore_to` can then no
         // longer find in the finished attribute — the frozen golden
         // recording for this shape captures exactly that leaked,
-        // still-encoded token, and no restore here can reproduce it. Deferred with the
-        // whole match left literal, the same boundary the cross-reference
-        // family's own pre-restore target keeps, and drawn per *slot* so that
-        // the sibling fixtures above (a masked display text beside a plain
-        // subject) still restore.
+        // still-encoded token, and no restore here can reproduce it. Deferred
+        // with the whole match left literal, the same boundary the
+        // cross-reference family's own pre-restore target keeps, and
+        // drawn per *slot* so that the sibling fixtures above (a masked
+        // display text beside a plain subject) still restore.
         use super::super::super::test_support::golden_passthroughs;
 
         for source in [
@@ -3766,11 +3766,11 @@ mod tests {
     #[test]
     fn an_authors_own_sentinel_shaped_bytes_in_a_display_text_are_a_documented_divergence() {
         // The wart the image family's own bracket already pins, reached from
-        // this side: the string pipeline restores by `replace_all` over the
-        // *finished* string, so an author's own `\u{96}`n`\u{97}` bytes are
-        // rewritten too (both copies become the body), while this restore
-        // splices at the token it placed. Neither reading is reachable by
-        // ordinary authoring — these are C1 control characters.
+        // this side: restoring by `replace_all` over the
+        // *finished* string would rewrite an author's own `\u{96}`n`\u{97}`
+        // bytes too (both copies would become the body), while this restore
+        // splices only at the token it placed. Neither reading is reachable
+        // by ordinary authoring — these are C1 control characters.
         use super::super::super::test_support::golden_passthroughs;
 
         let source = "link:https://example.org[\u{96}0\u{97}++a++,role=hl]";
@@ -4003,7 +4003,7 @@ mod tests {
     fn a_link_macro_url_target_is_left_for_the_link_macro_pass() {
         // `link:https://…[…]` is the pattern's LINK-MACRO branch; the auto-link
         // pass leaves it, and `link_macro_level` builds the identical node, so
-        // the fold still matches the string pipeline byte-for-byte.
+        // the fold still matches the frozen golden recording byte-for-byte.
         let source = "link:https://example.org[Example]";
         let nodes = build_src(Span::new(source));
 
@@ -4020,8 +4020,8 @@ mod tests {
     #[test]
     fn an_auto_link_at_a_spans_own_edge_reads_that_spans_boundary_characters() {
         // `INLINE_LINK`'s non-angle branch requires a boundary prefix
-        // (`( ^ | [\ \t\p{Zs}] | [>\(\)\[\];"'] )`), which inside a span the
-        // string pipeline reads out of that span's own rendered markup. Every
+        // (`( ^ | [\ \t\p{Zs}] | [>\(\)\[\];"'] )`), which inside a span would
+        // be read out of that span's own rendered markup. Every
         // shape a [`LevelContext`](super::super::quotes::LevelContext) can
         // present — the `>` ending a tag and the `;` ending a smart quote's
         // entity — is in that class, so the URL is recognized on both sides of
@@ -4066,9 +4066,10 @@ mod tests {
         // [`LevelContext::shift`](super::super::quotes::LevelContext)).
         // A boundary class reads exactly one character, but a bare URL's own
         // body class (`[^\s\[\]<]*`) consumes greedily: it excludes a `<`, so
-        // a tag-rendered span's closing markup stops it in both pipelines, and
-        // it admits an `&`, so at a smart quote's closing `&#8220;…&#8221;` the
-        // string pipeline swallows the whole entity into the target and leaves
+        // a tag-rendered span's closing markup would stop it there too, and
+        // it admits an `&`, so at a smart quote's closing `&#8220;…&#8221;`
+        // matching over the rendered markup would swallow the whole entity
+        // into the target and leave
         // a stray `;` behind. Supplying the level one `&` would build a third,
         // differently wrong target, so the closing character is dropped rather
         // than half-supplied and the tree keeps the well-formed reading — the
@@ -4082,7 +4083,8 @@ mod tests {
             "expected the documented divergence to still reproduce"
         );
 
-        // The string pipeline's own reading is the markup-perturbed one.
+        // The frozen golden recording's own reading is the markup-perturbed
+        // one.
         assert!(golden_macros(source).contains("https://example.org&#8221"));
         assert!(folded.contains(r#"href="https://example.org""#));
     }
@@ -4179,7 +4181,8 @@ mod tests {
 
     #[test]
     fn an_angle_bracketed_url_becomes_a_bare_ref_node_consuming_its_delimiters() {
-        // The string replacer emits *only* the rendered link for the whole
+        // Asciidoctor's own angle-link rendering emits *only* the rendered
+        // link for the whole
         // match, so the node consumes its `&lt;`/`&gt;` delimiters rather than
         // keeping them as literal text: one node, whose location covers the
         // brackets too.
@@ -4241,7 +4244,7 @@ mod tests {
     #[test]
     fn an_unterminated_angle_bracketed_url_is_left_literal() {
         // The ANGLE branch's third alternative — no closing `&gt;` and no
-        // `[…]` — is emitted unchanged by the string replacer, so the builder
+        // `[…]` — is left unchanged, so the builder
         // builds no node for it either (and, because the branch's own match
         // consumed the URL, no *non-angle* auto-link is found inside it).
         let nodes = build_src(Span::new("<https://example.org"));
@@ -4256,8 +4259,8 @@ mod tests {
     fn an_angle_bracketed_url_crossing_an_escaped_special_shows_structured_children() {
         // The delimiters of an angle link are escaped specials the node
         // consumes; so, now, may the URL *between* them be crossed by one. The
-        // target is read off the level's match string (the escaped bytes the
-        // string replacer computed), and the shown text — which for this
+        // target is read off the level's match string (the correctly
+        // escaped bytes), and the shown text — which for this
         // always-`bare` form *is* the target — is recovered from the interior's
         // own range as structured children, so the `&` stays the `CharRef` it
         // already is rather than being escaped a second time.
@@ -4295,8 +4298,9 @@ mod tests {
     fn an_angle_bracketed_url_over_a_rendered_span_is_a_documented_divergence() {
         // The interior gate admits an escaped special but still rejects an
         // *opaque* piece: a quoted span inside the delimiters is a `Styled`
-        // node by macro time, standing in as one placeholder where the string
-        // pipeline's haystack holds its markup, so the angle link is left
+        // node by macro time, standing in as one placeholder rather than the
+        // rendered markup that exists only at fold time, so the angle link
+        // is left
         // literal — the `<url>` form's own half of the boundary its `[…]`
         // sibling keeps below.
         let source = "<https://example.org/*bold*>";
@@ -4317,11 +4321,11 @@ mod tests {
         // bracketed display text crosses an **opaque** piece — a rendered span,
         // an already-recognized macro node of another family, a masked
         // passthrough. The text is carried structurally (each opaque piece's
-        // own node becomes a child), so the fold re-renders exactly the markup
-        // the string replacer captured in its own text.
+        // own node becomes a child), so the fold reproduces that markup
+        // exactly.
         let fixtures = [
-            // (A masked passthrough is opaque here too — and in the string
-            // pipeline, which restores passthroughs only after every step — but
+            // (A masked passthrough is opaque here too — since it restores
+            // only after every substitution step has run — but
             // this oracle runs the steps directly, without the extraction the
             // real `SubstitutionGroup::apply` performs around them, so those
             // fixtures live in the whole-pipeline sweep instead; see
@@ -4334,8 +4338,9 @@ mod tests {
             "https://example.org[a *b* c]",
             "https://example.org[*bold*]",
             // Every quoted form the earlier step can have produced, including
-            // an attributed span (whose markup carries an `=` the string
-            // replacer's own attribute-list probe reads, and this one does not:
+            // an attributed span (whose markup carries an `=` an
+            // attribute-list probe reading the rendered markup would read,
+            // and this one does not:
             // with no comma to split on, the parse yields one positional value
             // equal to the whole text, so both take the plain-text path).
             "https://example.org[_em_ and `code` and #mark#]",
@@ -4417,8 +4422,7 @@ mod tests {
         // the span is one opaque placeholder in the match string, but
         // `macro_text_children` recovers the text with `emit_range`, which
         // clones the span's own node whole into the link's children. The fold
-        // then re-renders exactly the markup the string replacer captured in
-        // its own display text.
+        // then reproduces that markup exactly.
         let source = "https://example.org[a *bold* b]";
         let nodes = build_src(Span::new(source));
 
@@ -4476,22 +4480,26 @@ mod tests {
     #[test]
     fn a_span_whose_markup_perturbs_the_inline_link_pattern_is_a_documented_divergence() {
         // What the structural recovery cannot do is make the *recognition*
-        // agree in every case: the string replacer matches over the span's
-        // markup where this matches over the one placeholder standing in for
-        // it, so the two read the same extent only while that markup carries
-        // no character the pattern (or the replacer's own attribute-list
-        // probe) is sensitive to. These are the two shapes where it does — and
-        // in each the string pipeline's reading is the markup-perturbed one (a
+        // agree with matching over the span's
+        // rendered markup in every case: this matches over the one
+        // placeholder standing in for
+        // it, so the two extents coincide only while that markup carries
+        // no character the pattern (or an attribute-list probe reading it)
+        // is sensitive to. These are the two shapes where it does — and
+        // in each matching the rendered markup gives the perturbed reading
+        // (a
         // truncated text, a text the attribute-list parse cut in half) and the
-        // tree's the well-formed one, exactly as the quotes step's own
+        // tree's is the well-formed one, exactly as the quotes step's own
         // crossed-delimiter divergence is.
         for source in [
-            // A `]` inside the span ends `INLINE_LINK`'s own lazy text capture
-            // early for the string replacer, but not here.
+            // A `]` inside the span would end `INLINE_LINK`'s own lazy text
+            // capture early if matched over the rendered markup, but not
+            // here.
             "https://example.org[a *b ] c* d]",
             // Markup carrying an `=` (an attributed span) *and* a comma
-            // elsewhere in the text: the string replacer's attribute-list probe
-            // fires on the markup's own `=`, and the parse then splits the text
+            // elsewhere in the text: an attribute-list probe reading the
+            // rendered markup fires on its own `=`, and the parse then
+            // splits the text
             // at that comma, keeping only what precedes it.
             "https://example.org[one, [.hl]#two#]",
         ] {
@@ -4514,11 +4522,11 @@ mod tests {
 
     #[test]
     fn a_bare_auto_link_crossing_an_escaped_special_shows_structured_children() {
-        // A URL whose body contains `&` is matched by the string pipeline over
+        // A URL whose body contains `&` is matched over
         // the *escaped* text (`…?a=1&amp;b=2`) — and the level's match string
-        // carries exactly those bytes for the `CharRef::Special` the
-        // `SpecialCharacters` step made, so the target this pass computes is
-        // the one the replacer computed. A bare link's shown text *is* that
+        // carries exactly those bytes for the `CharRef::Special`
+        // `apply_special_characters` made, so the target this pass computes is
+        // the correctly escaped one. A bare link's shown text *is* that
         // target, so it is recovered from the URL's own range as structured
         // children (each special keeping its precise `'src` span, #944) rather
         // than baked, already escaped, into one `Text` the fold would escape
@@ -4636,9 +4644,9 @@ mod tests {
         // The trailing-punctuation strip keys off the target's *final
         // character*, over the escaped text — so a bare URL ending in a
         // literal `&` (whose match-string tail is `&amp;`) satisfies it on
-        // that entity's own `;`. The string replacer splits the entity there
-        // (target `…/a&amp`, a literal `;` after the link), and the tree now
-        // reproduces that split rather than deferring to it: the boundary
+        // that entity's own `;`. Splitting the entity there
+        // (target `…/a&amp`, a literal `;` after the link) is what the tree
+        // reproduces rather than deferring to it: the boundary
         // falls inside a `CharRef` leaf, which
         // [`emit_range`](super::super::quotes::emit_range) cuts into two
         // [`Raw`](InlineNode::Raw) halves — each folding to its own bytes, so
@@ -4687,9 +4695,9 @@ mod tests {
     #[test]
     fn a_bare_urls_trailing_strip_cuts_a_special_into_two_raw_halves() {
         // The parity above, read structurally: the target keeps the entity's
-        // leading bytes as the string replacer's own `href` does, the shown
+        // leading bytes, the shown
         // text carries them as a `Raw` leaf (a `Text` would have the fold
-        // escape the `&` a second time — design §3.4), and the `;` the strip
+        // escape the `&` a second time), and the `;` the strip
         // left behind is the leaf's own remaining byte, emitted beside the
         // link rather than duplicating the whole entity there.
         let nodes = build_src(Span::new("https://example.org/a&"));
@@ -4701,7 +4709,7 @@ mod tests {
 
         // Neither half has an honest `'src` slice of its own — the source
         // holds one `&` where the match string holds five bytes — so both keep
-        // the leaf's whole location (design §4.4's coarse fallback).
+        // the leaf's whole location (the coarse whole-content-span fallback).
         let head = assert_raw(&reference.children[1], "&amp");
         assert_eq!(head.data(), "&");
 
@@ -4715,8 +4723,8 @@ mod tests {
         // A *restored entity* (`&amp;copy;` written in the source, which the
         // character-replacements step turns back into a `CharRef::Entity`
         // whose value is `&copy;`) is admitted for the same reason an escaped
-        // special is: its match-string bytes are the string pipeline's own
-        // haystack bytes there, and the fold emits them verbatim. It is
+        // special is: its match-string bytes are the correctly escaped bytes
+        // there, and the fold emits them verbatim. It is
         // recovered as its own `CharRef` child rather than baked into a `Text`
         // the fold would escape a second time.
         let fixtures = [
@@ -5030,8 +5038,9 @@ mod tests {
             "link:index.html[a *b* c]",
             "link:index.html[*bold*]",
             // Every quoted form the earlier step can have produced, including
-            // an attributed span (whose markup carries an `=` the string
-            // replacer's own attribute-list probe reads, and this one does not:
+            // an attributed span (whose markup carries an `=` an
+            // attribute-list probe reading the rendered markup would read,
+            // and this one does not:
             // with no comma to split on, the parse yields one positional value
             // equal to the whole text, so both take the plain-text path).
             "link:index.html[_em_ and `code` and #mark#]",
@@ -5088,8 +5097,7 @@ mod tests {
         // the span is one opaque placeholder in the match string, but
         // `macro_text_children` recovers the text with `emit_range`, which
         // clones the span's own node whole into the link's children. The fold
-        // then re-renders exactly the markup the string replacer captured in
-        // its own display text.
+        // then reproduces that markup exactly.
         let source = "link:index.html[a *bold* b]";
         let nodes = build_src(Span::new(source));
 

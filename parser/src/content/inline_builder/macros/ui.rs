@@ -525,7 +525,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros_in("macros_experimental", fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the golden output for {fixture:?}"
             );
         }
     }
@@ -550,7 +550,7 @@ mod tests {
             assert_eq!(
                 fold_html(&nodes, &renderer),
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the golden output for {fixture:?}"
             );
         }
     }
@@ -821,7 +821,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros_in("macros_experimental", fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the golden output for {fixture:?}"
             );
         }
     }
@@ -914,7 +914,7 @@ mod tests {
                 golden.contains("<kbd>")
                     || golden.contains(r#"class="button"#)
                     || golden.contains(r#"class="menu"#),
-                "expected the golden pipeline to build a UI macro for {source:?}"
+                "expected the golden recording to hold a UI macro for {source:?}"
             );
         }
     }
@@ -978,7 +978,7 @@ mod tests {
                     &parser.render_context()
                 ),
                 golden_normal(source, &parser),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the golden output for {source:?}"
             );
         }
     }
@@ -1074,7 +1074,7 @@ mod tests {
                     &parser.render_context()
                 ),
                 golden_normal(filtered, &parser),
-                "fold diverged from the string pipeline for {filtered:?}"
+                "fold diverged from the golden output for {filtered:?}"
             );
         }
     }

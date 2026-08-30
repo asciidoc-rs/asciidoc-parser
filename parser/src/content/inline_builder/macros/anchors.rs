@@ -905,7 +905,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen recording for {fixture:?}"
             );
         }
     }
@@ -1194,7 +1194,7 @@ mod tests {
             &parser.render_context(),
         );
 
-        assert_eq!(folded, golden, "fold diverged from the string pipeline");
+        assert_eq!(folded, golden, "fold diverged from the frozen recording");
     }
 
     #[test]
@@ -1289,7 +1289,7 @@ mod tests {
             &HtmlInlineRenderer {},
             &parser.render_context(),
         );
-        assert_eq!(folded, golden, "fold diverged from the string pipeline");
+        assert_eq!(folded, golden, "fold diverged from the frozen recording");
     }
 
     // ---- `apply_ref_side_effects` -------
@@ -1619,7 +1619,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros_with(fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen recording for {fixture:?}"
             );
         }
     }
