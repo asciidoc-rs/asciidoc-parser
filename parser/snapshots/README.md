@@ -29,9 +29,7 @@ builder — and the test asserted the two matched. Once the AST's HTML fold beca
 *only* pipeline (the string pipeline was deleted), that comparison would have become
 tautological (the fold compared against itself). So each corpus's expected side was
 recorded once, checked in, and is now read rather than re-derived — exactly like the
-crate's ~277 golden-HTML string assertions elsewhere in the test suite. There is no
-`ASCIIDOC_UPDATE_SNAPSHOTS=1`-style regeneration mode; that went away with the pipeline
-that would have produced the values.
+crate's ~277 golden-HTML string assertions elsewhere in the test suite.
 
 **A recording is edited by hand, and reviewed like the behavior change it records.**
 Adding or changing a line is asserting "this rendering is correct" — treat it as an
