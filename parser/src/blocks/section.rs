@@ -65,9 +65,9 @@ impl<'src> SectionBlock<'src> {
         // within another section's body. Inside a delimited block (example,
         // sidebar, open, or quote), a `== …` line is literal content — a
         // paragraph — not a section, so decline here and let the line fall
-        // through to `SimpleBlock`. A discrete heading is an ordinary block, not
-        // a section, and remains valid in these contexts, so it is not
-        // suppressed.
+        // through to `SimpleBlock`. A discrete heading is an ordinary block,
+        // not a section, and remains valid in these contexts, so it is
+        // not suppressed.
         if !discrete && parser.in_delimited_block {
             return None;
         }
@@ -78,25 +78,26 @@ impl<'src> SectionBlock<'src> {
         // document attribute. A positive offset (the usual case, from
         // `include::[leveloffset=+1]`) pushes headings down — notably promoting
         // an included file's level-0 document title (`=`) into a real section —
-        // while a negative offset pulls them up. A heading whose effective level
-        // is below 1 is rejected as an unsupported level-0 heading (the warning
-        // is raised inside `parse_title_line`).
+        // while a negative offset pulls them up. A heading whose effective
+        // level is below 1 is rejected as an unsupported level-0
+        // heading (the warning is raised inside `parse_title_line`).
         let level_and_title = parse_title_line(source, parser.level_offset(), discrete, warnings)?;
 
-        // Take a snapshot of `sectids` value before reading child blocks because
-        // the value might be altered while parsing.
+        // Take a snapshot of `sectids` value before reading child blocks
+        // because the value might be altered while parsing.
         let sectids = parser.is_attribute_set("sectids");
 
         let level = level_and_title.item.0;
 
         // A level-0 section heading in the document body (a bare `=` that no
-        // positive `leveloffset` promoted to a real section) is only valid under
-        // `:doctype: book`, where it is a book part. Under any other doctype
-        // Asciidoctor logs "level 0 sections can only be used when doctype is
-        // book"; raise that warning here, where the doctype is known. The heading
-        // is still modeled as a level-0 section either way, so a renderer can emit
-        // `<h1 class="sect0">`. A discrete level-0 heading is a floating `<h1>`,
-        // not a section, and is exempt.
+        // positive `leveloffset` promoted to a real section) is only valid
+        // under `:doctype: book`, where it is a book part. Under any
+        // other doctype Asciidoctor logs "level 0 sections can only be
+        // used when doctype is book"; raise that warning here, where
+        // the doctype is known. The heading is still modeled as a
+        // level-0 section either way, so a renderer can emit
+        // `<h1 class="sect0">`. A discrete level-0 heading is a floating
+        // `<h1>`, not a section, and is exempt.
         if !discrete && level == 0 && !is_book_doctype(parser) {
             warnings.push(Warning::new(
                 source.take_normalized_line().item,
@@ -114,19 +115,21 @@ impl<'src> SectionBlock<'src> {
             .and_then(|a| a.id())
             .or_else(|| metadata.anchor.as_ref().map(|anchor| anchor.data()));
 
-        // AsciiDoc lets a section define its ID via an anchor embedded at the end
-        // of the title (`== Title [[id]] ==`, optionally `[[id,reftext]]`). When
-        // present (and not already overridden by an explicit ID above), the anchor
-        // is consumed to set the section ID and removed from the rendered title,
-        // rather than being rendered as an inline anchor.
+        // AsciiDoc lets a section define its ID via an anchor embedded at the
+        // end of the title (`== Title [[id]] ==`, optionally
+        // `[[id,reftext]]`). When present (and not already overridden
+        // by an explicit ID above), the anchor is consumed to set the
+        // section ID and removed from the rendered title, rather than
+        // being rendered as an inline anchor.
         let (title_span, embedded_id, embedded_reftext) = if attr_or_anchor_id.is_none() {
             match_embedded_section_anchor(level_and_title.item.1)
         } else {
             (level_and_title.item.1, None, None)
         };
 
-        // Assign the section type. At level 1, we look for an `appendix` section style;
-        // at all other levels, we inherit the section type from parent.
+        // Assign the section type. At level 1, we look for an `appendix`
+        // section style; at all other levels, we inherit the section
+        // type from parent.
         let section_type = if discrete {
             SectionType::Discrete
         } else if level == 1 {
@@ -144,18 +147,20 @@ impl<'src> SectionBlock<'src> {
             parser.topmost_section_type
         };
 
-        // Assign section number BEFORE parsing child blocks so that sections are
-        // numbered in document order (parent before children).
+        // Assign section number BEFORE parsing child blocks so that sections
+        // are numbered in document order (parent before children).
         //
-        // Appendix sections are lettered (A, B, ...) independently of `sectnums`
-        // because their title prefix is governed by the `appendix-caption`
-        // attribute (see the "Appendix label" section of the spec). An appendix
-        // root — the section that directly carries the `appendix` style —
-        // therefore always advances the appendix counter so it (and the numbering
-        // of any subsection) can derive its letter, even when `sectnums` is unset.
+        // Appendix sections are lettered (A, B, ...) independently of
+        // `sectnums` because their title prefix is governed by the
+        // `appendix-caption` attribute (see the "Appendix label"
+        // section of the spec). An appendix root — the section that
+        // directly carries the `appendix` style — therefore always
+        // advances the appendix counter so it (and the numbering of any
+        // subsection) can derive its letter, even when `sectnums` is unset.
         // A level-0 section (a book part) is not numbered through `sectnums`
-        // (parts use the separate `partnums` attribute, which this crate does not
-        // yet model), so section numbering is restricted to level 1 and deeper.
+        // (parts use the separate `partnums` attribute, which this crate does
+        // not yet model), so section numbering is restricted to level 1
+        // and deeper.
         let sectnums_active = parser.is_attribute_set("sectnums")
             && level >= MIN_SECTION_LEVEL as usize
             && level <= parser.sectnumlevels
@@ -163,12 +168,13 @@ impl<'src> SectionBlock<'src> {
 
         let is_appendix_root = !discrete && level == 1 && section_type == SectionType::Appendix;
 
-        // A cross-reference builds `full`/`short` xrefstyle text from a section's
-        // signifier and number, but only when the section has a number *and* no
-        // explicit reftext (an explicit reftext is used verbatim instead). An
-        // explicit reftext can come from a `reftext` attribute, the second field
-        // of a `[[id,reftext]]` block anchor, or the second field of an anchor
-        // embedded in the section title.
+        // A cross-reference builds `full`/`short` xrefstyle text from a
+        // section's signifier and number, but only when the section has
+        // a number *and* no explicit reftext (an explicit reftext is
+        // used verbatim instead). An explicit reftext can come from a
+        // `reftext` attribute, the second field of a `[[id,reftext]]`
+        // block anchor, or the second field of an anchor embedded in
+        // the section title.
         let has_explicit_reftext = metadata
             .attrlist
             .as_ref()
@@ -180,11 +186,11 @@ impl<'src> SectionBlock<'src> {
         // An anchor reftext can carry attribute references (`[[install,install
         // on {platform-name}]]`), whether the anchor sits above the heading
         // (`metadata.anchor_reftext`) or is embedded in the title
-        // (`embedded_reftext`). Resolve them against the attributes in effect at
-        // the anchor's location — captured here, before the section body is
-        // parsed and can itself redefine those attributes — mirroring how the
-        // anchor ID and a `reftext=` attribute are already substituted when the
-        // attribute list is parsed.
+        // (`embedded_reftext`). Resolve them against the attributes in effect
+        // at the anchor's location — captured here, before the section
+        // body is parsed and can itself redefine those attributes —
+        // mirroring how the anchor ID and a `reftext=` attribute are
+        // already substituted when the attribute list is parsed.
         let anchor_reftext = metadata
             .anchor_reftext
             .as_ref()
@@ -250,15 +256,17 @@ impl<'src> SectionBlock<'src> {
         // https://github.com/asciidoc-rs/asciidoc-parser/issues/594.
         //
         // A footnote in the title is a real, document-order footnote, but its
-        // marker must not leak into the section's reference text (an xref's link
-        // text) or auto-generated ID. The title's tree is what answers that: a
-        // footnote is a node, so the heading's own rendering and its
-        // footnote-free reference text are two folds of one tree
-        // ([`fold_reference_text`]), and "which regions were footnote markers"
-        // is a question about node kinds rather than about bytes. Still a single
-        // substitution pass, so counters and attribute-expanded footnotes are
-        // processed exactly once — which is what the sentinel pair this replaces
-        // existed to buy (design §4.2's first sentinel system).
+        // marker must not leak into the section's reference text (an xref's
+        // link text) or auto-generated ID. The title's tree is what
+        // answers that: a footnote is a node, so the heading's own
+        // rendering and its footnote-free reference text are two folds
+        // of one tree ([`fold_reference_text`]), and "which regions
+        // were footnote markers" is a question about node kinds rather
+        // than about bytes. Still a single substitution pass, so
+        // counters and attribute-expanded footnotes are
+        // processed exactly once — which is what the sentinel pair this
+        // replaces existed to buy (design §4.2's first sentinel
+        // system).
         let mut section_title = Content::from(title_span);
         SubstitutionGroup::Title.apply(&mut section_title, parser, metadata.attrlist.as_ref());
 
@@ -270,10 +278,11 @@ impl<'src> SectionBlock<'src> {
             &parser.render_context(),
         );
 
-        // A section carrying the `bibliography` style implicitly adds that style
-        // to each top-level unordered list in its body (see the "Bibliography
-        // section syntax" section of the spec). Record that we are parsing such a
-        // section's body so `ListBlock::parse` can detect it, and restore the
+        // A section carrying the `bibliography` style implicitly adds that
+        // style to each top-level unordered list in its body (see the
+        // "Bibliography section syntax" section of the spec). Record
+        // that we are parsing such a section's body so
+        // `ListBlock::parse` can detect it, and restore the
         // previous value afterward so the style does not leak into sibling
         // sections (or, via a non-bibliography subsection, into its children).
         let is_bibliography_section = !discrete
@@ -286,12 +295,14 @@ impl<'src> SectionBlock<'src> {
         let previously_in_bibliography_section = parser.parsing_bibliography_section_body;
         parser.parsing_bibliography_section_body = is_bibliography_section;
 
-        // A special section that does not support nested sections (a `glossary`,
-        // `bibliography`, `colophon`, `dedication`, or `index` section) logs an
-        // error for each subsection found directly within it. Only a level-1
-        // section carries a special-section style, and a discrete heading is not
+        // A special section that does not support nested sections (a
+        // `glossary`, `bibliography`, `colophon`, `dedication`, or
+        // `index` section) logs an error for each subsection found
+        // directly within it. Only a level-1 section carries a
+        // special-section style, and a discrete heading is not
         // part of the section hierarchy, so the check is limited accordingly.
-        // The offending subsections are detected below, once the body is parsed.
+        // The offending subsections are detected below, once the body is
+        // parsed.
         let no_subsection_style = if !discrete && level == 1 {
             metadata
                 .attrlist
@@ -337,12 +348,13 @@ impl<'src> SectionBlock<'src> {
         let source = metadata.source.trim_remainder(blocks.after);
 
         // Emit an error for each subsection found directly inside a special
-        // section that does not support nested sections. The error points at the
-        // offending subsection's heading line, mirroring Asciidoctor's
-        // `<sectname> sections do not support nested sections` diagnostic. The
-        // subsection's title source is used rather than its whole span, whose
-        // first line is any block metadata (an anchor, attribute list, or block
-        // title) that precedes the heading.
+        // section that does not support nested sections. The error points at
+        // the offending subsection's heading line, mirroring
+        // Asciidoctor's `<sectname> sections do not support nested
+        // sections` diagnostic. The subsection's title source is used
+        // rather than its whole span, whose first line is any block
+        // metadata (an anchor, attribute list, or block title) that
+        // precedes the heading.
         if let Some(style) = no_subsection_style {
             for block in &blocks.item {
                 if let Block::Section(subsection) = block
@@ -361,14 +373,14 @@ impl<'src> SectionBlock<'src> {
 
         let proposed_base_id = generate_section_id(&title_reftext, parser);
 
-        // An explicit ID above the heading wins; otherwise an anchor embedded in
-        // the title supplies the ID.
+        // An explicit ID above the heading wins; otherwise an anchor embedded
+        // in the title supplies the ID.
         let manual_id = attr_or_anchor_id.or(embedded_id);
 
         // Reftext precedence mirrors `Block::block_reftext`: an explicit
-        // `reftext` attribute, then a `[[id,reftext]]` block-anchor reftext, then
-        // an embedded-anchor reftext (both with their attribute references
-        // already resolved above), then the section title.
+        // `reftext` attribute, then a `[[id,reftext]]` block-anchor reftext,
+        // then an embedded-anchor reftext (both with their attribute
+        // references already resolved above), then the section title.
         let reftext: CowStr<'_> = metadata
             .attrlist
             .as_ref()
@@ -414,7 +426,8 @@ impl<'src> SectionBlock<'src> {
             embedded_id.map(str::to_string)
         };
 
-        // Restore "normal" top-level section type if exiting a level 1 appendix.
+        // Restore "normal" top-level section type if exiting a level 1
+        // appendix.
         if level == 1 && !discrete {
             parser.topmost_section_type = SectionType::Normal;
         }
@@ -825,10 +838,11 @@ fn match_embedded_section_anchor<'src>(
     let title_text = caps.get(1).map_or("", |m| m.as_str());
     let id = caps.get(3).map(|m| m.as_str());
 
-    // Trailing whitespace is trimmed from the reftext, matching the inline-anchor
-    // substitution's handling of a shorthand `[[id,reftext]]`. The reftext is
-    // returned as a source span (rather than a `&str`) so its attribute
-    // references can be resolved against the document source at the caller.
+    // Trailing whitespace is trimmed from the reftext, matching the
+    // inline-anchor substitution's handling of a shorthand
+    // `[[id,reftext]]`. The reftext is returned as a source span (rather
+    // than a `&str`) so its attribute references can be resolved against
+    // the document source at the caller.
     let reftext = caps
         .get(4)
         .map(|m| title.slice(m.start()..m.end()).trim_trailing_whitespace());
@@ -907,24 +921,25 @@ fn parse_title_line<'src>(
 
     let title_span = strip_symmetric_title_close(title.after, marker_char, count);
 
-    // A bare `=` (syntactic level 0) that no positive offset lifts to level 1 or
-    // beyond is a document title appearing in the body. Rather than the document
-    // title (the single-document-title rule forbids a second one), it models a
-    // level-0 section — Asciidoctor's `sect0`, rendered as `<h1 class="sect0">`,
-    // a book part under `:doctype: book`. It is carried through with level 0 so
-    // the block model can represent it; `SectionBlock::parse` raises
-    // [`WarningType::Level0SectionHeadingNotSupported`] for it under any doctype
-    // other than `book`, where it knows the doctype.
+    // A bare `=` (syntactic level 0) that no positive offset lifts to level 1
+    // or beyond is a document title appearing in the body. Rather than the
+    // document title (the single-document-title rule forbids a second one),
+    // it models a level-0 section — Asciidoctor's `sect0`, rendered as `<h1
+    // class="sect0">`, a book part under `:doctype: book`. It is carried
+    // through with level 0 so the block model can represent it;
+    // `SectionBlock::parse` raises
+    // [`WarningType::Level0SectionHeadingNotSupported`] for it under any
+    // doctype other than `book`, where it knows the doctype.
     //
-    // A `discrete`/`float` heading is likewise valid at level 0: it renders as a
-    // floating `<h1>` rather than the document title.
+    // A `discrete`/`float` heading is likewise valid at level 0: it renders as
+    // a floating `<h1>` rather than the document title.
     //
     // A real section heading whose offset-adjusted level lands outside the
     // supported range is clamped into range and reported, rather than producing
     // an out-of-range (or, under a hostile offset, absurd) level. The lower
-    // bound is [`MIN_SECTION_LEVEL`] normally, but 0 for a `discrete` heading or
-    // a bare `=` (syntactic level 0), each of which may legitimately occupy
-    // level 0.
+    // bound is [`MIN_SECTION_LEVEL`] normally, but 0 for a `discrete` heading
+    // or a bare `=` (syntactic level 0), each of which may legitimately
+    // occupy level 0.
     let min_level = if discrete || syntactic_level == 0 {
         0
     } else {
@@ -1000,8 +1015,8 @@ fn peer_or_ancestor_section<'src>(
     // path. Block metadata may be separated from its block by blank lines
     // (including the blank lines around a comment that block-metadata parsing
     // skips over), and `parse_title_line` requires a non-blank first line, so
-    // without this the boundary check would miss such a heading and wrongly fold
-    // the following peer/ancestor section into the current one.
+    // without this the boundary check would miss such a heading and wrongly
+    // fold the following peer/ancestor section into the current one.
     let source_after_metadata = block_metadata.block_start.discard_empty_lines();
 
     // Compare effective levels: the boundary heading's `leveloffset` is read
@@ -1020,8 +1035,8 @@ fn peer_or_ancestor_section<'src>(
     let mut ignored_warnings = vec![];
 
     // A `discrete` heading has already been excluded above, so the boundary
-    // look-ahead never needs the level-0 exemption; pass `discrete = false` so a
-    // bare `=` here is treated as ordinary content, exactly as before.
+    // look-ahead never needs the level-0 exemption; pass `discrete = false` so
+    // a bare `=` here is treated as ordinary content, exactly as before.
     if let Some(mi) = parse_title_line(
         source_after_metadata,
         parser.level_offset(),
@@ -1156,11 +1171,11 @@ fn generate_section_id(title: &str, parser: &Parser) -> String {
             gen_id.pop();
         }
 
-        // Strip a leading separator (e.g. from a title beginning with a space or
-        // hyphen) before the prefix is applied, matching Ruby Asciidoctor. This
-        // keeps a leading separator out of the final ID and avoids doubling it
-        // up against a non-empty `idprefix` (e.g. `=== {sp}Heading` → `_heading`,
-        // not `__heading`).
+        // Strip a leading separator (e.g. from a title beginning with a space
+        // or hyphen) before the prefix is applied, matching Ruby
+        // Asciidoctor. This keeps a leading separator out of the final
+        // ID and avoids doubling it up against a non-empty `idprefix`
+        // (e.g. `=== {sp}Heading` → `_heading`, not `__heading`).
         if gen_id.starts_with(&sep) {
             gen_id = gen_id[sep.len()..].to_string();
         }
@@ -2221,9 +2236,10 @@ mod tests {
             let mut parser = Parser::default();
             let mut warnings: Vec<crate::warnings::Warning<'_>> = vec![];
 
-            // A bare `=` in the body is modeled as a level-0 section (Asciidoctor's
-            // `sect0`), not declined. Under the default (article) doctype it also
-            // raises the level-0 warning.
+            // A bare `=` in the body is modeled as a level-0 section
+            // (Asciidoctor's `sect0`), not declined. Under the
+            // default (article) doctype it also raises the level-0
+            // warning.
             let mi = crate::blocks::SectionBlock::parse(
                 &BlockMetadata::new("= Document Title"),
                 &mut parser,
@@ -3162,9 +3178,9 @@ mod tests {
             let mut warnings: Vec<crate::warnings::Warning<'_>> = vec![];
 
             // A bare `#` (the Markdown-style level-0 marker) in the body is
-            // modeled as a level-0 section (Asciidoctor's `sect0`), not declined.
-            // Under the default (article) doctype it also raises the level-0
-            // warning.
+            // modeled as a level-0 section (Asciidoctor's `sect0`), not
+            // declined. Under the default (article) doctype it also
+            // raises the level-0 warning.
             let mi = crate::blocks::SectionBlock::parse(
                 &BlockMetadata::new("# Document Title"),
                 &mut parser,
@@ -4315,8 +4331,9 @@ mod tests {
         #[test]
         fn level_0() {
             // A `[discrete]`/`[float]` style makes a level-0 (`=`) heading a
-            // discrete floating title rather than the (rejected) document title,
-            // so it parses to a level-0 discrete section with no warning.
+            // discrete floating title rather than the (rejected) document
+            // title, so it parses to a level-0 discrete section
+            // with no warning.
             let mut parser = Parser::default();
             let mut warnings: Vec<crate::warnings::Warning<'_>> = vec![];
 

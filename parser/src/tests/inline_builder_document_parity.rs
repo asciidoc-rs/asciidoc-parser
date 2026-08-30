@@ -716,9 +716,10 @@ fn a_folded_heading_keeps_the_cross_title_coordination() {
 fn the_title_pass_renders_each_title_once() {
     use crate::parser::{CatalogResolver, InlineRenderer, XrefRenderParams};
 
-    // The title-side counterpart of `resolution_renders_a_deferred_content_once`,
-    // and the property that makes the fold a *replacement* for the document-order
-    // pass's template render rather than an addition to it.
+    // The title-side counterpart of
+    // `resolution_renders_a_deferred_content_once`, and the property that
+    // makes the fold a *replacement* for the document-order pass's template
+    // render rather than an addition to it.
     //
     // The pass needs each title's rendering while it runs — it is the link text
     // a reference to that title splices in — so the fold has to happen inside

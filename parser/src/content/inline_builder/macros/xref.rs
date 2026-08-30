@@ -289,9 +289,10 @@ fn find_xref_matches<'src>(
 
         let recoverable = match &shorthand_inner {
             Some(inner) => {
-                // The shorthand's id is its inner up to the first `,` — the very
-                // split `build_xref_shorthand_node` (and the string replacer)
-                // makes. A comma the *markup* of an opaque piece contributes
+                // The shorthand's id is its inner up to the first `,` — the
+                // very split `build_xref_shorthand_node` (and
+                // the string replacer) makes. A comma the
+                // *markup* of an opaque piece contributes
                 // cannot move that split unnoticed: such a piece would have to
                 // sit in the id half, which this gate then rejects.
                 let id_range = shorthand_id_range(s, inner);
@@ -1088,8 +1089,8 @@ mod tests {
 
     #[test]
     fn an_xref_display_text_is_located_at_its_source() {
-        // The display text's `Text` child locates at the bracketed text, not the
-        // whole macro.
+        // The display text's `Text` child locates at the bracketed text, not
+        // the whole macro.
         let nodes = build_src(Span::new("xref:install[Installation]"));
 
         let reference = assert_xref(&nodes[0]);
@@ -1099,12 +1100,13 @@ mod tests {
 
     #[test]
     fn an_explicit_same_document_xref_stores_the_interpreted_id() {
-        // `xref:#install[]` uses the explicit-`#` same-document form. The node's
-        // `target` is the *interpreted* id (`install`), not the raw `#install`:
-        // it is the value the renderer builds the `href` from and resolution
-        // keys on, matching the string pipeline and the recorder tree (see the
-        // `Ref::target` field docs). Storing `#install` would fold to
-        // `href="##install"` and break parity.
+        // `xref:#install[]` uses the explicit-`#` same-document form. The
+        // node's `target` is the *interpreted* id (`install`), not the
+        // raw `#install`: it is the value the renderer builds the
+        // `href` from and resolution keys on, matching the string
+        // pipeline and the recorder tree (see the `Ref::target` field
+        // docs). Storing `#install` would fold to `href="##install"`
+        // and break parity.
         let nodes = build_src(Span::new("xref:#install[Install]"));
 
         let reference = assert_xref(&nodes[0]);
@@ -1134,8 +1136,9 @@ mod tests {
 
     #[test]
     fn an_escaped_xref_stays_literal() {
-        // `\xref:…` drops the backslash and keeps the macro as literal text — no
-        // reference node — exactly as the string replacer's escape branch does.
+        // `\xref:…` drops the backslash and keeps the macro as literal text —
+        // no reference node — exactly as the string replacer's escape
+        // branch does.
         let source = "\\xref:install[Installation]";
         let nodes = build_src(Span::new(source));
 
@@ -1170,8 +1173,9 @@ mod tests {
     #[test]
     fn an_xref_shorthand_becomes_a_ref_node() {
         // The `<<id,text>>` shorthand builds the same `Ref{Xref}` node the
-        // `xref:` macro does, even though its `&lt;&lt;` / `&gt;&gt;` delimiters
-        // are `CharRef`s: the node consumes them and slices its verbatim inner.
+        // `xref:` macro does, even though its `&lt;&lt;` / `&gt;&gt;`
+        // delimiters are `CharRef`s: the node consumes them and slices
+        // its verbatim inner.
         let nodes = build_src(Span::new("<<install,Install Now>>"));
 
         assert_eq!(nodes.len(), 1);
@@ -1208,9 +1212,10 @@ mod tests {
 
     #[test]
     fn an_xref_shorthand_display_text_is_located_at_its_trimmed_source() {
-        // The reference text's `Text` child locates at the *trimmed* text within
-        // the shorthand, not at the whole shorthand and not including the
-        // surrounding whitespace the string replacer trims.
+        // The reference text's `Text` child locates at the *trimmed* text
+        // within the shorthand, not at the whole shorthand and not
+        // including the surrounding whitespace the string replacer
+        // trims.
         let nodes = build_src(Span::new("<<install, Install Now >>"));
 
         let reference = assert_xref(&nodes[0]);
@@ -1223,8 +1228,8 @@ mod tests {
 
     #[test]
     fn an_xref_shorthand_is_recognized_inside_a_span() {
-        // A shorthand can appear inside a rendered span; the transducer descends
-        // into the span body and builds the node there.
+        // A shorthand can appear inside a rendered span; the transducer
+        // descends into the span body and builds the node there.
         let nodes = build_src(Span::new("*see <<x,X>>*"));
 
         let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
@@ -1238,10 +1243,11 @@ mod tests {
 
     #[test]
     fn an_escaped_xref_shorthand_stays_literal() {
-        // `\<<id>>` drops the backslash and keeps the shorthand as literal text —
-        // no reference node — exactly as the string replacer's escape branch
-        // does. Its delimiters are non-verbatim `CharRef`s, so this also exercises
-        // the escape path that does not require a verbatim inner.
+        // `\<<id>>` drops the backslash and keeps the shorthand as literal text
+        // — no reference node — exactly as the string replacer's escape
+        // branch does. Its delimiters are non-verbatim `CharRef`s, so
+        // this also exercises the escape path that does not require a
+        // verbatim inner.
         let source = "\\<<install,Install Now>>";
         let nodes = build_src(Span::new(source));
 
@@ -1285,9 +1291,10 @@ mod tests {
 
     #[test]
     fn an_empty_xref_shorthand_becomes_a_ref_node() {
-        // `<<>>` names the document as a whole: an empty id that resolves through
-        // a *derived* destination computed from the document's own attributes,
-        // exactly as the empty `xref:#[]` macro form does.
+        // `<<>>` names the document as a whole: an empty id that resolves
+        // through a *derived* destination computed from the document's
+        // own attributes, exactly as the empty `xref:#[]` macro form
+        // does.
         let source = "<<>>";
         let nodes = build_src(Span::new(source));
 
@@ -2458,9 +2465,10 @@ mod tests {
 
     #[test]
     fn a_fragmentless_this_document_xref_target_is_document_as_a_whole() {
-        // A target naming *this* document with no fragment (`xref:mydoc.adoc[]`)
-        // is, like the empty target (`xref:#[]`), a reference to the document as
-        // a whole: the same `this_document_reference` derived destination, not a
+        // A target naming *this* document with no fragment
+        // (`xref:mydoc.adoc[]`) is, like the empty target (`xref:#[]`),
+        // a reference to the document as a whole: the same
+        // `this_document_reference` derived destination, not a
         // same-document id to resolve through the catalog.
         let parser = Parser::default().with_primary_file_name("mydoc.adoc");
 

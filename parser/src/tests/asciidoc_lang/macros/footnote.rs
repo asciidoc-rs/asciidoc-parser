@@ -277,13 +277,13 @@ That means the text formatting in the footnote text will already be applied when
 
 #[test]
 fn footnotes_in_headings_are_numbered_in_document_order() {
-    // The crate deliberately diverges from Asciidoctor here (see the note on the
-    // "Footnotes in headings" section below and issue #594). Rather than
-    // converting section titles eagerly and out of document order, it applies a
-    // title's substitutions before parsing the section body. A footnote in a
-    // heading is therefore numbered in straightforward document order: the
-    // heading's footnote follows footnotes in preceding content and precedes
-    // footnotes in the heading's own section body.
+    // The crate deliberately diverges from Asciidoctor here (see the note on
+    // the "Footnotes in headings" section below and issue #594). Rather
+    // than converting section titles eagerly and out of document order, it
+    // applies a title's substitutions before parsing the section body. A
+    // footnote in a heading is therefore numbered in straightforward
+    // document order: the heading's footnote follows footnotes in preceding
+    // content and precedes footnotes in the heading's own section body.
     let doc = Parser::default().parse(concat!(
         "== Section 1\n",
         "\n",

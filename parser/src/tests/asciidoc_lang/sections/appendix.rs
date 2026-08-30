@@ -37,10 +37,10 @@ include::example$appendix.adoc[tag=appx-article-out]
 
     // NOTE: Removed the `:appendix-caption: Exhibit` and `:toc:` header
     // attributes from the example. The `appendix-caption` attribute is now
-    // honored (it defaults to "`Appendix`", so the appendix sections below carry
-    // "Appendix A: " / "Appendix B: " captions), but `toc` rendering is still not
-    // supported. A custom `appendix-caption` value is exercised separately in
-    // `appendix_label` below.
+    // honored (it defaults to "`Appendix`", so the appendix sections below
+    // carry "Appendix A: " / "Appendix B: " captions), but `toc` rendering
+    // is still not supported. A custom `appendix-caption` value is
+    // exercised separately in `appendix_label` below.
     let doc = Parser::default().parse("= Article Title\n:sectnums:\n\n== Section\n\n=== Subsection\n\n[appendix]\n== First Appendix\n\n=== First Subsection\n\n=== Second Subsection\n\n[appendix]\n== Second Appendix");
 
     assert_eq!(
@@ -470,7 +470,8 @@ Unset the attribute to remove the prefix.
     );
 
     // Unsetting `appendix-caption` removes the label, but the appendix is still
-    // lettered: the prefix collapses to "<letter>. " (matching Ruby Asciidoctor).
+    // lettered: the prefix collapses to "<letter>. " (matching Ruby
+    // Asciidoctor).
     let doc = Parser::default().parse(
         ":appendix-caption!:\n\n[appendix]\n== Data Access Matrix\n\n[appendix]\n== Error Codes",
     );

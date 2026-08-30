@@ -159,7 +159,8 @@ mod default_special_characters_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -267,7 +268,8 @@ mod default_special_characters_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -337,7 +339,8 @@ mod default_special_characters_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -364,7 +367,8 @@ mod default_special_characters_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        // Dig an extra level deeper to get the simple block that has the content.
+        // Dig an extra level deeper to get the simple block that has the
+        // content.
         let block1 = block1.child_blocks().next().unwrap();
 
         let Block::Simple(block1) = block1 else {
@@ -384,8 +388,8 @@ mod default_special_characters_substitution {
         );
 
         // Special character substitution always applies to table cell content,
-        // including literal (`l`) cells, where most other substitution steps are
-        // skipped.
+        // including literal (`l`) cells, where most other substitution steps
+        // are skipped.
         let doc = Parser::default().parse("|===\n|a > b\nl|c > d\n|===");
 
         let Some(Block::Table(table)) = doc.child_blocks().next() else {

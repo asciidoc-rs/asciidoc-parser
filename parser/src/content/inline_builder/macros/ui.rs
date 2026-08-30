@@ -423,10 +423,11 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_ui_macros() {
         // For each fixture, folding the single-pass tree (all five steps, under
-        // `experimental`) reproduces the string pipeline's output byte-for-byte.
-        // This is the differential corpus (design §5.3) that pins the UI-macro
-        // increment. Every fixture is deliberately *verbatim* (no `<`/`>`/`&`
-        // inside a macro), the boundary this increment claims.
+        // `experimental`) reproduces the string pipeline's output
+        // byte-for-byte. This is the differential corpus (design §5.3)
+        // that pins the UI-macro increment. Every fixture is
+        // deliberately *verbatim* (no `<`/`>`/`&` inside a macro), the
+        // boundary this increment claims.
         let fixtures = [
             // No UI macro despite macro-ish characters.
             "kbd is a word, not a macro",

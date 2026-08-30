@@ -90,8 +90,9 @@ impl PathResolver for DefaultPathResolver {
 
         let mut uri_prefix: Option<String> = None;
 
-        // Ruby treats a `nil` *or* empty `start` the same (`start.nil_or_empty?`):
-        // in both cases the target is used as-is, with no start path prepended.
+        // Ruby treats a `nil` *or* empty `start` the same
+        // (`start.nil_or_empty?`): in both cases the target is used
+        // as-is, with no start path prepended.
         let start_is_empty = start.as_deref().is_none_or(str::is_empty);
 
         if !(start_is_empty || self.is_web_root(&target)) {
@@ -166,9 +167,10 @@ impl DefaultPathResolver {
     fn partition_path(&self, path: &str, web: WebPath) -> (Vec<String>, Option<String>) {
         // Ruby memoizes partition results per (path, web) in a hash. That cache
         // exists to avoid Ruby's comparatively expensive string work; here the
-        // partitioning is cheap and the resolver takes `&self`, so caching would
-        // require interior mutability that the derived `Clone`/`Eq` would then
-        // have to skip. Deliberately not ported.
+        // partitioning is cheap and the resolver takes `&self`, so caching
+        // would require interior mutability that the derived
+        // `Clone`/`Eq` would then have to skip. Deliberately not
+        // ported.
         let posix_path = self.posixify(path);
 
         let root: Option<String> = if web.0 {
@@ -187,13 +189,15 @@ impl DefaultPathResolver {
                 // ex. /sample/path
                 Some("/".to_owned())
             } else if posix_path.starts_with(URI_CLASSLOADER) {
-                // ex. uri:classloader:sample/path (or uri:classloader:/sample/path)
+                // ex. uri:classloader:sample/path (or
+                // uri:classloader:/sample/path)
                 Some(URI_CLASSLOADER.to_owned())
             } else {
                 // ex. C:/sample/path (or file:///sample/path in browser
                 // environment). The root is everything up to and including the
-                // first slash. `is_root` guarantees a slash for the drive-letter
-                // case, so `None` here is unreachable in practice.
+                // first slash. `is_root` guarantees a slash for the
+                // drive-letter case, so `None` here is
+                // unreachable in practice.
                 posix_path
                     .find('/')
                     .map(|slash| posix_path[..=slash].to_owned())
@@ -219,10 +223,11 @@ impl DefaultPathResolver {
             .collect();
 
         // Ruby builds these segments with `posix_path.split SLASH`, and Ruby's
-        // `String#split` drops trailing empty fields (e.g. `'a/b/'.split '/'` is
-        // `['a', 'b']`, and `''.split '/'` is `[]`). Rust's `str::split` keeps
-        // them, so strip trailing empties to match — otherwise a trailing slash
-        // would survive as a spurious empty final segment.
+        // `String#split` drops trailing empty fields (e.g. `'a/b/'.split '/'`
+        // is `['a', 'b']`, and `''.split '/'` is `[]`). Rust's
+        // `str::split` keeps them, so strip trailing empties to match —
+        // otherwise a trailing slash would survive as a spurious empty
+        // final segment.
         while path_segments.last().is_some_and(|s| s.is_empty()) {
             path_segments.pop();
         }
@@ -542,8 +547,8 @@ mod tests {
             // `String#split('/')` drops *all* trailing empty fields, so
             // `partition_path` yields no segments and the rooted path collapses
             // to `/`. This guards the trailing-empty-segment stripping in
-            // `partition_path` against regressing to a one-shot pop (which would
-            // leave `//`, `///`, etc.).
+            // `partition_path` against regressing to a one-shot pop (which
+            // would leave `//`, `///`, etc.).
             let pr = DefaultPathResolver::default();
 
             assert_eq!(pr.web_path("/", None), "/");

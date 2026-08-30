@@ -530,12 +530,14 @@ mod bulleted_lists {
             assert_css(&doc, "ul", 1);
             assert_css(&doc, "ul li", 2);
 
-            // Asciidoctor test on which this is based comes with the following comment:
-            // > NOTE: for some reason, we're getting an extra line after the indented line.
+            // Asciidoctor test on which this is based comes with the following
+            // comment:
+            // > NOTE: for some reason, we're getting an extra line after the
+            // > indented line.
             //
-            // Looks like we're not having that problem in the Rust port. Use this detailed
-            // comparison to ensure that remains true. todo!("xmlnodes_at_xpath
-            // check for 3 lines");
+            // Looks like we're not having that problem in the Rust port. Use
+            // this detailed comparison to ensure that remains true.
+            // todo!("xmlnodes_at_xpath check for 3 lines");
 
             assert_eq!(
                 doc,
@@ -1073,9 +1075,10 @@ mod bulleted_lists {
             let doc = Parser::default().parse("* complex list item\n+\n[source,xml]\n----\n<name>value</name> <!--1-->\n----\n<1> a configuration value\n");
 
             // The callout list attached to the list item must not inherit the
-            // `[source,xml]` attributes from the preceding listing block. Mirror
-            // the Ruby test's `refute important_message.attributes.key?
-            // 'language'` by checking the list item's last block (the callout
+            // `[source,xml]` attributes from the preceding listing block.
+            // Mirror the Ruby test's `refute
+            // important_message.attributes.key? 'language'` by
+            // checking the list item's last block (the callout
             // list) carries no attrlist of its own.
             let list = doc.child_blocks().next().unwrap();
             let item = list.child_blocks().next().unwrap().as_list_item().unwrap();
@@ -1956,7 +1959,8 @@ mod bulleted_lists {
 
             let doc = Parser::default().parse("The highest peak in the Front Range is <<grays-peak>>, which tops <<mount-evans>> by just a few feet.\n\n* [[mount-evans,Mount Evans]]At 14,271 feet, Mount Evans is the highest summit of the Chicago Peaks in the Front Range of the Rocky Mountains.\n* [[grays-peak,Grays Peak]]\nGrays Peak rises to 14,278 feet, making it the highest summit in the Front Range of the Rocky Mountains.\n* Longs Peak is a 14,259-foot high, prominent mountain summit in the northern Front Range of the Rocky Mountains.\n* Pikes Peak is the highest summit of the southern Front Range of the Rocky Mountains at 14,115 feet.\n");
 
-            // The inline anchors at the start of the list items were registered.
+            // The inline anchors at the start of the list items were
+            // registered.
             assert!(doc.catalog().contains_id("mount-evans"));
             assert!(doc.catalog().contains_id("grays-peak"));
 
@@ -2324,8 +2328,8 @@ mod bulleted_lists {
             assert_css(&doc, "li", 26);
         }
 
-        // Ruby `List#level` model API: this crate's `ListBlock` exposes no `level`
-        // accessor.
+        // Ruby `List#level` model API: this crate's `ListBlock` exposes no
+        // `level` accessor.
         non_normative!(
             r#"
     test 'level of unordered list should match section level' do
@@ -2461,8 +2465,8 @@ mod bulleted_lists {
             assert_css(&doc, "li", 26);
         }
 
-        // Ruby `List#level` model API: this crate's `ListBlock` exposes no `level`
-        // accessor.
+        // Ruby `List#level` model API: this crate's `ListBlock` exposes no
+        // `level` accessor.
         non_normative!(
             r#"
     test 'level of ordered list should match section level' do
@@ -4066,11 +4070,12 @@ mod bulleted_lists {
 "#
             );
 
-            // The Ruby asciidoctor implementation on which this is based comes with the
-            // following comment:
+            // The Ruby asciidoctor implementation on which this is based comes
+            // with the following comment:
 
-            // NOTE: This is not consistent w/ AsciiDoc.py, but this is some screwy input
-            // anyway. FIXME: one list continuation is left behind.
+            // NOTE: This is not consistent w/ AsciiDoc.py, but this is some
+            // screwy input anyway. FIXME: one list continuation is
+            // left behind.
 
             let doc = Parser::default().parse("== Lists\n\n* Item one, paragraph one\n+\n+\nItem one, paragraph two\n+\n+\n* Item two\n+\n+\n");
 
@@ -4685,8 +4690,9 @@ mod ordered_lists {
             assert_xpath(&doc, "(//li)[2]/p[text()=\"b\u{2028}b\"]", 1);
         }
 
-        // The following tests extend the Ruby coverage with crate-specific cases
-        // (chiefly the `start` attribute) and so carry no `verifies!` block.
+        // The following tests extend the Ruby coverage with crate-specific
+        // cases (chiefly the `start` attribute) and so carry no
+        // `verifies!` block.
 
         #[test]
         fn should_honor_start_attribute_on_ordered_list() {
@@ -5737,8 +5743,8 @@ mod description_lists_dlist {
 "#
             );
 
-            // NOTE: blank line following literal paragraph is required or else it will
-            // gobble up the second term.
+            // NOTE: blank line following literal paragraph is required or else
+            // it will gobble up the second term.
             let doc = Parser::default().parse("term1::\ndef1\n\n  literal\n\nterm2::\n  def2\n");
 
             assert_xpath(&doc, "//dl", 1);
@@ -7667,7 +7673,8 @@ mod description_lists_dlist {
 "#
         );
 
-        // DocBook backend / horizontal list layout are out of scope for this crate.
+        // DocBook backend / horizontal list layout are out of scope for this
+        // crate.
         non_normative!(
             r#"
     test 'should set col widths of item and label in docbook if specified' do
@@ -7898,9 +7905,10 @@ mod description_lists_dlist {
             assert_css(&doc, ".ulist.bibliography ul li", 2);
             assert_css(&doc, ".ulist.bibliography ul li p", 2);
             // Asciidoctor scopes this to the first item with `li:nth-child(1)`;
-            // the test CSS engine can't evaluate `:nth-child` across a descendant
-            // combinator, so the first-item specificity is instead checked against
-            // the rendered paragraph below.
+            // the test CSS engine can't evaluate `:nth-child` across a
+            // descendant combinator, so the first-item specificity
+            // is instead checked against the rendered paragraph
+            // below.
             assert_css(&doc, ".ulist.bibliography ul li p a#taoup", 1);
 
             // The bibliography anchor renders as an empty `<a id>` (it has no
@@ -7909,8 +7917,8 @@ mod description_lists_dlist {
 
             // The crate produces inline content at parse time rather than
             // rendering whole blocks, so the anchor-then-`[taoup] ` sequence
-            // (asserted via `following-sibling::text()` in Asciidoctor) is checked
-            // against the rendered paragraph directly.
+            // (asserted via `following-sibling::text()` in Asciidoctor) is
+            // checked against the rendered paragraph directly.
             let paragraphs = rendered_paragraphs(&doc);
             assert!(paragraphs[0].starts_with("<a id=\"taoup\"></a>[taoup] "));
             assert!(paragraphs[1].starts_with("<a id=\"walsh-muellner\"></a>[walsh-muellner] "));
@@ -8013,10 +8021,11 @@ mod description_lists_dlist {
 
             let doc = Parser::default().parse("[bibliography]\n== Bibliography\n\n.Books\n* [[[taoup]]] Eric Steven Raymond. _The Art of Unix\n  Programming_. Addison-Wesley. ISBN 0-13-142901-9.\n* [[[walsh-muellner]]] Norman Walsh & Leonard Muellner.\n  _DocBook - The Definitive Guide_. O'Reilly & Associates. 1999.\n  ISBN 1-56592-580-7.\n\n.Periodicals\n* [[[doc-writer]]] Doc Writer. _Documentation As Code_. Static Times, 54. August 2016.\n");
 
-            // Both top-level unordered lists in the bibliography section inherit
-            // the `bibliography` style, even though neither carries an explicit
-            // `[bibliography]` attribute. This mirrors the Ruby assertions
-            // `ulists[0].style == 'bibliography'` and `ulists[1].style ==
+            // Both top-level unordered lists in the bibliography section
+            // inherit the `bibliography` style, even though neither
+            // carries an explicit `[bibliography]` attribute. This
+            // mirrors the Ruby assertions `ulists[0].style ==
+            // 'bibliography'` and `ulists[1].style ==
             // 'bibliography'`: the crate surfaces the resolved style through
             // `resolved_style()`.
             let ulists: Vec<_> = doc
@@ -8064,7 +8073,8 @@ mod description_lists_dlist {
             );
 
             // A label that begins with a digit is not a bibliography anchor, so
-            // the triple brackets are left untouched and no anchor is generated.
+            // the triple brackets are left untouched and no anchor is
+            // generated.
             let paragraphs = rendered_paragraphs(&doc);
             assert!(paragraphs[0].starts_with("[[[1984]]] "));
             assert_xpath(&doc, "//a[@id=\"1984\"]", 0);
@@ -8184,12 +8194,14 @@ mod description_lists_dlist {
 
             let paragraphs = rendered_paragraphs(&doc);
 
-            // The cross-references use each entry's reftext: the plain label for
-            // `TMMM`, and the explicit xreftext `1` for `Fowler_1997`.
+            // The cross-references use each entry's reftext: the plain label
+            // for `TMMM`, and the explicit xreftext `1` for
+            // `Fowler_1997`.
             assert!(paragraphs[0].contains("<a href=\"#TMMM\">[TMMM]</a>"));
             assert!(paragraphs[0].contains("<a href=\"#Fowler_1997\">[1]</a>"));
 
-            // The bibliography entries themselves render the same bracketed text.
+            // The bibliography entries themselves render the same bracketed
+            // text.
             assert!(paragraphs[1].starts_with("<a id=\"TMMM\"></a>[TMMM] "));
             assert!(paragraphs[2].starts_with("<a id=\"Fowler_1997\"></a>[1] "));
         }
@@ -9564,7 +9576,8 @@ mod description_lists_redux {
             );
 
             // Comment ported from Ruby Asciidoctor tests:
-            // FIXME: this is a negative test; the behavior should be the other way around.
+            // FIXME: this is a negative test; the behavior should be the other
+            // way around.
             let doc =
                 Parser::default().parse("term1:: def\n+\nmore description\nnot a term:: def\n");
 
@@ -11469,8 +11482,8 @@ mod callout_lists {
 
         let doc = Parser::default().parse("foo::\n  bar <1>\n\n<1> Not pointing to a callout\n");
 
-        // The `<1>` in the indented description-list paragraph is not a callout;
-        // it is rendered literally and produces no conum.
+        // The `<1>` in the indented description-list paragraph is not a
+        // callout; it is rendered literally and produces no conum.
         assert_xpath(&doc, "//dl//b", 0);
         assert_output_contains(&doc, "bar &lt;1&gt;");
 
@@ -11561,8 +11574,8 @@ mod callout_lists {
 
         // The verbatim block defines only callout 1, so the second item (whose
         // marker is `<3>`) is both out of sequence and has no matching callout.
-        // Asciidoctor logs these via its memory logger; this crate surfaces them
-        // as document warnings.
+        // Asciidoctor logs these via its memory logger; this crate surfaces
+        // them as document warnings.
         let warnings: Vec<_> = doc.warnings().map(|w| &w.warning).collect();
         assert_eq!(
             warnings,
@@ -12247,8 +12260,8 @@ mod checklists {
         let checklist = first_list(&doc);
         assert!(checklist.is_checklist());
 
-        // First item: principal paragraph carries the check-mark marker, and the
-        // continuation paragraph is wrapped in div.paragraph.
+        // First item: principal paragraph carries the check-mark marker, and
+        // the continuation paragraph is wrapped in div.paragraph.
         assert_xpath(
             &doc,
             "(/*[@class=\"ulist checklist\"]/ul/li)[1]/p[text()=\"\u{2713} done\"]",
@@ -12674,7 +12687,8 @@ mod lists_model {
 "#
     );
 
-    // Ruby `ListItem#simple?`/`compound?` model predicates: no crate equivalent.
+    // Ruby `ListItem#simple?`/`compound?` model predicates: no crate
+    // equivalent.
     non_normative!(
         r#"
   test 'simple? should return true for list item with no nested blocks' do
@@ -12693,7 +12707,8 @@ mod lists_model {
 "#
     );
 
-    // Ruby `ListItem#simple?`/`compound?` model predicates: no crate equivalent.
+    // Ruby `ListItem#simple?`/`compound?` model predicates: no crate
+    // equivalent.
     non_normative!(
         r#"
   test 'simple? should return true for list item with nested outline list' do
@@ -12715,7 +12730,8 @@ mod lists_model {
 "#
     );
 
-    // Ruby `ListItem#simple?`/`compound?` model predicates: no crate equivalent.
+    // Ruby `ListItem#simple?`/`compound?` model predicates: no crate
+    // equivalent.
     non_normative!(
         r#"
   test 'simple? should return false for list item with block content' do
@@ -12738,7 +12754,8 @@ mod lists_model {
 "#
     );
 
-    // Mutable model API (`ListItem#text=`): this crate's parsed AST is read-only.
+    // Mutable model API (`ListItem#text=`): this crate's parsed AST is
+    // read-only.
     non_normative!(
         r#"
   test 'should allow text of ListItem to be assigned' do
@@ -12759,8 +12776,8 @@ mod lists_model {
 "#
     );
 
-    // Mutable model API (`id=`/`add_role`) plus re-conversion: this crate's parsed
-    // AST is read-only.
+    // Mutable model API (`id=`/`add_role`) plus re-conversion: this crate's
+    // parsed AST is read-only.
     non_normative!(
         r#"
   test 'id and role assigned to ulist item in model are transmitted to output' do
@@ -12781,8 +12798,8 @@ mod lists_model {
 "#
     );
 
-    // Mutable model API (`id=`/`add_role`) plus re-conversion: this crate's parsed
-    // AST is read-only.
+    // Mutable model API (`id=`/`add_role`) plus re-conversion: this crate's
+    // parsed AST is read-only.
     non_normative!(
         r#"
   test 'id and role assigned to olist item in model are transmitted to output' do
@@ -12803,7 +12820,8 @@ mod lists_model {
 "#
     );
 
-    // Runtime substitution model API (`remove_sub`/`subs`): no crate equivalent.
+    // Runtime substitution model API (`remove_sub`/`subs`): no crate
+    // equivalent.
     non_normative!(
         r#"
   test 'should allow API control over substitutions applied to ListItem text' do

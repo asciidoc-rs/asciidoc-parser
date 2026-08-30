@@ -198,9 +198,10 @@ impl<'src> Attrlist<'src> {
                 attrlist_context,
             );
 
-            // Because we do attribute value substitution early on in parsing, we can't
-            // pinpoint the exact location of warnings in an attribute list. For that
-            // reason, individual attribute parsing only returns the warning type and we
+            // Because we do attribute value substitution early on in parsing,
+            // we can't pinpoint the exact location of warnings in
+            // an attribute list. For that reason, individual
+            // attribute parsing only returns the warning type and we
             // then map it back to the entire attrlist source.
             for warning_type in warning_types {
                 warnings.push(Warning::new(source, warning_type));
@@ -219,8 +220,8 @@ impl<'src> Attrlist<'src> {
             // A completely empty (or whitespace-only) attribute list: the first
             // entry is an empty, *unquoted* positional with nothing after it.
             // Yield no attributes. An explicit empty *quoted* positional
-            // (`""` / `''`) carries a value and is kept below, so it is excluded
-            // here by `!attr.value_is_quoted()`.
+            // (`""` / `''`) carries a value and is kept below, so it is
+            // excluded here by `!attr.value_is_quoted()`.
             if attr.name().is_none()
                 && attr.value().is_empty()
                 && !attr.value_is_quoted()
@@ -231,9 +232,9 @@ impl<'src> Attrlist<'src> {
             }
 
             if attr.name().is_some() {
-                // A named attribute whose value is the literal `None` unsets the
-                // attribute (Asciidoctor semantics); it still consumes a
-                // position but is not stored.
+                // A named attribute whose value is the literal `None` unsets
+                // the attribute (Asciidoctor semantics); it
+                // still consumes a position but is not stored.
                 if attr.value() != "None" {
                     attributes.push(attr);
                 }
@@ -258,8 +259,9 @@ impl<'src> Attrlist<'src> {
                     if after.starts_with(',') {
                         warnings.push(Warning::new(source, WarningType::EmptyAttributeValue));
 
-                        // Consume the blank slot between consecutive commas here,
-                        // advancing the position counter past it.
+                        // Consume the blank slot between consecutive commas
+                        // here, advancing the position
+                        // counter past it.
                         entry_number += 1;
                         after = after.discard(1);
                         index = after.byte_offset();
@@ -722,11 +724,12 @@ impl<'src> Attrlist<'src> {
 
         // Asciidoctor's `parse_quoted_text_attributes` considers only the first
         // positional attribute — the source up to the first comma — and uses it
-        // verbatim (quote characters included) as the role. The comma split is on
-        // the raw source, matching Asciidoctor's `str.slice 0, (str.index ',')`,
-        // so a comma *inside* the quotes truncates the role there too (e.g.
-        // `['a,b']` yields the role `'a`) rather than being treated as quoted
-        // content. A quote-delimited first positional always leaves at least its
+        // verbatim (quote characters included) as the role. The comma split is
+        // on the raw source, matching Asciidoctor's `str.slice 0,
+        // (str.index ',')`, so a comma *inside* the quotes truncates
+        // the role there too (e.g. `['a,b']` yields the role `'a`)
+        // rather than being treated as quoted content. A
+        // quote-delimited first positional always leaves at least its
         // opening quote here, so the slice is never empty.
         let raw = self.source_text();
         Some(raw.split_once(',').map_or(raw, |(first, _)| first).trim())
@@ -818,7 +821,8 @@ impl<'src> Attrlist<'src> {
     ///
     /// [`options()`]: Self::options
     pub fn has_option<N: AsRef<str>>(&'src self, name: N) -> bool {
-        // PERF: Might help to optimize away the construction of the options Vec.
+        // PERF: Might help to optimize away the construction of the options
+        // Vec.
         let options = self.options();
         let name = name.as_ref();
         options.contains(&name)
@@ -2658,7 +2662,8 @@ mod tests {
             assert_eq!(mi.item.quoted_text_fallback_role().unwrap(), "'role'");
 
             // Only the first positional (the source up to the first comma) is
-            // considered, mirroring Asciidoctor's `parse_quoted_text_attributes`.
+            // considered, mirroring Asciidoctor's
+            // `parse_quoted_text_attributes`.
             let mi = crate::attributes::Attrlist::parse(
                 crate::Span::new("'role',keep=dropped"),
                 &p,
@@ -2669,9 +2674,9 @@ mod tests {
             assert_eq!(mi.item.quoted_text_fallback_role().unwrap(), "'role'");
 
             // The comma boundary is applied to the raw source, matching
-            // Asciidoctor's `str.slice 0, (str.index ',')`, so a comma inside the
-            // quotes truncates the role there too rather than being kept as
-            // quoted content.
+            // Asciidoctor's `str.slice 0, (str.index ',')`, so a comma inside
+            // the quotes truncates the role there too rather than
+            // being kept as quoted content.
             let mi = crate::attributes::Attrlist::parse(
                 crate::Span::new("'a,b'"),
                 &p,

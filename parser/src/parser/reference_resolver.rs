@@ -431,7 +431,8 @@ mod tests {
     #[test]
     fn new_builds_a_resolvable_context() {
         // The `new` constructor is the seam a downstream `ReferenceResolver`
-        // uses to build its own contexts, since the type is `#[non_exhaustive]`.
+        // uses to build its own contexts, since the type is
+        // `#[non_exhaustive]`.
         let catalog = catalog_with("later", Some("The Later Section"), RefType::Section);
         let resolver = CatalogResolver::new(&catalog);
 

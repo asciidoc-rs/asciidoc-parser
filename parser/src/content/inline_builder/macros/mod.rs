@@ -257,42 +257,66 @@ fn apply_macro_families<'src>(
     // comment); a span the built-in backend renders with no markup of its own
     // is transparent, so `child_contexts` hands its children the character its
     // own *siblings* present instead.
-    let contexts = LevelContext::child_contexts(&nodes, ctx, masked);
+    // A level with no parent node to descend into — the common leaf-only case
+    // — skips the context derivation and the rebuild of its node vector
+    // entirely (the same scan-first shape the shown-term hop below uses).
+    let has_parent = nodes
+        .iter()
+        .any(|node| matches!(node, InlineNode::Styled(_) | InlineNode::Ref(_)));
 
-    let nodes: Vec<InlineNode<'src>> = nodes
-        .into_iter()
-        .zip(contexts)
-        .map(|(node, inner)| match node {
-            // An extraction wrapper's body is **not** this content's to
-            // substitute. The string pipeline holds it as a sentinel for every
-            // step from here on, and the body was already substituted once —
-            // by the separate, nested `Normal` build the `x-` compatibility
-            // form (`[x-]++text++`) runs it through — so descending here would
-            // apply this step's families to it a *second* time
-            // (`[x-]++**b**https://example.org++` grows an `<a>` inside the
-            // `<a>` that build already made). It is also the one place this
-            // level's `masked` could not answer even if it did descend, since
-            // the list is collected from one content's own top level and knows
-            // nothing of a nested build's nodes.
-            InlineNode::Styled(styled) if masked.covers(styled.location) => {
-                InlineNode::Styled(styled)
-            }
+    let nodes: Vec<InlineNode<'src>> = if has_parent {
+        let contexts = LevelContext::child_contexts(&nodes, ctx, masked);
 
-            InlineNode::Styled(mut styled) => {
-                styled.children =
-                    apply_macro_families(styled.children, root, parser, inner, masked, specials);
-                InlineNode::Styled(styled)
-            }
+        nodes
+            .into_iter()
+            .zip(contexts)
+            .map(|(node, inner)| match node {
+                // An extraction wrapper's body is **not** this content's to
+                // substitute. The string pipeline holds it as a sentinel for
+                // every step from here on, and the body was already
+                // substituted once — by the separate, nested `Normal` build
+                // the `x-` compatibility form (`[x-]++text++`) runs it
+                // through — so descending here would apply this step's
+                // families to it a *second* time
+                // (`[x-]++**b**https://example.org++` grows an `<a>` inside
+                // the `<a>` that build already made). It is also the one
+                // place this level's `masked` could not answer even if it did
+                // descend, since the list is collected from one content's own
+                // top level and knows nothing of a nested build's nodes.
+                InlineNode::Styled(styled) if masked.covers(styled.location) => {
+                    InlineNode::Styled(styled)
+                }
 
-            InlineNode::Ref(mut reference) => {
-                reference.children =
-                    apply_macro_families(reference.children, root, parser, inner, masked, specials);
-                InlineNode::Ref(reference)
-            }
+                InlineNode::Styled(mut styled) => {
+                    styled.children = apply_macro_families(
+                        styled.children,
+                        root,
+                        parser,
+                        inner,
+                        masked,
+                        specials,
+                    );
+                    InlineNode::Styled(styled)
+                }
 
-            other => other,
-        })
-        .collect();
+                InlineNode::Ref(mut reference) => {
+                    reference.children = apply_macro_families(
+                        reference.children,
+                        root,
+                        parser,
+                        inner,
+                        masked,
+                        specials,
+                    );
+                    InlineNode::Ref(reference)
+                }
+
+                other => other,
+            })
+            .collect()
+    } else {
+        nodes
+    };
 
     // The UI macros run before image/icon and only under `experimental`,
     // mirroring the string step's order and gate.
@@ -399,9 +423,9 @@ fn apply_reference_families<'src>(
 
     // A bare e-mail address (`doc@example.org`) runs after both URL-link
     // families and before the anchor pass, exactly where the string step runs
-    // `InlineEmailReplacer` — so an address that is really the tail of a URL, or
-    // a `mailto:` macro's own target, is already inside an opaque node (there,
-    // already-rendered `<a …>` markup) and is not re-recognized.
+    // `InlineEmailReplacer` — so an address that is really the tail of a URL,
+    // or a `mailto:` macro's own target, is already inside an opaque node
+    // (there, already-rendered `<a …>` markup) and is not re-recognized.
     let nodes = email_level(nodes, root, ctx, masked);
 
     // Inline anchors (`[[id]]`, `anchor:id[…]`) run after the link families and
@@ -652,8 +676,8 @@ pub(super) fn macro_text_children<'src>(
         None => {
             // The text crosses an escaped special (the only atomic piece the
             // callers' gate admits) — or, degenerately, is a range `text_slice`
-            // declined to recover. Rebuild it out of the nodes it covers, so each
-            // special stays the `CharRef` it already is.
+            // declined to recover. Rebuild it out of the nodes it covers, so
+            // each special stays the `CharRef` it already is.
             let mut children = Vec::new();
 
             if unescape_bracket {
@@ -1376,21 +1400,23 @@ mod tests {
         // take the same lift, closing the escaped-special / restored-entity
         // boundary for every macro family:
         //
-        // - The **UI** family (`kbd:`/`btn:`/`menu:`) swapped its own gate for the
-        //   shared opaque-piece one. Every value a `Ui` node holds is
-        //   already-substituted text read out of the match string, which is exactly
-        //   what the string replacer computes from its own escaped haystack.
+        // - The **UI** family (`kbd:`/`btn:`/`menu:`) swapped its own gate for
+        //   the shared opaque-piece one. Every value a `Ui` node holds is
+        //   already-substituted text read out of the match string, which is
+        //   exactly what the string replacer computes from its own escaped
+        //   haystack.
         //
         // - A **footnote's text** needed no code change at all: its content is
-        //   structured children (`emit_range` keeps a `CharRef` leaf as its own child),
-        //   so it never sliced `'src` for a value in the first place. What made this
-        //   look like a boundary was the *harness*: the test that pinned it drove the
-        //   golden pipeline and the builder from one shared `Parser`, so each fixture's
-        //   footnote was numbered twice (`1` on the golden side, `2` on the built side)
-        //   and the two sides "diverged" for a reason that had nothing to do with the
-        //   entity. Hence `parity`, below, which configures one parser per side — the
-        //   two-independent-parsers discipline every footnote-bearing corpus in this
-        //   module already uses.
+        //   structured children (`emit_range` keeps a `CharRef` leaf as its own
+        //   child), so it never sliced `'src` for a value in the first place.
+        //   What made this look like a boundary was the *harness*: the test
+        //   that pinned it drove the golden pipeline and the builder from one
+        //   shared `Parser`, so each fixture's footnote was numbered twice (`1`
+        //   on the golden side, `2` on the built side) and the two sides
+        //   "diverged" for a reason that had nothing to do with the entity.
+        //   Hence `parity`, below, which configures one parser per side — the
+        //   two-independent-parsers discipline every footnote-bearing corpus in
+        //   this module already uses.
         let configure = || {
             Parser::default().with_intrinsic_attribute(
                 "experimental",

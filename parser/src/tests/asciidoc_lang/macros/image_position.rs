@@ -516,9 +516,9 @@ This role isn't technically required, but it gives the image semantic meaning.
 
 mod control_the_float {
     // This section describes the browser layout behavior of the `float-group`
-    // role, which the parser records as an ordinary role on the enclosing block.
-    // No parser-specific behavior is normative here (block images are not
-    // rendered to HTML by this crate), so the section is covered as
+    // role, which the parser records as an ordinary role on the enclosing
+    // block. No parser-specific behavior is normative here (block images
+    // are not rendered to HTML by this crate), so the section is covered as
     // non-normative.
     use crate::tests::prelude::*;
 

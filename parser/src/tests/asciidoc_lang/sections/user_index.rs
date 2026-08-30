@@ -40,8 +40,8 @@ To create an index, define a level 1 section (`==`) marked with the style `index
     );
 
     // A level 1 section marked with the `index` style carries that style, which
-    // a converter that generates an index uses as the seed section. (The level 0
-    // multipart-book form is not modeled by this single-document crate.)
+    // a converter that generates an index uses as the seed section. (The level
+    // 0 multipart-book form is not modeled by this single-document crate.)
     let doc = Parser::default().parse("[index]\n== Index\n");
     let section = doc.child_blocks().next().unwrap();
     assert_eq!(section.declared_style(), Some("index"));
@@ -139,9 +139,10 @@ indexterm:[knight, Knight of the Round Table, Lancelot] <.>
 "#
     );
 
-    // The callout markers (`<.>`) above are annotations on the listing, not part
-    // of the marked-up content. Parsing the equivalent content, the visible
-    // (flow) terms remain inline while the concealed terms disappear.
+    // The callout markers (`<.>`) above are annotations on the listing, not
+    // part of the marked-up content. Parsing the equivalent content, the
+    // visible (flow) terms remain inline while the concealed terms
+    // disappear.
     let doc = Parser::default().parse(
         "signifying by divine providence that I, ((Arthur)),\nwas to carry Excalibur(((Sword, Broadsword, Excalibur))).",
     );
@@ -192,7 +193,8 @@ indexterm:[knight, "Arthur, King"]
     );
 
     // A comma inside a double-quoted term segment is treated as content, so the
-    // concealed term parses cleanly and contributes nothing to the flow of text.
+    // concealed term parses cleanly and contributes nothing to the flow of
+    // text.
     let doc = Parser::default().parse("I, King Arthur.\nindexterm:[knight, \"Arthur, King\"]");
     assert_eq!(rendered_paragraphs(&doc), &["I, King Arthur.\n"]);
 
@@ -274,8 +276,8 @@ To create a new git repository,
     );
 
     // An empty line between the terms and the paragraph splits them into two
-    // blocks: an (empty) paragraph holding only the now-invisible terms, and the
-    // real paragraph.
+    // blocks: an (empty) paragraph holding only the now-invisible terms, and
+    // the real paragraph.
     let doc = Parser::default().parse(
         "=== Create a new Git repository\n\n(((Repository, create)))\n(((Create Git repository)))\n\nTo create a new git repository,\n",
     );

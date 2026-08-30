@@ -109,8 +109,9 @@ struct SpecialCharacterReplacer<'r> {
 
 impl Replacer for SpecialCharacterReplacer<'_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        // The SPECIAL_CHARS regex only matches '<', '>', and '&'. This sequence is
-        // specifically constructed to avoid having any unreachable code.
+        // The SPECIAL_CHARS regex only matches '<', '>', and '&'. This sequence
+        // is specifically constructed to avoid having any unreachable
+        // code.
         let ch = &caps[0];
 
         if ch == "<" {
@@ -328,7 +329,8 @@ pub(crate) static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     //
     // The counter expression is matched non-greedily (`+?`) so a trailing
     // escape backslash (`{counter:n\}`) is left for group 5 rather than being
-    // swallowed into the expression, again matching Asciidoctor's `#{CC_ANY}+?`.
+    // swallowed into the expression, again matching Asciidoctor's
+    // `#{CC_ANY}+?`.
     //
     // The attribute-name class `\w` (Unicode `\p{Word}`) accepts any Unicode
     // word character, matching Asciidoctor's `#{CG_WORD}[#{CC_WORD}-]*`, so
@@ -500,16 +502,17 @@ impl<'p> AttributeReplacer<'p> {
 
 impl Replacer for AttributeReplacer<'_> {
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        // A backslash immediately before the opening brace (`\{name}`) or before
-        // the closing brace (`{name\}`) — or both, as in `\{name\}` — escapes
-        // the reference: it is emitted literally with the escaping backslash(es)
-        // removed and left unexpanded, whether or not the attribute is set. An
-        // escaped reference is never treated as a missing reference, so it
-        // neither drops the line nor warns, and an escaped counter directive
+        // A backslash immediately before the opening brace (`\{name}`) or
+        // before the closing brace (`{name\}`) — or both, as in
+        // `\{name\}` — escapes the reference: it is emitted literally
+        // with the escaping backslash(es) removed and left unexpanded,
+        // whether or not the attribute is set. An escaped reference is
+        // never treated as a missing reference, so it neither drops the
+        // line nor warns, and an escaped counter directive
         // does not advance the counter. This mirrors Asciidoctor, whose
-        // `sub_attributes` returns `{#{name}}` when either its leading (`$1`) or
-        // trailing (`$4`) backslash capture is present, before any counter,
-        // missing-attribute, or resolution handling runs.
+        // `sub_attributes` returns `{#{name}}` when either its leading (`$1`)
+        // or trailing (`$4`) backslash capture is present, before any
+        // counter, missing-attribute, or resolution handling runs.
         if caps.get(1).is_some() || caps.get(5).is_some() {
             dest.push('{');
 
@@ -1272,10 +1275,10 @@ mod tests {
 
         #[test]
         fn escaped_reference_with_both_braces_escaped_drops_backslashes() {
-            // `\{name\}` escapes the reference the same way `\{name}` does: both
-            // backslashes are removed and the reference is left unexpanded, even
-            // when the attribute is set. This is the form Asciidoctor produces
-            // for `\{group-id\}`.
+            // `\{name\}` escapes the reference the same way `\{name}` does:
+            // both backslashes are removed and the reference is
+            // left unexpanded, even when the attribute is set. This
+            // is the form Asciidoctor produces for `\{group-id\}`.
             let p = Parser::default().with_intrinsic_attribute(
                 "group-id",
                 "42",
@@ -1292,8 +1295,9 @@ mod tests {
 
         #[test]
         fn escaped_reference_with_only_trailing_brace_escaped_drops_backslash() {
-            // A backslash before the closing brace alone (`{name\}`) also escapes
-            // the reference, matching Asciidoctor's trailing-backslash capture.
+            // A backslash before the closing brace alone (`{name\}`) also
+            // escapes the reference, matching Asciidoctor's
+            // trailing-backslash capture.
             let p = Parser::default().with_intrinsic_attribute(
                 "group-id",
                 "42",
@@ -1310,9 +1314,10 @@ mod tests {
 
         #[test]
         fn escaped_counter_with_trailing_backslash_is_literal_and_does_not_advance() {
-            // A trailing escape backslash on a counter directive (`{counter:n\}`)
-            // emits the reference literally (without the backslash) and does not
-            // advance the counter, so the following unescaped reference is `1`.
+            // A trailing escape backslash on a counter directive
+            // (`{counter:n\}`) emits the reference literally
+            // (without the backslash) and does not advance the
+            // counter, so the following unescaped reference is `1`.
             let mut content = Content::from(crate::Span::new("{counter:n\\} {counter:n}"));
             let p = Parser::default();
             SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
@@ -1482,8 +1487,9 @@ mod tests {
 
             #[test]
             fn drop_line_records_one_warning_per_missing_reference() {
-                // Two missing references on the same dropped line each produce a
-                // diagnostic, matching Asciidoctor's per-reference logging.
+                // Two missing references on the same dropped line each produce
+                // a diagnostic, matching Asciidoctor's
+                // per-reference logging.
                 let p = parser_with_mode("drop-line");
                 assert_eq!(render("a {x} b {y} c\ntail", &p), "tail");
                 assert_eq!(p.take_substitution_warnings().len(), 2);
@@ -1492,7 +1498,8 @@ mod tests {
             #[test]
             fn drop_line_does_not_warn_for_a_line_without_a_missing_reference() {
                 // Only the line carrying the missing reference is dropped and
-                // warned about; a line whose references all resolve is untouched.
+                // warned about; a line whose references all resolve is
+                // untouched.
                 let p = parser_with_mode("drop-line");
                 assert_eq!(
                     render("first {sp}line\nsecond {missing} line\nthird line", &p),
@@ -1510,7 +1517,8 @@ mod tests {
             #[test]
             fn drop_line_points_at_the_precise_reference() {
                 // With per-line source spans retained, the drop-line diagnostic
-                // names the exact offending reference rather than the whole line.
+                // names the exact offending reference rather than the whole
+                // line.
                 let p = parser_with_mode("drop-line");
                 let text = "first {alpha} line\nsecond {beta} line";
                 let mut content = Content::from(Span::new(text));
@@ -1562,9 +1570,9 @@ mod tests {
             #[test]
             fn escaped_missing_reference_drops_the_backslash_and_never_drops_the_line() {
                 // An escaped reference has its backslash removed and is passed
-                // through literally; it is never treated as a missing reference,
-                // so even under `drop-line` the line survives and no warning is
-                // recorded.
+                // through literally; it is never treated as a missing
+                // reference, so even under `drop-line` the line
+                // survives and no warning is recorded.
                 let p = parser_with_mode("drop-line");
                 assert_eq!(
                     render("In the path /items/\\{id}, x.", &p),
@@ -1646,9 +1654,10 @@ mod tests {
             #[test]
             fn warn_span_survives_earlier_special_character_expansion() {
                 // The key regression guard: special characters run before the
-                // attributes step and lengthen the rendered text (`<` -> `&lt;`),
-                // so a naive rendered-offset would be wrong. The warning must
-                // still name the reference's *original* source offset.
+                // attributes step and lengthen the rendered text (`<` ->
+                // `&lt;`), so a naive rendered-offset would be
+                // wrong. The warning must still name the
+                // reference's *original* source offset.
                 let p = parser_with_mode("warn");
                 let text = "a < b {foo} c";
                 let mut content = Content::from(Span::new(text));

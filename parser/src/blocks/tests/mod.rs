@@ -420,9 +420,10 @@ mod error_cases {
 
     #[test]
     fn title_with_only_blank_lines_after_still_warns() {
-        // A title followed by nothing but blank lines has no block to attach to,
-        // so the `MissingBlockAfterTitleOrAttributeList` warning still fires and
-        // the title line is demoted to paragraph content.
+        // A title followed by nothing but blank lines has no block to attach
+        // to, so the `MissingBlockAfterTitleOrAttributeList` warning
+        // still fires and the title line is demoted to paragraph
+        // content.
         let doc = Parser::default().parse(".My Title\n\n");
 
         let blocks: Vec<_> = doc.child_blocks().collect();

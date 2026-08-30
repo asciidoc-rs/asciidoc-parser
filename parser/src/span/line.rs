@@ -144,18 +144,20 @@ impl<'src> Span<'src> {
             loop {
                 let next = cursor.after.take_normalized_line();
 
-                // A blank line (or end of input) terminates the value and is not
-                // consumed.
+                // A blank line (or end of input) terminates the value and is
+                // not consumed.
                 if next.item.is_empty() {
                     break;
                 }
 
-                // Left- and right-trim the line before testing for the marker so
-                // this agrees exactly with `fold_continuation_value`, which trims
+                // Left- and right-trim the line before testing for the marker
+                // so this agrees exactly with
+                // `fold_continuation_value`, which trims
                 // each continuation line the same way. Without the left trim a
-                // line that is *only* the marker (e.g. a bare ` +`) would be kept
-                // open here but treated as a terminating line by the folder,
-                // causing the following line to be consumed from the stream yet
+                // line that is *only* the marker (e.g. a bare ` +`) would be
+                // kept open here but treated as a terminating
+                // line by the folder, causing the following
+                // line to be consumed from the stream yet
                 // silently dropped from the value.
                 let keep_open = next
                     .item
@@ -1431,10 +1433,10 @@ mod tests {
 
         #[test]
         fn bare_backslash_is_not_a_continuation() {
-            // A soft-wrap line continuation requires a *space* before the trailing
-            // backslash. A bare `\` (no preceding space) is a literal character and
-            // terminates the line; the next line is not folded in.
-            // See https://github.com/asciidoc-rs/asciidoc-parser/issues/666.
+            // A soft-wrap line continuation requires a *space* before the
+            // trailing backslash. A bare `\` (no preceding space)
+            // is a literal character and terminates the line; the
+            // next line is not folded in. See https://github.com/asciidoc-rs/asciidoc-parser/issues/666.
             let span = crate::Span::new("abc\\\ndef");
             let line = span.take_value_with_continuation();
 
@@ -1513,9 +1515,10 @@ mod tests {
 
         #[test]
         fn legacy_plus_continuation() {
-            // A legacy `+` continuation (a space followed by `+`) fuses lines just
-            // like the modern `\` marker. The raw item preserves the markers and
-            // interior newlines; folding happens later.
+            // A legacy `+` continuation (a space followed by `+`) fuses lines
+            // just like the modern `\` marker. The raw item
+            // preserves the markers and interior newlines; folding
+            // happens later.
             let span = crate::Span::new("abc +\ndef +\nghi");
             let line = span.take_value_with_continuation();
 
@@ -1542,8 +1545,9 @@ mod tests {
 
         #[test]
         fn legacy_plus_terminates_on_line_without_marker() {
-            // The continuation stops after the first line that no longer carries
-            // the legacy `+` marker (that line is still consumed).
+            // The continuation stops after the first line that no longer
+            // carries the legacy `+` marker (that line is still
+            // consumed).
             let span = crate::Span::new("abc +\ndef\nghi");
             let line = span.take_value_with_continuation();
 
@@ -1571,8 +1575,8 @@ mod tests {
         #[test]
         fn legacy_plus_marker_is_fixed_by_first_line() {
             // The marker is fixed by the first line. When the first line has no
-            // marker, a trailing `\` on a *later* line is not a continuation: the
-            // value is just the first line.
+            // marker, a trailing `\` on a *later* line is not a continuation:
+            // the value is just the first line.
             let span = crate::Span::new("abc\ndef \\\nghi");
             let line = span.take_value_with_continuation();
 
@@ -1599,9 +1603,10 @@ mod tests {
 
         #[test]
         fn bare_plus_is_not_a_continuation() {
-            // A legacy continuation requires a *space* before the trailing `+`. A
-            // bare `+` (no preceding space) is a literal character and terminates
-            // the line; the next line is not folded in.
+            // A legacy continuation requires a *space* before the trailing `+`.
+            // A bare `+` (no preceding space) is a literal
+            // character and terminates the line; the next line is
+            // not folded in.
             let span = crate::Span::new("abc+\ndef");
             let line = span.take_value_with_continuation();
 
@@ -1629,10 +1634,11 @@ mod tests {
         #[test]
         fn bare_marker_only_line_terminates_extent() {
             // A continuation line that is *only* the marker (a bare ` +` once
-            // left-trimmed) terminates the value. The extent must stop after that
-            // line so the following line stays in the stream; otherwise the folder
-            // (which left-trims and treats the bare marker as terminating) would
-            // drop it. Extent = `text +\n +`; `more` is left for the next block.
+            // left-trimmed) terminates the value. The extent must stop after
+            // that line so the following line stays in the stream;
+            // otherwise the folder (which left-trims and treats the
+            // bare marker as terminating) would drop it. Extent =
+            // `text +\n +`; `more` is left for the next block.
             let span = crate::Span::new("text +\n +\nmore");
             let line = span.take_value_with_continuation();
 

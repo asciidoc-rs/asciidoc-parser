@@ -9,18 +9,32 @@ use super::{
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    content::{QuoteSub, maybe_has_quotes, quote_subs},
+    content::{QuoteSub, maybe_has_quotes, maybe_has_replacements, quote_subs},
     inlines::{CharRef, InlineNode, RawForm, RawOrigin, SpanForm, StyleVariant, Styled},
     parser::{HtmlInlineRenderer, InlineRenderer, QuoteScope, QuoteType},
     strings::CowStr,
 };
 
 /// A single opaque codepoint standing in for a whole [`Styled`] span (produced
-/// by an earlier sub) while a later sub matches at that span's level. It is in
-/// the Unicode Private Use Area, so — like a rendered `<strong>…</strong>` in
-/// the string pipeline — it is a single non-word, non-space boundary character
-/// that a quote pattern treats as opaque content.
-pub(super) const SPAN_PLACEHOLDER: char = '\u{E0F0}';
+/// by an earlier sub) while a later sub matches at that span's level. Like a
+/// rendered `<strong>…</strong>` in the string pipeline, it is a single
+/// non-word, non-space boundary character that a quote pattern treats as
+/// opaque content.
+///
+/// The codepoint is an **ASCII** control character (U+0010 DATA LINK ESCAPE),
+/// not a Private Use Area one, and the choice is load-bearing for throughput:
+/// several shared patterns carry Unicode word-boundary assertions
+/// (`\b{start-half}` / `\b{end-half}`), which the regex crate's lazy DFA
+/// supports only while the haystack is pure ASCII — its first non-ASCII byte
+/// makes the DFA quit and the whole search rerun on an engine that is more
+/// than an order of magnitude slower. A PUA placeholder (three UTF-8 bytes)
+/// put that byte in every level that contained any recognized construct, which
+/// is exactly the text these patterns sweep hardest. Semantically the two are
+/// interchangeable — the placeholder is located through each level's
+/// [`Piece`] table, never by scanning for it, and both codepoints are
+/// non-word, non-space, and match no pattern's own character classes — so the
+/// ASCII pick costs nothing and keeps the sweep on the fast engine.
+pub(super) const SPAN_PLACEHOLDER: char = '\u{10}';
 
 /// The characters an enclosing construct's own rendering presents to the level
 /// nested inside it — the bytes the string pipeline's haystack holds
@@ -634,21 +648,31 @@ fn apply_quote_sub<'src>(
 ) -> Vec<InlineNode<'src>> {
     // Recurse into the spans produced by earlier subs *before* matching at this
     // level. A span this sub itself creates below is therefore never revisited
-    // by the same sub, matching the string pipeline (a sub runs once).
-    let contexts = LevelContext::child_contexts(&nodes, ctx, Masked::UNKNOWN);
+    // by the same sub, matching the string pipeline (a sub runs once). A level
+    // with no such span — the common leaf-only case, visited once per sub —
+    // has nothing to descend into, so it skips the context derivation and the
+    // rebuild of its node vector entirely.
+    let nodes = if nodes
+        .iter()
+        .any(|node| matches!(node, InlineNode::Styled(_)))
+    {
+        let contexts = LevelContext::child_contexts(&nodes, ctx, Masked::UNKNOWN);
 
-    let nodes: Vec<InlineNode<'src>> = nodes
-        .into_iter()
-        .zip(contexts)
-        .map(|(node, inner)| match node {
-            InlineNode::Styled(mut styled) => {
-                styled.children = apply_quote_sub(sub, styled.children, root, parser, inner);
-                InlineNode::Styled(styled)
-            }
+        nodes
+            .into_iter()
+            .zip(contexts)
+            .map(|(node, inner)| match node {
+                InlineNode::Styled(mut styled) => {
+                    styled.children = apply_quote_sub(sub, styled.children, root, parser, inner);
+                    InlineNode::Styled(styled)
+                }
 
-            other => other,
-        })
-        .collect();
+                other => other,
+            })
+            .collect()
+    } else {
+        nodes
+    };
 
     match_level(sub, nodes, root, parser, ctx)
 }
@@ -698,13 +722,17 @@ fn match_level<'src>(
     parser: &Parser,
     ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
-
-    // Cheap pre-filter: if nothing quote-like is present, no sub can match, so
-    // skip building the (owned) result vector entirely.
-    if !maybe_has_quotes(&s) {
+    // Cheap pre-filter, taken *before* the match string is materialized: if
+    // nothing quote-like is present at this level, no sub can match, so skip
+    // the build (and its allocations) entirely. Every sub runs this gate at
+    // every level, so probing the nodes' contributions piecewise — rather
+    // than building the string just to sniff it — is what keeps a quote-free
+    // level's cost at a scan.
+    if !level_may_have_quotes(&nodes) {
         return nodes;
     }
+
+    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // The pattern runs over the level wrapped in its enclosing construct's own
     // boundary characters, and every offset it reports is mapped back into the
@@ -784,11 +812,136 @@ fn attrlist_is_readable(nodes: &[InlineNode<'_>], pieces: &[Piece], m: &QuoteMat
 /// question turns on for every tag-rendered span; see [`Masked`].
 ///
 /// [`apply_character_replacements`]: super::char_replacements::apply_character_replacements
+/// Reports whether this level's match string *could* contain a character the
+/// quoted-text sniff ([`maybe_has_quotes`]) looks for, without materializing
+/// the string.
+///
+/// This probes exactly the contributions [`build_match_string`] would write —
+/// a `Text` run's value, a `CharRef`'s entity bytes ([`charref_entity`]), and
+/// the up-to-two sibling-boundary characters wrapped around an opaque node's
+/// placeholder (the placeholder itself is never a sniff character) — so its
+/// answer equals sniffing the built string: the sniff's class is single
+/// characters only, which cannot straddle two contributions. Probing under
+/// [`Masked::UNKNOWN`] mirrors the build [`match_level`] would do.
+fn level_may_have_quotes(nodes: &[InlineNode<'_>]) -> bool {
+    let mut buf = [0u8; 4];
+
+    nodes.iter().any(|node| match node {
+        InlineNode::Text { value, .. } => maybe_has_quotes(value),
+
+        node => {
+            if let Some(entity) = charref_entity(node) {
+                maybe_has_quotes(entity)
+            } else {
+                let (before, after) = match node {
+                    InlineNode::Styled(styled) => {
+                        styled_sibling_boundaries(styled, Masked::UNKNOWN)
+                    }
+                    _ => (None, None),
+                };
+
+                before.is_some_and(|ch| maybe_has_quotes(ch.encode_utf8(&mut buf)))
+                    || after.is_some_and(|ch| maybe_has_quotes(ch.encode_utf8(&mut buf)))
+            }
+        }
+    })
+}
+
+/// Reports whether this level's match string *could* contain text the
+/// character-replacements sniff ([`maybe_has_replacements`]) looks for,
+/// without materializing the string — the replacements counterpart of
+/// [`level_may_have_quotes`], probing the same contributions.
+///
+/// Unlike the quotes sniff, this one holds multi-character alternatives
+/// (`--`, `...`, `(C)`…), which *can* straddle two adjacent contributions the
+/// piecewise probe checks separately. The probe stays conservative rather
+/// than exact: any non-final contribution whose last character could end a
+/// proper prefix of such an alternative (`-`, `.`, `(`, `C`, `R`, `T`, `M`)
+/// reports `true`, since a straddling match necessarily consumes that
+/// character. A false positive only means the level builds its match string
+/// and sniffs it exactly as before; a miss is impossible, because a match
+/// lying inside one contribution is found by that contribution's own sniff
+/// and a straddling one trips the last-character rule.
+///
+/// Lives here rather than beside its caller
+/// ([`apply_character_replacements`](super::char_replacements)) because the
+/// probe reads [`styled_sibling_boundaries`], which is this module's own.
+pub(super) fn level_may_have_replacements(nodes: &[InlineNode<'_>]) -> bool {
+    // The last characters of every proper prefix of the sniff's
+    // multi-character alternatives; see the doc comment.
+    const STRADDLE_ENDINGS: [char; 7] = ['-', '.', '(', 'C', 'R', 'T', 'M'];
+
+    let mut buf = [0u8; 4];
+
+    for (index, node) in nodes.iter().enumerate() {
+        // Whether some contribution follows this node's own, making a
+        // straddling match possible.
+        let followed = index + 1 != nodes.len();
+
+        match node {
+            InlineNode::Text { value, .. } => {
+                if maybe_has_replacements(value) || (followed && value.ends_with(STRADDLE_ENDINGS))
+                {
+                    return true;
+                }
+            }
+
+            node => {
+                if let Some(entity) = charref_entity(node) {
+                    // Every entity's own `&` is in the sniff's class, so this
+                    // arm always reports `true` in practice; it is spelled as
+                    // the sniff itself for the same no-drift reason the rest
+                    // of the probe is. It takes no straddle clause: an entity
+                    // always ends with `;`, which ends no alternative's
+                    // proper prefix.
+                    if maybe_has_replacements(entity) {
+                        return true;
+                    }
+                } else {
+                    let (before, after) = match node {
+                        InlineNode::Styled(styled) => {
+                            styled_sibling_boundaries(styled, Masked::UNKNOWN)
+                        }
+                        _ => (None, None),
+                    };
+
+                    // A boundary character takes the sniff alone, no straddle
+                    // rule: under [`Masked::UNKNOWN`] — the identity-less
+                    // answer this probe's callers run with — the only pair
+                    // [`styled_sibling_boundaries`] classifies is the
+                    // smart-quote span's `&`/`;` (its `&#8220;`/`&#8221;`
+                    // edges), and neither character ends an alternative's
+                    // proper prefix (pinned by
+                    // `the_replacements_pre_filter_reads_every_contribution_kind`).
+                    let mut hits = |ch: char| maybe_has_replacements(ch.encode_utf8(&mut buf));
+
+                    if before.is_some_and(&mut hits) || after.is_some_and(&mut hits) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
+
 pub(super) fn build_match_string(
     nodes: &[InlineNode<'_>],
     masked: Masked<'_>,
 ) -> (String, Vec<Piece>) {
-    let mut s = String::new();
+    // Sized for the common all-text case (each node's own value), plus the
+    // few bytes an entity or a boundary-wrapped placeholder adds, so the
+    // build appends without growth reallocations.
+    let capacity: usize = nodes
+        .iter()
+        .map(|node| match node {
+            InlineNode::Text { value, .. } => value.len(),
+            _ => 8,
+        })
+        .sum();
+
+    let mut s = String::with_capacity(capacity);
     let mut pieces = Vec::with_capacity(nodes.len());
 
     for (node_index, node) in nodes.iter().enumerate() {
@@ -1443,15 +1596,15 @@ fn parse_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
 fn attributes_of_attrlist<'src>(
     attrlist: Attrlist<'src>,
 ) -> (Option<CowStr<'src>>, Vec<CowStr<'src>>, Attrlist<'src>) {
-    // Extract owned id/roles before the attrlist is moved into the node, exactly
-    // as the string pipeline's quote replacer does.
+    // Extract owned id/roles before the attrlist is moved into the node,
+    // exactly as the string pipeline's quote replacer does.
     //
-    // Unlike that replacer, this deliberately performs *no* side effect: it does
-    // not `register_ref` an assigned id in the catalog, because the builder is
-    // additive and not yet the recognition sink — the authoritative string
-    // pipeline still registers it. The cutover (design §5.2 Phase 4, step 6)
-    // must add that registration so cross-references to an inline id resolve
-    // (tracked by #1087).
+    // Unlike that replacer, this deliberately performs *no* side effect: it
+    // does not `register_ref` an assigned id in the catalog, because the
+    // builder is additive and not yet the recognition sink — the
+    // authoritative string pipeline still registers it. The cutover (design
+    // §5.2 Phase 4, step 6) must add that registration so cross-references
+    // to an inline id resolve (tracked by #1087).
     let id = attrlist.id().map(|id| CowStr::from(id.to_string()));
 
     let roles = attrlist
@@ -1732,8 +1885,8 @@ fn s_to_src(pieces: &[Piece], x: usize, bias: Bias) -> usize {
         }
     }
 
-    // Past the last piece: the end of the source the pieces cover, or the anchor
-    // for an empty level.
+    // Past the last piece: the end of the source the pieces cover, or the
+    // anchor for an empty level.
     pieces
         .last()
         .map_or(0, |last| last.src_offset + last.src_len)
@@ -2479,7 +2632,8 @@ mod tests {
         // An id rather than a role, so the probe sees a `<span …>`: the fold
         // hands the renderer the span's `attrs` and `id` and lets it derive
         // the roles, so a `roles` field with no attribute list behind it
-        // renders nothing (see `styled_boundaries_match_the_built_in_renderer`).
+        // renders nothing (see
+        // `styled_boundaries_match_the_built_in_renderer`).
         let styled = Styled {
             variant: StyleVariant::Unquoted,
             form: SpanForm::Unconstrained,
@@ -2569,10 +2723,10 @@ mod tests {
         assert_eq!(s, SPAN_PLACEHOLDER.to_string());
         assert_eq!(pieces[0].s_start, 0);
 
-        // And a node the identity *names* is such a wrapper — `[width=10]++x ++`
-        // renders its body and nothing else too, and the string pipeline is
-        // holding its `\u{96}…\u{97}` sentinel there, which is exactly what a
-        // bare placeholder reads as.
+        // And a node the identity *names* is such a wrapper — `[width=10]++x
+        // ++` renders its body and nothing else too, and the string
+        // pipeline is holding its `\u{96}…\u{97}` sentinel there, which
+        // is exactly what a bare placeholder reads as.
         let wrapper = styled(body());
 
         let identity = (
@@ -2583,6 +2737,68 @@ mod tests {
         let (s, _) = build_match_string(&[InlineNode::Styled(wrapper)], Masked::known(&[identity]));
 
         assert_eq!(s, SPAN_PLACEHOLDER.to_string());
+    }
+
+    #[test]
+    fn the_replacements_pre_filter_reads_every_contribution_kind() {
+        // The piecewise pre-filter (`level_may_have_replacements`) must answer
+        // exactly as sniffing the built match string would, per contribution
+        // kind: a `CharRef`'s entity bytes (whose `&` is in the sniff's
+        // class), a smart-quote span's presented boundary `&`, a straddle
+        // ending on a non-final text run, and — negatively — a tag-rendered
+        // span under `Masked::UNKNOWN`, which stands as the bare placeholder
+        // and can satisfy nothing.
+        use super::level_may_have_replacements;
+        use crate::inlines::{CharRef, Styled};
+
+        let text = |value: &'static str| InlineNode::Text {
+            value: CowStr::from(value),
+            location: Span::new(value),
+        };
+
+        let styled = |variant| {
+            InlineNode::Styled(Styled {
+                variant,
+                form: SpanForm::Constrained,
+                id: None,
+                roles: Vec::new(),
+                attrs: crate::attributes::Attrlist::empty(Span::new("").slice(0..0)),
+                children: vec![text("x")],
+                passthrough: None,
+                location: Span::new("\"`x`\""),
+            })
+        };
+
+        // A `CharRef` contributes its entity, whose `&` sniffs.
+        assert!(level_may_have_replacements(&[InlineNode::CharRef {
+            value: CharRef::Special('<'),
+            location: Span::new("<"),
+        }]));
+
+        // A smart-quote span presents `&#8220;`'s own `&` to its siblings.
+        assert!(level_may_have_replacements(&[styled(
+            StyleVariant::DoubleQuote
+        )]));
+
+        // A non-final text run ending a proper prefix of `--` admits the
+        // level through the straddle rule; the same run standing last cannot
+        // straddle anything.
+        assert!(level_may_have_replacements(&[text("x-"), text("y")]));
+        assert!(!level_may_have_replacements(&[text("x-")]));
+
+        // A tag-rendered span is unclassified without the extraction pass's
+        // identity: a bare placeholder, sniffing nothing.
+        assert!(!level_may_have_replacements(&[styled(
+            StyleVariant::Strong
+        )]));
+
+        // An entity that carries no sniffable byte — a shape no producer
+        // builds, since a real entity is always `&…;` — falls through to the
+        // nodes after it rather than answering for the level.
+        assert!(!level_may_have_replacements(&[InlineNode::CharRef {
+            value: CharRef::Entity(CowStr::from("x")),
+            location: Span::new("x"),
+        }]));
     }
 
     #[test]
@@ -2779,8 +2995,9 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_quotes() {
         // For each fixture, folding the single-pass tree (special characters +
-        // quotes) reproduces the string pipeline's output byte-for-byte. This is
-        // the differential corpus (design §5.3) that pins the quotes increment.
+        // quotes) reproduces the string pipeline's output byte-for-byte. This
+        // is the differential corpus (design §5.3) that pins the quotes
+        // increment.
         let fixtures = [
             // No quotes.
             "plain text",
@@ -3626,9 +3843,10 @@ mod tests {
         // flat string, emits crossed — malformed — HTML tags (`<code>…<strong>…
         // </code>…</strong>`) that no tree can represent. The single-pass
         // builder instead treats an earlier span as opaque, so it produces a
-        // well-formed tree (here, monospace wrapping a strong span). This is the
-        // documented boundary of the single-pass recognition (see the module
-        // docs): for pathological cross-span input the two intentionally differ.
+        // well-formed tree (here, monospace wrapping a strong span). This is
+        // the documented boundary of the single-pass recognition (see
+        // the module docs): for pathological cross-span input the two
+        // intentionally differ.
         let source = "`a *b` c*";
 
         let folded = fold_html(
@@ -3656,8 +3874,8 @@ mod tests {
         assert_eq!(nodes.len(), 1);
         let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
 
-        // The delimiters are consumed; the child is the borrowed body, precisely
-        // located just past the opening `*`.
+        // The delimiters are consumed; the child is the borrowed body,
+        // precisely located just past the opening `*`.
         assert_eq!(children.len(), 1);
         assert_text(&children[0], "bold", 1, 2);
 
@@ -3681,8 +3899,8 @@ mod tests {
 
     #[test]
     fn emphasis_nests_inside_strong() {
-        // The canonical nesting example: constrained emphasis matches inside the
-        // body of the strong span an earlier sub created.
+        // The canonical nesting example: constrained emphasis matches inside
+        // the body of the strong span an earlier sub created.
         let nodes = build_src(Span::new("*a _b_ c*"));
 
         assert_eq!(nodes.len(), 1);
@@ -3766,8 +3984,8 @@ mod tests {
         // Regression guard for the escape-after-a-boundary case (`a \*x*`): the
         // backslash immediately before the delimiter is the constrained match's
         // *leading boundary group*, hence the first character of the whole
-        // match, so it is still recognized as an escape. The construct must stay
-        // literal rather than becoming a span.
+        // match, so it is still recognized as an escape. The construct must
+        // stay literal rather than becoming a span.
         let nodes = build_src(Span::new("a \\*x*"));
 
         assert!(
@@ -4017,7 +4235,8 @@ mod tests {
         // (`['{myrole}']*bold*`), and no longer does: that one was never
         // really about a later step reading emitted markup, but about
         // `Attrlist::parse` discarding the substituted text one accessor
-        // needs — see `a_quoted_role_reads_the_attribute_lists_substituted_text`
+        // needs — see
+        // `a_quoted_role_reads_the_attribute_lists_substituted_text`
         // above. What is left here is genuinely markup-reading.
         let parser = crate::Parser::default();
 

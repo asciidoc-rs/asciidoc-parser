@@ -410,9 +410,10 @@ Strictly speaking, the enclosure is only required when the text preceding the eq
         );
 
         // The text preceding the `=` here is `Read this`, which is not a valid
-        // attribute name (it contains a space), so the whole unquoted attrlist is
-        // taken as the first positional attribute (the link text) even though it
-        // contains an equals sign. No double-quote enclosure is required.
+        // attribute name (it contains a space), so the whole unquoted attrlist
+        // is taken as the first positional attribute (the link text)
+        // even though it contains an equals sign. No double-quote
+        // enclosure is required.
         let doc = Parser::default().parse("https://example.org[Read this=important document]");
 
         assert_eq!(

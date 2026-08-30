@@ -423,8 +423,9 @@ fn build_inline_link_node<'src>(
     let raw_text = raw_text_m.map_or("", |m| m.as_str());
 
     if let Some(attrlist_m) = raw_text_m {
-        // A formal URL link: the bracketed text is the display text (empty means
-        // a bare link, handled by the shared post-processing below).
+        // A formal URL link: the bracketed text is the display text (empty
+        // means a bare link, handled by the shared post-processing
+        // below).
         if !attrlist_m.is_empty() {
             link_text = Some(attrlist_m.as_str().to_string());
         }
@@ -452,15 +453,15 @@ fn build_inline_link_node<'src>(
             }
         }
 
-        // A bare scheme with nothing left after trimming is not a link; leave it
-        // literal, exactly as the string step does.
+        // A bare scheme with nothing left after trimming is not a link; leave
+        // it literal, exactly as the string step does.
         if target.ends_with("://") {
             return None;
         }
 
         // The bare group is the last group in the match, so the URL ends at
-        // `full.end`; the node stops short of the stripped punctuation, which the
-        // stripped bytes (ASCII) place `stripped` bytes back.
+        // `full.end`; the node stops short of the stripped punctuation, which
+        // the stripped bytes (ASCII) place `stripped` bytes back.
         consumed_end = full.end - stripped;
         url_end = consumed_end;
 
@@ -486,12 +487,13 @@ fn build_inline_link_node<'src>(
     // A target crossing a **masked** construct finishes into the restored
     // bytes — the node's own rendered body ([`restorable_body`]) substituted
     // for its placeholder, the same rewrite `Passthroughs::restore_to`
-    // performs on the emitted `href` — and only the node's values take them. Every
-    // *decision* the string replacer makes over the bytes as matched is already
-    // behind us (the quoted-prefix rejection and the trailing-punctuation strip
-    // above), each reading a placeholder exactly as the sentinel-holding
-    // haystack reads its own sentinel: neither spelling is a quote, and neither
-    // ends in the `;` or `:` the strip keys off.
+    // performs on the emitted `href` — and only the node's values take them.
+    // Every *decision* the string replacer makes over the bytes as matched
+    // is already behind us (the quoted-prefix rejection and the
+    // trailing-punctuation strip above), each reading a placeholder exactly
+    // as the sentinel-holding haystack reads its own sentinel: neither
+    // spelling is a quote, and neither ends in the `;` or `:` the strip
+    // keys off.
     //
     // `target` is the match string's own bytes from the scheme through the
     // URL — one contiguous run, less whatever the strip truncated — so its
@@ -1015,10 +1017,10 @@ fn find_link_macro_matches<'src>(
         // dropping the backslash keeps the rest of the match as its **own
         // original nodes** (a rendered span or an escaped special among them),
         // which fold back to exactly the bytes the replacer's `caps[0][1..]`
-        // emits. (This is the same check-order fix the `footnoteref:`, menu, and
-        // cross-reference increments made for their own families; before it, an
-        // escaped `\link:x[*bold*]` whose match the gate rejected was left
-        // unrecognized, backslash and all.)
+        // emits. (This is the same check-order fix the `footnoteref:`, menu,
+        // and cross-reference increments made for their own families;
+        // before it, an escaped `\link:x[*bold*]` whose match the gate
+        // rejected was left unrecognized, backslash and all.)
         if whole.as_str().starts_with('\\') {
             matches.push(MacroMatch {
                 kind: MacroMatchKind::Unescape {
@@ -1791,7 +1793,7 @@ fn text_attrlist<'src>(
 /// [`range_has_no_opaque_piece`](super::image::range_has_no_opaque_piece)
 /// gate to express that lift: an address
 /// **cannot** cross an opaque piece in the first place. Every such piece is
-/// exactly one [`SPAN_PLACEHOLDER`] (U+E0F0, Unicode category `Co`), which
+/// exactly one [`SPAN_PLACEHOLDER`] (U+0010, an ASCII control character), which
 /// none of the pattern's character classes admit — not the local part's
 /// `[\w_]` / `[\w\-.%+]`, not the domain's `[\p{L}\p{Nd}_\-.]`, not the TLD's
 /// `[a-zA-Z]` — so a match can never contain one. Nor can a match *begin* or
@@ -2230,11 +2232,12 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_with_hide_uri_scheme() {
         // Under `hide-uri-scheme`, a bare link's display text drops the URI
-        // scheme; the builder reproduces the string step's `URI_SNIFF` stripping,
-        // including the fall-back to the whole target when the strip leaves
-        // nothing. Every fixture is a non-`://` `link:` target, so the string
-        // pipeline routes it through the same `INLINE_LINK_MACRO` the builder
-        // uses (a `://` target is `INLINE_LINK`'s territory, a later increment).
+        // scheme; the builder reproduces the string step's `URI_SNIFF`
+        // stripping, including the fall-back to the whole target when
+        // the strip leaves nothing. Every fixture is a non-`://`
+        // `link:` target, so the string pipeline routes it through the
+        // same `INLINE_LINK_MACRO` the builder uses (a `://` target is
+        // `INLINE_LINK`'s territory, a later increment).
         use crate::parser::ModificationContext;
 
         let parser = Parser::default().with_intrinsic_attribute_bool(
@@ -2668,7 +2671,8 @@ mod tests {
     #[test]
     fn a_mailto_macro_targets_the_address() {
         // A labeled mailto prefixes the address with `mailto:` and shows the
-        // label; a bare mailto shows the address itself and takes no `bare` role.
+        // label; a bare mailto shows the address itself and takes no `bare`
+        // role.
         let labeled = build_src(Span::new("mailto:hello@example.org[Email us]"));
         let reference = assert_link(&labeled[0]);
         assert_eq!(reference.target.as_ref(), "mailto:hello@example.org");
@@ -2698,8 +2702,8 @@ mod tests {
 
     #[test]
     fn an_escaped_link_macro_stays_literal() {
-        // `\link:…` drops the backslash and keeps the macro as literal text — no
-        // link node.
+        // `\link:…` drops the backslash and keeps the macro as literal text —
+        // no link node.
         let nodes = build_src(Span::new("\\link:index.html[Docs]"));
 
         assert!(
@@ -3006,8 +3010,8 @@ mod tests {
 
     #[test]
     fn a_link_is_recognized_inside_a_span() {
-        // A macro can appear inside a rendered span; the transducer descends into
-        // the span body and builds the node there.
+        // A macro can appear inside a rendered span; the transducer descends
+        // into the span body and builds the node there.
         let nodes = build_src(Span::new("*see link:x.html[X]*"));
 
         let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
@@ -3023,13 +3027,14 @@ mod tests {
     fn fold_matches_the_string_pipeline_through_inline_links() {
         // For each fixture, folding the single-pass tree (all five steps)
         // reproduces the string pipeline's output byte-for-byte. This is the
-        // differential corpus (design §5.3) that pins the auto-link / formal-URL
-        // link increment. A fixture may cross an escaped special anywhere but
-        // its own attribute-list text; the forms still deferred (an
-        // attribute-list text crossing a special, a multi-line attribute-list
-        // text, a display text crossing a rendered span, and a bare URL whose
-        // trailing-punctuation strip would split a special) each live in a
-        // divergence test below. The pattern's ANGLE branch has its own corpus,
+        // differential corpus (design §5.3) that pins the auto-link /
+        // formal-URL link increment. A fixture may cross an escaped
+        // special anywhere but its own attribute-list text; the forms
+        // still deferred (an attribute-list text crossing a special, a
+        // multi-line attribute-list text, a display text crossing a
+        // rendered span, and a bare URL whose trailing-punctuation
+        // strip would split a special) each live in a divergence test
+        // below. The pattern's ANGLE branch has its own corpus,
         // alongside its own structural tests.
         let fixtures = [
             // No auto-link despite a colon or a `//`.
@@ -3143,8 +3148,9 @@ mod tests {
 
     #[test]
     fn fold_matches_the_string_pipeline_for_auto_links_with_hide_uri_scheme() {
-        // Under `hide-uri-scheme`, a bare auto-link's display text drops the URI
-        // scheme; the builder reproduces the string step's `URI_SNIFF` stripping.
+        // Under `hide-uri-scheme`, a bare auto-link's display text drops the
+        // URI scheme; the builder reproduces the string step's
+        // `URI_SNIFF` stripping.
         use crate::parser::ModificationContext;
 
         let parser = Parser::default().with_intrinsic_attribute_bool(

@@ -90,8 +90,8 @@ If the number of columns is assigned using a multiplier (`+<n>*+`), the horizont
         ]
     );
 
-    // A horizontal alignment operator is placed in front of a vertical alignment
-    // operator.
+    // A horizontal alignment operator is placed in front of a vertical
+    // alignment operator.
     let table = parse_table("[cols=\">.^1,2\"]\n|===\n|a |b\n|===");
     assert_eq!(
         column_alignments(&table),
@@ -376,7 +376,8 @@ Then it's placed after the horizontal alignment operator, (e.g., `[cols="3*^pass
     );
 
     // When a column width doesn't need to be specified, a vertical alignment
-    // operator can represent both the column and the column content's alignment.
+    // operator can represent both the column and the column content's
+    // alignment.
     let table = parse_table("[cols=\".^,.>\"]\n|===\n|a |b\n|===");
     assert_eq!(
         column_alignments(&table),
@@ -386,8 +387,8 @@ Then it's placed after the horizontal alignment operator, (e.g., `[cols="3*^pass
         ]
     );
 
-    // The vertical alignment operator is placed directly after a multiplier when
-    // there is no horizontal alignment operator.
+    // The vertical alignment operator is placed directly after a multiplier
+    // when there is no horizontal alignment operator.
     let table = parse_table("[cols=\"3*.>\"]\n|===\n|a |b |c\n|===");
     assert_eq!(
         column_alignments(&table),
@@ -641,9 +642,9 @@ IMPORTANT: If there is an xref:align-by-cell.adoc[alignment operator on a cell's
 "#
     );
 
-    // The column is centered horizontally and aligned to the bottom (`^.>`), but
-    // the cell's own specifier (`>.^`) overrides both: the cell is right-aligned
-    // and centered vertically.
+    // The column is centered horizontally and aligned to the bottom (`^.>`),
+    // but the cell's own specifier (`>.^`) overrides both: the cell is
+    // right-aligned and centered vertically.
     let table = parse_table("[cols=\"^.>\"]\n|===\n>.^|overridden\n|===");
     assert_eq!(
         column_alignments(&table),

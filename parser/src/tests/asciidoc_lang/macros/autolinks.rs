@@ -869,9 +869,9 @@ mod pr498 {
         // fires capture group 6 with group 2 unset. Previously this panicked on
         // the direct `&caps[7]` / `&caps[8]` indexing in InlineLinkReplacer.
         //
-        // Expected output matches Ruby Asciidoctor 2.0.23, which treats the stray
-        // `&gt;` as part of a bare link (keeping `&gt` in the URL) and leaves the
-        // trailing `;` outside the link.
+        // Expected output matches Ruby Asciidoctor 2.0.23, which treats the
+        // stray `&gt;` as part of a bare link (keeping `&gt` in the
+        // URL) and leaves the trailing `;` outside the link.
         let doc = Parser::default().parse("See https://example.org> for details.");
 
         let rendered = doc
@@ -889,8 +889,9 @@ mod pr498 {
 
     #[test]
     fn multiple_bare_urls_with_trailing_gt() {
-        // Two group-6 matches in a row also exercised the skip/retry path; verify
-        // both URLs render and no panic occurs. Output matches Ruby Asciidoctor.
+        // Two group-6 matches in a row also exercised the skip/retry path;
+        // verify both URLs render and no panic occurs. Output matches
+        // Ruby Asciidoctor.
         let doc = Parser::default().parse("a https://example.org> b https://example.com> c");
 
         let rendered = doc

@@ -294,8 +294,8 @@ Will be colorized by the source highlighter if enabled on the document and a lan
 "#
     );
 
-    // A `[source]` style over a listing (`----`) delimited block resolves to the
-    // `listing` context, specialized by the `source` style.
+    // A `[source]` style over a listing (`----`) delimited block resolves to
+    // the `listing` context, specialized by the `source` style.
     let (resolved, model, style) = facts("[source]\n----\ncode\n----");
     assert_eq!(resolved, "listing");
     assert_eq!(model, ContentModel::Verbatim);

@@ -609,10 +609,11 @@ include::example$video.adoc[tag=vimeo]
 "#
         );
 
-        // The video ID is the macro target and the hosting service name (`vimeo`)
-        // is the first positional attribute. How the target ID and service name
-        // are assembled into an embed URL is the converter's responsibility, not
-        // the parser's, so the parser simply preserves both verbatim.
+        // The video ID is the macro target and the hosting service name
+        // (`vimeo`) is the first positional attribute. How the target
+        // ID and service name are assembled into an embed URL is the
+        // converter's responsibility, not the parser's, so the parser
+        // simply preserves both verbatim.
         //
         // example$video.adoc[tag=vimeo]
         let doc = Parser::default().parse("video::67480300[vimeo]");
@@ -671,9 +672,9 @@ include::example$video.adoc[tag=youtube-with-list]
 "#
         );
 
-        // The `list` named attribute carries the playlist ID. The parser exposes
-        // it as a plain named attribute; mapping it onto the embed URL is the
-        // converter's job.
+        // The `list` named attribute carries the playlist ID. The parser
+        // exposes it as a plain named attribute; mapping it onto the
+        // embed URL is the converter's job.
         //
         // example$video.adoc[tag=youtube-with-list]
         let doc = Parser::default()
@@ -709,9 +710,9 @@ include::example$video.adoc[tag=youtube-with-list-in-target]
         );
 
         // The playlist ID follows the video ID in the target, separated by a
-        // slash. The parser keeps the whole target verbatim (it does not split on
-        // the slash); the converter is responsible for separating the video ID
-        // from the playlist ID.
+        // slash. The parser keeps the whole target verbatim (it does not split
+        // on the slash); the converter is responsible for separating
+        // the video ID from the playlist ID.
         //
         // example$video.adoc[tag=youtube-with-list-in-target]
         let doc = Parser::default()
@@ -746,8 +747,8 @@ include::example$video.adoc[tag=youtube-with-playlist]
         );
 
         // The `playlist` named attribute holds a comma-separated list of video
-        // IDs. Because the value contains commas, it is enclosed in double quotes
-        // so the attribute parser keeps it as a single value.
+        // IDs. Because the value contains commas, it is enclosed in double
+        // quotes so the attribute parser keeps it as a single value.
         //
         // example$video.adoc[tag=youtube-with-playlist]
         let doc = Parser::default()
@@ -783,9 +784,9 @@ include::example$video.adoc[tag=youtube-with-playlist-in-target]
         );
 
         // The additional video IDs follow the first video ID in the target,
-        // separated by commas. The parser keeps the entire comma-separated target
-        // verbatim; splitting it into the lead video ID and the playlist members
-        // is the converter's job.
+        // separated by commas. The parser keeps the entire comma-separated
+        // target verbatim; splitting it into the lead video ID and the
+        // playlist members is the converter's job.
         //
         // example$video.adoc[tag=youtube-with-playlist-in-target]
         let doc = Parser::default().parse("video::RvRhUHTV_8k,_SvwdK_HibQ,SGqg_ZzThDU[youtube]");
