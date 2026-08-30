@@ -2148,20 +2148,19 @@ mod tests {
     fn a_bracket_body_carrying_sentinel_shaped_bytes_is_not_re_matched() {
         // The bracket restore is one left-to-right pass, like
         // `Passthroughs::restore_to`'s own: a body that itself contains the
-        // bytes of a *later* token must not have that token spliced into it,
-        // and a token index the bracket never issued is left as written
-        // rather than renumbering the ones after it.
+        // bytes of a *later* placeholder must not have that placeholder
+        // spliced into it.
         let source = "image:x.png[++x\u{96}1\u{97}y++ ++b++]";
         let nodes = build_src(Span::new(source));
 
         let image = assert_image(&nodes[0]);
         assert_eq!(image.alt.as_deref(), Some("x\u{96}1\u{97}y b"));
 
-        // The leniency the index-keyed restore rests on, in both spellings a
-        // bracket can present: a run that is not a well-formed token (no
-        // digits) and one whose index the bracket never issued are each left
-        // exactly as the author wrote them, rather than renumbering — or
-        // consuming — the real tokens around them.
+        // The leniency the positional restore rests on, in both spellings a
+        // bracket can present: a run that is not the well-formed placeholder
+        // pair (a lone `\u{96}` or `\u{97}`, or the two separated by other
+        // bytes) is left exactly as the author wrote it, rather than being
+        // mistaken for a real occurrence.
         let nodes = build_src(Span::new(
             "image:x.png[++a++ \u{96}x\u{97} \u{96}9\u{97} ++b++]",
         ));
@@ -2172,13 +2171,27 @@ mod tests {
             Some("a \u{96}x\u{97} \u{96}9\u{97} b")
         );
 
-        // The string pipeline reads this one differently, and the difference
-        // is its own wart rather than something to reproduce: `restore_to`
-        // is a `replace_all` over the *finished* rendered string, so it also
-        // rewrites the sentinel-shaped bytes the author wrote — splicing
-        // passthrough 1's body into the middle of passthrough 0's. The tree
-        // restores per token, into the value each token actually stands in,
-        // so an author's own bytes survive. Its sibling
+        // And the leniency on the *other* side of the same shape: an
+        // author-typed **adjacent** pair — the well-formed placeholder shape
+        // itself, with no real masked piece behind it — is left as written
+        // too, rather than consuming a body meant for a later real
+        // occurrence. Only one passthrough (`++a++`) supplies a body here, so
+        // the cursor is already past `bodies.len()` by the time the typed
+        // pair is reached, and `restore_tokens`' own leniency for that case
+        // is what keeps it literal instead of panicking or misattributing.
+        let nodes = build_src(Span::new("image:x.png[++a++ \u{96}\u{97}]"));
+        let image = assert_image(&nodes[0]);
+
+        assert_eq!(image.alt.as_deref(), Some("a \u{96}\u{97}"));
+
+        // The string pipeline reads the first fixture differently, and the
+        // difference is its own wart rather than something to reproduce:
+        // `restore_to` is a `replace_all` over the *finished* rendered
+        // string, so it also rewrites the sentinel-shaped bytes the author
+        // wrote — splicing passthrough 1's body into the middle of
+        // passthrough 0's. The tree restores per occurrence, into the value
+        // each one actually stands in, so an author's own bytes survive. Its
+        // sibling
         // `a_restored_body_carrying_sentinel_shaped_bytes_is_not_re_matched`
         // pins the same reading for a target.
         use super::super::super::test_support::golden_passthroughs;
