@@ -1746,12 +1746,13 @@ mod tests {
     fn fold_matches_the_string_pipeline_through_escaped_paren_wrapped_shorthands() {
         // The one escaped shorthand rendered rather than
         // left literal: a paren-wrapped `\(((x)))`, whose wrapping parens are
-        // stripped off `encl_text` before rendering what is left as a **visible**
-        // term between two literal parens ("an escaped concealed term still
-        // processes a nested flow term"), so the whole thing collapses to
-        // `(x)`. The builder expresses that as a pair of matches — an
-        // `Unescape` over the backslash alone, then a `Node` whose `consumed`
-        // sub-range keeps a paren at each end — and folds to the same bytes.
+        // stripped off `encl_text` before rendering what is left as a
+        // **visible** term between two literal parens ("an escaped
+        // concealed term still processes a nested flow term"), so the
+        // whole thing collapses to `(x)`. The builder expresses that as
+        // a pair of matches — an `Unescape` over the backslash alone,
+        // then a `Node` whose `consumed` sub-range keeps a paren at
+        // each end — and folds to the same bytes.
         for fixture in [
             // The shape itself, alone and in flow.
             r"\(((x)))",

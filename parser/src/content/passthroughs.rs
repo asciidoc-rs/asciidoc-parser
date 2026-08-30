@@ -435,8 +435,8 @@ mod tests {
         // in the first place.
         //
         // Before the authoritative-pass closure the route was different — the
-        // body re-entered `SubstitutionGroup::apply`, whose string pipeline
-        // raised the warning into the discarded range, and a
+        // body re-entered `SubstitutionGroup::apply`, which raised the
+        // warning into the discarded range, and a
         // `nested_authoritative_warnings` buffer on the `Parser` carried it
         // back out. That buffer is retired along with the re-entry it existed
         // for. Both routes surfaced the same warning at the same location,
@@ -483,9 +483,10 @@ mod tests {
         // `passthrough_text` seeded the body's `Content` from an unanchored
         // `Span::new`, so a reference inside the body had no position in the
         // document to be located against and every such warning collapsed onto
-        // the document start. `origin/inline-ast` before this branch's step 6
-        // inversion was mislocated too, differently: the body's warning came
-        // from the *builder* rather than from this authoritative string pass,
+        // the document start. `origin/inline-ast` before this branch's
+        // authoritative-pass inversion was mislocated too, differently: the
+        // body's warning came from the *builder* rather than from this
+        // authoritative string pass,
         // and reported the reference's offset within the body (2 for
         // `['{alpha}'`) read as though it were a document offset.
         //
@@ -535,8 +536,9 @@ mod tests {
 
     #[test]
     fn a_nested_attributed_passthrough_locates_each_reference_separately() {
-        // The shape nothing covered, and the gap the step 6 inversion's own
-        // offset shift went unnoticed through: a `pass:` macro whose list
+        // The shape nothing covered, and the gap the authoritative-pass
+        // inversion's own offset shift went unnoticed through: a `pass:`
+        // macro whose list
         // includes `a`, whose body is itself an attribute-listed inline
         // passthrough. The macro's body stops at the first `]`, so the body
         // substituted here is `['{alpha}'` — the inner passthrough's attribute
@@ -582,7 +584,8 @@ mod tests {
     #[test]
     fn content_without_passthroughs_exposes_an_empty_collection() {
         // Plain content — and content whose substitution group never extracts
-        // passthroughs — exposes an empty collection rather than any sentinel.
+        // passthroughs — exposes an empty collection rather than a
+        // placeholder value.
         let mut p = Parser::default();
 
         let maw = crate::blocks::Block::parse(crate::Span::new("just plain prose"), &mut p);

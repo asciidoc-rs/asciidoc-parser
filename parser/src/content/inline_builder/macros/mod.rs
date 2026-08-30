@@ -199,8 +199,8 @@ pub(super) fn apply_macros<'src>(
 /// `ctx` is the [`LevelContext`] this level sits in — the character an
 /// enclosing construct's own rendering presents immediately before it, which
 /// a fully rendered flat string holds there but a level matched in
-/// isolation does not have on its own. Two of this step's families read exactly that
-/// character: `INLINE_LINK`'s boundary-prefix group and `INLINE_EMAIL`'s
+/// isolation does not have on its own. Two of this step's families read exactly
+/// that character: `INLINE_LINK`'s boundary-prefix group and `INLINE_EMAIL`'s
 /// "prefix that causes a mismatch" group (see
 /// [`links::inline_link_level`] and [`links::email_level`]). Without it,
 /// `*doc@example.org*` links here while a flat-string reading — seeing the `>`
@@ -237,14 +237,14 @@ pub(super) fn apply_macros<'src>(
 /// outer characters. Either one it can write only for a span really
 /// rendered here, not for the passthrough-extraction pass's own
 /// wrapper (see [`Masked`]), whose body stands in as an opaque placeholder
-/// regardless of what that body itself renders as. This step is where `masked` is
-/// carried, and only here, because these two prefix groups are the only
+/// regardless of what that body itself renders as. This step is where `masked`
+/// is carried, and only here, because these two prefix groups are the only
 /// classes in the whole module that read a tag's `>` differently from the
 /// bare placeholder: `**bold**https://example.org` links against a
-/// fully rendered reading, which sees the `>` that ends `</strong>`, where a quote sub's own
-/// `(^|[^\w&;:}])` accepts the two alike. Every other step goes on passing
-/// [`Masked::UNKNOWN`](super::special_chars::Masked::UNKNOWN), which is not a
-/// shortcut but the same answer stated once.
+/// fully rendered reading, which sees the `>` that ends `</strong>`, where a
+/// quote sub's own `(^|[^\w&;:}])` accepts the two alike. Every other step goes
+/// on passing [`Masked::UNKNOWN`](super::special_chars::Masked::UNKNOWN), which
+/// is not a shortcut but the same answer stated once.
 fn apply_macro_families<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -451,12 +451,12 @@ fn apply_reference_families<'src>(
 /// [`apply_macros`]'s own doc comment): bibliography anchor,
 /// then image, then link, then anchor/ref.
 /// This is not cosmetic — it is what keeps output identical to
-/// the recorded golden output whenever more than one family's side effect touches
-/// the *same* shared list. Concretely, [`Parser::record_substitution_warning`]
-/// appends to one shared warnings list, and both
-/// [`image::apply_image_side_effects`]'s dangerous-link-scheme warning and
-/// [`anchors::apply_ref_side_effects`]'s duplicate-id warning write to it — a
-/// content whose image triggers the first and whose anchor triggers the
+/// the recorded golden output whenever more than one family's side effect
+/// touches the *same* shared list. Concretely,
+/// [`Parser::record_substitution_warning`] appends to one shared warnings list,
+/// and both [`image::apply_image_side_effects`]'s dangerous-link-scheme warning
+/// and [`anchors::apply_ref_side_effects`]'s duplicate-id warning write to it —
+/// a content whose image triggers the first and whose anchor triggers the
 /// second must see the image warning recorded first, matching the
 /// image-then-anchor family order. The same holds one
 /// step earlier for [`anchors::apply_biblio_side_effects`]'s own duplicate-id
@@ -1250,8 +1250,9 @@ mod tests {
         // `Macros` too. Only the cross-reference family can be pinned to
         // parity there, because it is the one family whose node stays an
         // unresolved placeholder in the tree
-        // when the escaping step runs — so `flatten_prior_markup` leaves it alone,
-        // where a link's already-emitted `<a …>` markup is escaped, which is the separate divergence
+        // when the escaping step runs — so `flatten_prior_markup` leaves it
+        // alone, where a link's already-emitted `<a …>` markup is
+        // escaped, which is the separate divergence
         // `a_markup_producing_step_before_the_escaping_one_is_a_documented_divergence`
         // pins. Both spellings reach parity; the bare `<` did not before the
         // decision became position-aware.
@@ -1587,12 +1588,11 @@ mod tests {
         // A content that exercises every family this function composes in one
         // go: an image whose `link=` targets a dangerous scheme (a warning
         // from the image family) *before* a duplicate anchor id (a warning
-        // from the anchor family) — the golden pipeline's own image-then-
+        // from the anchor family) — the crate's own image-then-
         // anchor pass order (`apply_macros`'s own doc comment) must land the
         // two warnings in that order, not the reverse. Each side uses its own
-        // *independent* parser (design §5.3's two-independent-parsers
-        // discipline, established by the image increment's own differential
-        // corpus).
+        // *independent* parser — the two-independent-parsers
+        // discipline every warning-ordering test in this module uses.
         let source = "image:x.png[alt,link=javascript:alert(1)] then [[dup]] and [[dup]]";
 
         let builder_parser = Parser::default().with_catalog_assets(true);

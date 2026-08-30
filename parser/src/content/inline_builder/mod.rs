@@ -966,8 +966,8 @@ mod tests {
         );
     }
 
-    /// A broad, general-purpose sweep of inline fixtures, run against `build`
-    /// + `fold_html`. Unlike
+    /// A broad, general-purpose sweep of inline fixtures, run against
+    /// `build` and `fold_html`. Unlike
     /// the hand-picked combined-constructs corpus above, this one is not
     /// curated to stay inside `build`'s claimed vocabulary, so it is exactly
     /// the kind of audit that finds real gaps (it once caught a `hardbreaks`
@@ -2410,8 +2410,9 @@ mod tests {
         }
 
         /// The complement of the corpus above, for the *other* order case the
-        /// escaping-order rule has to answer for: not a group that never escapes, but one that
-        /// escapes **after** expanding an attribute reference.
+        /// escaping-order rule has to answer for: not a group that never
+        /// escapes, but one that escapes **after** expanding an
+        /// attribute reference.
         ///
         /// Every built-in group that runs both steps escapes first and expands
         /// later, which is why a spliced value's literal `<`/`>`/`&` has always
@@ -2820,10 +2821,10 @@ mod tests {
         /// records its own spelling
         /// ([`Ref::link_form`](crate::inlines::Ref::link_form)), which is what
         /// [`apply_link_side_effects`](macros::links::apply_link_side_effects)
-        /// reads to replay the string pipeline's family-pass registration
+        /// reads to replay the crate's own family-pass registration
         /// order. So this reads like every other family — which computes what
         /// it needs from the level's match string and is recognized in
-        /// flattened text just as the string pipeline recognizes it in the
+        /// flattened text just as it is recognized in Asciidoctor's own
         /// escaped tags; the corpus above pins an auto-link, an image macro,
         /// and a footnote doing the same.
         #[test]
@@ -2834,8 +2835,8 @@ mod tests {
             // sits in a wholly-synthesized run. That used to defer, because
             // this family required its own marker to be verbatim source; the
             // node now records its spelling instead (`Ref::link_form`), so the
-            // macro is recognized and the fold reproduces the string
-            // pipeline's own bytes.
+            // macro is recognized and the fold reproduces the same bytes
+            // Asciidoctor's own substitution would produce.
             let (group, invalid) =
                 SubstitutionGroup::from_custom_string(None, "quotes,specialcharacters,macros");
             assert!(invalid.is_empty());
@@ -2879,7 +2880,7 @@ mod tests {
     /// wholly-synthesized seed guarantees. That marker used to be what told
     /// this pass's nodes from the other link passes' when
     /// [`apply_link_side_effects`](macros::links::apply_link_side_effects)
-    /// replays the string pipeline's registration order; the node now records
+    /// replays each family's own registration order; the node now records
     /// its own spelling ([`Ref::link_form`](crate::inlines::Ref::link_form))
     /// instead, so the macro is recognized here too.
     ///
@@ -2899,7 +2900,7 @@ mod tests {
         // was the last one holding that rule, and it no longer needs it: the
         // node records which spelling built it (`Ref::link_form`) rather than
         // having it re-derived from `location`. So the macro is recognized
-        // here too, with only its `location` taking design §4.4's coarse span.
+        // here too, with only its `location` taking the coarse span fallback.
         let filtered = "see link:https://example.org[Example] here";
         let source = "  see link:https://example.org[Example] here";
 

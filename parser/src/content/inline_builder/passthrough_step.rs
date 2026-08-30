@@ -102,13 +102,13 @@ use crate::{
 ///
 /// A **prohibited prefix** ahead of either attribute-list-prefixed bare form
 /// (`index:[attrs]+text+`, `` \[x-]`text` ``) is answered the way
-/// Asciidoctor's own regex answers it, for want of a lookbehind: the match's first character
-/// — always its `[` — is written back verbatim and the *rest of that same
-/// match* is scanned again ([`collect_bare_pass_matches`], recursively). The
-/// second scan routinely recognizes a different, shorter construct the
-/// bracket was hiding — for the plus form, the bare unconstrained form over
-/// the same body, so the attribute list ends up a literal prefix and the body
-/// an *ordinary* passthrough rather than a `Styled` span — and for the
+/// Asciidoctor's own regex answers it, for want of a lookbehind: the match's
+/// first character — always its `[` — is written back verbatim and the *rest of
+/// that same match* is scanned again ([`collect_bare_pass_matches`],
+/// recursively). The second scan routinely recognizes a different, shorter
+/// construct the bracket was hiding — for the plus form, the bare unconstrained
+/// form over the same body, so the attribute list ends up a literal prefix and
+/// the body an *ordinary* passthrough rather than a `Styled` span — and for the
 /// backtick form it finds nothing, leaving the construct to the later quotes
 /// step. Writing both of this pass's escapes at once
 /// (`\[attrs]\++text++`) lands here as well: the delimiter escape wins the
@@ -910,9 +910,9 @@ fn build_passthrough_node<'src>(
     // producing an already-final HTML string
     // that this arm wraps in a single `Raw` leaf. A `Raw` leaf is *opaque* to
     // every later step in this module (never descended into, never re-matched —
-    // this module's own passthrough-as-leaf convention), so it is immune to both
-    // failure modes above: nothing in `build`'s own remaining steps can touch
-    // it, whether or not the author's list included that step.
+    // this module's own passthrough-as-leaf convention), so it is immune to
+    // both failure modes above: nothing in `build`'s own remaining steps
+    // can touch it, whether or not the author's list included that step.
     //
     // That opacity is also why the explicit-list form is the one place `value`
     // is not the author's own bytes, and so the one place the node records a
@@ -1207,8 +1207,8 @@ fn split_old_behavior_attrlist(attrlist: Span<'_>) -> (Span<'_>, bool) {
 /// marker's `Normal`-group passthrough body (see
 /// [`split_old_behavior_attrlist`]).
 ///
-/// This mirrors `PassthroughRestoreReplacer`'s own `pass.subs.apply(…)` call
-/// for that case. That call is *not* just the six named steps
+/// This matches Asciidoctor's own handling for that case. It is *not* just
+/// the six named steps
 /// (`SpecialCharacters`, `Quotes`, `AttributeReferences`,
 /// `CharacterReplacements`, `Macros`, `PostReplacement`): `SubstitutionGroup`'s
 /// `run_pipeline` extracts passthroughs (and, as part of that same extraction,
@@ -1218,10 +1218,10 @@ fn split_old_behavior_attrlist(attrlist: Span<'_>) -> (Span<'_>, bool) {
 /// and restored, not left for `Macros` to walk over as plain text.
 /// [`build`](super::build)
 /// already threads a span through exactly that full sequence — passthroughs,
-/// STEM, then the six steps, footnotes included (the string pipeline's
-/// `Macros` step recognizes footnote macros too, so `Normal`'s semantics
+/// STEM, then the six steps, footnotes included (Asciidoctor's own `Macros`
+/// step recognizes footnote macros too, so `Normal`'s semantics
 /// cover them; `build` only splits that recognition into its own step for
-/// numbering-order reasons, design §5.2 step 4b(ii) part 4c) — so this
+/// numbering-order reasons) — so this
 /// delegates to it directly rather than re-deriving a subset.
 fn apply_normal_subs<'src>(text: Span<'src>, parser: &Parser) -> Vec<InlineNode<'src>> {
     super::build(text, parser, None)
@@ -1235,22 +1235,19 @@ fn apply_normal_subs<'src>(text: Span<'src>, parser: &Parser) -> Vec<InlineNode<
 /// [`InlineRenderer`](crate::parser::InlineRenderer)
 /// `parser` carries rather than a hand-rolled, always-default escaping.
 ///
-/// **This is the authoritative-pass closure** (design §5.2's step 6). Until
-/// now this ran `subs.apply`, which re-entered
-/// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup) for the
-/// body; that re-entry took no tree seed (a reentrancy guard on the `Parser`,
-/// since retired along with the re-entry), so its *string* pipeline was the
-/// body's authoritative pass. It was the last thing
-/// in production keeping `run_pipeline` alive — the survey named it the
-/// only non-test-side blocker to the deletion, which has since landed.
+/// This function builds the body's own tree directly, rather than
+/// re-entering [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup)
+/// for a second, string-based substitution pass over it — the reentrant call
+/// this used to make (guarded against recursion on the `Parser`) is retired
+/// along with the call itself.
 ///
-/// It closes because [`build_for_group`](super::build_for_group) already runs
-/// **an arbitrary group's steps in that group's own order** — including a
-/// `Custom` order that puts the escaping step after a step that produced
-/// markup, which is what `flatten_prior_markup` and `SplicedSpecials` are for.
-/// So the body needs no string pipeline of its own: it is built as a tree and
-/// folded, exactly as every other content is, and the enclosing level goes on
-/// wrapping the result in one opaque `Raw` leaf.
+/// This works because [`build_for_group`](super::build_for_group) already
+/// runs **an arbitrary group's steps in that group's own order** — including
+/// a `Custom` order that puts the escaping step after a step that produced
+/// markup, which is what `flatten_prior_markup` and `SplicedSpecials` are
+/// for. So the body needs no string-based substitution of its own: it is
+/// built as a tree and folded, exactly as every other content is, and the
+/// enclosing level goes on wrapping the result in one opaque `Raw` leaf.
 ///
 /// *The obvious objection does not apply here, which is why this works.* A
 /// passthrough's body cannot be built as *nodes spliced into the enclosing
@@ -1424,7 +1421,7 @@ mod tests {
 
     #[test]
     fn a_pass_macro_unescapes_an_escaped_closing_bracket() {
-        // Mirrors the string replacer's `text.replace("\\]", "]")`, the same
+        // Matches Asciidoctor's own unescape of `\]` to `]`, the same
         // treatment every other macro family's bracket content gets. The
         // unescape makes the value owned, unlike the no-escape case above.
         let nodes = build_src(Span::new(r"pass:[a\]b]"));
@@ -1449,7 +1446,7 @@ mod tests {
         // that same de-escaped text and consumes its leading `+++` as a bare
         // passthrough wrapping a single `+` (the outer `+` is the delimiter,
         // the middle `+` is the body), leaving the third `+` as literal text
-        // in front of `text+++` — exactly what the string pipeline's own
+        // in front of `text+++` — exactly what Asciidoctor's own
         // second regex pass does over its own once-substituted text, so this
         // is parity, not a divergence.
         let source = r"\+++text+++";
@@ -1846,8 +1843,8 @@ mod tests {
             // attributed *quote's* — parsed from the escaped text, since the
             // escaping step runs before the quotes step (see
             // [`quote_attributes`](super::quotes)) — this extraction pass runs
-            // *ahead* of every step, so the string pipeline parses the
-            // author's raw bytes here and `attributes_of` matches it by
+            // *ahead* of every step, so it parses the
+            // author's raw bytes here directly, and `attributes_of` matches it by
             // parsing the source slice.
             "[.a<b]++text++",
             "[#a&b]++text++",
@@ -1892,7 +1889,7 @@ mod tests {
             // A delimiter escape after an attribute list drops one backslash
             // and leaves the rest literal — which the bare-form second pass
             // then legitimately re-recognizes as its own (different) match,
-            // exactly as the string pipeline's own second regex pass does.
+            // exactly as Asciidoctor's own second regex pass does.
             r"[.role]\++text++",
             // The bare-plus form's own delimiter escape: dropped backslash,
             // literal remainder, no further pass to re-scan a residue.
@@ -1903,7 +1900,7 @@ mod tests {
             // `++`, no `x-` monospace either. Every boundary, in flow,
             // beside its unescaped twin, with a special character and with
             // quote syntax in the kept prefix (both substituted normally
-            // there, exactly as the string pipeline substitutes its own
+            // there, exactly as Asciidoctor substitutes its own
             // literal `[attrs]`), and spanning a newline.
             r"\[attrs]++text++",
             r"abc \[attrs]++text++",
@@ -1939,8 +1936,8 @@ mod tests {
             r"see \+text+ end",
             r"\+text+",
             // A prefix the pattern's own consuming boundary group excludes
-            // (`\`, `:`, `;`) leaves the match unrecognized by both
-            // pipelines, so the source stays entirely literal.
+            // (`\`, `:`, `;`) leaves the match unrecognized, matching
+            // Asciidoctor's own behavior, so the source stays entirely literal.
             r"a\+text+ b",
             "a:+text+ b",
             "a;+text+ b",
@@ -1949,7 +1946,7 @@ mod tests {
             "a copyright (C) then +text+",
             // The two *attribute-list-prefixed* options behind that same
             // prohibited prefix, which their own pattern does not exclude
-            // and which the string replacer answers with a retry over the
+            // and which Asciidoctor answers with a retry over the
             // match minus its leading `[`. For the plus option that retry
             // routinely finds the bare unconstrained form the bracket was
             // hiding — a literal `[attrs]` prefix and an *ordinary*
@@ -2126,7 +2123,7 @@ mod tests {
 
     #[test]
     fn the_x_dash_marker_normal_subs_numbers_a_nested_footnote() {
-        // `[x-]++footnote:[…]++`: the string pipeline's `Macros` step
+        // `[x-]++footnote:[…]++`: Asciidoctor's own `Macros` step
         // recognizes footnote macros too, so `Normal`'s semantics cover them;
         // `build` splits that recognition into its own `apply_footnotes` step
         // (for numbering-order reasons), which delegating to `build` picks up
@@ -2303,7 +2300,7 @@ mod tests {
 
     #[test]
     fn a_prohibited_prefix_before_a_bare_attrlisted_form_retries_over_the_rest() {
-        // The string pipeline's own `InlinePassReplacer` retries around a
+        // This family's own retry, reproducing Asciidoctor's behavior around a
         // match immediately preceded by `\`, `:`, or `;` (no lookbehind in
         // Rust's regex engine): it writes the match's first character back
         // verbatim and re-scans the rest. That retry is not a no-op — here it
@@ -2503,8 +2500,8 @@ mod tests {
         // `a_bare_attrlisted_match_whose_content_crosses_an_already_built_node_is_deferred`'s
         // guard, rather than a hand-built level.
         //
-        // The string pipeline instead reconciles this via a recursive
-        // sentinel-restoration step (`PassthroughRestoreReplacer` re-resolves
+        // Asciidoctor instead reconciles this via a recursive
+        // placeholder-restoration step (re-resolving
         // a leftover placeholder against the *outer* passthrough list when a
         // nested `Normal`-group substitution doesn't consume it) that has no
         // counterpart in this tree-based, single-pass builder.
@@ -2527,11 +2524,11 @@ mod tests {
     fn a_bare_plus_attrlisted_delimiter_escape_stays_literal() {
         // `[attrs]\+text+`: honors the escape of the formatting mark — one
         // backslash drops, the rest (attrlist brackets included) stays
-        // literal, mirroring `InlinePassReplacer`'s own `escape_count > 0`
-        // branch. Unlike the delimited form's own escape
+        // literal, matching Asciidoctor's own handling of this escape.
+        // Unlike the delimited form's own escape
         // (`[.role]\++text++`), there is no further pass to re-scan the
         // residue here — this second pass already is the last one — so the
-        // result is simple parity with the golden string pipeline.
+        // result is simple parity with the golden recording.
         let source = r"[attrs]\+text+";
         let nodes = build_src(Span::new(source));
 

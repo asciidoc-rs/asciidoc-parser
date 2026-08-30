@@ -1076,10 +1076,11 @@ fn find_link_macro_matches<'src>(
         // ([`Ref::link_form`](crate::inlines::Ref::link_form)) rather than
         // having it re-derived from `location` — so a *wholly* expanded macro
         // (`:m: link:index.html[Docs]`, then `{m}`) is recognized, with only
-        // its `location` taking the coarse whole-content-span fallback. A text carrying an
-        // attribute list is handled inside `text_attrlist`, since its display
-        // text comes back from a *parse*: every opaque piece is tokened
-        // through that parse and restored after it.
+        // its `location` taking the coarse whole-content-span fallback. A text
+        // carrying an attribute list is handled inside `text_attrlist`,
+        // since its display text comes back from a *parse*: every
+        // opaque piece is tokened through that parse and restored after
+        // it.
         if let Some(target) = caps.get(3)
             && !range_is_restorable(nodes, pieces, &(target.start()..target.end()))
         {
@@ -1217,12 +1218,12 @@ pub(super) fn restore_masked_passthroughs(
 ///   of the bracket's own verbatim `'src` slice yields logical text, so it
 ///   stays a single synthesized `Text` (that slice carries no entity to undo);
 ///   a parse of the level's **match string** yields already-escaped bytes
-///   instead, so it is rebuilt through
-///   [`computed_value_children`] — the escaped/entity/replacement trichotomy under an order that
-///   has already escaped, and the literal reading under one that has not —
-///   exactly as the cross-reference family's own attribute-list value is, with
-///   each **masked** construct that value still holds a token for spliced back
-///   in as its own node ([`restored_value_children`]).
+///   instead, so it is rebuilt through [`computed_value_children`] — the
+///   escaped/entity/replacement trichotomy under an order that has already
+///   escaped, and the literal reading under one that has not — exactly as the
+///   cross-reference family's own attribute-list value is, with each **masked**
+///   construct that value still holds a token for spliced back in as its own
+///   node ([`restored_value_children`]).
 ///
 /// This performs *no* recognition side
 /// effect — notably it does **not** `register_link` the target in the asset
@@ -1903,18 +1904,19 @@ fn find_email_matches<'src>(
 
         // The mismatch-prefix group above read an *empty* prefix — but that
         // decision is only faithful when the tree can actually see the
-        // character a markup-based reading would see there. When the address abuts an
-        // already-recognized construct (`**bold**doc@example.org`,
-        // `link:x[y]doc@example.org`), the
+        // character a markup-based reading would see there. When the address
+        // abuts an already-recognized construct
+        // (`**bold**doc@example.org`, `link:x[y]doc@example.org`), the
         // construct's *rendered* last character — `</strong>`, `</a>`, and
-        // `<img …>` all end in `>`, one of the three mismatch characters — would
-        // suppress the address, while [`build_match_string`] stands the
-        // construct in as one opaque [`SPAN_PLACEHOLDER`], which no mismatch
-        // class contains. Recognizing here would build a link a markup-based
-        // reading would not, so this defers instead — leaving the address as
-        // literal text, never a wrong node, exactly as the sibling auto-link
-        // family already behaves for the same input ([`INLINE_LINK`]'s own
-        // boundary-prefix group is *required*, so a placeholder simply fails
+        // `<img …>` all end in `>`, one of the three mismatch characters —
+        // would suppress the address, while [`build_match_string`]
+        // stands the construct in as one opaque [`SPAN_PLACEHOLDER`],
+        // which no mismatch class contains. Recognizing here would
+        // build a link a markup-based reading would not, so this defers
+        // instead — leaving the address as literal text, never a wrong
+        // node, exactly as the sibling auto-link family already behaves
+        // for the same input ([`INLINE_LINK`]'s own boundary-prefix
+        // group is *required*, so a placeholder simply fails
         // its match). See [`email_level`]'s own scope note.
         if s.get(..full.start)
             .is_some_and(|before| before.ends_with(SPAN_PLACEHOLDER))
@@ -2014,7 +2016,8 @@ fn build_email_node<'src>(
 /// family's tests can build and inspect a tree without a full
 /// `Parser`/`Content` round trip. This function is the link family's own
 /// registration pass, called exactly once per parse, after the tree is built
-/// and folded, from [`apply_macro_side_effects`](super::apply_macro_side_effects).
+/// and folded, from
+/// [`apply_macro_side_effects`](super::apply_macro_side_effects).
 ///
 /// # Registration order across the three link forms
 ///
@@ -2142,8 +2145,8 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_link_macros() {
         // For each fixture, folding the single-pass tree (all five steps)
-        // reproduces the string pipeline's output byte-for-byte. This is the
-        // differential corpus (design §5.3) that pins the `link:`/`mailto:`
+        // reproduces the frozen golden recording byte-for-byte. This is the
+        // differential corpus that pins the `link:`/`mailto:`
         // macro increment. What is still deferred — a URL target (the
         // `INLINE_LINK` pass's own territory), a display text crossing a
         // rendered span, and a *wholly* expanded macro — lives in a divergence
@@ -2197,8 +2200,8 @@ mod tests {
             "_link:y.html[Y] in em_",
             // An escaped special (a `CharRef` by macro time) in the target, in
             // the display text, and in both — the match string carries its
-            // canonical entity, which is exactly what the string replacer's own
-            // haystack holds there.
+            // canonical entity, the same escaped bytes `apply_special_characters`
+            // always produces.
             "link:a&b.html[x]",
             "link:a&b.html[]",
             "mailto:a&b@example.org[]",
@@ -2216,7 +2219,7 @@ mod tests {
             // own: one crossing an escaped special, one crossing a restored
             // entity, and one spanning two lines (which the attrlist parse
             // joins with a space). Each is parsed from the level's match
-            // string — the same bytes the string replacer parses — and owned
+            // string — already-escaped bytes — and owned
             // off it, in both the `link:` (`=`) and `mailto:` (`,`) spellings.
             "link:index.html[a < b,role=hl]",
             "link:index.html[Tom & Jerry,role=hl^]",
@@ -2254,7 +2257,7 @@ mod tests {
         // scheme; the builder reproduces the string step's `URI_SNIFF`
         // stripping, including the fall-back to the whole target when
         // the strip leaves nothing. Every fixture is a non-`://`
-        // `link:` target, so the string pipeline routes it through the
+        // `link:` target, so it is routed through the
         // same `INLINE_LINK_MACRO` the builder uses (a `://` target is
         // `INLINE_LINK`'s territory, a later increment).
         use crate::parser::ModificationContext;
@@ -2297,12 +2300,11 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_for_a_link_macro_target_over_a_passthrough() {
         // The differential corpus for a `link:`/`mailto:` target crossing a
-        // masked **passthrough** — the string pipeline swallows the
-        // `\u{96}`*n*`\u{97}` sentinel into the target (its class admits it as
-        // it admits the placeholder) and the restore pass then splices the
-        // extracted body over every sentinel in the rendered string, so the
-        // tree's computed target substitutes the `Raw` node's value for its
-        // placeholder the same way (see [`restore_masked_passthroughs`]).
+        // masked **passthrough**: `INLINE_LINK_MACRO`'s target class admits
+        // the placeholder the same way it would admit the passthrough's own
+        // restored bytes, so the tree's computed target substitutes the
+        // `Raw` node's value for its
+        // placeholder directly (see [`restore_masked_passthroughs`]).
         // These are the documented idioms: `++…++` to keep a target's
         // formatting characters literal, and `pass:[…]` to admit characters
         // the target class itself rejects (a space).
@@ -2314,7 +2316,8 @@ mod tests {
             "link:++https://example.org/now_this__link_works.html++[]",
             "link:++https://example.org/a__b__c.html++[the docs]",
             // A `pass:[…]` target carrying a space — a byte the target class
-            // itself excludes, which only the sentinel lets through.
+            // itself excludes, which only the passthrough's placeholder lets
+            // through.
             "link:pass:[My Documents/report.pdf][Get Report]",
             // A `pass:c[…]` target, and an attribute list on the (empty)
             // display text beside it.
@@ -2357,8 +2360,7 @@ mod tests {
 
     #[test]
     fn hide_uri_scheme_reads_the_target_as_matched_over_a_passthrough() {
-        // The `URI_SNIFF` strip runs over the bytes as *matched*, exactly as
-        // the string replacer sniffs its own sentinel-holding haystack: a
+        // The `URI_SNIFF` strip runs over the bytes as *matched*: a
         // scheme hidden inside the passthrough is invisible to the strip (the
         // shown text keeps it), while a verbatim scheme prefix ahead of the
         // passthrough is stripped — and the offset, a match of literal ASCII
@@ -2425,14 +2427,15 @@ mod tests {
     #[test]
     fn a_dangerous_scheme_inside_a_passthrough_is_a_documented_divergence() {
         // The one place this increment chooses the safe reading over byte
-        // parity. The string replacer's dangerous-scheme check reads its own
-        // masked haystack, where the sentinel hides the scheme — so
-        // `link:++javascript:...++[]` passes its check and the restore then
-        // completes a live `javascript:` link in the golden output. The
+        // parity. Checking the masked haystack directly would hide the
+        // scheme behind its placeholder — so
+        // `link:++javascript:...++[]` would pass that check and the restore
+        // would then complete a live `javascript:` link, which is what the
+        // frozen golden recording shows. The
         // builder checks the *restored* target instead and defers, leaving
         // the text literal (the passthrough's own restore still applies to
-        // it), exactly as both pipelines treat the unmasked
-        // `link:javascript:...[x]` spelling.
+        // it), exactly as the unmasked
+        // `link:javascript:...[x]` spelling is treated.
         use super::super::super::test_support::golden_passthroughs;
 
         for source in [
@@ -2469,8 +2472,9 @@ mod tests {
         // masked **STEM** expression — the same restore-the-value move this
         // family's passthrough corpus above pins, over the other node kind
         // the one extraction pass masks. `INLINE_LINK_MACRO`'s `[^\s\[\]]+`
-        // target class swallows the sentinel and the placeholder alike, so
-        // recognition agrees with no widening, and the `URI_SNIFF` strip
+        // target class admits the placeholder the same way it would admit
+        // the restored bytes, so
+        // recognition needs no widening, and the `URI_SNIFF` strip
         // still runs over the bytes as matched.
         use super::super::super::test_support::golden_passthroughs;
 
@@ -2536,7 +2540,7 @@ mod tests {
         // platform separator. These two families never route a target through
         // `web_path` — it reaches the `href` as computed — so a restored STEM
         // target must be byte-identical under either separator, and must
-        // match the string pipeline under both.
+        // match the frozen golden recording under both.
         //
         // Without this, the difference is invisible on a Posix runner and
         // only surfaces on Windows CI.
@@ -4460,7 +4464,8 @@ mod tests {
                 "a target crossing a rendered span must stay literal: {nodes:?}"
             );
 
-            // The frozen golden recording, by contrast, *does* build a link here.
+            // The frozen golden recording, by contrast, *does* build a link
+            // here.
             assert!(golden_macros(source).contains("<a href"));
         }
     }
@@ -5125,7 +5130,8 @@ mod tests {
                 "a target crossing a rendered span must stay literal: {nodes:?}"
             );
 
-            // The frozen golden recording, by contrast, *does* build a link here.
+            // The frozen golden recording, by contrast, *does* build a link
+            // here.
             assert!(golden_macros(source).contains("<a href"));
         }
     }
@@ -6686,8 +6692,9 @@ mod tests {
         // ([`Ref::link_form`]) instead of having it re-derived from
         // `location` — the signal `apply_link_side_effects` reads to replay
         // the crate's own family-pass registration order. Only the
-        // node's `location` takes the coarse whole-content-span fallback. This closes the
-        // divergence `a_wholly_expanded_link_macro_is_a_documented_divergence`
+        // node's `location` takes the coarse whole-content-span fallback. This
+        // closes the divergence
+        // `a_wholly_expanded_link_macro_is_a_documented_divergence`
         // used to pin, per its own "if this boundary is ever lifted" note.
         let parser = expanding_parser();
 

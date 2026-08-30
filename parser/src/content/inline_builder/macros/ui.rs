@@ -19,10 +19,9 @@ use crate::{
 };
 
 /// The delimiter a menu macro's item list is split on: the *escaped* form of
-/// the source `>` submenu caret, which is what the string replacer sees (the
-/// special-characters step runs long before macros) and therefore what this
-/// module's own match string presents too — as an atomic
-/// [`CharRef`](InlineNode::CharRef) piece.
+/// the source `>` submenu caret — the special-characters step runs long
+/// before macros, so this module's own match string presents it too — as an
+/// atomic [`CharRef`](InlineNode::CharRef) piece.
 const SUBMENU_DELIMITER: &str = "&gt;";
 
 /// The keyboard/button UI macro pass at a level: matches
@@ -31,9 +30,8 @@ const SUBMENU_DELIMITER: &str = "&gt;";
 ///
 /// The caller runs this only under the `experimental` document attribute (see
 /// [`apply_macros`](super::apply_macros)); a cheap prefilter still skips the
-/// pattern sweep when no `kbd:`/`btn:` prefix with a `:[` is present, mirroring
-/// the string step's `found_macroish_short` guard.
-/// Mirrors the string step's `found_macroish_short` guard: a `kbd:`/`btn:`
+/// pattern sweep when no `kbd:`/`btn:` prefix with a `:[` is present: a
+/// `kbd:`/`btn:`
 /// macro needs its name prefix and a `:[`. Shared between
 /// [`kbd_btn_macros_level`]'s pre-build sniff and its post-build one, so the
 /// two answers cannot drift apart.
@@ -95,11 +93,11 @@ fn find_kbd_btn_matches<'src>(
         // Group 1 is the (optional) escape backslash. It is honored *before*
         // the gate below — and needs no gate of its own — because dropping
         // the backslash keeps the rest of the match as its own original nodes
-        // (a rendered span among them), which fold back to exactly the bytes
-        // the string replacer's `caps[0][1..]` emits. Mirrors that replacer's
-        // own escape-first check order, and closes the same latent gap the
-        // `footnoteref:`, menu, cross-reference, link, and image increments
-        // each closed for their own families.
+        // (a rendered span among them), which fold back to exactly the
+        // original bytes minus the backslash. This is the same escape-first
+        // check order, and closes the same latent gap, the
+        // `footnoteref:`, menu, cross-reference, link, and image families
+        // each close for their own escaped spellings.
         if caps.get(1).is_some() {
             matches.push(MacroMatch {
                 kind: MacroMatchKind::Unescape {
@@ -112,11 +110,11 @@ fn find_kbd_btn_matches<'src>(
         }
 
         // A match crossing an **opaque** piece — a rendered span, an
-        // earlier-recognized macro node, a masked passthrough — is left for a
-        // later increment: `build_match_string` stands each in as one
-        // placeholder where the string pipeline's own haystack holds the
-        // markup it will fold to, so the keys or label read out of the match
-        // string would not be the replacer's.
+        // earlier-recognized macro node, a masked passthrough — is left
+        // unrecognized: `build_match_string` stands each in as one
+        // placeholder whose markup exists only at fold time, so the keys or
+        // label read out of the match string would not be the true rendered
+        // text.
         //
         // Every *recoverable* piece is admitted: a
         // [`synthesized`](Piece::synthesized) run (an attribute expansion,
@@ -126,7 +124,7 @@ fn find_kbd_btn_matches<'src>(
         // (`kbd:[a(C)b]`). This family never slices `'src` for a value at all
         // — its keys and label come straight from the match string, which
         // carries every one of those pieces' bytes exactly — so only the
-        // node's `location` takes design §4.4's coarse fallback (see
+        // node's `location` takes the coarse fallback (see
         // [`build_kbd_btn_node`]). Nor can a boundary split such a leaf: the
         // match is delimited by `kbd:`/`btn:`, `[`, and `]`, and its keys by
         // `,`/`+` — none of which occurs in `&lt;`, `&gt;`, `&amp;`, or a
@@ -152,20 +150,20 @@ fn find_kbd_btn_matches<'src>(
 }
 
 /// Builds one [`Ui`](InlineNode::Ui) node from a keyboard/button match,
-/// splitting the keys / normalizing the label exactly as the string replacer
-/// does so the fold reproduces the same bytes.
+/// splitting the keys / normalizing the label so the fold reproduces the
+/// golden bytes.
 ///
 /// Every value it computes comes from the **match string**, never from an
 /// `'src` slice: on a verbatim match those bytes *are* the source text; on a
-/// [`synthesized`](Piece::synthesized) one they are the expanded value the
-/// string pipeline itself matched over; and across an escaped special or a
+/// [`synthesized`](Piece::synthesized) one they are the expanded value
+/// itself; and across an escaped special or a
 /// restored entity they are that leaf's own entity bytes (`&amp;`, `&copy;`) —
-/// which is what the string replacer's own escaped haystack holds there, and
-/// what `render_keyboard`/`render_button` then emit *verbatim*. That is
+/// exactly what
+/// `render_keyboard`/`render_button` then emit *verbatim*. That is
 /// precisely what lets this family recognize a macro inside an expanded
 /// attribute value, or across an entity, where a family carrying an
 /// [`Attrlist`](crate::attributes::Attrlist)`<'src>` cannot. Only the node's
-/// `location` falls back to the enclosing run's coarse span (design §4.4) in
+/// `location` falls back to the enclosing run's coarse span in
 /// the synthesized case.
 fn build_kbd_btn_node<'src>(
     caps: &regex::Captures<'_>,
@@ -208,8 +206,8 @@ fn build_kbd_btn_node<'src>(
 /// text crossing any *other* escaped special (`menu:File[Save & Exit]`) or a
 /// restored entity (`menu:&#8942;[More Tools, Extensions]`) is recognized too:
 /// like a keyboard macro's keys, every value a menu node holds is read out of
-/// the match string, whose bytes at such a leaf are exactly the ones the
-/// string replacer's own escaped haystack carries and `render_menu` emits
+/// the match string, whose bytes at such a leaf are exactly the ones
+/// `render_menu` emits
 /// verbatim (see [`find_menu_matches`]). What is still deferred is a name or
 /// item text crossing an **opaque** piece — a rendered
 /// [`Styled`](crate::inlines::Styled) span, an earlier-recognized macro node,
@@ -267,16 +265,15 @@ pub(super) fn menu_macros_level<'src>(
 /// caret-only check; it is now the general one, because *every* value a menu
 /// node holds comes from the match string, whose bytes at such a leaf — a
 /// special's canonical entity, a restored entity's own text — are exactly the
-/// ones the string replacer's own escaped haystack carries and `render_menu`
+/// ones `render_menu`
 /// emits verbatim. So a name or item text crossing any escaped special
 /// (`menu:File[Save & Exit]`, `menu:a>b[Save]`) or restored entity
-/// (`menu:&#8942;[More Tools, Extensions]`) is recognized, exactly as the
-/// string pipeline recognizes it.
+/// (`menu:&#8942;[More Tools, Extensions]`) is recognized.
 ///
 /// No boundary can split such a leaf, either: the match is delimited by
 /// `menu:`, `[`, and `]`, and its item list by `&gt;` or `,` — none of which
 /// occurs in `&lt;`, `&amp;`, or a restored entity's own `&name;`, while a
-/// `&gt;` *is* the delimiter both pipelines split on — so every atomic overlap
+/// `&gt;` *is* the delimiter the item list itself splits on — so every atomic overlap
 /// is either wholly contained or consumed as the delimiter itself.
 fn find_menu_matches<'src>(
     nodes: &[InlineNode<'src>],
@@ -297,9 +294,9 @@ fn find_menu_matches<'src>(
         // checked *before* the sliceability gate — and needs no gate of its
         // own — because dropping the backslash keeps the rest of the match as
         // its own original nodes (an escaped special or a rendered span among
-        // them), which fold back to exactly the bytes the string replacer's
-        // `caps[0][1..]` emits. Mirrors the same hoist the `footnoteref:`
-        // increment made for the identical reason.
+        // them), which fold back to exactly the
+        // original bytes minus the backslash. Mirrors the same hoist the `footnoteref:`
+        // family makes for the identical reason.
         if whole.as_str().starts_with('\\') {
             matches.push(MacroMatch {
                 kind: MacroMatchKind::Unescape {
