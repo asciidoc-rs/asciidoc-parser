@@ -512,8 +512,8 @@ fn emit_shown_term_range<'src>(
         } else {
             // `rest` is non-empty here (the loop guard `offset < range.end`
             // ensures at least one byte remains), so a first character always
-            // exists. `SPAN_PLACEHOLDER` is a multi-byte character, so the
-            // scan advances by whole characters rather than by bytes.
+            // exists. The scan advances by whole characters because
+            // index-term text can contain multi-byte UTF-8 characters.
             #[allow(clippy::unwrap_used)]
             let c = rest.chars().next().unwrap();
             offset += c.len_utf8();
