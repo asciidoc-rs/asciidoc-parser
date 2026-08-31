@@ -24,16 +24,16 @@ regex = "1.11.1"
 # default `dfa` feature — would, through feature unification, change engine
 # selection for every `regex::Regex` in this crate, not just the quote subs.
 regex-automata = { version = "0.4.18", default-features = false, features = [
-    "dfa-onepass",
-    "hybrid",
-    "meta",
-    "nfa-backtrack",
-    "nfa-pikevm",
-    "perf-inline",
-    "perf-literal",
-    "std",
-    "syntax",
-    "unicode",
+  "dfa-onepass",
+  "hybrid",
+  "meta",
+  "nfa-backtrack",
+  "nfa-pikevm",
+  "perf-inline",
+  "perf-literal",
+  "std",
+  "syntax",
+  "unicode",
 ] }
 self_cell = "1.2.0"
 thiserror = "2.0.1"
