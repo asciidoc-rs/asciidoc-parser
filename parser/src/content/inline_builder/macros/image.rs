@@ -922,7 +922,7 @@ fn bracket_attrlist<'src>(
 
     let bodies: Vec<&str> = masked.iter().map(|piece| piece.body.as_ref()).collect();
 
-    parse_attrlist(Span::new(&tokened), parser).into_owned_restoring(bracket, &bodies)
+    parse_tokened_attrlist(Span::new(&tokened), parser).into_owned_restoring(bracket, &bodies)
 }
 
 /// One masked piece a [`tokened_bracket`] token stands for: the node itself,
@@ -1095,11 +1095,21 @@ pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
 }
 
 /// Parses one inline attribute list, discarding the warnings — the shared
-/// spelling both of [`bracket_attrlist`]'s paths use.
+/// spelling of [`bracket_attrlist`]'s two **untokened** paths, the empty
+/// bracket and the verbatim one, whose bytes are the author's own.
 fn parse_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
     Attrlist::parse(source, parser, AttrlistContext::Inline)
         .item
         .item
+}
+
+/// [`parse_attrlist`] for [`bracket_attrlist`]'s third path, whose text came
+/// back from [`tokened_bracket`]: this parse's own attribute-reference
+/// substitution escapes each value it splices, so the placeholders
+/// [`Attrlist::into_owned_restoring`] then walks are still only the ones the
+/// tokener wrote. See [`Attrlist::parse_tokened`].
+fn parse_tokened_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
+    Attrlist::parse_tokened(source, parser).item.item
 }
 
 /// Performs the recognition side effects an `image:`/`icon:` match needs —

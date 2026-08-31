@@ -2,9 +2,11 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::{
         ElementAttribute,
-        element_attribute::{MASKED_PIECE_PLACEHOLDER, ParseShorthand, restore_into},
+        element_attribute::{
+            MASKED_PIECE_PLACEHOLDER, ParseShorthand, SplicedValueEscaping, restore_into,
+        },
     },
-    content::{Content, SubstitutionStep},
+    content::{Content, apply_attributes},
     internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     span::MatchedItem,
     strings::CowStr,
@@ -210,6 +212,56 @@ impl<'src> Attrlist<'src> {
         parser: &Parser,
         attrlist_context: AttrlistContext,
     ) -> MatchAndWarnings<'src, MatchedItem<'src, Self>> {
+        Self::parse_escaping(
+            source,
+            parser,
+            attrlist_context,
+            SplicedValueEscaping::Verbatim,
+        )
+    }
+
+    /// [`parse`](Self::parse) over **tokened** macro-bracket text — what
+    /// `tokened_bracket`/`tokened_text` (the macros step) hand back, in which
+    /// each masked passthrough or STEM piece stands as one
+    /// [`MASKED_PIECE_PLACEHOLDER`] occurrence and every other byte is escaped
+    /// ([`escape_masked_piece_bytes`]).
+    ///
+    /// The difference is the attribute-reference substitution this parse runs
+    /// of its own, below. That substitution is the **second** point at which
+    /// bytes enter a tokened text — a `subs=` list naming `macros` without
+    /// `attributes` reaches the macros step with every reference still
+    /// unresolved, so it is this parse, not the content-level step, that
+    /// expands one — and it runs *after* the tokener escaped its copy. Under
+    /// [`SplicedValueEscaping::MaskedPieceBytes`] each resolved value is
+    /// escaped as it is spliced, which is what keeps the tokener's property
+    /// total: every reserved codepoint standing in the text this splits is one
+    /// the tokener wrote, so [`restore_into`]'s positional walk has nothing to
+    /// be fooled by and a document attribute's own reserved bytes come back
+    /// out as the document wrote them.
+    ///
+    /// Every other caller wants [`parse`](Self::parse): ordinary content
+    /// carries no such invariant, and escaping into it would put the escape's
+    /// own bytes in front of a reader that never unescapes.
+    ///
+    /// [`escape_masked_piece_bytes`]: crate::attributes::element_attribute::escape_masked_piece_bytes
+    pub(crate) fn parse_tokened(
+        source: Span<'src>,
+        parser: &Parser,
+    ) -> MatchAndWarnings<'src, MatchedItem<'src, Self>> {
+        Self::parse_escaping(
+            source,
+            parser,
+            AttrlistContext::Inline,
+            SplicedValueEscaping::MaskedPieceBytes,
+        )
+    }
+
+    fn parse_escaping(
+        source: Span<'src>,
+        parser: &Parser,
+        attrlist_context: AttrlistContext,
+        escaping: SplicedValueEscaping,
+    ) -> MatchAndWarnings<'src, MatchedItem<'src, Self>> {
         let mut attributes: Vec<ElementAttribute> = vec![];
         let mut parse_shorthand_items = true;
         let mut warnings: Vec<Warning<'src>> = vec![];
@@ -217,7 +269,7 @@ impl<'src> Attrlist<'src> {
         // Apply attribute value substitutions before parsing attrlist content.
         let source_cow = if source.contains('{') && source.contains('}') {
             let mut content = Content::from(source);
-            SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+            apply_attributes(&mut content, parser, escaping);
             CowStr::from(content.rendered.to_string())
         } else {
             CowStr::from(source.data())
@@ -1068,6 +1120,80 @@ mod tests {
             30,
             "the substitution's own extra length must have moved the placeholder: {:?}",
             attrlist.source_text()
+        );
+    }
+
+    #[test]
+    fn a_restore_copies_an_unpaired_escape_introducer_through() {
+        // The restore walk's decode half is **total** over arbitrary input:
+        // an escape introducer followed by a byte that is not one of the
+        // three tags this crate writes is copied through with the bytes after
+        // it, rather than eating one as a tag (see `escaped_literal`), and
+        // the genuine placeholder further along still restores.
+        //
+        // Both points at which bytes enter a tokened text escape now — the
+        // tokener's own copy, and the splice inside `Attrlist::parse_tokened`
+        // — so the pipeline itself no longer produces an unpaired introducer.
+        // That is exactly why this is pinned here, over a hand-written
+        // tokened text, rather than through a document: totality is what lets
+        // every consumer run the unescape unconditionally, and it should not
+        // quietly stop holding just because nothing upstream exercises it.
+        use crate::attributes::element_attribute::{MASKED_PIECE_ESCAPE, MASKED_PIECE_PLACEHOLDER};
+
+        let p = Parser::default();
+        let source = format!("alt=p{MASKED_PIECE_ESCAPE}zq,title={MASKED_PIECE_PLACEHOLDER}");
+
+        let attrlist = crate::attributes::Attrlist::parse_tokened(crate::Span::new(&source), &p)
+            .unwrap_if_no_warnings()
+            .item
+            .into_owned_restoring(crate::Span::new("whatever"), &["real"]);
+
+        assert_eq!(
+            attrlist.named_attribute("alt").map(|attr| attr.value()),
+            Some(format!("p{MASKED_PIECE_ESCAPE}zq").as_str())
+        );
+
+        assert_eq!(
+            attrlist.named_attribute("title").map(|attr| attr.value()),
+            Some("real")
+        );
+    }
+
+    #[test]
+    fn a_restore_copies_an_occurrence_past_the_end_of_bodies_through() {
+        // The restore walk fails **closed** when it finds more placeholder
+        // occurrences than the caller supplied bodies for: the surplus
+        // occurrence is copied through verbatim rather than panicking or
+        // taking a later occurrence's body, and every occurrence the caller
+        // *did* supply a body for still restores.
+        //
+        // No caller can produce this — each tokens exactly as many pieces as
+        // it supplies bodies for, and since the tokened parse's own
+        // attribute-reference splice is escaped
+        // (`SplicedValueEscaping::MaskedPieceBytes`) an expansion can no
+        // longer add an occurrence behind the tokener's back either, which is
+        // what used to reach this arm. It is pinned directly instead, so a
+        // caller that someday breaks the count is caught by this contract
+        // rather than by a corrupted neighbouring restore.
+        use crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER;
+
+        let p = Parser::default();
+        let source = format!("alt={MASKED_PIECE_PLACEHOLDER},title={MASKED_PIECE_PLACEHOLDER}");
+
+        // Two occurrences, one body.
+        let attrlist = crate::attributes::Attrlist::parse_tokened(crate::Span::new(&source), &p)
+            .unwrap_if_no_warnings()
+            .item
+            .into_owned_restoring(crate::Span::new("whatever"), &["real"]);
+
+        assert_eq!(
+            attrlist.named_attribute("alt").map(|attr| attr.value()),
+            Some("real")
+        );
+
+        assert_eq!(
+            attrlist.named_attribute("title").map(|attr| attr.value()),
+            Some(MASKED_PIECE_PLACEHOLDER)
         );
     }
 

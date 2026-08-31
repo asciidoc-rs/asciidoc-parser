@@ -12,7 +12,10 @@ use super::{
 };
 use crate::{
     Parser, Span,
-    attributes::{Attrlist, element_attribute::MASKED_PIECE_PLACEHOLDER},
+    attributes::{
+        Attrlist,
+        element_attribute::{MASKED_PIECE_PLACEHOLDER, SplicedValueEscaping},
+    },
     content::{
         INLINE_EMAIL, INLINE_LINK, INLINE_LINK_MACRO, NormalizedCaps, URI_SNIFF,
         encode_uri_component, extract_attributes_from_text,
@@ -1676,7 +1679,10 @@ fn text_attrlist<'src>(
     let source = source_slice(pieces, text_range.clone(), root);
 
     if range_is_verbatim(pieces, &verbatim_range) && source.data() == normalized {
-        let (text, attrs) = extract_attributes_from_text(source, parser, None);
+        // The author's own bytes, never tokened, so a resolved attribute
+        // reference is spliced into them verbatim.
+        let (text, attrs) =
+            extract_attributes_from_text(source, parser, None, SplicedValueEscaping::Verbatim);
 
         return Some(TextAttrlist {
             adopted: text != normalized,
@@ -1699,7 +1705,14 @@ fn text_attrlist<'src>(
         Tokened::MaskedOrRendered,
     );
 
-    let (text, attrs) = extract_attributes_from_text(Span::new(&tokened), parser, None);
+    // Tokened, so the parse's own attribute-reference substitution escapes each
+    // value it splices — see [`Attrlist::parse_tokened`].
+    let (text, attrs) = extract_attributes_from_text(
+        Span::new(&tokened),
+        parser,
+        None,
+        SplicedValueEscaping::MaskedPieceBytes,
+    );
 
     // One thing has to hold before a token may stand for a **rendered** piece:
     // the *split* must land where a parse of the rendered
