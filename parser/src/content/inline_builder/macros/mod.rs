@@ -16,7 +16,8 @@ use xref::xref_macros_level;
 
 use super::{
     quotes::{
-        LevelContext, Piece, charref_entity, emit_range, source_slice, special_entity, text_slice,
+        LevelContext, Piece, charref_entity, emit_range, single_text_value, source_slice,
+        special_entity, text_slice,
     },
     special_chars::{Masked, unescaped_value_children},
 };
@@ -178,6 +179,23 @@ pub(super) fn apply_macros<'src>(
     masked: Masked<'_>,
     specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
+    // One shared gate over every family's own sniff, taken while the content
+    // is still one lone `Text` node — a plain paragraph's shape. Each family
+    // sniffs for its own literals, and every one of those needles — `[[`,
+    // `[[[`, `anchor:`, `image:`, `icon:`, `kbd:`/`btn:`/`menu:` with `:[`,
+    // `((`, `indexterm` with `:[`, `://`, `link:`, `mailto:`, `@`, `xref:`,
+    // and the escaped `&lt;&lt;` — spells at least one of these five bytes,
+    // so a value carrying none of them fails every family's sniff before any
+    // is asked ([`level_may_have_macros`];
+    // `every_macro_family_needle_carries_a_gate_byte` pins the needle list).
+    // Nothing to recognize also means nothing to descend into: a lone `Text`
+    // node has no children, so the whole step is a no-op.
+    if let Some(value) = single_text_value(&nodes)
+        && !level_may_have_macros(value)
+    {
+        return nodes;
+    }
+
     // The bibliography anchor (`[[[label]]]`) runs before every other family,
     // exactly as the string step runs its own `INLINE_BIBLIO_ANCHOR` pass
     // first. It runs *only here*, at the content's own top level — its pattern
@@ -190,6 +208,15 @@ pub(super) fn apply_macros<'src>(
     let nodes = biblio_anchor_level(nodes, root, parser, masked);
 
     apply_macro_families(nodes, root, parser, LevelContext::ROOT, masked, specials)
+}
+
+/// Reports whether `value` holds any byte a macro family's own sniff could
+/// possibly be satisfied by — see the gate in [`apply_macros`] for the
+/// needle-by-needle accounting this five-byte class summarizes.
+fn level_may_have_macros(value: &str) -> bool {
+    value
+        .bytes()
+        .any(|b| matches!(b, b':' | b'[' | b'(' | b'@' | b'&'))
 }
 
 /// Applies each macro family at this level — and, first, at every level nested
@@ -1687,5 +1714,45 @@ mod tests {
                 WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn every_macro_family_needle_carries_a_gate_byte() {
+        // The gate in `apply_macros` skips the whole step for a lone `Text`
+        // value holding none of its five bytes, so a minimal construct of
+        // every family — spelled as the *value* the step reads, meaning
+        // post-escaping for the xref's angle form — must answer `true`, or
+        // the gate would silently disable that family.
+        use super::level_may_have_macros;
+
+        for construct in [
+            "[[[biblio]]]",
+            "[[id]]",
+            "anchor:id[]",
+            "image:a.png[alt]",
+            "icon:heart[]",
+            "kbd:[F1]",
+            "btn:[OK]",
+            "menu:File[Save]",
+            "((term))",
+            "indexterm:[primary]",
+            "indexterm2:[shown]",
+            "https://example.com",
+            "link:page.html[text]",
+            "mailto:a@example.org[]",
+            "doc@example.org",
+            "xref:section[]",
+            "&lt;&lt;section&gt;&gt;",
+        ] {
+            assert!(
+                level_may_have_macros(construct),
+                "the gate would wrongly skip {construct:?}"
+            );
+        }
+
+        // And the shape the gate exists for answers `false`.
+        assert!(!level_may_have_macros(
+            "plain prose with nothing any macro family recognizes"
+        ));
     }
 }
