@@ -558,21 +558,32 @@ impl Replacer for AttributeReplacer<'_> {
             let name = parts.next().unwrap_or_default();
             let seed = parts.next();
 
-            let value = self.parser.counter(name, seed);
+            let (value, from_persisted_state) =
+                self.parser.counter_reporting_provenance(name, seed);
 
             // `counter` displays the new value; `counter2` advances silently.
             if directive.as_str() == "counter" {
-                // Written through unescaped even under
-                // `SplicedValueEscaping::MaskedPieceBytes`, unlike the
-                // resolved value below, because a counter's bytes are the
-                // haystack's own: the seed is a slice of the counter
-                // expression (already escaped where it came from a tokener,
-                // and free to hold a genuine placeholder the tokener wrote
-                // between the braces), and every later value is that seed
-                // advanced. Escaping here would both double-escape an escape
-                // the tokener already wrote and hide an occurrence the restore
-                // walk holds a body for.
-                dest.push_str(&value);
+                if from_persisted_state {
+                    // Advanced from the counter's own persisted state — a
+                    // prior counter value, or a plain document attribute of
+                    // the same name — rather than derived from this call's
+                    // own `seed`. Persisted state was never escaped for
+                    // *this* haystack (it may have entered as an ordinary
+                    // document attribute, or from an earlier, unrelated
+                    // reference elsewhere in the document), so it needs
+                    // exactly the same escape a resolved reference's value
+                    // does. See [`Parser::counter_reporting_provenance`].
+                    dest.push_str(&self.spliced(&value));
+                } else {
+                    // Fresh from `seed` (or the `"1"` default): a slice of
+                    // this call's own haystack, already escaped where it
+                    // came from a tokener and free to hold a genuine
+                    // placeholder the tokener wrote between the braces
+                    // (`{counter:a++x++}`). Escaping it here would both
+                    // double-escape an escape the tokener already wrote and
+                    // hide an occurrence the restore walk holds a body for.
+                    dest.push_str(&value);
+                }
             }
             return;
         }

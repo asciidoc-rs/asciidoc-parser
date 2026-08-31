@@ -511,23 +511,24 @@ fn an_expansion_into_ordinary_content_is_never_escaped() {
 
 #[test]
 fn a_counter_in_a_tokened_bracket_keeps_its_expressions_own_bytes() {
-    // The one thing `AttributeReplacer` writes that is neither a slice of the
-    // haystack nor a resolved attribute value: a `counter`/`counter2`
-    // directive's displayed value. It is deliberately *not* escaped — its
-    // bytes are the counter expression's own (a slice of the already-escaped
-    // haystack, free to hold a genuine placeholder the tokener wrote between
-    // the braces), or that seed advanced — so escaping it would double-escape
-    // an escape the tokener already wrote.
+    // A `counter`/`counter2` directive's displayed value is escaped or not
+    // depending on where its bytes came from — never uniformly, since a
+    // counter's value has two possible sources with opposite provenance (see
+    // `Parser::counter_reporting_provenance`).
+    //
+    // Fresh from *this* call's own `seed` (or the `"1"` default, plain
+    // digit): a slice of the already-escaped haystack, free to hold a
+    // genuine placeholder the tokener wrote between the braces — not
+    // escaped, since it would double-escape an escape the tokener already
+    // wrote.
     let doc = Parser::default().parse(concat!(
-        ":c: 5\n",
-        "\n",
         "[subs=macros]\n",
-        "image:x.png[alt={counter:c},title=++real++]\n",
+        "image:x.png[alt={counter:c:5},title=++real++]\n",
     ));
 
     assert_eq!(
         last_paragraph(&doc),
-        "<span class=\"image\"><img src=\"x.png\" alt=\"6\" title=\"real\"></span>"
+        "<span class=\"image\"><img src=\"x.png\" alt=\"5\" title=\"real\"></span>"
     );
 
     // A seed carrying a reserved codepoint reaches the directive in the
@@ -541,6 +542,42 @@ fn a_counter_in_a_tokened_bracket_keeps_its_expressions_own_bytes() {
     assert_eq!(
         last_paragraph(&doc),
         "<span class=\"image\"><img src=\"x.png\" alt=\"q\u{e005}\" title=\"real\"></span>"
+    );
+
+    // Advanced from **persisted** state instead — a plain document attribute
+    // of the same name, set nowhere near this bracket — is a different
+    // story: those bytes never passed through this call's tokener at all,
+    // so they need exactly the escape a resolved attribute reference's value
+    // does. A plain numeric value makes escaping a no-op, which is why this
+    // case alone (Greptile's review of this PR) would not have caught a
+    // missing escape.
+    let doc = Parser::default().parse(concat!(
+        ":e: 5\n",
+        "\n",
+        "[subs=macros]\n",
+        "image:x.png[alt={counter:e},title=++real++]\n",
+    ));
+
+    assert_eq!(
+        last_paragraph(&doc),
+        "<span class=\"image\"><img src=\"x.png\" alt=\"6\" title=\"real\"></span>"
+    );
+
+    // The case that does catch it: a persisted document attribute whose own
+    // value spells the escape sequence. Advancing it (`String#succ` on the
+    // last alphanumeric) must not disturb those bytes, and restoring the
+    // real passthrough elsewhere in the same bracket must not decode them.
+    let doc = Parser::default().parse(concat!(
+        ":f: p\u{e005}sq\n",
+        "\n",
+        "[subs=macros]\n",
+        "image:x.png[alt={counter:f},title=++real++]\n",
+    ));
+
+    assert_eq!(
+        last_paragraph(&doc),
+        "<span class=\"image\"><img src=\"x.png\" alt=\"p\u{e005}sr\" title=\"real\"></span>",
+        "the document's own escape-shaped bytes, persisted in an attribute, must survive a counter advance"
     );
 }
 

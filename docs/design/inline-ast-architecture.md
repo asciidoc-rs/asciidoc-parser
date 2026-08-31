@@ -272,11 +272,21 @@ substitution under `SplicedValueEscaping::MaskedPieceBytes`; the replacer perfor
 Because a `Replacer` only ever writes replacement text and never touches the haystack around a
 match, the tokener's own already-escaped bytes are left alone and nothing is escaped twice — and
 because the flag is per-call, the same substitution over ordinary never-tokened prose (which has
-no such invariant, and whose readers never unescape) goes on splicing verbatim. Two writes are
-deliberately left verbatim even under the tokened flag, both because their bytes are the
-haystack's own: the literal `{name}` an `attribute-missing=skip`/`warn` reference keeps, and a
-`counter`/`counter2` directive's displayed value, whose seed is a slice of the already-escaped
-expression and may hold a genuine placeholder the tokener wrote between the braces.
+no such invariant, and whose readers never unescape) goes on splicing verbatim. One write is
+deliberately left verbatim even under the tokened flag, because its bytes are the haystack's
+own: the literal `{name}` an `attribute-missing=skip`/`warn` reference keeps.
+
+A `counter`/`counter2` directive's displayed value is not so uniform, and splits on where that
+value came from (`Parser::counter_reporting_provenance`). Freshly derived from *this* call's own
+`seed` (or the `"1"` default) it is verbatim too, for the same reason: a slice of the
+already-escaped expression, free to hold a genuine placeholder the tokener wrote between the
+braces. But a counter with an existing value advances from **persisted** state instead — a
+plain document attribute of the same name (`:name: value`), or this same counter's own value
+from an earlier, unrelated reference elsewhere in the document — and persisted state was never
+escaped for *this* haystack. That value gets exactly the escape a resolved reference's value
+does, caught by Greptile's review of the PR that introduced this mechanism after the initial
+version escaped only the resolved-reference path and left every counter write verbatim
+regardless of provenance.
 
 Ordinal restoration is what makes escaping-at-the-splice sufficient where a byte-offset table
 would still fail: escaping a spliced value changes its length, but it changes neither the count
