@@ -2,7 +2,7 @@
 //! effective order that never runs it — or that runs it *late*, after a step
 //! that already produced markup.
 
-use super::{fold_html, passthrough_step::is_special};
+use super::fold_html;
 use crate::{
     HasSpan, Parser, Span,
     inlines::{CharRef, InlineNode, RawForm, RawOrigin, RefVariant},
@@ -199,6 +199,27 @@ pub(super) fn unescaped_value_children<'src>(
 /// reference text is exactly one, and the fold tells it from an absent text by
 /// the child's *presence* (see `build_xref_shorthand_node` in
 /// [`macros`](super::macros)).
+/// Finds the first special character in `text` — one `memchr` sweep over the
+/// three bytes rather than a per-character `is_special` scan, which for the
+/// common special-free run is the whole cost of splitting it — returning its
+/// byte offset and which special it is. The three specials are ASCII, so
+/// byte search and character search coincide: a special's byte never occurs
+/// inside a multi-byte character's encoding.
+fn find_special(text: &str) -> Option<(usize, char)> {
+    let pos = memchr::memchr3(b'<', b'>', b'&', text.as_bytes())?;
+
+    // The byte at `pos` is one of the three searched-for bytes; reading it
+    // back tells which. The catch-all arm is the ampersand's, `get` having
+    // no `None` to answer for an offset `memchr3` itself just found.
+    let ch = match text.as_bytes().get(pos) {
+        Some(b'<') => '<',
+        Some(b'>') => '>',
+        _ => '&',
+    };
+
+    Some((pos, ch))
+}
+
 fn split_text<'src>(
     value: CowStr<'src>,
     location: Span<'src>,
@@ -225,7 +246,7 @@ fn split_verbatim<'src>(location: Span<'src>, leaf: SpecialLeaf, out: &mut Vec<I
     // `char` in hand, so neither arm below has to re-derive it from the sliced
     // span through a fallible `chars().next()` whose failure branch could
     // never be reached (and so could never be tested).
-    while let Some((pos, ch)) = rest.data().char_indices().find(|(_, ch)| is_special(*ch)) {
+    while let Some((pos, ch)) = find_special(rest.data()) {
         // Emit the borrowed text run preceding the special, when non-empty.
         if pos > 0 {
             let text = rest.slice_to(..pos);
@@ -534,7 +555,7 @@ fn split_synthesized<'src>(
 
     // As in [`split_verbatim`], the character comes back with its offset, so
     // there is no unreachable fallback to re-derive it through.
-    while let Some((pos, ch)) = rest.char_indices().find(|(_, ch)| is_special(*ch)) {
+    while let Some((pos, ch)) = find_special(rest) {
         // Emit the owned text run preceding the special, when non-empty.
         if pos > 0 {
             out.push(InlineNode::Text {
