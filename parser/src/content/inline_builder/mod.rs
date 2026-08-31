@@ -386,6 +386,7 @@ mod post_replacements;
 mod quotes;
 mod special_chars;
 mod stem_step;
+mod trigger_scan;
 
 #[cfg(test)]
 pub(crate) mod snapshot;
@@ -413,6 +414,11 @@ use special_chars::{
     masked_locations,
 };
 use stem_step::apply_stem;
+#[cfg(test)]
+pub(crate) use trigger_scan::{
+    ATTRIBUTE_TRIGGERS, MACRO_TRIGGERS, PASSTHROUGH_TRIGGERS, POST_REPLACEMENT_TRIGGERS,
+    QUOTE_TRIGGERS, REPLACEMENT_TRIGGERS, SPECIAL_TRIGGERS, STEM_TRIGGERS, trigger_mask,
+};
 
 use crate::{
     Parser, Span,
@@ -541,16 +547,32 @@ pub(crate) fn build_for_group<'src>(
 
     let mut nodes = vec![InlineNode::Text { value, location }];
 
+    // The fused per-step gate: while the tree is still a single `Text` node,
+    // one shared scan of its bytes (see [`trigger_scan`]) answers every
+    // step's own lone-text sniff at once, and a step whose trigger bytes are
+    // absent is skipped without being called at all. Every step that *does*
+    // run invalidates the scan, so a step that transforms the tree can never
+    // leave a stale answer behind (see [`trigger_scan::LoneTextSniff`] for
+    // when a rescan is actually needed); everything after it proceeds
+    // exactly as before.
+    let mut sniff = trigger_scan::LoneTextSniff::default();
+
     // Passthroughs are extracted before every other step (mirroring
     // `Passthroughs::extract_from`'s own gate), so their content is
     // never touched by specialcharacters, quotes, replacements, or macros.
     if steps.contains(&SubstitutionStep::Macros) || group == &SubstitutionGroup::Header {
-        nodes = apply_passthroughs(nodes, location, parser);
+        if sniff.may(&nodes, trigger_scan::PASSTHROUGH_TRIGGERS) {
+            nodes = apply_passthroughs(nodes, location, parser);
+            sniff.invalidate();
+        }
 
         // Inline STEM is an implicit passthrough too, extracted last
         // (mirroring `Passthroughs::extract_from`'s own ordering) so a
         // passthrough placeholder nested inside a STEM expression survives.
-        nodes = apply_stem(nodes, location, parser);
+        if sniff.may(&nodes, trigger_scan::STEM_TRIGGERS) {
+            nodes = apply_stem(nodes, location, parser);
+            sniff.invalidate();
+        }
     }
 
     // What the extraction pass masked, recorded — as it must be — *before* any
@@ -569,6 +591,26 @@ pub(crate) fn build_for_group<'src>(
     let masked = masked_locations(&nodes);
 
     for (position, step) in steps.iter().enumerate() {
+        // The fused gate's per-step answer. `Callouts` takes no class here:
+        // it runs only in the Verbatim group's order and keeps its own sniff.
+        let triggers = match step {
+            SubstitutionStep::SpecialCharacters => Some(trigger_scan::SPECIAL_TRIGGERS),
+            SubstitutionStep::Quotes => Some(trigger_scan::QUOTE_TRIGGERS),
+            SubstitutionStep::AttributeReferences => Some(trigger_scan::ATTRIBUTE_TRIGGERS),
+            SubstitutionStep::CharacterReplacements => Some(trigger_scan::REPLACEMENT_TRIGGERS),
+            SubstitutionStep::Macros => Some(trigger_scan::MACRO_TRIGGERS),
+            SubstitutionStep::PostReplacement => Some(trigger_scan::POST_REPLACEMENT_TRIGGERS),
+            SubstitutionStep::Callouts => None,
+        };
+
+        if let Some(triggers) = triggers
+            && !sniff.may(&nodes, triggers)
+        {
+            continue;
+        }
+
+        sniff.invalidate();
+
         nodes = match step {
             SubstitutionStep::SpecialCharacters => {
                 // Applied to this step's own *position* in the order:
@@ -659,7 +701,9 @@ pub(crate) fn build_for_group<'src>(
     // `Raw` leaf here rather than the `Text` run the fold would escape. This
     // runs last, after the group's own steps, so every transducer still sees
     // the specials as ordinary text.
-    if !steps.contains(&SubstitutionStep::SpecialCharacters) {
+    if !steps.contains(&SubstitutionStep::SpecialCharacters)
+        && sniff.may(&nodes, trigger_scan::SPECIAL_TRIGGERS)
+    {
         nodes = classify_unescaped_specials(nodes);
     }
 
