@@ -835,18 +835,25 @@ fn is_shorthand_delimiter(c: char) -> bool {
 /// it), which covered only the one road a *spliced* value took and left both
 /// a typed pair and the escape's own output visible in the output.
 ///
-/// One road remains, and it is the same one that blocked carrying a
+/// One road used to remain, and it was the same one that blocked carrying a
 /// byte-offset table through `Attrlist::parse` in the first place:
 /// [`Attrlist::parse`](crate::attributes::Attrlist::parse) re-substitutes
 /// attribute references over the text handed to it, so a `subs=` list naming
-/// `macros` without `attributes` can expand a reference *after* the tokener
-/// has escaped its copy. Whatever that reference's value spells reaches
+/// `macros` without `attributes` expands a reference *after* the tokener has
+/// escaped its copy — and whatever that reference's value spelled reached
 /// `restore_into`'s walk unescaped and indistinguishable from something the
-/// tokener wrote — a value spelling the placeholder forges a restore, and one
-/// spelling the escape sequence gets decoded, corrupting a document
-/// attribute's own text with no masked piece involved at all. See
-/// `an_attrlist_level_expansion_can_still_forge_a_bracket_restore`
-/// (`tests/sentinels.rs`), which pins both.
+/// tokener wrote.
+///
+/// It is closed by escaping at that second point of entry too: the tokened
+/// call sites parse through
+/// [`Attrlist::parse_tokened`](crate::attributes::Attrlist), which runs its
+/// inner substitution under
+/// [`SplicedValueEscaping::MaskedPieceBytes`], so a resolved value is escaped
+/// as it is spliced. That keeps the by-construction property total — every
+/// reserved codepoint standing in a tokened text is one the tokener wrote —
+/// rather than true only of the bytes the tokener itself copied. See
+/// `an_attrlist_level_expansion_cannot_forge_a_bracket_restore`
+/// (`tests/sentinels.rs`).
 pub(crate) const MASKED_PIECE_PLACEHOLDER_START: char = '\u{96}';
 
 /// See [`MASKED_PIECE_PLACEHOLDER`].
@@ -876,6 +883,34 @@ const ESCAPED_END_TAG: char = 'e';
 /// `\u{E005}s` would come back holding a
 /// [`MASKED_PIECE_PLACEHOLDER_START`] it never wrote.
 const ESCAPED_ESCAPE_TAG: char = 'g';
+
+/// Whether the attribute-reference substitution rewriting a text has to run
+/// [`escape_masked_piece_bytes`] over each value it splices into it.
+///
+/// The distinction is *provenance*, not syntax: a resolved attribute value is
+/// the only thing that substitution writes which did not come out of the text
+/// it was handed, so it is the only thing that has to be escaped for a
+/// **tokened** text to go on holding no reserved codepoint the tokener did not
+/// write. Threaded from
+/// [`Attrlist::parse_tokened`](crate::attributes::Attrlist) down to the
+/// replacer that performs the splice; ordinary content-level content carries
+/// [`Verbatim`](Self::Verbatim) and is unaffected.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SplicedValueEscaping {
+    /// Ordinary, never-tokened text: a resolved value is spliced exactly as
+    /// the document wrote it. This text has no masked-piece invariant to
+    /// protect, and escaping into it would put the escape's own bytes in front
+    /// of a reader that never unescapes.
+    Verbatim,
+
+    /// **Tokened** macro-bracket text — what
+    /// [`Attrlist::parse_tokened`](crate::attributes::Attrlist) is handed — in
+    /// which every byte the tokener copied is already escaped. A resolved
+    /// value reaches this text *after* that escape ran, so it is escaped here
+    /// instead, at the splice, which is the one point where bytes from outside
+    /// the tokener's input enter it.
+    MaskedPieceBytes,
+}
 
 /// Rewrites `text`'s own copies of the three reserved codepoints —
 /// [`MASKED_PIECE_PLACEHOLDER_START`], [`MASKED_PIECE_PLACEHOLDER_END`], and
@@ -948,12 +983,16 @@ pub(crate) fn escape_masked_piece_bytes(text: &str) -> Cow<'_, str> {
 /// with the length of the tag that named it, or `None` when what follows the
 /// introducer is not a tag this crate wrote.
 ///
-/// The `None` case is not merely defensive: an introducer can reach a value
-/// without passing through [`escape_masked_piece_bytes`], via the one road
-/// [`MASKED_PIECE_PLACEHOLDER_START`]'s own doc comment names —
-/// [`Attrlist::parse`](crate::attributes::Attrlist::parse)'s re-substitution
-/// of an attribute reference over already-tokened text. Copying such an
-/// introducer through verbatim is what keeps that value's own bytes intact.
+/// The `None` case makes the decode half **total** over arbitrary input,
+/// which is what lets every consumer of a tokened text run
+/// [`unescape_masked_piece_bytes`] unconditionally rather than first proving
+/// the text is well-formed. Copying an unrecognized introducer through
+/// verbatim — rather than eating the byte after it as a tag — is what keeps
+/// such a text's own bytes intact. Both points at which bytes enter a tokened
+/// text do escape (see [`MASKED_PIECE_PLACEHOLDER_START`]), so the pipeline
+/// itself no longer produces an unpaired introducer; this arm is the codec's
+/// contract, pinned directly by
+/// `masked_piece_escape_round_trips_every_reserved_codepoint`.
 fn escaped_literal(tail: &str) -> Option<(char, usize)> {
     match tail.chars().next()? {
         ESCAPED_START_TAG => Some((MASKED_PIECE_PLACEHOLDER_START, ESCAPED_START_TAG.len_utf8())),
@@ -1304,13 +1343,16 @@ mod tests {
             borrowed
         );
 
-        // An introducer this crate did not write — reachable through
-        // `Attrlist::parse`'s own re-substitution over already-tokened text,
-        // the one road
-        // `an_attrlist_level_expansion_can_still_forge_a_bracket_restore`
-        // pins — is copied through with the bytes after it, rather than
-        // eating one as a tag. That holds at the end of the text too, where
-        // there is no byte after it at all.
+        // An introducer this crate did not write is copied through with the
+        // bytes after it, rather than eating one as a tag. That holds at the
+        // end of the text too, where there is no byte after it at all.
+        //
+        // Every point at which bytes enter a tokened text escapes them now
+        // (the tokener's own copy, and the splice inside
+        // `Attrlist::parse_tokened`), so this is the codec's contract rather
+        // than a case the pipeline still produces: the decode half is total
+        // over arbitrary input, which is what lets a caller run it
+        // unconditionally.
         assert_eq!(
             unescape_masked_piece_bytes("p\u{e005}zq\u{e005}").as_ref(),
             "p\u{e005}zq\u{e005}"

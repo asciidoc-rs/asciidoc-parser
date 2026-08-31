@@ -3140,6 +3140,30 @@ impl Parser {
     ///
     /// [counter]: https://docs.asciidoctor.org/asciidoc/latest/attributes/counters/
     pub(crate) fn counter(&self, name: &str, seed: Option<&str>) -> String {
+        self.counter_impl(name, seed, false).0
+    }
+
+    /// Like [`counter`](Self::counter), but also reports whether the
+    /// returned value was advanced from the counter's own **persisted**
+    /// state (`true`) — a prior counter value, or a plain document attribute
+    /// of the same name — rather than freshly derived from `seed` or the
+    /// `"1"` default (`false`).
+    ///
+    /// A caller splicing this value into text that must stay free of
+    /// [`MASKED_PIECE_PLACEHOLDER`](crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER)-shaped
+    /// bytes it did not itself write needs this distinction: `seed` (from
+    /// `{counter:name:seed}`) is a slice of the caller's own already-escaped
+    /// haystack, so a value derived from it needs no further escaping — but
+    /// persisted state was never escaped for *this* haystack. It may be an
+    /// ordinary document attribute (`:name: value`) set anywhere, or this
+    /// same counter's own value from an earlier, unrelated reference
+    /// elsewhere in the document — either way, its bytes did not pass
+    /// through the tokener guarding the text this call is splicing into.
+    pub(crate) fn counter_reporting_provenance(
+        &self,
+        name: &str,
+        seed: Option<&str>,
+    ) -> (String, bool) {
         self.counter_impl(name, seed, false)
     }
 
@@ -3154,7 +3178,7 @@ impl Parser {
     /// reads back as its latest counter value (unlike a plain inline
     /// `{counter:…}`, which leaves the locked value in place).
     pub(crate) fn counter_for_caption(&self, name: &str, seed: Option<&str>) -> String {
-        self.counter_impl(name, seed, true)
+        self.counter_impl(name, seed, true).0
     }
 
     /// Advances the `name` counter and returns its new value. `seed` supplies
@@ -3180,7 +3204,16 @@ impl Parser {
     ///   mirrors Asciidoctor's `Document#counter`, which advances `@counters`
     ///   but leaves `@attributes` untouched while the attribute is
     ///   `attribute_locked?`.
-    fn counter_impl(&self, name: &str, seed: Option<&str>, commit_when_locked: bool) -> String {
+    ///
+    /// Returns the advanced value alongside whether it was derived from
+    /// persisted state (see
+    /// [`counter_reporting_provenance`](Self::counter_reporting_provenance)).
+    fn counter_impl(
+        &self,
+        name: &str,
+        seed: Option<&str>,
+        commit_when_locked: bool,
+    ) -> (String, bool) {
         let use_private_state = !commit_when_locked && self.attribute_is_locked(name);
 
         // The value to advance from: the private running state first (only
@@ -3196,6 +3229,8 @@ impl Parser {
             InterpretedValue::Value(current) if !current.is_empty() => Some(current),
             _ => None,
         });
+
+        let from_persisted_state = current.is_some();
 
         let next = match current {
             Some(current) => next_counter_value(&current),
@@ -3214,7 +3249,7 @@ impl Parser {
                 .insert(name.to_string(), next.clone());
         }
 
-        next
+        (next, from_persisted_state)
     }
 
     /// Reports whether `name` currently resolves to an attribute that is

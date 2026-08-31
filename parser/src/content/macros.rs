@@ -5,7 +5,7 @@ use regex::{Captures, Match, Regex};
 
 use crate::{
     Parser, Span,
-    attributes::{Attrlist, AttrlistContext},
+    attributes::{Attrlist, AttrlistContext, element_attribute::SplicedValueEscaping},
     document::InterpretedValue,
     parser::XrefStyle,
 };
@@ -496,12 +496,25 @@ pub(crate) static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 /// attribute-list-bearing display text with the *exact* same interpretation
 /// this string step uses, changing only the recognition *sink* (a node field
 /// instead of a borrow of the node's own attribute list).
+///
+/// `escaping` names which of the link family's two display-text paths `text`
+/// came off: a verbatim slice of the source
+/// ([`Verbatim`](SplicedValueEscaping::Verbatim)) or the output of
+/// `tokened_bracket`
+/// ([`MaskedPieceBytes`](SplicedValueEscaping::MaskedPieceBytes)),
+/// whose masked-piece invariant this parse's own attribute-reference
+/// substitution has to keep. See [`Attrlist::parse_tokened`].
 pub(crate) fn extract_attributes_from_text<'src>(
     text: Span<'src>,
     parser: &Parser,
     default_text: Option<&str>,
+    escaping: SplicedValueEscaping,
 ) -> (String, Attrlist<'src>) {
-    let attrlist_maw = Attrlist::parse(text, parser, AttrlistContext::Inline);
+    let attrlist_maw = match escaping {
+        SplicedValueEscaping::Verbatim => Attrlist::parse(text, parser, AttrlistContext::Inline),
+        SplicedValueEscaping::MaskedPieceBytes => Attrlist::parse_tokened(text, parser),
+    };
+
     let attrs = attrlist_maw.item.item;
 
     if let Some(resolved_text) = attrs.nth_attribute(1) {
@@ -514,6 +527,8 @@ pub(crate) fn extract_attributes_from_text<'src>(
         // survive intact: the already-rendered inner macro output happens to
         // contain `=` and `"` characters, but is not a real attribute list.
         if resolved_text.value() == text.data() {
+            // A zero-length span: no bytes to splice into, so it takes the
+            // plain parse whichever path the caller is on.
             let empty_attrs = Attrlist::parse(Span::default(), parser, AttrlistContext::Inline)
                 .item
                 .item;

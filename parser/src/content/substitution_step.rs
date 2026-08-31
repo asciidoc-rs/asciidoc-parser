@@ -4,7 +4,10 @@ use regex::{Captures, Regex, RegexBuilder, Replacer};
 
 use crate::{
     Parser, Span,
-    attributes::Attrlist,
+    attributes::{
+        Attrlist,
+        element_attribute::{SplicedValueEscaping, escape_masked_piece_bytes},
+    },
     content::Content,
     document::InterpretedValue,
     parser::{
@@ -60,7 +63,12 @@ impl SubstitutionStep {
                 apply_special_characters(content, &*parser.renderer);
             }
             Self::AttributeReferences => {
-                apply_attributes(content, parser);
+                // Ordinary, never-tokened content: nothing here has a
+                // masked-piece invariant to protect, so a resolved value is
+                // spliced exactly as the document wrote it. The one caller
+                // that needs otherwise — `Attrlist::parse_tokened` — reaches
+                // `apply_attributes` directly.
+                apply_attributes(content, parser, SplicedValueEscaping::Verbatim);
             }
             // The five remaining steps have no per-step implementation here:
             // each is implemented as a tree transducer in
@@ -413,18 +421,30 @@ struct AttributeReplacer<'p> {
     /// whole line in `drop-line` mode, or a line the dropped reference left
     /// empty in `drop` mode (Asciidoctor's `reject_if_empty`).
     missing_on_line: bool,
+
+    /// Whether a resolved value is escaped as it is spliced, because the
+    /// haystack is **tokened** macro-bracket text. See
+    /// [`SplicedValueEscaping`], and [`replace_append`](Self::replace_append)
+    /// for why a resolved value is the only thing here that needs it.
+    escaping: SplicedValueEscaping,
 }
 
 impl<'p> AttributeReplacer<'p> {
     /// Builds the replacer over a haystack rendered from somewhere other than
     /// `fallback_source` itself, so a recorded warning names that coarse span.
-    fn new(parser: &'p Parser, mode: AttributeMissing, fallback_source: Span<'p>) -> Self {
+    fn new(
+        parser: &'p Parser,
+        mode: AttributeMissing,
+        fallback_source: Span<'p>,
+        escaping: SplicedValueEscaping,
+    ) -> Self {
         Self {
             parser,
             mode,
             fallback_source,
             haystack_is_source: false,
             missing_on_line: false,
+            escaping,
         }
     }
 
@@ -455,6 +475,25 @@ impl<'p> AttributeReplacer<'p> {
         );
     }
 
+    /// The bytes a **resolved** reference's `value` contributes to the output.
+    ///
+    /// This is the one thing
+    /// [`replace_append`](Replacer::replace_append) writes that did not come
+    /// out of the haystack, so it is the one thing that has to be escaped for
+    /// a **tokened** haystack to go on holding no reserved codepoint the
+    /// tokener did not write. See [`SplicedValueEscaping`].
+    fn spliced<'v>(&self, value: &'v str) -> Cow<'v, str> {
+        match self.escaping {
+            SplicedValueEscaping::Verbatim => Cow::Borrowed(value),
+
+            // A document attribute's value is document text — it never holds
+            // a placeholder a tokener wrote — so escaping it is unambiguous,
+            // and the consumer's own unescape on the way out hands the
+            // document its bytes back.
+            SplicedValueEscaping::MaskedPieceBytes => escape_masked_piece_bytes(value),
+        }
+    }
+
     /// The source span to attribute a recorded warning to: the offending
     /// reference itself where the haystack is its own source, and the coarse
     /// [`fallback_source`](Self::fallback_source) otherwise.
@@ -472,6 +511,15 @@ impl<'p> AttributeReplacer<'p> {
 }
 
 impl Replacer for AttributeReplacer<'_> {
+    /// Everything written here comes out of the haystack itself — the escaped
+    /// spelling of a reference, the literal `{name}` a missing reference keeps
+    /// — except the one thing that does not: the **resolved value** of a
+    /// reference that did resolve. Under
+    /// [`SplicedValueEscaping::MaskedPieceBytes`] that is the one write that
+    /// escapes, which is exactly what a tokened haystack needs and all it
+    /// needs: a [`Replacer`] only ever writes replacement text, never touching
+    /// the bytes around a match, so the tokener's own already-escaped copy is
+    /// left alone and nothing is escaped twice.
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
         // A backslash immediately before the opening brace (`\{name}`) or
         // before the closing brace (`{name\}`) — or both, as in
@@ -510,11 +558,32 @@ impl Replacer for AttributeReplacer<'_> {
             let name = parts.next().unwrap_or_default();
             let seed = parts.next();
 
-            let value = self.parser.counter(name, seed);
+            let (value, from_persisted_state) =
+                self.parser.counter_reporting_provenance(name, seed);
 
             // `counter` displays the new value; `counter2` advances silently.
             if directive.as_str() == "counter" {
-                dest.push_str(&value);
+                if from_persisted_state {
+                    // Advanced from the counter's own persisted state — a
+                    // prior counter value, or a plain document attribute of
+                    // the same name — rather than derived from this call's
+                    // own `seed`. Persisted state was never escaped for
+                    // *this* haystack (it may have entered as an ordinary
+                    // document attribute, or from an earlier, unrelated
+                    // reference elsewhere in the document), so it needs
+                    // exactly the same escape a resolved reference's value
+                    // does. See [`Parser::counter_reporting_provenance`].
+                    dest.push_str(&self.spliced(&value));
+                } else {
+                    // Fresh from `seed` (or the `"1"` default): a slice of
+                    // this call's own haystack, already escaped where it
+                    // came from a tokener and free to hold a genuine
+                    // placeholder the tokener wrote between the braces
+                    // (`{counter:a++x++}`). Escaping it here would both
+                    // double-escape an escape the tokener already wrote and
+                    // hide an occurrence the restore walk holds a body for.
+                    dest.push_str(&value);
+                }
             }
             return;
         }
@@ -566,7 +635,7 @@ impl Replacer for AttributeReplacer<'_> {
         // A value-less `Set` attribute (e.g. `:foo:` with no `=value`)
         // substitutes to an empty string, matching Asciidoctor.
         if let InterpretedValue::Value(value) = value {
-            dest.push_str(value.as_ref());
+            dest.push_str(&self.spliced(value.as_ref()));
         }
     }
 }
@@ -584,7 +653,19 @@ fn drop_emptied_line(replaced: &str) -> bool {
     replaced.strip_suffix('\r').unwrap_or(replaced).is_empty()
 }
 
-fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
+/// Runs the attribute-references substitution over `content`, escaping each
+/// value it splices as `escaping` says to.
+///
+/// Reached through [`SubstitutionStep::AttributeReferences`] — always
+/// [`SplicedValueEscaping::Verbatim`] — by everything except the one caller
+/// that needs otherwise:
+/// [`Attrlist::parse_tokened`](crate::attributes::Attrlist), whose haystack is
+/// already-tokened macro-bracket text and which calls this directly.
+pub(crate) fn apply_attributes(
+    content: &mut Content<'_>,
+    parser: &Parser,
+    escaping: SplicedValueEscaping,
+) {
     if !content.rendered.contains('{') {
         return;
     }
@@ -611,7 +692,7 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
             continue;
         }
 
-        let mut replacer = AttributeReplacer::new(parser, mode, source);
+        let mut replacer = AttributeReplacer::new(parser, mode, source, escaping);
 
         let replaced = ATTRIBUTE_REFERENCE.replace_all(line, replacer.by_ref());
 
@@ -671,8 +752,11 @@ pub(crate) fn substitute_attributes_in_macro_target<'src>(
     let mode = AttributeMissing::from_parser(parser);
 
     // The haystack is the target's own text, so a match's offsets are source
-    // offsets and a warning names the exact reference.
-    let mut replacer = AttributeReplacer::new(parser, mode, target).over_its_own_source();
+    // offsets and a warning names the exact reference. A macro *target* is
+    // never tokened — it is the source between the `::` and the `[` — so a
+    // resolved value is spliced verbatim.
+    let mut replacer = AttributeReplacer::new(parser, mode, target, SplicedValueEscaping::Verbatim)
+        .over_its_own_source();
 
     let replaced = ATTRIBUTE_REFERENCE.replace_all(text, replacer.by_ref());
 

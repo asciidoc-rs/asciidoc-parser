@@ -15,7 +15,7 @@ use super::{
 use crate::{
     Parser, Span,
     attributes::{
-        Attrlist, AttrlistContext,
+        Attrlist,
         element_attribute::{MASKED_PIECE_PLACEHOLDER_END, MASKED_PIECE_PLACEHOLDER_START},
     },
     content::{
@@ -444,7 +444,7 @@ fn attrlist_text_carries_its_opaque_pieces(
 
     let (tokened, _carried) = tokened_text(&raw_text.replace('\n', " "), text_range, nodes, pieces);
 
-    let attrlist = Attrlist::parse(Span::new(&tokened), parser, AttrlistContext::Inline)
+    let attrlist = Attrlist::parse_tokened(Span::new(&tokened), parser)
         .item
         .item;
 
@@ -652,7 +652,7 @@ fn xref_macro_text<'src>(
             pieces,
         );
 
-        let attrlist = Attrlist::parse(Span::new(&normalized), parser, AttrlistContext::Inline)
+        let attrlist = Attrlist::parse_tokened(Span::new(&normalized), parser)
             .item
             .item;
 

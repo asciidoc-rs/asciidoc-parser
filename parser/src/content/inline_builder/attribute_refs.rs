@@ -1181,6 +1181,14 @@ fn rebuild_attribute_level<'src>(
 /// so a value's own copy of the pair is escaped there whether it arrived
 /// through this splice or was typed in the clear — and, being two-way, comes
 /// back out as the document wrote it.
+///
+/// Not to be confused with the *other* attribute-reference splice, the one
+/// [`Attrlist::parse_tokened`](crate::attributes::Attrlist) runs inside a
+/// tokened parse, which **does** escape (see
+/// [`SplicedValueEscaping`](crate::attributes::element_attribute::SplicedValueEscaping)).
+/// The difference is what the value is being spliced into: this step's output
+/// is ordinary content, whose readers never unescape, while that one's is
+/// tokened text the tokener has already escaped the rest of.
 fn split_attribute_value<'src>(
     value: &str,
     location: Span<'src>,

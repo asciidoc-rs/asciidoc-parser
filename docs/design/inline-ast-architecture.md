@@ -259,11 +259,38 @@ restored ranges it records stay in the coordinates of the string it is building,
 `untranslated_value`/`computed_value_children` on the runs between occurrences — so a
 document's own copy of a reserved codepoint round-trips to the output as written.
 
-One road is left uncovered, and it is the first bullet above: `Attrlist::parse` re-substitutes
-attribute references over the text handed to it, *after* the tokener escaped its copy, so a
-`subs=` list naming `macros` without `attributes` can still expand a reference whose value
-spells the pair into the tokened text. Closing it means escaping inside that parse, which
-requires the parse to know it has been handed tokened text.
+The tokener's copy is not the only way bytes enter a tokened text, though, and the second way is
+the first bullet above: `Attrlist::parse` re-substitutes attribute references over the text
+handed to it, *after* the tokener escaped its copy, so a `subs=` list naming `macros` without
+`attributes` expands a reference whose value the tokener never saw. Escaping is therefore
+applied at **both** points of entry rather than at the tokener alone. The tokened call sites —
+`bracket_attrlist`'s third path (`image.rs`), the cross-reference family's two `tokened_text`
+parses (`xref.rs`), and the link families' display-text list through
+`extract_attributes_from_text` — parse through `Attrlist::parse_tokened`, which runs that inner
+substitution under `SplicedValueEscaping::MaskedPieceBytes`; the replacer performing the splice
+(`AttributeReplacer`, `substitution_step.rs`) then escapes each resolved value as it writes it.
+Because a `Replacer` only ever writes replacement text and never touches the haystack around a
+match, the tokener's own already-escaped bytes are left alone and nothing is escaped twice — and
+because the flag is per-call, the same substitution over ordinary never-tokened prose (which has
+no such invariant, and whose readers never unescape) goes on splicing verbatim. One write is
+deliberately left verbatim even under the tokened flag, because its bytes are the haystack's
+own: the literal `{name}` an `attribute-missing=skip`/`warn` reference keeps.
+
+A `counter`/`counter2` directive's displayed value is not so uniform, and splits on where that
+value came from (`Parser::counter_reporting_provenance`). Freshly derived from *this* call's own
+`seed` (or the `"1"` default) it is verbatim too, for the same reason: a slice of the
+already-escaped expression, free to hold a genuine placeholder the tokener wrote between the
+braces. But a counter with an existing value advances from **persisted** state instead — a
+plain document attribute of the same name (`:name: value`), or this same counter's own value
+from an earlier, unrelated reference elsewhere in the document — and persisted state was never
+escaped for *this* haystack. That value gets exactly the escape a resolved reference's value
+does, caught by Greptile's review of the PR that introduced this mechanism after the initial
+version escaped only the resolved-reference path and left every counter write verbatim
+regardless of provenance.
+
+Ordinal restoration is what makes escaping-at-the-splice sufficient where a byte-offset table
+would still fail: escaping a spliced value changes its length, but it changes neither the count
+nor the order of the placeholder occurrences the tokener wrote, which is all the walk reads.
 
 ## 4. Cross-reference and title resolution
 
