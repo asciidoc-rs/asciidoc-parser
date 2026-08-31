@@ -263,19 +263,22 @@ fn apply_macro_families<'src>(
     // is transparent, so `child_contexts` hands its children the character its
     // own *siblings* present instead.
     // A level with no parent node to descend into — the common leaf-only case
-    // — skips the context derivation and the rebuild of its node vector
-    // entirely (the same scan-first shape the shown-term hop below uses).
+    // — skips the context derivation and the walk over its nodes entirely
+    // (the same scan-first shape the shown-term hop below uses). The descent
+    // mutates each parent's children in place rather than moving every node
+    // through a rebuild of the level's vector: only the one field the
+    // recursion refines changes hands.
     let has_parent = nodes
         .iter()
         .any(|node| matches!(node, InlineNode::Styled(_) | InlineNode::Ref(_)));
 
-    let nodes: Vec<InlineNode<'src>> = if has_parent {
+    let mut nodes = nodes;
+
+    if has_parent {
         let contexts = LevelContext::child_contexts(&nodes, ctx, masked);
 
-        nodes
-            .into_iter()
-            .zip(contexts)
-            .map(|(node, inner)| match node {
+        for (node, inner) in nodes.iter_mut().zip(contexts) {
+            match node {
                 // An extraction wrapper's body is **not** this content's to
                 // substitute. It is an opaque placeholder for
                 // every step from here on, and the body was already
@@ -288,40 +291,24 @@ fn apply_macro_families<'src>(
                 // place this level's `masked` could not answer even if it did
                 // descend, since the list is collected from one content's own
                 // top level and knows nothing of a nested build's nodes.
-                InlineNode::Styled(styled) if masked.covers(styled.location) => {
-                    InlineNode::Styled(styled)
+                InlineNode::Styled(styled) if masked.covers(styled.location) => {}
+
+                InlineNode::Styled(styled) => {
+                    let children = std::mem::take(&mut styled.children);
+                    styled.children =
+                        apply_macro_families(children, root, parser, inner, masked, specials);
                 }
 
-                InlineNode::Styled(mut styled) => {
-                    styled.children = apply_macro_families(
-                        styled.children,
-                        root,
-                        parser,
-                        inner,
-                        masked,
-                        specials,
-                    );
-                    InlineNode::Styled(styled)
+                InlineNode::Ref(reference) => {
+                    let children = std::mem::take(&mut reference.children);
+                    reference.children =
+                        apply_macro_families(children, root, parser, inner, masked, specials);
                 }
 
-                InlineNode::Ref(mut reference) => {
-                    reference.children = apply_macro_families(
-                        reference.children,
-                        root,
-                        parser,
-                        inner,
-                        masked,
-                        specials,
-                    );
-                    InlineNode::Ref(reference)
-                }
-
-                other => other,
-            })
-            .collect()
-    } else {
-        nodes
-    };
+                _ => {}
+            }
+        }
+    }
 
     // The UI macros run before image/icon and only under `experimental`,
     // mirroring the string step's order and gate.
@@ -336,7 +323,7 @@ fn apply_macro_families<'src>(
 
     // Index terms (`((term))`, `(((primary, secondary)))`, `indexterm:[…]`,
     // `indexterm2:[…]`) run after image/icon and before the link families.
-    let nodes = indexterm_macros_level(nodes, root, parser, ctx, masked);
+    let mut nodes = indexterm_macros_level(nodes, root, parser, ctx, masked);
 
     // A **visible** term's shown text is not a boundary the later families
     // stop at — it is ordinary flow content, and
@@ -359,32 +346,24 @@ fn apply_macro_families<'src>(
         .iter()
         .any(|node| matches!(node, InlineNode::IndexTerm(term) if !term.children.is_empty()));
 
-    let nodes = if has_shown_term {
+    if has_shown_term {
         let contexts = LevelContext::child_contexts(&nodes, ctx, masked);
 
-        nodes
-            .into_iter()
-            .zip(contexts)
-            .map(|(node, inner)| match node {
-                InlineNode::IndexTerm(mut index_term) if !index_term.children.is_empty() => {
-                    index_term.children = apply_reference_families(
-                        std::mem::take(&mut index_term.children),
-                        root,
-                        parser,
-                        inner,
-                        masked,
-                        specials,
-                    );
-
-                    InlineNode::IndexTerm(index_term)
-                }
-
-                other => other,
-            })
-            .collect()
-    } else {
-        nodes
-    };
+        for (node, inner) in nodes.iter_mut().zip(contexts) {
+            if let InlineNode::IndexTerm(index_term) = node
+                && !index_term.children.is_empty()
+            {
+                index_term.children = apply_reference_families(
+                    std::mem::take(&mut index_term.children),
+                    root,
+                    parser,
+                    inner,
+                    masked,
+                    specials,
+                );
+            }
+        }
+    }
 
     apply_reference_families(nodes, root, parser, ctx, masked, specials)
 

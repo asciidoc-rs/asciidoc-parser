@@ -63,35 +63,34 @@ fn apply_replacements_recursive<'src>(
     ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     // A level with no parent node to descend into — the common leaf-only
-    // case — skips the rebuild of its node vector entirely.
-    let nodes = if nodes
+    // case — skips the walk over its nodes entirely. The descent mutates
+    // each parent's children in place rather than moving every node through
+    // a rebuild of the level's vector: only the one field the recursion
+    // refines changes hands.
+    let mut nodes = nodes;
+
+    if nodes
         .iter()
         .any(|node| matches!(node, InlineNode::Styled(_) | InlineNode::Ref(_)))
     {
-        nodes
-            .into_iter()
-            .map(|node| match node {
-                InlineNode::Styled(mut styled) => {
-                    let inner = LevelContext::inside_styled(&styled, ctx);
-                    styled.children = apply_replacements_recursive(styled.children, root, inner);
-                    InlineNode::Styled(styled)
+        for node in nodes.iter_mut() {
+            match node {
+                InlineNode::Styled(styled) => {
+                    let inner = LevelContext::inside_styled(styled, ctx);
+                    let children = std::mem::take(&mut styled.children);
+                    styled.children = apply_replacements_recursive(children, root, inner);
                 }
 
-                InlineNode::Ref(mut reference) => {
-                    reference.children = apply_replacements_recursive(
-                        reference.children,
-                        root,
-                        LevelContext::INSIDE_REF,
-                    );
-                    InlineNode::Ref(reference)
+                InlineNode::Ref(reference) => {
+                    let children = std::mem::take(&mut reference.children);
+                    reference.children =
+                        apply_replacements_recursive(children, root, LevelContext::INSIDE_REF);
                 }
 
-                other => other,
-            })
-            .collect()
-    } else {
-        nodes
-    };
+                _ => {}
+            }
+        }
+    }
 
     // Cheap pre-filter, shared by every rule below: none of them can match
     // when this level has nothing replaceable at all, so this skips all of
@@ -102,8 +101,6 @@ fn apply_replacements_recursive<'src>(
     if !level_may_have_replacements(&nodes) {
         return nodes;
     }
-
-    let mut nodes = nodes;
 
     // The match string is a pure function of the level's node list, so one
     // build here serves every rule that leaves the level unchanged — the
