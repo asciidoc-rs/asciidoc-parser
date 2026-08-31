@@ -807,6 +807,13 @@ fn is_shorthand_delimiter(c: char) -> bool {
 /// carrying none of the `,`/`=`/`"` bytes at that position instead of the
 /// piece's own.
 ///
+/// "Tokened"/"tokener" are this crate's own coined vocabulary for that
+/// rewrite, kept deliberately apart from "tokenized"/"tokenizer": this crate
+/// has no lexer stage that splits source into a token stream, and borrowing
+/// that pair of words would wrongly suggest one. A "tokened" text is just a
+/// text in which each masked piece has been replaced by one placeholder
+/// token, recovered later by position rather than by re-parsing.
+///
 /// Carries no index — which piece a given occurrence stands for is recovered
 /// by *position*: the Nth occurrence, scanned left to right, is `bodies[N]`,
 /// never by parsing anything back out of the placeholder's own bytes.
