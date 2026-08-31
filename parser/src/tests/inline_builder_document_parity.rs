@@ -12,8 +12,8 @@
 //! That leaves one thing unverified, and it is the guarantee the whole
 //! single-pass design rests on: **the tree the single-pass builder produces,
 //! folded *after* cross-reference resolution has run, reproduces the
-//! rendered string byte-for-byte.** Design §4 describes resolution as
-//! non-destructive and re-resolvable by construction — an `xref` is a
+//! rendered string byte-for-byte.** Resolution is non-destructive and
+//! re-resolvable by construction — an `xref` is a
 //! [`Ref`](crate::inlines::Ref)`{resolved: None}` node that resolution fills in
 //! place, with no template involved — for all three cases this harness
 //! checks: plain cross-references, section titles (whose own document-order
@@ -573,9 +573,8 @@ fn each_content_retains_the_attributes_of_its_own_point_in_the_document() {
     );
 }
 
-// The retirement of the deferred-cross-reference sentinel system (design
-// §4.2's second): a deferred content's rendering is a fold of its tree, taken
-// at the end of resolution.
+// The retirement of the deferred-cross-reference sentinel system: a deferred
+// content's rendering is a fold of its tree, taken at the end of resolution.
 //
 // The fold-against-template comparison that used to sit here
 // (`the_fold_reproduces_the_template_for_every_deferred_content`) retired with

@@ -1388,8 +1388,8 @@ impl Parser {
         RenderContext::new(self)
     }
 
-    /// Takes a [`RenderContext`] that pairs `attributes` with **this parser's
-    /// configuration** — its path resolver and file handlers.
+    /// Creates a [`RenderContext`] that pairs `attributes` with **this
+    /// parser's configuration** — its path resolver and file handlers.
     ///
     /// This is how a fold running *later than its parse* is assembled. The two
     /// halves come from different places on purpose:

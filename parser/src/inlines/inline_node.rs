@@ -11,12 +11,14 @@ use crate::{
 /// The first five variants are the ASG inline core: three literal leaves
 /// ([`Text`](Self::Text), [`CharRef`](Self::CharRef), [`Raw`](Self::Raw)) and
 /// two parents ([`Styled`](Self::Styled), [`Ref`](Self::Ref)). The remaining
-/// variants are crate extensions that the ASG does not yet model; each projects
-/// down to an ASG-legal node when emitting conformant ASG.
+/// variants are crate extensions that the ASG does not model — constructs
+/// (images, footnotes, UI macros, index terms, callouts, anchors, line
+/// breaks, STEM) that render richly in HTML with no projection to an
+/// ASG-legal node; the crate does not emit conformant ASG output.
 ///
 /// Every node carries a `location` [`Span`] (directly or on its inner struct),
 /// so [`InlineNode`] implements [`HasSpan`] and locates itself exactly the way
-/// blocks already do.
+/// blocks do.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InlineNode<'src> {
     // ─── ASG literal nodes (leaves) ───────────────────────────────────
