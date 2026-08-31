@@ -788,6 +788,7 @@ fn apply_quote_sub<'src>(
 }
 
 /// One leaf/opaque node's placement in a level's reconstructed match string.
+#[derive(Clone)]
 pub(super) struct Piece {
     /// Index of the node in the level's node vector.
     pub(super) node_index: usize,

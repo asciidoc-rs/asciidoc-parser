@@ -1,7 +1,7 @@
 //! Index-term recognition (`((term))`, `(((primary, secondary)))`,
 //! `indexterm:[…]`, `indexterm2:[…]`).
 
-use super::{MacroMatch, MacroMatchKind, rebuild_macro_level};
+use super::{LevelStrings, MacroMatch, MacroMatchKind, rebuild_macro_level, shifted_level};
 // Referenced by the doc comments below, whose offset arithmetic mirrors this
 // rewrite (see [`shown_term_range`]); the code performs it structurally
 // rather than calling it.
@@ -14,8 +14,7 @@ use crate::{
         INLINE_INDEXTERM,
         inline_builder::{
             quotes::{
-                LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, emit_range,
-                single_text_value, source_slice,
+                LevelContext, Piece, SPAN_PLACEHOLDER, emit_range, single_text_value, source_slice,
             },
             special_chars::Masked,
         },
@@ -44,6 +43,7 @@ pub(super) fn indexterm_macros_level<'src>(
     parser: &Parser,
     ctx: LevelContext,
     masked: Masked<'_>,
+    level: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     // Cheap pre-filter, taken *before* the match string is materialized: a
     // single, unsplit `Text` node's match string is its own value, so the
@@ -53,22 +53,21 @@ pub(super) fn indexterm_macros_level<'src>(
         return nodes;
     }
 
-    let (s, pieces) = build_match_string(&nodes, masked);
+    // The level's shared shifted match string (see `shifted_level`).
+    let (s, pieces) = {
+        let entry = shifted_level(level, &nodes, ctx, masked);
+        (entry.0.as_str(), entry.1.as_slice())
+    };
 
     // Cheap pre-filter mirroring the string step's guard: a shorthand needs a
     // `((` … `))` pair (its parens are not special, so they reach the macros
     // step intact), and a macro form needs a `:[` and `dexterm` (matching both
     // `indexterm:` and `indexterm2:`).
-    if !indexterm_prefilter(&s) {
+    if !indexterm_prefilter(s) {
         return nodes;
     }
 
-    // Matched over the level wrapped in the boundary character its enclosing
-    // construct presents, with the level's own pieces moved into that string's
-    // coordinates — see `apply_macro_families`'s own doc comment.
-    let (s, pieces) = ctx.shift(s, pieces);
-
-    let matches = find_indexterm_matches(&s, &nodes, &pieces, root, parser);
+    let matches = find_indexterm_matches(s, &nodes, pieces, root, parser);
 
     if matches.is_empty() {
         return nodes;
@@ -92,7 +91,9 @@ pub(super) fn indexterm_macros_level<'src>(
 
     let macro_matches = matches.into_iter().map(|m| m.macro_match).collect();
 
-    rebuild_macro_level(&nodes, &pieces, &s, macro_matches)
+    let rebuilt = rebuild_macro_level(&nodes, pieces, s, macro_matches);
+    *level = None;
+    rebuilt
 }
 
 /// A recognized index-term match, plus the two facts

@@ -3,8 +3,8 @@
 //! item.
 
 use super::{
-    MacroMatch, MacroMatchKind, emit_range_unescaping_brackets,
-    image::range_is_verbatim_or_synthesized, rebuild_macro_level,
+    LevelStrings, MacroMatch, MacroMatchKind, emit_range_unescaping_brackets,
+    image::range_is_verbatim_or_synthesized, rebuild_macro_level, shifted_level,
 };
 use crate::{
     Parser, Span,
@@ -214,6 +214,7 @@ pub(super) fn anchor_macros_level<'src>(
     root: Span<'src>,
     ctx: LevelContext,
     masked: Masked<'_>,
+    level: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     // Cheap pre-filter, taken *before* the match string is materialized: see
     // `biblio_anchor_level`'s own copy of this comment.
@@ -221,27 +222,28 @@ pub(super) fn anchor_macros_level<'src>(
         return nodes;
     }
 
-    let (s, pieces) = build_match_string(&nodes, masked);
+    // The level's shared shifted match string (see `shifted_level`).
+    let (s, pieces) = {
+        let entry = shifted_level(level, &nodes, ctx, masked);
+        (entry.0.as_str(), entry.1.as_slice())
+    };
 
     // Cheap pre-filter: an anchor needs either the shorthand `[[` opener or the
     // `anchor:` macro prefix. The `[` characters are not special, so a
     // shorthand reaches the macros step with its `[[` intact.
-    if !anchor_prefilter(&s) {
+    if !anchor_prefilter(s) {
         return nodes;
     }
 
-    // Matched over the level wrapped in the boundary character its enclosing
-    // construct presents, with the level's own pieces moved into that string's
-    // coordinates — see `apply_macro_families`'s own doc comment.
-    let (s, pieces) = ctx.shift(s, pieces);
-
-    let matches = find_anchor_matches(&nodes, &s, &pieces, root);
+    let matches = find_anchor_matches(&nodes, s, pieces, root);
 
     if matches.is_empty() {
         return nodes;
     }
 
-    rebuild_macro_level(&nodes, &pieces, &s, matches)
+    let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
+    *level = None;
+    rebuilt
 }
 
 /// Finds every recognized inline anchor at this level — both spellings — as a

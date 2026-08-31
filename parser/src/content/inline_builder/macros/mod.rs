@@ -16,8 +16,8 @@ use xref::xref_macros_level;
 
 use super::{
     quotes::{
-        LevelContext, Piece, charref_entity, emit_range, single_text_value, source_slice,
-        special_entity, text_slice,
+        LevelContext, Piece, build_match_string, charref_entity, emit_range, single_text_value,
+        source_slice, special_entity, text_slice,
     },
     special_chars::{Masked, unescaped_value_children},
 };
@@ -146,7 +146,7 @@ pub(super) enum ComputedSpecials {
 /// [`range_has_no_opaque_piece`](image::range_has_no_opaque_piece)). A
 /// **restored entity** (`&copy;`, `&#8217;` — an author-written entity the
 /// replacements step un-escaped) rides on that same gate, since
-/// [`build_match_string`](super::quotes::build_match_string) gives it its own
+/// [`build_match_string`] gives it its own
 /// bytes too; it needs no per-family work, so it is admitted for the
 /// index-term, anchor and STEM families as well, and a footnote's text — which
 /// is structured children rather than a sliced value — carries either leaf as
@@ -263,7 +263,7 @@ pub(crate) fn level_may_have_macros(value: &str) -> bool {
 ///
 /// The same two families read the character a construct written *beside* a
 /// rendered span presents, which
-/// [`build_match_string`](super::quotes::build_match_string) writes around
+/// [`build_match_string`] writes around
 /// that span's own placeholder — the two outer characters of its markup, or,
 /// for a span rendering to its **body** and nothing else, that body's own two
 /// outer characters. Either one it can write only for a span really
@@ -339,20 +339,25 @@ fn apply_macro_families<'src>(
         }
     }
 
+    // One shifted match string for the whole level, shared across every
+    // family's turn below (see [`shifted_level`]): a family fills it lazily,
+    // and a family that rebuilds the level clears it.
+    let mut level: Option<LevelStrings> = None;
+
     // The UI macros run before image/icon and only under `experimental`,
     // mirroring the string step's order and gate.
     let nodes = if parser.is_attribute_set("experimental") {
-        let nodes = kbd_btn_macros_level(nodes, root, ctx, masked);
-        menu_macros_level(nodes, root, ctx, masked)
+        let nodes = kbd_btn_macros_level(nodes, root, ctx, masked, &mut level);
+        menu_macros_level(nodes, root, ctx, masked, &mut level)
     } else {
         nodes
     };
 
-    let nodes = image_macros_level(nodes, root, parser, ctx, masked);
+    let nodes = image_macros_level(nodes, root, parser, ctx, masked, &mut level);
 
     // Index terms (`((term))`, `(((primary, secondary)))`, `indexterm:[…]`,
     // `indexterm2:[…]`) run after image/icon and before the link families.
-    let mut nodes = indexterm_macros_level(nodes, root, parser, ctx, masked);
+    let mut nodes = indexterm_macros_level(nodes, root, parser, ctx, masked, &mut level);
 
     // A **visible** term's shown text is not a boundary the later families
     // stop at — it is ordinary flow content, and
@@ -382,6 +387,10 @@ fn apply_macro_families<'src>(
             if let InlineNode::IndexTerm(index_term) = node
                 && !index_term.children.is_empty()
             {
+                // The term's children are their own level, with their own
+                // slot.
+                let mut term_level: Option<LevelStrings> = None;
+
                 index_term.children = apply_reference_families(
                     std::mem::take(&mut index_term.children),
                     root,
@@ -389,12 +398,19 @@ fn apply_macro_families<'src>(
                     inner,
                     masked,
                     specials,
+                    &mut term_level,
                 );
             }
         }
+
+        // A visible term is *transparent* — the boundary characters it
+        // presents to this level's match string are its body's own outer
+        // characters — so refining its children above can change what this
+        // level's string holds. Rebuild it on the next family's turn.
+        level = None;
     }
 
-    apply_reference_families(nodes, root, parser, ctx, masked, specials)
+    apply_reference_families(nodes, root, parser, ctx, masked, specials, &mut level)
 
     // Footnotes are **not** handled here. Every other family's recognition is
     // order-independent (no cross-node side effect), so it is safe for them to
@@ -422,28 +438,54 @@ fn apply_reference_families<'src>(
     ctx: LevelContext,
     masked: Masked<'_>,
     specials: ComputedSpecials,
+    level: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     // Auto-links and formal-URL links (`INLINE_LINK`) run after the index-term
     // pass and before the `link:`/`mailto:` macro.
-    let nodes = inline_link_level(nodes, root, parser, ctx, masked, specials);
+    let nodes = inline_link_level(nodes, root, parser, ctx, masked, specials, level);
 
     // The `link:`/`mailto:` macro runs after the auto-link pass.
-    let nodes = link_macro_level(nodes, root, parser, ctx, masked, specials);
+    let nodes = link_macro_level(nodes, root, parser, ctx, masked, specials, level);
 
     // A bare e-mail address (`doc@example.org`) runs after both URL-link
     // families and before the anchor pass — so an address that is really the
     // tail of a URL, or a `mailto:` macro's own target, is already inside an
     // opaque node and is not re-recognized.
-    let nodes = email_level(nodes, root, ctx, masked);
+    let nodes = email_level(nodes, root, ctx, masked, level);
 
     // Inline anchors (`[[id]]`, `anchor:id[…]`) run after the link families and
     // before cross-references. (The bibliography-anchor pass — a `^`-anchored
     // `[[[id]]]`, recognized only inside a bibliography list item — runs
     // first, in [`apply_macros`], outside this recursion.)
-    let nodes = anchor_macros_level(nodes, root, ctx, masked);
+    let nodes = anchor_macros_level(nodes, root, ctx, masked, level);
 
     // Cross-references (`xref:id[…]`) run after the anchor pass.
-    xref_macros_level(nodes, root, parser, ctx, masked, specials)
+    xref_macros_level(nodes, root, parser, ctx, masked, specials, level)
+}
+
+/// A level's **shifted** match string and [`Piece`] map — one
+/// [`build_match_string`]-plus-[`shift`](LevelContext::shift) result, held so
+/// the family passes at one level can share a single build rather than each
+/// repeating it. A family that rebuilds the level clears the slot; the next
+/// family's turn rebuilds it lazily.
+pub(super) type LevelStrings = (String, Vec<Piece>);
+
+/// Fills `level` if it is empty — the one shared build — and hands back the
+/// entry. The string a family's cheap needle prefilter then reads is the
+/// *shifted* one (it carries the enclosing construct's boundary characters),
+/// which can only make the prefilter more permissive than the unshifted read
+/// the families took before sharing: the real matcher, which always ran over
+/// the shifted string, still decides.
+pub(super) fn shifted_level<'a>(
+    level: &'a mut Option<LevelStrings>,
+    nodes: &[InlineNode<'_>],
+    ctx: LevelContext,
+    masked: Masked<'_>,
+) -> &'a LevelStrings {
+    level.get_or_insert_with(|| {
+        let (s, pieces) = build_match_string(nodes, masked);
+        ctx.shift(s, pieces)
+    })
 }
 
 /// The single entry point for
@@ -746,7 +788,7 @@ pub(in crate::content::inline_builder) fn emit_range_unescaping_brackets<'src>(
 /// earlier-recognized macro node — has no such body: its markup exists only
 /// when the tree is folded. There is still nothing to restore *into bytes*,
 /// but there is something to carry: the **node**. So this tokens every atomic
-/// piece [`build_match_string`](super::quotes::build_match_string) stands in
+/// piece [`build_match_string`] stands in
 /// as one placeholder, whatever kind it is, and the caller splices each node
 /// back through [`restored_value_children`].
 ///
@@ -787,7 +829,7 @@ pub(super) fn tokened_text<'src>(
 
         // The pieces that become a token are the **opaque** ones — atomic, and
         // not one of the three [`CharRef`](InlineNode::CharRef) leaves
-        // [`build_match_string`](super::quotes::build_match_string) gives real
+        // [`build_match_string`] gives real
         // bytes to. Every other piece contributes its own bytes as it stands,
         // and the caller's own rebuild
         // ([`computed_value_children`]) already knows how to unwind them.
@@ -1003,7 +1045,7 @@ pub(super) fn computed_value_children<'src>(
 /// for any part of it).
 ///
 /// The rebuild applies the same trichotomy to a string:
-/// [`build_match_string`](super::quotes::build_match_string) gives an escaped
+/// [`build_match_string`] gives an escaped
 /// special its canonical entity and a *restored* entity its own bytes, while a
 /// [`Text`](InlineNode::Text) node holds **logical** text the fold escapes. So
 /// the two classes come apart here — the special becomes the character it
@@ -1038,7 +1080,7 @@ pub(super) fn computed_value_children<'src>(
 /// [`Replacement`](CharRef::Replacement)'s numeric one. A *literal* `&` (an
 /// attribute expansion splicing one in after the escaping step) is a
 /// [`Raw`](InlineNode::Raw) leaf, which
-/// [`build_match_string`](super::quotes::build_match_string) stands in as an
+/// [`build_match_string`] stands in as an
 /// opaque placeholder carrying no `&` at all — so it never reaches a computed
 /// value as bytes. The branch is pinned by a direct unit test rather than by
 /// the corpus.
