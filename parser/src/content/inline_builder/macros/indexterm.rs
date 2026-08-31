@@ -1,7 +1,7 @@
 //! Index-term recognition (`((term))`, `(((primary, secondary)))`,
 //! `indexterm:[…]`, `indexterm2:[…]`).
 
-use super::{LevelStrings, MacroMatch, MacroMatchKind, rebuild_macro_level, shifted_level};
+use super::{INDEXTERM_DIGRAMS, LevelSniff, MacroMatch, MacroMatchKind, rebuild_macro_level};
 // Referenced by the doc comments below, whose offset arithmetic mirrors this
 // rewrite (see [`shown_term_range`]); the code performs it structurally
 // rather than calling it.
@@ -13,9 +13,7 @@ use crate::{
     content::{
         INLINE_INDEXTERM,
         inline_builder::{
-            quotes::{
-                LevelContext, Piece, SPAN_PLACEHOLDER, emit_range, single_text_value, source_slice,
-            },
+            quotes::{LevelContext, Piece, SPAN_PLACEHOLDER, emit_range, source_slice},
             special_chars::Masked,
         },
     },
@@ -43,27 +41,15 @@ pub(super) fn indexterm_macros_level<'src>(
     parser: &Parser,
     ctx: LevelContext,
     masked: Masked<'_>,
-    level: &mut Option<LevelStrings>,
+    level: &mut LevelSniff,
 ) -> Vec<InlineNode<'src>> {
-    // Cheap pre-filter, taken *before* the match string is materialized: a
-    // single, unsplit `Text` node's match string is its own value, so the
-    // check below can run against that directly. A level already split by
-    // an earlier step falls back to the build, exactly as before.
-    if single_text_value(&nodes).is_some_and(|value| !indexterm_prefilter(value)) {
-        return nodes;
-    }
-
-    // The level's shared shifted match string (see `shifted_level`).
-    let (s, pieces) = {
-        let entry = shifted_level(level, &nodes, ctx, masked);
-        (entry.0.as_str(), entry.1.as_slice())
-    };
+    let (s, pieces, digrams) = level.shifted(&nodes, ctx, masked);
 
     // Cheap pre-filter mirroring the string step's guard: a shorthand needs a
     // `((` … `))` pair (its parens are not special, so they reach the macros
     // step intact), and a macro form needs a `:[` and `dexterm` (matching both
     // `indexterm:` and `indexterm2:`).
-    if !indexterm_prefilter(s) {
+    if digrams & INDEXTERM_DIGRAMS == 0 || !indexterm_prefilter(s) {
         return nodes;
     }
 
@@ -92,7 +78,7 @@ pub(super) fn indexterm_macros_level<'src>(
     let macro_matches = matches.into_iter().map(|m| m.macro_match).collect();
 
     let rebuilt = rebuild_macro_level(&nodes, pieces, s, macro_matches);
-    *level = None;
+    level.invalidate();
     rebuilt
 }
 

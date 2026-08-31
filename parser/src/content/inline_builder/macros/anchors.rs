@@ -3,8 +3,8 @@
 //! item.
 
 use super::{
-    LevelStrings, MacroMatch, MacroMatchKind, emit_range_unescaping_brackets,
-    image::range_is_verbatim_or_synthesized, rebuild_macro_level, shifted_level,
+    ANCHOR_DIGRAMS, LevelSniff, MacroMatch, MacroMatchKind, emit_range_unescaping_brackets,
+    image::range_is_verbatim_or_synthesized, rebuild_macro_level,
 };
 use crate::{
     Parser, Span,
@@ -214,24 +214,15 @@ pub(super) fn anchor_macros_level<'src>(
     root: Span<'src>,
     ctx: LevelContext,
     masked: Masked<'_>,
-    level: &mut Option<LevelStrings>,
+    level: &mut LevelSniff,
 ) -> Vec<InlineNode<'src>> {
-    // Cheap pre-filter, taken *before* the match string is materialized: see
-    // `biblio_anchor_level`'s own copy of this comment.
-    if single_text_value(&nodes).is_some_and(|value| !anchor_prefilter(value)) {
-        return nodes;
-    }
-
-    // The level's shared shifted match string (see `shifted_level`).
-    let (s, pieces) = {
-        let entry = shifted_level(level, &nodes, ctx, masked);
-        (entry.0.as_str(), entry.1.as_slice())
-    };
+    let (s, pieces, digrams) = level.shifted(&nodes, ctx, masked);
 
     // Cheap pre-filter: an anchor needs either the shorthand `[[` opener or the
     // `anchor:` macro prefix. The `[` characters are not special, so a
-    // shorthand reaches the macros step with its `[[` intact.
-    if !anchor_prefilter(s) {
+    // shorthand reaches the macros step with its `[[` intact. The digram
+    // gate fronts the exact needle sweep.
+    if digrams & ANCHOR_DIGRAMS == 0 || !anchor_prefilter(s) {
         return nodes;
     }
 
@@ -242,7 +233,7 @@ pub(super) fn anchor_macros_level<'src>(
     }
 
     let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
-    *level = None;
+    level.invalidate();
     rebuilt
 }
 

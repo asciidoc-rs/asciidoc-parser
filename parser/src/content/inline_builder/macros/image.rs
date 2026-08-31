@@ -7,8 +7,8 @@ use std::borrow::Cow;
 #[allow(unused_imports)]
 use super::super::quotes::build_match_string;
 use super::{
-    LevelStrings, MacroMatch, MacroMatchKind, links::restore_masked_passthroughs,
-    rebuild_macro_level, shifted_level,
+    IMAGE_DIGRAMS, LevelSniff, MacroMatch, MacroMatchKind, links::restore_masked_passthroughs,
+    rebuild_macro_level,
 };
 use crate::{
     Parser, Span,
@@ -20,9 +20,7 @@ use crate::{
         INLINE_IMAGE_MACRO, basename,
         inline_builder::{
             fold::{fold_html, fold_stem, render_text},
-            quotes::{
-                LevelContext, Piece, charref_entity, single_text_value, source_slice, text_slice,
-            },
+            quotes::{LevelContext, Piece, charref_entity, source_slice, text_slice},
             special_chars::Masked,
         },
         normalize_text_lf_escaped_bracket,
@@ -50,22 +48,14 @@ pub(super) fn image_macros_level<'src>(
     parser: &Parser,
     ctx: LevelContext,
     masked: Masked<'_>,
-    level: &mut Option<LevelStrings>,
+    level: &mut LevelSniff,
 ) -> Vec<InlineNode<'src>> {
-    // Cheap pre-filter, taken *before* the match string is materialized: a
-    // single, unsplit `Text` node's match string is its own value, so the
-    // check below can run against that directly. A level already split by
-    // an earlier step falls back to the build, exactly as before.
-    if single_text_value(&nodes).is_some_and(|value| !image_macro_prefilter(value)) {
-        return nodes;
-    }
-
-    // The level's shared shifted match string (see `shifted_level`).
-    let entry = shifted_level(level, &nodes, ctx, masked);
+    let (shared_s, shared_pieces, digrams) = level.shifted(&nodes, ctx, masked);
 
     // Cheap pre-filter mirroring the string step's `found_macroish`: an image
-    // or icon macro needs its name prefix and an opening bracket.
-    if !image_macro_prefilter(&entry.0) {
+    // or icon macro needs its name prefix and an opening bracket. The digram
+    // gate fronts the exact needle sweep.
+    if digrams & IMAGE_DIGRAMS == 0 || !image_macro_prefilter(shared_s) {
         return nodes;
     }
 
@@ -75,11 +65,11 @@ pub(super) fn image_macros_level<'src>(
     // needs that. The widening rewrites the pair, so the (rare) level that
     // needs it works on its own copy and the shared slot stays as built.
     let widened;
-    let (s, pieces) = if has_restorable_piece(&entry.1, &nodes) {
-        widened = widen_masked_pieces(entry.0.clone(), entry.1.clone(), &nodes);
+    let (s, pieces) = if has_restorable_piece(shared_pieces, &nodes) {
+        widened = widen_masked_pieces(shared_s.to_owned(), shared_pieces.to_vec(), &nodes);
         (widened.0.as_str(), widened.1.as_slice())
     } else {
-        (entry.0.as_str(), entry.1.as_slice())
+        (shared_s, shared_pieces)
     };
 
     let matches = find_image_matches(s, pieces, root, parser, &nodes);
@@ -89,7 +79,7 @@ pub(super) fn image_macros_level<'src>(
     }
 
     let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
-    *level = None;
+    level.invalidate();
     rebuilt
 }
 

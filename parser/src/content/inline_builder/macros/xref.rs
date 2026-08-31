@@ -10,10 +10,10 @@ use super::super::quotes::build_match_string;
 #[allow(unused_imports)]
 use super::computed_value_children;
 use super::{
-    ComputedSpecials, LevelStrings, MacroMatch, MacroMatchKind,
+    ComputedSpecials, LevelSniff, MacroMatch, MacroMatchKind, XREF_DIGRAMS,
     image::{range_has_no_opaque_piece, range_is_substitution_restorable},
     links::restore_masked_passthroughs,
-    macro_text_children, rebuild_macro_level, restored_value_children, shifted_level, tokened_text,
+    macro_text_children, rebuild_macro_level, restored_value_children, tokened_text,
     untranslated_value,
 };
 use crate::{
@@ -25,7 +25,7 @@ use crate::{
     content::{
         INLINE_XREF, document_xrefstyle,
         inline_builder::{
-            quotes::{LevelContext, Piece, single_text_value, source_slice},
+            quotes::{LevelContext, Piece, source_slice},
             special_chars::Masked,
         },
         xref_target::{
@@ -114,21 +114,9 @@ pub(super) fn xref_macros_level<'src>(
     ctx: LevelContext,
     masked: Masked<'_>,
     specials: ComputedSpecials,
-    level: &mut Option<LevelStrings>,
+    level: &mut LevelSniff,
 ) -> Vec<InlineNode<'src>> {
-    // Cheap pre-filter, taken *before* the match string is materialized: a
-    // single, unsplit `Text` node's match string is its own value, so the
-    // check below can run against that directly. A level already split by
-    // an earlier step falls back to the build, exactly as before.
-    if single_text_value(&nodes).is_some_and(|value| !xref_prefilter(value)) {
-        return nodes;
-    }
-
-    // The level's shared shifted match string (see `shifted_level`).
-    let (s, pieces) = {
-        let entry = shifted_level(level, &nodes, ctx, masked);
-        (entry.0.as_str(), entry.1.as_slice())
-    };
+    let (s, pieces, digrams) = level.shifted(&nodes, ctx, masked);
 
     // Cheap pre-filter: both the `xref:` macro form and the `<<id>>` shorthand
     // (seen here as `&lt;&lt;id&gt;&gt;`, since specials run before macros) are
@@ -136,7 +124,7 @@ pub(super) fn xref_macros_level<'src>(
     // shorthand's `&lt;&lt;` opener, mirroring the string step's
     // `text.contains("&lt;&lt;") || (found_macroish && text.contains("xref:"))`
     // guard.
-    if !xref_prefilter(s) {
+    if digrams & XREF_DIGRAMS == 0 || !xref_prefilter(s) {
         return nodes;
     }
 
@@ -147,7 +135,7 @@ pub(super) fn xref_macros_level<'src>(
     }
 
     let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
-    *level = None;
+    level.invalidate();
     rebuilt
 }
 
