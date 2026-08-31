@@ -219,6 +219,36 @@ the boundary falls. Four cases in the crate fall back to this:
 
 ---
 
+### 3.5 A rejected refinement: carrying a byte-offset table through `Attrlist::parse`
+
+The mask/restore mechanism in §3.4 case 2 recovers a masked construct's body by scanning the
+parsed value for the placeholder pair and pairing occurrences positionally with a token list
+built alongside it (`tokened_bracket`/`tokened_text`). A `Piece` table one layer up
+(`quotes.rs`) has the stronger property of carrying byte offsets through directly rather than
+re-scanning; extending that property down through `Attrlist::parse`'s own split was considered
+and rejected, for two reasons that don't show up at the call site:
+
+- **`Attrlist::parse` re-substitutes attribute references over the tokened text** whenever it
+  holds a `{` and a `}` — and that changes byte offsets. A `subs=` list naming `macros` without
+  `attributes` reaches this step with every reference still unresolved, so the inner
+  substitution expands them *after* `tokened_bracket` has already written its placeholder,
+  moving every following occurrence. Ordinal (positional) restoration is indifferent to this; a
+  byte-offset table is not.
+- **A parsed attribute's value is not a slice of the text that was split at all.**
+  `ElementAttribute::parse` skips whitespace, strips the name/quotes, unescapes `\"`, and
+  trims — none of it reported back — so remapping tokened-text coordinates into value
+  coordinates would mean threading a byte mapping through most of
+  [`parser/src/attributes/`](../../parser/src/attributes/).
+
+The mechanism that *would* get the equivalent construction-time guarantee is different: escape
+the placeholder's own codepoints in the bytes `tokened_bracket`/`tokened_text` **copy** from
+their non-tokened pieces, at the one moment provenance is still known, rather than escaping the
+content-level splice that feeds them
+([`escape_passthrough_sentinels`](../../parser/src/content/inline_builder/attribute_refs.rs),
+§3.4 case 2). That would let `escape_passthrough_sentinels` retire, but it requires auditing
+every consumer of a tokened parse to apply the matching un-escape, so it remains a scoped,
+not-yet-taken-up follow-up rather than something this document tracks as in progress.
+
 ## 4. Cross-reference and title resolution
 
 Parsing happens in two phases — an initial parse that leaves cross-references unresolved, then

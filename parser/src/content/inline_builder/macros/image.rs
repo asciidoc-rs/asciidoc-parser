@@ -2174,6 +2174,14 @@ mod tests {
         // the cursor is already past `bodies.len()` by the time the typed
         // pair is reached, and `restore_tokens`' own leniency for that case
         // is what keeps it literal instead of panicking or misattributing.
+        //
+        // The leniency is *order-dependent*, and only this order is safe: a
+        // typed pair **ahead** of the bracket's real masked piece reaches an
+        // unspent `bodies` and takes that piece's body. That is a known gap,
+        // pinned by
+        // `a_typed_placeholder_before_a_masked_piece_forges_a_bracket_restore`
+        // (`tests/sentinels.rs`) — see `escape_passthrough_sentinels`' own
+        // "Known limits" section for why it is open.
         let nodes = build_src(Span::new("image:x.png[++a++ \u{96}\u{97}]"));
         let image = assert_image(&nodes[0]);
 
