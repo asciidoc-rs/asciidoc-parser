@@ -1521,10 +1521,6 @@ pub(crate) fn find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
     // Absolute offset of the current (possibly sliced) haystack within `s`.
     let mut base = 0usize;
 
-    // One reusable capture-slot buffer for the whole scan, filled in place by
-    // each anchored attempt.
-    let mut caps = sub.pattern.create_captures();
-
     let delim = candidate_needle(sub.type_, sub.scope);
 
     'retry: loop {
@@ -1567,14 +1563,15 @@ pub(crate) fn find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
                     .anchored(regex_automata::Anchored::Yes)
                     .range(start..);
 
-                sub.pattern.search_captures(&input, &mut caps);
-
-                let Some(whole) = caps.get_match() else {
+                // Bounds only: the groups are derived from the span below,
+                // so the capture-resolving engine never runs on the hot path.
+                let Some(found) = sub.pattern.search(&input) else {
                     continue;
                 };
 
-                let full = (base + whole.start())..(base + whole.end());
-                let after = &haystack[whole.end()..];
+                let whole = found.range();
+                let full = (base + whole.start)..(base + whole.end);
+                let after = &haystack[whole.end..];
 
                 // The monospace-constrained-before-quote look-ahead: reject
                 // and resume a few bytes in, so the following quote can be
@@ -1583,7 +1580,7 @@ pub(crate) fn find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
                     && sub.scope == QuoteScope::Constrained
                     && after.starts_with(['"', '\'', '`'])
                 {
-                    let matched = &haystack[whole.range()];
+                    let matched = &haystack[whole.clone()];
 
                     let skip = if matched.starts_with('\\') {
                         2
@@ -1595,7 +1592,18 @@ pub(crate) fn find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
                     continue 'retry;
                 }
 
-                if let Some(m) = classify_match(sub, haystack, &caps, base) {
+                // The span's own decomposition, with the capture engine as
+                // the cold fallback for a span it cannot decompose; a match
+                // neither can read (possible only for a synthetic pattern
+                // whose body group can sit out a match — no shared quote
+                // pattern's can) is skipped rather than mis-shaped.
+                let Some(groups) = derive_groups(sub, haystack, whole.clone())
+                    .or_else(|| derive_via_captures(sub, haystack, start))
+                else {
+                    continue;
+                };
+
+                if let Some(m) = classify_match(sub, haystack, &whole, &groups, base) {
                     matches.push(QuoteMatch { full, kind: m });
                 } else {
                     matches.push(QuoteMatch {
@@ -1607,7 +1615,7 @@ pub(crate) fn find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
                 // Every accepted match extends past `d` (its own delimiter
                 // sits at or beyond it), so the cursor always advances; `max`
                 // spells the guarantee out rather than trusting it.
-                at = whole.end().max(at + 1);
+                at = whole.end.max(at + 1);
                 continue 'candidates;
             }
 
@@ -1657,7 +1665,200 @@ pub(crate) fn candidate_needle(type_: QuoteType, scope: QuoteScope) -> &'static 
     }
 }
 
-/// Writes into `starts` the ascending, deduplicated positions a match whose
+/// `sub`'s **whole closing** delimiter: the same bytes as the opening one for
+/// every symmetric sub, and the mirrored pair for the two typographic-quote
+/// subs (`"` + backtick closes as backtick + `"`).
+/// `every_quote_sub_has_a_candidate_needle` pins this against each pattern's
+/// own trailing literal, alongside the opening needle.
+pub(crate) fn closing_needle(type_: QuoteType, scope: QuoteScope) -> &'static [u8] {
+    match (type_, scope) {
+        (QuoteType::DoubleQuote, _) => b"`\"",
+        (QuoteType::SingleQuote, _) => b"`'",
+
+        _ => candidate_needle(type_, scope),
+    }
+}
+
+/// The group spans [`derive_groups`] reads off one anchored match — exactly
+/// what the pattern's own capture groups would report, in haystack-relative
+/// offsets: where the boundary-prefix group ends (equal to the match start
+/// for the `^` alternative and for every unconstrained sub), the attribute
+/// list's interior when the optional group participated, and the body.
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+struct DerivedGroups {
+    prefix_end: usize,
+    attrlist: Option<std::ops::Range<usize>>,
+    body: std::ops::Range<usize>,
+}
+
+/// Reads the capture groups of one anchored match straight off its span,
+/// without running the capture-resolving engine.
+///
+/// Sound because a quote pattern's shape admits exactly one decomposition of
+/// a known `[start, end)` match, resolved in the same order the engine's own
+/// leftmost-first semantics resolve it:
+///
+/// - The **boundary prefix** (constrained subs only): at any start past the
+///   haystack's beginning, only the one-character class alternative can have
+///   matched, so the prefix is the first character. At the beginning, the
+///   engine tries the zero-width `^` alternative first and falls back to the
+///   class only when the rest cannot complete from there — mirrored here by
+///   trying the empty prefix first and validating the remainder against the
+///   fixed end (the one case where validation, not bytes, decides — see
+///   `parse_attrs_and_body`'s `validate_body_edges`).
+/// - The **optional attribute list** is tried greedily before the bare
+///   delimiter, exactly as the engine tries it; the two parses can never both
+///   fit one span, because no delimiter opens with `[`.
+/// - The **body** is whatever sits between the delimiters: the lazy `.+?` ends
+///   at the first possible close, and the engine's reported *end* is that very
+///   choice, so with the end in hand the body is fixed.
+///
+/// Answers `None` for a span it cannot decompose — no reachable match is one
+/// (the differential pin runs this against the capture engine match for
+/// match), and [`find_matches`] then falls back to that engine, so an anomaly
+/// costs a slow path rather than a wrong group.
+fn derive_groups(
+    sub: &QuoteSub,
+    haystack: &str,
+    whole: std::ops::Range<usize>,
+) -> Option<DerivedGroups> {
+    let open = candidate_needle(sub.type_, sub.scope);
+    let close = closing_needle(sub.type_, sub.scope);
+    let m = haystack.get(whole.clone())?;
+
+    match sub.scope {
+        QuoteScope::Unconstrained => {
+            // `\\?` — the optional escape is its own token here, not a prefix
+            // class character.
+            let after_escape = if m.as_bytes().first() == Some(&b'\\') {
+                1
+            } else {
+                0
+            };
+
+            let (attrlist, body) = parse_attrs_and_body(m, after_escape, open, close, false)?;
+
+            Some(DerivedGroups {
+                prefix_end: whole.start,
+                attrlist: attrlist.map(|r| (whole.start + r.start)..(whole.start + r.end)),
+                body: (whole.start + body.start)..(whole.start + body.end),
+            })
+        }
+
+        QuoteScope::Constrained => {
+            // At the haystack's beginning the engine prefers the zero-width
+            // `^` alternative; everywhere else only the class alternative
+            // can have consumed a character.
+            if whole.start == 0
+                && let Some((attrlist, body)) = parse_attrs_and_body(m, 0, open, close, true)
+            {
+                return Some(DerivedGroups {
+                    prefix_end: 0,
+                    attrlist,
+                    body,
+                });
+            }
+
+            let prefix_len = m.chars().next().map(char::len_utf8)?;
+            let (attrlist, body) = parse_attrs_and_body(m, prefix_len, open, close, true)?;
+
+            Some(DerivedGroups {
+                prefix_end: whole.start + prefix_len,
+                attrlist: attrlist.map(|r| (whole.start + r.start)..(whole.start + r.end)),
+                body: (whole.start + body.start)..(whole.start + body.end),
+            })
+        }
+    }
+}
+
+/// The tail every quote pattern shares, parsed off a match's remaining text:
+/// an optional greedy `[attrs]` (its interior excludes both brackets), the
+/// opening delimiter, the body, and the closing delimiter the match is known
+/// to end with. Ranges are relative to `m`.
+///
+/// `validate_body_edges` applies the constrained body's `\S…\S` edge classes;
+/// it is what lets [`derive_groups`]'s `^`-first probe reject a decomposition
+/// the engine would have backtracked out of. An unconstrained body (`.+?`)
+/// has no such class and skips it.
+fn parse_attrs_and_body(
+    m: &str,
+    from: usize,
+    open: &[u8],
+    close: &[u8],
+    validate_body_edges: bool,
+) -> Option<(Option<std::ops::Range<usize>>, std::ops::Range<usize>)> {
+    let close_start = m.len().checked_sub(close.len())?;
+
+    let body_of = |body_start: usize| -> Option<std::ops::Range<usize>> {
+        let body = m.get(body_start..close_start)?;
+
+        if body.is_empty() {
+            return None;
+        }
+
+        if validate_body_edges
+            && (body.chars().next().is_some_and(char::is_whitespace)
+                || body.chars().next_back().is_some_and(char::is_whitespace))
+        {
+            return None;
+        }
+
+        Some(body_start..close_start)
+    };
+
+    // The attribute list is tried greedily first, as the engine tries it.
+    if m.as_bytes().get(from) == Some(&b'[')
+        && let Some(interior_len) = memchr::memchr(b']', m.get(from + 1..)?.as_bytes())
+        && interior_len > 0
+        && memchr::memchr(b'[', m.get(from + 1..from + 1 + interior_len)?.as_bytes()).is_none()
+    {
+        let delim_start = from + 1 + interior_len + 1;
+
+        if m.get(delim_start..)?.as_bytes().starts_with(open)
+            && let Some(body) = body_of(delim_start + open.len())
+        {
+            return Some((Some((from + 1)..(from + 1 + interior_len)), body));
+        }
+    }
+
+    if m.get(from..)?.as_bytes().starts_with(open) {
+        let body = body_of(from + open.len())?;
+        return Some((None, body));
+    }
+
+    None
+}
+
+/// The capture-engine reading of one anchored match — [`derive_groups`]'s
+/// cold fallback, and the reference `derived_groups_match_the_capture_engine`
+/// compares the derivation against.
+#[cold]
+fn derive_via_captures(sub: &QuoteSub, haystack: &str, start: usize) -> Option<DerivedGroups> {
+    let mut caps = sub.pattern.create_captures();
+
+    let input = regex_automata::Input::new(haystack)
+        .anchored(regex_automata::Anchored::Yes)
+        .range(start..);
+
+    sub.pattern.search_captures(&input, &mut caps);
+
+    let whole = caps.get_match()?;
+    let group = |i: usize| caps.get_group(i).map(|span| span.start..span.end);
+
+    match sub.scope {
+        QuoteScope::Constrained => Some(DerivedGroups {
+            prefix_end: group(1).map_or(whole.start(), |r| r.end),
+            attrlist: group(2),
+            body: group(3)?,
+        }),
+
+        QuoteScope::Unconstrained => Some(DerivedGroups {
+            prefix_end: whole.start(),
+            attrlist: group(1),
+            body: group(2)?,
+        }),
+    }
+}
 /// pattern contains its opening delimiter at `d` could start at, returning how
 /// many were written.
 ///
@@ -1753,37 +1954,31 @@ fn prev_char_start(haystack: &str, i: usize) -> Option<usize> {
         .map(|ch| i - ch.len_utf8())
 }
 
-/// Classifies one raw capture into the [`Styled`] span it produces, or `None`
+/// Classifies one match into the [`Styled`] span it produces, or `None`
 /// when it is an escaped construct that wraps nothing.
 ///
-/// Group numbering follows the shared patterns: a *constrained* sub captures
-/// `(prefix)(attrlist?)(body)`; an *unconstrained* sub captures
-/// `(attrlist?)(body)`. `base` maps a capture offset (into the current
-/// haystack `h`) back to an absolute offset in the whole match string.
-///
-/// `caps` is the capture-slot buffer the anchored search in [`find_matches`]
-/// filled; a group is read as its offset span, and the overall match's text
-/// as a slice of `h`.
+/// `groups` is the span decomposition [`derive_groups`] (or its capture
+/// fallback) read for the match — the same offsets the pattern's own capture
+/// groups report. `base` maps a haystack offset back to an absolute offset
+/// in the whole match string.
 fn classify_match(
     sub: &QuoteSub,
     h: &str,
-    caps: &regex_automata::util::captures::Captures,
+    whole: &std::ops::Range<usize>,
+    groups: &DerivedGroups,
     base: usize,
 ) -> Option<QuoteMatchKind> {
     let abs = |r: std::ops::Range<usize>| (base + r.start)..(base + r.end);
-    let group = |i: usize| caps.get_group(i).map(|span| span.start..span.end);
-
-    let whole = caps.get_match()?;
 
     // The first byte of the match; the escape marker is ASCII, so the byte
     // test and a `starts_with('\\')` over the matched text agree.
-    let escaped = h.as_bytes().get(whole.start()) == Some(&b'\\');
+    let escaped = h.as_bytes().get(whole.start) == Some(&b'\\');
 
     match sub.scope {
         QuoteScope::Constrained => {
-            let prefix_end = group(1).map_or(base, |r| base + r.end);
-            let attrlist = group(2).map(&abs);
-            let body = group(3).map(&abs)?;
+            let prefix_end = base + groups.prefix_end;
+            let attrlist = groups.attrlist.clone().map(&abs);
+            let body = abs(groups.body.clone());
 
             if escaped {
                 // `\[a]*x*`: the escape keeps `[a]` literal but still wraps the
@@ -1795,7 +1990,7 @@ fn classify_match(
                     // capture through one byte after it.
                     keep_literal: Some((attrlist.start - 1)..(attrlist.end + 1)),
                     body,
-                    construct: (attrlist.end + 1)..(base + whole.end()),
+                    construct: (attrlist.end + 1)..(base + whole.end),
                     attrlist: None,
                     variant: style_variant(sub.type_, false),
                     form: SpanForm::Constrained,
@@ -1810,7 +2005,7 @@ fn classify_match(
             // the prefix into one contiguous run of kept text.
             Some(QuoteMatchKind::Wrap {
                 keep_literal: None,
-                construct: prefix_end..(base + whole.end()),
+                construct: prefix_end..(base + whole.end),
                 body,
                 attrlist,
                 variant: style_variant(sub.type_, has_attrs),
@@ -1825,13 +2020,13 @@ fn classify_match(
                 return None;
             }
 
-            let attrlist = group(1).map(&abs);
-            let body = group(2).map(&abs)?;
+            let attrlist = groups.attrlist.clone().map(&abs);
+            let body = abs(groups.body.clone());
             let has_attrs = attrlist.is_some();
 
             Some(QuoteMatchKind::Wrap {
                 keep_literal: None,
-                construct: (base + whole.start())..(base + whole.end()),
+                construct: (base + whole.start)..(base + whole.end),
                 body,
                 attrlist,
                 variant: style_variant(sub.type_, has_attrs),
@@ -4931,5 +5126,123 @@ mod tests {
 
             assert_ne!(folded, golden_html, "expected a divergence for {source:?}");
         }
+    }
+
+    #[test]
+    fn derived_groups_match_the_capture_engine() {
+        // `derive_groups` reads a match's capture groups off its span;
+        // `derive_via_captures` is the engine's own reading and the
+        // derivation's cold fallback. The two must agree at every anchored
+        // match of every sub across the ambiguity shapes the derivation has
+        // to re-decide (the `^`-versus-class choice at position zero, the
+        // attrs-greedy backtrack, delimiter-charactered bodies).
+        use super::{derive_groups, derive_via_captures};
+        use crate::content::quote_subs;
+
+        let fixtures = [
+            "*b*",
+            "**b**",
+            "[a]*b*",
+            "[a]**b**",
+            "}*b*",
+            " *b*",
+            "**[a]**",
+            "[[a]*b*",
+            "***b***",
+            "*a *b* c*",
+            "\"`dq`\" '`sq`'",
+            "[.role]#m#",
+            "x[a#b]#body#",
+            "é*ü*é",
+            "^s^~t~",
+            "`m`' `n`",
+            r"\[a]*b*",
+            r"\**b**",
+        ];
+
+        for sub in quote_subs() {
+            for fixture in fixtures {
+                for start in 0..=fixture.len() {
+                    if !fixture.is_char_boundary(start) {
+                        continue;
+                    }
+
+                    let input = regex_automata::Input::new(fixture)
+                        .anchored(regex_automata::Anchored::Yes)
+                        .range(start..);
+
+                    let Some(found) = sub.pattern.search(&input) else {
+                        continue;
+                    };
+
+                    assert_eq!(
+                        derive_groups(sub, fixture, found.range()),
+                        derive_via_captures(sub, fixture, start),
+                        "derivation diverged for {:?}/{:?} on {fixture:?} at {start}",
+                        sub.type_,
+                        sub.scope,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parse_attrs_and_body_rejects_what_the_engine_would_backtrack_out_of() {
+        // The guards inside the span parse are what let `derive_groups`'s
+        // `^`-first probe reject a decomposition the engine would have
+        // backtracked out of; they are pinned directly here because an
+        // engine-produced span never reaches them on its accepted branch.
+        use super::parse_attrs_and_body;
+
+        // A span leaving no body between the delimiters.
+        assert_eq!(parse_attrs_and_body("**", 0, b"*", b"*", false), None);
+
+        // A body whose edge the constrained `\S` class rejects — leading and
+        // trailing.
+        assert_eq!(parse_attrs_and_body("*a *", 0, b"*", b"*", true), None);
+        assert_eq!(parse_attrs_and_body("* a*", 0, b"*", b"*", true), None);
+
+        // The same edge-whitespace body accepted where no edge class applies.
+        assert_eq!(
+            parse_attrs_and_body("*a *", 0, b"*", b"*", false),
+            Some((None, 1..3))
+        );
+
+        // The greedy attribute-list branch, accepted and byte-precise.
+        assert_eq!(
+            parse_attrs_and_body("[r]*b*", 0, b"*", b"*", false),
+            Some((Some(1..2), 4..5))
+        );
+
+        // An attribute list the class could not have matched (a `[` inside)
+        // falls through, and with no delimiter at the front either, the
+        // span does not decompose.
+        assert_eq!(parse_attrs_and_body("[[r]*b*", 0, b"*", b"*", false), None);
+
+        // A well-formed attribute list whose delimited remainder is empty:
+        // the greedy attrs branch is entered but its body check fails, and
+        // the span falls through to (and past) the bare-delimiter reading.
+        assert_eq!(parse_attrs_and_body("[r]**", 0, b"*", b"*", false), None);
+    }
+
+    #[test]
+    fn an_underivable_synthetic_match_is_skipped() {
+        // No shared quote pattern's body group can sit out a match, so both
+        // the span derivation and its capture fallback always read one — but
+        // `find_matches` still has to do *something* total for a pattern
+        // where neither can, and the answer is to skip the match rather than
+        // mis-shape it. A synthetic sub whose body group is optional pins
+        // that skip path (and, with it, the fallback's own miss arm).
+        use super::find_matches;
+        use crate::{
+            content::quote_sub,
+            parser::{QuoteScope, QuoteType},
+        };
+
+        let synthetic = quote_sub(QuoteType::Strong, QuoteScope::Unconstrained, r"\*\*(x)?y");
+
+        assert!(find_matches(&synthetic, "**y").is_empty());
+        assert!(find_matches(&synthetic, "a**y b").is_empty());
     }
 }

@@ -169,7 +169,7 @@ pub(crate) struct QuoteSub {
 /// (The superscript and subscript patterns were built without the flag, but
 /// neither contains a `.` metacharacter, so the flag is inert for them and
 /// one shared configuration serves all twelve.)
-fn quote_sub(type_: QuoteType, scope: QuoteScope, source: &'static str) -> QuoteSub {
+pub(crate) fn quote_sub(type_: QuoteType, scope: QuoteScope, source: &'static str) -> QuoteSub {
     #[allow(clippy::unwrap_used)]
     let pattern = regex_automata::meta::Regex::builder()
         .syntax(regex_automata::util::syntax::Config::new().dot_matches_new_line(true))
