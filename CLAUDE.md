@@ -72,10 +72,16 @@ of `InlineNode`s — see `parser/src/content/inline_builder/README.md` and
 `docs/design/inline-ast-architecture.md`). **That migration is done**, not in progress: every parse
 builds the tree unconditionally, `Content::rendered_html()` is a fold over it, every macro family's
 catalog/warning registration is replayed from it, and the original string-substitution pipeline and
-its three sentinel-character encodings (for passthroughs, deferred cross-references, and footnote
-markers) are fully retired from production code — see `parser/snapshots/README.md` for that history.
-`golden_*` test helpers compare against **frozen recordings** of the old pipeline's output
-(`parser/snapshots/*.txt`), not a live second implementation.
+its three *rendering-time* sentinel-character encodings (for passthroughs, deferred
+cross-references, and footnote markers) are fully retired from production code — see
+`parser/snapshots/README.md` for that history. This does not extend to
+[`MASKED_PIECE_PLACEHOLDER`](parser/src/attributes/element_attribute.rs): a live, unrelated
+mechanism that happens to reuse the same two codepoints (`\u{96}`/`\u{97}`) for a different job —
+tokening a masked passthrough/STEM piece inside a macro bracket during tree building, not smuggling
+structure through a rendered string — and is very much still in production use; see
+`docs/design/inline-ast-architecture.md` §3.4 case 2 and §3.5. `golden_*` test helpers compare
+against **frozen recordings** of the old pipeline's output (`parser/snapshots/*.txt`), not a live
+second implementation.
 
 There is no more step-by-step migration checklist to work through. `docs/design/inline-ast-architecture.md`
 used to be a ~12,000-line proposal-plus-build-log tracking that migration phase by phase; once the
