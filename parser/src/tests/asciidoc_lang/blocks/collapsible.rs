@@ -124,8 +124,8 @@ include::example$collapsible.adoc[tag=paragraph]
         1,
     );
 
-    // A collapsible paragraph's content sits directly in `<div class="content">`,
-    // without a wrapping paragraph.
+    // A collapsible paragraph's content sits directly in `<div
+    // class="content">`, without a wrapping paragraph.
     assert_xpath(
         &doc,
         "//details/div[@class=\"content\"][normalize-space(text())=\"This content is only revealed when the user clicks the block title.\"]",
@@ -141,9 +141,9 @@ include::example$collapsible.adoc[tag=paragraph]
         1,
     );
 
-    // The example paragraph style is required: a bare `[%collapsible]` paragraph
-    // (with no `example` style) is not collapsible; it remains an ordinary
-    // paragraph.
+    // The example paragraph style is required: a bare `[%collapsible]`
+    // paragraph (with no `example` style) is not collapsible; it remains an
+    // ordinary paragraph.
     let doc = Parser::default().parse(
         "[%collapsible]\nThis content is only revealed when the user clicks the block title.",
     );

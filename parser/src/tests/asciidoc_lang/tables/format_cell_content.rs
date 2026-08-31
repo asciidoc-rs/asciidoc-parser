@@ -110,9 +110,9 @@ When a style operator isn't explicitly assigned to a cell specifier (or xref:for
     let table = parse_table("|===\n|h\n\n|plain\n|===");
     assert_eq!(body_styles(&table), vec![vec![ColumnStyle::Default]]);
 
-    // The explicit `d` operator only matters when the column carries a style: it
-    // reverts that one cell to the default while its siblings keep the column's
-    // style.
+    // The explicit `d` operator only matters when the column carries a style:
+    // it reverts that one cell to the default while its siblings keep the
+    // column's style.
     let table = parse_table("[cols=\"m,m\"]\n|===\n|h1 |h2\n\nd|reverted |still monospace\n|===");
     assert_eq!(
         body_styles(&table),
@@ -143,10 +143,10 @@ Don't insert any spaces between the `|` and the operator.
 
     // The style operator occupies the last position of the specifier, after any
     // span/duplication operator and the horizontal and vertical alignment
-    // operators: `2*>m` (duplication, right, monospace) and `.3+^.>s` (row span,
-    // center, bottom, strong). The `2*` duplication clones its cell, so the first
-    // two cells both carry the right-aligned monospace specifier; the `.3+^.>s`
-    // cell follows.
+    // operators: `2*>m` (duplication, right, monospace) and `.3+^.>s` (row
+    // span, center, bottom, strong). The `2*` duplication clones its cell,
+    // so the first two cells both carry the right-aligned monospace
+    // specifier; the `.3+^.>s` cell follows.
     let table =
         parse_table("|===\n|h\n\n2*>m|dup right mono\n.3+^.>s|span center bottom strong\n|===");
     let cells: Vec<&crate::blocks::TableCell<'_>> =
@@ -270,8 +270,8 @@ d|This content is rendered as regular paragraph text because the `d` operator in
         "[cols=\"m,m\"]\n|===\n|Column 1, header row |Column 2, header row\n\n|This content is rendered using a monospace font because the column's specifier includes the `m` operator.\n|This content is rendered using a monospace font because the column's specifier includes the `m` operator.\n\ns|This content is rendered as bold paragraph text because the `s` operator in the cell's specifier overrides the style operator in the column specifier.\n|*This content is rendered using a monospace font because the column's specifier includes the `m` operator.\nIt's also bold because it's marked up with the inline syntax for bold formatting.*\n\nd|This content is rendered as regular paragraph text because the `d` operator in the cell's specifier overrides the style operator in the column specifier.\n|This content is rendered using a monospace font because the column's specifier includes the `m` operator.\n|===",
     );
 
-    // A cell style operator overrides the column's style; a cell with no operator
-    // inherits it.
+    // A cell style operator overrides the column's style; a cell with no
+    // operator inherits it.
     assert_eq!(
         body_styles(&table),
         vec![
@@ -281,17 +281,18 @@ d|This content is rendered as regular paragraph text because the `d` operator in
         ]
     );
 
-    // The header row overrides (ignores) style operators: both header cells stay
-    // the default style even though their column carries the `m` operator.
+    // The header row overrides (ignores) style operators: both header cells
+    // stay the default style even though their column carries the `m`
+    // operator.
     let header = table.header_row().unwrap();
     assert_eq!(
         header.cells().iter().map(|c| c.style()).collect::<Vec<_>>(),
         vec![ColumnStyle::Default, ColumnStyle::Default]
     );
 
-    // Inline formatting markup is applied in addition to the style operator: the
-    // monospace cell whose content is wrapped in `*...*` still renders a strong
-    // span.
+    // Inline formatting markup is applied in addition to the style operator:
+    // the monospace cell whose content is wrapped in `*...*` still renders
+    // a strong span.
     let bold_in_mono = &table.body_rows()[1].cells()[1];
     assert_eq!(bold_in_mono.style(), ColumnStyle::Monospace);
     assert!(simple_text(bold_in_mono).contains("<strong>"));
@@ -317,8 +318,8 @@ The `a` can also be specified on the column in the `cols` attribute on the table
     );
 
     // A cell prefixed with the `a` operator parses its content as a nested
-    // sequence of blocks; a cell with no operator keeps the same markup as inline
-    // text.
+    // sequence of blocks; a cell with no operator keeps the same markup as
+    // inline text.
     let table = parse_table("|===\n|Normal |AsciiDoc\n\n|* not a list\na|* a list\n|===");
     let row = &table.body_rows()[0];
     assert!(matches!(
@@ -334,8 +335,8 @@ The `a` can also be specified on the column in the `cols` attribute on the table
         other => panic!("expected nested AsciiDoc blocks, got {other:?}"),
     }
 
-    // The `a` operator can equally be set on the column via the `cols` attribute,
-    // which makes every cell in that column an AsciiDoc cell.
+    // The `a` operator can equally be set on the column via the `cols`
+    // attribute, which makes every cell in that column an AsciiDoc cell.
     let table = parse_table("[cols=\"a,d\"]\n|===\n|h1 |h2\n\n|* a list\n|* not a list\n|===");
     let row = &table.body_rows()[0];
     assert!(matches!(
@@ -363,9 +364,10 @@ include::example$cell.adoc[tag=adoc]
 "#
     );
 
-    // Expansion of `example$cell.adoc[tag=adoc]`. In each row the first cell has
-    // no operator (its list / listing markup stays inline text), while the second
-    // cell's `a` operator parses the same markup as nested AsciiDoc blocks.
+    // Expansion of `example$cell.adoc[tag=adoc]`. In each row the first cell
+    // has no operator (its list / listing markup stays inline text), while
+    // the second cell's `a` operator parses the same markup as nested
+    // AsciiDoc blocks.
     let table = parse_table(
         "|===\n|Normal Style |AsciiDoc Style\n\n|This cell isn't prefixed with an `a`, so the processor doesn't interpret the following lines as an AsciiDoc list.\n\n* List item 1\n* List item 2\n* List item 3\n\na|This cell is prefixed with an `a`, so the processor interprets the following lines as an AsciiDoc list.\n\n* List item 1\n* List item 2\n* List item 3\n\n|This cell isn't prefixed with an `a`, so the processor doesn't interpret the listing block delimiters or the `source` style.\n\n[source,python]\n----\nimport os\nprint (\"%s\" %(os.uname()))\n----\n\na|This cell is prefixed with an `a`, so the listing block is processed and rendered according to the `source` style rules.\n\n[source,python]\n----\nimport os\nprint \"%s\" %(os.uname())\n----\n\n|===",
     );
@@ -390,8 +392,8 @@ include::example$cell.adoc[tag=adoc]
     }
 
     // Second row: the source listing. The plain cell keeps it inline; the `a`
-    // cell parses its leading sentence as a paragraph and the delimited block as
-    // a listing block.
+    // cell parses its leading sentence as a paragraph and the delimited block
+    // as a listing block.
     let row = &table.body_rows()[1];
     assert!(matches!(
         row.cells()[0].content(),
@@ -457,8 +459,8 @@ There are a handful of exceptions to this rule, which includes doctype, toc, not
         .parse(":locked: parent\n\n|===\n|h\n\na|\n:locked: child\n\nvalue is {locked}\n|===");
     assert_eq!(asciidoc_cell_text(&doc), "value is parent");
 
-    // One of the carved-out exceptions (here `compat-mode`) may still be modified
-    // inside the cell even though the parent set it.
+    // One of the carved-out exceptions (here `compat-mode`) may still be
+    // modified inside the cell even though the parent set it.
     let mut parser = Parser::default();
     let doc = parser
         .parse(":compat-mode: parent\n\n|===\n|h\n\na|\n:compat-mode: child\n\nmode is {compat-mode}\n|===");
@@ -492,11 +494,11 @@ By starting the contents of the AsciiDoc table cell on the line after the cell s
 "#
     );
 
-    // A preprocessor conditional that opens on the cell-separator line is limited
-    // to that single line: the `ifdef::[]` is retained as literal cell text
-    // rather than opening a multiline conditional, so the guarded body is neither
-    // included nor excluded by the attribute test. The `endif::[]` on a later
-    // line is then left unmatched.
+    // A preprocessor conditional that opens on the cell-separator line is
+    // limited to that single line: the `ifdef::[]` is retained as literal
+    // cell text rather than opening a multiline conditional, so the guarded
+    // body is neither included nor excluded by the attribute test. The
+    // `endif::[]` on a later line is then left unmatched.
     let doc = Parser::default().parse("|===\na|ifdef::showit[]\nvisible\nendif::[]\n|===");
     assert_eq!(asciidoc_cell_text(&doc), "ifdef::showit[]\nvisible");
     assert!(doc.warnings().any(|w| matches!(
@@ -506,8 +508,8 @@ By starting the contents of the AsciiDoc table cell on the line after the cell s
 
     // By contrast, starting the cell contents on the line after the cell
     // separator lets the directive act as a normal multiline conditional: with
-    // `showit` unset the guarded body is excluded, leaving the cell empty, and no
-    // unmatched-directive warning is raised.
+    // `showit` unset the guarded body is excluded, leaving the cell empty, and
+    // no unmatched-directive warning is raised.
     let doc = Parser::default().parse("|===\na|\nifdef::showit[]\nvisible\nendif::[]\n|===");
     assert_eq!(asciidoc_cell_text(&doc), "");
     assert!(doc.warnings().next().is_none());

@@ -22,6 +22,9 @@ use super::{
 };
 use crate::{
     HasSpan, Parser, Span,
+    attributes::element_attribute::{
+        MASKED_PIECE_PLACEHOLDER, escape_masked_piece_bytes, unescape_masked_piece_bytes,
+    },
     content::restored_entity_pattern,
     inlines::{CharRef, InlineNode},
     strings::CowStr,
@@ -30,7 +33,7 @@ use crate::{
 /// Whether the escaping step has already run by the time the macros step reads
 /// a value off the level's match string.
 ///
-/// Design §3.4.1 decides what a fragment is worth by *where the steps sit* in
+/// What a fragment is worth is decided by *where the steps sit* in
 /// the group's effective order, not by where the fragment came from. The
 /// attribute-references step already makes that decision for the value it
 /// splices in
@@ -47,16 +50,16 @@ use crate::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ComputedSpecials {
     /// `SpecialCharacters` sits **before** `Macros` in this order, so a
-    /// computed value holds the already-escaped bytes the string replacer
-    /// parsed out of its own escaped haystack: `&lt;` is an escaped special
+    /// computed value holds already-escaped bytes read out of the level's own
+    /// escaped match string: `&lt;` is an escaped special
     /// standing for a logical `<`, which [`escaped_value_children`] unwinds one
-    /// level so the fold escapes it back exactly once (§3.4).
+    /// level so the fold escapes it back exactly once.
     Escaped,
 
     /// No `SpecialCharacters` step has run yet — either the order has none at
     /// all (`subs=attributes,macros`) or it runs *after* `Macros`
     /// (`subs=macros,specialcharacters`) — so a computed value holds the
-    /// author's own bytes, which the string replacer splices in verbatim:
+    /// author's own bytes, spliced in verbatim:
     /// `&lt;` is six literal characters, not an escaped `<`, and
     /// [`unescaped_value_children`] classifies it as such.
     Verbatim,
@@ -64,26 +67,30 @@ pub(super) enum ComputedSpecials {
 
 /// The macros substitution, as a node transducer.
 ///
-/// This increment recognizes **image and icon macros** (`image:target[…]`,
+/// This recognizes **image and icon macros** (`image:target[…]`,
 /// `icon:target[…]`), the **UI macros** (`kbd:[…]`, `btn:[…]`, `menu:…[…]`),
-/// the **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`),
-/// **auto-links and formal-URL links** (`https://example.org`,
-/// `https://example.org[text]`), and **bare e-mail addresses**
-/// (`doc@example.org`), replacing each with an
-/// [`Image`](InlineNode::Image), [`Ui`](InlineNode::Ui), or
-/// [`Ref`](InlineNode::Ref) node. An image node carries its own owned
+/// **index terms** (`((term))`, `(((primary, secondary)))`,
+/// `indexterm:[…]`, `indexterm2:[…]`), **auto-links and formal-URL links**
+/// (`https://example.org`, `https://example.org[text]`), the
+/// **`link:`/`mailto:` macro** (`link:target[…]`, `mailto:addr[…]`), **bare
+/// e-mail addresses** (`doc@example.org`), **inline anchors** (`[[id]]`,
+/// `anchor:id[…]`), and **cross-references** (`xref:id[…]`, `<<id>>`),
+/// replacing each with an [`Image`](InlineNode::Image), [`Ui`](InlineNode::Ui),
+/// [`IndexTerm`](crate::inlines::IndexTerm), or [`Ref`](InlineNode::Ref) node.
+/// An image node carries its own owned
 /// [`Attrlist`](crate::attributes::Attrlist) — the step that makes a macro node
 /// *self-describing*, so the fold reconstructs the render parameters and calls
-/// the same `render_image`/`render_icon` the string step calls; a UI node
-/// carries the keys / label / menu path the string replacer computed, so its
+/// the same `render_image`/`render_icon`; a UI node
+/// carries the computed keys / label / menu path, so its
 /// fold calls the same `render_keyboard`/`render_button`/`render_menu`; a link
 /// node (whether a `link:`/`mailto:` macro, an auto-link, or a bare e-mail
 /// address) carries the
 /// computed target, display text (as [`Text`](InlineNode::Text) children), and
-/// roles/window, so its fold calls the same `render_link`. The remaining macro
-/// families (cross-references, footnotes, index terms, anchors, STEM) are later
-/// increments (see [`link_macro_level`], [`inline_link_level`], and
-/// [`email_level`] for the link forms this increment defers).
+/// roles/window, so its fold calls the same `render_link`. Footnotes and STEM
+/// macros are recognized by their own separate transducers elsewhere in
+/// [`build`](super::build) rather than here (see
+/// [`link_macro_level`], [`inline_link_level`], and
+/// [`email_level`] for the three link forms).
 ///
 /// It also recognizes the **bibliography anchor** (`[[[label]]]`) that prefixes
 /// a bibliography list item, as an [`Anchor`](InlineNode::Anchor) node whose
@@ -91,36 +98,34 @@ pub(super) enum ComputedSpecials {
 /// its pattern is `^`-anchored to the whole content (see
 /// [`biblio_anchor_level`]).
 ///
-/// Each family is applied at each level in the **same order the string step
-/// applies them** — keyboard/button, then menu, then image/icon, then
+/// Each family is applied at each level in a fixed order — keyboard/button,
+/// then menu, then image/icon, then index terms, then
 /// auto-links (`INLINE_LINK`), then the `link:`/`mailto:` macro
-/// (`INLINE_LINK_MACRO`), then a bare e-mail address (`INLINE_EMAIL`) — so a
+/// (`INLINE_LINK_MACRO`), then a bare e-mail address (`INLINE_EMAIL`), then
+/// inline anchors, then cross-references — so a
 /// level's overlapping constructs resolve
-/// identically. Like the other steps it descends
+/// consistently. Like the other steps it descends
 /// into the [`Styled`](crate::inlines::Styled)/[`Ref`](InlineNode::Ref)
 /// children earlier steps created — a macro can appear inside a rendered span
-/// (`*image:x[]*`), just as the string pipeline matches one inside a rendered
-/// `<strong>` tag — then matches at each level.
+/// (`*image:x[]*`) — then matches at each level.
 ///
 /// # The UI macros are gated on `experimental`
 ///
-/// The string step recognizes `kbd:`/`btn:`/`menu:` only when the
+/// `kbd:`/`btn:`/`menu:` are recognized only when the
 /// `experimental` document attribute is set (an optimization that skips the
-/// work in the common case); this transducer mirrors that gate exactly, so with
-/// `experimental` off a `kbd:[…]` stays literal here just as it does in the
-/// string output.
+/// work in the common case), so with
+/// `experimental` off a `kbd:[…]` stays literal.
 ///
 /// # Scope: verbatim macros only
 ///
 /// A recognized macro is built into an `'src`-borrowing node only when its
 /// whole match is **verbatim source** — no special character (`< > &`, an
 /// atomic [`CharRef`](InlineNode::CharRef)) and no rendered
-/// [`Styled`](crate::inlines::Styled) span falls inside it. The string pipeline
-/// matches macros over *escaped, already-rendered* text, so a macro containing
-/// (say) a `&` sees `&amp;` in its target/attrlist, and a self-describing node
+/// [`Styled`](crate::inlines::Styled) span falls inside it. A macro
+/// containing (say) a `&` sees `&amp;` in its target/attrlist once
+/// `specialcharacters` has escaped it, and a self-describing node
 /// cannot carry that escaped text as an `'src` slice. Such a macro is therefore
-/// **left unrecognized** here for a later increment (the attribute-references
-/// step and the cutover), mirroring how the quotes step documents its own
+/// **left unrecognized** here, mirroring how the quotes step documents its own
 /// cross-span boundary (crossed delimiters). A family relaxes that gate where
 /// the escaped piece is a delimiter *it consumes and never slices* — the
 /// angle-bracketed URL's own `&lt;`/`&gt;` (see
@@ -130,8 +135,8 @@ pub(super) enum ComputedSpecials {
 /// formal-URL**, the **bare e-mail**, the **image/icon**, and the **UI**
 /// families), wherever the escaped text need not
 /// ride on the node as an `'src` slice at all: none of those families' targets
-/// is `Span`-typed, so each reads its values out of the match string (whose
-/// entity bytes *are* the string pipeline's own) and rebuilds its display text
+/// is `Span`-typed, so each reads its values out of the match string
+/// and rebuilds its display text
 /// as structured children through [`macro_text_children`], keeping each special
 /// as its own `CharRef` (see `xref::find_xref_matches`,
 /// `links::find_link_macro_matches`, `links::build_inline_link_node`,
@@ -188,7 +193,7 @@ pub(super) fn apply_macros<'src>(
 }
 
 /// Applies each macro family at this level — and, first, at every level nested
-/// inside it — in the string step's own family order. See
+/// inside it — in a fixed family order. See
 /// [`apply_macros`], which wraps this with the once-per-content
 /// bibliography-anchor pass.
 ///
@@ -196,12 +201,12 @@ pub(super) fn apply_macros<'src>(
 ///
 /// `ctx` is the [`LevelContext`] this level sits in — the character an
 /// enclosing construct's own rendering presents immediately before it, which
-/// the string pipeline's flat haystack holds there and a level matched in
-/// isolation does not. Two of this step's families read exactly that
-/// character: `INLINE_LINK`'s boundary-prefix group and `INLINE_EMAIL`'s
+/// a fully rendered flat string holds there but a level matched in
+/// isolation does not have on its own. Two of this step's families read exactly
+/// that character: `INLINE_LINK`'s boundary-prefix group and `INLINE_EMAIL`'s
 /// "prefix that causes a mismatch" group (see
 /// [`links::inline_link_level`] and [`links::email_level`]). Without it,
-/// `*doc@example.org*` links here while the string pipeline — reading the `>`
+/// `*doc@example.org*` links here while a flat-string reading — seeing the `>`
 /// that ends `<strong>`, one of that group's own mismatch characters — leaves
 /// the address literal.
 ///
@@ -232,17 +237,17 @@ pub(super) fn apply_macros<'src>(
 /// [`build_match_string`](super::quotes::build_match_string) writes around
 /// that span's own placeholder — the two outer characters of its markup, or,
 /// for a span rendering to its **body** and nothing else, that body's own two
-/// outer characters. Either one it can write only for a span the string
-/// pipeline has really rendered, not for the passthrough-extraction pass's own
-/// wrapper (see [`Masked`]), whose body the pipeline is holding inside its own
-/// sentinel whatever that body renders as. This step is where `masked` is
-/// carried, and only here, because these two prefix groups are the only
+/// outer characters. Either one it can write only for a span really
+/// rendered here, not for the passthrough-extraction pass's own
+/// wrapper (see [`Masked`]), whose body stands in as an opaque placeholder
+/// regardless of what that body itself renders as. This step is where `masked`
+/// is carried, and only here, because these two prefix groups are the only
 /// classes in the whole module that read a tag's `>` differently from the
-/// bare placeholder: `**bold**https://example.org` links in the string
-/// pipeline, reading the `>` that ends `</strong>`, where a quote sub's own
-/// `(^|[^\w&;:}])` accepts the two alike. Every other step goes on passing
-/// [`Masked::UNKNOWN`](super::special_chars::Masked::UNKNOWN), which is not a
-/// shortcut but the same answer stated once.
+/// bare placeholder: `**bold**https://example.org` links against a
+/// fully rendered reading, which sees the `>` that ends `</strong>`, where a
+/// quote sub's own `(^|[^\w&;:}])` accepts the two alike. Every other step goes
+/// on passing [`Masked::UNKNOWN`](super::special_chars::Masked::UNKNOWN), which
+/// is not a shortcut but the same answer stated once.
 fn apply_macro_families<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -251,48 +256,72 @@ fn apply_macro_families<'src>(
     masked: Masked<'_>,
     specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
-    // Recurse into spans/refs first, matching the string pipeline's
-    // whole-string pass. Each nested level is matched in the context its own
+    // Recurse into spans/refs first, so every level is matched, inside out.
+    // Each nested level is matched in the context its own
     // enclosing construct's rendering presents (see this function's own doc
     // comment); a span the built-in backend renders with no markup of its own
     // is transparent, so `child_contexts` hands its children the character its
     // own *siblings* present instead.
-    let contexts = LevelContext::child_contexts(&nodes, ctx, masked);
+    // A level with no parent node to descend into — the common leaf-only case
+    // — skips the context derivation and the rebuild of its node vector
+    // entirely (the same scan-first shape the shown-term hop below uses).
+    let has_parent = nodes
+        .iter()
+        .any(|node| matches!(node, InlineNode::Styled(_) | InlineNode::Ref(_)));
 
-    let nodes: Vec<InlineNode<'src>> = nodes
-        .into_iter()
-        .zip(contexts)
-        .map(|(node, inner)| match node {
-            // An extraction wrapper's body is **not** this content's to
-            // substitute. The string pipeline holds it as a sentinel for every
-            // step from here on, and the body was already substituted once —
-            // by the separate, nested `Normal` build the `x-` compatibility
-            // form (`[x-]++text++`) runs it through — so descending here would
-            // apply this step's families to it a *second* time
-            // (`[x-]++**b**https://example.org++` grows an `<a>` inside the
-            // `<a>` that build already made). It is also the one place this
-            // level's `masked` could not answer even if it did descend, since
-            // the list is collected from one content's own top level and knows
-            // nothing of a nested build's nodes.
-            InlineNode::Styled(styled) if masked.covers(styled.location) => {
-                InlineNode::Styled(styled)
-            }
+    let nodes: Vec<InlineNode<'src>> = if has_parent {
+        let contexts = LevelContext::child_contexts(&nodes, ctx, masked);
 
-            InlineNode::Styled(mut styled) => {
-                styled.children =
-                    apply_macro_families(styled.children, root, parser, inner, masked, specials);
-                InlineNode::Styled(styled)
-            }
+        nodes
+            .into_iter()
+            .zip(contexts)
+            .map(|(node, inner)| match node {
+                // An extraction wrapper's body is **not** this content's to
+                // substitute. It is an opaque placeholder for
+                // every step from here on, and the body was already
+                // substituted once — by the separate, nested `Normal` build
+                // the `x-` compatibility form (`[x-]++text++`) runs it
+                // through — so descending here would apply this step's
+                // families to it a *second* time
+                // (`[x-]++**b**https://example.org++` grows an `<a>` inside
+                // the `<a>` that build already made). It is also the one
+                // place this level's `masked` could not answer even if it did
+                // descend, since the list is collected from one content's own
+                // top level and knows nothing of a nested build's nodes.
+                InlineNode::Styled(styled) if masked.covers(styled.location) => {
+                    InlineNode::Styled(styled)
+                }
 
-            InlineNode::Ref(mut reference) => {
-                reference.children =
-                    apply_macro_families(reference.children, root, parser, inner, masked, specials);
-                InlineNode::Ref(reference)
-            }
+                InlineNode::Styled(mut styled) => {
+                    styled.children = apply_macro_families(
+                        styled.children,
+                        root,
+                        parser,
+                        inner,
+                        masked,
+                        specials,
+                    );
+                    InlineNode::Styled(styled)
+                }
 
-            other => other,
-        })
-        .collect();
+                InlineNode::Ref(mut reference) => {
+                    reference.children = apply_macro_families(
+                        reference.children,
+                        root,
+                        parser,
+                        inner,
+                        masked,
+                        specials,
+                    );
+                    InlineNode::Ref(reference)
+                }
+
+                other => other,
+            })
+            .collect()
+    } else {
+        nodes
+    };
 
     // The UI macros run before image/icon and only under `experimental`,
     // mirroring the string step's order and gate.
@@ -306,19 +335,17 @@ fn apply_macro_families<'src>(
     let nodes = image_macros_level(nodes, root, parser, ctx, masked);
 
     // Index terms (`((term))`, `(((primary, secondary)))`, `indexterm:[…]`,
-    // `indexterm2:[…]`) run after image/icon and before the link families,
-    // mirroring the string step's order.
+    // `indexterm2:[…]`) run after image/icon and before the link families.
     let nodes = indexterm_macros_level(nodes, root, parser, ctx, masked);
 
     // A **visible** term's shown text is not a boundary the later families
-    // stop at. The string replacer puts that text back into the one flat
-    // haystack every later pass scans — `((a term with a link:t.html[T]))`
-    // links exactly as if the parentheses were not there — so the families
+    // stop at — it is ordinary flow content, and
+    // `((a term with a link:t.html[T]))` links exactly as if the parentheses
+    // were not there. So the families
     // below descend into the term's own
     // [`children`](crate::inlines::IndexTerm::children), which is where this
-    // pass has just put that text. (A *concealed* term shows nothing, so the
-    // replacer leaves no text behind for them to scan and its `children` are
-    // empty.)
+    // pass has just put that text. (A *concealed* term shows nothing, so its
+    // `children` are empty and there is nothing for them to scan.)
     //
     // Their own level, rather than one flat scan across the term and its
     // neighbours: a term renders its shown text with no markup of its own, so
@@ -373,12 +400,12 @@ fn apply_macro_families<'src>(
 }
 
 /// The macro families that run **after** the index-term pass — the three link
-/// spellings, inline anchors, and cross-references — in the string step's own
+/// spellings, inline anchors, and cross-references — in their fixed
 /// order.
 ///
 /// Split out of [`apply_macro_families`] because it has two callers rather
-/// than one: this level, and a visible index term's shown text, which the
-/// string replacer hands back to exactly these passes. See the call site for
+/// than one: this level, and a visible index term's shown text, which is
+/// ordinary flow content reaching exactly these passes. See the call site for
 /// why the term's children are their own level.
 fn apply_reference_families<'src>(
     nodes: Vec<InlineNode<'src>>,
@@ -389,63 +416,59 @@ fn apply_reference_families<'src>(
     specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
     // Auto-links and formal-URL links (`INLINE_LINK`) run after the index-term
-    // pass and before the `link:`/`mailto:` macro, mirroring the string step's
-    // order (`INLINE_LINK` precedes `INLINE_LINK_MACRO`).
+    // pass and before the `link:`/`mailto:` macro.
     let nodes = inline_link_level(nodes, root, parser, ctx, masked, specials);
 
-    // The `link:`/`mailto:` macro runs after the auto-link pass, mirroring the
-    // string step's order.
+    // The `link:`/`mailto:` macro runs after the auto-link pass.
     let nodes = link_macro_level(nodes, root, parser, ctx, masked, specials);
 
     // A bare e-mail address (`doc@example.org`) runs after both URL-link
-    // families and before the anchor pass, exactly where the string step runs
-    // `InlineEmailReplacer` — so an address that is really the tail of a URL, or
-    // a `mailto:` macro's own target, is already inside an opaque node (there,
-    // already-rendered `<a …>` markup) and is not re-recognized.
+    // families and before the anchor pass — so an address that is really the
+    // tail of a URL, or a `mailto:` macro's own target, is already inside an
+    // opaque node and is not re-recognized.
     let nodes = email_level(nodes, root, ctx, masked);
 
     // Inline anchors (`[[id]]`, `anchor:id[…]`) run after the link families and
-    // before cross-references, mirroring the string step's order. (The
-    // bibliography-anchor pass the string step runs *first* — a `^`-anchored
-    // `[[[id]]]`, recognized only inside a bibliography list item — runs in
-    // [`apply_macros`], outside this recursion.)
+    // before cross-references. (The bibliography-anchor pass — a `^`-anchored
+    // `[[[id]]]`, recognized only inside a bibliography list item — runs
+    // first, in [`apply_macros`], outside this recursion.)
     let nodes = anchor_macros_level(nodes, root, ctx, masked);
 
-    // Cross-references (`xref:id[…]`) run after the anchor pass, mirroring the
-    // string step's order.
+    // Cross-references (`xref:id[…]`) run after the anchor pass.
     xref_macros_level(nodes, root, parser, ctx, masked, specials)
 }
 
-/// The eventual cutover's single entry point (design §5.2, Phase 4 step 6) for
+/// The single entry point for
 /// **every** recognition side effect the macro families above defer —
 /// composing [`anchors::apply_biblio_side_effects`],
 /// [`image::apply_image_side_effects`], [`links::apply_link_side_effects`], and
-/// [`anchors::apply_ref_side_effects`], each staged and tested as its own
-/// standalone building block, into the one call the cutover makes exactly once
-/// per parse.
+/// [`anchors::apply_ref_side_effects`], each its own reviewable
+/// building block, into the one call
+/// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup) makes
+/// exactly once per parse.
 ///
 /// # Ordering
 ///
-/// The four are called in the same relative order the string pipeline's own
-/// macro passes run in (the bibliography anchor, then image/icon, …, links, …,
-/// anchors, … — see [`apply_macros`]'s own doc comment): bibliography anchor,
+/// The four are called in the crate's own macro-family order (the
+/// bibliography anchor, then image/icon, …, links, …, anchors, … — see
+/// [`apply_macros`]'s own doc comment): bibliography anchor,
 /// then image, then link, then anchor/ref.
-/// This is not cosmetic — it is what keeps this function's output identical to
-/// the golden pipeline's whenever more than one family's side effect touches
-/// the *same* shared list. Concretely, [`Parser::record_substitution_warning`]
-/// appends to one shared warnings list, and both
-/// [`image::apply_image_side_effects`]'s dangerous-link-scheme warning and
-/// [`anchors::apply_ref_side_effects`]'s duplicate-id warning write to it — a
-/// content whose image triggers the first and whose anchor triggers the
-/// second must see the image warning recorded first, exactly as it would from
-/// the string pipeline's own image-then-anchor pass order. The same holds one
+/// This is not cosmetic — it is what keeps output identical to
+/// the recorded golden output whenever more than one family's side effect
+/// touches the *same* shared list. Concretely,
+/// [`Parser::record_substitution_warning`] appends to one shared warnings list,
+/// and both [`image::apply_image_side_effects`]'s dangerous-link-scheme warning
+/// and [`anchors::apply_ref_side_effects`]'s duplicate-id warning write to it —
+/// a content whose image triggers the first and whose anchor triggers the
+/// second must see the image warning recorded first, matching the
+/// image-then-anchor family order. The same holds one
 /// step earlier for [`anchors::apply_biblio_side_effects`]'s own duplicate-id
-/// warning, which the string pipeline's first pass records ahead of both. (The
+/// warning, recorded ahead of both. (The
 /// asset/ref catalogs the three write to are otherwise disjoint from one
 /// another — images, links, and refs are three separate lists — so this
 /// ordering does not, by itself, need to hold *within* a single catalog; see
 /// [`links::apply_link_side_effects`]'s own doc comment for the finer-grained
-/// ordering *within* the link family that the golden pipeline also requires.)
+/// ordering *within* the link family that the golden recordings also require.)
 ///
 /// Index terms, cross-references, and footnotes are not part of this
 /// function: index terms and cross-references perform no recognition side
@@ -455,18 +478,13 @@ fn apply_reference_families<'src>(
 /// place (see [`apply_footnotes`](super::footnotes::apply_footnotes)'s own doc
 /// comment); it already runs during [`build`](super::build), not here.
 ///
-/// This is the **production** entry point for all four side effects:
-/// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup) calls it
-/// once per content, from the tree it just built, while the string pipeline's
-/// own copies are suppressed for that content (see
-/// `Parser::suppress_macro_side_effects`). Design §5.2's step 6 asks for
-/// exactly that — "re-attach the recognition side effects ... at the cutover
-/// ... which is what avoids double-counting each registration".
+/// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup) calls this
+/// once per content, from the tree it just built.
 ///
-/// It runs *after* the whole string pass rather than during its macros step.
-/// Across contents that preserves document order, and within one content the
-/// composition below preserves the string pipeline's own pass order, which is
-/// what the two orderings above require. `source` and
+/// It runs *after* the whole tree is built rather than during the macros step
+/// itself. Across contents that preserves document order, and within one
+/// content the composition below preserves the crate's own macro-family
+/// order, which is what the two orderings above require. `source` and
 /// `leading_anchor_registered` are threaded straight through to
 /// [`anchors::apply_ref_side_effects`] — see its own doc comment for both.
 pub(crate) fn apply_macro_side_effects(
@@ -495,8 +513,7 @@ pub(super) struct MacroMatch<'src> {
 pub(super) enum MacroMatchKind<'src> {
     /// An escaped macro (`\image:…`, `\kbd:[…]`, `\https://…`): drop the single
     /// backslash at `backslash` and keep the rest of the match as literal
-    /// nodes, replacing nothing — mirroring the string replacer's
-    /// `caps[0][1..]`. The backslash is at the match start for the
+    /// nodes, replacing nothing. The backslash is at the match start for the
     /// prefix-less macros, and at the scheme for an escaped auto-link whose
     /// match carries a boundary prefix.
     Unescape { backslash: usize },
@@ -574,20 +591,19 @@ pub(super) fn rebuild_macro_level<'src>(
 /// `raw_text` is the match string's own bytes for `text_range`, and
 /// `unescape_bracket` selects the one behavior the callers do *not* share: the
 /// `xref:` and `link:`/`mailto:` macro forms unescape an escaped closing
-/// bracket (`\]`) in their bracketed text, mirroring their replacers' own
-/// `replace("\\]", "]")`, while the `<<id,text>>` shorthand — which has no
-/// bracket to escape, and whose own branch of `InlineXrefReplacer` performs no
-/// such replace — keeps the pair literal.
+/// bracket (`\]`) in their bracketed text, while the `<<id,text>>` shorthand —
+/// which has no
+/// bracket to escape — keeps the pair literal.
 ///
 /// The common case is one [`Text`](InlineNode::Text) child: an unescaped
 /// bracket makes its logical value a computed (owned) one — a *synthesized*
 /// `Text` whose value need not coincide with its source — while otherwise
 /// [`text_slice`] recovers the range's own bytes, borrowing a single verbatim
-/// run (the builder's `'src`-borrowing goal, §4.5) and, for a text crossing a
+/// run (the builder's `'src`-borrowing goal) and, for a text crossing a
 /// [`synthesized`](Piece::synthesized) run, taking the match string's bytes —
-/// the expanded value exactly, and the very text the string replacer matched
-/// over — as an owned value, with only its location falling back to the
-/// enclosing run's coarse span (design §4.4).
+/// the expanded value exactly —
+/// as an owned value, with only its location falling back to the
+/// enclosing run's coarse span.
 ///
 /// [`text_slice`] rather than `text_location.data()`, because a verbatim range
 /// is **not always contiguous in the source**: an earlier step can drop a byte
@@ -597,7 +613,7 @@ pub(super) fn rebuild_macro_level<'src>(
 /// whose backslash
 /// [`apply_attribute_references`](super::attribute_refs::apply_attribute_references)
 /// drops as a *gap* in the ranges it emits), and re-reading the enclosing
-/// source span would put the backslash back — a text the string pipeline no
+/// source span would put the backslash back — a byte the tree no
 /// longer carries. Slicing the pieces themselves, as [`emit_range`] already
 /// does for the structured path below, cannot reintroduce it.
 ///
@@ -607,10 +623,10 @@ pub(super) fn rebuild_macro_level<'src>(
 /// [`text_slice`] declines to recover — instead becomes
 /// **structured children**, recovered with [`emit_range`]: the
 /// leaf is its own [`CharRef`] child that folds
-/// back to the same bytes the string replacer's text carries, where one `Text`
+/// back to the same bytes, where one `Text`
 /// child holding the match string's `&lt;` (or `&copy;`) would be escaped a
 /// second time by
-/// the fold (design §3.4).
+/// the fold.
 ///
 /// A text crossing an **opaque** piece (a rendered span, an
 /// earlier-recognized macro node, a masked passthrough) takes that same
@@ -652,8 +668,8 @@ pub(super) fn macro_text_children<'src>(
         None => {
             // The text crosses an escaped special (the only atomic piece the
             // callers' gate admits) — or, degenerately, is a range `text_slice`
-            // declined to recover. Rebuild it out of the nodes it covers, so each
-            // special stays the `CharRef` it already is.
+            // declined to recover. Rebuild it out of the nodes it covers, so
+            // each special stays the `CharRef` it already is.
             let mut children = Vec::new();
 
             if unescape_bracket {
@@ -671,8 +687,8 @@ pub(super) fn macro_text_children<'src>(
 /// each **escaped closing bracket**'s backslash dropped — the `\]` unescape
 /// every bracket-bearing macro form performs, expressed structurally.
 ///
-/// `raw_text` is the level's own match-string slice for `range` (the bytes the
-/// string replacer's `replace("\\]", "]")` runs over), so the two agree on
+/// `raw_text` is the level's own match-string slice for `range`, so this
+/// agrees with a plain `replace("\\]", "]")` over the same bytes on
 /// which backslashes pair off: [`str::match_indices`] scans non-overlapping and
 /// left to right, exactly as [`str::replace`] does, so a run of backslashes
 /// resolves identically on both sides.
@@ -685,7 +701,7 @@ pub(super) fn macro_text_children<'src>(
 /// ending in a backslash followed by a literal `]` (`:t: b\`, then
 /// `xref:foo[a<{t}]x]`) puts the two characters in different runs. Skipping the
 /// backslash by range is boundary-agnostic, and leaves every surviving fragment
-/// borrowing `'src` (§4.5) where a rebuilt value would have had to own its
+/// borrowing `'src` where a rebuilt value would have had to own its
 /// bytes.
 ///
 /// Shared with the footnote family — whose content is *always* structured
@@ -710,15 +726,15 @@ pub(in crate::content::inline_builder) fn emit_range_unescaping_brackets<'src>(
 }
 
 /// Rewrites the **opaque** pieces inside one computed text's own match-string
-/// bytes into index-keyed `\u{96}`*n*`\u{97}` tokens, returning that text
-/// alongside the nodes those tokens stand for.
+/// bytes into [`MASKED_PIECE_PLACEHOLDER`] occurrences, returning that text
+/// alongside the nodes those occurrences stand for, in left-to-right order.
 ///
 /// This is [`tokened_bracket`](image::tokened_bracket)'s counterpart for a
 /// value that is **carried structurally** rather than restored as bytes, and
 /// the two differ in exactly one way. A masked passthrough or STEM expression
-/// has a body known at build time, so `tokened_bracket` pairs each token with
-/// it and the caller can splice those bytes back into a *parsed* value. A
-/// rendered [`Styled`](crate::inlines::Styled) span — or any
+/// has a body known at build time, so `tokened_bracket` pairs each occurrence
+/// with it and the caller can splice those bytes back into a *parsed* value.
+/// A rendered [`Styled`](crate::inlines::Styled) span — or any
 /// earlier-recognized macro node — has no such body: its markup exists only
 /// when the tree is folded. There is still nothing to restore *into bytes*,
 /// but there is something to carry: the **node**. So this tokens every atomic
@@ -726,18 +742,13 @@ pub(in crate::content::inline_builder) fn emit_range_unescaping_brackets<'src>(
 /// as one placeholder, whatever kind it is, and the caller splices each node
 /// back through [`restored_value_children`].
 ///
-/// Why tokening at all, when the placeholder is already one opaque character:
-/// so the split sees the string pipeline's own **shape** there. The
-/// replacer parses an attribute list over the piece's *markup*, which carries
-/// no `,`/`=`/`"` the split could read differently than it reads a token —
-/// and a bare placeholder, being a single `Co` character, would be
-/// indistinguishable from one *inside* a value once the parse hands that value
-/// back. The token's index is what makes the walk back out
-/// unambiguous, exactly as it is for
-/// [`tokened_bracket`](image::tokened_bracket).
+/// The placeholder carries no index of its own — [`Attrlist::parse`] just
+/// needs an atomic run at that position, carrying none of the `,`/`=`/`"` a
+/// value's own bytes might. Which node an occurrence stands for is recovered
+/// by *position*, exactly as for [`tokened_bracket`](image::tokened_bracket):
+/// the Nth occurrence, scanned left to right, is `carried[N]`.
 ///
-/// Renumbering is per call, from zero, so a token the parse drops shifts none
-/// of the ones that survive.
+/// [`Attrlist::parse`]: crate::attributes::Attrlist::parse
 pub(super) fn tokened_text<'src>(
     text: &str,
     range: &std::ops::Range<usize>,
@@ -769,9 +780,8 @@ pub(super) fn tokened_text<'src>(
         // The pieces that become a token are the **opaque** ones — atomic, and
         // not one of the three [`CharRef`](InlineNode::CharRef) leaves
         // [`build_match_string`](super::quotes::build_match_string) gives real
-        // bytes to. Every other piece contributes its own bytes as it stands:
-        // those are the string replacer's bytes there, so the split reads them
-        // identically and the caller's own rebuild
+        // bytes to. Every other piece contributes its own bytes as it stands,
+        // and the caller's own rebuild
         // ([`computed_value_children`]) already knows how to unwind them.
         let opaque = piece
             .atomic
@@ -781,19 +791,27 @@ pub(super) fn tokened_text<'src>(
 
         match opaque {
             Some(node) => {
-                tokened.push_str(&format!("\u{96}{n}\u{97}", n = carried.len()));
+                tokened.push_str(MASKED_PIECE_PLACEHOLDER);
                 carried.push(node.clone());
             }
 
-            None => tokened.push_str(
+            // A piece that keeps its own bytes has them **escaped** on the way
+            // in, exactly as in
+            // [`tokened_bracket`](image::tokened_bracket): after this, the
+            // only `MASKED_PIECE_PLACEHOLDER` occurrences in `tokened` are the
+            // ones written just above.
+            None => tokened.push_str(&escape_masked_piece_bytes(
                 text.get(lo.saturating_sub(range.start)..hi.saturating_sub(range.start))
                     .unwrap_or_default(),
-            ),
+            )),
         }
     }
 
+    // A text that tokened nothing keeps its own bytes as written rather than
+    // the piece-by-piece copy above — but still escaped, so every consumer can
+    // unescape unconditionally.
     if carried.is_empty() {
-        return (text.to_string(), carried);
+        return (escape_masked_piece_bytes(text).into_owned(), carried);
     }
 
     (tokened, carried)
@@ -805,9 +823,9 @@ pub(super) fn tokened_text<'src>(
 /// text of the node it stands for.
 ///
 /// A string slot has nowhere to put a node, so the alternative to this is
-/// refusing the whole match (which is what the gate used to do) or spelling the
-/// token into the output (which is what the string pipeline does, emitting
-/// either rendered markup or a raw `\u{96}0\u{97}` sentinel). Neither is what
+/// refusing the whole match, or spelling the
+/// token into the output as either rendered markup or a raw `\u{96}0\u{97}`
+/// placeholder. Neither is what
 /// the author wrote. What they wrote is the source, so that is what the slot
 /// takes.
 ///
@@ -830,29 +848,48 @@ pub(super) fn tokened_text<'src>(
 /// issue #2661, open since 2018 and settled there as intended behavior), which
 /// is a divergence this crate takes deliberately.
 ///
-/// The walk is index-keyed and left to right, exactly like
-/// [`restored_value_children`]'s: each token is sought only in the bytes after
-/// the previous one, and a token the parse dropped is simply not found.
+/// The walk is left to right and **positional**, exactly like
+/// [`restored_value_children`]'s: each [`MASKED_PIECE_PLACEHOLDER`]
+/// occurrence is sought only in the bytes after the previous one, and is
+/// paired with the next of `carried` in turn. `carried` must already be
+/// sliced to start at `text`'s own first occurrence — see
+/// [`Attrlist::nth_attribute_token_offset`]/
+/// [`Attrlist::named_attribute_token_offset`] for how a caller reading `text`
+/// out of a larger parsed [`Attrlist`] finds that starting point — since a bare
+/// occurrence carries no index of its own to re-align with if `carried` starts
+/// anywhere else.
+///
+/// [`Attrlist`]: crate::attributes::Attrlist
+/// [`Attrlist::nth_attribute_token_offset`]: crate::attributes::Attrlist::nth_attribute_token_offset
+/// [`Attrlist::named_attribute_token_offset`]: crate::attributes::Attrlist::named_attribute_token_offset
 pub(super) fn untranslated_value(text: &str, carried: &[InlineNode<'_>]) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
 
-    for (n, node) in carried.iter().enumerate() {
-        let token = format!("\u{96}{n}\u{97}");
+    for node in carried {
+        let Some(pos) = rest.find(MASKED_PIECE_PLACEHOLDER) else {
+            break;
+        };
 
-        if let Some(pos) = rest.find(&token) {
-            out.push_str(rest.get(..pos).unwrap_or_default());
+        // Only the bytes *between* occurrences are unescaped: they are the
+        // tokener's own copy of the author's text (see
+        // [`escape_masked_piece_bytes`]), where a node's untranslated bytes
+        // below come straight from the source and never passed through it.
+        out.push_str(&unescape_masked_piece_bytes(
+            rest.get(..pos).unwrap_or_default(),
+        ));
 
-            match node {
-                InlineNode::Raw { value, .. } => out.push_str(value.as_ref()),
-                other => out.push_str(other.span().data()),
-            }
-
-            rest = rest.get(pos + token.len()..).unwrap_or_default();
+        match node {
+            InlineNode::Raw { value, .. } => out.push_str(value.as_ref()),
+            other => out.push_str(other.span().data()),
         }
+
+        rest = rest
+            .get(pos + MASKED_PIECE_PLACEHOLDER.len()..)
+            .unwrap_or_default();
     }
 
-    out.push_str(rest);
+    out.push_str(&unescape_masked_piece_bytes(rest));
 
     out
 }
@@ -864,21 +901,29 @@ pub(super) fn untranslated_value(text: &str, carried: &[InlineNode<'_>]) -> Stri
 ///
 /// Splicing the node rather than its bytes is what keeps the fold honest. A
 /// [`Raw`](InlineNode::Raw) leaf's body is emitted verbatim and a
-/// [`Stem`](InlineNode::Stem) leaf's is rendered at fold time — which is
-/// exactly what `Passthroughs::restore_to` splices into the string pipeline's
-/// own display text — where those same bytes spliced into a
-/// [`Text`](InlineNode::Text) would be escaped a second time (design §3.4):
+/// [`Stem`](InlineNode::Stem) leaf's is rendered at fold time — where those
+/// same bytes spliced into a
+/// [`Text`](InlineNode::Text) would be escaped a second time:
 /// `link:x[++<b>a</b>++,role=hl]` would show `&amp;lt;b&amp;gt;` against the
 /// golden's `&lt;b&gt;`. A rendered
 /// [`Styled`](crate::inlines::Styled) span has no bytes to splice at all —
 /// its markup exists only at fold time — so for it the node *is* the only
 /// honest reading.
 ///
-/// The walk is index-keyed and left to right, like
-/// `Passthroughs::restore_to`'s
-/// own: each token is sought only in the bytes after the previous one, and a
-/// token the parse dropped (a value the split discarded) is simply not found,
-/// leaving the ones after it to splice by their own index.
+/// The walk is left to right and **positional**: each
+/// [`MASKED_PIECE_PLACEHOLDER`] occurrence is sought only in the bytes after
+/// the previous one, and is paired with the next of `restores` in turn.
+/// `restores` must already be sliced to start at `text`'s own first
+/// occurrence — see
+/// [`Attrlist::nth_attribute_token_offset`]/
+/// [`Attrlist::named_attribute_token_offset`] for how a caller reading `text`
+/// out of a larger parsed [`Attrlist`] finds that starting point, exactly as
+/// [`untranslated_value`] needs it — since a bare occurrence carries no index
+/// of its own to re-align with if `restores` starts anywhere else.
+///
+/// [`Attrlist`]: crate::attributes::Attrlist
+/// [`Attrlist::nth_attribute_token_offset`]: crate::attributes::Attrlist::nth_attribute_token_offset
+/// [`Attrlist::named_attribute_token_offset`]: crate::attributes::Attrlist::named_attribute_token_offset
 pub(super) fn restored_value_children<'src>(
     text: &str,
     restores: &[InlineNode<'src>],
@@ -888,19 +933,21 @@ pub(super) fn restored_value_children<'src>(
     let mut children: Vec<InlineNode<'src>> = Vec::new();
     let mut rest = text;
 
-    for (n, node) in restores.iter().enumerate() {
-        let token = format!("\u{96}{n}\u{97}");
+    for node in restores {
+        let Some(pos) = rest.find(MASKED_PIECE_PLACEHOLDER) else {
+            break;
+        };
 
-        if let Some(pos) = rest.find(&token) {
-            children.append(&mut computed_value_children(
-                rest.get(..pos).unwrap_or_default(),
-                location,
-                specials,
-            ));
+        children.append(&mut computed_value_children(
+            rest.get(..pos).unwrap_or_default(),
+            location,
+            specials,
+        ));
 
-            children.push(node.clone());
-            rest = rest.get(pos + token.len()..).unwrap_or_default();
-        }
+        children.push(node.clone());
+        rest = rest
+            .get(pos + MASKED_PIECE_PLACEHOLDER.len()..)
+            .unwrap_or_default();
     }
 
     children.append(&mut computed_value_children(rest, location, specials));
@@ -909,7 +956,7 @@ pub(super) fn restored_value_children<'src>(
 }
 
 /// Rebuilds a value the macros step **computed** off the level's match string
-/// as the children a node shows, taking whichever half of design §3.4.1
+/// as the children a node shows, taking whichever half
 /// `specials` names.
 ///
 /// A computed value is the one thing this step reads as *bytes* rather than
@@ -924,9 +971,19 @@ pub(super) fn computed_value_children<'src>(
     location: Span<'src>,
     specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
+    // This is where a run of a tokened text's own bytes leaves the pipeline,
+    // so it is where the tokener's escape comes back off (see
+    // [`escape_masked_piece_bytes`]). Its caller
+    // ([`restored_value_children`]) has already split the genuine
+    // `MASKED_PIECE_PLACEHOLDER` occurrences out, so what arrives here is only
+    // ever the author's own bytes — unescaping ahead of the special/entity
+    // trichotomy below is safe because none of the escape's own codepoints is
+    // an `&`.
+    let text = unescape_masked_piece_bytes(text);
+
     match specials {
-        ComputedSpecials::Escaped => escaped_value_children(text, location),
-        ComputedSpecials::Verbatim => unescaped_value_children(text, location),
+        ComputedSpecials::Escaped => escaped_value_children(&text, location),
+        ComputedSpecials::Verbatim => unescaped_value_children(&text, location),
     }
 }
 
@@ -934,10 +991,10 @@ pub(super) fn computed_value_children<'src>(
 /// the level's own match string rather than out of the tree, here a reference-
 /// or link-family attribute list's positional value — as the nodes that fold
 /// back to exactly those bytes, all sharing `location` (the value has no `'src`
-/// slice of its own, so design §4.4's coarse fallback is the only honest span
+/// slice of its own, so the coarse fallback is the only honest span
 /// for any part of it).
 ///
-/// The rebuild is design §3.4's trichotomy applied to a string:
+/// The rebuild applies the same trichotomy to a string:
 /// [`build_match_string`](super::quotes::build_match_string) gives an escaped
 /// special its canonical entity and a *restored* entity its own bytes, while a
 /// [`Text`](InlineNode::Text) node holds **logical** text the fold escapes. So
@@ -958,7 +1015,7 @@ pub(super) fn computed_value_children<'src>(
 /// a verbatim run holds no special at all (the `SpecialCharacters` step split
 /// every one into its own leaf) and a synthesized run's own specials are
 /// [`Raw`](InlineNode::Raw) leaves, which are opaque and so rejected by the
-/// caller's gate. Under an effective order that never escapes (§3.4.1) a
+/// caller's gate. Under an effective order that never escapes a
 /// literal `&` *does* survive into a verbatim run, and is left exactly as it
 /// is here, since neither class matches it.
 ///
@@ -1090,7 +1147,7 @@ mod tests {
         // step drops an escaped reference's backslash as a gap in the ranges it
         // emits, leaving two adjacent verbatim runs whose match-string bytes
         // run on while their source spans skip one. Re-reading the span would
-        // put the backslash back — a text the string pipeline no longer
+        // put the backslash back — a byte the tree no longer
         // carries — so this pins all three families that build a display text
         // through the shared helper.
         let parser = Parser::default();
@@ -1132,16 +1189,16 @@ mod tests {
     fn a_computed_value_is_classified_by_where_the_escaping_step_sits() {
         // [`escaped_value_children`] reads its input as the *escaped* text a
         // family took off the level's match string, so it unwinds one level of
-        // §3.4's trichotomy: `&lt;` becomes the logical `<` a `Text` node
+        // the trichotomy: `&lt;` becomes the logical `<` a `Text` node
         // holds, which the fold escapes back. That is exact under an order
         // that runs `SpecialCharacters` **before** `Macros` — every built-in
         // group — and exactly wrong under one that does not, where the same
-        // six bytes are the author's own and the string replacer splices them
-        // in untouched.
+        // six bytes are the author's own and get spliced in
+        // untouched.
         //
         // An attribute list is parsed under *any* order that runs `Macros`, so
         // both readings are reachable, and which one a value takes is decided
-        // the way §3.4.1 decides every other classification: by where the
+        // the way every other classification is: by where the
         // escaping step actually sits in the group's effective order. This
         // pins that decision from both sides over one fixture per family — the
         // three that compute an attribute-list value — so neither half can
@@ -1238,11 +1295,11 @@ mod tests {
         // The `Verbatim` half is *not* "the order has no escaping step" but
         // "none has run yet", so it covers an order that escapes **after**
         // `Macros` too. Only the cross-reference family can be pinned to
-        // parity there, because it is the one family whose node the string
-        // pipeline is still holding as a deferred placeholder when the
-        // escaping step runs — so `flatten_prior_markup` leaves it alone,
-        // where a link's already-emitted `<a …>` markup is escaped by the
-        // string pipeline and is the separate divergence
+        // parity there, because it is the one family whose node stays an
+        // unresolved placeholder in the tree
+        // when the escaping step runs — so `flatten_prior_markup` leaves it
+        // alone, where a link's already-emitted `<a …>` markup is
+        // escaped, which is the separate divergence
         // `a_markup_producing_step_before_the_escaping_one_is_a_documented_divergence`
         // pins. Both spellings reach parity; the bare `<` did not before the
         // decision became position-aware.
@@ -1283,8 +1340,8 @@ mod tests {
         // the level's match string is a `CharRef` leaf's own entity, while a
         // literal one is a `Raw` leaf the match string stands in as an opaque
         // placeholder. So it is pinned directly, on the classification it
-        // makes: one logical `Text` run, which the fold escapes back to the
-        // `&amp;` the string pipeline would have emitted.
+        // makes: one logical `Text` run, which the fold escapes back to
+        // `&amp;`.
         let src = Span::new("x");
         let children = escaped_value_children("a & b &copy; c &lt; d", src);
 
@@ -1364,7 +1421,7 @@ mod tests {
                     "build_for_group_restored_entity",
                     source
                 ),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the golden output for {source:?}"
             );
         }
     }
@@ -1376,21 +1433,21 @@ mod tests {
         // take the same lift, closing the escaped-special / restored-entity
         // boundary for every macro family:
         //
-        // - The **UI** family (`kbd:`/`btn:`/`menu:`) swapped its own gate for the
-        //   shared opaque-piece one. Every value a `Ui` node holds is
-        //   already-substituted text read out of the match string, which is exactly
-        //   what the string replacer computes from its own escaped haystack.
+        // - The **UI** family (`kbd:`/`btn:`/`menu:`) swapped its own gate for
+        //   the shared opaque-piece one. Every value a `Ui` node holds is
+        //   already-substituted text read out of the match string.
         //
         // - A **footnote's text** needed no code change at all: its content is
-        //   structured children (`emit_range` keeps a `CharRef` leaf as its own child),
-        //   so it never sliced `'src` for a value in the first place. What made this
-        //   look like a boundary was the *harness*: the test that pinned it drove the
-        //   golden pipeline and the builder from one shared `Parser`, so each fixture's
-        //   footnote was numbered twice (`1` on the golden side, `2` on the built side)
-        //   and the two sides "diverged" for a reason that had nothing to do with the
-        //   entity. Hence `parity`, below, which configures one parser per side — the
-        //   two-independent-parsers discipline every footnote-bearing corpus in this
-        //   module already uses.
+        //   structured children (`emit_range` keeps a `CharRef` leaf as its own
+        //   child), so it never sliced `'src` for a value in the first place.
+        //   What made this look like a boundary was the *harness*: the test
+        //   that pinned it drove the golden pipeline and the builder from one
+        //   shared `Parser`, so each fixture's footnote was numbered twice (`1`
+        //   on the golden side, `2` on the built side) and the two sides
+        //   "diverged" for a reason that had nothing to do with the entity.
+        //   Hence `parity`, below, which configures one parser per side — the
+        //   two-independent-parsers discipline every footnote-bearing corpus in
+        //   this module already uses.
         let configure = || {
             Parser::default().with_intrinsic_attribute(
                 "experimental",
@@ -1420,7 +1477,7 @@ mod tests {
                     "build_for_group_recoverable_piece",
                     source
                 ),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the golden output for {source:?}"
             );
         };
 
@@ -1500,13 +1557,14 @@ mod tests {
         // finer: not a later **step** reading an earlier step's tags, but a
         // later **family of this same step** reading an earlier family's.
         //
-        // The string pipeline runs its macro families as passes over one flat
-        // string, so by the time the cross-reference and footnote passes run,
-        // that string already holds the `</a>` the link pass wrote. Their
-        // patterns match straight through it, and the bracket a family reads
-        // as its own can begin inside one link's display text and end outside
-        // it: `link:t.html[pre xref:tgt[T] post]` renders an `<a>` nested
-        // inside an `<a>`, because the cross-reference's own bracketed text is
+        // The crate's old string-substitution implementation ran its macro
+        // families as passes over one flat
+        // string, so by the time the cross-reference and footnote passes ran,
+        // that string already held the `</a>` the link pass had written. Their
+        // patterns matched straight through it, and the bracket a family read
+        // as its own could begin inside one link's display text and end outside
+        // it: `link:t.html[pre xref:tgt[T] post]` rendered an `<a>` nested
+        // inside an `<a>`, because the cross-reference's own bracketed text was
         // `T</a> post`.
         //
         // A tree has no tags to match through. The link's display text is a
@@ -1515,9 +1573,9 @@ mod tests {
         // where it was written, and the link keeps the text it was given.
         //
         // This is a **keep**: the tree's answer is the well-formed one, and
-        // the string pipeline's is markup no backend would choose to emit.
+        // the old implementation's was markup no backend would choose to emit.
 
-        // `golden_html` is what the string pipeline rendered — kept in the
+        // `golden_html` is what the old pipeline rendered — kept in the
         // fixture as the recorded half of the divergence now that the
         // pipeline itself is gone, exactly as the divergence corpora keep
         // theirs in `snapshots/`.
@@ -1577,12 +1635,11 @@ mod tests {
         // A content that exercises every family this function composes in one
         // go: an image whose `link=` targets a dangerous scheme (a warning
         // from the image family) *before* a duplicate anchor id (a warning
-        // from the anchor family) — the golden pipeline's own image-then-
+        // from the anchor family) — the crate's own image-then-
         // anchor pass order (`apply_macros`'s own doc comment) must land the
         // two warnings in that order, not the reverse. Each side uses its own
-        // *independent* parser (design §5.3's two-independent-parsers
-        // discipline, established by the image increment's own differential
-        // corpus).
+        // *independent* parser — the two-independent-parsers
+        // discipline every warning-ordering test in this module uses.
         let source = "image:x.png[alt,link=javascript:alert(1)] then [[dup]] and [[dup]]";
 
         let builder_parser = Parser::default().with_catalog_assets(true);
@@ -1618,11 +1675,11 @@ mod tests {
 
     #[test]
     fn a_bibliography_entry_registers_before_every_other_family() {
-        // The string pipeline runs its bibliography-anchor pass *first*, ahead
+        // The bibliography-anchor pass runs *first*, ahead
         // of every other macro family, so a duplicate bibliography id must be
         // warned about before an image's dangerous-link-scheme warning in the
         // one shared warnings list — the same ordering this function's own doc
-        // comment records for image-before-anchor, one step earlier. Each side
+        // comment records for image-before-anchor, one place earlier. Each side
         // uses its own independent parser.
         let source = "[[[dup]]] image:x.png[alt,link=javascript:alert(1)] entry";
 

@@ -222,10 +222,11 @@ fn footnote_in_heading_does_not_leak_into_generated_id() {
 
 #[test]
 fn footnote_reaching_a_heading_via_attribute_is_kept_out_of_xref_text() {
-    // The footnote enters the title through an attribute reference, so it is not
-    // visible in the raw title source. Because markers are annotated during the
-    // single title render (not gated on the source text), the footnote is still
-    // kept out of the reference text — and remains a real, numbered footnote.
+    // The footnote enters the title through an attribute reference, so it is
+    // not visible in the raw title source. Because markers are annotated
+    // during the single title render (not gated on the source text), the
+    // footnote is still kept out of the reference text — and remains a
+    // real, numbered footnote.
     let doc = Parser::default().parse(concat!(
         ":disclaimer: footnote:[Not legal advice.]\n",
         "\n",
@@ -338,12 +339,13 @@ fn xrefstyle_survives_deferred_resolution() {
     // `xrefstyle` formatting is compatible with the two-phase resolve mechanism
     // used for forward (and cross-document) references. The two inputs it needs
     // are resolved at their natural points: the effective *style* is a property
-    // of the reference site, captured during parsing (alongside `provided_text`,
-    // `window`, and `roles`), while the target's *signifier and number* live in
-    // the catalog and are read only when references are resolved (alongside the
-    // target's `reftext`). So a forward reference is an unresolved fallback
-    // until resolution, then picks up its full styled text — the same lifecycle
-    // as a plain reference.
+    // of the reference site, captured during parsing (alongside
+    // `provided_text`, `window`, and `roles`), while the target's
+    // *signifier and number* live in the catalog and are read only when
+    // references are resolved (alongside the target's `reftext`). So a
+    // forward reference is an unresolved fallback until resolution, then
+    // picks up its full styled text — the same lifecycle as a plain
+    // reference.
     let src = ":sectnums:\n:xrefstyle: full\n\nSee <<install>>.\n\n\
               == One\n\n== Two\n\n=== Two-A\n\n=== Two-B\n\n\
               [#install]\n=== Installation\n";
@@ -358,8 +360,9 @@ fn xrefstyle_survives_deferred_resolution() {
         "See <a href=\"#install\">[install]</a>."
     );
 
-    // Resolving against the now-complete catalog applies the full style, drawing
-    // the signifier and number from the catalog entry registered for the target.
+    // Resolving against the now-complete catalog applies the full style,
+    // drawing the signifier and number from the catalog entry registered
+    // for the target.
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
     let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
@@ -374,8 +377,8 @@ fn xrefstyle_survives_deferred_resolution() {
 fn host_resolver_can_attach_signifier() {
     // A host resolver that builds its `href`/`text` from scratch (rather than
     // from a catalog `RefEntry`) can still opt a target into `full`/`short`
-    // formatting by attaching a signifier with `with_signifier`. The style still
-    // comes from the referencing document.
+    // formatting by attaching a signifier with `with_signifier`. The style
+    // still comes from the referencing document.
     let mut parser = Parser::default();
     let mut doc = parser.parse_deferred(":xrefstyle: full\n\nSee <<install>>.\n");
 
@@ -428,10 +431,11 @@ fn reference_to_this_document_by_name_resolves_within_it() {
 
 #[test]
 fn reference_to_this_document_by_explicit_docname_attribute_resolves_within_it() {
-    // Same as above, but the current document is identified by an explicitly-set
-    // `docname` attribute rather than a primary file name. Asciidoctor treats
-    // `doc.attributes['docname']` as the single source of truth for the
-    // self-reference match, so an API-provided `docname` must be honored too.
+    // Same as above, but the current document is identified by an
+    // explicitly-set `docname` attribute rather than a primary file name.
+    // Asciidoctor treats `doc.attributes['docname']` as the single source
+    // of truth for the self-reference match, so an API-provided `docname`
+    // must be honored too.
     let mut parser = Parser::default().with_intrinsic_attribute(
         "docname",
         "guide",
@@ -501,8 +505,8 @@ fn explicit_reftext_wins_for_document_title_reference() {
 #[test]
 fn reference_to_document_title_with_bracket_anchor_resolves() {
     // A document title whose ID comes from a `[[id]]` block anchor (rather than
-    // the `[#id]` shorthand) is registered the same way, so a cross-reference to
-    // it renders the title text.
+    // the `[#id]` shorthand) is registered the same way, so a cross-reference
+    // to it renders the title text.
     let doc =
         Parser::default().parse("[[manual]]\n= Reference Manual\n\nThis is the <<manual>>.\n");
 
@@ -530,8 +534,8 @@ fn reference_to_document_title_uses_bracket_anchor_reftext() {
 fn host_resolver_can_override_a_derived_destination() {
     // The destination the parser derives for a target that names a document is
     // only a default: it is offered to the resolver (as
-    // `ResolutionContext::derived`) rather than imposed, so a host that resolves
-    // targets across a corpus can answer with its own.
+    // `ResolutionContext::derived`) rather than imposed, so a host that
+    // resolves targets across a corpus can answer with its own.
     let mut parser = Parser::default();
     let mut doc = parser.parse_deferred("See <<tigers#about,About Tigers>>.\n");
 
@@ -602,9 +606,10 @@ fn cross_document_resolution() {
     let doc_b = parser.parse_deferred("[#b-topic]\n== B Topic\n\nContent.\n");
 
     // The host builds a combined index from each document's catalog, assigning
-    // its own cross-document hrefs. Building each entry with `from_entry` carries
-    // the target's reftext and signifier, so cross-document `xrefstyle`
-    // formatting keeps working (see `xrefstyle_carries_across_documents`).
+    // its own cross-document hrefs. Building each entry with `from_entry`
+    // carries the target's reftext and signifier, so cross-document
+    // `xrefstyle` formatting keeps working (see
+    // `xrefstyle_carries_across_documents`).
     let mut index = HashMap::new();
     for id in ["b-topic"] {
         if let Some(entry) = doc_b.catalog().get_ref(id) {
@@ -631,12 +636,13 @@ fn cross_document_resolution() {
 
 #[test]
 fn xrefstyle_carries_across_documents() {
-    // Cross-document `xrefstyle` formatting works when the host resolver carries
-    // the target's signifier. The two inputs come from different documents: the
-    // *style* (`full`) is a property of the referencing document (doc A), while
-    // the *signifier and number* ("Section 2.3") are computed in the target
-    // document (doc B) and travel on its catalog entry. A host that builds its
-    // result with `ResolvedReference::from_entry` carries the signifier through
+    // Cross-document `xrefstyle` formatting works when the host resolver
+    // carries the target's signifier. The two inputs come from different
+    // documents: the *style* (`full`) is a property of the referencing
+    // document (doc A), while the *signifier and number* ("Section 2.3")
+    // are computed in the target document (doc B) and travel on its catalog
+    // entry. A host that builds its result with
+    // `ResolvedReference::from_entry` carries the signifier through
     // automatically.
     let mut parser = Parser::default();
 
@@ -895,9 +901,10 @@ mod unresolved_reference_warnings {
 
     #[test]
     fn reported_for_a_reference_inside_a_footnote() {
-        // A footnote's text is lifted out of the block it was written in, but the
-        // footnote records the location of its defining occurrence, so the
-        // warning is anchored at that content rather than at the whole document.
+        // A footnote's text is lifted out of the block it was written in, but
+        // the footnote records the location of its defining occurrence,
+        // so the warning is anchored at that content rather than at the
+        // whole document.
         let doc = Parser::default().parse("Intro.\n\nText.footnote:[See <<nope>>.]\n");
 
         let warnings: Vec<_> = doc.warnings().collect();
@@ -914,8 +921,8 @@ mod unresolved_reference_warnings {
     #[test]
     fn distinguishes_two_footnotes_by_location() {
         // The whole point of #804: two unresolved references in two different
-        // footnotes must be distinguishable by location, so a host can point the
-        // author at the offending footnote.
+        // footnotes must be distinguishable by location, so a host can point
+        // the author at the offending footnote.
         let doc = Parser::default()
             .parse("First.footnote:[See <<nope-a>>.]\n\nSecond.footnote:[See <<nope-b>>.]\n");
 
@@ -943,10 +950,11 @@ mod unresolved_reference_warnings {
         // document source, so no precise location is recorded and the warning
         // falls back to the whole-document span rather than a misleading one.
         //
-        // The footnote sits on a later line of the quote's owned body (offset > 0
-        // there); were that owned offset stored and applied to the document
-        // source it would resolve to some unrelated line, so asserting the
-        // fallback line 1 guards the owned-sub-source guard specifically.
+        // The footnote sits on a later line of the quote's owned body (offset >
+        // 0 there); were that owned offset stored and applied to the
+        // document source it would resolve to some unrelated line, so
+        // asserting the fallback line 1 guards the owned-sub-source
+        // guard specifically.
         let doc =
             Parser::default().parse("Intro.\n\n> Line one.\n>\n> Text.footnote:[See <<nope>>.]\n");
 
@@ -1093,8 +1101,8 @@ mod included_file_collapses_to_internal_anchor {
     #[test]
     fn include_outside_base_directory_still_registers_and_collapses() {
         // A file included from outside the base directory registers under the
-        // target as written (`../section-a`), and an inter-document reference to
-        // it collapses just the same.
+        // target as written (`../section-a`), and an inter-document reference
+        // to it collapses just the same.
         let handler =
             InlineFileHandler::from_pairs([("../section-a.adoc", "[#section-a]\n== Section A\n")]);
         let doc = Parser::default()
@@ -1355,10 +1363,10 @@ mod xrefs_in_titles {
 
     #[test]
     fn two_references_in_a_carried_title_resolve_in_order() {
-        // The carried title's placeholder template is synthesized from its own
+        // The carried title's deferred template is synthesized from its own
         // inline tree at the hop (see `Content::to_owned_title`), so the
-        // placeholder indices and the segment list are built in one walk and
-        // must line up: the first reference takes the first segment's
+        // template's `Xref` pieces and the segment list are built in one walk
+        // and must line up: the first reference takes the first segment's
         // destination, the second the second's.
         let doc = Parser::default()
             .parse(".See <<goal>> then <<par>>\n== Section\n\n[[par]]para\n\n[#goal]\n== Goal");
@@ -1409,8 +1417,8 @@ mod xrefs_in_titles {
         // A documented boundary of the tree-synthesized carried-title template
         // (see `carried_title_template`): the synthesis reads the tree's
         // top-level nodes, so a cross-reference *nested* inside another
-        // construct — here a styled span — folds with its enclosing node as
-        // template text rather than contributing a placeholder. It is baked as
+        // construct — here a styled span — folds with its enclosing node into
+        // a literal piece rather than contributing a splice. It is baked as
         // its unresolved fallback (the derived `#goal` destination with the
         // bracketed text) instead of splicing the target's reference text, and
         // — having no segment — an unresolvable one is not reported either.
@@ -1440,6 +1448,70 @@ mod xrefs_in_titles {
         let doc = Parser::default().parse(".See *x <<nowhere>>* done\n== Section\n\npara");
 
         assert_eq!(doc.warnings().count(), 0);
+    }
+
+    #[test]
+    fn a_reference_nested_in_a_span_of_a_footnote_stays_its_fallback() {
+        // The footnote analog of the carried-title boundary above (see
+        // `fold_deferring_xrefs`'s own docs): the deferring fold walks a
+        // footnote's own children at the top level only, so a
+        // cross-reference *nested* inside another construct — here a styled
+        // span — folds with its enclosing node into one literal template
+        // piece rather than contributing its own splice, and is baked as its
+        // unresolved fallback rather than the target's (eventual) resolved
+        // reference text.
+        //
+        // This is checked at *registration* time (`parse_deferred`, before
+        // any reference is resolved), which is the only moment the template
+        // narrowing is observable at all: every production footnote goes on
+        // to fold from its own **tree** once resolution runs
+        // (`Content::collect_own_folded_footnotes`), and the tree's nested
+        // reference *does* pick up its resolved destination there (mirrored
+        // onto the node by the enclosing content's own resolution pass,
+        // independently of `FootnoteDeferred`) — see the complementary
+        // `a_reference_nested_in_a_footnote_resolves_once_the_document_does`.
+        let mut parser = Parser::default();
+        let doc =
+            parser.parse_deferred("See footnote:[x *<<goal>>* done] here.\n\n[#goal]\n== Goal");
+
+        assert_eq!(
+            doc.catalog().footnotes()[0].text,
+            r##"x <strong><a href="#goal">[goal]</a></strong> done"##
+        );
+    }
+
+    #[test]
+    fn a_reference_nested_in_a_footnote_resolves_once_the_document_does() {
+        // The complement of the fixture above: `FootnoteDeferred`'s own
+        // narrowed template only governs the *registration-time* fallback.
+        // Once the document is resolved, this footnote's `text` is folded
+        // fresh from its own tree (`Content::collect_own_folded_footnotes`),
+        // whose nested reference node was mirrored to its resolved
+        // destination by the enclosing content's own resolution pass — so
+        // the nested reference *does* end up resolved in the end, unlike the
+        // carried-title case, which has no tree left to re-fold from at all.
+        let doc =
+            Parser::default().parse("See footnote:[x *<<goal>>* done] here.\n\n[#goal]\n== Goal");
+
+        assert_eq!(
+            doc.catalog().footnotes()[0].text,
+            r##"x <strong><a href="#goal">Goal</a></strong> done"##
+        );
+    }
+
+    #[test]
+    fn an_unresolvable_reference_nested_in_a_footnote_is_still_warned_about() {
+        // Unlike the carried title's own nested-reference narrowing above
+        // (which captures no segment at all for a nested reference, so an
+        // unresolvable one raises no warning), a footnote's nested reference
+        // keeps its segment: `FootnoteDeferred`'s own `xrefs` records every
+        // cross-reference the footnote's text carries, not only the ones its
+        // `template` can splice — see that type's own docs — so it is still
+        // resolved, and still warned about when unresolvable, exactly as a
+        // top-level one would be.
+        let doc = Parser::default().parse("See footnote:[x *<<nowhere>>* done] here.\n");
+
+        assert_eq!(doc.warnings().count(), 1);
     }
 
     #[test]

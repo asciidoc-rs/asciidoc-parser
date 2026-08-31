@@ -4,19 +4,20 @@
 //! ([`inline_builder`](crate::content::inline_builder)'s test module) drive
 //! [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup)
 //! on a bare [`Content`](crate::content::Content), which has no document
-//! catalog and so **cannot resolve cross-references**. (The whole-document
-//! sweep that used to sit beside this one drove the *Strategy-A recorder* and
-//! retired with it.)
+//! catalog and so **cannot resolve cross-references**. (A whole-document
+//! sweep used to sit beside this one, driving a since-retired recorder that
+//! reconstructed trees from the string pipeline's rendered output; it
+//! retired along with that recorder.)
 //!
-//! That leaves one thing unverified, and it is the thing the
-//! cutover rests on: **the tree the single-pass builder produces, folded
-//! *after* cross-reference resolution has run, reproduces the rendered string
-//! byte-for-byte.** Design §4.2 retires the deferred-cross-reference sentinel
-//! system on exactly that basis — an `xref` is a
+//! That leaves one thing unverified, and it is the guarantee the whole
+//! single-pass design rests on: **the tree the single-pass builder produces,
+//! folded *after* cross-reference resolution has run, reproduces the
+//! rendered string byte-for-byte.** Resolution is non-destructive and
+//! re-resolvable by construction — an `xref` is a
 //! [`Ref`](crate::inlines::Ref)`{resolved: None}` node that resolution fills in
-//! place, "non-destructive by construction, re-resolvable, no template" — and
-//! §4.3 extends the same claim to section titles (whose own document-order
-//! pass mutates the title's tree) and to footnote-embedded references (which
+//! place, with no template involved — for all three cases this harness
+//! checks: plain cross-references, section titles (whose own document-order
+//! pass mutates the title's tree), and footnote-embedded references (which
 //! live in a footnote's subtree).
 //!
 //! This harness checks all three, over whole documents, in one parse: every
@@ -26,11 +27,12 @@
 use std::rc::Rc;
 
 use crate::{
-    Parser,
+    Document, Parser,
+    attributes::Attrlist,
     blocks::{Block, FindBlocks, IsBlock, TableCellContent, TableRow},
-    content::inline_builder::fold_html,
+    content::{Content, inline_builder::fold_html},
     inlines::InlineNode,
-    parser::{HtmlInlineRenderer, ModificationContext},
+    parser::{HtmlInlineRenderer, InlineRenderer, ModificationContext, QuoteScope, QuoteType},
 };
 
 /// One content location: what the string pipeline rendered, and the tree the
@@ -43,7 +45,7 @@ struct Location<'a, 'src> {
 
 /// Collects every content-bearing location in `doc` that carries a tree, in a
 /// fixed document order.
-fn locations<'src>(doc: &'src crate::Document<'src>) -> Vec<Location<'src, 'src>> {
+fn locations<'src>(doc: &'src Document<'src>) -> Vec<Location<'src, 'src>> {
     fn cells<'src>(row: &'src TableRow<'src>, out: &mut Vec<Location<'src, 'src>>) {
         for cell in row.cells() {
             // Only inline (`Simple`) cells carry a single `Content`; an
@@ -79,10 +81,10 @@ fn locations<'src>(doc: &'src crate::Document<'src>) -> Vec<Location<'src, 'src>
 
         // A **block title** (`.Title`) is substituted content in its own
         // right and carries its own tree, but it is not the block's content,
-        // so neither accessor above reaches it. Every block kind that can
-        // carry one is named by `block_title_content`, which is the mutable
-        // accessor the document-order title pass already uses, read-only.
-        if let Some(title) = block.block_title_content() {
+        // so neither accessor above reaches it. `IsBlock::title_content` is
+        // the read-only counterpart of the mutable accessor the
+        // document-order title pass uses.
+        if let Some(title) = block.title_content() {
             out.push(Location {
                 what: "block title".to_string(),
                 rendered: title.rendered_html().to_string(),
@@ -343,6 +345,17 @@ fn fold_matches_the_rendered_string_after_resolution() {
         // Plain documents, so the harness is not only about references.
         "First *para* here.\n\nSecond _para_ with `code` and (C).",
         "== Heading\n\nBody with an image:x.png[Alt] and a kbd:[Ctrl,T].",
+        // A preamble: content before the first section title, wrapped in its
+        // own compound block. A preamble is only synthesized when the
+        // document has a title (`Document::parse`), which every other
+        // fixture above omits. `Preamble` carries no content and no title
+        // directly (its own `IsBlock::rendered_html_content`/`inlines`/
+        // `title_content` all return `None`), so it contributes no location of
+        // its own — but this is still the only fixture that reaches that arm
+        // of the walk's dispatch. The intro paragraph inside it is what still
+        // shows up as `paragraph`, via the walk's own recursion into its
+        // children.
+        "= Doc Title\n\nIntro *para* before any heading.\n\n== Heading\n\nBody.",
     ] {
         kinds.extend(check_document(source));
     }
@@ -413,7 +426,7 @@ fn fold_matches_the_rendered_string_after_resolution() {
 fn a_stateful_renderer_is_not_required_for_the_fold() {
     // The fold takes the renderer as an argument, so the same tree renders
     // through a second, independently-constructed renderer to the same bytes —
-    // the property `render_with` will rest on (design §3.3.1). Driven here on
+    // the property `render_with` rests on. Driven here on
     // a document whose references resolve, since that is this harness's own
     // subject.
     let mut parser = parser();
@@ -453,9 +466,8 @@ fn a_stateful_renderer_is_not_required_for_the_fold() {
     }
 }
 
-// The document-attribute state each content retains for the fold that will run
-// *after* resolution — design §4.2's second sentinel system, whose retirement
-// is the increment this one stages.
+// The document-attribute state each content retains for the fold that runs
+// *after* resolution.
 
 #[test]
 fn document_stays_send_and_sync() {
@@ -561,9 +573,8 @@ fn each_content_retains_the_attributes_of_its_own_point_in_the_document() {
     );
 }
 
-// The retirement of the deferred-cross-reference sentinel system (design
-// §4.2's second): a deferred content's rendering is a fold of its tree, taken
-// at the end of resolution.
+// The retirement of the deferred-cross-reference sentinel system: a deferred
+// content's rendering is a fold of its tree, taken at the end of resolution.
 //
 // The fold-against-template comparison that used to sit here
 // (`the_fold_reproduces_the_template_for_every_deferred_content`) retired with
@@ -716,9 +727,10 @@ fn a_folded_heading_keeps_the_cross_title_coordination() {
 fn the_title_pass_renders_each_title_once() {
     use crate::parser::{CatalogResolver, InlineRenderer, XrefRenderParams};
 
-    // The title-side counterpart of `resolution_renders_a_deferred_content_once`,
-    // and the property that makes the fold a *replacement* for the document-order
-    // pass's template render rather than an addition to it.
+    // The title-side counterpart of
+    // `resolution_renders_a_deferred_content_once`, and the property that
+    // makes the fold a *replacement* for the document-order pass's template
+    // render rather than an addition to it.
     //
     // The pass needs each title's rendering while it runs — it is the link text
     // a reference to that title splices in — so the fold has to happen inside
@@ -767,12 +779,12 @@ fn the_title_pass_renders_each_title_once() {
 #[derive(Debug)]
 struct BracketStrong;
 
-impl crate::parser::InlineRenderer for BracketStrong {
+impl InlineRenderer for BracketStrong {
     fn render_styled(
         &self,
-        type_: crate::parser::QuoteType,
-        scope: crate::parser::QuoteScope,
-        attrlist: &crate::attributes::Attrlist<'_>,
+        type_: QuoteType,
+        scope: QuoteScope,
+        attrlist: &Attrlist<'_>,
         id: Option<String>,
         body: &str,
         dest: &mut String,
@@ -784,7 +796,7 @@ impl crate::parser::InlineRenderer for BracketStrong {
             return;
         }
 
-        crate::parser::HtmlInlineRenderer {}.render_styled(type_, scope, attrlist, id, body, dest);
+        HtmlInlineRenderer {}.render_styled(type_, scope, attrlist, id, body, dest);
     }
 }
 
@@ -802,7 +814,7 @@ fn render_with_reproduces_the_built_in_html_rendering() {
     assert_eq!(
         simple
             .content()
-            .render_with(&crate::parser::HtmlInlineRenderer {}, &parser),
+            .render_with(&HtmlInlineRenderer {}, &parser),
         simple.content().rendered_html()
     );
 }
@@ -851,9 +863,7 @@ fn render_with_uses_the_attributes_the_content_was_parsed_under() {
 
     assert_eq!(paragraphs.len(), 2);
 
-    let render = |content: &crate::content::Content<'_>| {
-        content.render_with(&crate::parser::HtmlInlineRenderer {}, &parser)
-    };
+    let render = |content: &Content<'_>| content.render_with(&HtmlInlineRenderer {}, &parser);
 
     let first = render(paragraphs[0]);
     let second = render(paragraphs[1]);
@@ -903,7 +913,7 @@ fn render_with_takes_document_attributes_from_the_content() {
     // A different parser entirely, which never saw `:icons: font`.
     let other = crate::Parser::default();
 
-    let rendered = content.render_with(&crate::parser::HtmlInlineRenderer {}, &other);
+    let rendered = content.render_with(&HtmlInlineRenderer {}, &other);
 
     // Still a font icon: the value in effect where the content was written
     // wins over anything the supplied parser knows.

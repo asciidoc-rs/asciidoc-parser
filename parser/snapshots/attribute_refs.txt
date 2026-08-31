@@ -27,6 +27,7 @@
 "{counter:n}"	"1"
 "{counter:n} *{counter:n}*"	"1 <strong>2</strong>"
 "{counter:n}-{counter:n}"	"1-2"
+"{dashed}-world"	"hello&#8212;&#8203;world"
 "{greeting}, {greeting}!"	"Hello, Hello!"
 "{note}"	"&#169; 2024"
 "{set-name\\} stays literal"	"{set-name} stays literal"

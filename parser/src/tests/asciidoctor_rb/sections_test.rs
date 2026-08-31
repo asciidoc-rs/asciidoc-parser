@@ -498,8 +498,8 @@ mod ids {
 "##
         );
 
-        // The embedded anchor is consumed to set the section ID and removed from
-        // the rendered title.
+        // The embedded anchor is consumed to set the section ID and removed
+        // from the rendered title.
         let doc = Parser::default().parse("== Section One [[one]] ==");
         let sec = first_section(&doc);
         assert_eq!(sec.id(), Some("one"));
@@ -644,8 +644,8 @@ mod ids {
 "##
         );
 
-        // The escaped anchor is unescaped to literal `[[one]]` but not processed,
-        // so the ID is not `one`.
+        // The escaped anchor is unescaped to literal `[[one]]` but not
+        // processed, so the ID is not `one`.
         let doc = Parser::default().parse(r#"== Section One \[[one]] =="#);
         let sec = first_section(&doc);
         assert_ne!(sec.id(), Some("one"));
@@ -981,7 +981,8 @@ mod ids {
         let reff = doc.catalog().get_ref("install").unwrap();
         assert_eq!(reff.reftext.as_deref(), Some("install on Linux"));
 
-        // The resolved reftext is what a natural cross reference matches against.
+        // The resolved reftext is what a natural cross reference matches
+        // against.
         assert_eq!(
             doc.catalog().resolve_id("install on Linux"),
             Some("install".to_string())
@@ -1026,10 +1027,11 @@ mod ids {
             "[#install]\n== First Install\n\ncontent\n\n[#install]\n== Second Install\n\ncontent\n",
         );
         // The normative behavior — the duplicate ID does not overwrite the
-        // existing entry, and a warning is emitted — holds. Two representational
-        // differences from Ruby: the crate stores the section title as the
-        // entry's fallback reftext (Ruby leaves `ref.reftext` nil and keeps the
-        // title separately in `ref.title`), and the `DuplicateId` warning does
+        // existing entry, and a warning is emitted — holds. Two
+        // representational differences from Ruby: the crate stores the
+        // section title as the entry's fallback reftext (Ruby leaves
+        // `ref.reftext` nil and keeps the title separately in
+        // `ref.title`), and the `DuplicateId` warning does
         // not distinguish "section" from "block" in its wording.
         let reff = doc.catalog().get_ref("install");
         assert!(reff.is_some());
@@ -1084,8 +1086,9 @@ mod ids {
             "== Do Not Repeat Yourself\n\ncontent\n\n[#_do_not_repeat_yourself]\n== Do Not Repeat Yourself\n\ncontent\n",
         );
         // As above, the entry stores the title as its fallback reftext. The
-        // explicit ID that collides with the auto-generated one is reported as a
-        // `DuplicateId` warning, and both headings render with the shared ID.
+        // explicit ID that collides with the auto-generated one is reported as
+        // a `DuplicateId` warning, and both headings render with the
+        // shared ID.
         let reff = doc.catalog().get_ref("_do_not_repeat_yourself");
         assert!(reff.is_some());
         assert_eq!(
@@ -1253,9 +1256,10 @@ mod levels {
 "##
         );
 
-        // The crate's virtual DOM models *embedded* output, which does not frame
-        // the document title in an `<h1>` by default; the parsed document title
-        // is verified through [`Document::doctitle`] instead.
+        // The crate's virtual DOM models *embedded* output, which does not
+        // frame the document title in an `<h1>` by default; the parsed
+        // document title is verified through [`Document::doctitle`]
+        // instead.
         #[test]
         fn document_title_with_atx_syntax() {
             verifies!(
@@ -1289,9 +1293,9 @@ mod levels {
         // A `:leveloffset:` shift that drives a heading to effective level 0
         // coerces it to the document title, exactly as a bare `=` would. The
         // crate models embedded output, which does not frame the doctitle in an
-        // `<h1>`, so the promotion is verified through [`Document::doctitle`]; a
-        // doctitle carries no `id`, matching the `not(@id)` in the Ruby
-        // assertions.
+        // `<h1>`, so the promotion is verified through [`Document::doctitle`];
+        // a doctitle carries no `id`, matching the `not(@id)` in the
+        // Ruby assertions.
         #[test]
         fn document_title_created_from_leveloffset_shift_defined_in_document() {
             verifies!(
@@ -1320,10 +1324,11 @@ mod levels {
 "##
             );
 
-            // The Ruby `'-1@'` value carries the trailing `@` soft-set modifier:
-            // the effective offset is `-1`, and the attribute becomes overridable
-            // by the document. `with_intrinsic_attribute` strips the `@` and
-            // relaxes the modification context to
+            // The Ruby `'-1@'` value carries the trailing `@` soft-set
+            // modifier: the effective offset is `-1`, and the
+            // attribute becomes overridable by the document.
+            // `with_intrinsic_attribute` strips the `@` and relaxes
+            // the modification context to
             // [`ModificationContext::Anywhere`] on its own, so the raw `-1@`
             // value can be passed through verbatim.
             let doc = Parser::default()
@@ -1334,12 +1339,13 @@ mod levels {
             assert!(doc.warnings().next().is_none());
         }
 
-        // A tab (not just a space) may separate the marker run from the title, so
-        // a tab-delimited heading shifted to effective level 0 is coerced to the
-        // document title exactly as its space-delimited form is — matching the
-        // section parser's `[ \t]+` whitespace handling. This edge is not covered
-        // by a Ruby test, but guards against the header recognizer and the body
-        // section parser disagreeing on what counts as a heading.
+        // A tab (not just a space) may separate the marker run from the title,
+        // so a tab-delimited heading shifted to effective level 0 is
+        // coerced to the document title exactly as its space-delimited
+        // form is — matching the section parser's `[ \t]+` whitespace
+        // handling. This edge is not covered by a Ruby test, but guards
+        // against the header recognizer and the body section parser
+        // disagreeing on what counts as a heading.
         #[test]
         fn document_title_from_leveloffset_shift_allows_a_tab_after_the_marker() {
             let doc = Parser::default().parse(":leveloffset: -1\n==\tDocument Title");
@@ -1393,11 +1399,11 @@ mod levels {
         );
 
         // The crate recognizes a document ID from a `[[id]]` block anchor above
-        // the document title, folding it into the header the same way the `[#id]`
-        // shorthand is. `doc.id` and any accompanying attribute entry are exposed
-        // through the header/document accessors; only the
-        // `assert_css 'body#reference'` (which needs a standalone `<body>`) is
-        // out of scope.
+        // the document title, folding it into the header the same way the
+        // `[#id]` shorthand is. `doc.id` and any accompanying attribute
+        // entry are exposed through the header/document accessors; only
+        // the `assert_css 'body#reference'` (which needs a standalone
+        // `<body>`) is out of scope.
         #[test]
         fn block_id_above_document_title_sets_id_on_document() {
             verifies!(
@@ -1480,10 +1486,10 @@ mod levels {
         // A cross-reference to a document title carrying an explicit shorthand
         // ID (`[#id]`) resolves to the title's reference text. The crate
         // registers the document title in the catalog under its ID (as a
-        // [`Section`](crate::document::RefType::Section) whose reference text is
-        // the doctitle), so an `<<id>>` to it renders the title rather than the
-        // bracketed `[id]` fallback — matching a cross-reference to an ordinary
-        // section.
+        // [`Section`](crate::document::RefType::Section) whose reference text
+        // is the doctitle), so an `<<id>>` to it renders the title
+        // rather than the bracketed `[id]` fallback — matching a
+        // cross-reference to an ordinary section.
         #[test]
         fn should_compute_xreftext_to_document_title() {
             verifies!(
@@ -1704,7 +1710,8 @@ mod levels {
 "##
             );
 
-            // A non-matching trailing run is part of the title (nothing to strip).
+            // A non-matching trailing run is part of the title (nothing to
+            // strip).
             let doc = Parser::default().parse("== My Title ===");
             let sec = first_section(&doc);
             assert_eq!(sec.level(), 1);
@@ -1713,9 +1720,9 @@ mod levels {
         }
 
         // The symmetric close must be separated by an ASCII blank (space or
-        // tab), matching Asciidoctor's `CG_BLANK`; a non-breaking space (U+00A0)
-        // before the close is not a valid separator, so the `==` stays part of
-        // the title. (No Ruby counterpart.)
+        // tab), matching Asciidoctor's `CG_BLANK`; a non-breaking space
+        // (U+00A0) before the close is not a valid separator, so the
+        // `==` stays part of the title. (No Ruby counterpart.)
         #[test]
         fn symmetric_close_requires_ascii_blank_not_unicode_whitespace() {
             let doc = Parser::default().parse("== My Title\u{a0}==");
@@ -1740,8 +1747,9 @@ mod levels {
             );
 
             // The straight apostrophe becomes a typographic right single quote,
-            // which the crate emits as the numeric character reference `&#8217;`
-            // in the rendered title (Ruby's test decodes it to `’`).
+            // which the crate emits as the numeric character reference
+            // `&#8217;` in the rendered title (Ruby's test decodes
+            // it to `’`).
             let doc = Parser::default().parse("== What's new?");
 
             let sec = first_section(&doc);
@@ -2096,9 +2104,9 @@ mod substitutions {
         assert_css(&doc, "h2", 1);
         // The heading's inline content is rendered to an HTML string on the
         // `h2` node (not parsed into child elements), so the link and trademark
-        // sign are verified in the rendered title: attribute references resolve,
-        // the macro becomes a link, and `{tm}` → `(TM)` → the trademark sign
-        // (emitted as `&#8482;`).
+        // sign are verified in the rendered title: attribute references
+        // resolve, the macro becomes a link, and `{tm}` → `(TM)` → the
+        // trademark sign (emitted as `&#8482;`).
         assert_eq!(
             first_section(&doc).section_title(),
             r#"<a href="https://acme.com">ACME</a>&#8482;"#
@@ -2164,11 +2172,11 @@ mod nesting {
         assert_eq!(nested.level(), 3);
     }
 
-    // NOTE: The crate now warns generically when a top-level section skips level
-    // 1 (`SectionHeadingLevelSkipped(0, 2)` here; see #754 and the regression
-    // test below), but the exact "expected levels 0 or 1" wording is
-    // book-specific — a level-0 part or level-1 chapter — and the book doctype
-    // is unsupported, so this test remains out of scope.
+    // NOTE: The crate now warns generically when a top-level section skips
+    // level 1 (`SectionHeadingLevelSkipped(0, 2)` here; see #754 and the
+    // regression test below), but the exact "expected levels 0 or 1"
+    // wording is book-specific — a level-0 part or level-1 chapter — and
+    // the book doctype is unsupported, so this test remains out of scope.
     non_normative!(
         r##"
     test 'should warn if chapter title is out of sequence' do
@@ -2226,9 +2234,9 @@ mod nesting {
     // Regression test for #754 — the contrapositive of the `fragment` test
     // above, and the article counterpart of the book-specific `should warn if
     // chapter title is out of sequence` test (which stays out of scope). It has
-    // no direct Ruby test in this suite. Without `fragment`, a top-level section
-    // that skips level 1 directly under the document title is reported as out of
-    // sequence.
+    // no direct Ruby test in this suite. Without `fragment`, a top-level
+    // section that skips level 1 directly under the document title is
+    // reported as out of sequence.
     #[test]
     fn top_level_section_out_of_sequence_warns_without_fragment() {
         let doc = Parser::default().parse("= Document Title\n\n=== First Section\n\ncontent\n");
@@ -2241,8 +2249,9 @@ mod nesting {
     }
 
     // A discrete (`[float]`) heading is not part of the section sequence, so a
-    // discrete heading at the document root does not trigger the out-of-sequence
-    // check even when its level skips ahead. (Also no Ruby counterpart.)
+    // discrete heading at the document root does not trigger the
+    // out-of-sequence check even when its level skips ahead. (Also no Ruby
+    // counterpart.)
     #[test]
     fn discrete_heading_at_document_root_is_not_out_of_sequence() {
         let doc = Parser::default().parse("= Document Title\n\n[float]\n=== Float Heading\n");
@@ -2343,9 +2352,9 @@ mod nesting {
         );
 
         // A `glossary` and a `bibliography` section do not support nested
-        // sections, so each subsection found directly within one is reported, in
-        // document order. An `appendix` section — and an ordinary section —
-        // support subsections and raise no such error.
+        // sections, so each subsection found directly within one is reported,
+        // in document order. An `appendix` section — and an ordinary
+        // section — support subsections and raise no such error.
         let warnings: Vec<_> = doc.warnings().collect();
 
         let special_warnings: Vec<&str> = warnings
@@ -2388,12 +2397,13 @@ mod nesting {
     }
 
     // NOTE: The book variant relies on the `book` doctype and its level-0 (`=`)
-    // special sections (colophon, dedication, glossary, bibliography). The crate
-    // now models a body-level `=` heading as a level-0 section, but it does not
-    // apply the special-section styles or their no-nested-sections rule at level
-    // 0 (that rule is recognized only for level-1 special sections), so this
-    // book variant can't be exercised. It stays out of scope until the book
-    // doctype's parts and special sections are supported.
+    // special sections (colophon, dedication, glossary, bibliography). The
+    // crate now models a body-level `=` heading as a level-0 section, but
+    // it does not apply the special-section styles or their
+    // no-nested-sections rule at level 0 (that rule is recognized only for
+    // level-1 special sections), so this book variant can't be exercised.
+    // It stays out of scope until the book doctype's parts and special
+    // sections are supported.
     non_normative!(
         r##"
     test 'should log error if subsections are found in special sections in book that do not support subsections' do
@@ -2585,7 +2595,8 @@ mod markdown_style_headings {
         );
 
         let doc = Parser::default().parse("=#= My Title");
-        // Not a heading: no sections are produced and the line stays a paragraph.
+        // Not a heading: no sections are produced and the line stays a
+        // paragraph.
         assert!(all_sections(&doc).is_empty());
         assert_eq!(rendered_paragraphs(&doc), vec!["=#= My Title"]);
     }
@@ -2602,11 +2613,12 @@ mod discrete_heading {
     use crate::tests::prelude::*;
 
     // A `[float]`/`[discrete]` style on a level-0 (`=`) heading suppresses the
-    // doctitle promotion and yields a level-0 discrete (floating-title) heading,
-    // just as `==`+ discrete headings do at their own level. As with
-    // the `==`+ cases below, the crate models the heading as a
+    // doctitle promotion and yields a level-0 discrete (floating-title)
+    // heading, just as `==`+ discrete headings do at their own level. As
+    // with the `==`+ cases below, the crate models the heading as a
     // `SectionType::Discrete` block and checks the normative facts against the
-    // AST rather than reproducing the Ruby `class`/following-sibling HTML shape.
+    // AST rather than reproducing the Ruby `class`/following-sibling HTML
+    // shape.
     #[test]
     fn should_create_discrete_heading_instead_of_section_if_style_is_float() {
         verifies!(
@@ -2633,7 +2645,8 @@ mod discrete_heading {
 
         let doc = Parser::default().parse("[float]\n= Independent Heading!\n\nnot in section\n");
 
-        // The level-0 heading must not have been promoted to the document title.
+        // The level-0 heading must not have been promoted to the document
+        // title.
         assert!(doc.header().title().is_none());
         assert_eq!(doc.doctitle(), None);
 
@@ -2647,11 +2660,11 @@ mod discrete_heading {
     }
 
     // The crate marks a discrete heading with `SectionType::Discrete` (verified
-    // via the AST); its virtual DOM renders it like a normal section rather than
-    // a bare `<hN class="discrete">`, so the `class`/following-sibling shape of
-    // the Ruby assertions is not reproduced. The normative facts — a discrete
-    // heading is created (not a section body), with the expected ID and title,
-    // holding no nested content — are checked directly.
+    // via the AST); its virtual DOM renders it like a normal section rather
+    // than a bare `<hN class="discrete">`, so the `class`/following-sibling
+    // shape of the Ruby assertions is not reproduced. The normative facts —
+    // a discrete heading is created (not a section body), with the expected
+    // ID and title, holding no nested content — are checked directly.
     #[test]
     fn should_create_discrete_heading_instead_of_section_if_style_is_discrete() {
         verifies!(
@@ -2717,10 +2730,11 @@ mod discrete_heading {
     }
 
     // Level-0 discrete headings using the shorthand attribute form
-    // (`[float.role#id]` / `[discrete.role#id]`): the `#id` supplies the heading
-    // ID, the `.role` adds a role, and the level-0 doctitle promotion is still
-    // suppressed. As above, the normative facts are checked against
-    // the AST rather than the Ruby `class`/following-sibling HTML shape.
+    // (`[float.role#id]` / `[discrete.role#id]`): the `#id` supplies the
+    // heading ID, the `.role` adds a role, and the level-0 doctitle
+    // promotion is still suppressed. As above, the normative facts are
+    // checked against the AST rather than the Ruby
+    // `class`/following-sibling HTML shape.
     #[test]
     fn should_create_discrete_heading_if_style_is_float_with_shorthand_role_and_id() {
         verifies!(
@@ -2960,9 +2974,9 @@ mod discrete_heading {
         assert_eq!(sec.id(), Some("free"));
     }
 
-    // NOTE: The `float`/role class rendering on discrete headings is not modeled
-    // (the crate renders a discrete heading like a normal section), so the
-    // `class="float isolated"` assertion is out of scope.
+    // NOTE: The `float`/role class rendering on discrete headings is not
+    // modeled (the crate renders a discrete heading like a normal section),
+    // so the `class="float isolated"` assertion is out of scope.
     non_normative!(
         r##"
     test 'should add role to class attribute on discrete heading' do
@@ -2984,8 +2998,8 @@ mod discrete_heading {
 
     // NOTE: The crate does not drop a `title` attribute on a discrete heading;
     // it exposes it as the block title (distinct from the heading text), so
-    // Ruby's `heading.title == 'Independent Heading!'` and the removed-attribute
-    // check do not hold. Out of scope.
+    // Ruby's `heading.title == 'Independent Heading!'` and the
+    // removed-attribute check do not hold. Out of scope.
     non_normative!(
         r##"
     test 'should ignore title attribute on discrete heading' do
@@ -3115,8 +3129,8 @@ mod level_offset {
     // `= Standalone Document` line is not recognized as a section here: the
     // `//`-comment line above it and the `:author:` line below it (no blank
     // lines between) are absorbed with it into a single paragraph, so there is
-    // no level-0 heading to flag. (A cleanly separated body level-0 heading does
-    // now raise `Level0SectionHeadingNotSupported`; see
+    // no level-0 heading to flag. (A cleanly separated body level-0 heading
+    // does now raise `Level0SectionHeadingNotSupported`; see
     // `should_print_error_if_level_0_section_comes_after_nested_section_and_doctype_is_not_book`.)
     // Out of scope.
     non_normative!(
@@ -3197,8 +3211,8 @@ mod level_offset {
         // attribute entry (`:author:`). A comment line (`// begin simulated
         // include::[]`) precedes the heading, which previously caused the
         // heading to be swallowed into a comment-led paragraph and the section
-        // to be dropped under the active `:leveloffset: 1` (see #746). It is now
-        // promoted to a level-1 section like its `==` sibling.
+        // to be dropped under the active `:leveloffset: 1` (see #746). It is
+        // now promoted to a level-1 section like its `==` sibling.
         let doc = Parser::default().parse(
             "= Main Document\nDoc Writer\n\nMain document written by {author}.\n\n:leveloffset: 1\n\n// begin simulated include::[]\n= Standalone Document\n:author: Junior Writer\n\nStandalone document written by {author}.\n\n== Section in Standalone\n\nStandalone section text.\n// end simulated include::[]\n\n:leveloffset!:\n\n== Section in Main\n\nMain section text.\n",
         );
@@ -3479,9 +3493,9 @@ mod section_numbering {
 "##
         );
 
-        // The crate models section numbers on the AST (rather than rendering the
-        // "N. " prefix into the heading text), so the numbers are verified via
-        // `section_number()`.
+        // The crate models section numbers on the AST (rather than rendering
+        // the "N. " prefix into the heading text), so the numbers are
+        // verified via `section_number()`.
         let doc = Parser::default().parse(
             "= Title\n:sectnums:\n\n== Section_1\n\ntext\n\n=== Section_1_1\n\ntext\n\n==== Section_1_1_1\n\ntext\n\n== Section_2\n\ntext\n\n=== Section_2_1\n\ntext\n\n=== Section_2_2\n\ntext\n",
         );
@@ -3768,8 +3782,8 @@ mod section_numbering {
         );
 
         // The crate carries the level on section blocks; it is verified here on
-        // the sections (the per-paragraph level Ruby also asserts is not modeled
-        // as a distinct property).
+        // the sections (the per-paragraph level Ruby also asserts is not
+        // modeled as a distinct property).
         let doc = Parser::default().parse(
             "= Title\n\npreamble\n\n== Section 1\n\nparagraph\n\n=== Section 1.1\n\nparagraph\n",
         );
@@ -3824,8 +3838,8 @@ mod section_numbering {
         );
 
         // Verified on the AST via `section_number()`: sections in the
-        // `:numbered!:` region are unnumbered, and numbering resumes (continuing
-        // the sequence) after `:numbered:`.
+        // `:numbered!:` region are unnumbered, and numbering resumes
+        // (continuing the sequence) after `:numbered:`.
         let doc = Parser::default().parse(
             "= Document Title\n:numbered:\n\n:numbered!:\n\n== Colophon Section\n\n== Another Colophon Section\n\n== Final Colophon Section\n\n:numbered:\n\n== Section One\n\n=== Section One Subsection\n\n== Section Two\n\n== Section Three\n",
         );
@@ -3890,11 +3904,11 @@ mod section_numbering {
 
         // An API-*enabled* `numbered` (`attributes: { 'numbered' => '' }`,
         // modeled here as an `ApiOnly` `with_intrinsic_attribute` on the raw
-        // `numbered` alias) seeds `sectnums` *set*, but a flexible attribute set
-        // through the API is unlocked once the header is parsed — so the body's
-        // `:numbered!:` / `:numbered:` toggles still take effect. The colophon
-        // sections are unnumbered and numbering restarts at `1` after
-        // `:numbered:`.
+        // `numbered` alias) seeds `sectnums` *set*, but a flexible attribute
+        // set through the API is unlocked once the header is parsed —
+        // so the body's `:numbered!:` / `:numbered:` toggles still take
+        // effect. The colophon sections are unnumbered and numbering
+        // restarts at `1` after `:numbered:`.
         let doc = Parser::default()
             .with_intrinsic_attribute("numbered", "", ModificationContext::ApiOnly)
             .parse(
@@ -4410,9 +4424,9 @@ mod special_sections {
 
     // The caption prefix is verified via `caption()` (see the note above about
     // captions being computed on the AST). `decode_char 946` is β (U+03B2) and
-    // `decode_char 947` is γ (U+03B3): the `appendix-number` value is the letter
-    // *before* the first appendix, so `:appendix-number: α` letters the
-    // appendices β and γ.
+    // `decode_char 947` is γ (U+03B3): the `appendix-number` value is the
+    // letter *before* the first appendix, so `:appendix-number: α` letters
+    // the appendices β and γ.
     #[test]
     fn should_allow_appendix_number_to_be_controlled_using_appendix_number_attribute() {
         verifies!(
@@ -4602,9 +4616,9 @@ mod special_sections {
     // (this crate models section numbers on the AST, not as rendered `N.`
     // prefixes) and on behaviors this crate does not model: appendix
     // *subsection* numbering (A.1, …), `sectnumlevels`-limited numbering, book
-    // parts and non-appendix special sections (preface / glossary / bibliography
-    // / dedication / colophon / abstract / index / partintro), table-of-contents
-    // rendering, and the DocBook backend. Out of scope.
+    // parts and non-appendix special sections (preface / glossary /
+    // bibliography / dedication / colophon / abstract / index / partintro),
+    // table-of-contents rendering, and the DocBook backend. Out of scope.
     non_normative!(
         r##"
     test 'should continue numbering after appendix' do
@@ -5295,8 +5309,9 @@ mod heading_patterns_in_blocks {
         );
 
         // A section heading (`== …`) inside a delimited block is literal block
-        // content, not a section: the interior line stays a paragraph inside the
-        // example block, so no `<h2>` is emitted anywhere in the document.
+        // content, not a section: the interior line stays a paragraph inside
+        // the example block, so no `<h2>` is emitted anywhere in the
+        // document.
         let doc = Parser::default().parse("====\n\n== not a heading\n\n====\n");
 
         assert_xpath(&doc, "//h2", 0);
@@ -5743,9 +5758,10 @@ mod table_of_contents {
     }
 
     // NOTE: The remaining tests depend on standalone `#header` framing, the
-    // `toc::[]` macro placement family, `toc-class`/`toc-title` rendered via the
-    // macro, book parts, and exact inner-HTML of TOC entries (icons / inline
-    // formatting) — not modeled by the embedded virtual DOM here. Out of scope.
+    // `toc::[]` macro placement family, `toc-class`/`toc-title` rendered via
+    // the macro, book parts, and exact inner-HTML of TOC entries (icons /
+    // inline formatting) — not modeled by the embedded virtual DOM here.
+    // Out of scope.
     non_normative!(
         r##"
     test 'should output table of contents at location of toc macro' do
@@ -6215,10 +6231,10 @@ mod book_doctype {
         ) && w.source.line() == 7));
     }
 
-    // NOTE: The remaining book-doctype tests all rely on book parts, `partintro`
-    // handling, DocBook output, or Ruby-internal `Block` accessors
-    // (`sectname` / `find_by` / `content_model` / `lines` / `subs`), none of
-    // which this crate models. Out of scope.
+    // NOTE: The remaining book-doctype tests all rely on book parts,
+    // `partintro` handling, DocBook output, or Ruby-internal `Block`
+    // accessors (`sectname` / `find_by` / `content_model` / `lines` /
+    // `subs`), none of which this crate models. Out of scope.
     non_normative!(
         r##"
     test 'should add class matching role to part' do

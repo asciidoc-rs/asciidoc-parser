@@ -8,11 +8,10 @@
 //! (and a bibliography entry) registers its id in the reference catalog, an
 //! image whose `link=` names a dangerous scheme records a warning, and a
 //! `footnote:`/`footnoteref:` macro registers its numbered entry — text and
-//! deferred cross-references included — in the footnote catalog. Design
-//! §5.2's step 6 has to replay the first four from the tree, exactly once per
-//! parse and in the string pipeline's own pass order, which is what
+//! deferred cross-references included — in the footnote catalog.
 //! [`apply_macro_side_effects`](crate::content::inline_builder::apply_macro_side_effects)
-//! is staged to do.
+//! replays the first four from the tree, exactly once per parse and in the
+//! string pipeline's own pass order.
 //!
 //! The **footnote** catalog is the one that cannot be staged, and the builder
 //! has always written it during the build: a footnote's number *is* its
@@ -24,15 +23,15 @@
 //! pipeline wrote down), but against the build itself rather than a replay.
 //!
 //! Until now it was pinned only by hand-written fixtures inside its own
-//! module — one per ordering rule it has to honor. The blast-radius
-//! experiment recorded in the design doc (what breaks if `rendered_html()`
-//! becomes the fold today?) says so in as many words: it "neither calls the
-//! staged side effects nor sequences the fold against resolution". The
-//! sibling harness
+//! module — one per ordering rule it has to honor. The blast-radius question
+//! (what breaks if `rendered_html()` becomes the fold today?) is exactly
+//! this: doing so would neither call the staged side effects nor sequence
+//! the fold against resolution. The sibling harness
 //! [`inline_builder_document_parity`](super::inline_builder_document_parity)
 //! closed the second half of that sentence. This one closes the first.
 //!
-//! The discipline is design §5.3's: two independently-configured parsers see
+//! The discipline is the same one this branch's other fold-parity corpora
+//! use: two independently-configured parsers see
 //! the same fixture, one through the real
 //! [`SubstitutionGroup::Normal`](crate::content::SubstitutionGroup) pipeline
 //! and one through [`build`](crate::content::inline_builder::build) plus the
@@ -40,16 +39,17 @@
 //! catalog entries, in registration order, and the warnings, in the order one
 //! shared list received them.
 //!
-//! The golden side is **frozen** (`snapshots/side_effects.txt`). Its source is
-//! `SubstitutionGroup::apply_string_pipeline`, which design §5.2's step 6 is
-//! about to delete; without the freeze every assertion below would be left
-//! comparing the builder against itself the moment it went. The survey that
-//! scoped that deletion named this corpus as the second of the two
-//! *record-shaped* ones — a flat list of plainly serializable facts, needing a
-//! codec for its own record rather than the `InlineNode` serialization the
-//! tree-shaped corpora still owe. See [`frozen`] for why this one round-trips
-//! the recording rather than comparing bytes, and [`key`] for why it is the
-//! first corpus whose recording key is not the fixture source alone.
+//! The golden side is **frozen** (`snapshots/side_effects.txt`). Its source
+//! was `SubstitutionGroup::apply_string_pipeline`, retired along with the
+//! rest of the crate's string-substitution implementation; without the
+//! freeze every assertion below would now be comparing the builder against
+//! itself. The survey that scoped that retirement named this corpus as the
+//! second of the two *record-shaped* ones — a flat list of plainly serializable
+//! facts, needing a codec for its own record rather than the `InlineNode`
+//! serialization the tree-shaped corpora still owe. See [`frozen`] for why this
+//! one round-trips the recording rather than comparing bytes, and [`key`] for
+//! why it is the first corpus whose recording key is not the fixture source
+//! alone.
 
 use crate::{
     Parser, Span,
@@ -110,11 +110,24 @@ struct FootnoteRecord {
     id: Option<String>,
     text: String,
 
-    /// The entry's deferred cross-reference state, as `FootnoteDeferred`'s
-    /// `Debug` spelling — the template and the segments, in placeholder order.
+    /// The entry's deferred **cross-references**, as
+    /// `FootnoteDeferred::xrefs`'s own `Debug` spelling — every one the
+    /// footnote's text carries, in document order.
     ///
     /// A spelling here for the same reason as `warnings`: an `XrefSegment`
     /// carries seven fields, three of them resolver types of their own.
+    ///
+    /// This is the **segment list alone**, not `FootnoteDeferred`'s whole
+    /// `Debug` (which also has a `template`): the structured
+    /// `XrefTemplatePiece` template a piece-based build produces has no
+    /// spelling the frozen golden — captured from the string pipeline's own
+    /// in-band placeholder template — could ever hold, so comparing the two
+    /// verbatim compares apples to a representation that no longer exists.
+    /// The segment list, unlike the template, is unchanged in shape by that
+    /// switch (an `XrefSegment` is still an `XrefSegment`), so it stays a
+    /// meaningful freeze; the template's own literal bytes are still pinned,
+    /// just via the entry's already-compared [`text`](FootnoteRecord::text)
+    /// rather than via this field.
     deferred: Option<String>,
 
     location: Option<(usize, usize)>,
@@ -155,7 +168,7 @@ fn snapshot(parser: &Parser) -> SideEffects {
                     index: footnote.index,
                     id: footnote.id,
                     text: footnote.text,
-                    deferred: footnote.deferred.map(|d| format!("{d:?}")),
+                    deferred: footnote.deferred.map(|d| format!("{:?}", d.xrefs())),
                     location: footnote.location,
                 })
                 .collect(),
@@ -178,15 +191,16 @@ fn snapshot(parser: &Parser) -> SideEffects {
 /// What the **string pipeline** wrote down, read back from the recording — the
 /// frozen half of every comparison in this module.
 ///
-/// The pipeline still runs, and `recorded` still checks its answer
-/// against the recorded one on every call, so nothing here is taken on trust
-/// while the pipeline exists. What the freeze buys is the day it does not:
-/// `apply_string_pipeline` is this corpus's only golden source, so deleting it
-/// would otherwise leave every assertion below comparing the builder against
-/// itself. Design §5.2's survey named this corpus as the second of the two
-/// *record-shaped* ones — a flat list of plainly serializable facts, needing a
-/// codec for its own record rather than an `InlineNode` serialization — and
-/// this is that codec.
+/// While the pipeline still ran, `recorded` also checked its answer against
+/// the recorded one on every call, so nothing here was taken on trust while
+/// the pipeline existed. What the freeze bought is the day it stopped:
+/// `apply_string_pipeline` was this corpus's only golden source, and it was
+/// retired along with the rest of the crate's string-substitution
+/// implementation; without the freeze every assertion below would now be
+/// comparing the builder against itself. This corpus is the second of
+/// the two *record-shaped* ones — a flat list of plainly serializable facts,
+/// needing a codec for its own record rather than an `InlineNode` serialization
+/// — and this is that codec.
 ///
 /// It is a **round trip** rather than a string comparison for the same reason
 /// the passthrough record corpus's is: the assertions below read the golden's
@@ -471,8 +485,8 @@ fn corpus_parser() -> Parser {
 /// `configure` is called once per side rather than sharing one `Parser`: both
 /// sides register into the parser they are given, so a shared one would see
 /// every entry twice and every duplicate-id warning fire spuriously. The same
-/// two-independent-parsers discipline design §5.3 establishes for the fold's
-/// own corpora.
+/// two-independent-parsers discipline this branch's other fold-parity
+/// corpora use.
 fn side_effects_with(
     source: &str,
     config: &str,
@@ -759,15 +773,15 @@ fn two_shapes_where_a_tree_built_footnote_entry_still_diverges() {
     // diverged for *every* fixture above — and neither is one it can close.
 
     // 1. A passthrough (or a STEM expression) inside a footnote. The string
-    //    pipeline restores a passthrough *after* the macros step, over the whole
-    //    block string — by which time the footnote's text has already been cut out
-    //    of it, so the entry keeps a raw passthrough sentinel that no later pass
-    //    will ever replace. It is one of design §4.2's three sentinel systems
+    //    pipeline restores a passthrough *after* the macros step, over the
+    //    whole block string — by which time the footnote's text has already
+    //    been cut out of it, so the entry keeps a raw passthrough sentinel that
+    //    no later pass will ever replace. It is one of three sentinel systems
     //    leaking into public API, and the tree simply has no sentinels: the
-    //    passthrough is a node, so folding the subtree yields the restored text.
-    //    The tree is *right* here and the string pipeline is wrong, which is why
-    //    this is pinned as a divergence rather than fixed on the tree's side to
-    //    match.
+    //    passthrough is a node, so folding the subtree yields the restored
+    //    text. The tree is *right* here and the string pipeline is wrong, which
+    //    is why this is pinned as a divergence rather than fixed on the tree's
+    //    side to match.
     for (source, string_side, tree_side) in [
         (
             "A footnote:[a +++<b>raw</b>+++ passthrough] here.",
@@ -796,14 +810,14 @@ fn two_shapes_where_a_tree_built_footnote_entry_still_diverges() {
         );
     }
 
-    // 2. A cross-reference inside a **link's display text**. The builder does not
-    //    recognize one there at all — the link family escapes its text rather than
-    //    substituting into it — so the tree holds `CharRef` leaves where the string
-    //    pipeline holds a deferred reference. That is a recognition gap in the
-    //    *link* family, which shows identically outside any footnote (`A
-    //    link:x.html[<<tgt>>] here.` renders `&lt;&lt;tgt&gt;&gt;` in the flow
-    //    either way it is reached); the footnote entry is only where it becomes
-    //    visible in a side effect.
+    // 2. A cross-reference inside a **link's display text**. The builder does
+    //    not recognize one there at all — the link family escapes its text
+    //    rather than substituting into it — so the tree holds `CharRef` leaves
+    //    where the string pipeline holds a deferred reference. That is a
+    //    recognition gap in the *link* family, which shows identically outside
+    //    any footnote (`A link:x.html[<<tgt>>] here.` renders
+    //    `&lt;&lt;tgt&gt;&gt;` in the flow either way it is reached); the
+    //    footnote entry is only where it becomes visible in a side effect.
     let (golden, builder) = side_effects("A footnote:[link:x.html[<<tgt>>]] here.");
 
     assert_eq!(
@@ -1226,10 +1240,11 @@ fn a_real_parse_records_each_side_effect_exactly_once() {
     );
 
     // Pass order, not source order: the auto-link / formal-URL pass runs ahead
-    // of the `link:`/`mailto:` macro pass, so `z` precedes `y` even though it is
-    // written after it. `apply_macro_side_effects` reproduces that ordering
-    // because it composes the families in the string pipeline's own order — the
-    // property `links::apply_link_side_effects` documents for itself.
+    // of the `link:`/`mailto:` macro pass, so `z` precedes `y` even though it
+    // is written after it. `apply_macro_side_effects` reproduces that
+    // ordering because it composes the families in the string pipeline's
+    // own order — the property `links::apply_link_side_effects` documents
+    // for itself.
     assert_eq!(
         catalog.links().to_vec(),
         [
@@ -1273,11 +1288,11 @@ fn a_duplicate_id_warns_once_through_a_real_parse() {
 fn a_description_list_term_still_registers_from_the_string_pipeline() {
     // The carve-out, pinned. A term runs the substitution steps directly rather
     // than through `SubstitutionGroup::apply` (see
-    // `blocks::list_item_marker::DefinedTerm::substitute`), so it builds no tree
-    // and has nothing to replay from — and it stays correct only because it
-    // never enters the suppression window, which lives inside `apply`. Hoisting
-    // the flag to cover a whole parse rather than one pass would drop this
-    // registration silently.
+    // `blocks::list_item_marker::DefinedTerm::substitute`), so it builds no
+    // tree and has nothing to replay from — and it stays correct only
+    // because it never enters the suppression window, which lives inside
+    // `apply`. Hoisting the flag to cover a whole parse rather than one
+    // pass would drop this registration silently.
     let mut parser = Parser::default();
     let doc = parser.parse("[[term-id]]A term:: its description.");
 
@@ -1291,12 +1306,12 @@ fn a_description_list_term_still_registers_from_the_string_pipeline() {
 #[test]
 fn a_passthrough_body_with_its_own_macros_registers_once() {
     // The nesting case the save-and-*restore* exists for. A `pass:` macro with
-    // an explicit substitution list re-enters `SubstitutionGroup::apply` for its
-    // body while the outer content's suppression window is open, and closes a
-    // window of its own on the way out. Restoring the previous value is what
-    // leaves the outer content suppressed for everything *after* the
-    // passthrough; clearing it instead would let the string pipeline record
-    // `outer.png` alongside the replay's copy.
+    // an explicit substitution list re-enters `SubstitutionGroup::apply` for
+    // its body while the outer content's suppression window is open, and
+    // closes a window of its own on the way out. Restoring the previous
+    // value is what leaves the outer content suppressed for everything
+    // *after* the passthrough; clearing it instead would let the string
+    // pipeline record `outer.png` alongside the replay's copy.
     //
     // The body's own image is not catalogued at all, on this branch or before
     // it — a pre-existing gap in how a `pass:`-with-subs body reaches the
@@ -1463,7 +1478,7 @@ fn the_record_codec_round_trips_every_shape() {
                 index: "2".to_string(),
                 id: Some("fid".to_string()),
                 text: "with a reference".to_string(),
-                deferred: Some("FootnoteDeferred { template: \"x\", xrefs: [] }".to_string()),
+                deferred: Some("[]".to_string()),
                 location: Some((12, 34)),
             },
         ],

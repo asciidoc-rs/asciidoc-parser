@@ -36,7 +36,8 @@ fn conditional_warning_in_cell_included_content_keeps_its_origin() {
 
     assert_eq!(unmatched.len(), 1, "expected one unmatched-endif warning");
 
-    // The origin points at the *included* file and line, not the cell's own line.
+    // The origin points at the *included* file and line, not the cell's own
+    // line.
     assert_eq!(
         unmatched[0].origin,
         Some(SourceLine(Some("inc.adoc".to_owned()), 3))

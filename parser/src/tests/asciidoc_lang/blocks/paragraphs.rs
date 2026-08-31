@@ -292,10 +292,10 @@ Another way to solve the problem is to write the paragraph as a literal paragrap
         }
     );
 
-    // Writing the bracketed text as an indented (literal) paragraph and applying
-    // the explicit `[normal]` style attaches `normal` as the block's attribute
-    // list, so the bracketed line is treated as paragraph content rather than as
-    // block metadata, again with no warnings.
+    // Writing the bracketed text as an indented (literal) paragraph and
+    // applying the explicit `[normal]` style attaches `normal` as the
+    // block's attribute list, so the bracketed line is treated as paragraph
+    // content rather than as block metadata, again with no warnings.
     assert_eq!(
         Parser::default().parse("[normal]\n [.rolename]*main text*footnote:[The footnote.]"),
         Document {

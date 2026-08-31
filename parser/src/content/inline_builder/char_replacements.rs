@@ -1,12 +1,15 @@
 //! The character-replacements substitution step.
 
 use super::{
-    quotes::{LevelContext, Piece, build_match_string, emit_range, source_slice},
+    quotes::{
+        LevelContext, Piece, build_match_string, emit_range, level_may_have_replacements,
+        source_slice,
+    },
     special_chars::Masked,
 };
 use crate::{
     Span,
-    content::{CharacterReplacement, character_replacements, maybe_has_replacements},
+    content::{CharacterReplacement, character_replacements},
     inlines::{CharRef, InlineNode},
     parser::CharacterReplacementType,
     strings::CowStr,
@@ -19,72 +22,94 @@ use crate::{
 /// a [`CharRef::Entity`] (a restored named/numeric entity such as `&amp;copy;`
 /// → `&copy;`) leaf.
 ///
-/// Like the string pipeline's step, the rules match over the level's
-/// **escaped** text (built by [`build_match_string`], where a
-/// [`CharRef::Special`] contributes its canonical entity) — which is exactly
-/// why the arrow (`-&gt;`, `&lt;-`) and entity (`&amp;copy;`) rules can
-/// straddle a `Text`/`CharRef` boundary, and, since a
-/// [`synthesized`](super::quotes::Piece::synthesized) run (an
+/// The rules match over the level's **escaped** text (built by
+/// [`build_match_string`], where a [`CharRef::Special`] contributes its
+/// canonical entity) — which is exactly why the arrow (`-&gt;`, `&lt;-`) and
+/// entity (`&amp;copy;`) rules can straddle a `Text`/`CharRef` boundary, and,
+/// since a [`synthesized`](super::quotes::Piece::synthesized) run (an
 /// attribute-expanded value) contributes its own `value` there too, why they
-/// can straddle a `Text`/synthesized-`Text` boundary as well (design §3.4.1) —
-/// pinned by
+/// can straddle a `Text`/synthesized-`Text` boundary as well — pinned by
 /// `attribute_refs::tests::a_replacement_straddling_a_synthesized_and_a_real_piece_is_recognized`.
 /// `root` is the whole-content source span; every leaf's precise `location`
 /// is sliced from it — or, for a leaf recognized *inside* a synthesized run,
-/// falls back to that run's own whole span (design §4.4), since its bytes
-/// have no honest source counterpart of their own.
+/// falls back to that run's own whole span, since its bytes have no honest
+/// source counterpart of their own.
 pub(super) fn apply_character_replacements<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
 ) -> Vec<InlineNode<'src>> {
-    let mut nodes = nodes;
-
-    for repl in character_replacements() {
-        nodes = apply_one_replacement(repl, nodes, root, LevelContext::ROOT);
-    }
-
-    nodes
+    apply_replacements_recursive(nodes, root, LevelContext::ROOT)
 }
 
-/// Applies one [`CharacterReplacement`] rule to `nodes`, first descending into
+/// Applies every [`character_replacements`] rule to `nodes`, descending into
 /// the [`Styled`](crate::inlines::Styled)/[`Ref`](InlineNode::Ref) children
-/// earlier steps created (a replacement inside a span is recognized just as the
-/// string pipeline recognizes one inside a rendered tag), then matching and
-/// replacing at this level.
+/// earlier steps created exactly once (a replacement inside a span is
+/// recognized against the *inside* of that span's own rendered tag) rather
+/// than once per rule: every rule shares the same
+/// [`level_may_have_replacements`] sniff, so descending, and sniffing, once
+/// per level reaches the same leaves whichever rule matches there, without
+/// redoing either for every rule in the `character_replacements` list in
+/// turn.
 ///
-/// `ctx` is the boundary context this level sits in
-/// ([`LevelContext`]): "just as the string pipeline recognizes one inside a
-/// rendered tag" is true of the tag's *inside* only once the tag's own
-/// characters are there to be read, which is what decides an em dash written
-/// against either edge of a span (`*x --*` renders `<strong>x --</strong>`,
-/// the `--` staying literal because `<` follows it in that haystack, not the
-/// end of a line).
-fn apply_one_replacement<'src>(
-    repl: &CharacterReplacement,
+/// `ctx` is the boundary context this level sits in ([`LevelContext`]):
+/// recognition inside a span is scoped to the *inside* of its tag, which only
+/// opens up once the tag's own characters are there to be read — that is what
+/// decides an em dash written against either edge of a span (`*x --*` renders
+/// `<strong>x --</strong>`, the `--` staying literal because `<` follows it in
+/// that haystack, not the end of a line).
+fn apply_replacements_recursive<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
-    let nodes: Vec<InlineNode<'src>> = nodes
-        .into_iter()
-        .map(|node| match node {
-            InlineNode::Styled(mut styled) => {
-                let inner = LevelContext::inside_styled(&styled, ctx);
-                styled.children = apply_one_replacement(repl, styled.children, root, inner);
-                InlineNode::Styled(styled)
-            }
+    // A level with no parent node to descend into — the common leaf-only
+    // case — skips the rebuild of its node vector entirely.
+    let nodes = if nodes
+        .iter()
+        .any(|node| matches!(node, InlineNode::Styled(_) | InlineNode::Ref(_)))
+    {
+        nodes
+            .into_iter()
+            .map(|node| match node {
+                InlineNode::Styled(mut styled) => {
+                    let inner = LevelContext::inside_styled(&styled, ctx);
+                    styled.children = apply_replacements_recursive(styled.children, root, inner);
+                    InlineNode::Styled(styled)
+                }
 
-            InlineNode::Ref(mut reference) => {
-                reference.children =
-                    apply_one_replacement(repl, reference.children, root, LevelContext::INSIDE_REF);
-                InlineNode::Ref(reference)
-            }
+                InlineNode::Ref(mut reference) => {
+                    reference.children = apply_replacements_recursive(
+                        reference.children,
+                        root,
+                        LevelContext::INSIDE_REF,
+                    );
+                    InlineNode::Ref(reference)
+                }
 
-            other => other,
-        })
-        .collect();
+                other => other,
+            })
+            .collect()
+    } else {
+        nodes
+    };
 
-    replace_level(repl, nodes, root, ctx)
+    // Cheap pre-filter, shared by every rule below: none of them can match
+    // when this level has nothing replaceable at all, so this skips all of
+    // them at once rather than letting each rediscover the same answer over
+    // `nodes` on its own turn. `replace_level` does not repeat this check
+    // itself — see its own doc comment for why one pass here already covers
+    // every rule's turn.
+    if !level_may_have_replacements(&nodes) {
+        return nodes;
+    }
+
+    let mut nodes = nodes;
+
+    for repl in character_replacements() {
+        nodes = replace_level(repl, nodes, root, ctx);
+    }
+
+    nodes
 }
 
 /// One character-replacement match at a level, in absolute match-string byte
@@ -126,7 +151,7 @@ impl ReplacementMatch {
 enum ReplacementKind {
     /// An escaped construct (`\(C)`, `\-&gt;`, …): drop the single backslash at
     /// this offset and keep the rest of the match as literal nodes, replacing
-    /// nothing — mirroring the string replacer's `caps[0].replace("\\", "")`.
+    /// nothing.
     Unescape { backslash: usize },
 
     /// A recognized typographic replacement. Only the `consumed` sub-range
@@ -147,6 +172,19 @@ enum ReplacementKind {
 
 /// Matches `repl` over this level's escaped text, replacing each match with the
 /// leaf node(s) it produces and leaving everything else in place.
+///
+/// Takes no [`level_may_have_replacements`] pre-filter of its own: the caller
+/// ([`apply_replacements_recursive`]) already took it once for `nodes` before
+/// entering the rule loop this is called from, and every rule's own leaf —
+/// [`Replace`](ReplacementKind::Replace),
+/// [`Unescape`](ReplacementKind::Unescape),
+/// or [`Entity`](ReplacementKind::Entity) alike — either keeps the matched
+/// text's own trigger characters in place or produces a [`CharRef`] whose
+/// [`charref_entity`](super::quotes::charref_entity) form always starts with
+/// `&`, which the sniff's own `[&']` alternative always answers `true` for.
+/// So once true for a level, the sniff cannot go false again for the rest of
+/// that level's rule loop, and re-taking it on every rule's own turn would
+/// only ever confirm what the caller already established.
 fn replace_level<'src>(
     repl: &CharacterReplacement,
     nodes: Vec<InlineNode<'src>>,
@@ -154,12 +192,6 @@ fn replace_level<'src>(
     ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
     let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
-
-    // Cheap pre-filter: skip the pattern sweep when nothing replaceable is
-    // present at this level.
-    if !maybe_has_replacements(&s) {
-        return nodes;
-    }
 
     // The rule runs over the level wrapped in its enclosing construct's own
     // boundary characters, and every offset it reports is mapped back into the
@@ -183,8 +215,8 @@ fn replace_level<'src>(
     rebuild_replacements(&nodes, &pieces, &s, &matches, root)
 }
 
-/// Finds every non-overlapping match of `repl` in the escaped match string `s`,
-/// left to right, exactly as the string pipeline's `replace_all` does.
+/// Finds every non-overlapping match of `repl` in the escaped match string
+/// `s`, left to right.
 fn find_replacement_matches(repl: &CharacterReplacement, s: &str) -> Vec<ReplacementMatch> {
     let mut matches = Vec::new();
 
@@ -296,9 +328,10 @@ fn rebuild_replacements<'src>(
             }
 
             ReplacementKind::Replace { consumed, value } => {
-                // The gap runs up to `consumed`, absorbing any kept leading word
-                // character; the cursor stops at `consumed.end`, so a kept
-                // trailing letter (the second letter of a `w'w` apostrophe) is
+                // The gap runs up to `consumed`, absorbing any kept leading
+                // word character; the cursor stops at
+                // `consumed.end`, so a kept trailing letter
+                // (the second letter of a `w'w` apostrophe) is
                 // absorbed by the next gap.
                 emit_range(nodes, pieces, cursor..consumed.start, &mut out);
 
@@ -351,13 +384,12 @@ mod tests {
         strings::CowStr,
     };
 
-    /// The string pipeline's recorded output through the **post-replacement**
-    /// step for `source` — what that pipeline produced while it existed: the
-    /// four steps [`build`] runs, in order (special characters, quotes,
-    /// character replacements, post replacement), frozen into
-    /// `snapshots/char_replacements.txt`. Attribute references and macros were
-    /// skipped — exactly as the additive builder skips them — so the fixtures
-    /// deliberately contain neither.
+    /// The frozen recording (see `parser/snapshots/README.md`) through the
+    /// **post-replacement** step for `source`: the four steps [`build`] runs,
+    /// in order (special characters, quotes, character replacements, post
+    /// replacement), frozen into `snapshots/char_replacements.txt`. Attribute
+    /// references and macros were skipped — exactly as the additive builder
+    /// skips them — so the fixtures deliberately contain neither.
     fn golden_replacements(source: &str) -> String {
         crate::content::inline_builder::snapshot::recorded("char_replacements", source)
     }
@@ -366,11 +398,10 @@ mod tests {
     fn a_replacement_at_a_spans_own_edge_reads_that_spans_boundary_characters() {
         // A rule whose pattern reads what surrounds its match — the spaced em
         // dash's `(^|\n| )--( |\n|$)` is the one in this step — must see the
-        // enclosing span's own markup where the string pipeline's flat
-        // haystack holds it, not the start or end of a level. `*x --*` renders
-        // `<strong>x --</strong>`: the `--` stays literal because `<` follows
-        // it there, and a level matched in isolation would take its own end as
-        // the line end the rule wants.
+        // enclosing span's own markup, not the start or end of a level. `*x
+        // --*` renders `<strong>x --</strong>`: the `--` stays literal because
+        // `<` follows it there, and a level matched in isolation would take
+        // its own end as the line end the rule wants.
         for source in [
             // Against either edge, in each variant's own rendering shape.
             "*-- x*",
@@ -385,8 +416,8 @@ mod tests {
             r#""`-- x`""#,
             r#""`x --`""#,
             r#"'`x --`'"#,
-            // Away from either edge, where the rule matches inside the span in
-            // both pipelines.
+            // Away from either edge, where the rule matches inside the span
+            // regardless.
             "*a -- b*",
             "_a -- b_",
             r#""`a -- b`""#,
@@ -400,19 +431,19 @@ mod tests {
             // rather than a boundary one.
             "*one--two*",
             // And the same constructs at the content's own top level, where a
-            // pattern's `^`/`$` is exactly what the string pipeline presents.
+            // pattern's `^`/`$` matches the line boundaries directly.
             "-- x",
             "x --",
             "a -- b",
             // A span *beside* a replacement, where the placeholder standing in
-            // for it is not the space the rule requires — in either pipeline.
+            // for it is not the space the rule requires.
             "*x*-- y",
             "*x* -- y",
         ] {
             assert_eq!(
                 golden_replacements(source),
                 fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from golden for {source:?}"
             );
         }
     }
@@ -424,11 +455,11 @@ mod tests {
         // the context the span itself sits in
         // ([`LevelContext::inside_styled`]). That is right whenever the span
         // is all its parent's level holds — `[width=10]#x --#` at the top
-        // level replaces the dash in both pipelines — and wrong when a sibling
-        // follows it, because the string pipeline's haystack then shows what
-        // that sibling begins with (here a space, which is exactly the em
-        // dash's own trailing class) where the tree shows the parent's closing
-        // markup.
+        // level replaces the dash the same way in the tree and the frozen
+        // recording — and wrong when a sibling follows it, because the
+        // recording's flat haystack then shows what that sibling begins with
+        // (here a space, which is exactly the em dash's own trailing class)
+        // where the tree shows the parent's closing markup.
         //
         // [`LevelContext::child_contexts`] derives exactly that character from
         // a level's siblings for the two steps that can take it, and this step
@@ -451,7 +482,7 @@ mod tests {
             "expected the documented divergence to still reproduce for {source:?}"
         );
 
-        // The string pipeline replaces the *first* dash (a space follows it,
+        // The frozen recording replaces the *first* dash (a space follows it,
         // the transparent span having rendered nothing); the tree leaves both
         // literal.
         assert_eq!(folded, "<strong>x -- --</strong>");
@@ -470,8 +501,8 @@ mod tests {
     fn fold_matches_the_string_pipeline_through_replacements() {
         // For each fixture, folding the single-pass tree (special characters +
         // quotes + character replacements + post replacement) reproduces the
-        // string pipeline's output byte-for-byte. This is the differential
-        // corpus (design §5.3) that pins this increment.
+        // frozen recording's output byte-for-byte. This is the differential
+        // corpus that pins this step.
         let fixtures = [
             // No replacements.
             "plain text",
@@ -559,7 +590,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_replacements(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -586,7 +617,7 @@ mod tests {
 
         assert_eq!(nodes.len(), 1);
         // The logical value is the copyright character; the fold encodes it as
-        // the numeric entity the string pipeline emits.
+        // a numeric entity.
         assert_replacement(&nodes[0], "\u{a9}", "(C)");
 
         assert_eq!(fold_html(&nodes, &HtmlInlineRenderer {}), "&#169;");
@@ -595,7 +626,8 @@ mod tests {
     #[test]
     fn an_arrow_replacement_spans_a_text_and_charref_boundary() {
         // `->` is `-` (text) followed by `&gt;` (a `CharRef::Special` from the
-        // special-characters step), so the arrow rule must match across the two.
+        // special-characters step), so the arrow rule must match across the
+        // two.
         let nodes = build_src(Span::new("a -> b"));
 
         // "a " kept, the arrow leaf over "->", then " b".
@@ -672,8 +704,8 @@ mod tests {
 
     #[test]
     fn a_replacement_inside_a_span_is_recognized() {
-        // A `(C)` inside a strong span is replaced just as the string pipeline
-        // replaces one inside a rendered `<strong>` tag.
+        // A `(C)` inside a strong span is replaced the same way it would be at
+        // the top level.
         let nodes = build_src(Span::new("*Acme (C)*"));
 
         let children = assert_styled(&nodes[0], StyleVariant::Strong, SpanForm::Constrained);
@@ -684,9 +716,9 @@ mod tests {
 
     #[test]
     fn character_replacements_recurse_into_ref_children() {
-        // A reference's display text is subject to replacements, just as the
-        // string pipeline processes it inside the rendered anchor. (No macros
-        // step yet builds `Ref` nodes, so this drives the recursion directly.)
+        // A reference's display text is subject to replacements just like any
+        // other span's. (This constructs the `Ref` node directly, without
+        // running the macros step, to drive the recursion in isolation.)
         let loc = Span::new("(C)");
 
         let reference = InlineNode::Ref(Ref {
@@ -723,11 +755,10 @@ mod tests {
     fn a_later_rule_never_splits_an_earlier_replacement_leaf() {
         // Now that a `CharRef::Replacement` leaf contributes its rendered
         // entity to the match string, a *later* rule in the ordered sweep sees
-        // those bytes — the same ones the string pipeline's own sequential
-        // passes see, which is the point. What such a rule must never do is
-        // match *partially* into one: `rebuild_replacements`' gap would then
-        // clone the whole atomic leaf and emit the new leaf beside it,
-        // duplicating bytes the string pipeline emits once.
+        // those bytes too. What such a rule must never do is match
+        // *partially* into one: `rebuild_replacements`' gap would then clone
+        // the whole atomic leaf and emit the new leaf beside it, duplicating
+        // bytes that should appear once.
         //
         // It cannot, and the reason is structural. Every entity this table
         // produces is `&#…;` — only `&`, `#`, digits and a terminating `;` —
@@ -743,7 +774,8 @@ mod tests {
         // This pins that as behavior rather than as an argument: every
         // replacement-producing token is glued to every token that could
         // extend a match, in both orders and with a word character between, and
-        // each pairing must fold to exactly what the string pipeline emits.
+        // each pairing must fold to exactly what the frozen recording holds
+        // for it.
         let replacements = [
             "(C)",
             "(R)",
@@ -785,7 +817,7 @@ mod tests {
                     assert_eq!(
                         fold_html(&nodes, &HtmlInlineRenderer {}),
                         golden_replacements(&source),
-                        "fold diverged from the string pipeline for {source:?}"
+                        "fold diverged from golden for {source:?}"
                     );
                 }
             }

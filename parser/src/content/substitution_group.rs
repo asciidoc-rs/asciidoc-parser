@@ -244,10 +244,6 @@ impl SubstitutionGroup {
     /// — the one point where the tree exists and nothing has registered from it
     /// yet — and the replay is then told the anchor is already registered, so
     /// it does not raise a second duplicate-id warning for it.
-    ///
-    /// Before this branch's step 6 the term ran the steps directly and
-    /// registered from the string pipeline, which made it the last content
-    /// doing so. It no longer is.
     pub(crate) fn apply_to_description_list_term<'src>(
         &self,
         content: &mut Content<'src>,
@@ -266,24 +262,15 @@ impl SubstitutionGroup {
     ) {
         // The pre-substitution value the build is seeded from.
         //
-        // Unconditional. Every parse builds the tree — the `with_inline_tree`
-        // opt-in and the `build_inline_tree` field that outlived it are both
-        // retired — and the reentrancy guard that was the last remaining reason
-        // to skip one is retired too: nothing re-enters this seam during a
-        // build. A passthrough carrying its own substitution list was the only
-        // caller that ever did, and `passthrough_text` builds and folds its
-        // body's own tree directly through `build_for_group` now.
-        //
-        // The string pipeline no longer runs here at all (design §5.2 Phase 4,
-        // step 6). After the inversion it ran on a discarded clone — a pure
-        // oracle computing a string nobody read, kept only so the differential
-        // corpora could take a golden from the same seam — and the last
-        // production reader of its side products (the carried block title's
-        // placeholder template) now takes the tree's own instead. The callable
-        // itself is gone too: every corpus reads its golden from the frozen
-        // recordings (`inline_builder::snapshot`), and what machinery the
-        // pipeline leaves behind is exercised only by its own unit tests until
-        // the tail deletion takes it whole. The seam is single-pass.
+        // Unconditional: every parse builds the tree, and nothing re-enters
+        // this seam during a build — a passthrough carrying its own
+        // substitution list was the only caller that ever did, and
+        // `passthrough_text` builds and folds its body's own tree directly
+        // through `build_for_group`. The seam is single-pass: nothing else
+        // computes a rendered string here. Every differential corpus reads
+        // its golden from the frozen recordings in `parser/snapshots/`
+        // instead (see `inline_builder::snapshot` and that directory's
+        // README for why).
         let value = content.rendered.clone();
 
         {
@@ -301,11 +288,9 @@ impl SubstitutionGroup {
             // string records its own `attribute-missing` warning at an offset
             // into that string, which is not a position in the document source
             // — `['{missing}']++x++` is the shape, and surfacing it would
-            // anchor a warning nowhere. Before the inversion these were
-            // discarded by being recorded onto the clone; the build holds the
-            // real parser now, so the discard has to be said out loud. It is
+            // anchor a warning nowhere. It is discarded below, using
             // the same `substitution_warnings_len`/`truncate` idiom every other
-            // owned-source substitution in the crate already uses.
+            // owned-source substitution in the crate uses.
             let warnings_before_build = parser.substitution_warnings_len();
 
             let tree = crate::content::inline_builder::build_for_group(
@@ -318,16 +303,12 @@ impl SubstitutionGroup {
 
             // Everything this build recorded into the substitution-warning
             // buffer is incidental (see `warnings_before_build`), and all of it
-            // is discarded. There is no longer an exception: the one that stood
-            // here put back what a *nested authoritative pass* had moved aside,
-            // and no pass runs nested any more — that mechanism's two ends went
-            // with the branch that fed it.
+            // is discarded.
             parser.truncate_substitution_warnings(warnings_before_build);
 
-            // The recognition **diagnostics** the string pipeline's copy of this
-            // content raised into the discarded clone, raised again here where
-            // they are kept — the warning half of "re-attach the recognition
-            // side effects" (design §5.2's step 6).
+            // The recognition **diagnostics** a construct's recognition itself
+            // raises, kept separately from the incidental buffer just
+            // discarded above.
             //
             // A registration has a node to hang on, so it is replayed from the
             // tree below. These five do not: `attribute-missing` drops a
@@ -337,30 +318,24 @@ impl SubstitutionGroup {
             // where they are *recognized* and carried across here — which is
             // what `Parser::record_builder_diagnostic` and
             // `push_substitution_warnings` are for. The builder's own buffer is
-            // still used rather than the parser's warning buffer, and now for
-            // the only reason that was ever load-bearing: a warning the build
+            // used rather than the parser's warning buffer for the reason that
+            // is load-bearing: a warning the build
             // records merely *incidentally* (an `Attrlist` parse over a match
-            // string) must not be swept up with them. Before the inversion that
-            // separation also fell out of the buffer sitting on a clone nobody
-            // read; it does not any more, so this buffer is the whole of it.
+            // string) must not be swept up with them.
             //
-            // Before `apply_macro_side_effects`, deliberately: the string
-            // pipeline raised these during its own pass, ahead of the
-            // registrations the replay performs, and that relative order is
-            // what `inline_builder_side_effect_parity` compares.
+            // Before `apply_macro_side_effects`, deliberately: recognition
+            // raises these ahead of the registrations the replay performs, and
+            // that relative order is what `inline_builder_side_effect_parity`
+            // compares.
             parser.push_substitution_warnings(
                 parser.drain_builder_diagnostics_since(diagnostics_before_build),
             );
 
-            // The deferred cross-references are the **tree's**, not the string
-            // pipeline's — design §5.2's survey item, wired. The two staged
-            // walks read them off the tree already partitioned into the
-            // block-level ones and the ones this content's footnotes carry,
-            // where the string pipeline produced one flat list that had to be
-            // split by asking which of its placeholders survived. What is kept
-            // from the pipeline's own answer is the placeholder template, and
-            // only for the one content that renders from one — see
-            // `Content::set_tree_xrefs`.
+            // The deferred cross-references are the **tree's**: the two walks
+            // below read them off the tree, already partitioned into the
+            // block-level ones and the ones this content's footnotes carry —
+            // rather than a flat list that has to be split by asking which
+            // placeholder survived. See `Content::set_tree_xrefs`.
             //
             // The fold below reads `content.deferred_parts()` for nothing, so
             // the order of these two is a matter of reading rather than of
@@ -371,10 +346,9 @@ impl SubstitutionGroup {
             content.set_tree_xrefs(&tree, &*parser.renderer, &render_context);
 
             // The tree is **authoritative** for the rendered string: what
-            // `rendered_html()` returns is a fold of it, not the string
-            // pipeline's own output (design §5.2 Phase 4, step 6).
+            // `rendered_html()` returns is a fold of it.
             //
-            // Unconditional now, including for content carrying a deferred
+            // Unconditional, including for content carrying a deferred
             // cross-reference. Such a content's rendering is taken *again* at
             // the end of resolution (`Content::refold`), once the destinations
             // are known; what it holds until then is the fold of an unresolved
@@ -389,12 +363,12 @@ impl SubstitutionGroup {
 
             content.rendered = crate::strings::CowStr::from(folded);
 
-            // The recognition side effects the string pipeline just skipped,
-            // replayed from the tree — design §5.2's step 6, "re-attach the
-            // recognition side effects". They run here, after the whole
-            // pipeline rather than during its macros step, which keeps them in
-            // document order across contents and in the string pipeline's own
-            // pass order within one (see `apply_macro_side_effects`).
+            // Every macro family's recognition side effect, replayed from the
+            // finished tree. This runs here, after the whole
+            // pipeline rather than during the macros step itself, which keeps
+            // side effects in document order across contents and in the
+            // crate's own family-pass order within one (see
+            // `apply_macro_side_effects`).
             //
             // A description-list term's own leading-anchor rule runs first,
             // between the build and the replay — see
@@ -417,10 +391,9 @@ impl SubstitutionGroup {
             // sibling call rather than part of the composition above.
             crate::content::inline_builder::apply_callout_side_effects(&tree, parser);
 
-            // `Content::passthroughs()` is a **view over the tree**, the last
-            // of design §5.2's six things `run_pipeline` solely owned. The
-            // extraction pass still builds its own list — the restore pass
-            // indexes into it by sentinel — but that list is now private to
+            // `Content::passthroughs()` is a **view over the tree**. The
+            // extraction pass builds its own list to index into while
+            // restoring, but that list is private to
             // this one pipeline run, and what a caller observes is read back
             // off the tree in document order. See `Passthrough::from_tree`.
             content.set_passthroughs(Passthrough::from_tree(&tree));
@@ -533,10 +506,11 @@ impl SubstitutionGroup {
             // A declared block style reinterprets a simple-content (paragraph)
             // block as another context, which can change the substitution group
             // that applies. This masquerade only affects blocks whose default
-            // group is `Normal`: a delimited block's delimiter already fixes its
-            // group (verbatim, pass, stem, etc.), and Asciidoctor does not let a
-            // style keyword override it. So the mapping below is scoped to
-            // `Normal` blocks, matching Asciidoctor's parser.
+            // group is `Normal`: a delimited block's delimiter already fixes
+            // its group (verbatim, pass, stem, etc.), and
+            // Asciidoctor does not let a style keyword override it.
+            // So the mapping below is scoped to `Normal` blocks,
+            // matching Asciidoctor's parser.
             if result == SubstitutionGroup::Normal
                 && let Some(block_style) = attrlist.nth_attribute(1).and_then(|a| a.block_style())
             {
@@ -612,9 +586,10 @@ mod tests {
 
         #[test]
         fn applies_special_characters_only() {
-            // The `Stem` group applies only the special characters substitution:
-            // `<` is escaped, but quotes (`*bold*`) and attribute references
-            // (`{color}`) are left untouched.
+            // The `Stem` group applies only the special characters
+            // substitution: `<` is escaped, but quotes (`*bold*`)
+            // and attribute references (`{color}`) are left
+            // untouched.
             let mut content = Content::from(crate::Span::new("*a* < {color}"));
             let p = Parser::default();
             SubstitutionGroup::Stem.apply(&mut content, &p, None);
@@ -1264,9 +1239,9 @@ mod tests {
 
         #[test]
         fn non_masquerade_styles_keep_normal() {
-            // Styles whose content model is simple (or compound) keep the normal
-            // substitution group; e.g. `verse` uses normal subs even though its
-            // content model is verbatim.
+            // Styles whose content model is simple (or compound) keep the
+            // normal substitution group; e.g. `verse` uses normal
+            // subs even though its content model is verbatim.
             for style in ["normal", "verse", "quote", "sidebar", "example"] {
                 assert_eq!(
                     resolve(SubstitutionGroup::Normal, style),
@@ -1278,10 +1253,11 @@ mod tests {
 
         #[test]
         fn style_does_not_override_a_delimited_block_group() {
-            // A delimited block's delimiter fixes its substitution group; a style
-            // keyword must not override it (matching Asciidoctor). A `[pass]`
-            // style on a `----`/`....` verbatim block keeps verbatim subs, and a
-            // `[source]` style on a `++++` pass block keeps the pass group.
+            // A delimited block's delimiter fixes its substitution group; a
+            // style keyword must not override it (matching
+            // Asciidoctor). A `[pass]` style on a `----`/`....`
+            // verbatim block keeps verbatim subs, and a `[source]`
+            // style on a `++++` pass block keeps the pass group.
             assert_eq!(
                 resolve(SubstitutionGroup::Verbatim, "pass"),
                 SubstitutionGroup::Verbatim
@@ -1300,8 +1276,9 @@ mod tests {
 
         #[test]
         fn subs_attribute_still_overrides() {
-            // An explicit `subs=` attribute overrides the group regardless of the
-            // block style, and takes precedence over the style masquerade.
+            // An explicit `subs=` attribute overrides the group regardless of
+            // the block style, and takes precedence over the style
+            // masquerade.
             assert_eq!(
                 resolve(SubstitutionGroup::Normal, "listing,subs=normal"),
                 SubstitutionGroup::Normal

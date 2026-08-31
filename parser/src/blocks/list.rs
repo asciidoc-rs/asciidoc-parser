@@ -49,16 +49,10 @@ impl<'src> ListBlock<'src> {
     /// This narrow seam exists for the document-order title resolution pass
     /// (see `document::title_refs`), which installs the re-rendered title
     /// after resolving any cross-references embedded in it. All other access
-    /// goes through the read-only [`IsBlock::title`] accessor.
+    /// goes through the read-only [`IsBlock::title`]/[`IsBlock::title_content`]
+    /// accessors.
     pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         self.title.as_mut()
-    }
-
-    /// Returns the block's title as a read-only [`Content`], if the block has
-    /// one. Used by the inline-tree tests to inspect a block title's own tree.
-    #[cfg(test)]
-    pub(crate) fn title_content(&self) -> Option<&Content<'src>> {
-        self.title.as_ref()
     }
 
     pub(crate) fn parse(
@@ -80,17 +74,18 @@ impl<'src> ListBlock<'src> {
         // A list carries the `bibliography` style in two ways, which differ in
         // scope (matching Asciidoctor):
         //
-        // * An explicit `[bibliography]` attribute marks the list a bibliography
-        //   regardless of its type (even an ordered list).
-        // * A `bibliography` section implicitly marks each of its top-level *unordered*
-        //   lists (only) a bibliography. A nested list never inherits the section
-        //   style, so this is gated on `parent_list_markers` being empty; the list-type
-        //   restriction is applied below, once the type is known.
+        // * An explicit `[bibliography]` attribute marks the list a
+        //   bibliography regardless of its type (even an ordered list).
+        // * A `bibliography` section implicitly marks each of its top-level
+        //   *unordered* lists (only) a bibliography. A nested list never
+        //   inherits the section style, so this is gated on
+        //   `parent_list_markers` being empty; the list-type restriction is
+        //   applied below, once the type is known.
         //
-        // The section only propagates its style to a list that declares no style
-        // of its own — Asciidoctor applies it with `!style && …`, so a list with
-        // an explicit style (e.g. `[square]`) keeps that style and is not treated
-        // as a bibliography.
+        // The section only propagates its style to a list that declares no
+        // style of its own — Asciidoctor applies it with `!style && …`,
+        // so a list with an explicit style (e.g. `[square]`) keeps that
+        // style and is not treated as a bibliography.
         let declared_style = metadata
             .attrlist
             .as_ref()
@@ -109,10 +104,11 @@ impl<'src> ListBlock<'src> {
         loop {
             let next_line_mi = next_item_source.take_normalized_line();
 
-            // A leading blank line ends the list. `ListItem::parse` discards the
-            // blank lines that merely separate items of the same list, so a blank
-            // line surfacing here means it deliberately stopped short of
-            // blank-separated block metadata, which decorates a new, separate
+            // A leading blank line ends the list. `ListItem::parse` discards
+            // the blank lines that merely separate items of the
+            // same list, so a blank line surfacing here means it
+            // deliberately stopped short of blank-separated block
+            // metadata, which decorates a new, separate
             // block rather than the next item (matching Asciidoctor).
             if next_line_mi.item.data().is_empty() {
                 break;
@@ -131,16 +127,18 @@ impl<'src> ListBlock<'src> {
 
             // Parse any block metadata (title, anchor, attribute list) that
             // precedes this item's marker so it is captured on the item rather
-            // than dropped. A metadata line with no intervening blank line keeps
-            // the item in this list (matching Asciidoctor); the blank-separated
-            // case is handled in `ListItem::parse`, which finalizes the previous
+            // than dropped. A metadata line with no intervening blank line
+            // keeps the item in this list (matching Asciidoctor);
+            // the blank-separated case is handled in
+            // `ListItem::parse`, which finalizes the previous
             // item before such metadata.
             //
-            // Only subsequent items can carry their own metadata: the caller has
-            // already consumed any that precedes the list, so the first item's
-            // marker sits at `next_item_source`. Skipping the parse there keeps
-            // the common speculative `ListBlock::parse` on a non-list paragraph
-            // (tried and rejected for every such block) from re-parsing metadata
+            // Only subsequent items can carry their own metadata: the caller
+            // has already consumed any that precedes the list, so
+            // the first item's marker sits at `next_item_source`.
+            // Skipping the parse there keeps the common speculative
+            // `ListBlock::parse` on a non-list paragraph (tried and
+            // rejected for every such block) from re-parsing metadata
             // it has already parsed once.
             //
             // The metadata's own warnings are held until the item is actually
@@ -172,20 +170,21 @@ impl<'src> ListBlock<'src> {
 
             let this_item_marker = list_item_marker_mi.item;
 
-            // If this item's marker doesn't match the existing list marker, we are changing
-            // levels in the list hierarchy.
+            // If this item's marker doesn't match the existing list marker, we
+            // are changing levels in the list hierarchy.
             if let Some(ref first_marker) = first_marker {
                 if !first_marker.is_match_for(&this_item_marker)
                     && parent_list_markers
                         .iter()
                         .any(|parent| parent.is_match_for(&this_item_marker))
                 {
-                    // We matched a parent marker type. This list is complete; roll up the
-                    // hierarchy.
+                    // We matched a parent marker type. This list is complete;
+                    // roll up the hierarchy.
                     break;
                 }
 
-                // Check if the marker is in sequence for explicit ordered lists.
+                // Check if the marker is in sequence for explicit ordered
+                // lists.
                 if let Some(actual_ordinal) = this_item_marker.ordinal_value() {
                     if let Some(expected) = expected_ordinal
                         && actual_ordinal != expected
@@ -212,11 +211,12 @@ impl<'src> ListBlock<'src> {
                 }
             }
 
-            // The bibliography anchor (`[[[id]]]`) is recognized in the principal
-            // text of any item of an explicitly-styled bibliography list, or of an
-            // unordered-list item when the style is inherited from the section.
-            // Pass that context down so the item's inline substitution can detect
-            // it.
+            // The bibliography anchor (`[[[id]]]`) is recognized in the
+            // principal text of any item of an explicitly-styled
+            // bibliography list, or of an unordered-list item when
+            // the style is inherited from the section.
+            // Pass that context down so the item's inline substitution can
+            // detect it.
             let item_is_bibliography = own_style_bibliography
                 || (section_propagated_bibliography
                     && matches!(
@@ -303,17 +303,19 @@ impl<'src> ListBlock<'src> {
             parser.close_callout_list();
         }
 
-        // An unordered list is a checklist (i.e. task list) when at least one of
-        // its items has checkbox syntax. This mirrors Asciidoctor, which sets the
-        // `checklist` option on the list once any item carries a checkbox.
+        // An unordered list is a checklist (i.e. task list) when at least one
+        // of its items has checkbox syntax. This mirrors Asciidoctor,
+        // which sets the `checklist` option on the list once any item
+        // carries a checkbox.
         let is_checklist = type_ == ListType::Unordered
             && items.iter().any(|item| {
                 item.as_list_item()
                     .is_some_and(|li| li.checkbox().is_some())
             });
 
-        // An explicit `[bibliography]` style applies to any list type; the style
-        // inherited from a section applies only to unordered lists.
+        // An explicit `[bibliography]` style applies to any list type; the
+        // style inherited from a section applies only to unordered
+        // lists.
         let is_bibliography = own_style_bibliography
             || (section_propagated_bibliography && type_ == ListType::Unordered);
 
@@ -462,6 +464,10 @@ impl<'src> IsBlock<'src> for ListBlock<'src> {
         self.title.as_ref().map(Content::rendered_str)
     }
 
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
+    }
+
     fn anchor(&'src self) -> Option<Span<'src>> {
         self.anchor
     }
@@ -475,11 +481,12 @@ impl<'src> IsBlock<'src> for ListBlock<'src> {
     }
 
     fn resolved_style(&'src self) -> Option<&'src str> {
-        // A list's resolved style is its declared style, except that a top-level
-        // unordered list in a `bibliography` section resolves to `bibliography`
-        // even though the author declared no style on the list itself (see
-        // [`is_bibliography()`]). The explicit `[bibliography]` case is already
-        // covered by the declared style.
+        // A list's resolved style is its declared style, except that a
+        // top-level unordered list in a `bibliography` section resolves
+        // to `bibliography` even though the author declared no style on
+        // the list itself (see [`is_bibliography()`]). The explicit
+        // `[bibliography]` case is already covered by the declared
+        // style.
         //
         // [`is_bibliography()`]: Self::is_bibliography
         self.declared_style()
@@ -1420,9 +1427,10 @@ mod tests {
 
         #[test]
         fn a_declared_style_suppresses_the_inherited_bibliography() {
-            // A list that declares its own style keeps it and is not treated as a
-            // bibliography, mirroring Asciidoctor's `!style` guard: the section
-            // style is applied only when the list has no style of its own.
+            // A list that declares its own style keeps it and is not treated as
+            // a bibliography, mirroring Asciidoctor's `!style`
+            // guard: the section style is applied only when the
+            // list has no style of its own.
             with_first_section_list(
                 "[bibliography]\n== References\n\n[square]\n* An entry.\n",
                 |list| {
@@ -1448,10 +1456,11 @@ mod tests {
     fn orphaned_title_after_continuation_is_discarded() {
         // Exercises the "If there's block metadata but no block, just discard
         // it and continue." path in ListItem::parse (circa line 368 of
-        // list_item.rs). A `+` continuation followed by a block title (`.Title`)
-        // and then an empty line means the title is orphaned (no block
-        // immediately follows). The title metadata is discarded and the
-        // subsequent paragraph is parsed as a continuation block.
+        // list_item.rs). A `+` continuation followed by a block title
+        // (`.Title`) and then an empty line means the title is orphaned
+        // (no block immediately follows). The title metadata is
+        // discarded and the subsequent paragraph is parsed as a
+        // continuation block.
         let list = list_parse("* item one\n+\n.Title\n\nsecond paragraph").unwrap();
 
         // The list should have one item.
@@ -1631,10 +1640,13 @@ mod tests {
     }
 
     mod has_empty_principal_text {
-        use crate::blocks::{Block, FindBlocks};
+        use crate::{
+            Document,
+            blocks::{Block, FindBlocks, ListItem},
+        };
 
         /// Returns the child list items of the first (list) block in `doc`.
-        fn items<'a>(doc: &'a crate::Document<'a>) -> Vec<&'a crate::blocks::ListItem<'a>> {
+        fn items<'a>(doc: &'a Document<'a>) -> Vec<&'a ListItem<'a>> {
             let Some(Block::List(list)) = doc.child_blocks().next() else {
                 panic!("expected a list block");
             };
@@ -1646,11 +1658,12 @@ mod tests {
 
         #[test]
         fn empty_principal_with_continuation_keeps_attached_block() {
-            // An empty (`{empty}`) principal followed by a continuation-attached
-            // listing: the principal-text node is dropped, so the listing is the
-            // item's only child block, but the item records the empty principal
-            // text so a renderer knows the listing is an attached block (and can
-            // emit the empty principal paragraph ahead of it).
+            // An empty (`{empty}`) principal followed by a
+            // continuation-attached listing: the principal-text
+            // node is dropped, so the listing is the item's only
+            // child block, but the item records the empty principal
+            // text so a renderer knows the listing is an attached block (and
+            // can emit the empty principal paragraph ahead of it).
             let doc = crate::Parser::default().parse(". {empty}\n+\n----\nprint(\"one\")\n----\n");
             let items = items(&doc);
 
@@ -1673,14 +1686,16 @@ mod tests {
             assert!(items[0].has_empty_principal_text());
             assert_eq!(items[0].child_blocks().count(), 0);
 
-            // The second item has ordinary principal text, so the flag is clear.
+            // The second item has ordinary principal text, so the flag is
+            // clear.
             assert!(!items[1].has_empty_principal_text());
         }
 
         #[test]
         fn non_empty_principal_with_continuation_is_not_flagged() {
-            // The contrasting case from the issue: with non-empty principal text,
-            // the principal is the first child block and the flag is clear.
+            // The contrasting case from the issue: with non-empty principal
+            // text, the principal is the first child block and the
+            // flag is clear.
             let doc = crate::Parser::default().parse(". text\n+\n----\nprint(\"one\")\n----\n");
             let items = items(&doc);
 

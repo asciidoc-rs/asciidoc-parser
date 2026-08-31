@@ -13,6 +13,7 @@ rust-version = "1.88.0"
 version = "0.30.0"
 
 [dependencies]
+ahash = "0.8.12"
 bytecount = "0.6.7"
 memchr = "2.6.4"
 percent-encoding = "2.3.2"
@@ -32,6 +33,10 @@ name = "element_attributes"
 [[bench]]
 harness = false
 name = "inline_macro"
+
+[[bench]]
+harness = false
+name = "inline_throughput"
 
 [[bench]]
 harness = false

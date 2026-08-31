@@ -1043,7 +1043,8 @@ mod tests {
 
         #[test]
         fn rem_too_long() {
-            // This is nonsense input, but we should at least not panic in this case.
+            // This is nonsense input, but we should at least not panic in this
+            // case.
 
             let source = advanced_span("abcdef", 6);
             let after = crate::Span::new("abcdef_bogus_bogus");

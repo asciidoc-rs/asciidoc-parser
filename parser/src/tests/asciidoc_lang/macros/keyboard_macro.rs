@@ -100,8 +100,8 @@ You can find example of these cases in the example below.
         // A trailing backslash key must be followed by a space so it is not
         // mistaken for an escape...
         assert_eq!(render("kbd:[\\ ]"), "<kbd>\\</kbd>");
-        // ...and a closing square bracket key must be escaped with a backslash so
-        // the macro does not end prematurely.
+        // ...and a closing square bracket key must be escaped with a backslash
+        // so the macro does not end prematurely.
         assert_eq!(
             render("kbd:[Ctrl+\\]]"),
             r#"<span class="keyseq"><kbd>Ctrl</kbd>+<kbd>]</kbd></span>"#
@@ -125,11 +125,13 @@ include::example$ui.adoc[tag=key]
 "#
         );
 
-        // The example above pulls in `example$ui.adoc[tag=key]`. The spec-coverage
-        // tool can't follow includes, so the included table is reproduced here and
-        // parsed directly (with `experimental` set, as the UI macros require). Each
-        // `Shortcut` cell exercises a documented case: a lone key, key sequences,
-        // the backslash-plus-space escape, and the escaped closing bracket.
+        // The example above pulls in `example$ui.adoc[tag=key]`. The
+        // spec-coverage tool can't follow includes, so the included
+        // table is reproduced here and parsed directly (with
+        // `experimental` set, as the UI macros require). Each
+        // `Shortcut` cell exercises a documented case: a lone key, key
+        // sequences, the backslash-plus-space escape, and the escaped
+        // closing bracket.
         let input = format!(
             ":experimental:\n\n{}",
             r#"|===

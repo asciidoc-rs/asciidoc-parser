@@ -742,8 +742,8 @@ TIP: The order of ID and role values in the shorthand syntax does not matter.
         );
 
         // The role-then-id ordering from the example above (`.movie#roads`) and
-        // the reverse, id-then-role ordering (`#roads.movie`) assign the same ID
-        // and role: the shorthand is order-independent.
+        // the reverse, id-then-role ordering (`#roads.movie`) assign the same
+        // ID and role: the shorthand is order-independent.
         let mut parser = Parser::default();
         let role_then_id = crate::blocks::Block::parse(
             crate::Span::new("[quote.movie#roads]\n____\nRoads?\n____"),
@@ -1720,8 +1720,8 @@ include::example$id.adoc[tag=anchor-wrong]
         );
 
         // An anchor in front of a list marker does not produce a list item. The
-        // line is parsed as an ordinary paragraph: the inline anchor is rendered
-        // and registered, and the `*` is left as literal text.
+        // line is parsed as an ordinary paragraph: the inline anchor is
+        // rendered and registered, and the `*` is left as literal text.
         let doc = Parser::default().parse("[[anchor-point]]* list item with invalid anchor");
 
         let block = doc.child_blocks().next().unwrap();
@@ -1802,8 +1802,8 @@ The remaining anchors are auxiliary and are used for making deep links (i.e., ac
 "#
         );
 
-        // Each anchor is rendered as an invisible anchor point and registered so
-        // that it can be the target of a deep link.
+        // Each anchor is rendered as an invisible anchor point and registered
+        // so that it can be the target of a deep link.
         let doc = Parser::default().parse("* [[a1]][[a2]]Item");
 
         assert!(doc.catalog().contains_id("a1"));
@@ -1829,8 +1829,8 @@ You can assign an ID to a table cell by placing an inline anchor at the start of
 "#
         );
 
-        // The inline anchor at the start of the cell is registered as the cell's
-        // referenceable ID.
+        // The inline anchor at the start of the cell is registered as the
+        // cell's referenceable ID.
         let doc =
             Parser::default().parse("|===\n|[[my_cell]]The table cell I want to jump to.\n|===");
 
@@ -1855,8 +1855,9 @@ include::example$id.adoc[tag=inline-anchor-brackets]
 "#
         );
 
-        // The anchor adjacent to the inline image is rendered as an anchor point
-        // immediately before the image and registered as a referenceable ID.
+        // The anchor adjacent to the inline image is rendered as an anchor
+        // point immediately before the image and registered as a
+        // referenceable ID.
         let doc = Parser::default().parse("[[tiger-image]]image:tiger.png[Image of a tiger]");
 
         let block = doc.child_blocks().next().unwrap();

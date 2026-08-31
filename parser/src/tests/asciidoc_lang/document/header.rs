@@ -187,8 +187,8 @@ These implicit content lines are used to assign xref:author-information.adoc[] a
         );
     }
 
-    // Treating as non-normative because these conditions are well-verified in the
-    // test suite for header parsing.
+    // Treating as non-normative because these conditions are well-verified in
+    // the test suite for header parsing.
     non_normative!(
         r#"
 The header may contain the following elements as long as there aren't any empty lines between them:

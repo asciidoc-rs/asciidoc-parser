@@ -4,25 +4,28 @@
 //! [`IsBlock::inlines`](crate::blocks::IsBlock) — and for the resolution
 //! machinery that installs cross-reference destinations back into it.
 //!
-//! This began life as `inline_recorder.rs`, the Strategy-A recorder's own
-//! corpus. The recorder — a `RecordingRenderer` that recovered a tree from the
-//! string pipeline's rendered output — retired with the string pipeline it
-//! wrapped (design §5.2 Phase 4, step 6); its corpus tests, which compared
+//! This began life as `inline_recorder.rs`, the corpus for a since-retired
+//! `RecordingRenderer` that recovered a tree from the string pipeline's
+//! rendered output. That recorder retired along with the string pipeline it
+//! wrapped; its corpus tests, which compared
 //! its tree against that pipeline's own bytes, could only ever compare the
 //! pipeline against itself once both were gone, so they went with it. What
 //! stayed is everything here: tests whose subject is the single-pass
 //! builder's tree as production builds, resolves, and re-folds it.
 
 use crate::{
-    Parser, Span,
-    blocks::FindBlocks,
+    Document, Parser, Span,
+    blocks::{Block, FindBlocks},
     content::Content,
-    inlines::{CharRef, InlineNode, RefVariant, SpanForm, StyleVariant},
+    inlines::{CharRef, Footnote, InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
+    parser::{
+        InlineRenderer, ReferenceResolver, ResolutionContext, ResolvedReference, SpecialCharacter,
+    },
 };
 
 /// Collects the rendered inline content of every content-bearing location in
 /// `doc`, in a fixed document order.
-fn collect_rendered(doc: &crate::Document<'_>) -> Vec<String> {
+fn collect_rendered(doc: &Document<'_>) -> Vec<String> {
     use crate::blocks::{Block, IsBlock, TableCellContent, TableRow};
 
     fn cells(row: &TableRow<'_>, out: &mut Vec<String>) {
@@ -78,7 +81,7 @@ fn collect_rendered(doc: &crate::Document<'_>) -> Vec<String> {
 }
 
 /// Collects the first simple block's content from a parsed document.
-fn first_simple_inlines<'a>(doc: &'a crate::Document<'a>) -> &'a [InlineNode<'a>] {
+fn first_simple_inlines<'a>(doc: &'a Document<'a>) -> &'a [InlineNode<'a>] {
     use crate::blocks::Block;
 
     for block in doc.child_blocks() {
@@ -93,7 +96,7 @@ fn first_simple_inlines<'a>(doc: &'a crate::Document<'a>) -> &'a [InlineNode<'a>
 /// The rendered (string-pipeline) content of the first simple block in `doc` —
 /// the counterpart of [`first_simple_inlines`], for a test that pins both
 /// views of the same content.
-fn first_simple_rendered<'a>(doc: &'a crate::Document<'a>) -> &'a str {
+fn first_simple_rendered<'a>(doc: &'a Document<'a>) -> &'a str {
     use crate::blocks::Block;
 
     for block in doc.child_blocks() {
@@ -135,8 +138,8 @@ struct OrdinalRenderer {
     calls: std::cell::Cell<usize>,
 }
 
-impl crate::parser::InlineRenderer for OrdinalRenderer {
-    fn render_special_character(&self, _type_: crate::parser::SpecialCharacter, dest: &mut String) {
+impl InlineRenderer for OrdinalRenderer {
+    fn render_special_character(&self, _type_: SpecialCharacter, dest: &mut String) {
         self.calls.set(self.calls.get() + 1);
         dest.push_str(&format!("[{}]", self.calls.get()));
     }
@@ -195,15 +198,15 @@ fn the_three_non_specialcharacters_bodies_still_consult_the_renderer() {
     // *specialcharacters* body, so no `RawForm` describes it and it has to be
     // computed at build time, against the parse's renderer.
     //
-    //   - `pass:c,q[…]` and `stem:[…]` each run an **arbitrary substitution list**,
-    //     which is a whole pipeline.
-    //   - a bare `+…+` body enclosing an already-extracted construct interleaves
-    //     escaped text with that construct's own **fold** bytes, which is a mixture
-    //     rather than a form.
+    //   - `pass:c,q[…]` and `stem:[…]` each run an **arbitrary substitution
+    //     list**, which is a whole pipeline.
+    //   - a bare `+…+` body enclosing an already-extracted construct
+    //     interleaves escaped text with that construct's own **fold** bytes,
+    //     which is a mixture rather than a form.
     //
     // All three owe `render_with` the same debt every frozen value on this
-    // branch does (design §3.3.1), and when that lands this test is what should
-    // start failing.
+    // branch does, and when that lands this test is what should start
+    // failing.
     for source in ["pass:c[a < b]", "stem:[x < y]", "+a $$b < c$$ d+"] {
         let calls = renderer_calls_while_building(source);
 
@@ -268,11 +271,11 @@ fn a_passthrough_body_is_substituted_once_per_apply() {
     // string pipeline's own substitutions of the body ran on the shared
     // renderer even though their output was discarded with the clone, and
     // those renders ended when the pipeline stopped running at the seam —
-    // exactly the transitional double render the design doc said would end
-    // "for all of them together, when step 6 takes the string pipeline off
-    // the production path". What remains is the body's one authoritative
-    // render at build time (`passthrough_text`), whose `Raw` leaf the fold
-    // then emits verbatim.
+    // exactly the transitional double render that was always going to end
+    // for all of them together, once the string pipeline came off the
+    // production path. What remains is the body's one authoritative render
+    // at build time (`passthrough_text`), whose `Raw` leaf the fold then
+    // emits verbatim.
     //
     // The exact number is not the claim; that the three agree is.
     for source in ["pass:c[a < b]", "pass:c,q[*a < b*]", "stem:[x < y]"] {
@@ -421,7 +424,7 @@ fn is_block_inlines_is_none_for_a_block_without_direct_content() {
 
 /// Names the [`Block`](crate::blocks::Block) variant, so a test can assert its
 /// fixture reaches every one.
-fn block_variant_name(block: &crate::blocks::Block<'_>) -> &'static str {
+fn block_variant_name(block: &Block<'_>) -> &'static str {
     use crate::blocks::Block;
 
     match block {
@@ -475,10 +478,11 @@ fn is_block_inlines_matches_rendered_html_content_across_every_block_kind() {
     for block in doc.descendant_blocks() {
         seen.insert(block_variant_name(block));
 
-        // `inlines()` is the structured counterpart of `rendered_html_content()`:
-        // the same content-bearing blocks carry each, so their presence agrees
-        // for every kind (this also drives every `Block::inlines()` dispatch
-        // arm and each block type's override).
+        // `inlines()` is the structured counterpart of
+        // `rendered_html_content()`: the same content-bearing blocks
+        // carry each, so their presence agrees for every kind (this
+        // also drives every `Block::inlines()` dispatch arm and each
+        // block type's override).
         assert_eq!(
             block.inlines().is_some(),
             block.rendered_html_content().is_some(),
@@ -518,9 +522,9 @@ fn is_block_inlines_matches_rendered_html_content_across_every_block_kind() {
 fn is_block_inlines_carries_a_real_tree_for_each_content_bearing_kind() {
     use crate::blocks::{Block, FindBlocks, IsBlock};
 
-    // Beyond `Some` vs `None`, the override bodies for the content-bearing block
-    // kinds must return the *actual* parsed tree — so a formatting construct in
-    // each shows up as a `Styled` node, not an empty slice.
+    // Beyond `Some` vs `None`, the override bodies for the content-bearing
+    // block kinds must return the *actual* parsed tree — so a formatting
+    // construct in each shows up as a `Styled` node, not an empty slice.
     let mut parser = Parser::default();
     let doc = parser.parse(concat!(
         "NOTE: A _note_.\n\n",
@@ -607,7 +611,7 @@ fn inline_tree_for_none_group_content_is_the_untouched_seed() {
     // string pipeline leaving the text unchanged. It is not a *single* `Text`
     // run, though: because no `SpecialCharacters` step ever acted on it, each
     // literal `<`/`>`/`&` is a `Raw` leaf the fold emits verbatim rather than
-    // a `Text` character the fold would escape (design §3.4.1).
+    // a `Text` character the fold would escape.
     let mut parser = Parser::default();
     let doc = parser.parse("[pass]\n<b>raw</b> and *not bold*\n");
 
@@ -664,8 +668,8 @@ fn inline_tree_for_a_listing_block_carries_callout_nodes() {
 
 #[test]
 fn the_xref_mirror_correlates_the_form_that_used_to_defer() {
-    // The counterpart of the deferral divergence (design §5.2's step 6), seen
-    // from resolution.
+    // The counterpart of the deferral divergence that closed with the
+    // string-substitution pipeline's retirement, seen from resolution.
     //
     // `xref:sec[a *b, c* d,role=hl]` used to be deferred by the builder,
     // because the string replacer splits the attribute list over the span's
@@ -903,7 +907,7 @@ fn a_footnote_subtree_that_defers_a_reference_form_still_mirrors_what_it_holds()
 
 /// Collects every cross-reference/link node found inside footnote subtrees of
 /// simple blocks in `doc`.
-fn collect_footnote_refs<'a>(doc: &'a crate::Document<'a>) -> Vec<crate::inlines::Ref<'a>> {
+fn collect_footnote_refs<'a>(doc: &'a Document<'a>) -> Vec<Ref<'a>> {
     use crate::blocks::Block;
 
     fn walk<'a>(
@@ -977,11 +981,11 @@ fn inline_tree_numbers_footnotes_in_document_order() {
 // catalog), a cross-reference in the inline tree carries the same resolved
 // destination the rendered string reflects — so a consumer that walks
 // `inlines()` sees resolved xrefs, not just the parse-time `resolved: None`
-// state the tree is first built with (design §4.3).
+// state the tree is first built with.
 
 /// Collects every [`Ref`](InlineNode::Ref) node from the simple blocks of
 /// `doc`, recursing into formatting spans and reference children.
-fn collect_refs<'a>(doc: &'a crate::Document<'a>) -> Vec<crate::inlines::Ref<'a>> {
+fn collect_refs<'a>(doc: &'a Document<'a>) -> Vec<Ref<'a>> {
     use crate::blocks::Block;
 
     fn walk<'a>(nodes: &[InlineNode<'a>], out: &mut Vec<crate::inlines::Ref<'a>>) {
@@ -1106,7 +1110,8 @@ fn inline_tree_resolution_walks_past_a_footnote_and_a_link() {
         Some("#tgt")
     );
 
-    // ... the link (a `Ref` of variant `Link`) is left untouched by resolution ...
+    // ... the link (a `Ref` of variant `Link`) is left untouched by resolution
+    // ...
     let link = refs
         .iter()
         .find(|r| r.variant == RefVariant::Link)
@@ -1127,9 +1132,9 @@ fn inline_tree_resolution_walks_past_a_footnote_and_a_link() {
 fn inline_tree_same_target_refs_keep_per_reference_resolution() {
     // Two references to the same target, resolved by a custom resolver that
     // varies its destination by the reference's provided text. Correlating each
-    // tree node with its own segment positionally (rather than keying by target)
-    // gives each node its own destination instead of collapsing both onto the
-    // first.
+    // tree node with its own segment positionally (rather than keying by
+    // target) gives each node its own destination instead of collapsing
+    // both onto the first.
     use crate::parser::{
         HtmlInlineRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
     };
@@ -1212,25 +1217,22 @@ fn inline_tree_xref_resolution_matches_the_rendered_string() {
 #[test]
 fn inline_tree_build_tolerates_a_stateful_renderer() {
     /// A renderer whose output depends on mutable internal state: it emits
-    /// different bytes on each invocation. Under the retired Strategy-A
-    /// recorder, tree building re-ran the whole pipeline through the shared
-    /// renderer instance, so such a renderer poisoned the recorded tree (and a
-    /// debug assertion rejected it). The single-pass builder derives the tree
-    /// from source instead — a `CharRef` node carries the *logical* character,
-    /// not renderer output — so a stateful renderer is now safe: the
-    /// authoritative rendered string sees the renderer's stateful bytes, and
+    /// different bytes on each invocation. Under the retired
+    /// `RecordingRenderer` (see the module doc), tree building re-ran the
+    /// whole pipeline through the shared renderer instance, so such a
+    /// renderer poisoned the recorded tree (and a debug assertion rejected
+    /// it). The single-pass builder derives the tree from source instead —
+    /// a `CharRef` node carries the *logical* character, not renderer
+    /// output — so a stateful renderer is now safe: the authoritative
+    /// rendered string sees the renderer's stateful bytes, and
     /// the tree stays logical.
     #[derive(Debug, Default)]
     struct FlipRenderer {
         flipped: std::cell::Cell<bool>,
     }
 
-    impl crate::parser::InlineRenderer for FlipRenderer {
-        fn render_special_character(
-            &self,
-            _type_: crate::parser::SpecialCharacter,
-            dest: &mut String,
-        ) {
+    impl InlineRenderer for FlipRenderer {
+        fn render_special_character(&self, _type_: SpecialCharacter, dest: &mut String) {
             if self.flipped.replace(true) {
                 dest.push_str("[second]");
             } else {
@@ -1286,12 +1288,12 @@ fn inline_tree_build_tolerates_a_stateful_renderer() {
 // per-content pass cannot. That pass now mirrors each resolved destination into
 // the title's own inline tree, so a consumer that walks a title's `inlines()`
 // sees the same destinations the rendered title reflects — closing the
-// section-/block-title follow-up of Phase 2 step 2 (design §4.3).
+// section-/block-title follow-up of Phase 2 step 2.
 
 /// Collects every cross-reference/link node from the inline tree of every
 /// section heading in `doc`, recursing into nested sections and into formatting
 /// spans and reference children within each title.
-fn collect_section_title_refs<'a>(doc: &'a crate::Document<'a>) -> Vec<crate::inlines::Ref<'a>> {
+fn collect_section_title_refs<'a>(doc: &'a Document<'a>) -> Vec<Ref<'a>> {
     use crate::blocks::{Block, FindBlocks};
 
     fn refs_in<'a>(nodes: &[InlineNode<'a>], out: &mut Vec<crate::inlines::Ref<'a>>) {
@@ -1353,10 +1355,10 @@ fn section_title_forward_xref_is_resolved_in_the_tree() {
 
 #[test]
 fn circular_section_title_xrefs_are_both_resolved_in_the_tree() {
-    // Two headings reference each other. The title pass breaks the cycle for the
-    // rendered link *text*, but each reference still resolves to its target's
-    // destination — and both destinations are now mirrored into the two
-    // headings' trees.
+    // Two headings reference each other. The title pass breaks the cycle for
+    // the rendered link *text*, but each reference still resolves to its
+    // target's destination — and both destinations are now mirrored into
+    // the two headings' trees.
     let mut parser = Parser::default();
     let doc = parser.parse("[#a]\n== See <<b>>\n\n[#b]\n== See <<a>>\n");
 
@@ -1403,7 +1405,7 @@ fn block_title_xref_is_resolved_in_the_tree() {
     let doc =
         parser.parse("[[tgt]]The target paragraph.\n\n.See <<tgt>>\nA captioned paragraph.\n");
 
-    use crate::blocks::Block;
+    use crate::blocks::{Block, IsBlock};
 
     let title = doc
         .child_blocks()
@@ -1440,13 +1442,14 @@ fn block_title_xref_is_resolved_in_the_tree() {
 
 #[test]
 fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
-    // Resolving a document twice, the second time with a resolver that no longer
-    // recognizes the title's target, must leave the title tree's `Ref` node
-    // *unresolved* — not stale at the first pass's destination. The title pass
-    // rebuilds the ordered destinations each run (the template, and so the list
-    // length, is stable), and the mirror overwrites each slot unconditionally
-    // (to `Some` or `None`), so the tree tracks the rendered title rather than
-    // retaining a superseded link.
+    // Resolving a document twice, the second time with a resolver that no
+    // longer recognizes the title's target, must leave the title tree's
+    // `Ref` node *unresolved* — not stale at the first pass's destination.
+    // The title pass rebuilds the ordered destinations each run (the
+    // template, and so the list length, is stable), and the mirror
+    // overwrites each slot unconditionally (to `Some` or `None`), so the
+    // tree tracks the rendered title rather than retaining a superseded
+    // link.
     use crate::parser::{
         HtmlInlineRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
     };
@@ -1464,7 +1467,7 @@ fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
 
     /// The resolved `href` of the first cross-reference in any section heading,
     /// scoped so the tree borrow is released before the next resolution.
-    fn title_xref_href(doc: &crate::Document<'_>) -> Option<String> {
+    fn title_xref_href(doc: &Document<'_>) -> Option<String> {
         collect_section_title_refs(doc)
             .iter()
             .find(|r| r.variant == RefVariant::Xref)
@@ -1475,8 +1478,8 @@ fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
     let mut parser = Parser::default();
     let mut doc = parser.parse_deferred("== See <<tgt>>\n\n[#tgt]\n== Target\n");
 
-    // First pass: the resolver recognizes the target, so the heading's tree xref
-    // carries its destination.
+    // First pass: the resolver recognizes the target, so the heading's tree
+    // xref carries its destination.
     doc.resolve_references(
         &FixedResolver(Some("#tgt")),
         &HtmlInlineRenderer {},
@@ -1484,8 +1487,9 @@ fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
     );
     assert_eq!(title_xref_href(&doc).as_deref(), Some("#tgt"));
 
-    // Second pass: the resolver no longer recognizes the target, so the tree xref
-    // must fall back to unresolved rather than keep the stale destination.
+    // Second pass: the resolver no longer recognizes the target, so the tree
+    // xref must fall back to unresolved rather than keep the stale
+    // destination.
     doc.resolve_references(&FixedResolver(None), &HtmlInlineRenderer {}, &parser);
     assert_eq!(
         title_xref_href(&doc),
@@ -1507,14 +1511,14 @@ fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
 // cross-reference *inside* a footnote is re-homed out of the block template
 // when the footnote text is extracted, so it lives in that subtree, and the
 // shared mirror now installs its resolved destination there — the same
-// destination the rendered footnote text reflects (design §4.3).
+// destination the rendered footnote text reflects.
 
 /// The first [`Footnote`](InlineNode::Footnote) node found anywhere in the
 /// simple blocks of `doc`, in document order.
-fn first_footnote<'a>(doc: &'a crate::Document<'a>) -> crate::inlines::Footnote<'a> {
+fn first_footnote<'a>(doc: &'a Document<'a>) -> Footnote<'a> {
     use crate::blocks::Block;
 
-    fn find<'a>(nodes: &[InlineNode<'a>]) -> Option<crate::inlines::Footnote<'a>> {
+    fn find<'a>(nodes: &[InlineNode<'a>]) -> Option<Footnote<'a>> {
         for node in nodes {
             let found = match node {
                 InlineNode::Footnote(footnote) => Some(footnote.clone()),
@@ -1623,9 +1627,9 @@ fn footnote_subtree_carries_a_nested_macro() {
 
 #[test]
 fn footnote_reference_keeps_an_empty_subtree() {
-    // `footnote:id[]` defines nothing — it re-uses an earlier footnote's number —
-    // so it consumes no footnote text and keeps the empty subtree its node type
-    // documents, while the defining occurrence carries the text.
+    // `footnote:id[]` defines nothing — it re-uses an earlier footnote's number
+    // — so it consumes no footnote text and keeps the empty subtree its
+    // node type documents, while the defining occurrence carries the text.
     let mut parser = Parser::default();
     let doc = parser.parse("Named.footnote:disc[a *discussion*] then footnote:disc[].");
 
@@ -1699,8 +1703,9 @@ fn footnote_subtrees_track_document_order_across_blocks() {
 #[test]
 fn footnote_embedded_xref_is_resolved_in_the_tree() {
     // The cross-reference lives in the footnote's subtree, and its destination
-    // is mirrored there from the same resolution sweep that resolved the block's
-    // own references — so the tree agrees with the rendered footnote text.
+    // is mirrored there from the same resolution sweep that resolved the
+    // block's own references — so the tree agrees with the rendered
+    // footnote text.
     let mut parser = Parser::default();
     let doc = parser.parse("[[tgt]]The target.\n\nA claim.footnote:[see <<tgt>> for details]");
 
@@ -1732,10 +1737,10 @@ fn footnote_embedded_xref_is_resolved_in_the_tree() {
 
 #[test]
 fn footnote_embedded_xref_does_not_displace_block_xrefs() {
-    // A footnote-embedded reference is re-homed out of the block template, so it
-    // must not consume a slot of the block-level list. Were the block walk to
-    // descend into the footnote subtree, the reference *after* the footnote
-    // would take the footnote's destination.
+    // A footnote-embedded reference is re-homed out of the block template, so
+    // it must not consume a slot of the block-level list. Were the block
+    // walk to descend into the footnote subtree, the reference *after* the
+    // footnote would take the footnote's destination.
     let mut parser = Parser::default();
     let doc = parser.parse(
         "[[one]]First.\n\n[[two]]Second.\n\nSee <<one>>.footnote:[also <<two>>] and <<two>>.",
@@ -1807,8 +1812,8 @@ fn unresolved_footnote_embedded_xref_stays_none() {
 fn re_resolving_clears_a_now_unresolved_footnote_tree_destination() {
     // The footnote mirror overwrites each slot unconditionally, exactly as the
     // block and title mirrors do, so a second resolution that no longer
-    // recognizes the target clears the subtree's destination rather than leaving
-    // the first pass's stale link behind.
+    // recognizes the target clears the subtree's destination rather than
+    // leaving the first pass's stale link behind.
     use crate::parser::{
         HtmlInlineRenderer, ReferenceResolver, ResolutionContext, ResolvedReference,
     };
@@ -1827,7 +1832,7 @@ fn re_resolving_clears_a_now_unresolved_footnote_tree_destination() {
     /// The resolved `href` of the first cross-reference in the first footnote's
     /// subtree, scoped so the tree borrow is released before the next
     /// resolution.
-    fn footnote_xref_href(doc: &crate::Document<'_>) -> Option<String> {
+    fn footnote_xref_href(doc: &Document<'_>) -> Option<String> {
         refs_in(&first_footnote(doc).children)
             .into_iter()
             .find(|r| r.variant == RefVariant::Xref)
@@ -1873,11 +1878,8 @@ fn a_footnotes_rendering_is_refolded_from_its_subtree_at_resolution() {
     // the two readings below would be equal and this test would fail.
     struct FixedResolver(Option<&'static str>);
 
-    impl crate::parser::ReferenceResolver for FixedResolver {
-        fn resolve(
-            &self,
-            _context: &crate::parser::ResolutionContext<'_>,
-        ) -> Option<crate::parser::ResolvedReference> {
+    impl ReferenceResolver for FixedResolver {
+        fn resolve(&self, _context: &ResolutionContext<'_>) -> Option<ResolvedReference> {
             self.0
                 .map(|href| crate::parser::ResolvedReference::new(href.to_string(), None))
         }
@@ -1923,9 +1925,10 @@ fn a_footnotes_rendering_is_refolded_from_its_subtree_at_resolution() {
 
 #[test]
 fn section_title_footnote_carries_its_subtree_and_resolved_xref() {
-    // A footnote in a section heading is owned by the document-order title pass,
-    // which resolves the heading's cross-references and now mirrors the
-    // footnote-embedded ones into the heading tree's footnote subtree too.
+    // A footnote in a section heading is owned by the document-order title
+    // pass, which resolves the heading's cross-references and now mirrors
+    // the footnote-embedded ones into the heading tree's footnote subtree
+    // too.
     use crate::blocks::{Block, FindBlocks};
 
     let mut parser = Parser::default();
@@ -2208,7 +2211,7 @@ fn a_terms_default_reftext_folds_before_nested_references_resolve() {
 }
 
 /// The inline tree of the first description-list term in `doc`.
-fn description_term_tree<'a>(doc: &'a crate::Document<'a>) -> Vec<InlineNode<'a>> {
+fn description_term_tree<'a>(doc: &'a Document<'a>) -> Vec<InlineNode<'a>> {
     use crate::blocks::{Block, FindBlocks, ListItemMarker};
 
     for block in doc.descendant_blocks() {

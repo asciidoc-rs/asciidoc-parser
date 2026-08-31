@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::{
     Parser, Span,
     attributes::AttrlistContext,
@@ -54,8 +56,8 @@ pub struct ElementAttribute<'src> {
     /// every other attribute. A consumer that re-processes the value as a
     /// *path* — the built-in renderer's `web_path` resolution of a `fallback=`
     /// or macro-level `imagesdir=` — masks these ranges around that resolution
-    /// and splices them back afterwards, reproducing the string pipeline's own
-    /// restore-after-resolve order (its resolver only ever sees the sentinel).
+    /// and splices them back afterwards, so a STEM body's backslash or a
+    /// passthrough's own bytes never reach that resolution.
     restored_value_ranges: Vec<std::ops::Range<usize>>,
 }
 
@@ -94,52 +96,59 @@ impl<'src> ElementAttribute<'src> {
     }
 
     /// [`into_owned`](Self::into_owned), first substituting each
-    /// `\u{96}`*n*`\u{97}` **token** in this attribute's name and value with
-    /// `bodies[n]`.
+    /// [`MASKED_PIECE_PLACEHOLDER`] occurrence in this attribute's name and
+    /// value with the next of `bodies`, in the order `cursor` finds them.
     ///
     /// This is the *after the split* half of restoring a masked construct
     /// inside a parsed attribute list. A caller that parses an attribute list
     /// whose text still holds a masked passthrough cannot restore the body
-    /// first: the string pipeline's own
-    /// [`Attrlist::parse`](crate::attributes::Attrlist::parse) reads the
-    /// sentinel — an opaque token carrying none of the `,`/`=`/`"` bytes the
-    /// split reads — so a body holding one of those characters must not
-    /// influence how the list divides (`image:x.png[++a,b++]` is one
-    /// positional whose value is `a,b`, not two). Restoring per *parsed value*
-    /// reproduces that, exactly as
-    /// `Passthroughs::restore_to`
-    /// splices each body over whatever sentinel reached the rendered
-    /// string.
+    /// first: [`Attrlist::parse`](crate::attributes::Attrlist::parse) has to
+    /// see the placeholder — an opaque run carrying none of the `,`/`=`/`"`
+    /// bytes the split reads — so a body holding one of those characters must
+    /// not influence how the list divides (`image:x.png[++a,b++]` is one
+    /// positional whose value is `a,b`, not two). Restoring per *parsed
+    /// value*, after the split, is what keeps that true.
     ///
     /// [`shorthand_item_indices`](Self::shorthand_item_indices) are byte
     /// offsets into `value`, so each is **shifted** past every substitution
-    /// that ends at or before it — a token is one opaque run holding none of
-    /// the `#`/`.`/`%` delimiters the shorthand scan keys off, so the items it
-    /// found stay the same items, only further along
+    /// that ends at or before it — a placeholder is one opaque character
+    /// holding none of the `#`/`.`/`%` delimiters the shorthand scan keys off,
+    /// so the items it found stay the same items, only further along
     /// (`image:x.png[++abc++.myrole]` keeps the `myrole` role while its value
     /// becomes `abc.myrole`). Re-deriving them over the restored text would
-    /// instead find a delimiter *inside* a body, which the string pipeline
-    /// never sees.
+    /// instead find a delimiter *inside* a body, which the placeholder never
+    /// exposes.
     ///
-    /// Substitution is **index-keyed**, as `restore_to` is, so a token whose
-    /// index the caller did not supply is left as written rather than
-    /// renumbering the ones that follow.
+    /// `cursor` is shared across every attribute
+    /// [`Attrlist::into_owned_restoring`](crate::attributes::Attrlist::into_owned_restoring)
+    /// restores, in the same left-to-right order
+    /// [`Attrlist::parse`](crate::attributes::Attrlist::parse) found them in,
+    /// so a placeholder's position — not an index carried in the text — says
+    /// which of `bodies` it stands for. A placeholder `cursor`
+    /// finds past the end of `bodies` (more occurrences than the caller
+    /// tokened) is left as written rather than panicking or misattributing a
+    /// later one.
     ///
     /// Each splice's resulting byte range in the restored value is recorded
     /// in [`restored_value_ranges`](Self::restored_value_ranges), so a
     /// consumer that re-processes the value as a path can keep the restored
     /// bytes out of that resolution's way (see the field's own doc comment).
-    pub(crate) fn into_owned_restoring<'dst>(self, bodies: &[&str]) -> ElementAttribute<'dst> {
+    pub(crate) fn into_owned_restoring<'dst>(
+        self,
+        bodies: &[&str],
+        cursor: &mut usize,
+    ) -> ElementAttribute<'dst> {
         let mut shorthand_item_indices = self.shorthand_item_indices;
         let mut restored_value_ranges = Vec::new();
 
         ElementAttribute {
             name: self
                 .name
-                .map(|name| restore_into(name, bodies, &mut [], &mut Vec::new())),
+                .map(|name| restore_into(name, bodies, cursor, &mut [], &mut Vec::new())),
             value: restore_into(
                 self.value,
                 bodies,
+                cursor,
                 &mut shorthand_item_indices,
                 &mut restored_value_ranges,
             ),
@@ -166,9 +175,10 @@ impl<'src> ElementAttribute<'src> {
 
             // Skip any leading, non-semantic whitespace before this entry
             // (Asciidoctor's `skip_blank`). Name detection has to run first, so
-            // without this a name with leading blanks — e.g. `[  first = value]`
-            // or the second/third entries once a comma is consumed — would fail
-            // to be recognized and fall through to a positional literal.
+            // without this a name with leading blanks — e.g. `[  first =
+            // value]` or the second/third entries once a comma is
+            // consumed — would fail to be recognized and fall
+            // through to a positional literal.
             source = source.take_whitespace_with_newline().after;
 
             let (name, after): (Option<Span<'_>>, Span) = match source.take_attr_name() {
@@ -178,11 +188,13 @@ impl<'src> ElementAttribute<'src> {
                         Some(equals) => {
                             let space = equals.after.take_whitespace_with_newline();
 
-                            // `name=` with nothing (or only a comma) after the `=`
-                            // is a named attribute with an empty value, not a
+                            // `name=` with nothing (or only a comma) after the
+                            // `=` is a named
+                            // attribute with an empty value, not a
                             // positional one. The empty value falls out of the
-                            // value scan below (`take_while(c != ',')` yields the
-                            // empty string), so the name is all we need to keep.
+                            // value scan below (`take_while(c != ',')` yields
+                            // the empty string), so
+                            // the name is all we need to keep.
                             (Some(name.item), space.after)
                         }
                         None => (None, source),
@@ -787,41 +799,314 @@ fn is_shorthand_delimiter(c: char) -> bool {
     c == '#' || c == '%' || c == '.'
 }
 
-/// Substitutes each `\u{96}`*n*`\u{97}` token in `text` with `bodies[n]`,
-/// shifting every offset in `indices` past the substitutions that end at or
-/// before it.
+/// The opaque placeholder `tokened_bracket` (and its sibling `tokened_text`,
+/// both in the macros substitution step) rewrites each masked passthrough,
+/// STEM expression, or other already-recognized construct to inside a macro
+/// bracket's own text, one occurrence per piece, so
+/// [`Attrlist::parse`](crate::attributes::Attrlist::parse) sees an atomic run
+/// carrying none of the `,`/`=`/`"` bytes at that position instead of the
+/// piece's own.
 ///
-/// The token spelling is the string pipeline's own passthrough sentinel (see
-/// `Passthroughs`), which is what
-/// makes this the faithful restore: a caller hands over the very text
-/// `Attrlist::parse` would have seen there, and each body lands where
-/// `Passthroughs::restore_to`
-/// splices it.
+/// "Tokened"/"tokener" are this crate's own coined vocabulary for that
+/// rewrite, kept deliberately apart from "tokenized"/"tokenizer": this crate
+/// has no lexer stage that splits source into a token stream, and borrowing
+/// that pair of words would wrongly suggest one. A "tokened" text is just a
+/// text in which each masked piece has been replaced by one placeholder
+/// token, recovered later by position rather than by re-parsing.
 ///
-/// A run that is not a well-formed token, or whose index `bodies` does not
-/// supply, is copied through verbatim — the same index-keyed leniency
-/// `restore_to` has, so an unsupplied index never renumbers the tokens after
-/// it. Each splice's byte range in the restored text is appended to
-/// `restored_ranges`, in ascending order. See
-/// [`ElementAttribute::into_owned_restoring`] for why the shift is
+/// Carries no index — which piece a given occurrence stands for is recovered
+/// by *position*: the Nth occurrence, scanned left to right, is `bodies[N]`,
+/// never by parsing anything back out of the placeholder's own bytes.
+/// [`restore_into`] is what walks that position order.
+///
+/// Two fixed codepoints, adjacent, rather than one: a single reserved
+/// codepoint alone would have to be reserved *everywhere* the tokener copies
+/// bytes, where a two-codepoint run is cheap to keep unique. Kept as two
+/// separate consts too ([`MASKED_PIECE_PLACEHOLDER_START`],
+/// [`MASKED_PIECE_PLACEHOLDER_END`]) because
+/// [`escape_masked_piece_bytes`] escapes each codepoint on its own — a
+/// document contributing only one half, beside the other half from an
+/// unrelated source, would complete the same pair otherwise.
+///
+/// Which occurrences are genuine is settled **by construction**, not by
+/// likelihood. `tokened_bracket`/`tokened_text` run
+/// [`escape_masked_piece_bytes`] over every non-tokened byte they copy, and
+/// that escape leaves neither codepoint standing anywhere in its output, so
+/// the only `MASKED_PIECE_PLACEHOLDER` occurrences in a tokened text are the
+/// ones the tokener itself wrote. Nothing downstream has to ask whether an
+/// occurrence is real; every consumer of a tokened text runs the matching
+/// [`unescape_masked_piece_bytes`] on the bytes *around* those occurrences on
+/// its way out, so a document's own copy of either codepoint round-trips to
+/// the output unchanged. That replaced an earlier one-way escape at the
+/// attribute-reference splice (`escape_passthrough_sentinels`, retired with
+/// it), which covered only the one road a *spliced* value took and left both
+/// a typed pair and the escape's own output visible in the output.
+///
+/// One road used to remain, and it was the same one that blocked carrying a
+/// byte-offset table through `Attrlist::parse` in the first place:
+/// [`Attrlist::parse`](crate::attributes::Attrlist::parse) re-substitutes
+/// attribute references over the text handed to it, so a `subs=` list naming
+/// `macros` without `attributes` expands a reference *after* the tokener has
+/// escaped its copy — and whatever that reference's value spelled reached
+/// `restore_into`'s walk unescaped and indistinguishable from something the
+/// tokener wrote.
+///
+/// It is closed by escaping at that second point of entry too: the tokened
+/// call sites parse through
+/// [`Attrlist::parse_tokened`](crate::attributes::Attrlist), which runs its
+/// inner substitution under
+/// [`SplicedValueEscaping::MaskedPieceBytes`], so a resolved value is escaped
+/// as it is spliced. That keeps the by-construction property total — every
+/// reserved codepoint standing in a tokened text is one the tokener wrote —
+/// rather than true only of the bytes the tokener itself copied. See
+/// `an_attrlist_level_expansion_cannot_forge_a_bracket_restore`
+/// (`tests/sentinels.rs`).
+pub(crate) const MASKED_PIECE_PLACEHOLDER_START: char = '\u{96}';
+
+/// See [`MASKED_PIECE_PLACEHOLDER`].
+pub(crate) const MASKED_PIECE_PLACEHOLDER_END: char = '\u{97}';
+
+/// See [`MASKED_PIECE_PLACEHOLDER_START`] / [`MASKED_PIECE_PLACEHOLDER_END`].
+/// Must spell the same two codepoints, adjacent and in the same order.
+pub(crate) const MASKED_PIECE_PLACEHOLDER: &str = "\u{96}\u{97}";
+
+/// Introduces an escape [`escape_masked_piece_bytes`] writes over a
+/// document's own copy of a reserved codepoint, and
+/// [`unescape_masked_piece_bytes`] reads back.
+///
+/// A private-use codepoint, so it needs no reservation of its own beyond
+/// being escaped like the two it protects (`ESCAPED_ESCAPE_TAG`).
+pub(crate) const MASKED_PIECE_ESCAPE: char = '\u{E005}';
+
+/// The tag byte that follows [`MASKED_PIECE_ESCAPE`] for an escaped
+/// [`MASKED_PIECE_PLACEHOLDER_START`].
+const ESCAPED_START_TAG: char = 's';
+
+/// The tag byte for an escaped [`MASKED_PIECE_PLACEHOLDER_END`].
+const ESCAPED_END_TAG: char = 'e';
+
+/// The tag byte for an escaped [`MASKED_PIECE_ESCAPE`] — the escape's own
+/// introducer, which has to be escapable or a document that types
+/// `\u{E005}s` would come back holding a
+/// [`MASKED_PIECE_PLACEHOLDER_START`] it never wrote.
+const ESCAPED_ESCAPE_TAG: char = 'g';
+
+/// Whether the attribute-reference substitution rewriting a text has to run
+/// [`escape_masked_piece_bytes`] over each value it splices into it.
+///
+/// The distinction is *provenance*, not syntax: a resolved attribute value is
+/// the only thing that substitution writes which did not come out of the text
+/// it was handed, so it is the only thing that has to be escaped for a
+/// **tokened** text to go on holding no reserved codepoint the tokener did not
+/// write. Threaded from
+/// [`Attrlist::parse_tokened`](crate::attributes::Attrlist) down to the
+/// replacer that performs the splice; ordinary content-level content carries
+/// [`Verbatim`](Self::Verbatim) and is unaffected.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SplicedValueEscaping {
+    /// Ordinary, never-tokened text: a resolved value is spliced exactly as
+    /// the document wrote it. This text has no masked-piece invariant to
+    /// protect, and escaping into it would put the escape's own bytes in front
+    /// of a reader that never unescapes.
+    Verbatim,
+
+    /// **Tokened** macro-bracket text — what
+    /// [`Attrlist::parse_tokened`](crate::attributes::Attrlist) is handed — in
+    /// which every byte the tokener copied is already escaped. A resolved
+    /// value reaches this text *after* that escape ran, so it is escaped here
+    /// instead, at the splice, which is the one point where bytes from outside
+    /// the tokener's input enter it.
+    MaskedPieceBytes,
+}
+
+/// Rewrites `text`'s own copies of the three reserved codepoints —
+/// [`MASKED_PIECE_PLACEHOLDER_START`], [`MASKED_PIECE_PLACEHOLDER_END`], and
+/// [`MASKED_PIECE_ESCAPE`] itself — as
+/// [`MASKED_PIECE_ESCAPE`]-plus-tag pairs, so the result holds none of them
+/// in the clear.
+///
+/// This is the *construction-time* half of the masked-piece placeholder's
+/// unambiguity: `tokened_bracket`/`tokened_text` run it over every byte they
+/// copy out of a **non-tokened** piece, and write
+/// [`MASKED_PIECE_PLACEHOLDER`] themselves for each piece they token. Since
+/// neither of the placeholder's codepoints survives this escape, every
+/// occurrence of the pair in a tokened text is one the tokener wrote —
+/// which is what lets [`restore_into`] and the macros step's own
+/// `untranslated_value` / `restored_value_children` recover a piece **by
+/// position** without ever asking whether the occurrence in front of them is
+/// genuine.
+///
+/// The encoding is unambiguous against all three things it has to be: a
+/// genuine placeholder (which holds no [`MASKED_PIECE_ESCAPE`], and whose own
+/// codepoints this escape never emits in the clear), itself (the introducer is
+/// escaped as `\u{E005}g`, so an introducer standing in the output is always
+/// one this function wrote), and ordinary text (which reaches
+/// [`unescape_masked_piece_bytes`] through the same pairing and comes back
+/// byte-for-byte).
+///
+/// Unlike the one-way `escape_passthrough_sentinels` it replaced, this is
+/// **two-way**: every consumer of a tokened text unescapes on the way out
+/// (see [`unescape_masked_piece_bytes`]), so a document that types a reserved
+/// codepoint sees it in the output rather than the escape's own bytes.
+///
+/// Text with none of the three — the overwhelming majority — is borrowed
+/// through unchanged.
+pub(crate) fn escape_masked_piece_bytes(text: &str) -> Cow<'_, str> {
+    if !text.contains([
+        MASKED_PIECE_PLACEHOLDER_START,
+        MASKED_PIECE_PLACEHOLDER_END,
+        MASKED_PIECE_ESCAPE,
+    ]) {
+        return Cow::Borrowed(text);
+    }
+
+    let mut out = String::with_capacity(text.len());
+
+    for c in text.chars() {
+        match c {
+            MASKED_PIECE_PLACEHOLDER_START => {
+                out.push(MASKED_PIECE_ESCAPE);
+                out.push(ESCAPED_START_TAG);
+            }
+
+            MASKED_PIECE_PLACEHOLDER_END => {
+                out.push(MASKED_PIECE_ESCAPE);
+                out.push(ESCAPED_END_TAG);
+            }
+
+            MASKED_PIECE_ESCAPE => {
+                out.push(MASKED_PIECE_ESCAPE);
+                out.push(ESCAPED_ESCAPE_TAG);
+            }
+
+            other => out.push(other),
+        }
+    }
+
+    Cow::Owned(out)
+}
+
+/// The codepoint an escape introduced by [`MASKED_PIECE_ESCAPE`] stands for,
+/// with the length of the tag that named it, or `None` when what follows the
+/// introducer is not a tag this crate wrote.
+///
+/// The `None` case makes the decode half **total** over arbitrary input,
+/// which is what lets every consumer of a tokened text run
+/// [`unescape_masked_piece_bytes`] unconditionally rather than first proving
+/// the text is well-formed. Copying an unrecognized introducer through
+/// verbatim — rather than eating the byte after it as a tag — is what keeps
+/// such a text's own bytes intact. Both points at which bytes enter a tokened
+/// text do escape (see [`MASKED_PIECE_PLACEHOLDER_START`]), so the pipeline
+/// itself no longer produces an unpaired introducer; this arm is the codec's
+/// contract, pinned directly by
+/// `masked_piece_escape_round_trips_every_reserved_codepoint`.
+fn escaped_literal(tail: &str) -> Option<(char, usize)> {
+    match tail.chars().next()? {
+        ESCAPED_START_TAG => Some((MASKED_PIECE_PLACEHOLDER_START, ESCAPED_START_TAG.len_utf8())),
+        ESCAPED_END_TAG => Some((MASKED_PIECE_PLACEHOLDER_END, ESCAPED_END_TAG.len_utf8())),
+        ESCAPED_ESCAPE_TAG => Some((MASKED_PIECE_ESCAPE, ESCAPED_ESCAPE_TAG.len_utf8())),
+        _ => None,
+    }
+}
+
+/// Undoes [`escape_masked_piece_bytes`], putting each escaped codepoint back
+/// as the document wrote it.
+///
+/// Every consumer that reads a tokened text and produces user-visible output
+/// has to run this before that output leaves the pipeline, on the bytes
+/// *between* the genuine [`MASKED_PIECE_PLACEHOLDER`] occurrences rather than
+/// over the restored bodies — a body is the node's own bytes and was never
+/// escaped. [`restore_into`] does both halves in one walk; the macros step's
+/// `untranslated_value` and `computed_value_children` call this directly on
+/// the runs their own positional walk hands them.
+///
+/// Text holding no [`MASKED_PIECE_ESCAPE`] is borrowed through unchanged.
+pub(crate) fn unescape_masked_piece_bytes(text: &str) -> Cow<'_, str> {
+    if !text.contains(MASKED_PIECE_ESCAPE) {
+        return Cow::Borrowed(text);
+    }
+
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(at) = rest.find(MASKED_PIECE_ESCAPE) {
+        out.push_str(rest.get(..at).unwrap_or_default());
+
+        let tail = rest
+            .get(at.saturating_add(MASKED_PIECE_ESCAPE.len_utf8())..)
+            .unwrap_or_default();
+
+        match escaped_literal(tail) {
+            Some((literal, tag_len)) => {
+                out.push(literal);
+                rest = tail.get(tag_len..).unwrap_or_default();
+            }
+
+            None => {
+                out.push(MASKED_PIECE_ESCAPE);
+                rest = tail;
+            }
+        }
+    }
+
+    out.push_str(rest);
+
+    Cow::Owned(out)
+}
+
+/// Substitutes each [`MASKED_PIECE_PLACEHOLDER`] occurrence in `text` with the
+/// next of `bodies` `*cursor` finds, shifting every offset in `indices` past
+/// the substitutions that end at or before it.
+///
+/// `cursor` is shared across every call this restore makes (see
+/// [`ElementAttribute::into_owned_restoring`] for why), so it is threaded
+/// through rather than reset here: a placeholder's *position* in the whole
+/// attribute list — not an index carried in its own bytes — says which body
+/// it stands for.
+///
+/// An occurrence `*cursor` finds past the end of `bodies` is copied through
+/// verbatim rather than panicking or misattributing a later one — the same
+/// leniency an unsupplied index used to get, for the same reason: it should
+/// never be reachable in practice (every caller tokens exactly as many
+/// pieces as it supplies bodies for), but a caller that someday doesn't
+/// should fail closed, not corrupt a neighboring restore. Each splice's byte
+/// range in the restored text is appended to `restored_ranges`, in ascending
+/// order. See [`ElementAttribute::into_owned_restoring`] for why the shift is
 /// right where a re-derivation would not be.
+///
+/// The same walk also undoes [`escape_masked_piece_bytes`] over every byte
+/// that is *not* a substituted body: the tokener escaped a document's own
+/// copies of the reserved codepoints on the way in, and this is the way out
+/// for every value a bracket parse produces. Doing it in the one walk rather
+/// than in a second pass is what keeps `indices` and `restored_ranges`
+/// honest — both are byte offsets into the text being built, so an unescape
+/// that shortened it afterwards would move every offset already recorded, and
+/// a second pass would also have to know not to reach inside a restored body
+/// (which is the node's own bytes and was never escaped).
+///
 /// [`restore_tokens`] over a [`CowStr`], keeping the plain
 /// [`into_owned`](CowStr::into_owned) conversion — and with it the inline
 /// representation a short string prefers — for the overwhelmingly common text
-/// that holds no token at all.
+/// that holds neither a placeholder nor an escape.
 pub(super) fn restore_into<'dst>(
     text: CowStr<'_>,
     bodies: &[&str],
+    cursor: &mut usize,
     indices: &mut [usize],
     restored_ranges: &mut Vec<std::ops::Range<usize>>,
 ) -> CowStr<'dst> {
-    if bodies.is_empty() || !text.contains('\u{96}') {
+    // `bodies.is_empty()` is deliberately *not* a reason to skip the walk any
+    // more: a text with no piece to restore may still carry an escape to
+    // undo — `tokened_bracket`/`tokened_text` escape unconditionally, whether
+    // or not the bracket held anything to token.
+    if !text.contains([MASKED_PIECE_PLACEHOLDER_START, MASKED_PIECE_ESCAPE]) {
         return text.into_owned();
     }
 
     CowStr::from(restore_tokens(
         text.as_ref(),
         bodies,
+        cursor,
         indices,
         restored_ranges,
     ))
@@ -830,52 +1115,83 @@ pub(super) fn restore_into<'dst>(
 fn restore_tokens(
     text: &str,
     bodies: &[&str],
+    cursor: &mut usize,
     indices: &mut [usize],
     restored_ranges: &mut Vec<std::ops::Range<usize>>,
 ) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut cursor = 0usize;
+    let mut scan_cursor = 0usize;
 
-    // `(offset just past a substituted token, cumulative delta)`, in the
-    // *original* text's coordinates and in increasing order.
+    // `(offset just past a substituted placeholder or unescaped codepoint,
+    // cumulative delta)`, in the *original* text's coordinates and in
+    // increasing order.
     let mut shifts: Vec<(usize, isize)> = vec![];
     let mut delta: isize = 0;
 
-    while let Some(rel) = text.get(cursor..).and_then(|rest| rest.find('\u{96}')) {
-        let start = cursor.saturating_add(rel);
-        let digits_start = start.saturating_add('\u{96}'.len_utf8());
+    while let Some(rel) = text
+        .get(scan_cursor..)
+        .and_then(|rest| rest.find([MASKED_PIECE_PLACEHOLDER_START, MASKED_PIECE_ESCAPE]))
+    {
+        let start = scan_cursor.saturating_add(rel);
 
-        let digits = text
-            .get(digits_start..)
-            .map(|rest| {
-                let len = rest
-                    .find(|c: char| !c.is_ascii_digit())
-                    .unwrap_or(rest.len());
+        // An escape the tokener wrote over a reserved codepoint the
+        // *document* typed. It is tested first because it is the only one of
+        // the two that can begin with `MASKED_PIECE_ESCAPE`, and because the
+        // escape leaves no `MASKED_PIECE_PLACEHOLDER_START` standing: a start
+        // codepoint found here is therefore always a placeholder the tokener
+        // wrote, and its `END` half always follows.
+        if let Some(tail) = text
+            .get(start..)
+            .and_then(|head| head.strip_prefix(MASKED_PIECE_ESCAPE))
+        {
+            let escape_len = MASKED_PIECE_ESCAPE.len_utf8();
 
-                rest.get(..len).unwrap_or_default()
-            })
-            .unwrap_or_default();
+            let end = match escaped_literal(tail) {
+                Some((literal, tag_len)) => {
+                    let end = start.saturating_add(escape_len).saturating_add(tag_len);
 
-        let digits_end = digits_start.saturating_add(digits.len());
-        let end = digits_end.saturating_add('\u{97}'.len_utf8());
+                    out.push_str(text.get(scan_cursor..start).unwrap_or_default());
+                    out.push(literal);
 
-        let body = if digits.is_empty() || text.get(digits_end..end) != Some("\u{97}") {
-            None
-        } else {
-            digits.parse::<usize>().ok().and_then(|n| bodies.get(n))
-        };
+                    delta = delta
+                        .saturating_add(isize::try_from(literal.len_utf8()).unwrap_or(isize::MAX))
+                        .saturating_sub(
+                            isize::try_from(end.saturating_sub(start)).unwrap_or(isize::MAX),
+                        );
 
-        let Some(body) = body else {
-            // Not a token this caller supplied: copy the `\u{96}` through and
-            // resume scanning after it, so a later token in the same text is
-            // still found.
-            let next = start.saturating_add('\u{96}'.len_utf8());
-            out.push_str(text.get(cursor..next).unwrap_or_default());
-            cursor = next;
+                    shifts.push((end, delta));
+                    end
+                }
+
+                None => {
+                    // An introducer this crate did not write (see
+                    // `escaped_literal`): copy it through and keep scanning,
+                    // so the bytes after it are still read.
+                    let end = start.saturating_add(escape_len);
+                    out.push_str(text.get(scan_cursor..end).unwrap_or_default());
+                    end
+                }
+            };
+
+            scan_cursor = end;
+            continue;
+        }
+
+        let end = start.saturating_add(MASKED_PIECE_PLACEHOLDER.len());
+
+        let Some(body) = bodies.get(*cursor).copied() else {
+            // More occurrences than the caller supplied bodies for: copy this
+            // one through and keep scanning, so a body-bearing occurrence
+            // later in the same text is still found. See this function's own
+            // doc comment for why this should be unreachable in practice.
+            out.push_str(text.get(scan_cursor..end).unwrap_or_default());
+            scan_cursor = end;
             continue;
         };
 
-        out.push_str(text.get(cursor..start).unwrap_or_default());
+        *cursor += 1;
+
+        out.push_str(text.get(scan_cursor..start).unwrap_or_default());
         restored_ranges.push(out.len()..out.len() + body.len());
         out.push_str(body);
 
@@ -884,14 +1200,15 @@ fn restore_tokens(
             .saturating_sub(isize::try_from(end.saturating_sub(start)).unwrap_or(isize::MAX));
 
         shifts.push((end, delta));
-        cursor = end;
+        scan_cursor = end;
     }
 
-    out.push_str(text.get(cursor..).unwrap_or_default());
+    out.push_str(text.get(scan_cursor..).unwrap_or_default());
 
     for index in indices.iter_mut() {
-        // A token holds none of the `#`/`.`/`%` delimiters the shorthand scan
-        // keys off, so no offset ever falls *inside* one: each is either
+        // Neither a placeholder nor an escape holds any of the `#`/`.`/`%`
+        // delimiters the shorthand scan keys off — the escape's own tags are
+        // `s`/`e`/`g` — so no offset ever falls *inside* one: each is either
         // before every substitution or after some, and takes that one's
         // cumulative delta.
         if let Some((_, delta)) = shifts.iter().rev().find(|(end, _)| *end <= *index) {
@@ -944,6 +1261,109 @@ mod tests {
         let b2 = b1.clone();
 
         assert_eq!(b1, b2);
+    }
+
+    #[test]
+    fn quoted_values_own_unescape_shortens_a_value_by_one_byte_ahead_of_a_placeholder() {
+        // Direct evidence for the second blocker that ruled out carrying a
+        // byte-offset table through `Attrlist::parse`, checked against this
+        // method's own parsed value
+        // rather than only a full document's final rendered HTML (as
+        // `tests/sentinels.rs`'s
+        // `a_quoted_values_own_unescape_moves_a_placeholder_in_the_parsed_value`
+        // does). `\"` is rewritten to `"` by a plain `String::replace` on the
+        // way to a quoted value — one byte shorter than what it replaces —
+        // and that rewrite is not reported back anywhere a caller could use
+        // to remap a byte offset recorded against the source it parsed.
+        use crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER;
+
+        let source = format!(r#"alt="a \" b {MASKED_PIECE_PLACEHOLDER} c""#);
+        let written_offset = source.find(MASKED_PIECE_PLACEHOLDER).unwrap();
+
+        let p = Parser::default();
+        let (attr, _offset, warning_types) = crate::attributes::ElementAttribute::parse(
+            &CowStr::from(source.as_str()),
+            0,
+            &p,
+            ParseShorthand(false),
+            AttrlistContext::Inline,
+        );
+
+        assert!(warning_types.is_empty());
+        assert!(attr.value_is_quoted());
+
+        let parsed_offset = attr.value().find(MASKED_PIECE_PLACEHOLDER).unwrap();
+
+        // `alt="` (5 bytes) is stripped entirely, since the parsed value
+        // holds only the entry's own content; the `\"` -> `"` unescape ahead
+        // of the placeholder accounts for the other byte.
+        assert_eq!(
+            parsed_offset,
+            written_offset - 5 - 1,
+            "the value's own unescape must shorten it by one byte ahead of the placeholder: {:?}",
+            attr.value()
+        );
+    }
+
+    #[test]
+    fn masked_piece_escape_round_trips_every_reserved_codepoint() {
+        use std::borrow::Cow;
+
+        use crate::attributes::element_attribute::{
+            escape_masked_piece_bytes, unescape_masked_piece_bytes,
+        };
+
+        // The three codepoints the escape reserves, plus one of its own tag
+        // characters standing on its own (`s`, which must not be read as a
+        // tag when nothing introduces it).
+        let raw = "a\u{96}b\u{97}c\u{e005}d\u{e005}se";
+        let escaped = escape_masked_piece_bytes(raw);
+
+        assert_eq!(
+            escaped.as_ref(),
+            "a\u{e005}sb\u{e005}ec\u{e005}gd\u{e005}gse"
+        );
+
+        // Neither of the placeholder's own codepoints survives the escape,
+        // which is the whole property `tokened_bracket`/`tokened_text` rest
+        // on: every occurrence of the pair in a tokened text is one the
+        // tokener wrote.
+        assert!(
+            !escaped.contains(super::MASKED_PIECE_PLACEHOLDER_START)
+                && !escaped.contains(super::MASKED_PIECE_PLACEHOLDER_END)
+        );
+
+        assert_eq!(unescape_masked_piece_bytes(&escaped).as_ref(), raw);
+
+        // Text holding none of the three is borrowed through, in both
+        // directions. Compared by discriminant rather than by `matches!`,
+        // whose own non-matching arm would be a region no input reaches.
+        let borrowed = std::mem::discriminant(&Cow::<str>::Borrowed(""));
+
+        assert_eq!(
+            std::mem::discriminant(&escape_masked_piece_bytes("plain text")),
+            borrowed
+        );
+
+        assert_eq!(
+            std::mem::discriminant(&unescape_masked_piece_bytes("plain text")),
+            borrowed
+        );
+
+        // An introducer this crate did not write is copied through with the
+        // bytes after it, rather than eating one as a tag. That holds at the
+        // end of the text too, where there is no byte after it at all.
+        //
+        // Every point at which bytes enter a tokened text escapes them now
+        // (the tokener's own copy, and the splice inside
+        // `Attrlist::parse_tokened`), so this is the codec's contract rather
+        // than a case the pipeline still produces: the decode half is total
+        // over arbitrary input, which is what lets a caller run it
+        // unconditionally.
+        assert_eq!(
+            unescape_masked_piece_bytes("p\u{e005}zq\u{e005}").as_ref(),
+            "p\u{e005}zq\u{e005}"
+        );
     }
 
     #[test]
@@ -1583,9 +2003,10 @@ mod tests {
         fn named_with_empty_value() {
             let p = Parser::default();
 
-            // `name=` with nothing after the `=` is a named attribute whose value
-            // is the empty string (e.g. `[caption=]` clears a label), not a
-            // positional attribute with the literal value "abc=".
+            // `name=` with nothing after the `=` is a named attribute whose
+            // value is the empty string (e.g. `[caption=]` clears a
+            // label), not a positional attribute with the literal
+            // value "abc=".
             let (element_attr, offset, warning_types) = crate::attributes::ElementAttribute::parse(
                 &CowStr::from("abc="),
                 0,

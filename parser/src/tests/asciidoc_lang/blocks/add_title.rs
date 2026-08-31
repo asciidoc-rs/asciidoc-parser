@@ -591,8 +591,8 @@ ifdef::prev-example-number[:example-number: {prev-example-number}]
     );
 
     // On a pristine parser `example-number` is unset, so both conditionals are
-    // false: the save and restore are no-ops, the counter is reset to 0, and the
-    // example is numbered 1 and displayed with its caption.
+    // false: the save and restore are no-ops, the counter is reset to 0, and
+    // the example is numbered 1 and displayed with its caption.
     let doc = Parser::default().parse(
         ":example-caption: Example\nifdef::example-number[:prev-example-number: {example-number}]\n:example-number: 0\n\n.Block that supports captioned title\n====\nBlock content\n====\n\n:!example-caption:\nifdef::prev-example-number[:example-number: {prev-example-number}]\n:!prev-example-number:",
     );
@@ -609,7 +609,8 @@ ifdef::prev-example-number[:example-number: {prev-example-number}]
     );
     let mut examples = doc.child_blocks().filter(|b| b.title().is_some());
     // The first conditional fired (`example-number` was set), saving 7 into
-    // `prev-example-number`; the counter was then reset to 0, so this example is 1.
+    // `prev-example-number`; the counter was then reset to 0, so this example
+    // is 1.
     let saved = examples.next().unwrap();
     assert_eq!(saved.number(), Some(1));
     // The second conditional fired (`prev-example-number` was set), restoring
@@ -695,8 +696,8 @@ Block content
     assert_eq!(block.title(), Some("Block Title"));
 
     // The custom caption replaces the entire caption verbatim (the counter
-    // reference is resolved), including the trailing space, and the block is not
-    // auto-numbered.
+    // reference is resolved), including the trailing space, and the block is
+    // not auto-numbered.
     assert_eq!(block.caption(), Some("Example A: "));
     assert_eq!(block.number(), None);
 }

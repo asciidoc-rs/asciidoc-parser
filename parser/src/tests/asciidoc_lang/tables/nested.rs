@@ -100,8 +100,8 @@ To distinguish the inner table from the enclosing one, you need to use `!===` as
 
     // The inner table is delimited by `!===` and separates its cells with `!`,
     // which differs from the outer table's `|`. Because the separators differ,
-    // the outer table's `|` scan does not break the inner table apart: the inner
-    // `!`-separated cells are parsed as a complete two-column table.
+    // the outer table's `|` scan does not break the inner table apart: the
+    // inner `!`-separated cells are parsed as a complete two-column table.
     let inner = nested_table(last_cell);
     assert_eq!(inner.header_row().unwrap().cells().len(), 2);
     assert_eq!(inner.body_rows().len(), 1);
@@ -152,8 +152,8 @@ The default cell separator for a nested table is `!`, though you can choose anot
     assert_eq!(simple_text(&inner.body_rows()[0].cells()[0]), "one");
     assert_eq!(simple_text(&inner.body_rows()[0].cells()[1]), "two");
 
-    // The `separator` attribute applies to an outer table as well, replacing the
-    // default `|` with the chosen character.
+    // The `separator` attribute applies to an outer table as well, replacing
+    // the default `|` with the chosen character.
     let outer = parse_table("[separator=;]\n|===\n;one ;two\n|===");
     assert_eq!(outer.body_rows()[0].cells().len(), 2);
     assert_eq!(simple_text(&outer.body_rows()[0].cells()[0]), "one");
@@ -186,8 +186,8 @@ include::example$table.adoc[tag=nested]
     );
 
     // Expansion of `example$table.adoc[tag=nested]`, which is identical to
-    // `NESTED_EXAMPLE`: a two-column outer table whose AsciiDoc-styled (`a`) last
-    // cell carries a nested table.
+    // `NESTED_EXAMPLE`: a two-column outer table whose AsciiDoc-styled (`a`)
+    // last cell carries a nested table.
     let outer = parse_table(NESTED_EXAMPLE);
     assert_eq!(outer.columns().len(), 2);
     assert_eq!(outer.body_rows().len(), 2);

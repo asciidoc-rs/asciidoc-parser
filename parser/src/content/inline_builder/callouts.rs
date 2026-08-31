@@ -3,7 +3,7 @@
 use regex::Regex;
 
 use super::{
-    quotes::{Piece, build_match_string, emit_range, source_slice},
+    quotes::{Piece, build_match_string, emit_range, single_text_value, source_slice},
     special_chars::Masked,
 };
 use crate::{
@@ -30,8 +30,7 @@ use crate::{
 ///
 /// A [`Callout`](InlineNode::Callout) node's `number` is already the resolved
 /// sequential value for an auto-numbered `<.>`, so no counter is consulted
-/// here. A number that does not parse as a `u32` is skipped, exactly as the
-/// string pipeline skips it.
+/// here. A number that does not parse as a `u32` is skipped.
 ///
 /// The walk recurses into every container a node can nest inside. Callouts are
 /// recognized in **verbatim** content, where no quotes or macros step runs, so
@@ -81,19 +80,15 @@ pub(crate) fn apply_callout_side_effects(nodes: &[InlineNode<'_>], parser: &Pars
 /// carry the step, directly after
 /// [`apply_special_characters`](super::special_chars::apply_special_characters).
 ///
-/// It reuses the string pipeline's *exact* recognition —
-/// [`build_callout_regexes`] is now shared `pub(crate)` — so only the
-/// recognition *sink* differs (§4.1): a matched, trailing-position callout
-/// becomes a node instead of rendered markup, folding through the same
-/// `render_callout` the string step calls (see `fold_callout`) so the
-/// output is byte-for-byte identical. `attrlist` is the block's own
-/// attribute list (`None` when the caller has none); together with `parser`
-/// it resolves the `line-comment` attribute exactly as
-/// [`apply_callouts`](crate::content::substitution_step)'s string-pipeline
-/// counterpart does: absent, the default line-comment prefixes (`//`, `#`,
-/// `--`, `;;`) and XML callouts are recognized; present (non-empty), only
-/// that prefix is; present but empty, no prefix is recognized (and neither
-/// are XML callouts).
+/// It reuses [`build_callout_regexes`] (shared `pub(crate)`): a matched,
+/// trailing-position callout becomes a node instead of rendered markup,
+/// folding through the same `render_callout` (see `fold_callout`).
+/// `attrlist` is the block's own attribute list (`None` when the caller has
+/// none); together with `parser` it resolves the `line-comment` attribute:
+/// absent, the default line-comment prefixes (`//`, `#`, `--`, `;;`) and XML
+/// callouts are recognized; present (non-empty), only that prefix is;
+/// present but empty, no prefix is recognized (and neither are XML
+/// callouts).
 ///
 /// An escaped callout (`\<1>`) drops its backslash and stays literal,
 /// mirroring every other macro family's escape handling. This pass performs
@@ -108,11 +103,20 @@ pub(super) fn apply_callouts<'src>(
     parser: &Parser,
     attrlist: Option<&Attrlist<'_>>,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: the
+    // common case of a single, unsplit `Text` node (nothing for the
+    // preceding `SpecialCharacters` step to have escaped) has the same bytes
+    // in its match string as in its own value, so the `&lt;` check below can
+    // run against that directly. A level already split into more than one
+    // node falls back to the build, exactly as before.
+    if single_text_value(&nodes).is_some_and(|value| !value.contains("&lt;")) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 
     // A callout's opening bracket is always rendered as `&lt;` by
-    // `apply_special_characters`, so we can cheaply skip content without any
-    // (mirrors the string pipeline's own guard).
+    // `apply_special_characters`, so we can cheaply skip content without any.
     if !s.contains("&lt;") {
         return nodes;
     }
@@ -178,14 +182,11 @@ enum CalloutMatchKind {
 }
 
 /// Finds every [`build_callout_regexes`] match in the match string `s`, left
-/// to right, honoring the trailing-position lookahead (`tail_rx`) exactly as
-/// the string pipeline's `CalloutReplacer` does: a callout is only recognized
-/// when nothing but further callouts follows it up to the end of the line.
-/// Unlike the string pipeline (whose `LookaheadReplacer` never skips ahead
-/// and retries for this step), a match that fails the lookahead is simply
-/// left out of the returned list — the surrounding gap then reproduces its
-/// original nodes unchanged, exactly the same outcome as the string
-/// pipeline's `dest.push_str(&caps[0])` fallback.
+/// to right, honoring the trailing-position lookahead (`tail_rx`): a callout
+/// is only recognized when nothing but further callouts follows it up to the
+/// end of the line. A match that fails the lookahead is simply left out of
+/// the returned list — the surrounding gap then reproduces its original
+/// nodes unchanged.
 fn find_callout_matches(s: &str, callout_rx: &Regex, tail_rx: &Regex) -> Vec<CalloutMatch> {
     let mut matches = Vec::new();
     let mut autonum = 0u32;
@@ -220,10 +221,9 @@ fn find_callout_matches(s: &str, callout_rx: &Regex, tail_rx: &Regex) -> Vec<Cal
             (caps.name("num").unwrap().as_str(), false)
         };
 
-        // Auto-numbering (`<.>`) is scoped to this level's whole scan, exactly
-        // as the string pipeline's `CalloutReplacer::autonum` is scoped to one
-        // block, and only advances for a match that reaches this point (past
-        // the lookahead and escape checks).
+        // Auto-numbering (`<.>`) is scoped to this level's whole scan — one
+        // block's worth of callouts — and only advances for a match that
+        // reaches this point (past the lookahead and escape checks).
         let number = if number_raw == "." {
             autonum += 1;
             autonum.to_string()
@@ -250,10 +250,10 @@ fn find_callout_matches(s: &str, callout_rx: &Regex, tail_rx: &Regex) -> Vec<Cal
 /// original nodes; each match becomes its unescaped literal text (an
 /// [`Unescape`](CalloutMatchKind::Unescape)) or a
 /// [`Callout`](InlineNode::Callout) node (a
-/// [`Callout`](CalloutMatchKind::Callout) match), whose guard mirrors
-/// [`CalloutReplacer`](crate::content::substitution_step)'s resolution: a
-/// captured line-comment prefix takes precedence; otherwise an XML callout
-/// uses the XML guard; failing both, an empty line-comment guard (there is no
+/// [`Callout`](CalloutMatchKind::Callout) match), whose guard resolves the
+/// same way: a captured line-comment prefix takes precedence; otherwise an
+/// XML callout uses the XML guard; failing both, an empty line-comment guard
+/// (there is no
 /// "no guard" state — the fold's non-icon fallback always guards with
 /// *something*).
 fn rebuild_callout_level<'src>(
@@ -313,9 +313,9 @@ fn rebuild_callout_level<'src>(
 /// The inverse of the classifier's value assignment: the
 /// [`CharacterReplacementType`] the fold renders a
 /// [`CharRef::Replacement`](crate::inlines::CharRef::Replacement) value with.
-/// The mapping is a bijection — each replacement type produces a
-/// distinct logical string — so the fold reproduces the string pipeline's bytes
-/// through the same [`render_character_replacement`] the step calls.
+/// The mapping is a bijection — each replacement type produces a distinct
+/// logical string — so the fold reproduces the right output bytes through
+/// the same [`render_character_replacement`] the step calls.
 ///
 /// [`render_character_replacement`]:
 ///     crate::parser::InlineRenderer::render_character_replacement
@@ -362,9 +362,9 @@ mod tests {
     fn replacement_type_of_round_trips_every_variant() {
         use super::replacement_type_of;
 
-        // Every replacement value the classifier assigns maps back to a type, so
-        // the fold always routes through the renderer. An unknown value is the
-        // defensive `None`.
+        // Every replacement value the classifier assigns maps back to a type,
+        // so the fold always routes through the renderer. An unknown
+        // value is the defensive `None`.
         for value in [
             "\u{a9}",
             "\u{ae}",
@@ -409,13 +409,12 @@ mod tests {
         build_verbatim(source, &Parser::default(), None)
     }
 
-    /// The string pipeline's recorded output through the **callouts** step
-    /// for `source` — what that pipeline produced while it existed:
-    /// `SubstitutionGroup::Verbatim`'s two steps, in order (special
-    /// characters, then callouts), frozen into `snapshots/callouts.txt`. The
-    /// `_parser` and `_attrlist` no longer participate — a recording is keyed
-    /// by source alone — but the parameters stay so the call sites that
-    /// configured them do not churn.
+    /// The frozen recording (see `parser/snapshots/README.md`) through the
+    /// **callouts** step for `source`: `SubstitutionGroup::Verbatim`'s two
+    /// steps, in order (special characters, then callouts), frozen into
+    /// `snapshots/callouts.txt`. The `_parser` and `_attrlist` no longer
+    /// participate — a recording is keyed by source alone — but the
+    /// parameters stay so the call sites that configured them do not churn.
     fn golden_callouts_with(
         source: &str,
         parser: &Parser,
@@ -458,9 +457,9 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_callouts() {
         // For each fixture, folding the single-pass tree (special characters
-        // then callouts) reproduces the string pipeline's output
-        // byte-for-byte. This is the differential corpus (design §5.3) that
-        // pins the callouts increment (part 5c).
+        // then callouts) reproduces the frozen recording's output
+        // byte-for-byte. This is the differential corpus that pins callout
+        // recognition.
         let fixtures = [
             "just some text",
             "a <b> c",
@@ -492,7 +491,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_callouts(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -529,7 +528,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_callouts_in(corpus, fixture, parser, None),
-                "fold diverged from the string pipeline under a custom `icons` attribute"
+                "fold diverged from golden under a custom `icons` attribute"
             );
         }
     }

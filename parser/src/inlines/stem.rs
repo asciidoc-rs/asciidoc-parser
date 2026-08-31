@@ -1,9 +1,6 @@
 use crate::{HasSpan, Span, content::SubstitutionGroup, inlines::InlineNode, strings::CowStr};
 
 /// Inline STEM content (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`).
-///
-/// Field set is provisional (Phase 0) and will be refined against the first
-/// consumer.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Stem<'src> {
     /// The notation the expression is written in.

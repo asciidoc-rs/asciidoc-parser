@@ -62,9 +62,10 @@ Instead, it will look for icons that have the _.png_ file extension.
 "#
     );
 
-    // With neither `iconsdir` nor `imagesdir` configured, an icon resolves under
-    // the default `./images/icons` directory with the `.png` extension (the "if
-    // you have not configured either attribute" outcome).
+    // With neither `iconsdir` nor `imagesdir` configured, an icon resolves
+    // under the default `./images/icons` directory with the `.png`
+    // extension (the "if you have not configured either attribute"
+    // outcome).
     let doc = Parser::default().parse(":icons: image\n\nicon:note[]");
     assert_eq!(
         rendered_paragraphs(&doc).join("\n"),

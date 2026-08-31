@@ -1,7 +1,9 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, LazyLock},
-};
+use std::sync::{Arc, LazyLock};
+
+// See the matching comment in `parser.rs` for why this table (looked up on
+// every `attribute_value`/`is_attribute_set`/`has_attribute` miss against a
+// parser's own overrides) uses `ahash` rather than `std`'s `HashMap`.
+use ahash::{HashMap, HashMapExt};
 
 use crate::{
     ASCIIDOCTOR_VERSION,
@@ -272,13 +274,13 @@ pub(crate) fn synthesized_attr(
     name: &str,
     overrides: &HashMap<String, AttributeValue>,
 ) -> Option<&'static AttributeValue> {
-    // The derived backend-family flags are all empty-valued and defined only for
-    // the *active* backend / basebackend / filetype / doctype. Rather than parse
-    // the queried name, compute the flag names that are currently active and
-    // compare — unambiguous even where the components overlap. An explicitly
-    // unset (or empty) `backend` / `doctype` contributes no flags, so the
-    // backend-dependent and doctype-dependent groups are each gated on a
-    // present, non-empty value.
+    // The derived backend-family flags are all empty-valued and defined only
+    // for the *active* backend / basebackend / filetype / doctype. Rather
+    // than parse the queried name, compute the flag names that are
+    // currently active and compare — unambiguous even where the components
+    // overlap. An explicitly unset (or empty) `backend` / `doctype`
+    // contributes no flags, so the backend-dependent and doctype-dependent
+    // groups are each gated on a present, non-empty value.
     if name.starts_with("backend-")
         || name.starts_with("basebackend-")
         || name.starts_with("filetype-")
@@ -339,8 +341,8 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     // non-visible characters, escapes for characters with special meaning in
     // AsciiDoc, and passthroughs for characters that get encoded by default.
     // See the reference page:
-    // `ref/asciidoc-lang/docs/modules/attributes/pages/character-replacement-ref.
-    // adoc`.
+    // `ref/asciidoc-lang/docs/modules/attributes/pages/
+    // character-replacement-ref. adoc`.
     //
     // The entries below are listed in the same order they appear on that
     // reference page. The replacement values match Ruby Asciidoctor's
@@ -414,10 +416,10 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
         value,
     };
 
-    // Set by default to a concrete `default` value. The value is stored directly
-    // (not via [`build_built_in_default_values`]) so that setting the attribute
-    // with an empty value overrides it with an empty value, rather than
-    // re-applying the default.
+    // Set by default to a concrete `default` value. The value is stored
+    // directly (not via [`build_built_in_default_values`]) so that setting
+    // the attribute with an empty value overrides it with an empty value,
+    // rather than re-applying the default.
     let set = |ctx, default: &str| AttributeValue {
         allowable_value: AllowableValue::Any,
         modification_context: ctx,
@@ -477,24 +479,24 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     //
     // `authorcount` reflects the number of resolved authors and defaults to `0`
     // for a document with none. Registering the default here (rather than
-    // writing it during every header parse) lets an author-less document resolve
-    // `{authorcount}` to `0` without materializing the attribute — the header
-    // parser only writes `authorcount` when the count is non-zero (see
-    // [`Header::parse`](crate::document::Header)).
+    // writing it during every header parse) lets an author-less document
+    // resolve `{authorcount}` to `0` without materializing the attribute —
+    // the header parser only writes `authorcount` when the count is
+    // non-zero (see [`Header::parse`](crate::document::Header)).
     attrs.insert("authorcount".to_owned(), set(Anywhere, "0"));
 
     // ### General content and formatting attributes
     //
     // The active backend defaults to `html5` (the only backend this crate
-    // renders). It is a normal, unlocked attribute — settable in the header, the
-    // body, or via the API, matching Asciidoctor, where `{backend}` reflects the
-    // latest assignment — so its default context is `Anywhere`; an API caller
-    // that wants to pin it uses `ApiOnly`. Its derived family —
-    // `backend-{backend}`, `basebackend`, `basebackend-{basebackend}`,
-    // `filetype`, `filetype-{filetype}`, and the `*-doctype-{doctype}` flags —
-    // is synthesized on the fly from this value (see [`synthesized_attr`] and
-    // [`derived_backend_value`]), so it is never materialized or kept in sync
-    // when `backend` changes.
+    // renders). It is a normal, unlocked attribute — settable in the header,
+    // the body, or via the API, matching Asciidoctor, where `{backend}`
+    // reflects the latest assignment — so its default context is
+    // `Anywhere`; an API caller that wants to pin it uses `ApiOnly`. Its
+    // derived family — `backend-{backend}`, `basebackend`,
+    // `basebackend-{basebackend}`, `filetype`, `filetype-{filetype}`, and
+    // the `*-doctype-{doctype}` flags — is synthesized on the fly from this
+    // value (see [`synthesized_attr`] and [`derived_backend_value`]), so it
+    // is never materialized or kept in sync when `backend` changes.
     attrs.insert("backend".to_owned(), any(Anywhere, Value("html5".into())));
 
     // The document type defaults to `article` and may be set in the header or
@@ -558,8 +560,8 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     attrs.insert("max-block-nesting".to_owned(), set(ApiOnly, "32"));
 
     // NOTE: `max-attribute-value-size` is *not* registered here. Its `4096`
-    // default is only in effect under `SafeMode::Secure`, so it is resolved as a
-    // mode-aware synthesized attribute instead (see
+    // default is only in effect under `SafeMode::Secure`, so it is resolved as
+    // a mode-aware synthesized attribute instead (see
     // [`max_attribute_value_size_default`] and `Parser::effective_attribute`).
     // Keeping it out of this mode-agnostic table is what lets a caller-supplied
     // limit (which, being API-only, always lives in the per-parser map) survive
@@ -602,8 +604,9 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
     // `Parser::with_safe_mode` overrides `safe-mode-level` and `safe-mode-name`
     // (via `apply_safe_mode_attributes`) when the caller chooses a different
     // mode. The active `safe-mode-<name>` flag is *not* stored here: it is
-    // synthesized on the fly from `safe-mode-name` (see [`synthesized_attr`]), so
-    // exactly one flag is ever defined and the inactive flags stay absent.
+    // synthesized on the fly from `safe-mode-name` (see [`synthesized_attr`]),
+    // so exactly one flag is ever defined and the inactive flags stay
+    // absent.
     attrs.insert(
         "safe-mode-level".to_owned(),
         any(ApiOnly, Value("20".into())),
@@ -615,11 +618,12 @@ fn build_built_in_attrs() -> HashMap<String, AttributeValue> {
 
     // NOTE: The derived backend-family flags (`backend-{backend}`,
     // `basebackend-{basebackend}`, `filetype-{filetype}`, `doctype-{doctype}`,
-    // and the `*-doctype-*` combinations) are *not* registered here, nor are the
-    // derived `basebackend` / `filetype` values. They are synthesized on the fly
-    // for the active `backend` / `doctype` by `Parser::attribute_value` (via
-    // [`synthesized_attr`] and [`derived_backend_value`]), so they never need to
-    // be materialized or kept in sync when `backend` or `doctype` changes.
+    // and the `*-doctype-*` combinations) are *not* registered here, nor are
+    // the derived `basebackend` / `filetype` values. They are synthesized
+    // on the fly for the active `backend` / `doctype` by
+    // `Parser::attribute_value` (via [`synthesized_attr`] and
+    // [`derived_backend_value`]), so they never need to be materialized or
+    // kept in sync when `backend` or `doctype` changes.
 
     attrs
 }
@@ -632,11 +636,11 @@ fn build_built_in_default_values() -> HashMap<String, String> {
     // This map holds the defaults for attributes that are *not* set by default:
     // the reference page's "turn-on" attributes (`toc`, `sectnums`) and its
     // implied `(x)` / effective `_empty_[=x]` values. Because these attributes
-    // are absent from [`build_built_in_attrs`], they are treated as missing when
-    // referenced while unset; their default is applied only once they are
-    // explicitly set. Attributes that *are* set by default store their value
-    // directly in [`build_built_in_attrs`] and do not appear here, so setting
-    // one with an empty value overrides it with an empty value.
+    // are absent from [`build_built_in_attrs`], they are treated as missing
+    // when referenced while unset; their default is applied only once they
+    // are explicitly set. Attributes that *are* set by default store their
+    // value directly in [`build_built_in_attrs`] and do not appear here, so
+    // setting one with an empty value overrides it with an empty value.
     //
     // `docinfosubs` is intentionally omitted: its implied default of
     // `attributes` is handled where docinfo substitution is resolved (an unset

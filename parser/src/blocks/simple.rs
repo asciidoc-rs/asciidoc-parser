@@ -80,17 +80,10 @@ impl<'src> SimpleBlock<'src> {
     /// This narrow seam exists for the document-order title resolution pass
     /// (see `document::title_refs`), which installs the re-rendered title
     /// after resolving any cross-references embedded in it. All other access
-    /// goes through the read-only [`IsBlock::title`] accessor.
+    /// goes through the read-only [`IsBlock::title`]/[`IsBlock::title_content`]
+    /// accessors.
     pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         self.title.as_mut()
-    }
-
-    /// Returns the block's title as a read-only [`Content`], if the block has
-    /// one. Used by the inline-tree tests to inspect a block title's mirrored
-    /// cross-reference resolution.
-    #[cfg(test)]
-    pub(crate) fn title_content(&self) -> Option<&Content<'src>> {
-        self.title.as_ref()
     }
 
     pub(crate) fn parse(
@@ -309,13 +302,15 @@ fn parse_lines<'src>(
     let source_after_whitespace = source.discard_whitespace();
     let first_line_indent = source_after_whitespace.col() - 1;
 
-    // Track if we're in "indented literal" mode (literal style from indentation).
-    // In this mode, we should still stop for list markers that are NOT indented.
+    // Track if we're in "indented literal" mode (literal style from
+    // indentation). In this mode, we should still stop for list markers
+    // that are NOT indented.
     let mut indented_literal_mode = false;
 
     let mut style = if source_after_whitespace.col() == source.col() || force_paragraph_style {
-        // When force_paragraph_style is true, we still need to track that the content
-        // is indented so we can properly stop at unindented list markers.
+        // When force_paragraph_style is true, we still need to track that the
+        // content is indented so we can properly stop at unindented
+        // list markers.
         if source_after_whitespace.col() != source.col() {
             indented_literal_mode = true;
         }
@@ -365,10 +360,10 @@ fn parse_lines<'src>(
     let mut next = source;
     let mut filtered_lines: Vec<&'src str> = vec![];
 
-    // Source span of each surviving line, kept in lockstep with `filtered_lines`
-    // so the attribute-references substitution can locate an
-    // `attribute-missing=warn` warning at the precise source offset of the
-    // offending reference (see `Content::from_filtered_lines`).
+    // Source span of each surviving line, kept in lockstep with
+    // `filtered_lines` so the attribute-references substitution can locate
+    // an `attribute-missing=warn` warning at the precise source offset of
+    // the offending reference (see `Content::from_filtered_lines`).
     let mut skipped_comment_line = false;
 
     // Determine how much indentation to strip from literal paragraphs.
@@ -409,9 +404,10 @@ fn parse_lines<'src>(
     while let Some(line_mi) = next.take_non_empty_line() {
         let mut line = line_mi.item;
 
-        // If we've skipped a comment line and this is a section header, stop here
-        // so the section can be parsed as a separate block. Only do this at the
-        // top level (not inside lists), indicated by stop_for_list_items being false.
+        // If we've skipped a comment line and this is a section header, stop
+        // here so the section can be parsed as a separate block. Only
+        // do this at the top level (not inside lists), indicated by
+        // stop_for_list_items being false.
         if !stop_for_list_items
             && skipped_comment_line
             && style == SimpleBlockStyle::Paragraph
@@ -420,13 +416,14 @@ fn parse_lines<'src>(
             break;
         }
 
-        // A leading line comment sitting directly above a line that begins a new
-        // block — block metadata (a `.Title`, or a `[...]` attribute list or
-        // `[[...]]` anchor) or a block delimiter (a delimited block or a table)
-        // — must not absorb that line as paragraph content. Terminate the
-        // comment-only block here so the following line gets a fresh dispatch
-        // and can attach as metadata to (or open) the block it decorates.
-        // Without this, the first such line after the comment is swallowed as
+        // A leading line comment sitting directly above a line that begins a
+        // new block — block metadata (a `.Title`, or a `[...]`
+        // attribute list or `[[...]]` anchor) or a block delimiter (a
+        // delimited block or a table) — must not absorb that line as
+        // paragraph content. Terminate the comment-only block here so
+        // the following line gets a fresh dispatch and can attach as
+        // metadata to (or open) the block it decorates. Without this,
+        // the first such line after the comment is swallowed as
         // paragraph text. This is scoped to the case where only comment lines
         // have been consumed so far (`filtered_lines` still empty); once real
         // content has accumulated, the general stop conditions below take over.
@@ -450,17 +447,18 @@ fn parse_lines<'src>(
 
         // There are several stop conditions for simple paragraph blocks. These
         // "shouldn't" be encountered on the first line (we shouldn't be calling
-        // `SimpleBlock::parse` in these conditions), but in case it is, we simply
-        // ignore them on the first line.
+        // `SimpleBlock::parse` in these conditions), but in case it is, we
+        // simply ignore them on the first line.
         if !filtered_lines.is_empty() {
-            // In indented literal mode, only stop for list markers that are NOT indented
-            // (at column 1). This allows definition list items to be properly separated.
+            // In indented literal mode, only stop for list markers that are NOT
+            // indented (at column 1). This allows definition list
+            // items to be properly separated.
             let should_check_for_list_marker =
                 stop_for_list_items && (!indented_literal_mode || line.col() == 1);
 
-            // If we've already started accumulating content for this list item paragraph,
-            // we don't stop for list markers at any level other than our own or a parent
-            // level.
+            // If we've already started accumulating content for this list item
+            // paragraph, we don't stop for list markers at any
+            // level other than our own or a parent level.
             if should_check_for_list_marker
                 && let Some(marker_mi) = ListItemMarker::parse(line, parser)
             {
@@ -501,9 +499,10 @@ fn parse_lines<'src>(
 
         next = line_mi.after;
 
-        // Only strip comment lines in paragraph style. In literal/listing/source
-        // blocks, "//" lines are preserved as content; likewise a `[comment]`
-        // paragraph retains its content verbatim (raw).
+        // Only strip comment lines in paragraph style. In
+        // literal/listing/source blocks, "//" lines are preserved as
+        // content; likewise a `[comment]` paragraph retains its content
+        // verbatim (raw).
         if !comment_style
             && style == SimpleBlockStyle::Paragraph
             && line.starts_with("//")
@@ -598,6 +597,10 @@ impl<'src> IsBlock<'src> for SimpleBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_ref().map(Content::rendered_str)
+    }
+
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
     }
 
     fn caption(&self) -> Option<&str> {
@@ -966,8 +969,8 @@ mod tests {
         #[test]
         fn multi_marker_is_always_a_section_regardless_of_offset() {
             // Two or more markers followed by a space are always a section, at
-            // any offset (a negative offset that would push the level below 1 is
-            // clamped in `parse_title_line`, not rejected).
+            // any offset (a negative offset that would push the level below 1
+            // is clamped in `parse_title_line`, not rejected).
             assert!(is_section_header("== Section", 0));
             assert!(is_section_header("=== Section", 0));
             assert!(is_section_header("## Section", 0));
@@ -1006,7 +1009,8 @@ mod tests {
         fn non_marker_and_over_long_marker_are_not_sections() {
             assert!(!is_section_header("paragraph", 1));
 
-            // Seven markers exceed the level-5 maximum, so this is not a heading.
+            // Seven markers exceed the level-5 maximum, so this is not a
+            // heading.
             assert!(!is_section_header("======= Too deep", 0));
         }
     }

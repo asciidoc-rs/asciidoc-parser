@@ -1,4 +1,9 @@
-use std::{borrow::Cow, collections::HashMap, sync::Arc};
+use std::{borrow::Cow, sync::Arc};
+
+// See the matching comment in `parser.rs` for why these tables use `ahash`
+// rather than `std`'s `HashMap` — they are the same tables, shared with the
+// parser by `Arc` (see the fields below).
+use ahash::HashMap;
 
 use crate::{
     SafeMode,
@@ -108,8 +113,8 @@ impl std::hash::Hash for ResolvedAttributes {
         // with the derived, content-based `Eq` (equal snapshots hash equally),
         // while distinguishing snapshots whose tables differ in their keys or
         // values — not merely in their entry count (hashing the count alone
-        // would collide every cell in a document, since they typically share one
-        // `Arc`-backed, equal-length attribute table).
+        // would collide every cell in a document, since they typically share
+        // one `Arc`-backed, equal-length attribute table).
         hash_table(self.attribute_values.iter(), state);
         hash_table(self.default_attribute_values.iter(), state);
         hash_table(self.counter_values.iter(), state);
@@ -219,8 +224,9 @@ impl ResolvedAttributes {
             // An enabled automatic (top) TOC clears any author-supplied
             // `toc-position`: Asciidoctor's normalization falls into its `else`
             // arm and deletes the attribute, so an unrecognized author value
-            // (e.g. a bogus side) does not leak into the derived state. A disabled
-            // TOC returns early above and leaves the author value untouched.
+            // (e.g. a bogus side) does not leak into the derived state. A
+            // disabled TOC returns early above and leaves the
+            // author value untouched.
             attrs.remove("toc-position");
         }
         if let Some(class) = class {
@@ -522,7 +528,9 @@ impl ResolvedAttributes {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
+    use std::sync::Arc;
+
+    use ahash::{HashMap, HashMapExt};
 
     use crate::{
         SafeMode,
@@ -737,9 +745,9 @@ mod tests {
 
     #[test]
     fn absent_docdir_and_docfile_stay_missing_under_server_safe_mode() {
-        // With no `docdir` / `docfile` stored, the masking finds nothing to mask
-        // (`raw_set_value` short-circuits on the absent attribute) and they stay
-        // missing — mirroring the parser.
+        // With no `docdir` / `docfile` stored, the masking finds nothing to
+        // mask (`raw_set_value` short-circuits on the absent attribute)
+        // and they stay missing — mirroring the parser.
         let attrs = ResolvedAttributes::new(
             Arc::new(HashMap::new()),
             Arc::new(HashMap::new()),
@@ -801,7 +809,9 @@ mod tests {
     }
 
     mod resolve_show_title {
-        use std::{collections::HashMap, sync::Arc};
+        use std::sync::Arc;
+
+        use ahash::{HashMap, HashMapExt};
 
         use crate::{
             SafeMode,

@@ -128,16 +128,10 @@ impl<'src> QuoteBlock<'src> {
     /// This narrow seam exists for the document-order title resolution pass
     /// (see `document::title_refs`), which installs the re-rendered title
     /// after resolving any cross-references embedded in it. All other access
-    /// goes through the read-only [`IsBlock::title`] accessor.
+    /// goes through the read-only [`IsBlock::title`]/[`IsBlock::title_content`]
+    /// accessors.
     pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         self.title.as_mut()
-    }
-
-    /// Returns the block's title as a read-only [`Content`], if the block has
-    /// one. Used by the inline-tree tests to inspect a block title's own tree.
-    #[cfg(test)]
-    pub(crate) fn title_content(&self) -> Option<&Content<'src>> {
-        self.title.as_ref()
     }
 
     /// Parse a blockquote, if the given metadata and content describe one.
@@ -166,9 +160,10 @@ impl<'src> QuoteBlock<'src> {
             }
 
             // A `[quote]`/`[verse]` style also masquerades over an open block
-            // (`--`): the open delimiter adopts the quote/verse context. This is
-            // unique to the open block — every other structural container (below)
-            // keeps its own context and ignores the style.
+            // (`--`): the open delimiter adopts the quote/verse context. This
+            // is unique to the open block — every other structural
+            // container (below) keeps its own context and ignores
+            // the style.
             if first_line.data() == "--" {
                 return Some(Self::parse_delimited(metadata, parser, type_));
             }
@@ -187,8 +182,9 @@ impl<'src> QuoteBlock<'src> {
             return Self::parse_styled_paragraph(metadata, parser, type_);
         }
 
-        // A bare quote-delimited block (no `[quote]`/`[verse]` style) is a quote
-        // block. Any other style on it (e.g. an admonition label) is ignored.
+        // A bare quote-delimited block (no `[quote]`/`[verse]` style) is a
+        // quote block. Any other style on it (e.g. an admonition label)
+        // is ignored.
         if is_quote_delimiter {
             return Some(Self::parse_delimited(metadata, parser, QuoteType::Quote));
         }
@@ -231,9 +227,10 @@ impl<'src> QuoteBlock<'src> {
         let (content_model, content, blocks, mut warnings) = match type_ {
             // A quote block contains other blocks.
             QuoteType::Quote => {
-                // A `== …` line inside the quote block is literal content, not a
-                // section heading; suppress section recognition for the nested
-                // parse (saved and restored to compose with outer contexts).
+                // A `== …` line inside the quote block is literal content, not
+                // a section heading; suppress section
+                // recognition for the nested parse (saved and
+                // restored to compose with outer contexts).
                 let previously_in_delimited_block = parser.in_delimited_block;
                 parser.in_delimited_block = true;
 
@@ -342,14 +339,16 @@ impl<'src> QuoteBlock<'src> {
         parser: &mut Parser,
     ) -> Option<MatchAndWarnings<'src, Option<MatchedItem<'src, Self>>>> {
         // A quoted paragraph must begin with a double quote. Test that on the
-        // block's first byte *before* scanning the whole paragraph. `read_paragraph`
-        // (below) walks every line up to the next blank line, so testing the first
-        // byte here avoids that scan for the common non-quoted paragraph: without
-        // it, a long run of non-blank lines that never forms a quoted paragraph is
-        // rescanned in full for every block, making the parse O(n²) on pathological
-        // input (e.g. thousands of consecutive delimiter lines with no blank line
-        // between them). `read_paragraph` starts at `block_start`, so a paragraph
-        // beginning with `"` shares this first byte — testing it here loses nothing.
+        // block's first byte *before* scanning the whole paragraph.
+        // `read_paragraph` (below) walks every line up to the next
+        // blank line, so testing the first byte here avoids that scan
+        // for the common non-quoted paragraph: without it, a long run
+        // of non-blank lines that never forms a quoted paragraph is
+        // rescanned in full for every block, making the parse O(n²) on
+        // pathological input (e.g. thousands of consecutive delimiter
+        // lines with no blank line between them). `read_paragraph`
+        // starts at `block_start`, so a paragraph beginning with `"`
+        // shares this first byte — testing it here loses nothing.
         if !metadata.block_start.data().starts_with('"') {
             return None;
         }
@@ -378,7 +377,8 @@ impl<'src> QuoteBlock<'src> {
         let mut content = Content::from(inner_span);
         SubstitutionGroup::Normal.apply(&mut content, parser, None);
 
-        // The attribution line provides the attribution and (optional) citation.
+        // The attribution line provides the attribution and (optional)
+        // citation.
         let (attribution, citetitle) = split_attribution_line(attribution_text.trim(), parser);
 
         let source = metadata
@@ -422,9 +422,9 @@ impl<'src> QuoteBlock<'src> {
     ) -> Option<MatchAndWarnings<'src, Option<MatchedItem<'src, Self>>>> {
         let first_line = metadata.block_start.take_normalized_line().item;
 
-        // The first line must begin the Markdown blockquote: a `>` followed by a
-        // space, or a bare `>`. A `>` immediately followed by other text (e.g.
-        // `>foo`) is not a blockquote.
+        // The first line must begin the Markdown blockquote: a `>` followed by
+        // a space, or a bare `>`. A `>` immediately followed by other
+        // text (e.g. `>foo`) is not a blockquote.
         if !is_markdown_marker_line(first_line.data()) {
             return None;
         }
@@ -467,24 +467,27 @@ impl<'src> QuoteBlock<'src> {
 
         let body = lines.join("\n");
 
-        // The stripped body owns its source; its blocks borrow from it. Warnings
-        // from the owned parse reference spans in that owned source, so they
-        // cannot be returned to the caller as `Warning<'src>`. Their
-        // [`WarningType`]s (which carry no borrowed data) are collected instead
-        // and re-anchored at the blockquote's own source span below: the
-        // `>`-stripped body is not contiguous in the document source, so a
-        // precise location is not available anyway, but the diagnostic itself
+        // The stripped body owns its source; its blocks borrow from it.
+        // Warnings from the owned parse reference spans in that owned
+        // source, so they cannot be returned to the caller as
+        // `Warning<'src>`. Their [`WarningType`]s (which carry no
+        // borrowed data) are collected instead and re-anchored at the
+        // blockquote's own source span below: the `>`-stripped body is
+        // not contiguous in the document source, so a precise location
+        // is not available anyway, but the diagnostic itself
         // must not be lost.
         let mut nested_warning_types: Vec<WarningType> = vec![];
         let owned = OwnedQuoteBlocks::new(body, |source| {
-            // The blocks parse from `source`, an owned copy that does not map to
-            // the document. Mark that so a footnote defined inside records no
-            // (misleading) document location; see `Parser::owned_subsource_depth`.
+            // The blocks parse from `source`, an owned copy that does not map
+            // to the document. Mark that so a footnote defined
+            // inside records no (misleading) document location; see
+            // `Parser::owned_subsource_depth`.
             parser.owned_subsource_depth += 1;
 
             // A `== …` line inside the blockquote is literal content, not a
-            // section heading; suppress section recognition for the nested parse
-            // (saved and restored to compose with outer contexts).
+            // section heading; suppress section recognition for the nested
+            // parse (saved and restored to compose with outer
+            // contexts).
             let previously_in_delimited_block = parser.in_delimited_block;
             parser.in_delimited_block = true;
 
@@ -582,9 +585,9 @@ impl<'src> QuoteBlock<'src> {
     ) {
         let source = self.source;
 
-        // The owned store is shared behind an `Arc`, but references are resolved
-        // immediately after parsing while the block is still its sole owner, so
-        // `get_mut` succeeds.
+        // The owned store is shared behind an `Arc`, but references are
+        // resolved immediately after parsing while the block is still
+        // its sole owner, so `get_mut` succeeds.
         if let Some(owned) = self.markdown_blocks.as_mut()
             && let Some(owned) = Arc::get_mut(owned)
         {
@@ -749,8 +752,8 @@ fn split_at_attribution_line(data: &str) -> Option<(&str, &str)> {
         {
             let attribution_text = rest.trim_start_matches([' ', '\t']);
 
-            // `line_start > 0` ensures there is at least one line of quoted text
-            // before the attribution line.
+            // `line_start > 0` ensures there is at least one line of quoted
+            // text before the attribution line.
             if !attribution_text.is_empty() && line_start > 0 {
                 attribution = Some((line_start, attribution_text));
             }
@@ -759,8 +762,8 @@ fn split_at_attribution_line(data: &str) -> Option<(&str, &str)> {
         line_start += line.len();
     }
 
-    // `line_start` is always a line boundary, so `split_at` never lands inside a
-    // character.
+    // `line_start` is always a line boundary, so `split_at` never lands inside
+    // a character.
     attribution.map(|(start, text)| (data.split_at(start).0, text))
 }
 
@@ -828,6 +831,10 @@ impl<'src> IsBlock<'src> for QuoteBlock<'src> {
         self.title.as_ref().map(Content::rendered_str)
     }
 
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
+    }
+
     fn anchor(&'src self) -> Option<Span<'src>> {
         self.anchor
     }
@@ -874,7 +881,7 @@ mod tests {
     use std::ops::Deref;
 
     use crate::{
-        blocks::{Block, ContentModel, IsBlock, QuoteType},
+        blocks::{Block, ContentModel, IsBlock, QuoteBlock, QuoteType},
         tests::prelude::*,
     };
 
@@ -886,7 +893,7 @@ mod tests {
             .item
     }
 
-    fn as_quote<'a>(block: &'a Block<'a>) -> &'a crate::blocks::QuoteBlock<'a> {
+    fn as_quote<'a>(block: &'a Block<'a>) -> &'a QuoteBlock<'a> {
         match block {
             Block::Quote(quote) => quote,
 
@@ -998,8 +1005,8 @@ mod tests {
 
     #[test]
     fn quote_or_verse_style_over_other_container_is_not_a_quote() {
-        // A `quote`/`verse` style over an example, sidebar, listing, literal, or
-        // passthrough block keeps that container's own context.
+        // A `quote`/`verse` style over an example, sidebar, listing, literal,
+        // or passthrough block keeps that container's own context.
         assert_eq!(
             parse_one("[quote]\n====\nx\n====").raw_context().deref(),
             "example"
@@ -1131,10 +1138,10 @@ mod tests {
 
     #[test]
     fn markdown_blockquote_propagates_nested_warning() {
-        // A warning produced while parsing the (owned, `>`-stripped) body — here
-        // an unterminated nested delimited block — is re-anchored at the
-        // blockquote's own span and surfaced to the caller, rather than being
-        // dropped (or panicking a debug build).
+        // A warning produced while parsing the (owned, `>`-stripped) body —
+        // here an unterminated nested delimited block — is re-anchored
+        // at the blockquote's own span and surfaced to the caller,
+        // rather than being dropped (or panicking a debug build).
         let mut parser = Parser::default();
         let maw = Block::parse(crate::Span::new("> ____\n> unclosed"), &mut parser);
 
@@ -1167,8 +1174,9 @@ mod tests {
         assert_eq!(quote.content_model(), ContentModel::Compound);
         assert_eq!(quote.blocks().len(), 1);
 
-        // A Markdown blockquote's nested blocks borrow the block's owned source,
-        // but `child_blocks()` still exposes them (matching `blocks()`).
+        // A Markdown blockquote's nested blocks borrow the block's owned
+        // source, but `child_blocks()` still exposes them (matching
+        // `blocks()`).
         assert_eq!(quote.child_blocks().count(), 1);
     }
 
@@ -1335,7 +1343,8 @@ mod tests {
         fn assert_literal_heading(input: &str) {
             let doc = Parser::default().parse(input);
 
-            // No section heading was recognized, so nothing renders as an `<h2>`.
+            // No section heading was recognized, so nothing renders as an
+            // `<h2>`.
             assert_xpath(&doc, "//h2", 0);
 
             // The line survives as ordinary paragraph content.

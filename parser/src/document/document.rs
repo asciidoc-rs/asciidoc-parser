@@ -102,9 +102,10 @@ impl<'src> Document<'src> {
             let header = mi.item.item;
             let mut warnings = mi.warnings;
 
-            // Derive the `iconsdir` default from `imagesdir` (`{imagesdir}/icons`)
-            // now that the header is fully parsed, unless the author set
-            // `iconsdir` explicitly in the header (in which case it wins).
+            // Derive the `iconsdir` default from `imagesdir`
+            // (`{imagesdir}/icons`) now that the header is fully
+            // parsed, unless the author set `iconsdir` explicitly
+            // in the header (in which case it wins).
             let iconsdir_set_in_header = header.attributes().any(|a| a.name().data() == "iconsdir");
             parser.apply_iconsdir_default(iconsdir_set_in_header);
 
@@ -126,10 +127,11 @@ impl<'src> Document<'src> {
             // the section-child boundary check only sees sections nested under
             // another section; flag the document-root case here.
             //
-            // Skipped for a title-less document or when `fragment` is set — both
-            // are treated as section fragments with no level-0 root to sequence
-            // against — and when `leveloffset` is in effect, since a shifted (or
-            // clamped) effective level no longer reflects the authored level
+            // Skipped for a title-less document or when `fragment` is set —
+            // both are treated as section fragments with no level-0
+            // root to sequence against — and when `leveloffset` is
+            // in effect, since a shifted (or clamped) effective
+            // level no longer reflects the authored level
             // relationship and any degenerate offset is reported on its own.
             if header.title_source().is_some()
                 && !parser.is_attribute_set("fragment")
@@ -143,8 +145,9 @@ impl<'src> Document<'src> {
             // Warnings recorded while replacing attribute references (e.g. a
             // reference to a missing attribute under `attribute-missing=warn`)
             // are collected on the parser, where only owned offsets — not
-            // borrowed spans — can live. Now that the document's owned source is
-            // available, turn each one back into a spanned `Warning`.
+            // borrowed spans — can live. Now that the document's owned source
+            // is available, turn each one back into a spanned
+            // `Warning`.
             let root = Span::new(owned_src);
 
             // Warnings raised during preprocessing (e.g. an unresolved include
@@ -169,7 +172,8 @@ impl<'src> Document<'src> {
             let mut preamble_split_index: Option<usize> = None;
 
             // Only look for preamble content if document has a title.
-            // Asciidoctor only creates a preamble when there's a document title.
+            // Asciidoctor only creates a preamble when there's a document
+            // title.
             if header.title().is_some() {
                 for (index, block) in blocks.iter().enumerate() {
                     match block {
@@ -218,11 +222,12 @@ impl<'src> Document<'src> {
                 }
             }
 
-            // Under `doctype: inline`, only the first eligible block is converted,
-            // as bare inline content, and everything after it is dropped (the
-            // rendering lives on the embed path). A compound or empty candidate
-            // has no inline content to emit, so warn here — matching
-            // Asciidoctor's `Document#convert` — and let the embed path render
+            // Under `doctype: inline`, only the first eligible block is
+            // converted, as bare inline content, and everything
+            // after it is dropped (the rendering lives on the embed
+            // path). A compound or empty candidate has no inline
+            // content to emit, so warn here — matching Asciidoctor'
+            // s `Document#convert` — and let the embed path render
             // nothing. This runs on the final block list (after any preamble
             // split) and uses the same candidate selection as the renderer, so
             // the two always agree on which block is the candidate.
@@ -257,19 +262,20 @@ impl<'src> Document<'src> {
             // `toc-class` document attributes from the resolved placement into
             // the snapshot (matching Asciidoctor), so they are queryable via
             // `attribute_value` without perturbing the parser's own attribute
-            // state — a reused parser must not carry this document's derived TOC
-            // values into the next parse, where they would change what
-            // `TocMode::from_parser` observes.
+            // state — a reused parser must not carry this document's derived
+            // TOC values into the next parse, where they would
+            // change what `TocMode::from_parser` observes.
             attributes.materialize_toc_attributes(toc.mode);
 
             // Resolve docinfo from the final attribute state and the parser's
             // configured docinfo file handler (empty when no handler is set).
             let docinfo = Docinfo::resolve(parser);
 
-            // Warnings are collected in assembly order (header, then blocks, then
-            // preprocessor, substitution, and post-parse checks), which is not
-            // source order. Put them into source order now so a host can rely on
-            // `warnings()` yielding line-ordered diagnostics. See
+            // Warnings are collected in assembly order (header, then blocks,
+            // then preprocessor, substitution, and post-parse
+            // checks), which is not source order. Put them into
+            // source order now so a host can rely on `warnings()`
+            // yielding line-ordered diagnostics. See
             // `sort_warnings` for the ordering and its determinism.
             sort_warnings(&mut warnings);
 
@@ -656,10 +662,11 @@ impl<'src> Document<'src> {
             let source = dependent.source;
             let mut warnings = ReferenceWarnings::default();
 
-            // The footnotes are moved out of the catalog so they can be resolved
-            // mutably while the `CatalogResolver` borrows the (footnote-free)
-            // catalog. Footnotes are never cross-reference *targets*, so their
-            // absence does not affect resolution.
+            // The footnotes are moved out of the catalog so they can be
+            // resolved mutably while the `CatalogResolver` borrows
+            // the (footnote-free) catalog. Footnotes are never
+            // cross-reference *targets*, so their absence does not
+            // affect resolution.
             let mut footnotes = dependent.catalog.take_footnotes();
 
             let resolver = CatalogResolver::new(&dependent.catalog);
@@ -1934,8 +1941,9 @@ mod tests {
         #[test]
         fn matches_parser_state_for_masked_docdir_and_docfile() {
             // Under `SafeMode::Server` the `Document` snapshot must report the
-            // same masked `docdir` / `docfile` the parser does, so the host path
-            // never leaks through the public `Document::attribute_value` (#735).
+            // same masked `docdir` / `docfile` the parser does, so the host
+            // path never leaks through the public
+            // `Document::attribute_value` (#735).
             let mut parser = Parser::default()
                 .with_safe_mode(SafeMode::Server)
                 .with_intrinsic_attribute("docdir", "/some/dir", ModificationContext::ApiOnly)

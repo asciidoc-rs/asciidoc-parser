@@ -282,8 +282,8 @@ fn store_attribute_with_value() {
     );
 
     // Constructing the parser with the attribute makes it active for a parsed
-    // document: `foo` is present on the resulting `Document` and resolves when a
-    // `{foo}` reference is substituted.
+    // document: `foo` is present on the resulting `Document` and resolves when
+    // a `{foo}` reference is substituted.
     let mut parser =
         Parser::default().with_intrinsic_attribute("foo", "bar", ModificationContext::Anywhere);
     let doc = parser.parse("{foo}");
@@ -1004,9 +1004,10 @@ fn parse_author_condenses_whitespace() {
 "#
     );
 
-    // This crate does not derive the `authors` or `authorcount` attributes, so we
-    // assert on the parsed author directly. The interior whitespace between the
-    // names is condensed to a single space (matching `metadata['author']`).
+    // This crate does not derive the `authors` or `authorcount` attributes, so
+    // we assert on the parsed author directly. The interior whitespace
+    // between the names is condensed to a single space (matching
+    // `metadata['author']`).
     let a = parse_authors("Stuart       Rackham     <founder@asciidoc.org>");
     assert_eq!(a.len(), 1);
     assert_eq!(a[0].name, "Stuart Rackham");
@@ -1034,17 +1035,17 @@ fn parse_invalid_author_line_becomes_author() {
     );
 
     // The author line doesn't match the author pattern (because of the embedded
-    // comma), so Asciidoctor condenses the interior whitespace and stores the whole
-    // line as the author.
+    // comma), so Asciidoctor condenses the interior whitespace and stores the
+    // whole line as the author.
     //
-    // The Ruby assertions above check `metadata['author']`, the *raw* value that
-    // `parse_header_metadata` returns before substitution. This crate's
-    // `Author::name()` instead represents the value that populates the `author`
-    // document attribute — the one `{author}` and the converter consume — to which
-    // Asciidoctor applies the header substitution group via `apply_header_subs`
-    // (`doc.attributes['author'] = apply_header_subs val`). Applying the header
-    // subs escapes the literal angle brackets, so they appear as `&lt;`/`&gt;`
-    // here.
+    // The Ruby assertions above check `metadata['author']`, the *raw* value
+    // that `parse_header_metadata` returns before substitution. This
+    // crate's `Author::name()` instead represents the value that populates
+    // the `author` document attribute — the one `{author}` and the
+    // converter consume — to which Asciidoctor applies the header
+    // substitution group via `apply_header_subs` (`doc.attributes['author']
+    // = apply_header_subs val`). Applying the header subs escapes the
+    // literal angle brackets, so they appear as `&lt;`/`&gt;` here.
     let a = parse_authors("   Stuart       Rackham, founder of AsciiDoc   <founder@asciidoc.org>");
     assert_eq!(a.len(), 1);
     assert_eq!(
@@ -1148,10 +1149,11 @@ fn skips_blank_author_entries_in_implicit_author_line() {
 "#
     );
 
-    // This crate splits the implicit author line on a semicolon that is followed
-    // by a space or the end of the line (see issue #757), then drops any blank
-    // entry. So the empty middle entry and the trailing bare `;` are both
-    // dropped, and the trailing `;` no longer clings to the final author's name.
+    // This crate splits the implicit author line on a semicolon that is
+    // followed by a space or the end of the line (see issue #757), then
+    // drops any blank entry. So the empty middle entry and the trailing
+    // bare `;` are both dropped, and the trailing `;` no longer clings to
+    // the final author's name.
     let a = parse_authors("Doc Writer; ; John Smith <john.smith@asciidoc.org>;");
     assert_eq!(a.len(), 2);
     assert_eq!(a[0].name, "Doc Writer");
@@ -1160,7 +1162,8 @@ fn skips_blank_author_entries_in_implicit_author_line() {
 
     // The two surviving authors are counted and numbered `author_1` /
     // `author_2`, matching Asciidoctor. A synthetic document title is prepended
-    // because this crate only recognizes an author line when a title is present.
+    // because this crate only recognizes an author line when a title is
+    // present.
     let mut parser = Parser::default();
     let _doc =
         parser.parse("= Document Title\nDoc Writer; ; John Smith <john.smith@asciidoc.org>;");
@@ -1516,8 +1519,8 @@ fn allows_authors_to_be_overridden_using_explicit_author_attributes() {
     // implicit author line. The first author is now exposed both unsuffixed
     // (`author`) and as `author_1`. The override is reconciled back into the
     // combined `authors` string and the resolved author list, so `{authors}`,
-    // `Document::authors()`, and `authorcount` all reflect `Danger Mouse` rather
-    // than the implicit `Johnny Bravo`.
+    // `Document::authors()`, and `authorcount` all reflect `Danger Mouse`
+    // rather than the implicit `Johnny Bravo`.
     let mut parser = Parser::default();
     let doc = parser.parse(
         "= Document Title\nKismet Chameleon; Johnny Bravo; Lazarus het_Draeke\n:author_2: Danger Mouse",
@@ -1721,9 +1724,9 @@ fn parse_rev_number_date_and_remark_as_attribute_references() {
 
     // With none of the referenced attributes defined, the references survive
     // verbatim: the `v` prefix is stripped from the revision number, but
-    // `{project-version}` is preserved rather than dropped for lack of a literal
-    // digit. (This crate does not surface the full header-metadata hash, so the
-    // `metadata.size` assertion is not modeled.)
+    // `{project-version}` is preserved rather than dropped for lack of a
+    // literal digit. (This crate does not surface the full header-metadata
+    // hash, so the `metadata.size` assertion is not modeled.)
     let (revnumber, revdate, revremark) =
         header_rev("Author Name\nv{project-version}, {release-date}: {release-summary}");
     assert_eq!(revnumber.as_deref(), Some("{project-version}"));

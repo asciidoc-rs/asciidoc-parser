@@ -5,13 +5,17 @@ use std::borrow::Cow;
 use super::{MacroMatch, MacroMatchKind, links::restore_masked_passthroughs, rebuild_macro_level};
 use crate::{
     Parser, Span,
-    attributes::{Attrlist, AttrlistContext},
+    attributes::{
+        Attrlist, AttrlistContext,
+        element_attribute::{MASKED_PIECE_PLACEHOLDER, escape_masked_piece_bytes},
+    },
     content::{
         INLINE_IMAGE_MACRO, basename,
         inline_builder::{
             fold::{fold_html, fold_stem, render_char},
             quotes::{
-                LevelContext, Piece, build_match_string, charref_entity, source_slice, text_slice,
+                LevelContext, Piece, build_match_string, charref_entity, single_text_value,
+                source_slice, text_slice,
             },
             special_chars::Masked,
         },
@@ -23,6 +27,14 @@ use crate::{
     warnings::WarningType,
 };
 
+/// Mirrors the string step's `found_macroish`: an image or icon macro needs
+/// its name prefix and an opening bracket. Shared between
+/// [`image_macros_level`]'s pre-build sniff and its post-build one, so the
+/// two answers cannot drift apart.
+fn image_macro_prefilter(s: &str) -> bool {
+    (s.contains("image:") || s.contains("icon:")) && s.contains('[')
+}
+
 /// Matches `INLINE_IMAGE_MACRO` at this level's escaped text, replacing each
 /// recognized match with the [`Image`](InlineNode::Image) node it produces and
 /// leaving everything else in place.
@@ -33,11 +45,19 @@ pub(super) fn image_macros_level<'src>(
     ctx: LevelContext,
     masked: Masked<'_>,
 ) -> Vec<InlineNode<'src>> {
+    // Cheap pre-filter, taken *before* the match string is materialized: a
+    // single, unsplit `Text` node's match string is its own value, so the
+    // check below can run against that directly. A level already split by
+    // an earlier step falls back to the build, exactly as before.
+    if single_text_value(&nodes).is_some_and(|value| !image_macro_prefilter(value)) {
+        return nodes;
+    }
+
     let (s, pieces) = build_match_string(&nodes, masked);
 
     // Cheap pre-filter mirroring the string step's `found_macroish`: an image
     // or icon macro needs its name prefix and an opening bracket.
-    if !((s.contains("image:") || s.contains("icon:")) && s.contains('[')) {
+    if !image_macro_prefilter(&s) {
         return nodes;
     }
 
@@ -47,9 +67,9 @@ pub(super) fn image_macros_level<'src>(
     let (s, pieces) = ctx.shift(s, pieces);
 
     // …and with each masked passthrough's or STEM expression's placeholder
-    // widened into the sentinel-shaped token the string pipeline's own
-    // haystack holds there — see `widen_masked_pieces` for why this family
-    // alone needs that.
+    // widened into the three-byte token [`INLINE_IMAGE_MACRO`]'s target class
+    // needs to match it — see `widen_masked_pieces` for why this family alone
+    // needs that.
     let (s, pieces) = widen_masked_pieces(s, pieces, &nodes);
 
     let matches = find_image_matches(&s, &pieces, root, parser, &nodes);
@@ -108,8 +128,8 @@ fn find_image_matches<'src>(
         // `bracket_attrlist` reads its bytes as content — so a placeholder
         // there would be read as literal text, and it keeps the opaque-piece
         // gate for a rendered span, admitting a masked passthrough or STEM
-        // expression (whose sentinel the string pipeline's `Attrlist::parse`
-        // swallows into a value that only *restores* after the split — the
+        // expression (whose placeholder `Attrlist::parse` swallows into a
+        // value that only *restores* after the split — the
         // order [`tokened_bracket`] and
         // [`Attrlist::into_owned_restoring`](Attrlist) reproduce). The
         // **target** (group 1) is the one value this family computes off the
@@ -150,10 +170,10 @@ fn find_image_matches<'src>(
 /// (an attribute-expanded value, a `counter` directive) is rejected here too:
 /// [`apply_character_replacements`](super::super::char_replacements::apply_character_replacements)
 /// can recognize a construct inside one (it produces a leaf needing no `'src`
-/// slice of its own — design §4.4's coarse fallback), but a macro node bakes
-/// its target/attribute list straight from source, so it still needs a real
-/// `'src` slice a synthesized run cannot provide — the same boundary an
-/// escaped-special or a rendered span already documents.
+/// slice of its own, falling back to the piece's coarse `location`), but a
+/// macro node bakes its target/attribute list straight from source, so it still
+/// needs a real `'src` slice a synthesized run cannot provide — the same
+/// boundary an escaped-special or a rendered span already documents.
 pub(in crate::content::inline_builder) fn range_is_verbatim(
     pieces: &[Piece],
     range: &std::ops::Range<usize>,
@@ -186,7 +206,7 @@ pub(in crate::content::inline_builder) fn range_is_verbatim(
 /// [`text_slice`] rather than
 /// [`source_slice`] to recover the
 /// range's own *text* precisely, since `source_slice` only ever offers a
-/// synthesized piece's coarse *location* fallback (design §4.4), never its
+/// synthesized piece's coarse *location* as a fallback, never its
 /// exact bytes.
 pub(in crate::content::inline_builder) fn range_is_verbatim_or_synthesized(
     pieces: &[Piece],
@@ -221,17 +241,15 @@ pub(in crate::content::inline_builder) fn range_is_verbatim_or_synthesized(
 /// [`Styled`](crate::inlines::Styled) span, an
 /// earlier-recognized macro node, or a masked passthrough or STEM expression,
 /// each of which [`build_match_string`] stands in as one
-/// `SPAN_PLACEHOLDER` rather than the markup or entity the string pipeline's
-/// own haystack holds there.
+/// `SPAN_PLACEHOLDER` rather than its rendered markup or entity.
 ///
 /// All three `CharRef` leaves are admissible for the same reason: their
 /// match-string bytes — a special's canonical entity (`&lt;`, `&gt;`,
 /// `&amp;`), a restored entity's own text (`&copy;`, `&#8217;`), a
 /// replacement's built-in rendering (`&#169;` for `(C)`, `&#8217;` for `'`,
 /// via [`replacement_entity`](super::super::quotes::replacement_entity)) — are
-/// the very byte sequence the string pipeline's own haystack carries at that
-/// position, so a family that reads its values out of the match string sees
-/// exactly what the string replacer sees.
+/// exactly the bytes each leaf renders as, so a family that reads its values
+/// out of the match string sees the same escaped form its own output would.
 /// What such a family cannot do is *slice* those bytes from `'src` (the source
 /// holds one character, or `(C)`, where the match string holds an entity, and
 /// `&amp;copy;` where it holds `&copy;`), so a value that must ride on the node
@@ -289,8 +307,8 @@ fn atomic_piece_is_recoverable(nodes: &[InlineNode<'_>], piece: &Piece) -> bool 
 
 /// [`range_has_no_opaque_piece`], further admitting a
 /// [`Raw`](InlineNode::Raw) leaf a **substitution produced in place** — an
-/// expanded attribute value's literal `<`, `>`, or `&`, which §3.4.1 leaves
-/// unescaped because the value expands *after* `specialcharacters` ran
+/// expanded attribute value's literal `<`, `>`, or `&`, left unescaped
+/// because the value expands *after* `specialcharacters` ran
 /// ([`RawOrigin::Substitution`]).
 ///
 /// The match string stands such a leaf in as one placeholder, so a value
@@ -301,14 +319,15 @@ fn atomic_piece_is_recoverable(nodes: &[InlineNode<'_>], piece: &Piece) -> bool 
 ///
 /// - A **masked passthrough** is restored by a later pass. A deferred
 ///   cross-reference's target is captured into its segment *before* that pass
-///   runs, so the string pipeline's own `href` holds the sentinel — and a tree
-///   that read the restored bytes would diverge from it (see
+///   runs, so the captured segment still holds the placeholder — and a tree
+///   that read the restored bytes instead would diverge from that documented
+///   behavior (see
 ///   `a_deferred_xref_target_over_a_passthrough_is_a_documented_divergence`).
 ///   [`range_is_restorable`] admits it; this does not.
 ///
 /// - A **substitution-produced** leaf was never extracted and is never
-///   restored. Its bytes are simply *there*, in the very haystack the string
-///   replacer reads, so filling the placeholder in reaches parity rather than
+///   restored. Its bytes are simply *there*, in the match string's own
+///   haystack, so filling the placeholder in reaches parity rather than
 ///   departing from it.
 ///
 /// Deciding this from the node's own [`RawOrigin`] rather than from the
@@ -353,41 +372,40 @@ pub(in crate::content::inline_builder) fn range_is_substitution_restorable(
 
 /// [`range_has_no_opaque_piece`], further admitting a **masked** piece — a
 /// passthrough or a STEM expression — for a value the caller *restores*
-/// rather than reads: the placeholder's bytes are not the string pipeline's
-/// (its haystack holds the `\u{96}`*n*`\u{97}` sentinel there), but the
-/// masked construct's own rendered body **is** known at build time — it is
-/// what `Passthroughs::restore_to` splices
-/// over the sentinel after the steps run — so a computed value that
-/// substitutes it for the placeholder (see
+/// rather than reads: the match string represents it only as the
+/// `\u{96}`*n*`\u{97}` placeholder, not its real rendered body, but that body
+/// **is** known at build time — it is what `Passthroughs::restore_to`
+/// splices over the placeholder after the steps run — so a computed value
+/// that substitutes it for the placeholder (see
 /// [`restore_masked_passthroughs`](super::links))
 /// finishes with exactly the restored string's bytes.
 ///
 /// That makes this gate right only for a value whose *recognition* treats the
 /// masked span as one swallowed token and whose *use* happens after restore —
 /// the `link:`/`mailto:` macro family's **target**, whose
-/// `[^\s\[\]]+` body class swallows the sentinel and the placeholder alike,
+/// `[^\s\[\]]+` body class swallows the placeholder like any other byte run,
 /// and whose bytes reach the output (the `href`, and a bare macro's shown
 /// text) only in the restored rendered string; and the `image:`/`icon:`
-/// family's target, whose recognition needs the placeholder widened to the
-/// sentinel's own shape first ([`widen_masked_pieces`]), whose one
+/// family's target, whose recognition needs the placeholder widened to that
+/// same shape first ([`widen_masked_pieces`]), whose one
 /// pre-restore computation, the `default_alt` derivation, runs over the
 /// masked bytes itself ([`masked_default_alt`]), and whose fold-time
 /// `web_path` runs over the restored ranges *masked* (see
-/// [`Image::restored_target_ranges`](crate::inlines::Image) — the string
-/// pipeline's own resolver only ever sees the sentinel); and the auto-link /
-/// formal-URL family's target, whose three URL classes swallow either
-/// spelling with no widening at all and whose two pre-restore decisions —
-/// rejecting a quoted URL, stripping a bare one's trailing punctuation — read
-/// a placeholder exactly as the string replacer's own sentinel reads
-/// (`links::build_inline_link_node`). It is right for a value that comes back
-/// from a **parse** too, once that parse is given the sentinel's own shape
-/// first — the `image:`/`icon:` bracket and the link families' display-text
-/// attribute list, each tokened by [`tokened_bracket`] and restored after the
+/// [`Image::restored_target_ranges`](crate::inlines::Image)); and the
+/// auto-link / formal-URL family's target, whose three URL classes swallow
+/// either spelling with no widening at all and whose two pre-restore
+/// decisions — rejecting a quoted URL, stripping a bare one's trailing
+/// punctuation — read the placeholder token the same way they read ordinary
+/// text (`links::build_inline_link_node`). It is right for a value that
+/// comes back from a **parse** too, once that parse is given the
+/// placeholder's own shape first — the `image:`/`icon:` bracket and the
+/// link families' display-text attribute list, each tokened by
+/// [`tokened_bracket`] and restored after the
 /// split. A family that *matches
 /// over* the masked bytes with a class the two spellings answer differently,
-/// or reads them into a value the string pipeline uses **before** restore (a
+/// or reads them into a value used **before** restore (a
 /// deferred cross-reference's target, captured into its placeholder template
-/// with the sentinel still in it — see
+/// with the placeholder still in it — see
 /// `a_deferred_xref_target_over_a_passthrough_is_a_documented_divergence`),
 /// keeps [`range_has_no_opaque_piece`].
 pub(in crate::content::inline_builder) fn range_is_restorable(
@@ -428,11 +446,10 @@ pub(in crate::content::inline_builder) fn range_is_restorable(
 /// (`Passthroughs::extract_from`)
 /// masks before any substitution step runs — STEM being an implicit
 /// passthrough, as [`Stem::value`](crate::inlines::Stem) documents — so each
-/// stands in the string pipeline's haystack as one `\u{96}`*n*`\u{97}` sentinel
-/// and in this module's match string as one
+/// stands in this module's match string as one
 /// [`SPAN_PLACEHOLDER`](super::super::quotes) character, and each has a body
 /// known at build time that `Passthroughs::restore_to` splices over that
-/// sentinel once the steps have run.
+/// placeholder once the steps have run.
 ///
 /// Every restoring family admits both kinds. The `image:`/`icon:` family's
 /// values are the only restored ones the **fold** re-processes —
@@ -440,9 +457,8 @@ pub(in crate::content::inline_builder) fn range_is_restorable(
 /// the target (and an interactive SVG's `fallback=`) into the `src`, and a
 /// rendered STEM body always carries a backslash `web_path` would posixify
 /// on a Windows-separator resolver — but that re-processing runs over the
-/// restored ranges *masked*, reproducing the string pipeline's own order
-/// (its `web_path` only ever sees the backslash-free sentinel; the restore
-/// splices the body in afterwards). See
+/// restored ranges *masked*: `web_path` only ever sees the backslash-free
+/// placeholder there, and the restore splices the body in afterwards. See
 /// [`Image::restored_target_ranges`](crate::inlines::Image) and
 /// [`ElementAttribute`]'s own restored ranges.
 ///
@@ -458,7 +474,7 @@ pub(in crate::content::inline_builder) fn node_is_restorable(node: &InlineNode<'
 
 /// The bytes a [`node_is_restorable`] node restores to — the very text
 /// `Passthroughs::restore_to`
-/// splices over the string pipeline's own sentinel — or `None` for any other
+/// splices over the placeholder — or `None` for any other
 /// node.
 ///
 /// The invariant both callers rest on is that this returns **exactly what the
@@ -476,11 +492,10 @@ pub(in crate::content::inline_builder) fn node_is_restorable(node: &InlineNode<'
 /// `renderer` is the **parser's** renderer, mirroring `restore_to`'s own
 /// (`Passthroughs::restore_to` renders a STEM entry through `parser.renderer`
 /// before splicing it into the rendered string). A computed target therefore
-/// freezes its STEM bytes at build time, exactly as the string pipeline
-/// freezes them into its `href`, where a `Stem` node standing in the flow is
-/// rendered at fold time instead; the two agree whenever the fold uses the
-/// parser's renderer, which is the seam design §3.3.1 defines and the only
-/// one `Content` uses.
+/// freezes its STEM bytes at build time to match what a `Stem` node standing
+/// in the flow renders at fold time instead; the two agree whenever the fold
+/// uses the parser's renderer, which is the only renderer seam `Content`
+/// uses.
 pub(in crate::content::inline_builder) fn restorable_body<'a>(
     node: &'a InlineNode<'_>,
     renderer: &dyn InlineRenderer,
@@ -493,7 +508,7 @@ pub(in crate::content::inline_builder) fn restorable_body<'a>(
         } => Some(Cow::Borrowed(value.as_ref())),
 
         // An escaped-form body carries the author's logical text, so the bytes
-        // the string pipeline splices over its own sentinel are that text
+        // spliced over the placeholder are that text
         // *escaped* — the same bytes this node's own fold emits, which is the
         // invariant this function exists to hold (see `node_is_restorable`).
         InlineNode::Raw {
@@ -521,8 +536,8 @@ pub(in crate::content::inline_builder) fn restorable_body<'a>(
 }
 
 /// Builds one [`Image`](InlineNode::Image) node from a recognized image/icon
-/// match, pre-extracting the alt/width/height the way the string replacer does
-/// so the fold reproduces the same bytes.
+/// match, pre-extracting the alt/width/height up front so the fold
+/// reproduces the same bytes.
 ///
 /// # What must be verbatim, and what need not be
 ///
@@ -531,17 +546,16 @@ pub(in crate::content::inline_builder) fn restorable_body<'a>(
 /// source slice, so both are exact even when they come from a
 /// [`synthesized`](Piece::synthesized) run — an expanded attribute value
 /// (`image:{logo}[Logo]`) or a filtered multi-line block's own joined seed —
-/// or cross an **escaped special** (`image:a&b.png[]`, whose target the string
-/// replacer reads as `a&amp;b.png` out of its own escaped haystack: the very
+/// or cross an **escaped special** (`image:a&b.png[]`, whose target reads as
+/// `a&amp;b.png` out of the match string's own escaped haystack: the very
 /// bytes this match string carries, and the ones
 /// [`apply_image_side_effects`] registers). Only the node's `location` then
-/// takes design §4.4's coarse fallback. A target crossing a masked
-/// **passthrough** or **STEM** expression finishes into the restored bytes
-/// instead — see
+/// falls back to the enclosing piece's coarse span. A target crossing a
+/// masked **passthrough** or **STEM** expression finishes into the restored
+/// bytes instead — see
 /// [`restore_masked_passthroughs`] and [`masked_default_alt`] — and the side
-/// effect registers that honest restored value where the string pipeline
-/// registers its own sentinel bytes verbatim (a wart the cutover deliberately
-/// will not reproduce; see
+/// effect registers that honest restored value rather than the raw
+/// placeholder bytes (see
 /// `registers_the_restored_target_for_an_image_over_a_passthrough`).
 ///
 /// The **attribute list** follows the same rule, one step removed. An
@@ -551,12 +565,12 @@ pub(in crate::content::inline_builder) fn restorable_body<'a>(
 /// (`image:sunset.jpg[{caption}]`), an escaped special
 /// (`image:x.png[a < b]`), or a restored entity (`image:x.png[Tom &amp;
 /// Jerry]`) — cannot be parsed from the source. It is parsed from the **match
-/// string** instead, through [`bracket_attrlist`], which is what the string
-/// replacer itself parses (`Attrlist::parse(Span::new(&caps[2]), …)`, over its
-/// own escaped, already-expanded haystack); the resulting list is then
+/// string** instead, through [`bracket_attrlist`]
+/// (`Attrlist::parse(Span::new(&caps[2]), …)`, over the match string's own
+/// escaped, already-expanded haystack); the resulting list is then
 /// [`into_owned`](Attrlist::into_owned)ed off that temporary and tagged with
-/// design §4.4's coarse span. A bracket that *is* verbatim keeps its `'src`
-/// slice, so its attribute values still borrow (§4.5).
+/// the enclosing piece's coarse span. A bracket that *is* verbatim keeps its
+/// `'src` slice, so its attribute values still borrow.
 fn build_image_node<'src>(
     caps: &regex::Captures<'_>,
     whole: &str,
@@ -584,18 +598,18 @@ fn build_image_node<'src>(
     // wonder about.
     let (target, restored_target_ranges) = caps.get(1).map_or(
         (CowStr::from(""), Vec::new()),
-        // Borrowed from `'src` for a verbatim target (§4.5), the expansion's
+        // Borrowed from `'src` for a verbatim target, the expansion's
         // own exact bytes for a synthesized one. A target crossing an escaped
         // special has no `'src` slice at all — the source holds one character
         // where the match string holds an entity — so it falls back to the
         // match string's own bytes, which is what `text_slice` declines to
-        // recover and precisely what the string replacer reads as `caps[1]`.
+        // recover and precisely what `caps[1]` holds.
         // A target crossing a masked **passthrough** or **STEM** expression
         // finishes into the restored bytes — the node's own rendered body
         // substituted for its placeholder, the same rewrite
         // `Passthroughs::restore_to` performs on the rendered `src` — while
         // the `default_alt` *arithmetic* below stays on the bytes as
-        // matched, where the string replacer's own runs (see
+        // matched (see
         // [`masked_default_alt`]), and the node records which ranges of the
         // restored target came from a masked body, so the fold-time
         // `web_path` can keep them out of its own way (see
@@ -624,10 +638,9 @@ fn build_image_node<'src>(
     let attrlist = bracket_attrlist(bracket_text, bracket_range, nodes, pieces, root, parser);
 
     // The default alt text derives from the target's basename, with `_`/`-`
-    // read as spaces — exactly the string replacer's `default_alt`, which
-    // runs over the *masked* bytes (its haystack holds the passthrough or
-    // STEM sentinel), with the masked bodies restored into whatever survives
-    // the arithmetic.
+    // read as spaces, running over the *masked* bytes (the haystack holds the
+    // passthrough or STEM placeholder there), with the masked bodies restored
+    // into whatever survives the arithmetic.
     let default_alt = caps.get(1).map_or_else(String::new, |m| {
         masked_default_alt(
             m.as_str(),
@@ -639,9 +652,10 @@ fn build_image_node<'src>(
     });
 
     // Pre-extract the resolved alt/width/height into owned values, ending the
-    // `&'src self`-tied borrows before the attribute list is moved into the node
-    // (the same read-then-move shape [`attributes_of`] uses). An icon carries a
-    // `size` rather than width/height, recomputed at fold time from `attrs`.
+    // `&'src self`-tied borrows before the attribute list is moved into the
+    // node (the same read-then-move shape [`attributes_of`] uses). An icon
+    // carries a `size` rather than width/height, recomputed at fold time
+    // from `attrs`.
     let (alt, width, height) = if is_icon {
         let alt = attrlist.named_attribute("alt").map_or(default_alt, |a| {
             normalize_text_lf_escaped_bracket(a.value())
@@ -679,22 +693,21 @@ fn build_image_node<'src>(
 }
 
 /// Rewrites this level's match string so each masked **passthrough** or
-/// **STEM** expression's placeholder becomes a sentinel-shaped token —
-/// `\u{96}`*n*`\u{97}`, the very bytes the string pipeline's own haystack
-/// holds there — moving the pieces into the rewritten string's coordinates
-/// (each [`node_is_restorable`] piece keeps its node, wider; every other
-/// piece keeps its bytes).
+/// **STEM** expression's placeholder becomes a three-byte token —
+/// `\u{96}`*n*`\u{97}` — moving the pieces into the rewritten string's
+/// coordinates (each [`node_is_restorable`] piece keeps its node, wider;
+/// every other piece keeps its bytes).
 ///
 /// This family alone needs the widening because [`INLINE_IMAGE_MACRO`]'s
 /// target class is the one in this module that requires **two** characters
 /// (`[^:\s\[\n][^\[\n]*?[^\s\[\n]`): a target written wholly inside a
 /// passthrough (`image:++sunset.jpg++[]`) or a STEM expression
 /// (`image:stem:[x][]`) is a single placeholder character, which that class
-/// cannot match — where the string replacer's three-byte sentinel matches it
-/// exactly. Widening the placeholder to the sentinel's own shape makes
-/// recognition agree byte-for-byte with the string step without touching the
-/// shared pattern. (The `link:`/`mailto:` family's one-or-more target class
-/// never faced this, so its increment left the placeholder bare.)
+/// cannot match — where the three-byte token matches it exactly. Widening
+/// the placeholder to that shape makes recognition agree byte-for-byte with
+/// [`INLINE_IMAGE_MACRO`]'s own pattern without touching the shared regex.
+/// (The `link:`/`mailto:` family's one-or-more target class never faced
+/// this, so its increment left the placeholder bare.)
 ///
 /// The token's bytes never reach an output node: an unmatched token sits in
 /// a gap [`rebuild_macro_level`] re-emits from the piece's own *node*, a
@@ -703,8 +716,7 @@ fn build_image_node<'src>(
 /// node's own body over, and no match boundary can cut one (no byte of
 /// `\u{96}`, a digit, `\u{97}` can begin or end an image match, whose ends
 /// are the literal macro name and `]`). The numbering is per level and
-/// exists only to keep tokens distinct; the string pipeline's own sentinel
-/// numbers are global to the content, and neither survives into any output.
+/// exists only to keep tokens distinct across this level's own placeholders.
 fn widen_masked_pieces(
     s: String,
     pieces: Vec<Piece>,
@@ -754,22 +766,21 @@ fn widen_masked_pieces(
     (out, out_pieces)
 }
 
-/// The string replacer's `default_alt` derivation —
+/// This family's `default_alt` derivation —
 /// `basename(&target.replace(['_', '-'], " "))` — performed over the
 /// **masked** bytes, with each masked passthrough's or STEM expression's
 /// body restored into whatever survives the arithmetic.
 ///
-/// The string pipeline computes `default_alt` from its own haystack, where a
-/// masked construct is the `\u{96}`*n*`\u{97}` sentinel: an opaque token
-/// carrying none of the bytes the arithmetic acts on (no `_`/`-` for the
-/// replace, no `/` or `.` for [`basename`]'s stem cut), so the derivation
-/// treats it as one indivisible character and the restore pass then splices
-/// the extracted body over whatever sentinel reaches the rendered `alt` —
-/// which is how `image:++a_b-c.jpg++[]` keeps `alt="a_b-c.jpg"` where the
-/// verbatim spelling shows `a b c`, its underscores hidden from the replace
-/// inside the sentinel. This reproduces that byte-for-byte: each overlapping
-/// [`node_is_restorable`] piece's placeholder becomes the same
-/// sentinel-shaped token, the arithmetic runs, and each *surviving* token is
+/// A masked construct sits in the haystack as the `\u{96}`*n*`\u{97}`
+/// token: an opaque run carrying none of the bytes the arithmetic acts on
+/// (no `_`/`-` for the replace, no `/` or `.` for [`basename`]'s stem cut),
+/// so the derivation treats it as one indivisible run and the restore then
+/// splices the extracted body over whatever token reaches the derived
+/// `alt` — which is how `image:++a_b-c.jpg++[]` keeps `alt="a_b-c.jpg"`
+/// where the verbatim spelling shows `a b c`, its underscores hidden from
+/// the replace inside the token. Each overlapping
+/// [`node_is_restorable`] piece's placeholder becomes that same
+/// token, the arithmetic runs, and each *surviving* token is
 /// restored with its own node's body ([`restorable_body`]) — index-keyed, as
 /// `Passthroughs::restore_to` is,
 /// so a token the basename cut dropped (a masked construct wholly inside a
@@ -778,9 +789,8 @@ fn widen_masked_pieces(
 /// [`basename`] reads (the last `/`, the last `.`) are bytes no token contains.
 ///
 /// A range holding no masked construct takes the plain derivation over the
-/// match-string bytes — exactly what this family computed before the restore
-/// existed, since `masked` here is the same `caps[1]` the string replacer
-/// reads.
+/// match-string bytes, since `masked` here is the same value `caps[1]`
+/// holds.
 fn masked_default_alt(
     masked: &str,
     range: &std::ops::Range<usize>,
@@ -839,7 +849,7 @@ fn masked_default_alt(
     // One left-to-right pass, like `Passthroughs::restore_to`'s own
     // `replace_all`: each token is sought only in the bytes after the
     // previous splice, so a restored body that itself carries
-    // sentinel-shaped bytes can never be matched as a later token. Surviving
+    // placeholder-shaped bytes can never be matched as a later token. Surviving
     // tokens appear in index order (they were emitted in piece order and the
     // arithmetic never reorders), and a dropped token is simply not found —
     // the ones after it still restore, keyed by their own index.
@@ -863,7 +873,7 @@ fn masked_default_alt(
 /// Parses the macro's bracket into the [`Attrlist`]`<'src>` its node carries.
 ///
 /// A **verbatim** bracket is parsed straight from its `'src` slice, so its
-/// attribute names and values borrow from the source (§4.5) — the shape every
+/// attribute names and values borrow from the source — the shape every
 /// ordinary `image:x.png[Alt,200]` takes.
 ///
 /// Any other bracket has no `'src` slice whose bytes are the attrlist text: a
@@ -876,7 +886,7 @@ fn masked_default_alt(
 /// parses the same bytes — from a [`Span::new`] over the capture, whose
 /// `line`/`col`/`offset` are meaningless and never escape this function —
 /// and [`into_owned`](Attrlist::into_owned)s the result onto the bracket's
-/// coarse source span (design §4.4), the same fallback the node's `location`
+/// coarse source span, the same fallback the node's `location`
 /// takes.
 ///
 /// An **empty** bracket carries no bytes either way and parses from a
@@ -912,7 +922,7 @@ fn bracket_attrlist<'src>(
 
     let bodies: Vec<&str> = masked.iter().map(|piece| piece.body.as_ref()).collect();
 
-    parse_attrlist(Span::new(&tokened), parser).into_owned_restoring(bracket, &bodies)
+    parse_tokened_attrlist(Span::new(&tokened), parser).into_owned_restoring(bracket, &bodies)
 }
 
 /// One masked piece a [`tokened_bracket`] token stands for: the node itself,
@@ -924,7 +934,7 @@ fn bracket_attrlist<'src>(
 /// attribute values ([`Attrlist::into_owned_restoring`]), while the link
 /// families' display text — which becomes a node's *children* rather than a
 /// string — splices the **node**, so the fold emits those same bytes without
-/// re-escaping them (design §3.4). Pairing them here rather than re-deriving
+/// re-escaping them. Pairing them here rather than re-deriving
 /// one from the other is what keeps the two spellings of "what this token
 /// restores to" from drifting.
 pub(in crate::content::inline_builder) struct MaskedPiece<'a, 'src> {
@@ -936,13 +946,11 @@ pub(in crate::content::inline_builder) struct MaskedPiece<'a, 'src> {
     /// What the token restores to: exactly what the fold of
     /// [`node`](Self::node) emits (see [`restorable_body`]).
     ///
-    /// For a *masked* construct those bytes are known at build time in the
-    /// same sense the string pipeline knows them —
+    /// For a *masked* construct those bytes are known at build time —
     /// `Passthroughs::restore_to` splices exactly these into its own finished
     /// string. For a **rendered** piece (admitted under
     /// [`Tokened::MaskedOrRendered`]) they are the build-time fold with the
-    /// parser's own renderer, which is what the string replacer's
-    /// already-rendered haystack holds there; freezing them is what lets a
+    /// parser's own renderer; freezing them is what lets a
     /// slot a renderer writes out carry markup the author wrote, at the cost
     /// of a *later* fold with some other renderer seeing the parse-time
     /// renderer's bytes in that slot.
@@ -953,44 +961,44 @@ pub(in crate::content::inline_builder) struct MaskedPiece<'a, 'src> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::content::inline_builder) enum Tokened {
     /// Only a **masked** construct — a passthrough or a STEM expression —
-    /// whose body the string pipeline itself splices over its own sentinel.
+    /// whose body `Passthroughs::restore_to` splices over its own placeholder.
     /// The bracket's parsed values may then be restored wherever they go.
     Masked,
 
     /// Also any other **opaque** piece: a rendered span, an
     /// earlier-recognized macro node. Its body is the build-time **fold** with
-    /// the parser's own renderer — the bytes the string replacer reads out of
-    /// its own already-rendered haystack there — which is what lets a value
+    /// the parser's own renderer, which is what lets a value
     /// carry markup an author wrote into a slot a renderer writes out (see
     /// [`MaskedPiece::body`]).
     MaskedOrRendered,
 }
 
 /// Rewrites a macro **bracket**'s own match-string bytes so each masked piece
-/// in it becomes an index-keyed `\u{96}`*n*`\u{97}` token, returning that text
-/// alongside the [`MaskedPiece`]s those tokens stand for.
+/// in it becomes one [`MASKED_PIECE_PLACEHOLDER`] occurrence, returning that
+/// text alongside the [`MaskedPiece`]s those occurrences stand for, in
+/// left-to-right order.
 ///
-/// This is the *before the split* half of every bracket restore, and it exists
-/// so the text handed to [`Attrlist::parse`] is the same **shape** the string
-/// pipeline's own haystack has there. Two spellings have to be normalized into
-/// one: [`widen_masked_pieces`] has already rewritten a masked piece to a
-/// sentinel-shaped token for the image family's *recognition*, but its
-/// numbering is per level, and for the link families' display-text list a
-/// masked piece is still the bare one-character
-/// [`SPAN_PLACEHOLDER`](super::super::quotes). Renumbering every restorable
-/// piece from zero, per bracket, is what lets the restore be **index-keyed**
-/// on the way back out ([`Attrlist::into_owned_restoring`]) — the parse can
-/// drop a token (a blank slot, a value the split discards) without shifting
-/// the ones that survive, exactly as
-/// `Passthroughs::restore_to` is
-/// unshifted by a sentinel that never reached the rendered string.
+/// This is the *before the split* half of every bracket restore, and it
+/// exists so [`Attrlist::parse`] sees an atomic, delimiter-free run at each
+/// masked piece's position instead of the piece's own `,`/`=`/`"` bytes. Two
+/// spellings have to be normalized into one: [`widen_masked_pieces`] has
+/// already rewritten a masked piece to its own `\u{96}`*n*`\u{97}` token for
+/// the image family's *recognition*, and for the link families' display-text
+/// list a masked piece is still the bare one-character
+/// [`SPAN_PLACEHOLDER`](super::super::quotes). Both become the same
+/// placeholder here, in the order they occur, which is what lets the restore
+/// find them **by position** on the way back out
+/// ([`Attrlist::into_owned_restoring`]) — a value the split discards simply
+/// never reaches a restore, and every occurrence after it keeps its own
+/// place in the sequence, unaffected.
 ///
 /// Shared by the two families whose bracket comes back from a parse — the
 /// `image:`/`icon:` bracket here, and the link families' display-text list
 /// ([`text_attrlist`](super::links)) — so the two cannot disagree about what
-/// a token may stand for: both masked kinds, the set [`node_is_restorable`]
-/// names. (The image bracket's one `web_path`-bound value, an interactive
-/// SVG's `fallback=`, resolves over its restored ranges *masked* — see
+/// a placeholder may stand for: both masked kinds, the set
+/// [`node_is_restorable`] names. (The image bracket's one `web_path`-bound
+/// value, an interactive SVG's `fallback=`, resolves over its restored ranges
+/// *masked* — see
 /// [`ElementAttribute::into_owned_restoring`](crate::attributes::ElementAttribute) —
 /// so a STEM body's backslash never reaches the resolver there either.)
 pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
@@ -1030,8 +1038,7 @@ pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
         // (pinned by `restorable_body_agrees_with_node_is_restorable`), so
         // gating on one before producing the other would leave a branch no
         // input can take. A piece this leaves untokened contributes its own
-        // bytes: a `Text` run's, or a `CharRef` leaf's canonical entity, which
-        // are the string replacer's own bytes there.
+        // bytes: a `Text` run's, or a `CharRef` leaf's canonical entity.
         let masked = piece
             .atomic
             .then(|| nodes.get(piece.node_index))
@@ -1057,35 +1064,55 @@ pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
 
         match masked {
             Some(masked) => {
-                tokened.push_str(&format!("\u{96}{n}\u{97}", n = masked_pieces.len()));
+                tokened.push_str(MASKED_PIECE_PLACEHOLDER);
                 masked_pieces.push(masked);
             }
 
-            None => tokened.push_str(
+            // A piece that keeps its own bytes has them **escaped** on the way
+            // in: after this, the only `MASKED_PIECE_PLACEHOLDER` occurrences
+            // in `tokened` are the ones written just above. See
+            // [`escape_masked_piece_bytes`].
+            None => tokened.push_str(&escape_masked_piece_bytes(
                 bracket_text
                     .get(lo.saturating_sub(range.start)..hi.saturating_sub(range.start))
                     .unwrap_or_default(),
-            ),
+            )),
         }
     }
 
+    // A bracket that tokened nothing keeps the whole match string as written
+    // rather than the piece-by-piece copy above — but still **escaped**, so
+    // every consumer can unescape unconditionally without having to know
+    // whether this bracket held anything to token.
     if masked_pieces.is_empty() {
-        return (bracket_text.to_string(), masked_pieces);
+        return (
+            escape_masked_piece_bytes(bracket_text).into_owned(),
+            masked_pieces,
+        );
     }
 
     (tokened, masked_pieces)
 }
 
 /// Parses one inline attribute list, discarding the warnings — the shared
-/// spelling both of [`bracket_attrlist`]'s paths use.
+/// spelling of [`bracket_attrlist`]'s two **untokened** paths, the empty
+/// bracket and the verbatim one, whose bytes are the author's own.
 fn parse_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
     Attrlist::parse(source, parser, AttrlistContext::Inline)
         .item
         .item
 }
 
-/// Performs the recognition side effects the string pipeline's own
-/// `InlineImageMacroReplacer` attaches to an `image:`/`icon:` match —
+/// [`parse_attrlist`] for [`bracket_attrlist`]'s third path, whose text came
+/// back from [`tokened_bracket`]: this parse's own attribute-reference
+/// substitution escapes each value it splices, so the placeholders
+/// [`Attrlist::into_owned_restoring`] then walks are still only the ones the
+/// tokener wrote. See [`Attrlist::parse_tokened`].
+fn parse_tokened_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
+    Attrlist::parse_tokened(source, parser).item.item
+}
+
+/// Performs the recognition side effects an `image:`/`icon:` match needs —
 /// registering the image target in the document's asset catalog (`image:`
 /// only, and only when [`catalog_assets`](Parser::with_catalog_assets) is
 /// enabled) and recording the `link=` dangerous-scheme/self-href warning —
@@ -1095,16 +1122,12 @@ fn parse_attrlist<'a>(source: Span<'a>, parser: &Parser) -> Attrlist<'a> {
 ///
 /// Every macro family this module recognizes defers exactly this kind of
 /// side effect (see this file's own `register_image` note, and the anchor,
-/// link, and footnote increments' own): while the additive builder runs
-/// *alongside* the authoritative string pipeline — each against its own,
-/// independent [`Parser`] — performing it from every additive pass would risk
-/// double-counting a registration once the two paths ever share one `Parser`.
-/// This function is that deferred piece, staged as its own building block for
-/// the eventual cutover (design §5.2, Phase 4 step 6): re-attaching it for
-/// real means calling it exactly once per parse, after the single-pass
-/// builder replaces the recorder as `Content`'s tree source, so nothing here
-/// is now wired into the real parse path — see
-/// [`apply_macro_side_effects`](super::apply_macro_side_effects) — and is also
+/// link, and footnote families' own): recognition runs once per level as the
+/// tree is built, but a side effect must run exactly once per parse, so it is
+/// replayed from the finished tree afterward, via
+/// [`apply_macro_side_effects`](super::apply_macro_side_effects), rather than
+/// performed inline as each family recognizes its construct. This function is
+/// that replay for the image/icon family, and is also
 /// exercised directly by this module's own tests, against their own `Parser`.
 ///
 /// Recurses into every container an `Image` node can be nested inside —
@@ -1233,8 +1256,8 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_macros() {
         // For each fixture, folding the single-pass tree (all five steps)
-        // reproduces the string pipeline's output byte-for-byte. This is the
-        // differential corpus (design §5.3) that pins the image/icon increment.
+        // reproduces the frozen golden output byte-for-byte. This is the
+        // differential corpus that pins the image/icon increment.
         let fixtures = [
             // No macro despite macro-ish characters.
             "plain text",
@@ -1293,7 +1316,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -1332,7 +1355,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros_in("macros_imagesdir", fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -1390,8 +1413,8 @@ mod tests {
 
     #[test]
     fn image_default_alt_derives_from_the_basename() {
-        // With no alt, the default is the target's basename with `_`/`-` read as
-        // spaces and the extension dropped.
+        // With no alt, the default is the target's basename with `_`/`-` read
+        // as spaces and the extension dropped.
         let nodes = build_src(Span::new("image:a_b-c.png[]"));
 
         let image = assert_image(&nodes[0]);
@@ -1469,7 +1492,7 @@ mod tests {
 
     #[test]
     fn fold_matches_the_string_pipeline_for_a_target_crossing_an_escaped_special() {
-        // The string pipeline matches macros over *escaped* text, so a target
+        // Macros are matched over *escaped* text, so a target
         // containing `&` is matched as `a&amp;b.png`. Those entity bytes are
         // exactly what this level's match string carries, so the node's target
         // is read off it and the fold reproduces the same `src`/default alt —
@@ -1514,14 +1537,14 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
 
     #[test]
     fn a_target_crossing_an_escaped_special_carries_the_entity_bytes() {
-        // The node's `target` is the string replacer's own `caps[1]` — the
+        // The node's `target` is exactly `caps[1]` — the
         // escaped haystack's bytes, not the source's single `&` — which is
         // also what `apply_image_side_effects` registers. The default alt
         // derives from that same string, exactly as `default_alt` does.
@@ -1546,9 +1569,9 @@ mod tests {
     fn fold_matches_the_string_pipeline_for_an_attribute_list_crossing_an_escaped_special() {
         // The bracket has no `'src` slice here — the source holds one
         // character where the match string holds an entity — so it is parsed
-        // from the match string, which is the very `caps[2]` the string
-        // replacer parses out of its own escaped haystack, and owned off that
-        // temporary. Every attribute the two read is therefore the same.
+        // from the match string, which is the very `caps[2]` parsed out of
+        // its own escaped haystack, and owned off that
+        // temporary.
         let fixtures = [
             // A special in a positional alt, in a named value, and in both a
             // named value and the target at once.
@@ -1581,18 +1604,18 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
 
     #[test]
     fn an_attribute_list_crossing_an_escaped_special_is_owned_and_coarsely_located() {
-        // The parsed values are the *escaped* ones the string replacer reads
+        // The parsed values are the *escaped* ones
         // (`a &lt; b`, not `a < b`), they own their bytes rather than
         // borrowing from the temporary they were parsed from, and the list's
-        // own span falls back to the bracket's coarse source range (design
-        // §4.4) — the same split the node's `location` already takes for a
+        // own span falls back to the bracket's coarse source range — the
+        // same split the node's `location` already takes for a
         // synthesized run.
         let source = "image:x.png[a < b,role=hl]";
         let nodes = build_src(Span::new(source));
@@ -1622,7 +1645,7 @@ mod tests {
         // An author-written entity (`&amp;copy;`, `&amp;#8217;`) is escaped by
         // `SpecialCharacters` and then *restored* by `CharacterReplacements`
         // into a `CharRef::Entity` leaf whose value is the entity itself. Those
-        // bytes are what the string pipeline's own haystack carries from the
+        // bytes are what the match string carries from the
         // replacements step onward, and what the fold emits verbatim, so
         // `range_has_no_opaque_piece` admits the leaf exactly as it admits an
         // escaped special.
@@ -1660,7 +1683,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -1691,8 +1714,8 @@ mod tests {
     fn fold_matches_the_string_pipeline_for_an_attribute_list_crossing_a_restored_entity() {
         // A restored entity takes the same lift as an escaped special, for the
         // same reason: the source holds `&amp;copy;` where the match string
-        // holds `&copy;`, so the bracket has no `'src` slice — and the match
-        // string's bytes are the ones the string replacer parses.
+        // holds `&copy;`, so the bracket has no `'src` slice — and it is
+        // parsed from the match string's own bytes.
         let fixtures = [
             "image:x.png[Tom &amp; Jerry]",
             "image:x.png[alt=a &copy; b]",
@@ -1719,7 +1742,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -1729,10 +1752,10 @@ mod tests {
         // A typographic replacement (`(C)`, `(R)`, `'`, `...`) is the third
         // recoverable piece, admitted for the same reason the two `CharRef`
         // entity leaves are: `build_match_string` gives it the entity the
-        // built-in backend renders it as, which is what the string pipeline's
-        // own haystack carries from the replacements step onward — so both the
-        // target read off that string and the bracket parsed from it are the
-        // string replacer's own bytes.
+        // built-in backend renders it as, and that is what the match string
+        // carries from the replacements step onward — so both the
+        // target read off that string and the bracket parsed from it carry
+        // those same bytes.
         let fixtures = [
             // A target crossing one, alone and beside an attribute list.
             "image:a(C)b.png[]",
@@ -1770,7 +1793,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_macros(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -1779,9 +1802,9 @@ mod tests {
     fn an_attribute_list_crossing_a_character_replacement_reads_the_rendered_entity() {
         // The structural companion: the bracket has no `'src` slice (the
         // source holds `(C)` where the match string holds `&#169;`), so it is
-        // parsed from the match string and owned onto design §4.4's coarse
-        // span — carrying the already-substituted value the string replacer
-        // parses, entity and all.
+        // parsed from the match string and owned onto the bracket's coarse
+        // span — carrying the already-substituted value,
+        // entity and all.
         let source = "image:x.png[title=Pause (C) Resume]";
         let nodes = build_src(Span::new(source));
 
@@ -1831,7 +1854,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_macros(source),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from golden for {source:?}"
             );
         }
     }
@@ -1864,26 +1887,26 @@ mod tests {
             "a target crossing a rendered span must be left unrecognized: {nodes:?}"
         );
 
-        // The string pipeline, by contrast, *does* build an image here.
+        // The frozen golden recording, by contrast, *does* build an image here.
         assert!(golden_macros(source).contains("<img"));
     }
 
     #[test]
     fn fold_matches_the_string_pipeline_for_an_image_target_over_a_passthrough() {
         // The differential corpus for an `image:`/`icon:` target crossing a
-        // masked **passthrough** — the string pipeline swallows the
-        // `\u{96}`*n*`\u{97}` sentinel into the target (the widened match
-        // string carries the same bytes, see [`widen_masked_pieces`])
-        // and the restore pass then splices the extracted body over every
-        // sentinel in the rendered string, so the tree's computed target
-        // substitutes the `Raw` node's value for its placeholder the same
-        // way, and the `default_alt` *arithmetic* runs over the masked bytes
+        // masked **passthrough** — the widened match string carries the
+        // `\u{96}`*n*`\u{97}` placeholder into the target (see
+        // [`widen_masked_pieces`]), and the restore then splices the
+        // extracted body over every placeholder in the computed value, so
+        // the tree's computed target
+        // substitutes the `Raw` node's value for its placeholder, and the
+        // `default_alt` *arithmetic* runs over the masked bytes
         // first (see [`masked_default_alt`]).
         use super::super::super::test_support::golden_passthroughs;
 
         let fixtures = [
             // The double-plus idiom, bare-bracketed and with an alt — and the
-            // default-alt arithmetic over the sentinel: the underscores and
+            // default-alt arithmetic over the placeholder: the underscores and
             // the extension hide inside it, so the whole restored body is the
             // alt (`alt="a_b-c.jpg"`), where the verbatim spelling shows
             // `a b c`.
@@ -1906,8 +1929,7 @@ mod tests {
             "image:https://++example.org/x++.png[]",
             // `web_path`'s own `..` arithmetic consumes the masked segment,
             // so the token never reaches the resolved path and its body is
-            // dropped — in both pipelines (the string pipeline's restore
-            // cannot find the sentinel either).
+            // dropped, unrestored.
             "image:++dropped++/../kept.png[]",
             // The icon form, which derives its default alt the same way.
             "icon:++a_b++[]",
@@ -1929,7 +1951,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -1937,9 +1959,9 @@ mod tests {
     #[test]
     fn an_image_target_over_a_passthrough_is_recognized() {
         // The target is the restored bytes; the default alt is the masked
-        // derivation with the surviving sentinel restored — the whole body,
+        // derivation with the surviving placeholder restored — the whole body,
         // underscores, hyphens, and extension intact, since all of them hide
-        // from the arithmetic inside the sentinel.
+        // from the arithmetic inside the placeholder.
         let nodes = build_src(Span::new("image:++a_b-c.jpg++[]"));
 
         let image = assert_image(&nodes[0]);
@@ -1976,10 +1998,10 @@ mod tests {
         // The one place this increment chooses the safe reading over byte
         // parity, mirroring the link family's own passthrough increment: the
         // renderer's `link=self` dangerous-target check runs over the node's
-        // *restored* target, where the string pipeline's renderer checks the
-        // sentinel it matched — through which a smuggled `javascript:` target
-        // passes, the restore then completing a live link around the image in
-        // the golden output. The tree's fold rejects it instead (the image
+        // *restored* target, where the golden output's renderer instead
+        // checked the raw placeholder it matched — through which a smuggled
+        // `javascript:` target passed, completing a live link around the
+        // image. The tree's fold rejects it instead (the image
         // renders without the wrapping anchor), pinned here rather than by
         // the corpus above.
         use super::super::super::test_support::golden_passthroughs;
@@ -2010,13 +2032,13 @@ mod tests {
         // Formerly this module's own documented divergence: the fold-time
         // `web_path` used to run over the node's *restored* target, so a
         // space the passthrough smuggled past the target class was
-        // percent-encoded into the `src` where the string pipeline
-        // normalized its space-free sentinel and spliced the raw space in
+        // percent-encoded into the `src`, where the golden output kept its
+        // space-free placeholder and spliced the raw space in
         // afterwards. The masked-resolve order closed it — `render_image`
         // resolves the `src` with the node's
         // [`restored_target_ranges`](Image) masked
-        // to the same sentinel shape and splices the bodies back in, so the
-        // space never reaches `web_path` in either pipeline.
+        // to the same placeholder shape and splices the bodies back in, so the
+        // space never reaches `web_path`.
         use super::super::super::test_support::golden_passthroughs;
 
         let source = "image:pass:[My Documents/chart.png][]";
@@ -2040,11 +2062,10 @@ mod tests {
     fn fold_matches_the_string_pipeline_for_an_image_bracket_over_a_passthrough() {
         // The differential corpus for an `image:`/`icon:` **bracket**
         // crossing a masked passthrough. The bracket comes back from a
-        // *parse*, so the restore is the one the string pipeline performs:
-        // `Attrlist::parse` reads the `\u{96}`*n*`\u{97}` sentinel as one
-        // opaque run — carrying none of the `,`/`=`/`"` bytes the split
-        // reads — and the restore pass splices each body over whatever
-        // sentinel reached the rendered string. `tokened_bracket` puts the
+        // *parse*: `Attrlist::parse` reads the `\u{96}`*n*`\u{97}` placeholder
+        // as one opaque run — carrying none of the `,`/`=`/`"` bytes the
+        // split reads — and the restore then splices each body over whatever
+        // placeholder survived the parse. `tokened_bracket` puts the
         // match string into that same shape and
         // `Attrlist::into_owned_restoring` performs the after-the-split
         // half.
@@ -2057,7 +2078,7 @@ mod tests {
             "image:x.png[a ++b_c__d++ e]",
             "image:x.png[++a++ and ++b++]",
             // The split invariant: a `,` or an `=` inside the body must not
-            // divide the list, because the string pipeline's own parse never
+            // divide the list, because the parse never
             // sees it. These are the fixtures a restore-*then*-parse fails.
             "image:x.png[++a,b++]",
             "image:x.png[++a=b++]",
@@ -2069,7 +2090,7 @@ mod tests {
             "image:x.png[++a++,++200++]",
             // Shorthand: the `#id`/`.role` the scan finds sit *after* a
             // token, so their offsets have to shift with the restore while
-            // the items themselves stay the ones the string pipeline found.
+            // the items themselves stay the ones the parse found.
             "image:x.png[++abc++#myid]",
             "image:x.png[++abc++.myrole]",
             "image:x.png[++a b++.myrole#myid]",
@@ -2106,7 +2127,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -2115,7 +2136,7 @@ mod tests {
     fn an_image_bracket_over_a_passthrough_is_recognized() {
         // The parsed values carry the *restored* bytes, owned off the
         // temporary the parse read and tagged with the bracket's own coarse
-        // span (design §4.4), exactly as every other non-verbatim bracket is.
+        // span, exactly as every other non-verbatim bracket is.
         let source = "image:x.png[++Alt text++,++100++,50]";
         let nodes = build_src(Span::new(source));
 
@@ -2146,20 +2167,22 @@ mod tests {
     fn a_bracket_body_carrying_sentinel_shaped_bytes_is_not_re_matched() {
         // The bracket restore is one left-to-right pass, like
         // `Passthroughs::restore_to`'s own: a body that itself contains the
-        // bytes of a *later* token must not have that token spliced into it,
-        // and a token index the bracket never issued is left as written
-        // rather than renumbering the ones after it.
+        // bytes of a *later* placeholder must not have that placeholder
+        // spliced into it.
         let source = "image:x.png[++x\u{96}1\u{97}y++ ++b++]";
         let nodes = build_src(Span::new(source));
 
         let image = assert_image(&nodes[0]);
         assert_eq!(image.alt.as_deref(), Some("x\u{96}1\u{97}y b"));
 
-        // The leniency the index-keyed restore rests on, in both spellings a
-        // bracket can present: a run that is not a well-formed token (no
-        // digits) and one whose index the bracket never issued are each left
-        // exactly as the author wrote them, rather than renumbering — or
-        // consuming — the real tokens around them.
+        // An author-typed run of the same bytes is left exactly as written,
+        // in every spelling a bracket can present: a lone `\u{96}` or
+        // `\u{97}`, the two separated by other bytes, or the well-formed
+        // adjacent pair itself. None of them is mistaken for a real
+        // occurrence, because none of them survives `tokened_bracket`'s own
+        // copy as those bytes — [`escape_masked_piece_bytes`] rewrites each
+        // one on the way into the parse, and the restore puts it back on the
+        // way out.
         let nodes = build_src(Span::new(
             "image:x.png[++a++ \u{96}x\u{97} \u{96}9\u{97} ++b++]",
         ));
@@ -2170,13 +2193,32 @@ mod tests {
             Some("a \u{96}x\u{97} \u{96}9\u{97} b")
         );
 
-        // The string pipeline reads this one differently, and the difference
-        // is its own wart rather than something to reproduce: `restore_to`
-        // is a `replace_all` over the *finished* rendered string, so it also
-        // rewrites the sentinel-shaped bytes the author wrote — splicing
-        // passthrough 1's body into the middle of passthrough 0's. The tree
-        // restores per token, into the value each token actually stands in,
-        // so an author's own bytes survive. Its sibling
+        // The adjacent pair, in both orders relative to the bracket's one real
+        // masked piece. Neither order matters any more: the escape settles it
+        // before `bodies` is ever consulted, where the restore's own leniency
+        // for an occurrence past the end of `bodies` used to save only the
+        // *behind* order and the *ahead* one forged a restore (a gap this
+        // comment recorded until 2026-08-31, now pinned closed by
+        // `a_typed_placeholder_beside_a_masked_piece_cannot_forge_a_bracket_restore`
+        // in `tests/sentinels.rs`).
+        let nodes = build_src(Span::new("image:x.png[++a++ \u{96}\u{97}]"));
+        let image = assert_image(&nodes[0]);
+
+        assert_eq!(image.alt.as_deref(), Some("a \u{96}\u{97}"));
+
+        let nodes = build_src(Span::new("image:x.png[\u{96}\u{97} ++a++]"));
+        let image = assert_image(&nodes[0]);
+
+        assert_eq!(image.alt.as_deref(), Some("\u{96}\u{97} a"));
+
+        // The golden output reads the first fixture differently, and the
+        // difference is its own wart rather than something to reproduce:
+        // `restore_to` is a `replace_all` over the *finished* rendered
+        // string, so it also rewrites the placeholder-shaped bytes the
+        // author wrote — splicing passthrough 1's body into the middle of
+        // passthrough 0's. The tree restores per occurrence, into the value
+        // each one actually stands in, so an author's own bytes survive. Its
+        // sibling
         // `a_restored_body_carrying_sentinel_shaped_bytes_is_not_re_matched`
         // pins the same reading for a target.
         use super::super::super::test_support::golden_passthroughs;
@@ -2193,9 +2235,9 @@ mod tests {
         // `a_dangerous_target_inside_a_passthrough_is_a_documented_divergence`,
         // and the same safe reading. The renderer's dangerous-scheme check
         // reads the `link=` attribute, which now carries the *restored*
-        // bytes; the string pipeline's renderer checks the sentinel its own
-        // parse put there, so a smuggled `javascript:` passes and its restore
-        // pass then completes a live anchor around the image.
+        // bytes; the golden output's renderer instead checks the placeholder
+        // its own parse put there, so a smuggled `javascript:` passes and the
+        // restore then completes a live anchor around the image.
         use super::super::super::test_support::golden_passthroughs;
 
         let source = "image:x.png[Alt,link=++javascript:alert(1)++]";
@@ -2227,8 +2269,8 @@ mod tests {
     fn a_quote_restored_into_an_image_bracket_is_a_documented_divergence() {
         // The one shape the bracket restore does not reach byte-for-byte,
         // and the same well-formed reading the two link families' own
-        // restores take for a `"` in a target. The string pipeline encodes
-        // its quote-free *sentinel* into `alt="…"` and the restore pass then
+        // restores take for a `"` in a target. The golden output encodes
+        // its quote-free *placeholder* into `alt="…"` and its restore then
         // splices the raw `"` into the finished attribute, closing it; the
         // tree holds the restored bytes as the node's own `alt`, so the
         // fold's `encode_attribute_value` escapes the quote and the
@@ -2273,8 +2315,8 @@ mod tests {
             "image:x.png[see stem:[y] here]",
             "icon:home[stem:[y]]",
             // The split invariant: a `,` or `=` inside the STEM body must
-            // not divide the list — the string pipeline's own parse only
-            // ever sees the sentinel.
+            // not divide the list — the parse only
+            // ever sees the placeholder.
             "image:x.png[stem:[a,b]]",
             "image:x.png[stem:[a=b],200]",
             // Named values, the positional width slot, and a role.
@@ -2302,19 +2344,19 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
 
     #[test]
     fn registers_the_restored_target_for_an_image_over_a_passthrough() {
-        // The staged side effect registers the node's own target — the
-        // *restored* bytes. The string pipeline registers the sentinel it
-        // matched (its restore pass rewrites only the rendered string, never
-        // the catalog), which no consumer can read anything from; the cutover
-        // deliberately adopts the tree's honest answer rather than
-        // reproducing that wart, so this pins the policy with no
+        // The side effect registers the node's own target — the
+        // *restored* bytes. The golden output instead registers the raw
+        // placeholder it matched (its restore rewrites only the rendered
+        // string, never the catalog), which no consumer can read anything
+        // from; the tree deliberately registers its honest answer instead,
+        // so this pins that policy with no
         // golden-catalog comparison — exactly as the link family's own
         // increment did.
         let source = "image:++sunset photo.jpg++[] and image:pass:[My Documents/chart.png][] and image:stem:[s].png[]";
@@ -2432,7 +2474,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -2441,7 +2483,7 @@ mod tests {
     fn an_image_target_over_a_stem_expression_is_recognized() {
         // The target is the restored bytes with the spliced ranges recorded
         // on the node, and the default alt is the masked derivation — the
-        // rendered expression hides whole inside the sentinel, so the
+        // rendered expression hides whole inside the placeholder, so the
         // extension still comes off around it.
         let nodes = build_src(Span::new("image:stem:[x].png[]"));
 
@@ -2497,7 +2539,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_passthroughs_with(fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -2510,7 +2552,7 @@ mod tests {
         // resolver would make the `src` differ by platform (CI runs all
         // three). The masked resolve keeps the body away from the resolver,
         // so the fold is byte-identical under either separator — and equal
-        // to the golden, whose own resolver only ever saw the sentinel.
+        // to the golden, whose own resolver only ever saw the placeholder.
         use super::super::super::test_support::golden_passthroughs;
 
         for source in [
@@ -2603,9 +2645,9 @@ mod tests {
 
     #[test]
     fn registers_the_recorded_target_for_a_target_crossing_an_escaped_special() {
-        // The staged `register_image` reads the node's own stored `target`,
-        // which is the escaped one — byte-identical to the `caps[1]` the
-        // string replacer registered. Frozen at the last differentially-
+        // `register_image` reads the node's own stored `target`,
+        // which is the escaped one — byte-identical to what `caps[1]`
+        // would hold. Frozen at the last differentially-
         // verified parity, like the broad set above.
         let fixtures = [
             ("image:a&b.png[]", r#"["a&amp;b.png"]"#),
@@ -2645,7 +2687,7 @@ mod tests {
         apply_character_replacements(build_through_quotes(source), source)
     }
 
-    // ---- `apply_image_side_effects` (staged for the eventual cutover) -----
+    // ---- `apply_image_side_effects` ----------------------------------------
 
     use super::apply_image_side_effects;
     use crate::warnings::WarningType;
@@ -2687,8 +2729,7 @@ mod tests {
 
     #[test]
     fn registration_is_a_no_op_when_catalog_assets_is_disabled() {
-        // `catalog_assets` defaults to off; `register_image` is then a no-op,
-        // mirroring the string pipeline's own `Parser::register_image`.
+        // `catalog_assets` defaults to off; `register_image` is then a no-op.
         let source = "image:sunset.jpg[Sunset]";
         let parser = Parser::default();
         let nodes = build_with(Span::new(source), &parser);
@@ -2700,8 +2741,8 @@ mod tests {
 
     #[test]
     fn registers_an_image_nested_inside_a_styled_span_and_a_footnote() {
-        // An `Image` node can be nested inside a `Styled` span (matched inside
-        // a rendered span, mirroring the string pipeline) or captured whole
+        // An `Image` node can be nested inside a `Styled` span (recognized
+        // inside the span body by `apply_macros`) or captured whole
         // into a `Footnote`'s own children (the footnote increment's own
         // `emit_range`); both containers must be walked.
         let source = "*see image:a.png[]* and footnote:[see image:b.png[]]";
@@ -2721,7 +2762,8 @@ mod tests {
     fn registers_an_image_nested_inside_a_refs_display_children() {
         // A `Ref`'s display children can hold an `Image` too — `apply_macros`
         // itself descends into a `Ref`'s own children before matching at its
-        // level (see `apply_macros_recognizes_a_macro_inside_reference_children`
+        // level (see
+        // `apply_macros_recognizes_a_macro_inside_reference_children`
         // in `macros/mod.rs`'s own tests), so a hand-built `Ref` exercises the
         // same container here.
         use crate::inlines::{Ref, RefVariant};
@@ -2756,10 +2798,10 @@ mod tests {
     #[test]
     fn registers_the_recorded_targets_for_a_broad_fixture_set() {
         // Each expected set is **frozen at the last differentially-verified
-        // parity**: until the string pipeline's deletion this test registered
-        // each fixture through it on an independent parser and compared the
-        // two catalogs, green at the commit that deleted it — the literals are
-        // that pipeline's own answer.
+        // parity**: until the string-rewriting implementation was deleted,
+        // this test registered each fixture through it on an independent
+        // parser and compared the two catalogs, green at the commit that
+        // deleted it — the literals are that implementation's own answer.
         let fixtures = [
             ("image:sunset.jpg[Sunset]", r#"["sunset.jpg"]"#),
             ("icon:home[]", "[]"),
@@ -2973,11 +3015,11 @@ mod tests {
         // An image or icon macro whose *target* (or whose whole macro name)
         // crosses a synthesized run is now recognized: the name and target are
         // read from the level's match string, which carries an expanded value's
-        // bytes exactly, so only the node's `location` takes design §4.4's
-        // coarse fallback. The macro's own attribute list is the one part that
-        // still needs an honest `'src` slice — see the divergence test below —
-        // so every fixture here either carries a verbatim bracket or an empty
-        // one.
+        // bytes exactly, so only the node's `location` falls back to the
+        // enclosing piece's coarse span. The macro's own attribute list is the
+        // one part that still needs an honest `'src` slice — see the
+        // divergence test below — so every fixture here either carries
+        // a verbatim bracket or an empty one.
         let parser = expanding_parser();
 
         let fixtures = [
@@ -3024,7 +3066,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_normal(fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -3033,7 +3075,7 @@ mod tests {
     fn an_image_inside_an_expanded_value_keeps_a_coarse_location() {
         // The target is recovered *exactly* (through `text_slice`), while the
         // node's `location` falls back to the enclosing synthesized run's own
-        // span — design §4.4's documented split, the same one the anchor, UI,
+        // span — the same documented split the anchor, UI,
         // index-term, and cross-reference families already take.
         let parser = expanding_parser();
         let source = "image:{logo}[Logo]";
@@ -3080,9 +3122,8 @@ mod tests {
     fn fold_matches_the_string_pipeline_for_an_attribute_list_inside_an_expanded_value() {
         // A non-empty attribute list crossing a synthesized run takes the same
         // lift: the expansion's bytes live only in the level's match string —
-        // which is exactly the already-substituted haystack the string
-        // replacer parses its own `caps[2]` out of — so the bracket is parsed
-        // from there and owned off it.
+        // the same already-substituted haystack `caps[2]` would read — so the
+        // bracket is parsed from there and owned off it.
         let parser = expanding_parser();
 
         let fixtures = [
@@ -3124,7 +3165,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_normal(fixture, &parser),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
@@ -3133,8 +3174,9 @@ mod tests {
     fn an_attribute_list_inside_an_expanded_value_is_owned_and_coarsely_located() {
         // The attribute values are the expansion's own bytes, owned rather
         // than borrowed from the temporary they were parsed from; the list's
-        // span takes design §4.4's coarse fallback — here the whole enclosing
-        // synthesized run — exactly as the node's `location` does.
+        // span falls back to the enclosing piece's coarse span — here the
+        // whole enclosing synthesized run — exactly as the node's `location`
+        // does.
         let parser = expanding_parser();
         let source = "image:sunset.jpg[{caption},role=hl]";
         let nodes = build(Span::new(source), &parser, None);
@@ -3156,9 +3198,9 @@ mod tests {
 
     #[test]
     fn registers_the_recorded_target_for_images_inside_expanded_values() {
-        // The staged `register_image` side effect reads the node's own stored
-        // `target`, which is the *expanded* one — what the string pipeline's
-        // own expanded haystack matched and registered. Frozen at the last
+        // The `register_image` side effect reads the node's own stored
+        // `target`, which is the *expanded* one — what an expanded haystack
+        // matches and registers. Frozen at the last
         // differentially-verified parity, like the broad set above.
         let fixtures = [
             ("image:{logo}[Logo]", r#"["sunset.jpg"]"#),
@@ -3198,8 +3240,9 @@ mod tests {
         // stays on the page as literal text and no node is built.
         //
         // Until the target group was made mandatory this shape *did* match
-        // here, with an empty target — while the string pipeline's own
-        // `InlineImageMacroReplacer` panicked reading `&caps[1]`, so the two
+        // here, with an empty target — while the string-rewriting
+        // implementation's own `InlineImageMacroReplacer` panicked reading
+        // `&caps[1]`, so the two
         // could not be compared at all. Both families read the one shared
         // pattern, so the fix reached this side with it; the shape now sits in
         // the differential corpus above, and what is pinned here is the

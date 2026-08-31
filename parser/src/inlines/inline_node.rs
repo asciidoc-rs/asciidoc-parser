@@ -11,12 +11,14 @@ use crate::{
 /// The first five variants are the ASG inline core: three literal leaves
 /// ([`Text`](Self::Text), [`CharRef`](Self::CharRef), [`Raw`](Self::Raw)) and
 /// two parents ([`Styled`](Self::Styled), [`Ref`](Self::Ref)). The remaining
-/// variants are crate extensions that the ASG does not yet model; each projects
-/// down to an ASG-legal node when emitting conformant ASG.
+/// variants are crate extensions that the ASG does not model — constructs
+/// (images, footnotes, UI macros, index terms, callouts, anchors, line
+/// breaks, STEM) that render richly in HTML with no projection to an
+/// ASG-legal node; the crate does not emit conformant ASG output.
 ///
 /// Every node carries a `location` [`Span`] (directly or on its inner struct),
 /// so [`InlineNode`] implements [`HasSpan`] and locates itself exactly the way
-/// blocks already do.
+/// blocks do.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InlineNode<'src> {
     // ─── ASG literal nodes (leaves) ───────────────────────────────────
@@ -318,22 +320,20 @@ mod tests {
 /// Orthogonal to [`RawForm`], which says what the fold *does* with the bytes.
 /// This says who produced them, and it answers two different questions.
 ///
-/// For a **consumer**, it sharpens the security story design §3.4 gives this
-/// node kind. "This document emits raw HTML" is visible as `Raw` nodes in the
+/// For a **consumer**, it sharpens this node kind's own security story:
+/// "This document emits raw HTML" is visible as `Raw` nodes in the
 /// tree; whether that came from an author writing an explicit passthrough or
 /// from a substitution expanding an attribute value is the difference between a
 /// deliberate escape hatch and a value that may have arrived from elsewhere.
 ///
 /// For the **builder**, it is the difference between content the extraction
-/// pass is holding and content that is simply there. The string pipeline's own
-/// haystack carries a sentinel where a [`Passthrough`](Self::Passthrough)
-/// node's text belongs, and splices the real text back only when it rewrites
-/// the rendered string — so a *computed value* that reads those bytes before
-/// the restore (a cross-reference's target, captured into its deferred segment)
-/// sees the sentinel, while one that reads a
-/// [`Substitution`](Self::Substitution) node's bytes sees exactly what the
-/// replacer saw. Recording it on the node is what lets a recognition gate tell
-/// the two apart without having to know which pass it is running in.
+/// pass pulled out before any step ran and content a later step produced in
+/// place: a [`Substitution`](Self::Substitution) node's bytes are exactly
+/// what produced them (a literal `<`/`>`/`&` from an expanded attribute
+/// value, for instance), while a [`Passthrough`](Self::Passthrough) node's
+/// text was set aside up front. Recording which one produced a given node is
+/// what lets a recognition gate tell the two apart without re-deriving it
+/// from context.
 ///
 /// A [`Passthrough`](Self::Passthrough) additionally carries the two facts the
 /// extraction pass resolved for it, which nothing else in the tree records: the
@@ -378,9 +378,9 @@ pub enum RawOrigin {
 
     /// Raw output a substitution produced **in place**, with no extraction
     /// involved: a literal `<`, `>`, or `&` from an expanded attribute value
-    /// (which §3.4.1 leaves unescaped, since the value expands *after*
-    /// `specialcharacters` ran), a special an effective order never escaped, or
-    /// a slice of an entity's own bytes.
+    /// (left unescaped since the value expands *after* `specialcharacters`
+    /// ran), a special an effective order never escaped, or a slice of an
+    /// entity's own bytes.
     Substitution,
 }
 

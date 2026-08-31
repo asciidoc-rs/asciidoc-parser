@@ -77,16 +77,10 @@ impl<'src> MediaBlock<'src> {
     /// This narrow seam exists for the document-order title resolution pass
     /// (see `document::title_refs`), which installs the re-rendered title
     /// after resolving any cross-references embedded in it. All other access
-    /// goes through the read-only [`IsBlock::title`] accessor.
+    /// goes through the read-only [`IsBlock::title`]/[`IsBlock::title_content`]
+    /// accessors.
     pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         self.title.as_mut()
-    }
-
-    /// Returns the block's title as a read-only [`Content`], if the block has
-    /// one. Used by the inline-tree tests to inspect a block title's own tree.
-    #[cfg(test)]
-    pub(crate) fn title_content(&self) -> Option<&Content<'src>> {
-        self.title.as_ref()
     }
 
     pub(crate) fn parse(
@@ -145,8 +139,9 @@ impl<'src> MediaBlock<'src> {
         // Asciidoctor's block-macro regex requires the target to begin and end
         // with a non-space character. A target with leading or trailing
         // whitespace is not recognized as a block macro at all; the line falls
-        // through to be parsed as a description list or paragraph instead. Reject
-        // it here (with no warning) so it is not mistaken for a media block.
+        // through to be parsed as a description list or paragraph instead.
+        // Reject it here (with no warning) so it is not mistaken for a
+        // media block.
         let target_data = target.item.data();
 
         if target_data.starts_with(char::is_whitespace)
@@ -348,6 +343,10 @@ impl<'src> IsBlock<'src> for MediaBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_ref().map(Content::rendered_str)
+    }
+
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
     }
 
     fn caption(&self) -> Option<&str> {

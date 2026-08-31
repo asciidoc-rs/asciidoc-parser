@@ -1,4 +1,4 @@
-//! The special-characters substitution step, and its §3.4.1 counterparts for an
+//! The special-characters substitution step, and its counterparts for an
 //! effective order that never runs it — or that runs it *late*, after a step
 //! that already produced markup.
 
@@ -12,9 +12,9 @@ use crate::{
 
 /// Which leaf kind a literal `<`/`>`/`&` becomes when a text run is split.
 ///
-/// Design §3.4.1: the kind a fragment becomes is **not** a fixed property of
-/// where it came from; it is decided by which substitution steps still act on
-/// it under the group's effective order.
+/// The kind a fragment becomes is **not** a fixed property of where it came
+/// from; it is decided by which substitution steps still act on it under the
+/// group's effective order.
 #[derive(Clone, Copy)]
 enum SpecialLeaf {
     /// A [`CharRef::Special`] the fold escapes — what the `SpecialCharacters`
@@ -23,7 +23,7 @@ enum SpecialLeaf {
 
     /// A [`Raw`](InlineNode::Raw) leaf the fold emits verbatim — what a
     /// literal special is under an effective order that never runs
-    /// `SpecialCharacters`, since the string pipeline leaves it untouched.
+    /// `SpecialCharacters`, since nothing in that order escapes it.
     Raw,
 }
 
@@ -67,14 +67,14 @@ pub(super) fn apply_special_characters<'src>(
 }
 
 /// Classifies every literal `<`/`>`/`&` left in the finished tree as a
-/// [`Raw`](InlineNode::Raw) leaf — the §3.4.1 policy for an effective
-/// substitution order whose steps **never include**
+/// [`Raw`](InlineNode::Raw) leaf — the policy for an effective substitution
+/// order whose steps **never include**
 /// [`SpecialCharacters`](crate::content::SubstitutionStep::SpecialCharacters).
 ///
-/// A [`Text`](InlineNode::Text) node is *logical* text the fold escapes (§3.4),
+/// A [`Text`](InlineNode::Text) node is *logical* text the fold escapes,
 /// which is exactly right when the `SpecialCharacters` step acted on the
-/// content — and exactly wrong when it never ran, because there the string
-/// pipeline emits the author's `<` unescaped. `subs=quotes` on a paragraph, a
+/// content — and exactly wrong when it never ran, because there the author's
+/// `<` renders unescaped. `subs=quotes` on a paragraph, a
 /// passthrough block ([`Pass`](crate::content::SubstitutionGroup::Pass)), a
 /// comment block ([`None`](crate::content::SubstitutionGroup::None)), and
 /// `subs=callouts` on a listing block all take that path, so the classification
@@ -82,12 +82,12 @@ pub(super) fn apply_special_characters<'src>(
 ///
 /// This runs **after** every one of the group's own steps rather than in place
 /// of `apply_special_characters`, and that ordering is what keeps it faithful:
-/// under such an order the string pipeline's own steps also match over text in
-/// which the specials are still literal, so every transducer must see them as
-/// ordinary [`Text`](InlineNode::Text) characters — not as the opaque leaf a
-/// `Raw` node is to [`build_match_string`](super::quotes::build_match_string).
-/// Only the finished tree's *classification* differs, so nothing about
-/// recognition changes.
+/// under such an order every other step still matches over text in which the
+/// specials are still literal, so every transducer must see them as ordinary
+/// [`Text`](InlineNode::Text) characters — not as the opaque leaf a `Raw` node
+/// is to [`build_match_string`](super::quotes::build_match_string). Only the
+/// finished tree's *classification* differs, so nothing about recognition
+/// changes.
 ///
 /// It recurses into every container a text run can be nested inside — a
 /// [`Styled`](crate::inlines::Styled) span, a [`Ref`](crate::inlines::Ref)'s
@@ -146,8 +146,8 @@ pub(super) fn classify_unescaped_specials<'src>(
 /// [`escaped_value_children`](super::macros::escaped_value_children).
 ///
 /// There is no entity to unwind here: the value's bytes are the author's own,
-/// which the string replacer splices into its output exactly as they stand. So
-/// this is the same classification [`classify_unescaped_specials`] performs
+/// spliced into the tree exactly as they stand. So this is the same
+/// classification [`classify_unescaped_specials`] performs
 /// over the finished tree — a literal `<`/`>`/`&` is a
 /// [`Raw`](InlineNode::Raw) leaf the fold emits verbatim, everything else a
 /// [`Text`](InlineNode::Text) run — reached through the very same
@@ -190,7 +190,7 @@ pub(super) fn unescaped_value_children<'src>(
 /// `line`/`col`/`offset` stay honest (issue #944) and its run text borrows from
 /// `'src`. When `value` is *synthesized* — it has no source of its own — the
 /// runs are owned slices of the value and every sub-node falls back to the
-/// whole `location` span, the documented coarse fallback (design §4.4).
+/// whole `location` span, the documented coarse fallback.
 ///
 /// An **empty** value is kept as the node it already is rather than split.
 /// Neither splitter ever emits an empty run (there is nothing in one to
@@ -267,16 +267,16 @@ fn split_verbatim<'src>(location: Span<'src>, leaf: SpecialLeaf, out: &mut Vec<I
 
 /// Rewrites every node an **earlier step of this same order** already turned
 /// into markup as the logical [`Text`](InlineNode::Text) that markup is, so the
-/// `SpecialCharacters` step that is about to run escapes it exactly as the
-/// string pipeline escapes the tags that earlier step already wrote.
+/// `SpecialCharacters` step that is about to run escapes those tags exactly as
+/// it escapes any other text.
 ///
-/// This is design §3.4.1 applied to the escaping step's own *position* rather
-/// than to a spliced value's classification (which
+/// This is the same escaping-order rule applied to the escaping step's own
+/// *position* rather than to a spliced value's classification (which
 /// `split_attribute_value` already keys on the same question). Every built-in
 /// group runs `specialcharacters` first, so this is a `subs=` list's question
 /// alone — `subs=quotes,specialcharacters` runs the quotes step first, and the
-/// string pipeline is holding `<strong>bold</strong>` by the time the escaping
-/// step reaches it, emitting `&lt;strong&gt;bold&lt;/strong&gt;`.
+/// tree already holds `<strong>bold</strong>` by the time the escaping step
+/// reaches it, so that step emits `&lt;strong&gt;bold&lt;/strong&gt;`.
 ///
 /// A tree has no rendered tags at that point: a
 /// [`Styled`](crate::inlines::Styled) span's markup exists only at fold time.
@@ -287,9 +287,9 @@ fn split_verbatim<'src>(location: Span<'src>, leaf: SpecialLeaf, out: &mut Vec<I
 /// the only place this module consults the renderer while building — and it is
 /// what the document genuinely says under such an order: the content is no
 /// longer a strong span, it is text that reads like a tag, which is exactly
-/// what a `Text` node the fold escapes means (§3.4).
+/// what a `Text` node the fold escapes means.
 ///
-/// The nodes that must **not** be folded are the ones the string pipeline is
+/// The nodes that must **not** be folded are the ones the tree is still
 /// holding as a *placeholder* rather than as markup at this point, since no
 /// escaping step acts on those either — see [`covers_masked`] for which they
 /// are and how each is told apart, and [`masked_locations`] for the one that
@@ -297,10 +297,11 @@ fn split_verbatim<'src>(location: Span<'src>, leaf: SpecialLeaf, out: &mut Vec<I
 ///
 /// A node whose own subtree *contains* one of those is left alone too, and is
 /// this policy's own documented divergence: folding it whole would inline the
-/// placeholder's content into the escaped text, where the string pipeline
-/// escapes *around* the placeholder and restores it unescaped afterwards.
-/// Splitting one node's fold back around its placeholder descendants is the
-/// sentinel mechanism itself, which this module deliberately does not have.
+/// placeholder's content into the escaped text, where the tree instead escapes
+/// *around* the placeholder and restores it unescaped afterwards. Splitting
+/// one node's fold back around its placeholder descendants would mean
+/// reconstructing partial markup piecewise, which this module deliberately
+/// avoids.
 pub(super) fn flatten_prior_markup<'src>(
     nodes: Vec<InlineNode<'src>>,
     masked: &[(usize, usize)],
@@ -330,17 +331,17 @@ pub(super) fn flatten_prior_markup<'src>(
 }
 
 /// Rewrites every [`Text`](InlineNode::Text) run *nested inside* `node` as a
-/// [`Raw`](InlineNode::Raw) leaf, so folding `node` reproduces the markup the
-/// string pipeline's haystack holds at this point — **before** its escaping
-/// step runs — rather than the fully-escaped markup a finished fold emits.
+/// [`Raw`](InlineNode::Raw) leaf, so folding `node` reproduces the markup its
+/// match string holds at this point — **before** the escaping step runs —
+/// rather than the fully-escaped markup a finished fold emits.
 ///
-/// A `Text` node is logical text the fold escapes (§3.4), which is what makes
-/// it the right kind for the *result* of this flattening: the escaping step
-/// that is about to run does that escaping, once. But the same rule applied to
-/// the node's own children would escape them a second time, since the string
-/// pipeline has not escaped them either at the moment its markup-producing
-/// step wrote those tags (`*a < b*` is `<strong>a < b</strong>` there, and the
-/// one escaping pass that follows turns both the tags and the `<` into
+/// A `Text` node is logical text the fold escapes, which is what makes it the
+/// right kind for the *result* of this flattening: the escaping step that is
+/// about to run does that escaping, once. But the same rule applied to the
+/// node's own children would escape them a second time, since those children
+/// have not been escaped either at the moment the markup-producing step wrote
+/// those tags (`*a < b*` folds to `<strong>a < b</strong>` at that point, and
+/// the one escaping pass that follows turns both the tags and the `<` into
 /// entities together). `Raw` is exactly "emit this verbatim", so the fold
 /// reproduces that pre-escape haystack.
 ///
@@ -390,8 +391,9 @@ fn as_pre_escape<'src>(node: InlineNode<'src>) -> InlineNode<'src> {
 /// A location is a sound identity for these: extraction recognizes only a
 /// wholly *verbatim* match (see
 /// [`range_is_verbatim`](super::macros::image::range_is_verbatim)), so each
-/// carries an honest, precise `'src` span rather than design §4.4's coarse
-/// fallback — and a later step's own node can never claim the identical range,
+/// carries an honest, precise `'src` span rather than a synthesized run's
+/// coarse fallback span — and a later step's own node can never claim the
+/// identical range,
 /// since a masked node is one opaque piece to
 /// [`build_match_string`](super::quotes::build_match_string) and any match
 /// containing it extends past it on at least one side.
@@ -414,16 +416,16 @@ pub(super) fn masked_locations(nodes: &[InlineNode<'_>]) -> Vec<(usize, usize)> 
 
 /// What a caller can say about which [`Styled`](crate::inlines::Styled) nodes
 /// are the passthrough-extraction pass's own wrappers — carried to the one
-/// place *recognition* needs to tell one from a span the string pipeline has
-/// really rendered.
+/// place *recognition* needs to tell one from a span whose markup has actually
+/// been rendered.
 ///
 /// [`masked_locations`] collects that identity once, before any step runs; this
 /// is how it reaches
 /// [`build_match_string`](super::quotes::build_match_string), which stands
 /// every opaque node in as one placeholder and wraps it in the characters its
-/// own rendering presents to a sibling. A wrapper has no such characters — the
-/// string pipeline is holding it as its own `\u{96}…\u{97}` placeholder for
-/// every step this module runs — so a sibling reads there exactly what the bare
+/// own rendering presents to a sibling. A wrapper has no such characters — it
+/// is represented as its own bare `\u{96}…\u{97}` placeholder for every step
+/// this module runs — so a sibling reads there exactly what the bare
 /// placeholder already reads as, and the wrapper must stay unwrapped.
 ///
 /// The third state is the point of the type. A caller that does **not** hold
@@ -662,8 +664,8 @@ mod tests {
         assert_text(&nodes[0], "a", 1, 1);
         assert_special(&nodes[1], '<', 2, 1);
 
-        // The middle run is "\nb": it starts right after `<` (line 1, col 3) and
-        // carries into line 2.
+        // The middle run is "\nb": it starts right after `<` (line 1, col 3)
+        // and carries into line 2.
         assert_text(&nodes[2], "\nb", 1, 3);
 
         // The closing `>` lands on line 2.
@@ -682,8 +684,8 @@ mod tests {
 
     #[test]
     fn special_characters_recurses_into_styled_children() {
-        // A custom `subs` order can run quotes before special characters, so the
-        // step must descend into a `Styled` span's children.
+        // A custom `subs` order can run quotes before special characters, so
+        // the step must descend into a `Styled` span's children.
         let loc = Span::new("a<b");
 
         let styled = InlineNode::Styled(Styled {
@@ -816,9 +818,8 @@ mod tests {
         }
     }
 
-    /// The string pipeline's special-characters output for `source`, used as
-    /// the golden oracle: `Content::from` then the `SpecialCharacters`
-    /// step.
+    /// The frozen recording (see `parser/snapshots/README.md`) for `source`,
+    /// used as the golden oracle.
     fn golden(source: &str) -> String {
         let parser = crate::Parser::default();
         let mut content = Content::from(Span::new(source));
@@ -857,10 +858,11 @@ mod tests {
 
     #[test]
     fn classification_splits_specials_into_raw_with_precise_spans() {
-        // The `Raw` counterpart of `splits_text_and_specials_with_precise_spans`
-        // above: the same split, keeping the same honest per-node spans, but
+        // The `Raw` counterpart of
+        // `splits_text_and_specials_with_precise_spans` above: the same
+        // split, keeping the same honest per-node spans, but
         // classifying each special as the verbatim leaf an order that never
-        // runs `SpecialCharacters` calls for (design §3.4.1).
+        // runs `SpecialCharacters` calls for.
         let nodes = classify_unescaped_specials(seed("a<b>c&d"));
 
         assert_eq!(nodes.len(), 7);
@@ -888,7 +890,7 @@ mod tests {
         // The synthesized (attribute-expansion) counterpart of
         // `special_characters_preserves_a_synthesized_text_value`: the split
         // follows the *logical value*, and every fragment keeps the whole
-        // `location` as its coarse fallback span (design §4.4).
+        // `location` as its coarse fallback span.
         let location = Span::new("{x}");
 
         let out = classify_unescaped_specials(vec![InlineNode::Text {
@@ -1042,7 +1044,7 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_byte_for_byte() {
         // Special-characters-only fixtures: for these, folding the single-pass
-        // tree reproduces the string pipeline's escaped output exactly.
+        // tree reproduces the frozen recording's escaped output exactly.
         let fixtures = [
             "",
             "plain text",
@@ -1064,7 +1066,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from golden for {fixture:?}"
             );
         }
     }
