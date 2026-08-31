@@ -104,11 +104,101 @@ fn apply_replacements_recursive<'src>(
 
     // The match string is a pure function of the level's node list, so one
     // build here serves every rule that leaves the level unchanged — the
-    // common outcome by far, since a level rarely matches more than a couple
-    // of the rules. Only a rule that actually replaced something invalidates
-    // it, by handing back the rebuilt level.
-    let mut level = build_match_string(&nodes, Masked::UNKNOWN);
+    // common outcome by far.
+    let level = build_match_string(&nodes, Masked::UNKNOWN);
 
+    // A haystack with no backslash anywhere — real prose, almost always —
+    // takes the fused pass: every rule matched against this one string, one
+    // rebuild. A backslash means an escape's unescape could expose text a
+    // later rule then matches (`\(C)` keeps a literal `(C)` no later rule may
+    // touch, but the sequenced strings differ), so those levels keep the
+    // rule-at-a-time pass whose semantics the escapes were specified against.
+    if ctx.haystack(&level.0).0.contains('\\') {
+        sequential_replacement_rules(nodes, level, root, ctx)
+    } else {
+        fused_replacement_rules(nodes, &level, root, ctx)
+    }
+}
+
+/// Every [`character_replacements`] rule applied to the level in **one**
+/// matching pass over its current match string, with a single rebuild.
+///
+/// Equivalent to [`sequential_replacement_rules`] for a level whose haystack
+/// carries no backslash (the caller's split): no rule's replacement leaf
+/// contributes bytes a later rule's pattern can match in or across — every
+/// contribution is `&#…;`/`&name;` entity text whose interior offers no
+/// later-rule needle and whose `&`/`;` edges preserve the word-, space- and
+/// boundary-classes the patterns key on (the one entity-producing rule runs
+/// last, so even the `&gt;`/`&lt;` it can produce has no rule left to feed) —
+/// so a later rule matches exactly where the sequenced pass would have, and a
+/// candidate overlapping an earlier rule's claim is exactly one the sequenced
+/// pass never saw. `fused_pass_matches_the_sequential_pass` pins the two
+/// passes against each other across the rule list's interaction shapes.
+fn fused_replacement_rules<'src>(
+    nodes: Vec<InlineNode<'src>>,
+    level: &(String, Vec<Piece>),
+    root: Span<'src>,
+    ctx: LevelContext,
+) -> Vec<InlineNode<'src>> {
+    let (s, pieces) = level;
+    let (haystack, prefix) = ctx.haystack(s);
+
+    let mut merged: Vec<ReplacementMatch> = Vec::new();
+
+    for repl in character_replacements() {
+        for m in find_replacement_matches(repl, &haystack) {
+            // A candidate whose match touches an earlier rule's **claimed**
+            // range is dropped: the sequenced pass would have run this rule
+            // over a string where those bytes are already an atomic
+            // replacement leaf's entity text, which (see above) it cannot
+            // match. An earlier match's *kept* context character stays
+            // matchable — `x'a--y`'s em dash keeps its `a`, and the
+            // apostrophe rule then anchors on that very `a`, in either pass.
+            let blocked = merged.iter().any(|earlier| {
+                let claim = earlier.claimed();
+                claim.start < m.full.end && m.full.start < claim.end
+            });
+
+            if !blocked {
+                merged.push(m);
+            }
+        }
+    }
+
+    if merged.is_empty() {
+        return nodes;
+    }
+
+    merged.sort_by_key(|m| m.full.start);
+
+    let matches: Vec<ReplacementMatch> = merged
+        .into_iter()
+        .map(|m| m.unshift(prefix, s.len()))
+        .filter(|m| !m.full.is_empty())
+        .collect();
+
+    // The filter above mirrors `replace_level`'s: a match the clip emptied
+    // kept nothing of the level itself. No rule's pattern can produce one —
+    // each needs at least two characters, and a context is one — so `merged`
+    // being non-empty means `matches` is too, and the rebuild below always
+    // has work.
+    rebuild_replacements(&nodes, pieces, s, &matches, root)
+}
+
+/// Every [`character_replacements`] rule applied to the level in list order,
+/// each matching over the string the rules before it left behind — the
+/// as-specified sequenced semantics, kept for the levels
+/// [`fused_replacement_rules`]'s equivalence argument excludes (a haystack
+/// carrying a backslash) and as the reference its differential pin compares
+/// the fused pass against.
+fn sequential_replacement_rules<'src>(
+    mut nodes: Vec<InlineNode<'src>>,
+    mut level: (String, Vec<Piece>),
+    root: Span<'src>,
+    ctx: LevelContext,
+) -> Vec<InlineNode<'src>> {
+    // Only a rule that actually replaced something invalidates the level's
+    // match string, by handing back the rebuilt level.
     for repl in character_replacements() {
         if let Some(rebuilt) = replace_level(repl, &nodes, &level, root, ctx) {
             nodes = rebuilt;
@@ -130,6 +220,21 @@ struct ReplacementMatch {
 }
 
 impl ReplacementMatch {
+    /// The byte range a rebuild turns into an atomic leaf — what a later
+    /// rule's match must not touch. A kept context character (the `w` beside
+    /// `w--`, the letters around a `w'w` apostrophe) lies outside it: the
+    /// rebuild keeps it as text, where a later rule may still anchor on it.
+    fn claimed(&self) -> std::ops::Range<usize> {
+        match &self.kind {
+            ReplacementKind::Replace { consumed, .. } => consumed.clone(),
+
+            // An entity leaf consumes its whole match; an unescape never
+            // reaches the one caller ([`fused_replacement_rules`], whose
+            // haystack carries no backslash) and answers its whole match too.
+            ReplacementKind::Entity { .. } | ReplacementKind::Unescape { .. } => self.full.clone(),
+        }
+    }
+
     /// Maps every offset in this match out of the
     /// [`haystack`](LevelContext::haystack) it was found in and back into the
     /// level's own match string (see [`LevelContext::unshift`]).
@@ -832,6 +937,104 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn fused_pass_matches_the_sequential_pass() {
+        // The fused pass must produce exactly the node list the sequenced
+        // rule-at-a-time pass produces, for every backslash-free level (the
+        // only kind routed to it). The fixtures concentrate on cross-rule
+        // interaction shapes: a later rule anchoring on an earlier match's
+        // kept context character, candidates a claimed range must block,
+        // adjacent and doubled constructs, every rule beside every other,
+        // and the entity rule's own productions.
+        use super::{
+            super::{special_chars::apply_special_characters, test_support::seed},
+            LevelContext, Masked, build_match_string, fused_replacement_rules,
+            sequential_replacement_rules,
+        };
+
+        let fixtures = [
+            // Each rule alone.
+            "(C)",
+            "(R)",
+            "(TM)",
+            " -- ",
+            "a--b",
+            "x...y",
+            "`'",
+            "it's",
+            "->",
+            "=>",
+            "<-",
+            "<=",
+            "&copy;",
+            "&#8217;",
+            // A later rule anchored on an earlier match's kept character —
+            // the shape the claimed-range (not whole-match) blocking exists
+            // for.
+            "x'a--y",
+            "a--b's",
+            "w--x'y--z",
+            // Candidates that must be blocked by an earlier claim.
+            "(C)'s",
+            "a... ...b",
+            "-- --",
+            " -- -- ",
+            "a-- --b",
+            // Adjacent constructs, every pair direction.
+            "(C)(R)(TM)",
+            "(C)->",
+            "->(C)",
+            "...->",
+            "->...",
+            "it's...",
+            "...it's",
+            "<-<=",
+            "=><=->",
+            "&copy;(C)",
+            "(C)&copy;",
+            "&copy;&#8217;",
+            "x'y'z",
+            "`'`'",
+            "a--b--c",
+            // Entities beside arrow fragments (the `&gt;`/`&lt;` bytes ride
+            // the escaped match string).
+            "-&copy;",
+            "&copy;-",
+            "=&copy;",
+            "a->b<-c",
+            // At either edge, and multi-line.
+            "--a",
+            "a--",
+            "...",
+            "'",
+            "a -- \nb -- c",
+            "x...\n...y",
+            // Dense soup.
+            "It's (C) 2026--the API's -> stable... &copy; -- yes <= no => (TM)",
+        ];
+
+        for source in fixtures {
+            // As production reaches this step: special characters first, so
+            // the match string holds the escaped text the rules match over.
+            let nodes = apply_special_characters(seed(Span::new(source)));
+            let root = Span::new(source);
+            let level = build_match_string(&nodes, Masked::UNKNOWN);
+
+            assert!(
+                !level.0.contains('\\'),
+                "fixture {source:?} belongs to the sequential-only path"
+            );
+
+            let fused = fused_replacement_rules(nodes.clone(), &level, root, LevelContext::ROOT);
+            let sequential = sequential_replacement_rules(nodes, level, root, LevelContext::ROOT);
+
+            assert_eq!(
+                fused, sequential,
+                "fused pass diverged from sequential for {source:?}"
+            );
         }
     }
 }
