@@ -1437,7 +1437,8 @@ pub(super) fn charref_entity<'a>(node: &'a InlineNode<'_>) -> Option<&'a str> {
 }
 
 /// One accepted quote match at a level, in absolute match-string byte offsets.
-struct QuoteMatch {
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+pub(crate) struct QuoteMatch {
     /// The whole match, `[start, end)`.
     full: Range<usize>,
 
@@ -1478,7 +1479,8 @@ impl QuoteMatch {
     }
 }
 
-enum QuoteMatchKind {
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+pub(crate) enum QuoteMatchKind {
     /// An escaped construct (`\*x*`): drop the leading backslash, keep the rest
     /// as literal text, wrap nothing.
     Unescape,
@@ -1512,48 +1514,106 @@ enum QuoteMatchKind {
 /// Drives `sub` over the match string with a look-ahead retry: a rejected
 /// monospace-before-quote match slices the haystack forward and re-searches,
 /// rather than giving up on the level.
-fn find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
+pub(crate) fn find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
     let mut matches = Vec::new();
 
     // Absolute offset of the current (possibly sliced) haystack within `s`.
     let mut base = 0usize;
 
+    // One reusable capture-slot buffer for the whole scan, filled in place by
+    // each anchored attempt.
+    let mut caps = sub.pattern.create_captures();
+
+    let delim = candidate_needle(sub.type_, sub.scope);
+
     'retry: loop {
         let haystack = &s[base..];
+        let bytes = haystack.as_bytes();
+        let mut at = 0usize;
 
-        for caps in sub.pattern.captures_iter(haystack) {
-            // `unwrap` on group 0 is safe: a capture always has an overall
-            // match.
-            #[allow(clippy::unwrap_used)]
-            let whole = caps.get(0).unwrap();
+        // The candidate scan. Every match of a quote pattern contains its
+        // whole opening delimiter — so instead of handing the whole haystack
+        // to an unanchored search that spends most of its time sweeping text
+        // between constructs, hop between occurrences of that delimiter with
+        // `memmem` and run the pattern **anchored** at each position a match
+        // containing that occurrence could start at ([`candidate_starts`]).
+        // An anchored attempt either matches exactly there or fails within a
+        // few bytes; the gaps are never swept by the regex engine at all.
+        //
+        // Left-to-right order is preserved: candidates are visited in
+        // position order, each candidate's possible starts are tried in
+        // ascending order, and `candidate_starts` enumerates every start a
+        // match could structurally have — including one whose attribute list
+        // *contains* this candidate's bytes, which is the one way a match can
+        // begin well before the delimiter that anchors it.
+        'candidates: while at < haystack.len() {
+            let Some(found) = memchr::memmem::find(bytes.get(at..).unwrap_or_default(), delim)
+            else {
+                break;
+            };
 
-            let full = (base + whole.start())..(base + whole.end());
-            let after = &haystack[whole.end()..];
+            let d = at + found;
 
-            // The monospace-constrained-before-quote look-ahead: reject and
-            // resume a few bytes in, so the following quote can be recognized.
-            if sub.type_ == QuoteType::Monospaced
-                && sub.scope == QuoteScope::Constrained
-                && after.starts_with(['"', '\'', '`'])
-            {
-                let skip = if whole.as_str().starts_with('\\') {
-                    2
-                } else {
-                    whole.as_str().chars().next().map_or(1, char::len_utf8)
+            let mut starts = [0usize; 6];
+            let count = candidate_starts(haystack, d, &mut starts);
+
+            for &start in starts.get(..count).unwrap_or_default() {
+                if start < at {
+                    continue;
+                }
+
+                let input = regex_automata::Input::new(haystack)
+                    .anchored(regex_automata::Anchored::Yes)
+                    .range(start..);
+
+                sub.pattern.search_captures(&input, &mut caps);
+
+                let Some(whole) = caps.get_match() else {
+                    continue;
                 };
 
-                base = full.start + skip;
-                continue 'retry;
+                let full = (base + whole.start())..(base + whole.end());
+                let after = &haystack[whole.end()..];
+
+                // The monospace-constrained-before-quote look-ahead: reject
+                // and resume a few bytes in, so the following quote can be
+                // recognized.
+                if sub.type_ == QuoteType::Monospaced
+                    && sub.scope == QuoteScope::Constrained
+                    && after.starts_with(['"', '\'', '`'])
+                {
+                    let matched = &haystack[whole.range()];
+
+                    let skip = if matched.starts_with('\\') {
+                        2
+                    } else {
+                        matched.chars().next().map_or(1, char::len_utf8)
+                    };
+
+                    base = full.start + skip;
+                    continue 'retry;
+                }
+
+                if let Some(m) = classify_match(sub, haystack, &caps, base) {
+                    matches.push(QuoteMatch { full, kind: m });
+                } else {
+                    matches.push(QuoteMatch {
+                        full,
+                        kind: QuoteMatchKind::Unescape,
+                    });
+                }
+
+                // Every accepted match extends past `d` (its own delimiter
+                // sits at or beyond it), so the cursor always advances; `max`
+                // spells the guarantee out rather than trusting it.
+                at = whole.end().max(at + 1);
+                continue 'candidates;
             }
 
-            if let Some(m) = classify_match(sub, &caps, base) {
-                matches.push(QuoteMatch { full, kind: m });
-            } else {
-                matches.push(QuoteMatch {
-                    full,
-                    kind: QuoteMatchKind::Unescape,
-                });
-            }
+            // No match can start at any position this candidate allows; move
+            // to the next occurrence of the delimiter (which may overlap this
+            // one from `d + 1` on — `***` holds two occurrences of `**`).
+            at = d + 1;
         }
 
         break;
@@ -1562,31 +1622,167 @@ fn find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
     matches
 }
 
+/// `sub`'s **whole opening** delimiter — the literal byte string every match
+/// of its pattern must contain at or after its start, which is what lets
+/// [`find_matches`] enumerate candidate positions with `memmem` instead of
+/// sweeping the gaps with the regex engine.
+///
+/// Using the whole delimiter rather than just its first byte matters most for
+/// the two typographic-quote subs: their delimiters open with `"` and `'`,
+/// bytes everyday prose is full of (`it's`, `the author's`), but the byte
+/// *pair* (quote-then-backtick) almost never occurs outside a real
+/// construct — exactly the discrimination the retired unanchored engine's own
+/// literal prefilter had.
+///
+/// The three types no [`QuoteSub`] carries answer an empty needle (the same
+/// shape as [`sub_markers`]'s empty answer for them;
+/// `every_quote_sub_has_a_candidate_needle` pins that no real sub does).
+pub(crate) fn candidate_needle(type_: QuoteType, scope: QuoteScope) -> &'static [u8] {
+    match (type_, scope) {
+        (QuoteType::Strong, QuoteScope::Unconstrained) => b"**",
+        (QuoteType::Strong, QuoteScope::Constrained) => b"*",
+        (QuoteType::DoubleQuote, _) => b"\"`",
+        (QuoteType::SingleQuote, _) => b"'`",
+        (QuoteType::Monospaced, QuoteScope::Unconstrained) => b"``",
+        (QuoteType::Monospaced, QuoteScope::Constrained) => b"`",
+        (QuoteType::Emphasis, QuoteScope::Unconstrained) => b"__",
+        (QuoteType::Emphasis, QuoteScope::Constrained) => b"_",
+        (QuoteType::Mark, QuoteScope::Unconstrained) => b"##",
+        (QuoteType::Mark, QuoteScope::Constrained) => b"#",
+        (QuoteType::Superscript, _) => b"^",
+        (QuoteType::Subscript, _) => b"~",
+
+        (QuoteType::Unquoted | QuoteType::AsciiMath | QuoteType::LatexMath, _) => b"",
+    }
+}
+
+/// Writes into `starts` the ascending, deduplicated positions a match whose
+/// pattern contains its opening delimiter at `d` could start at, returning how
+/// many were written.
+///
+/// A quote pattern's text before its opening delimiter is at most: an
+/// optional escaping backslash *or* one boundary-prefix character (the `^`
+/// alternative consumes nothing), then an optional `[attrs]` list whose
+/// characters exclude both brackets. That gives three shapes, each
+/// contributing the delimiter-relative start and the one a single preceding
+/// character adds:
+///
+/// - **plain** — nothing between start and `d`: `d` itself and the character
+///   before it;
+/// - **closed attribute list** — `d` directly follows `]`: the matching `[` and
+///   the character before it;
+/// - **bracket interior** — `d` sits *inside* an unclosed `[…` run, meaning
+///   this byte may be attribute-list content of a match whose own delimiter
+///   comes later: that run's `[` and the character before it. This is the one
+///   way a match can begin well before the candidate that led to it, and
+///   enumerating it is what keeps the candidate scan leftmost-faithful.
+///
+/// A start the pattern cannot actually use (say, `[` with no construct after
+/// the list) just fails its anchored attempt; over-enumeration costs a few
+/// bytes of engine work, never a wrong match.
+fn candidate_starts(haystack: &str, d: usize, starts: &mut [usize; 6]) -> usize {
+    let bytes = haystack.as_bytes();
+    let mut count = 0usize;
+
+    let mut push = |position: usize, count: &mut usize| {
+        if let Some(slot) = starts.get_mut(*count) {
+            *slot = position;
+            *count += 1;
+        }
+    };
+
+    // Bracket interior: the nearest `[` before `d` with no `]` between.
+    if let Some(open) = memchr::memrchr(b'[', bytes.get(..d).unwrap_or_default())
+        && memchr::memrchr(b']', bytes.get(open + 1..d).unwrap_or_default()).is_none()
+    {
+        if let Some(before) = prev_char_start(haystack, open) {
+            push(before, &mut count);
+        }
+
+        push(open, &mut count);
+    }
+
+    // Closed attribute list: `d` directly follows `]`; find its `[`.
+    if d > 0
+        && bytes.get(d - 1) == Some(&b']')
+        && let Some(open) = memchr::memrchr(b'[', bytes.get(..d - 1).unwrap_or_default())
+        && memchr::memrchr(b']', bytes.get(open + 1..d - 1).unwrap_or_default()).is_none()
+    {
+        if let Some(before) = prev_char_start(haystack, open) {
+            push(before, &mut count);
+        }
+
+        push(open, &mut count);
+    }
+
+    // Plain: the delimiter itself and the character before it.
+    if let Some(before) = prev_char_start(haystack, d) {
+        push(before, &mut count);
+    }
+
+    push(d, &mut count);
+
+    let filled = starts.get_mut(..count).unwrap_or_default();
+    filled.sort_unstable();
+
+    // Dedup in place; the array is tiny.
+    let mut kept = 0usize;
+
+    for i in 0..count {
+        let value = filled.get(i).copied().unwrap_or_default();
+
+        if (kept == 0 || filled.get(kept - 1).copied() != Some(value))
+            && let Some(slot) = filled.get_mut(kept)
+        {
+            *slot = value;
+            kept += 1;
+        }
+    }
+
+    kept
+}
+
+/// The byte position where the character ending at `i` begins, or `None` at
+/// the start of the haystack. `i` is always the index of an ASCII byte a
+/// `memchr` scan found, so it is in bounds and on a character boundary.
+fn prev_char_start(haystack: &str, i: usize) -> Option<usize> {
+    haystack
+        .get(..i)
+        .and_then(|before| before.chars().next_back())
+        .map(|ch| i - ch.len_utf8())
+}
+
 /// Classifies one raw capture into the [`Styled`] span it produces, or `None`
 /// when it is an escaped construct that wraps nothing.
 ///
 /// Group numbering follows the shared patterns: a *constrained* sub captures
 /// `(prefix)(attrlist?)(body)`; an *unconstrained* sub captures
 /// `(attrlist?)(body)`. `base` maps a capture offset (into the current
-/// haystack) back to an absolute offset in the whole match string.
+/// haystack `h`) back to an absolute offset in the whole match string.
+///
+/// `caps` is the capture-slot buffer the anchored search in [`find_matches`]
+/// filled; a group is read as its offset span, and the overall match's text
+/// as a slice of `h`.
 fn classify_match(
     sub: &QuoteSub,
-    caps: &regex::Captures<'_>,
+    h: &str,
+    caps: &regex_automata::util::captures::Captures,
     base: usize,
 ) -> Option<QuoteMatchKind> {
     let abs = |r: std::ops::Range<usize>| (base + r.start)..(base + r.end);
+    let group = |i: usize| caps.get_group(i).map(|span| span.start..span.end);
 
-    // `unwrap` on group 0 is safe: a capture always has an overall match.
-    #[allow(clippy::unwrap_used)]
-    let whole = caps.get(0).unwrap();
+    let whole = caps.get_match()?;
 
-    let escaped = whole.as_str().starts_with('\\');
+    // The first byte of the match; the escape marker is ASCII, so the byte
+    // test and a `starts_with('\\')` over the matched text agree.
+    let escaped = h.as_bytes().get(whole.start()) == Some(&b'\\');
 
     match sub.scope {
         QuoteScope::Constrained => {
-            let prefix_end = caps.get(1).map_or(base, |m| base + m.end());
-            let attrlist = caps.get(2).map(|m| abs(m.range()));
-            let body = caps.get(3).map(|m| abs(m.range()))?;
+            let prefix_end = group(1).map_or(base, |r| base + r.end);
+            let attrlist = group(2).map(&abs);
+            let body = group(3).map(&abs)?;
 
             if escaped {
                 // `\[a]*x*`: the escape keeps `[a]` literal but still wraps the
@@ -1628,8 +1824,8 @@ fn classify_match(
                 return None;
             }
 
-            let attrlist = caps.get(1).map(|m| abs(m.range()));
-            let body = caps.get(2).map(|m| abs(m.range()))?;
+            let attrlist = group(1).map(&abs);
+            let body = group(2).map(&abs)?;
             let has_attrs = attrlist.is_some();
 
             Some(QuoteMatchKind::Wrap {
@@ -2130,6 +2326,127 @@ pub(super) fn quote_type_of(variant: StyleVariant) -> QuoteType {
         StyleVariant::SingleQuote => QuoteType::SingleQuote,
         StyleVariant::Unquoted => QuoteType::Unquoted,
     }
+}
+
+#[cfg(test)]
+/// The unanchored `captures_iter` loop the candidate scan replaced,
+/// compiled from each sub's own [`source`](QuoteSub::source)
+/// through the `regex` crate exactly as the subs were built before — the
+/// reference `candidate_scan_matches_the_unanchored_reference` (in
+/// `crate::tests::inline_builder_quotes_candidate_scan`, kept outside this
+/// module so its lines stay out of the coverage measurement on every
+/// platform) pins [`find_matches`] against, match for match.
+// Test-only code (see `#[cfg(test)]` above); the unwraps are the tests-module
+// idiom, which the lint's own in-tests carve-out misses only because this fn
+// sits outside a `mod tests`.
+#[allow(clippy::unwrap_used)]
+pub(crate) fn reference_find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
+    // As every sub was compiled before the candidate scan: through
+    // `RegexBuilder` with `dot_matches_new_line`. (The superscript and
+    // subscript patterns were built without the flag, but contain no `.`
+    // metacharacter, so this is the same matcher.)
+    let pattern = regex::RegexBuilder::new(sub.source)
+        .dot_matches_new_line(true)
+        .build()
+        .unwrap();
+
+    let abs_kind = |caps: &regex::Captures<'_>, base: usize| -> Option<QuoteMatchKind> {
+        let abs = |r: std::ops::Range<usize>| (base + r.start)..(base + r.end);
+        let whole = caps.get(0).unwrap();
+        let escaped = whole.as_str().starts_with('\\');
+
+        match sub.scope {
+            QuoteScope::Constrained => {
+                let prefix_end = caps.get(1).map_or(base, |m| base + m.end());
+                let attrlist = caps.get(2).map(|m| abs(m.range()));
+                let body = caps.get(3).map(|m| abs(m.range()))?;
+
+                if escaped {
+                    let attrlist = attrlist?;
+
+                    return Some(QuoteMatchKind::Wrap {
+                        keep_literal: Some((attrlist.start - 1)..(attrlist.end + 1)),
+                        body,
+                        construct: (attrlist.end + 1)..(base + whole.end()),
+                        attrlist: None,
+                        variant: style_variant(sub.type_, false),
+                        form: crate::inlines::SpanForm::Constrained,
+                    });
+                }
+
+                let has_attrs = attrlist.is_some();
+
+                Some(QuoteMatchKind::Wrap {
+                    keep_literal: None,
+                    construct: prefix_end..(base + whole.end()),
+                    body,
+                    attrlist,
+                    variant: style_variant(sub.type_, has_attrs),
+                    form: crate::inlines::SpanForm::Constrained,
+                })
+            }
+
+            QuoteScope::Unconstrained => {
+                if escaped {
+                    return None;
+                }
+
+                let attrlist = caps.get(1).map(|m| abs(m.range()));
+                let body = caps.get(2).map(|m| abs(m.range()))?;
+                let has_attrs = attrlist.is_some();
+
+                Some(QuoteMatchKind::Wrap {
+                    keep_literal: None,
+                    construct: (base + whole.start())..(base + whole.end()),
+                    body,
+                    attrlist,
+                    variant: style_variant(sub.type_, has_attrs),
+                    form: crate::inlines::SpanForm::Unconstrained,
+                })
+            }
+        }
+    };
+
+    let mut matches = Vec::new();
+    let mut base = 0usize;
+
+    'retry: loop {
+        let haystack = &s[base..];
+
+        for caps in pattern.captures_iter(haystack) {
+            let whole = caps.get(0).unwrap();
+
+            let full = (base + whole.start())..(base + whole.end());
+            let after = &haystack[whole.end()..];
+
+            if sub.type_ == QuoteType::Monospaced
+                && sub.scope == QuoteScope::Constrained
+                && after.starts_with(['"', '\'', '`'])
+            {
+                let skip = if whole.as_str().starts_with('\\') {
+                    2
+                } else {
+                    whole.as_str().chars().next().map_or(1, char::len_utf8)
+                };
+
+                base = full.start + skip;
+                continue 'retry;
+            }
+
+            if let Some(kind) = abs_kind(&caps, base) {
+                matches.push(QuoteMatch { full, kind });
+            } else {
+                matches.push(QuoteMatch {
+                    full,
+                    kind: QuoteMatchKind::Unescape,
+                });
+            }
+        }
+
+        break;
+    }
+
+    matches
 }
 
 #[cfg(test)]

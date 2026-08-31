@@ -1,6 +1,6 @@
 use std::{borrow::Cow, sync::LazyLock};
 
-use regex::{Captures, Regex, RegexBuilder, Replacer};
+use regex::{Captures, Regex, Replacer};
 
 use crate::{
     Parser, Span,
@@ -138,15 +138,50 @@ impl Replacer for SpecialCharacterReplacer<'_> {
 }
 
 /// One quoted-text recognition rule: a [`QuoteType`]/[`QuoteScope`] pairing and
-/// the [`Regex`] that recognizes it.
+/// the pattern that recognizes it.
 ///
 /// The rules are `pub(crate)` (via [`quote_subs`]) so the single-pass
 /// [`inline_builder`](crate::content::inline_builder) reuses these *exact*
 /// same patterns rather than duplicating them at its own recognition sink.
+///
+/// The pattern is compiled through `regex-automata`'s meta engine rather than
+/// the `regex` crate's own wrapper of it, because the recognition sink's
+/// candidate scan needs the one thing the wrapper does not expose: an
+/// **anchored** search at an arbitrary offset (see `find_matches` in
+/// [`inline_builder`](crate::content::inline_builder)'s quotes step). The
+/// syntax and match semantics are the `regex` crate's own — the wrapper is a
+/// thin layer over this very engine. [`source`](Self::source) keeps the
+/// pattern's text so the differential pin in that module can compile the
+/// reference `regex::Regex` these matchers replaced and compare the two
+/// match-for-match.
 pub(crate) struct QuoteSub {
     pub(crate) type_: QuoteType,
     pub(crate) scope: QuoteScope,
-    pub(crate) pattern: Regex,
+    pub(crate) pattern: regex_automata::meta::Regex,
+    /// Read only by the differential pin in the quotes step's tests; the
+    /// production matcher is [`pattern`](Self::pattern).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) source: &'static str,
+}
+
+/// Builds one [`QuoteSub`], compiling `source` with the same
+/// `dot_matches_new_line` semantics `RegexBuilder` gave every quote pattern.
+/// (The superscript and subscript patterns were built without the flag, but
+/// neither contains a `.` metacharacter, so the flag is inert for them and
+/// one shared configuration serves all twelve.)
+fn quote_sub(type_: QuoteType, scope: QuoteScope, source: &'static str) -> QuoteSub {
+    #[allow(clippy::unwrap_used)]
+    let pattern = regex_automata::meta::Regex::builder()
+        .syntax(regex_automata::util::syntax::Config::new().dot_matches_new_line(true))
+        .build(source)
+        .unwrap();
+
+    QuoteSub {
+        type_,
+        scope,
+        pattern,
+        source,
+    }
 }
 
 /// The ordered quoted-text recognition rules, shared with the single-pass
@@ -178,135 +213,82 @@ pub(crate) fn quote_subs() -> &'static [QuoteSub] {
 //   the order in which they are replaced is important.
 static QUOTE_SUBS: LazyLock<Vec<QuoteSub>> = LazyLock::new(|| {
     vec![
-        QuoteSub {
-            // **strong**
-            type_: QuoteType::Strong,
-            scope: QuoteScope::Unconstrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(r#"\\?(?:\[([^\[\]]+)\])?\*\*(.+?)\*\*"#)
-                .dot_matches_new_line(true)
-                .build()
-                .unwrap(),
-        },
-        QuoteSub {
-            // *strong*
-            type_: QuoteType::Strong,
-            scope: QuoteScope::Constrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(
-                r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?\*(\S|\S.*?\S)\*\b{end-half}"#,
-            )
-            .dot_matches_new_line(true)
-            .build()
-            .unwrap(),
-        },
-        QuoteSub {
-            // "`double-quoted`"
-            type_: QuoteType::DoubleQuote,
-            scope: QuoteScope::Constrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(
-                r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?"`(\S|\S.*?\S)`"\b{end-half}"#,
-            )
-            .dot_matches_new_line(true)
-            .build()
-            .unwrap(),
-        },
-        QuoteSub {
-            // '`single-quoted`'
-            type_: QuoteType::SingleQuote,
-            scope: QuoteScope::Constrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(
-                r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?'`(\S|\S.*?\S)`'\b{end-half}"#,
-            )
-            .dot_matches_new_line(true)
-            .build()
-            .unwrap(),
-        },
-        QuoteSub {
-            // ``monospaced``
-            type_: QuoteType::Monospaced,
-            scope: QuoteScope::Unconstrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(r#"\\?(?:\[([^\[\]]+)\])?``(.+?)``"#)
-                .dot_matches_new_line(true)
-                .build()
-                .unwrap(),
-        },
-        QuoteSub {
-            // `monospaced`
-            type_: QuoteType::Monospaced,
-            scope: QuoteScope::Constrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(
-                r#"(^|[^\w&;:"'`}])(?:\[([^\[\]]+)\])?`(\S|\S.*?\S)`\b{end-half}"#,
-                // NB: We don't have look-ahead in Rust Regex, so we might miss some edge cases
-                // because Ruby's version matches `(?![#{CC_WORD}"'`])` which is slightly more
-                // detailed than our `\b{end-half}`.
-            )
-            .dot_matches_new_line(true)
-            .build()
-            .unwrap(),
-        },
-        QuoteSub {
-            // __emphasis__
-            type_: QuoteType::Emphasis,
-            scope: QuoteScope::Unconstrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(r#"\\?(?:\[([^\[\]]+)\])?__(.+?)__"#)
-                .dot_matches_new_line(true)
-                .build()
-                .unwrap(),
-        },
-        QuoteSub {
-            // _emphasis_
-            type_: QuoteType::Emphasis,
-            scope: QuoteScope::Constrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(
-                r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?_(\S|\S.*?\S)_\b{end-half}"#,
-            )
-            .dot_matches_new_line(true)
-            .build()
-            .unwrap(),
-        },
-        QuoteSub {
-            // ##mark##
-            type_: QuoteType::Mark,
-            scope: QuoteScope::Unconstrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(r#"\\?(?:\[([^\[\]]+)\])?##(.+?)##"#)
-                .dot_matches_new_line(true)
-                .build()
-                .unwrap(),
-        },
-        QuoteSub {
-            // #mark#
-            type_: QuoteType::Mark,
-            scope: QuoteScope::Constrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(
-                r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?#(\S|\S.*?\S)#\b{end-half}"#,
-            )
-            .dot_matches_new_line(true)
-            .build()
-            .unwrap(),
-        },
-        QuoteSub {
-            // ^superscript^
-            type_: QuoteType::Superscript,
-            scope: QuoteScope::Unconstrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?(?:\[([^\[\]]+)\])?\^(\S+?)\^"#).unwrap(),
-        },
-        QuoteSub {
-            // ~subscript~
-            type_: QuoteType::Subscript,
-            scope: QuoteScope::Unconstrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?(?:\[([^\[\]]+)\])?~(\S+?)~"#).unwrap(),
-        },
+        // **strong**
+        quote_sub(
+            QuoteType::Strong,
+            QuoteScope::Unconstrained,
+            r#"\\?(?:\[([^\[\]]+)\])?\*\*(.+?)\*\*"#,
+        ),
+        // *strong*
+        quote_sub(
+            QuoteType::Strong,
+            QuoteScope::Constrained,
+            r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?\*(\S|\S.*?\S)\*\b{end-half}"#,
+        ),
+        // "`double-quoted`"
+        quote_sub(
+            QuoteType::DoubleQuote,
+            QuoteScope::Constrained,
+            r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?"`(\S|\S.*?\S)`"\b{end-half}"#,
+        ),
+        // '`single-quoted`'
+        quote_sub(
+            QuoteType::SingleQuote,
+            QuoteScope::Constrained,
+            r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?'`(\S|\S.*?\S)`'\b{end-half}"#,
+        ),
+        // ``monospaced``
+        quote_sub(
+            QuoteType::Monospaced,
+            QuoteScope::Unconstrained,
+            r#"\\?(?:\[([^\[\]]+)\])?``(.+?)``"#,
+        ),
+        // `monospaced`
+        //
+        // NB: We don't have look-ahead in Rust Regex, so we might miss some
+        // edge cases because Ruby's version matches `(?![#{CC_WORD}"'`])`
+        // which is slightly more detailed than our `\b{end-half}`.
+        quote_sub(
+            QuoteType::Monospaced,
+            QuoteScope::Constrained,
+            r#"(^|[^\w&;:"'`}])(?:\[([^\[\]]+)\])?`(\S|\S.*?\S)`\b{end-half}"#,
+        ),
+        // __emphasis__
+        quote_sub(
+            QuoteType::Emphasis,
+            QuoteScope::Unconstrained,
+            r#"\\?(?:\[([^\[\]]+)\])?__(.+?)__"#,
+        ),
+        // _emphasis_
+        quote_sub(
+            QuoteType::Emphasis,
+            QuoteScope::Constrained,
+            r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?_(\S|\S.*?\S)_\b{end-half}"#,
+        ),
+        // ##mark##
+        quote_sub(
+            QuoteType::Mark,
+            QuoteScope::Unconstrained,
+            r#"\\?(?:\[([^\[\]]+)\])?##(.+?)##"#,
+        ),
+        // #mark#
+        quote_sub(
+            QuoteType::Mark,
+            QuoteScope::Constrained,
+            r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?#(\S|\S.*?\S)#\b{end-half}"#,
+        ),
+        // ^superscript^
+        quote_sub(
+            QuoteType::Superscript,
+            QuoteScope::Unconstrained,
+            r#"\\?(?:\[([^\[\]]+)\])?\^(\S+?)\^"#,
+        ),
+        // ~subscript~
+        quote_sub(
+            QuoteType::Subscript,
+            QuoteScope::Unconstrained,
+            r#"\\?(?:\[([^\[\]]+)\])?~(\S+?)~"#,
+        ),
     ]
 });
 
