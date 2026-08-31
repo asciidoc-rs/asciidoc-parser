@@ -302,9 +302,7 @@ fn fold_into_html(
                 // builder never leaves a special inside a `Text`, so this is
                 // belt-and-suspenders, but it keeps the fold correct in its own
                 // right.
-                for ch in value.chars() {
-                    render_char(ch, renderer, out);
-                }
+                render_text(value, renderer, out);
             }
 
             InlineNode::Raw {
@@ -323,9 +321,7 @@ fn fold_into_html(
                 form: RawForm::Escaped,
                 ..
             } => {
-                for ch in value.chars() {
-                    render_char(ch, renderer, out);
-                }
+                render_text(value, renderer, out);
             }
 
             InlineNode::CharRef {
@@ -458,6 +454,43 @@ fn fold_into_html(
             }
         }
     }
+}
+
+/// Appends `text` — logical, un-escaped text — to `out`, routing each of the
+/// three special characters through `renderer` exactly as [`render_char`]
+/// does and copying every run between them wholesale.
+///
+/// This is [`render_char`] applied to every character of `text`, spelled as
+/// one `memchr` sweep per special instead of a per-character loop: the runs
+/// between specials — for most text, all of it — are appended as one
+/// `push_str` each. The output is byte-identical for any renderer, since
+/// only the three characters `render_char` routes through the renderer are
+/// ever handed to it.
+pub(super) fn render_text(text: &str, renderer: &dyn InlineRenderer, out: &mut String) {
+    let mut rest = text;
+
+    while let Some(pos) = memchr::memchr3(b'<', b'>', b'&', rest.as_bytes()) {
+        // `pos` is the offset of a byte `memchr3` itself just found in
+        // `rest`, and each of the three searched-for bytes is ASCII, so the
+        // split point is in bounds and on a character boundary: this
+        // `split_at` cannot panic.
+        let (clean, special_and_rest) = rest.split_at(pos);
+
+        out.push_str(clean);
+
+        let mut chars = special_and_rest.chars();
+
+        // `special_and_rest` starts with the byte just found, so there is
+        // always a first character to take, and it is one of the three
+        // specials `render_char` routes through the renderer.
+        for ch in chars.by_ref().take(1) {
+            render_char(ch, renderer, out);
+        }
+
+        rest = chars.as_str();
+    }
+
+    out.push_str(rest);
 }
 
 /// Appends `ch` to `out`, routing the three special characters through
@@ -1125,5 +1158,39 @@ mod tests {
         // quoted-title suffix.
         assert!(folded.contains(">Section 2<"), "folded: {folded}");
         assert!(!folded.contains("&#8220;"), "folded: {folded}");
+    }
+
+    #[test]
+    fn render_text_matches_render_char_character_by_character() {
+        // `render_text` is `render_char` applied to every character, spelled
+        // as a bulk sweep; this pins the two as byte-identical across the
+        // shapes the sweep has to get right — no special at all, specials at
+        // either edge, adjacent specials, and multi-byte characters between
+        // them. The per-character loop is also what keeps `render_char`'s
+        // ordinary-character arm exercised now that production callers hand
+        // it only specials.
+        let renderer = HtmlInlineRenderer {};
+
+        for text in [
+            "",
+            "plain text with nothing special",
+            "a < b & c > d",
+            "<&>",
+            "&&&",
+            "ends with a special <",
+            "> starts with one",
+            "unicode — bullet • and a < special",
+        ] {
+            let mut bulk = String::new();
+            super::render_text(text, &renderer, &mut bulk);
+
+            let mut per_char = String::new();
+
+            for ch in text.chars() {
+                super::render_char(ch, &renderer, &mut per_char);
+            }
+
+            assert_eq!(bulk, per_char, "render_text diverged for {text:?}");
+        }
     }
 }
