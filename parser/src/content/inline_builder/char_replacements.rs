@@ -105,8 +105,18 @@ fn apply_replacements_recursive<'src>(
 
     let mut nodes = nodes;
 
+    // The match string is a pure function of the level's node list, so one
+    // build here serves every rule that leaves the level unchanged — the
+    // common outcome by far, since a level rarely matches more than a couple
+    // of the rules. Only a rule that actually replaced something invalidates
+    // it, by handing back the rebuilt level.
+    let mut level = build_match_string(&nodes, Masked::UNKNOWN);
+
     for repl in character_replacements() {
-        nodes = replace_level(repl, nodes, root, ctx);
+        if let Some(rebuilt) = replace_level(repl, &nodes, &level, root, ctx) {
+            nodes = rebuilt;
+            level = build_match_string(&nodes, Masked::UNKNOWN);
+        }
     }
 
     nodes
@@ -170,8 +180,11 @@ enum ReplacementKind {
     Entity { name: std::ops::Range<usize> },
 }
 
-/// Matches `repl` over this level's escaped text, replacing each match with the
-/// leaf node(s) it produces and leaving everything else in place.
+/// Matches `repl` over this level's escaped text — `level`, the
+/// [`build_match_string`] pair the caller built for the level's current
+/// `nodes` — returning the rebuilt level when the rule replaced something and
+/// `None` when it left the level untouched, so the caller knows whether the
+/// match string it holds still describes `nodes`.
 ///
 /// Takes no [`level_may_have_replacements`] pre-filter of its own: the caller
 /// ([`apply_replacements_recursive`]) already took it once for `nodes` before
@@ -187,16 +200,17 @@ enum ReplacementKind {
 /// only ever confirm what the caller already established.
 fn replace_level<'src>(
     repl: &CharacterReplacement,
-    nodes: Vec<InlineNode<'src>>,
+    nodes: &[InlineNode<'src>],
+    level: &(String, Vec<Piece>),
     root: Span<'src>,
     ctx: LevelContext,
-) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
+) -> Option<Vec<InlineNode<'src>>> {
+    let (s, pieces) = level;
 
     // The rule runs over the level wrapped in its enclosing construct's own
     // boundary characters, and every offset it reports is mapped back into the
     // level's own coordinates (see [`LevelContext`]).
-    let (haystack, prefix) = ctx.haystack(&s);
+    let (haystack, prefix) = ctx.haystack(s);
 
     // A match the clip emptied kept nothing of the level itself, so there is
     // nothing here to replace. No rule's pattern can produce one — each needs
@@ -209,10 +223,10 @@ fn replace_level<'src>(
         .collect();
 
     if matches.is_empty() {
-        return nodes;
+        return None;
     }
 
-    rebuild_replacements(&nodes, &pieces, &s, &matches, root)
+    Some(rebuild_replacements(nodes, pieces, s, &matches, root))
 }
 
 /// Finds every non-overlapping match of `repl` in the escaped match string
