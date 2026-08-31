@@ -3,13 +3,17 @@
 // Referenced by the doc comments below, whose own rebuild is the one this
 // family reaches through `restored_value_children`; the code no longer calls
 // it directly.
+// Referenced by the doc comments below; the code itself reaches the level's
+// match string through [`shifted_level`]'s shared slot now.
+#[allow(unused_imports)]
+use super::super::quotes::build_match_string;
 #[allow(unused_imports)]
 use super::computed_value_children;
 use super::{
-    ComputedSpecials, MacroMatch, MacroMatchKind,
+    ComputedSpecials, LevelStrings, MacroMatch, MacroMatchKind,
     image::{range_has_no_opaque_piece, range_is_substitution_restorable},
     links::restore_masked_passthroughs,
-    macro_text_children, rebuild_macro_level, restored_value_children, tokened_text,
+    macro_text_children, rebuild_macro_level, restored_value_children, shifted_level, tokened_text,
     untranslated_value,
 };
 use crate::{
@@ -21,7 +25,7 @@ use crate::{
     content::{
         INLINE_XREF, document_xrefstyle,
         inline_builder::{
-            quotes::{LevelContext, Piece, build_match_string, single_text_value, source_slice},
+            quotes::{LevelContext, Piece, single_text_value, source_slice},
             special_chars::Masked,
         },
         xref_target::{
@@ -110,6 +114,7 @@ pub(super) fn xref_macros_level<'src>(
     ctx: LevelContext,
     masked: Masked<'_>,
     specials: ComputedSpecials,
+    level: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     // Cheap pre-filter, taken *before* the match string is materialized: a
     // single, unsplit `Text` node's match string is its own value, so the
@@ -119,7 +124,11 @@ pub(super) fn xref_macros_level<'src>(
         return nodes;
     }
 
-    let (s, pieces) = build_match_string(&nodes, masked);
+    // The level's shared shifted match string (see `shifted_level`).
+    let (s, pieces) = {
+        let entry = shifted_level(level, &nodes, ctx, masked);
+        (entry.0.as_str(), entry.1.as_slice())
+    };
 
     // Cheap pre-filter: both the `xref:` macro form and the `<<id>>` shorthand
     // (seen here as `&lt;&lt;id&gt;&gt;`, since specials run before macros) are
@@ -127,22 +136,19 @@ pub(super) fn xref_macros_level<'src>(
     // shorthand's `&lt;&lt;` opener, mirroring the string step's
     // `text.contains("&lt;&lt;") || (found_macroish && text.contains("xref:"))`
     // guard.
-    if !xref_prefilter(&s) {
+    if !xref_prefilter(s) {
         return nodes;
     }
 
-    // Matched over the level wrapped in the boundary character its enclosing
-    // construct presents, with the level's own pieces moved into that string's
-    // coordinates — see `apply_macro_families`'s own doc comment.
-    let (s, pieces) = ctx.shift(s, pieces);
-
-    let matches = find_xref_matches(&nodes, &s, &pieces, root, parser, specials);
+    let matches = find_xref_matches(&nodes, s, pieces, root, parser, specials);
 
     if matches.is_empty() {
         return nodes;
     }
 
-    rebuild_macro_level(&nodes, &pieces, &s, matches)
+    let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
+    *level = None;
+    rebuilt
 }
 
 /// A shorthand whose id holds rendered inline markup is not a valid

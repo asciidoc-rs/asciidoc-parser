@@ -2,7 +2,14 @@
 
 use std::borrow::Cow;
 
-use super::{MacroMatch, MacroMatchKind, links::restore_masked_passthroughs, rebuild_macro_level};
+// Referenced by the doc comments below; the code itself reaches the level's
+// match string through [`shifted_level`]'s shared slot now.
+#[allow(unused_imports)]
+use super::super::quotes::build_match_string;
+use super::{
+    LevelStrings, MacroMatch, MacroMatchKind, links::restore_masked_passthroughs,
+    rebuild_macro_level, shifted_level,
+};
 use crate::{
     Parser, Span,
     attributes::{
@@ -14,8 +21,7 @@ use crate::{
         inline_builder::{
             fold::{fold_html, fold_stem, render_text},
             quotes::{
-                LevelContext, Piece, build_match_string, charref_entity, single_text_value,
-                source_slice, text_slice,
+                LevelContext, Piece, charref_entity, single_text_value, source_slice, text_slice,
             },
             special_chars::Masked,
         },
@@ -44,6 +50,7 @@ pub(super) fn image_macros_level<'src>(
     parser: &Parser,
     ctx: LevelContext,
     masked: Masked<'_>,
+    level: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     // Cheap pre-filter, taken *before* the match string is materialized: a
     // single, unsplit `Text` node's match string is its own value, so the
@@ -53,32 +60,37 @@ pub(super) fn image_macros_level<'src>(
         return nodes;
     }
 
-    let (s, pieces) = build_match_string(&nodes, masked);
+    // The level's shared shifted match string (see `shifted_level`).
+    let entry = shifted_level(level, &nodes, ctx, masked);
 
     // Cheap pre-filter mirroring the string step's `found_macroish`: an image
     // or icon macro needs its name prefix and an opening bracket.
-    if !image_macro_prefilter(&s) {
+    if !image_macro_prefilter(&entry.0) {
         return nodes;
     }
 
-    // Matched over the level wrapped in the boundary character its enclosing
-    // construct presents, with the level's own pieces moved into that string's
-    // coordinates — see `apply_macro_families`'s own doc comment.
-    let (s, pieces) = ctx.shift(s, pieces);
-
-    // …and with each masked passthrough's or STEM expression's placeholder
+    // …with each masked passthrough's or STEM expression's placeholder
     // widened into the three-byte token [`INLINE_IMAGE_MACRO`]'s target class
     // needs to match it — see `widen_masked_pieces` for why this family alone
-    // needs that.
-    let (s, pieces) = widen_masked_pieces(s, pieces, &nodes);
+    // needs that. The widening rewrites the pair, so the (rare) level that
+    // needs it works on its own copy and the shared slot stays as built.
+    let widened;
+    let (s, pieces) = if has_restorable_piece(&entry.1, &nodes) {
+        widened = widen_masked_pieces(entry.0.clone(), entry.1.clone(), &nodes);
+        (widened.0.as_str(), widened.1.as_slice())
+    } else {
+        (entry.0.as_str(), entry.1.as_slice())
+    };
 
-    let matches = find_image_matches(&s, &pieces, root, parser, &nodes);
+    let matches = find_image_matches(s, pieces, root, parser, &nodes);
 
     if matches.is_empty() {
         return nodes;
     }
 
-    rebuild_macro_level(&nodes, &pieces, &s, matches)
+    let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
+    *level = None;
+    rebuilt
 }
 
 /// Finds every image/icon macro at this level, skipping any whose match crosses
@@ -713,18 +725,17 @@ fn build_image_node<'src>(
 /// `\u{96}`, a digit, `\u{97}` can begin or end an image match, whose ends
 /// are the literal macro name and `]`). The numbering is per level and
 /// exists only to keep tokens distinct across this level's own placeholders.
+fn has_restorable_piece(pieces: &[Piece], nodes: &[InlineNode<'_>]) -> bool {
+    pieces
+        .iter()
+        .any(|piece| nodes.get(piece.node_index).is_some_and(node_is_restorable))
+}
+
 fn widen_masked_pieces(
     s: String,
     pieces: Vec<Piece>,
     nodes: &[InlineNode<'_>],
 ) -> (String, Vec<Piece>) {
-    if !pieces
-        .iter()
-        .any(|piece| nodes.get(piece.node_index).is_some_and(node_is_restorable))
-    {
-        return (s, pieces);
-    }
-
     let mut out = String::with_capacity(s.len() + 8);
     let mut out_pieces = Vec::with_capacity(pieces.len());
 

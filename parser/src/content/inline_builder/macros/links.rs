@@ -3,12 +3,16 @@
 // Referenced by the doc comments below, whose own rebuild is the one this
 // family reaches through `restored_value_children`; the code no longer calls
 // it directly.
+// Referenced by the doc comments below; the code itself reaches the level's
+// match string through [`shifted_level`]'s shared slot now.
+#[allow(unused_imports)]
+use super::super::quotes::build_match_string;
 #[allow(unused_imports)]
 use super::computed_value_children;
 use super::{
-    ComputedSpecials, MacroMatch, MacroMatchKind,
+    ComputedSpecials, LevelStrings, MacroMatch, MacroMatchKind,
     image::{Tokened, range_is_restorable, range_is_verbatim, restorable_body, tokened_bracket},
-    macro_text_children, rebuild_macro_level, restored_value_children,
+    macro_text_children, rebuild_macro_level, restored_value_children, shifted_level,
 };
 use crate::{
     Parser, Span,
@@ -20,10 +24,7 @@ use crate::{
         INLINE_EMAIL, INLINE_LINK, INLINE_LINK_MACRO, NormalizedCaps, URI_SNIFF,
         encode_uri_component, extract_attributes_from_text,
         inline_builder::{
-            quotes::{
-                LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, single_text_value,
-                source_slice,
-            },
+            quotes::{LevelContext, Piece, SPAN_PLACEHOLDER, single_text_value, source_slice},
             special_chars::Masked,
         },
     },
@@ -200,6 +201,7 @@ pub(super) fn inline_link_level<'src>(
     ctx: LevelContext,
     masked: Masked<'_>,
     specials: ComputedSpecials,
+    level: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     // Cheap pre-filter, taken *before* the match string is materialized: a
     // single, unsplit `Text` node's match string is its own value, so the
@@ -209,7 +211,11 @@ pub(super) fn inline_link_level<'src>(
         return nodes;
     }
 
-    let (s, pieces) = build_match_string(&nodes, masked);
+    // The level's shared shifted match string (see `shifted_level`).
+    let (s, pieces) = {
+        let entry = shifted_level(level, &nodes, ctx, masked);
+        (entry.0.as_str(), entry.1.as_slice())
+    };
 
     // Cheap pre-filter mirroring the string step's guard: an auto-link needs a
     // `://` scheme separator somewhere in the level.
@@ -217,18 +223,15 @@ pub(super) fn inline_link_level<'src>(
         return nodes;
     }
 
-    // Matched over the level wrapped in the boundary character its enclosing
-    // construct presents, with the level's own pieces moved into that string's
-    // coordinates — see `apply_macro_families`'s own doc comment.
-    let (s, pieces) = ctx.shift(s, pieces);
-
-    let matches = find_inline_link_matches(&nodes, &s, &pieces, root, parser, specials);
+    let matches = find_inline_link_matches(&nodes, s, pieces, root, parser, specials);
 
     if matches.is_empty() {
         return nodes;
     }
 
-    rebuild_macro_level(&nodes, &pieces, &s, matches)
+    let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
+    *level = None;
+    rebuilt
 }
 
 /// Finds every recognized auto-link / formal-URL / angle-bracketed link at this
@@ -986,6 +989,7 @@ pub(super) fn link_macro_level<'src>(
     ctx: LevelContext,
     masked: Masked<'_>,
     specials: ComputedSpecials,
+    level: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     // Cheap pre-filter, taken *before* the match string is materialized: a
     // single, unsplit `Text` node's match string is its own value, so the
@@ -995,26 +999,27 @@ pub(super) fn link_macro_level<'src>(
         return nodes;
     }
 
-    let (s, pieces) = build_match_string(&nodes, masked);
+    // The level's shared shifted match string (see `shifted_level`).
+    let (s, pieces) = {
+        let entry = shifted_level(level, &nodes, ctx, masked);
+        (entry.0.as_str(), entry.1.as_slice())
+    };
 
     // Cheap pre-filter mirroring the string step's guard: a link/mailto macro
     // needs its prefix and an opening bracket.
-    if !link_macro_prefilter(&s) {
+    if !link_macro_prefilter(s) {
         return nodes;
     }
 
-    // Matched over the level wrapped in the boundary character its enclosing
-    // construct presents, with the level's own pieces moved into that string's
-    // coordinates — see `apply_macro_families`'s own doc comment.
-    let (s, pieces) = ctx.shift(s, pieces);
-
-    let matches = find_link_macro_matches(&nodes, &s, &pieces, root, parser, specials);
+    let matches = find_link_macro_matches(&nodes, s, pieces, root, parser, specials);
 
     if matches.is_empty() {
         return nodes;
     }
 
-    rebuild_macro_level(&nodes, &pieces, &s, matches)
+    let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
+    *level = None;
+    rebuilt
 }
 
 /// Finds every recognized `link:`/`mailto:` macro at this level, skipping any
@@ -1884,6 +1889,7 @@ pub(super) fn email_level<'src>(
     root: Span<'src>,
     ctx: LevelContext,
     masked: Masked<'_>,
+    level: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     // Cheap pre-filter, taken *before* the match string is materialized: a
     // single, unsplit `Text` node's match string is its own value, so the
@@ -1893,7 +1899,11 @@ pub(super) fn email_level<'src>(
         return nodes;
     }
 
-    let (s, pieces) = build_match_string(&nodes, masked);
+    // The level's shared shifted match string (see `shifted_level`).
+    let (s, pieces) = {
+        let entry = shifted_level(level, &nodes, ctx, masked);
+        (entry.0.as_str(), entry.1.as_slice())
+    };
 
     // Cheap pre-filter mirroring the string step's own `text.contains('@')`
     // guard.
@@ -1901,18 +1911,15 @@ pub(super) fn email_level<'src>(
         return nodes;
     }
 
-    // Matched over the level wrapped in the boundary character its enclosing
-    // construct presents, with the level's own pieces moved into that string's
-    // coordinates — see `apply_macro_families`'s own doc comment.
-    let (s, pieces) = ctx.shift(s, pieces);
-
-    let matches = find_email_matches(&nodes, &s, &pieces, root);
+    let matches = find_email_matches(&nodes, s, pieces, root);
 
     if matches.is_empty() {
         return nodes;
     }
 
-    rebuild_macro_level(&nodes, &pieces, &s, matches)
+    let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
+    *level = None;
+    rebuilt
 }
 
 /// Finds every recognized bare e-mail address at this level, honoring the

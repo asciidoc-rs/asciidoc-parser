@@ -1,15 +1,15 @@
 //! UI macro recognition (`kbd:[…]`, `btn:[…]`, `menu:…[…]`).
 
-use super::{MacroMatch, MacroMatchKind, image::range_has_no_opaque_piece, rebuild_macro_level};
+use super::{
+    LevelStrings, MacroMatch, MacroMatchKind, image::range_has_no_opaque_piece,
+    rebuild_macro_level, shifted_level,
+};
 use crate::{
     Span,
     content::{
         INLINE_KBD_BTN_MACRO, INLINE_MENU_MACRO,
         inline_builder::{
-            quotes::{
-                LevelContext, Piece, build_match_string, single_text_value, source_slice,
-                text_slice,
-            },
+            quotes::{LevelContext, Piece, single_text_value, source_slice, text_slice},
             special_chars::Masked,
         },
         normalize_index_text, split_kbd_keys,
@@ -44,6 +44,7 @@ pub(super) fn kbd_btn_macros_level<'src>(
     root: Span<'src>,
     ctx: LevelContext,
     masked: Masked<'_>,
+    level: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     // Cheap pre-filter, taken *before* the match string is materialized: a
     // single, unsplit `Text` node's match string is its own value, so the
@@ -53,24 +54,25 @@ pub(super) fn kbd_btn_macros_level<'src>(
         return nodes;
     }
 
-    let (s, pieces) = build_match_string(&nodes, masked);
+    // The level's shared shifted match string (see `shifted_level`).
+    let (s, pieces) = {
+        let entry = shifted_level(level, &nodes, ctx, masked);
+        (entry.0.as_str(), entry.1.as_slice())
+    };
 
-    if !kbd_btn_prefilter(&s) {
+    if !kbd_btn_prefilter(s) {
         return nodes;
     }
 
-    // Matched over the level wrapped in the boundary character its enclosing
-    // construct presents, with the level's own pieces moved into that string's
-    // coordinates — see `apply_macro_families`'s own doc comment.
-    let (s, pieces) = ctx.shift(s, pieces);
-
-    let matches = find_kbd_btn_matches(&nodes, &s, &pieces, root);
+    let matches = find_kbd_btn_matches(&nodes, s, pieces, root);
 
     if matches.is_empty() {
         return nodes;
     }
 
-    rebuild_macro_level(&nodes, &pieces, &s, matches)
+    let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
+    *level = None;
+    rebuilt
 }
 
 /// Finds every keyboard/button macro at this level, skipping any whose match
@@ -226,6 +228,7 @@ pub(super) fn menu_macros_level<'src>(
     root: Span<'src>,
     ctx: LevelContext,
     masked: Masked<'_>,
+    level: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     // Cheap pre-filter, taken *before* the match string is materialized: see
     // `kbd_btn_macros_level`'s own copy of this comment.
@@ -233,24 +236,25 @@ pub(super) fn menu_macros_level<'src>(
         return nodes;
     }
 
-    let (s, pieces) = build_match_string(&nodes, masked);
+    // The level's shared shifted match string (see `shifted_level`).
+    let (s, pieces) = {
+        let entry = shifted_level(level, &nodes, ctx, masked);
+        (entry.0.as_str(), entry.1.as_slice())
+    };
 
-    if !menu_prefilter(&s) {
+    if !menu_prefilter(s) {
         return nodes;
     }
 
-    // Matched over the level wrapped in the boundary character its enclosing
-    // construct presents, with the level's own pieces moved into that string's
-    // coordinates — see `apply_macro_families`'s own doc comment.
-    let (s, pieces) = ctx.shift(s, pieces);
-
-    let matches = find_menu_matches(&nodes, &s, &pieces, root);
+    let matches = find_menu_matches(&nodes, s, pieces, root);
 
     if matches.is_empty() {
         return nodes;
     }
 
-    rebuild_macro_level(&nodes, &pieces, &s, matches)
+    let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
+    *level = None;
+    rebuilt
 }
 
 /// Finds every menu macro at this level, skipping any whose match crosses an
