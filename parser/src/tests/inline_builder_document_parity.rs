@@ -4,9 +4,10 @@
 //! ([`inline_builder`](crate::content::inline_builder)'s test module) drive
 //! [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup)
 //! on a bare [`Content`](crate::content::Content), which has no document
-//! catalog and so **cannot resolve cross-references**. (The whole-document
-//! sweep that used to sit beside this one drove the *Strategy-A recorder* and
-//! retired with it.)
+//! catalog and so **cannot resolve cross-references**. (A whole-document
+//! sweep used to sit beside this one, driving a since-retired recorder that
+//! reconstructed trees from the string pipeline's rendered output; it
+//! retired along with that recorder.)
 //!
 //! That leaves one thing unverified, and it is the thing the
 //! cutover rests on: **the tree the single-pass builder produces, folded
