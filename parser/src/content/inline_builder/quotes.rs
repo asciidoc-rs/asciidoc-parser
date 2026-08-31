@@ -652,28 +652,29 @@ fn apply_quote_sub<'src>(
     // by the same sub (a sub runs once per level). A level
     // with no such span — the common leaf-only case, visited once per sub —
     // has nothing to descend into, so it skips the context derivation and the
-    // rebuild of its node vector entirely.
-    let nodes = if nodes
+    // walk over its nodes entirely.
+    //
+    // The descent mutates each span's children in place rather than moving
+    // every node through a rebuild of the level's vector: only the one field
+    // the recursion refines changes hands, and the level's other nodes are
+    // never touched. This loop runs once per sub, so what it avoids is
+    // moving every node of every span-bearing level once per sub in
+    // `quote_subs`'s list.
+    let mut nodes = nodes;
+
+    if nodes
         .iter()
         .any(|node| matches!(node, InlineNode::Styled(_)))
     {
         let contexts = LevelContext::child_contexts(&nodes, ctx, Masked::UNKNOWN);
 
-        nodes
-            .into_iter()
-            .zip(contexts)
-            .map(|(node, inner)| match node {
-                InlineNode::Styled(mut styled) => {
-                    styled.children = apply_quote_sub(sub, styled.children, root, parser, inner);
-                    InlineNode::Styled(styled)
-                }
-
-                other => other,
-            })
-            .collect()
-    } else {
-        nodes
-    };
+        for (node, inner) in nodes.iter_mut().zip(contexts) {
+            if let InlineNode::Styled(styled) = node {
+                let children = std::mem::take(&mut styled.children);
+                styled.children = apply_quote_sub(sub, children, root, parser, inner);
+            }
+        }
+    }
 
     match_level(sub, nodes, root, parser, ctx)
 }
