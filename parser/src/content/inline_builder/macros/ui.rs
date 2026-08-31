@@ -1,15 +1,15 @@
 //! UI macro recognition (`kbd:[…]`, `btn:[…]`, `menu:…[…]`).
 
 use super::{
-    LevelStrings, MacroMatch, MacroMatchKind, image::range_has_no_opaque_piece,
-    rebuild_macro_level, shifted_level,
+    KBD_BTN_DIGRAMS, LevelSniff, MENU_DIGRAMS, MacroMatch, MacroMatchKind,
+    image::range_has_no_opaque_piece, rebuild_macro_level,
 };
 use crate::{
     Span,
     content::{
         INLINE_KBD_BTN_MACRO, INLINE_MENU_MACRO,
         inline_builder::{
-            quotes::{LevelContext, Piece, single_text_value, source_slice, text_slice},
+            quotes::{LevelContext, Piece, source_slice, text_slice},
             special_chars::Masked,
         },
         normalize_index_text, split_kbd_keys,
@@ -44,23 +44,11 @@ pub(super) fn kbd_btn_macros_level<'src>(
     root: Span<'src>,
     ctx: LevelContext,
     masked: Masked<'_>,
-    level: &mut Option<LevelStrings>,
+    level: &mut LevelSniff,
 ) -> Vec<InlineNode<'src>> {
-    // Cheap pre-filter, taken *before* the match string is materialized: a
-    // single, unsplit `Text` node's match string is its own value, so the
-    // check below can run against that directly. A level already split by
-    // an earlier step falls back to the build, exactly as before.
-    if single_text_value(&nodes).is_some_and(|value| !kbd_btn_prefilter(value)) {
-        return nodes;
-    }
+    let (s, pieces, digrams) = level.shifted(&nodes, ctx, masked);
 
-    // The level's shared shifted match string (see `shifted_level`).
-    let (s, pieces) = {
-        let entry = shifted_level(level, &nodes, ctx, masked);
-        (entry.0.as_str(), entry.1.as_slice())
-    };
-
-    if !kbd_btn_prefilter(s) {
+    if digrams & KBD_BTN_DIGRAMS == 0 || !kbd_btn_prefilter(s) {
         return nodes;
     }
 
@@ -71,7 +59,7 @@ pub(super) fn kbd_btn_macros_level<'src>(
     }
 
     let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
-    *level = None;
+    level.invalidate();
     rebuilt
 }
 
@@ -228,21 +216,11 @@ pub(super) fn menu_macros_level<'src>(
     root: Span<'src>,
     ctx: LevelContext,
     masked: Masked<'_>,
-    level: &mut Option<LevelStrings>,
+    level: &mut LevelSniff,
 ) -> Vec<InlineNode<'src>> {
-    // Cheap pre-filter, taken *before* the match string is materialized: see
-    // `kbd_btn_macros_level`'s own copy of this comment.
-    if single_text_value(&nodes).is_some_and(|value| !menu_prefilter(value)) {
-        return nodes;
-    }
+    let (s, pieces, digrams) = level.shifted(&nodes, ctx, masked);
 
-    // The level's shared shifted match string (see `shifted_level`).
-    let (s, pieces) = {
-        let entry = shifted_level(level, &nodes, ctx, masked);
-        (entry.0.as_str(), entry.1.as_slice())
-    };
-
-    if !menu_prefilter(s) {
+    if digrams & MENU_DIGRAMS == 0 || !menu_prefilter(s) {
         return nodes;
     }
 
@@ -253,7 +231,7 @@ pub(super) fn menu_macros_level<'src>(
     }
 
     let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
-    *level = None;
+    level.invalidate();
     rebuilt
 }
 

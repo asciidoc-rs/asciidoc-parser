@@ -342,7 +342,7 @@ fn apply_macro_families<'src>(
     // One shifted match string for the whole level, shared across every
     // family's turn below (see [`shifted_level`]): a family fills it lazily,
     // and a family that rebuilds the level clears it.
-    let mut level: Option<LevelStrings> = None;
+    let mut level = LevelSniff::default();
 
     // The UI macros run before image/icon and only under `experimental`,
     // mirroring the string step's order and gate.
@@ -389,7 +389,7 @@ fn apply_macro_families<'src>(
             {
                 // The term's children are their own level, with their own
                 // slot.
-                let mut term_level: Option<LevelStrings> = None;
+                let mut term_level = LevelSniff::default();
 
                 index_term.children = apply_reference_families(
                     std::mem::take(&mut index_term.children),
@@ -407,7 +407,7 @@ fn apply_macro_families<'src>(
         // presents to this level's match string are its body's own outer
         // characters — so refining its children above can change what this
         // level's string holds. Rebuild it on the next family's turn.
-        level = None;
+        level.invalidate();
     }
 
     apply_reference_families(nodes, root, parser, ctx, masked, specials, &mut level)
@@ -438,7 +438,7 @@ fn apply_reference_families<'src>(
     ctx: LevelContext,
     masked: Masked<'_>,
     specials: ComputedSpecials,
-    level: &mut Option<LevelStrings>,
+    level: &mut LevelSniff,
 ) -> Vec<InlineNode<'src>> {
     // Auto-links and formal-URL links (`INLINE_LINK`) run after the index-term
     // pass and before the `link:`/`mailto:` macro.
@@ -470,22 +470,123 @@ fn apply_reference_families<'src>(
 /// family's turn rebuilds it lazily.
 pub(super) type LevelStrings = (String, Vec<Piece>);
 
-/// Fills `level` if it is empty — the one shared build — and hands back the
-/// entry. The string a family's cheap needle prefilter then reads is the
-/// *shifted* one (it carries the enclosing construct's boundary characters),
-/// which can only make the prefilter more permissive than the unshifted read
-/// the families took before sharing: the real matcher, which always ran over
-/// the shifted string, still decides.
-pub(super) fn shifted_level<'a>(
-    level: &'a mut Option<LevelStrings>,
-    nodes: &[InlineNode<'_>],
-    ctx: LevelContext,
-    masked: Masked<'_>,
-) -> &'a LevelStrings {
-    level.get_or_insert_with(|| {
-        let (s, pieces) = build_match_string(nodes, masked);
-        ctx.shift(s, pieces)
-    })
+/// The digram bit for one adjacent byte pair — the single source both the
+/// family classes below and [`digram_mask`]'s per-pair classification are
+/// built from. Each family's class holds the **first two bytes** of every
+/// needle its exact prefilter looks for, so a needle's presence always
+/// implies its family's bit: the digram gate can only be more permissive
+/// than the `contains` sweep it fronts, and the exact sweep still confirms.
+/// `every_family_needle_carries_its_digram` (in the tests below) pins each
+/// spelled needle to its class.
+const fn digram_bit(a: u8, b: u8) -> u32 {
+    match (a, b) {
+        (b'[', b'[') => 1 << 0,
+        (b'r', b':') => 1 << 1,
+        (b'e', b':') => 1 << 2,
+        (b'n', b':') => 1 << 3,
+        (b'(', b'(') => 1 << 4,
+        (b':', b'[') => 1 << 5,
+        (b'k', b':') => 1 << 6,
+        (b'o', b':') => 1 << 7,
+        (b':', b'/') => 1 << 8,
+        (b'f', b':') => 1 << 9,
+        (b'&', b'l') => 1 << 10,
+        (b'd', b':') => 1 << 11,
+        (b'u', b':') => 1 << 12,
+
+        _ => 0,
+    }
+}
+
+/// Whether `b` closes any digram in [`digram_bit`]'s table — the scan's
+/// per-byte fast path. Every digram was chosen to end in one of these five
+/// characters, all uncommon in prose, so the two-byte classification only
+/// runs at the few positions that could close one.
+const fn closes_digram(b: u8) -> bool {
+    matches!(b, b':' | b'[' | b'(' | b'/' | b'l')
+}
+
+/// The digram classes present anywhere in `s`: one fused pass, standing in
+/// for every family's own needle sweep over the same bytes.
+fn digram_mask(s: &str) -> u32 {
+    let bytes = s.as_bytes();
+    let mut mask = 0u32;
+
+    for (a, b) in bytes.iter().zip(bytes.iter().skip(1)) {
+        if closes_digram(*b) {
+            mask |= digram_bit(*a, *b);
+        }
+    }
+
+    mask
+}
+
+/// Anchors: `[[`, and `anchor:`'s `r:` tail.
+pub(super) const ANCHOR_DIGRAMS: u32 = digram_bit(b'[', b'[') | digram_bit(b'r', b':');
+
+/// Image/icon macros: `image:`'s `e:` and `icon:`'s `n:` tails.
+pub(super) const IMAGE_DIGRAMS: u32 = digram_bit(b'e', b':') | digram_bit(b'n', b':');
+
+/// Index terms: the `((` shorthand and the `indexterm:[`/`indexterm2:[`
+/// macro forms' `:[`.
+pub(super) const INDEXTERM_DIGRAMS: u32 = digram_bit(b'(', b'(') | digram_bit(b':', b'[');
+
+/// The `link:`/`mailto:` macro: `link:`'s `k:` and `mailto:`'s `o:` tails.
+pub(super) const LINK_MACRO_DIGRAMS: u32 = digram_bit(b'k', b':') | digram_bit(b'o', b':');
+
+/// Auto-links: the `://` scheme separator.
+pub(super) const INLINE_LINK_DIGRAMS: u32 = digram_bit(b':', b'/');
+
+/// Cross-references: `xref:`'s `f:` tail and the shorthand's escaped
+/// `&lt;&lt;` opener.
+pub(super) const XREF_DIGRAMS: u32 = digram_bit(b'f', b':') | digram_bit(b'&', b'l');
+
+/// Keyboard/button macros: `kbd:`'s `d:` and `btn:`'s `n:` tails.
+pub(super) const KBD_BTN_DIGRAMS: u32 = digram_bit(b'd', b':') | digram_bit(b'n', b':');
+
+/// The menu macro: `menu:`'s `u:` tail.
+pub(super) const MENU_DIGRAMS: u32 = digram_bit(b'u', b':');
+
+/// The families' shared per-level sniff state: the one shifted match-string
+/// build ([`LevelStrings`]) with its [`digram_mask`], computed at most once
+/// per level, however many families ask.
+///
+/// The string a family reads is the *shifted* one (it carries the enclosing
+/// construct's boundary characters), which can only make its prefilter more
+/// permissive than the unshifted read the families took before sharing: the
+/// real matcher, which always ran over the shifted string, still decides.
+#[derive(Default)]
+pub(super) struct LevelSniff {
+    /// The shared shifted build and its digram mask.
+    strings: Option<(LevelStrings, u32)>,
+}
+
+impl LevelSniff {
+    /// Fills the shared build if it is empty and hands back the entry with
+    /// its digram mask; a family tests its class against the mask before
+    /// paying for its exact needle sweep.
+    pub(super) fn shifted(
+        &mut self,
+        nodes: &[InlineNode<'_>],
+        ctx: LevelContext,
+        masked: Masked<'_>,
+    ) -> (&str, &[Piece], u32) {
+        let ((s, pieces), digrams) = self.strings.get_or_insert_with(|| {
+            let (s, pieces) = build_match_string(nodes, masked);
+            let shifted = ctx.shift(s, pieces);
+            let digrams = digram_mask(&shifted.0);
+            (shifted, digrams)
+        });
+
+        (s.as_str(), pieces.as_slice(), *digrams)
+    }
+
+    /// Clears everything the sniff holds; called by a family that rebuilt
+    /// the level (and after the visible-index-term walk, whose child
+    /// refinement can change a transparent term's boundary characters).
+    pub(super) fn invalidate(&mut self) {
+        self.strings = None;
+    }
 }
 
 /// The single entry point for
@@ -1758,5 +1859,37 @@ mod tests {
                 WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn every_family_needle_carries_its_digram() {
+        // The digram gate fronts each family's exact needle sweep, so every
+        // needle a family's prefilter looks for must carry at least one byte
+        // pair of that family's class — otherwise the gate would silently
+        // disable the construct. Each needle is spelled here as its family's
+        // prefilter spells it.
+        use super::{
+            ANCHOR_DIGRAMS, IMAGE_DIGRAMS, INDEXTERM_DIGRAMS, INLINE_LINK_DIGRAMS, KBD_BTN_DIGRAMS,
+            LINK_MACRO_DIGRAMS, MENU_DIGRAMS, XREF_DIGRAMS, digram_mask,
+        };
+
+        for (family, class, needles) in [
+            ("anchors", ANCHOR_DIGRAMS, &["[[", "anchor:"][..]),
+            ("image", IMAGE_DIGRAMS, &["image:", "icon:"][..]),
+            ("indexterm", INDEXTERM_DIGRAMS, &["((", ":["][..]),
+            ("link macro", LINK_MACRO_DIGRAMS, &["link:", "mailto:"][..]),
+            ("inline link", INLINE_LINK_DIGRAMS, &["://"][..]),
+            ("xref", XREF_DIGRAMS, &["xref:", "&lt;&lt;"][..]),
+            ("kbd/btn", KBD_BTN_DIGRAMS, &["kbd:", "btn:"][..]),
+            ("menu", MENU_DIGRAMS, &["menu:"][..]),
+        ] {
+            for needle in needles {
+                assert_ne!(
+                    digram_mask(needle) & class,
+                    0,
+                    "{family}: needle {needle:?} carries no byte pair of its class"
+                );
+            }
+        }
     }
 }

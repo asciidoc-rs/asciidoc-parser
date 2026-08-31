@@ -10,9 +10,10 @@ use super::super::quotes::build_match_string;
 #[allow(unused_imports)]
 use super::computed_value_children;
 use super::{
-    ComputedSpecials, LevelStrings, MacroMatch, MacroMatchKind,
+    ComputedSpecials, INLINE_LINK_DIGRAMS, LINK_MACRO_DIGRAMS, LevelSniff, MacroMatch,
+    MacroMatchKind,
     image::{Tokened, range_is_restorable, range_is_verbatim, restorable_body, tokened_bracket},
-    macro_text_children, rebuild_macro_level, restored_value_children, shifted_level,
+    macro_text_children, rebuild_macro_level, restored_value_children,
 };
 use crate::{
     Parser, Span,
@@ -201,25 +202,14 @@ pub(super) fn inline_link_level<'src>(
     ctx: LevelContext,
     masked: Masked<'_>,
     specials: ComputedSpecials,
-    level: &mut Option<LevelStrings>,
+    level: &mut LevelSniff,
 ) -> Vec<InlineNode<'src>> {
-    // Cheap pre-filter, taken *before* the match string is materialized: a
-    // single, unsplit `Text` node's match string is its own value, so the
-    // check below can run against that directly. A level already split by
-    // an earlier step falls back to the build, exactly as before.
-    if single_text_value(&nodes).is_some_and(|value| !value.contains("://")) {
-        return nodes;
-    }
-
-    // The level's shared shifted match string (see `shifted_level`).
-    let (s, pieces) = {
-        let entry = shifted_level(level, &nodes, ctx, masked);
-        (entry.0.as_str(), entry.1.as_slice())
-    };
+    let (s, pieces, digrams) = level.shifted(&nodes, ctx, masked);
 
     // Cheap pre-filter mirroring the string step's guard: an auto-link needs a
-    // `://` scheme separator somewhere in the level.
-    if !s.contains("://") {
+    // `://` scheme separator somewhere in the level. The digram gate fronts
+    // the exact needle sweep.
+    if digrams & INLINE_LINK_DIGRAMS == 0 || !s.contains("://") {
         return nodes;
     }
 
@@ -230,7 +220,7 @@ pub(super) fn inline_link_level<'src>(
     }
 
     let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
-    *level = None;
+    level.invalidate();
     rebuilt
 }
 
@@ -989,25 +979,13 @@ pub(super) fn link_macro_level<'src>(
     ctx: LevelContext,
     masked: Masked<'_>,
     specials: ComputedSpecials,
-    level: &mut Option<LevelStrings>,
+    level: &mut LevelSniff,
 ) -> Vec<InlineNode<'src>> {
-    // Cheap pre-filter, taken *before* the match string is materialized: a
-    // single, unsplit `Text` node's match string is its own value, so the
-    // check below can run against that directly. A level already split by
-    // an earlier step falls back to the build, exactly as before.
-    if single_text_value(&nodes).is_some_and(|value| !link_macro_prefilter(value)) {
-        return nodes;
-    }
-
-    // The level's shared shifted match string (see `shifted_level`).
-    let (s, pieces) = {
-        let entry = shifted_level(level, &nodes, ctx, masked);
-        (entry.0.as_str(), entry.1.as_slice())
-    };
+    let (s, pieces, digrams) = level.shifted(&nodes, ctx, masked);
 
     // Cheap pre-filter mirroring the string step's guard: a link/mailto macro
     // needs its prefix and an opening bracket.
-    if !link_macro_prefilter(s) {
+    if digrams & LINK_MACRO_DIGRAMS == 0 || !link_macro_prefilter(s) {
         return nodes;
     }
 
@@ -1018,7 +996,7 @@ pub(super) fn link_macro_level<'src>(
     }
 
     let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
-    *level = None;
+    level.invalidate();
     rebuilt
 }
 
@@ -1889,21 +1867,17 @@ pub(super) fn email_level<'src>(
     root: Span<'src>,
     ctx: LevelContext,
     masked: Masked<'_>,
-    level: &mut Option<LevelStrings>,
+    level: &mut LevelSniff,
 ) -> Vec<InlineNode<'src>> {
     // Cheap pre-filter, taken *before* the match string is materialized: a
     // single, unsplit `Text` node's match string is its own value, so the
-    // check below can run against that directly. A level already split by
-    // an earlier step falls back to the build, exactly as before.
+    // check below can run against that directly. (A one-byte needle: memchr
+    // is already the fused scan, so this family takes no digram class.)
     if single_text_value(&nodes).is_some_and(|value| !value.contains('@')) {
         return nodes;
     }
 
-    // The level's shared shifted match string (see `shifted_level`).
-    let (s, pieces) = {
-        let entry = shifted_level(level, &nodes, ctx, masked);
-        (entry.0.as_str(), entry.1.as_slice())
-    };
+    let (s, pieces, _digrams) = level.shifted(&nodes, ctx, masked);
 
     // Cheap pre-filter mirroring the string step's own `text.contains('@')`
     // guard.
@@ -1918,7 +1892,7 @@ pub(super) fn email_level<'src>(
     }
 
     let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
-    *level = None;
+    level.invalidate();
     rebuilt
 }
 
