@@ -39,9 +39,8 @@
 //! beside a real masked piece and alone); one records the one road that
 //! **can** still forge an occurrence — `Attrlist::parse`'s own re-substitution
 //! of an attribute reference over already-tokened text; and two pin the inputs
-//! that rule out replacing the whole scheme with a byte-offset table (see the
-//! design doc's §3.5, "A rejected refinement: carrying a byte-offset table
-//! through `Attrlist::parse`").
+//! that rule out replacing the whole scheme with a byte-offset table carried
+//! through `Attrlist::parse` instead.
 
 use crate::{
     Document, Parser,
@@ -342,9 +341,9 @@ fn an_attrlist_level_expansion_can_still_forge_a_bracket_restore() {
     // passthrough's body, exactly as a typed pair used to.
     //
     // This is the same re-substitution that blocks the byte-offset table (see
-    // `an_attrlist_level_reference_expansion_moves_a_placeholder_in_the_tokened_text`
-    // and the design doc's §3.5); closing it means escaping inside that
-    // parse, which is a mechanism change of its own and a separate increment.
+    // `an_attrlist_level_reference_expansion_moves_a_placeholder_in_the_tokened_text`);
+    // closing it means escaping inside that parse, which is a mechanism
+    // change of its own and a separate increment.
     let doc = Parser::default().parse(concat!(
         ":forge: \u{96}\u{97}\n",
         "\n",
@@ -376,9 +375,10 @@ fn an_attrlist_level_expansion_can_still_forge_a_bracket_restore() {
 
 #[test]
 fn an_attrlist_level_reference_expansion_moves_a_placeholder_in_the_tokened_text() {
-    // Evidence for the design-doc note named above: the byte offsets
-    // `tokened_bracket` could record for the occurrences it writes are not
-    // stable across the parse that consumes them.
+    // Evidence that the byte offsets `tokened_bracket` could record for the
+    // occurrences it writes are not stable across the parse that consumes
+    // them — the blocker that ruled out a byte-offset table as a replacement
+    // for the escape mechanism above.
     //
     // `Attrlist::parse` runs an attribute-reference substitution of its own
     // over the text it is handed, whenever that text holds both a `{` and a

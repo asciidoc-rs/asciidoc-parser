@@ -835,9 +835,8 @@ fn is_shorthand_delimiter(c: char) -> bool {
 /// it), which covered only the one road a *spliced* value took and left both
 /// a typed pair and the escape's own output visible in the output.
 ///
-/// One road remains, and it is the same one the design doc's §3.5 ("A
-/// rejected refinement: carrying a byte-offset table through
-/// `Attrlist::parse`") names as a blocker for that table:
+/// One road remains, and it is the same one that blocked carrying a
+/// byte-offset table through `Attrlist::parse` in the first place:
 /// [`Attrlist::parse`](crate::attributes::Attrlist::parse) re-substitutes
 /// attribute references over the text handed to it, so a `subs=` list naming
 /// `macros` without `attributes` can expand a reference *after* the tokener
@@ -1216,9 +1215,9 @@ mod tests {
 
     #[test]
     fn quoted_values_own_unescape_shortens_a_value_by_one_byte_ahead_of_a_placeholder() {
-        // Direct evidence for the design doc's §3.5 ("A rejected refinement:
-        // carrying a byte-offset table through `Attrlist::parse`") and its
-        // second blocker, checked against this method's own parsed value
+        // Direct evidence for the second blocker that ruled out carrying a
+        // byte-offset table through `Attrlist::parse`, checked against this
+        // method's own parsed value
         // rather than only a full document's final rendered HTML (as
         // `tests/sentinels.rs`'s
         // `a_quoted_values_own_unescape_moves_a_placeholder_in_the_parsed_value`
