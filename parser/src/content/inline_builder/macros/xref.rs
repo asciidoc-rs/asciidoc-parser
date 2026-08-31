@@ -481,16 +481,20 @@ fn attrlist_text_carries_its_opaque_pieces(
 /// half sitting beside the *other* half completed by a real placeholder
 /// nearby would be just as ambiguous as a whole stray pair.
 ///
-/// Those bytes make the whole tokening ambiguous, and the ambiguity bites
-/// precisely where a value is read as a *string*. An occurrence is found by
-/// searching the parsed value for its bytes, and the search cannot tell an
-/// author's own copy from the one this pass emitted: it would splice a node's
-/// source into the author's text and leave the real occurrence standing (or,
-/// past it, misattribute every occurrence after it).
+/// Those bytes used to make the whole tokening ambiguous: an occurrence was
+/// found by searching the parsed value for its bytes, and the search could
+/// not tell an author's own copy from the one this pass emitted. They no
+/// longer do — [`tokened_text`] escapes every byte it copies
+/// ([`escape_masked_piece_bytes`](crate::attributes::element_attribute::escape_masked_piece_bytes)),
+/// so an author's copy is not those bytes by the time the parse sees it —
+/// which leaves this gate **conservative** rather than load-bearing. It is
+/// kept because the recorded golden this family's corpus compares against
+/// reads such a text differently — the recording's own passthrough masking
+/// used these same two codepoints, so a text carrying them reached its
+/// `xref` pass already confused — and lifting the gate would have the tree
+/// claim a shape whose fold diverges from that recording.
 ///
-/// So a text carrying either defers, which is what the per-slot check this
-/// replaced did for the same bytes. It is a deferral, not a rewrite: the tree
-/// claims no construct.
+/// It is a deferral, not a rewrite: the tree claims no construct.
 fn text_carries_author_written_token_bytes(raw_text: &str) -> bool {
     raw_text.contains([MASKED_PIECE_PLACEHOLDER_START, MASKED_PIECE_PLACEHOLDER_END])
 }

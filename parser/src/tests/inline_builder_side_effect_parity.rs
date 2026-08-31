@@ -8,9 +8,9 @@
 //! (and a bibliography entry) registers its id in the reference catalog, an
 //! image whose `link=` names a dangerous scheme records a warning, and a
 //! `footnote:`/`footnoteref:` macro registers its numbered entry — text and
-//! deferred cross-references included — in the footnote catalog. Design
-//! §5.2's step 6 has to replay the first four from the tree, exactly once per
-//! parse and in the string pipeline's own pass order, which is what
+//! deferred cross-references included — in the footnote catalog. Step 6 of
+//! the inline-AST cutover has to replay the first four from the tree, exactly
+//! once per parse and in the string pipeline's own pass order, which is what
 //! [`apply_macro_side_effects`](crate::content::inline_builder::apply_macro_side_effects)
 //! is staged to do.
 //!
@@ -24,15 +24,15 @@
 //! pipeline wrote down), but against the build itself rather than a replay.
 //!
 //! Until now it was pinned only by hand-written fixtures inside its own
-//! module — one per ordering rule it has to honor. The blast-radius
-//! experiment recorded in the design doc (what breaks if `rendered_html()`
-//! becomes the fold today?) says so in as many words: it "neither calls the
-//! staged side effects nor sequences the fold against resolution". The
-//! sibling harness
+//! module — one per ordering rule it has to honor. The blast-radius question
+//! (what breaks if `rendered_html()` becomes the fold today?) is exactly
+//! this: doing so would neither call the staged side effects nor sequence
+//! the fold against resolution. The sibling harness
 //! [`inline_builder_document_parity`](super::inline_builder_document_parity)
 //! closed the second half of that sentence. This one closes the first.
 //!
-//! The discipline is design §5.3's: two independently-configured parsers see
+//! The discipline is the same one this branch's other fold-parity corpora
+//! use: two independently-configured parsers see
 //! the same fixture, one through the real
 //! [`SubstitutionGroup::Normal`](crate::content::SubstitutionGroup) pipeline
 //! and one through [`build`](crate::content::inline_builder::build) plus the
@@ -41,7 +41,7 @@
 //! shared list received them.
 //!
 //! The golden side is **frozen** (`snapshots/side_effects.txt`). Its source is
-//! `SubstitutionGroup::apply_string_pipeline`, which design §5.2's step 6 is
+//! `SubstitutionGroup::apply_string_pipeline`, which step 6 of the cutover is
 //! about to delete; without the freeze every assertion below would be left
 //! comparing the builder against itself the moment it went. The survey that
 //! scoped that deletion named this corpus as the second of the two
@@ -196,8 +196,8 @@ fn snapshot(parser: &Parser) -> SideEffects {
 /// while the pipeline exists. What the freeze buys is the day it does not:
 /// `apply_string_pipeline` is this corpus's only golden source, so deleting it
 /// would otherwise leave every assertion below comparing the builder against
-/// itself. Design §5.2's survey named this corpus as the second of the two
-/// *record-shaped* ones — a flat list of plainly serializable facts, needing a
+/// itself. This corpus is the second of the two *record-shaped* ones — a flat
+/// list of plainly serializable facts, needing a
 /// codec for its own record rather than an `InlineNode` serialization — and
 /// this is that codec.
 ///
@@ -484,8 +484,8 @@ fn corpus_parser() -> Parser {
 /// `configure` is called once per side rather than sharing one `Parser`: both
 /// sides register into the parser they are given, so a shared one would see
 /// every entry twice and every duplicate-id warning fire spuriously. The same
-/// two-independent-parsers discipline design §5.3 establishes for the fold's
-/// own corpora.
+/// two-independent-parsers discipline this branch's other fold-parity
+/// corpora use.
 fn side_effects_with(
     source: &str,
     config: &str,
@@ -775,12 +775,12 @@ fn two_shapes_where_a_tree_built_footnote_entry_still_diverges() {
     //    pipeline restores a passthrough *after* the macros step, over the
     //    whole block string — by which time the footnote's text has already
     //    been cut out of it, so the entry keeps a raw passthrough sentinel that
-    //    no later pass will ever replace. It is one of design §4.2's three
-    //    sentinel systems leaking into public API, and the tree simply has no
-    //    sentinels: the passthrough is a node, so folding the subtree yields
-    //    the restored text. The tree is *right* here and the string pipeline is
-    //    wrong, which is why this is pinned as a divergence rather than fixed
-    //    on the tree's side to match.
+    //    no later pass will ever replace. It is one of three sentinel systems
+    //    leaking into public API, and the tree simply has no sentinels: the
+    //    passthrough is a node, so folding the subtree yields the restored
+    //    text. The tree is *right* here and the string pipeline is wrong, which
+    //    is why this is pinned as a divergence rather than fixed on the tree's
+    //    side to match.
     for (source, string_side, tree_side) in [
         (
             "A footnote:[a +++<b>raw</b>+++ passthrough] here.",

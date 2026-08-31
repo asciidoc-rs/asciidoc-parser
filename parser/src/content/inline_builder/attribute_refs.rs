@@ -1,6 +1,6 @@
 //! The attribute-references substitution step.
 
-use std::{borrow::Cow, collections::HashMap};
+use std::collections::HashMap;
 
 use super::{
     passthrough_step::is_special,
@@ -9,7 +9,6 @@ use super::{
 };
 use crate::{
     Parser, Span,
-    attributes::element_attribute::{MASKED_PIECE_PLACEHOLDER_END, MASKED_PIECE_PLACEHOLDER_START},
     content::{ATTRIBUTE_REFERENCE, AttributeMissing},
     document::InterpretedValue,
     inlines::{InlineNode, RawForm, RawOrigin},
@@ -1171,19 +1170,23 @@ fn rebuild_attribute_level<'src>(
 /// A run is never emitted empty, and an empty `value` (a value-less
 /// `InterpretedValue::Set` attribute) emits no node at all.
 ///
-/// Before either branch runs, `value` has its own copies of the masked-piece
-/// placeholder escaped by [`escape_passthrough_sentinels`] — see that
-/// function's doc comment for why a value reaching this splice point needs
-/// that unconditionally, regardless of which branch it then takes.
+/// A value spliced here needs no escaping of its own. It used to get one —
+/// `escape_passthrough_sentinels`, a one-way guard against a resolved value
+/// that happened to spell the masked-piece placeholder forging a bracket
+/// restore downstream — but that covered only the one road a *spliced* value
+/// took, and left the escape's own bytes in the output. The escape now lives
+/// where the placeholder is written instead: `tokened_bracket`/`tokened_text`
+/// escape every non-tokened byte they copy
+/// ([`escape_masked_piece_bytes`](crate::attributes::element_attribute::escape_masked_piece_bytes)),
+/// so a value's own copy of the pair is escaped there whether it arrived
+/// through this splice or was typed in the clear — and, being two-way, comes
+/// back out as the document wrote it.
 fn split_attribute_value<'src>(
     value: &str,
     location: Span<'src>,
     specials: SplicedSpecials,
     out: &mut Vec<InlineNode<'src>>,
 ) {
-    let value = escape_passthrough_sentinels(value);
-    let value = value.as_ref();
-
     if specials == SplicedSpecials::EscapedLater {
         if !value.is_empty() {
             out.push(InlineNode::Text {
@@ -1225,100 +1228,6 @@ fn split_attribute_value<'src>(
             location,
         });
     }
-}
-
-/// Escapes a document's own copies of the
-/// [`MASKED_PIECE_PLACEHOLDER`](crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER)
-/// pair's two codepoints out of a resolved attribute (or `counter`/`counter2`)
-/// value before [`split_attribute_value`] splices it into the node stream.
-///
-/// Those two C1 codepoints, adjacent, are the opaque placeholder
-/// [`tokened_bracket`](super::macros::image::tokened_bracket) (and its
-/// sibling `tokened_text`) writes for a masked passthrough or STEM expression
-/// inside an `image:`/`icon:` bracket or a link/xref family's own computed
-/// value, and both
-/// [`Attrlist::into_owned_restoring`](crate::attributes::Attrlist::into_owned_restoring)
-/// (via [`restore_into`](crate::attributes::element_attribute)) and the
-/// macros step's own `untranslated_value`/`restored_value_children` recover
-/// which piece an occurrence stands for **by position** once that bracket has
-/// been parsed: none of the three re-derive structure from anything but the
-/// bytes actually in front of them, so they cannot tell a real occurrence
-/// from a document-typed copy of the same two bytes at the same position. A
-/// macro bracket that mixes a genuine masked construct with an attribute
-/// reference whose resolved value happens to spell
-/// [`MASKED_PIECE_PLACEHOLDER`](crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER) — `image:x.png[++real++,alt={forge}]` with
-/// `:forge: \u{96}\u{97}` defined — is exactly that mix: the reference is
-/// spliced here, by this step, *before* the image macro is even recognized,
-/// so by the time the bracket is tokened the forged pair is indistinguishable
-/// from the passthrough's own placeholder, and every occurrence from that
-/// point on shifts onto the wrong body. Each codepoint is escaped on its
-/// own, not as a pair: a forged value contributing only *one* half, beside
-/// the other half from an unrelated source (a second reference, or a
-/// document-typed copy) landing adjacent to it, would complete the same
-/// pair otherwise.
-///
-/// This is the same forgery the old string-substitution implementation's own
-/// attribute-reference splice guarded against with `escape_sentinels` (since
-/// retired) for this pair among the five it
-/// covered; the other three guarded a deferred cross-reference's and a
-/// footnote marker's own in-band templates, which the tree builder replaced
-/// with structured piece lists nothing scans, so only this pair still needs
-/// a counterpart here. The escape is unconditional, for the same reason that
-/// one's was: this step splices at the content level, ahead of
-/// macro recognition, so it cannot know whether its value will end up beside
-/// a masked construct in some later bracket. It is also one-way, like its
-/// predecessor — nothing downstream unescapes it — so a document attribute
-/// whose value happens to hold one of these two rare C1 control codepoints
-/// (or the escape introducer itself) sees it come back escaped rather than
-/// silently enabling a forged restore.
-///
-/// Text with none of the three reserved codepoints — the overwhelming
-/// majority — is borrowed through unchanged.
-///
-/// # Known limits — documented, intentional debt
-///
-/// This guards **one** road to a forged occurrence: a value this step splices
-/// in. A document that types the pair in the clear inside a macro bracket
-/// never reaches this function, and ahead of a real masked piece it forges the
-/// same restore (`tests/sentinels.rs`'s
-/// `a_typed_placeholder_before_a_masked_piece_forges_a_bracket_restore`). The
-/// structural cure — capture each occurrence's provenance where it is written
-/// instead of re-deriving it from bytes, which is what `quotes.rs`'s `Piece`
-/// table does one layer up — was investigated as a byte-offset table carried
-/// through `Attrlist::parse` and **rejected**: that parse re-substitutes
-/// attribute references over the tokened text (length-changing under any
-/// `subs=` list naming `macros` without `attributes`), and a parsed value is
-/// not a slice of the split text in any case, since
-/// [`ElementAttribute::parse`](crate::attributes::ElementAttribute) derives it
-/// through unreported rewrites. Both are pinned by fixtures in
-/// `tests/sentinels.rs`, and the full reasoning — including the alternative
-/// that *would* work, escaping in the bytes `tokened_bracket`/`tokened_text`
-/// copy rather than in this splice — is in the design doc's "The masked-piece
-/// placeholder's offset table cannot be carried through `Attrlist::parse`"
-/// note. Until that lands, this stays.
-fn escape_passthrough_sentinels(value: &str) -> Cow<'_, str> {
-    const ESCAPE: char = '\u{E005}';
-
-    if !value.contains([
-        MASKED_PIECE_PLACEHOLDER_START,
-        MASKED_PIECE_PLACEHOLDER_END,
-        ESCAPE,
-    ]) {
-        return Cow::Borrowed(value);
-    }
-
-    let mut out = String::with_capacity(value.len());
-
-    for c in value.chars() {
-        match c {
-            MASKED_PIECE_PLACEHOLDER_START => out.push_str("\u{E005}s"),
-            MASKED_PIECE_PLACEHOLDER_END => out.push_str("\u{E005}e"),
-            ESCAPE => out.push_str("\u{E005}g"),
-            other => out.push(other),
-        }
-    }
-
-    Cow::Owned(out)
 }
 
 #[cfg(test)]
@@ -1495,17 +1404,18 @@ mod tests {
     }
 
     #[test]
-    fn a_reference_expanding_to_a_passthrough_sentinel_is_escaped() {
+    fn a_reference_expanding_to_a_passthrough_sentinel_is_spliced_verbatim() {
         // A value carrying either codepoint of the masked-piece placeholder
-        // pair, or a literal copy of the escape introducer this step's own
-        // escaping uses, is escaped out rather than spliced in verbatim —
-        // see `escape_passthrough_sentinels`. This test exercises the
-        // function directly (through the one seam that calls it) for all
-        // three codepoints its match arms cover, independent of any macro
-        // bracket: the regression this guards against is pinned end-to-end,
-        // over an actual `image:`/`link:` bracket, by the `sentinels` test
-        // module's own `a_placeholder_from_an_attribute_value_cannot_forge_*`
-        // tests.
+        // pair — or a copy of the escape introducer the tokener's own escape
+        // uses — is spliced in **as written**. This step used to escape all
+        // three out (`escape_passthrough_sentinels`, retired), which was the
+        // one-way guard on the one road a *spliced* value could forge a
+        // bracket restore by. The escape now lives where the placeholder is
+        // written, in `tokened_bracket`/`tokened_text`, so it covers a typed
+        // pair too and — being two-way — leaves nothing of its own in the
+        // output. Pinned end-to-end, over an actual `image:`/`link:` bracket,
+        // by the `sentinels` test module's own
+        // `a_placeholder_from_an_attribute_value_cannot_forge_*` tests.
         let parser = parser_with_attribute("v", "a\u{96}b\u{97}c\u{e005}d");
         let nodes = build(Span::new("{v}"), &parser, None);
 
@@ -1513,7 +1423,7 @@ mod tests {
 
         match &nodes[0] {
             InlineNode::Text { value, .. } => {
-                assert_eq!(value.as_ref(), "a\u{e005}sb\u{e005}ec\u{e005}gd");
+                assert_eq!(value.as_ref(), "a\u{96}b\u{97}c\u{e005}d");
             }
 
             other => panic!("expected Text, got {other:?}"),

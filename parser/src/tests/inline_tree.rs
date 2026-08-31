@@ -7,7 +7,7 @@
 //! This began life as `inline_recorder.rs`, the Strategy-A recorder's own
 //! corpus. The recorder — a `RecordingRenderer` that recovered a tree from the
 //! string pipeline's rendered output — retired with the string pipeline it
-//! wrapped (design §5.2 Phase 4, step 6); its corpus tests, which compared
+//! wrapped at the step 6 cutover; its corpus tests, which compared
 //! its tree against that pipeline's own bytes, could only ever compare the
 //! pipeline against itself once both were gone, so they went with it. What
 //! stayed is everything here: tests whose subject is the single-pass
@@ -205,8 +205,8 @@ fn the_three_non_specialcharacters_bodies_still_consult_the_renderer() {
     //     which is a mixture rather than a form.
     //
     // All three owe `render_with` the same debt every frozen value on this
-    // branch does (design §3.3.1), and when that lands this test is what should
-    // start failing.
+    // branch does, and when that lands this test is what should start
+    // failing.
     for source in ["pass:c[a < b]", "stem:[x < y]", "+a $$b < c$$ d+"] {
         let calls = renderer_calls_while_building(source);
 
@@ -271,11 +271,11 @@ fn a_passthrough_body_is_substituted_once_per_apply() {
     // string pipeline's own substitutions of the body ran on the shared
     // renderer even though their output was discarded with the clone, and
     // those renders ended when the pipeline stopped running at the seam —
-    // exactly the transitional double render the design doc said would end
-    // "for all of them together, when step 6 takes the string pipeline off
-    // the production path". What remains is the body's one authoritative
-    // render at build time (`passthrough_text`), whose `Raw` leaf the fold
-    // then emits verbatim.
+    // exactly the transitional double render that was always going to end
+    // for all of them together, once the string pipeline came off the
+    // production path. What remains is the body's one authoritative render
+    // at build time (`passthrough_text`), whose `Raw` leaf the fold then
+    // emits verbatim.
     //
     // The exact number is not the claim; that the three agree is.
     for source in ["pass:c[a < b]", "pass:c,q[*a < b*]", "stem:[x < y]"] {
@@ -611,7 +611,7 @@ fn inline_tree_for_none_group_content_is_the_untouched_seed() {
     // string pipeline leaving the text unchanged. It is not a *single* `Text`
     // run, though: because no `SpecialCharacters` step ever acted on it, each
     // literal `<`/`>`/`&` is a `Raw` leaf the fold emits verbatim rather than
-    // a `Text` character the fold would escape (design §3.4.1).
+    // a `Text` character the fold would escape.
     let mut parser = Parser::default();
     let doc = parser.parse("[pass]\n<b>raw</b> and *not bold*\n");
 
@@ -668,7 +668,7 @@ fn inline_tree_for_a_listing_block_carries_callout_nodes() {
 
 #[test]
 fn the_xref_mirror_correlates_the_form_that_used_to_defer() {
-    // The counterpart of the deferral divergence (design §5.2's step 6), seen
+    // The counterpart of the deferral divergence at the step 6 cutover, seen
     // from resolution.
     //
     // `xref:sec[a *b, c* d,role=hl]` used to be deferred by the builder,
@@ -981,7 +981,7 @@ fn inline_tree_numbers_footnotes_in_document_order() {
 // catalog), a cross-reference in the inline tree carries the same resolved
 // destination the rendered string reflects — so a consumer that walks
 // `inlines()` sees resolved xrefs, not just the parse-time `resolved: None`
-// state the tree is first built with (design §4.3).
+// state the tree is first built with.
 
 /// Collects every [`Ref`](InlineNode::Ref) node from the simple blocks of
 /// `doc`, recursing into formatting spans and reference children.
@@ -1287,7 +1287,7 @@ fn inline_tree_build_tolerates_a_stateful_renderer() {
 // per-content pass cannot. That pass now mirrors each resolved destination into
 // the title's own inline tree, so a consumer that walks a title's `inlines()`
 // sees the same destinations the rendered title reflects — closing the
-// section-/block-title follow-up of Phase 2 step 2 (design §4.3).
+// section-/block-title follow-up of Phase 2 step 2.
 
 /// Collects every cross-reference/link node from the inline tree of every
 /// section heading in `doc`, recursing into nested sections and into formatting
@@ -1510,7 +1510,7 @@ fn re_resolving_a_title_clears_a_now_unresolved_tree_destination() {
 // cross-reference *inside* a footnote is re-homed out of the block template
 // when the footnote text is extracted, so it lives in that subtree, and the
 // shared mirror now installs its resolved destination there — the same
-// destination the rendered footnote text reflects (design §4.3).
+// destination the rendered footnote text reflects.
 
 /// The first [`Footnote`](InlineNode::Footnote) node found anywhere in the
 /// simple blocks of `doc`, in document order.
