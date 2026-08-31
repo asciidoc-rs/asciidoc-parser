@@ -9562,8 +9562,7 @@ mod passthroughs {
     // The restore pass the next two upstream tests drive — re-expanding
     // hand-planted placeholders over an extracted list — has no analog here:
     // the tree is authoritative, and a passthrough body is folded in place
-    // rather than re-spliced into a placeholder-bearing string (design §5.2,
-    // Phase 4 step 6).
+    // rather than re-spliced into a placeholder-bearing string.
     non_normative!(
         r##"
     test 'restore inline passthroughs without subs' do

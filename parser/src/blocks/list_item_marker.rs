@@ -226,8 +226,8 @@ impl<'src> ListItemMarker<'src> {
         // Running it through `SubstitutionGroup::apply` rather than the steps
         // directly is what gives the term a **tree**: the seed, the
         // authoritative fold, and the replay of every recognition side effect
-        // come with it, so a term no longer registers from the string pipeline
-        // (design §5.2 Phase 4, step 6 — this was the last content that did).
+        // come with it, so a term no longer registers from the string
+        // pipeline (this was the last content that did).
         TERM_SUBSTITUTIONS.apply_to_description_list_term(term, parser, warnings);
     }
 

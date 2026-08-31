@@ -266,8 +266,7 @@ impl<'src> SectionBlock<'src> {
         // than about bytes. Still a single substitution pass, so
         // counters and attribute-expanded footnotes are
         // processed exactly once — which is what the sentinel pair this
-        // replaces existed to buy (design §4.2's first sentinel
-        // system).
+        // replaces used to buy.
         let mut section_title = Content::from(title_span);
         SubstitutionGroup::Title.apply(&mut section_title, parser, metadata.attrlist.as_ref());
 

@@ -862,7 +862,7 @@ impl<'src> Attrlist<'src> {
     /// For every list parsed straight from the source it describes, that is
     /// its [`source`](Self::span) span's own bytes. For one rebuilt by
     /// [`into_owned`](Self::into_owned) from a temporary — whose `source` is a
-    /// coarser *location tag* rather than the text (design §4.4) — it is the
+    /// coarser *location tag* rather than the text — it is the
     /// owned copy that method kept.
     fn source_text(&'src self) -> &'src str {
         match &self.source_text {
@@ -3109,7 +3109,7 @@ mod tests {
             // `into_owned` re-tags a list parsed from a temporary with a
             // *coarser* source span — the inline AST builder's case, where the
             // attrlist text is the escaped or attribute-expanded bytes of a
-            // match string and the span is only a location tag (design §4.4).
+            // match string and the span is only a location tag.
             // This is the one accessor that reads the list's own text rather
             // than a parsed attribute, so it reads the kept copy: recovering
             // the raw span's `'a<b'` here would drop the escaping the string

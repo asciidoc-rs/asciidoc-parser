@@ -90,7 +90,7 @@ struct TitleNode<'src> {
 
     /// The document attributes in force where this title was written, retained
     /// on its content because a fold running later than its parse cannot read
-    /// them from the parser (design §4.2's second sentinel system).
+    /// them from the parser.
     ///
     /// `None` leaves the title on the template path, as it does everywhere
     /// else.

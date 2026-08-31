@@ -12,9 +12,9 @@
 //! over the source, and a carried title's deferred template (the splice that
 //! outlives the parse) is a structured piece list rather than a marked
 //! string — so these tests now pin the simpler invariant that a typed
-//! sentinel is ordinary content. The one in-band form left in production is a
-//! footnote's deferred template (see `FootnoteDeferred::render`); retiring it
-//! is the remaining slice of design §4.2's third sentinel system.
+//! sentinel is ordinary content. The last in-band form, a footnote's
+//! deferred template, has retired too (see `FootnoteDeferred::render`):
+//! it is now a structured piece list rather than escaped sentinel text.
 //!
 //! Two properties are covered:
 //!
@@ -835,9 +835,9 @@ fn a_resolved_destination_holding_a_sentinel_survives_resolution() {
     // path's decode-once pass, which turned `#a\u{e004}b` into `#a\u{e001}`.
     //
     // The second anchor is whole rather than cut short inside its span since
-    // the deferral divergence (design §5.2's step 6) — the sentinel handling
-    // this test is about is unchanged by that, and the expected bytes simply
-    // carry the tree's reading now.
+    // the deferral divergence closed — the sentinel handling this test is
+    // about is unchanged by that, and the expected bytes simply carry the
+    // tree's reading now.
     let (rendered, warnings) = last_paragraph_and_warnings(SENTINEL_ID_SOURCE);
 
     assert_eq!(warnings, 0, "reference did not resolve: {rendered:?}");
