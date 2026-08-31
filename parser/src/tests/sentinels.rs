@@ -328,7 +328,9 @@ fn a_typed_escape_introducer_round_trips_through_a_bracket() {
 
 #[test]
 fn an_attrlist_level_expansion_can_still_forge_a_bracket_restore() {
-    // The one road left, recorded rather than fixed.
+    // The one road left, recorded rather than fixed — and, as the third case
+    // below shows, wider than "forges a restore": it can corrupt a document
+    // attribute's own text with no passthrough involved at all.
     //
     // The tokener escapes the bytes it *copies*, which settles every
     // occurrence in the text it hands to `Attrlist::parse`. But that parse
@@ -336,9 +338,14 @@ fn an_attrlist_level_expansion_can_still_forge_a_bracket_restore() {
     // whenever it holds both a `{` and a `}` — and a `subs=` list naming
     // `macros` without `attributes` reaches the macros step with every
     // reference still unresolved, so the inner substitution is the one that
-    // expands it, *after* the escape ran. A value spelling the placeholder
-    // therefore lands in the tokened text unescaped and takes the real
-    // passthrough's body, exactly as a typed pair used to.
+    // expands it, *after* the escape ran. Whatever the reference's value
+    // spells lands in the tokened text verbatim, unescaped, and
+    // `restore_into`'s walk cannot tell it from something the tokener wrote:
+    // a value spelling the placeholder takes the real passthrough's body,
+    // exactly as a typed pair used to, and — the case Greptile's review of
+    // #1355 caught, https://github.com/asciidoc-rs/asciidoc-parser/pull/1355
+    // — a value spelling the escape sequence gets *decoded*, corrupting text
+    // that never went near a masked piece.
     //
     // This is the same re-substitution that blocks the byte-offset table (see
     // `an_attrlist_level_reference_expansion_moves_a_placeholder_in_the_tokened_text`);
@@ -357,9 +364,11 @@ fn an_attrlist_level_expansion_can_still_forge_a_bracket_restore() {
         "known gap: the attrlist-level expansion captured the passthrough's body"
     );
 
-    // The same parse also splices a bare escape introducer past the tokener,
-    // where `restore_into`'s walk copies it through rather than reading the
-    // byte after it as a tag.
+    // The same parse also splices a bare escape introducer past the tokener.
+    // When the byte after it is not one of the three tags this crate writes,
+    // `escaped_literal` returns `None` and `restore_into`'s walk copies the
+    // introducer through rather than misreading it — safe by construction,
+    // not by luck.
     let doc = Parser::default().parse(concat!(
         ":stray: p\u{e005}zq\n",
         "\n",
@@ -370,6 +379,27 @@ fn an_attrlist_level_expansion_can_still_forge_a_bracket_restore() {
     assert_eq!(
         last_paragraph(&doc),
         "<span class=\"image\"><img src=\"x.png\" alt=\"p\u{e005}zq\" width=\"real\"></span>"
+    );
+
+    // But when the byte after a late-spliced introducer *is* one of the three
+    // tags, there is nothing left to tell it apart from one the tokener
+    // itself wrote: `restore_into`'s walk decodes it, corrupting a document
+    // attribute value that never went near a masked piece. This is a wider
+    // consequence of the same gap above, not a new one (caught in review of
+    // #1355 — https://github.com/asciidoc-rs/asciidoc-parser/pull/1355) —
+    // silent corruption of ordinary text rather than a forged restore, and
+    // closed by the same future fix: escaping inside `Attrlist::parse`.
+    let doc = Parser::default().parse(concat!(
+        ":stray: p\u{e005}sq\n",
+        "\n",
+        "[subs=macros]\n",
+        "image:x.png[alt={stray},++real++]\n",
+    ));
+
+    assert_eq!(
+        last_paragraph(&doc),
+        "<span class=\"image\"><img src=\"x.png\" alt=\"p\u{96}q\" width=\"real\"></span>",
+        "known gap: the document's own escape-shaped bytes were decoded"
     );
 }
 

@@ -840,9 +840,13 @@ fn is_shorthand_delimiter(c: char) -> bool {
 /// [`Attrlist::parse`](crate::attributes::Attrlist::parse) re-substitutes
 /// attribute references over the text handed to it, so a `subs=` list naming
 /// `macros` without `attributes` can expand a reference *after* the tokener
-/// has escaped its copy. See
+/// has escaped its copy. Whatever that reference's value spells reaches
+/// `restore_into`'s walk unescaped and indistinguishable from something the
+/// tokener wrote — a value spelling the placeholder forges a restore, and one
+/// spelling the escape sequence gets decoded, corrupting a document
+/// attribute's own text with no masked piece involved at all. See
 /// `an_attrlist_level_expansion_can_still_forge_a_bracket_restore`
-/// (`tests/sentinels.rs`), which pins it.
+/// (`tests/sentinels.rs`), which pins both.
 pub(crate) const MASKED_PIECE_PLACEHOLDER_START: char = '\u{96}';
 
 /// See [`MASKED_PIECE_PLACEHOLDER`].
