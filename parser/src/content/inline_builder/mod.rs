@@ -400,6 +400,8 @@ use char_replacements::apply_character_replacements;
 pub(crate) use fold::{fold_deferring_xrefs, fold_html, fold_reference_text};
 use footnotes::apply_footnotes;
 pub(crate) use macros::apply_macro_side_effects;
+#[cfg(test)]
+pub(crate) use macros::level_may_have_macros;
 use macros::{ComputedSpecials, apply_macros};
 use passthrough_step::apply_passthroughs;
 use post_replacements::apply_post_replacements;

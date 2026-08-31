@@ -16,7 +16,8 @@ use xref::xref_macros_level;
 
 use super::{
     quotes::{
-        LevelContext, Piece, charref_entity, emit_range, source_slice, special_entity, text_slice,
+        LevelContext, Piece, charref_entity, emit_range, single_text_value, source_slice,
+        special_entity, text_slice,
     },
     special_chars::{Masked, unescaped_value_children},
 };
@@ -178,6 +179,21 @@ pub(super) fn apply_macros<'src>(
     masked: Masked<'_>,
     specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
+    // One shared gate over every family's own sniff, taken while the content
+    // is still one lone `Text` node — a plain paragraph's shape. Each family
+    // sniffs for its own literals, and every one of those needles — `[[`,
+    // `[[[`, `anchor:`, `image:`, `icon:`, `kbd:`/`btn:`/`menu:` with `:[`,
+    // `((`, `indexterm` with `:[`, `://`, `link:`, `mailto:`, `@`, `xref:`,
+    // and the escaped `&lt;&lt;` — spells at least one of these five bytes,
+    // so a value carrying none of them fails every family's sniff before any
+    // is asked ([`level_may_have_macros`];
+    // `every_macro_family_needle_carries_a_gate_byte` pins the needle list).
+    // Nothing to recognize also means nothing to descend into: a lone `Text`
+    // node has no children, so the whole step is a no-op.
+    if single_text_value(&nodes).is_some_and(|value| !level_may_have_macros(value)) {
+        return nodes;
+    }
+
     // The bibliography anchor (`[[[label]]]`) runs before every other family,
     // exactly as the string step runs its own `INLINE_BIBLIO_ANCHOR` pass
     // first. It runs *only here*, at the content's own top level — its pattern
@@ -190,6 +206,19 @@ pub(super) fn apply_macros<'src>(
     let nodes = biblio_anchor_level(nodes, root, parser, masked);
 
     apply_macro_families(nodes, root, parser, LevelContext::ROOT, masked, specials)
+}
+
+/// Reports whether `value` holds any byte a macro family's own sniff could
+/// possibly be satisfied by — see the gate in [`apply_macros`] for the
+/// needle-by-needle accounting this five-byte class summarizes.
+///
+/// `pub(super)` (and re-exported for tests) so
+/// `tests::inline_builder_macro_gate` can pin every family's needle
+/// against the byte class from outside this module.
+pub(crate) fn level_may_have_macros(value: &str) -> bool {
+    value
+        .bytes()
+        .any(|b| matches!(b, b':' | b'[' | b'(' | b'@' | b'&'))
 }
 
 /// Applies each macro family at this level — and, first, at every level nested
