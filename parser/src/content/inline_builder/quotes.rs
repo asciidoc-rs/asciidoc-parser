@@ -626,6 +626,12 @@ fn probe_styled_boundaries_markup(styled: &Styled<'_>) -> (String, String) {
 /// keyed to the value's own address and length, so a sub that changes the
 /// level (or replaces the value, as an unescape does) simply misses the key
 /// and the next sub's turn recomputes it.
+///
+/// The top level's **match string** is likewise built once and reused across
+/// subs while nothing has changed it — the same one-build-serves-every-rule
+/// idea the character-replacements step's rule loop already applies — through
+/// the [`LevelStrings`] slot [`match_level`] fills and invalidates; see
+/// [`apply_quote_sub`] for how a nested change stales it.
 pub(super) fn apply_quotes<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
@@ -633,6 +639,7 @@ pub(super) fn apply_quotes<'src>(
 ) -> Vec<InlineNode<'src>> {
     let mut nodes = nodes;
     let mut cached_mask: Option<(usize, usize, u8)> = None;
+    let mut level: Option<LevelStrings> = None;
 
     for sub in quote_subs() {
         if let Some(value) = single_text_value(&nodes) {
@@ -650,7 +657,8 @@ pub(super) fn apply_quotes<'src>(
             // The same answer `level_may_match_sub` gives for a lone `Text`
             // node — every marker byte present somewhere in the value — read
             // off the mask. A sub ruled out here matches nothing and has
-            // nothing to descend into, so its whole turn is skipped.
+            // nothing to descend into, so its whole turn is skipped, and the
+            // level (and with it the cached match string) is untouched.
             if !sub_markers(sub.type_)
                 .iter()
                 .all(|&marker| mask & marker_bit(marker) != 0)
@@ -659,11 +667,23 @@ pub(super) fn apply_quotes<'src>(
             }
         }
 
-        nodes = apply_quote_sub(sub, nodes, root, parser, LevelContext::ROOT);
+        apply_quote_sub(
+            sub,
+            &mut nodes,
+            root,
+            parser,
+            LevelContext::ROOT,
+            &mut level,
+        );
     }
 
     nodes
 }
+
+/// A level's reconstructed match string and its [`Piece`] map — one
+/// [`build_match_string`] result, held so a rule loop can reuse it across
+/// rules while nothing has changed the level it describes.
+type LevelStrings = (String, Vec<Piece>);
 
 /// The bit [`marker_mask`] records the presence of `marker` under, or `0` for
 /// a character that is not one of the eight [`sub_markers`] characters (which
@@ -709,13 +729,21 @@ fn marker_mask(text: &str) -> u8 {
 /// **siblings** present ([`LevelContext::child_contexts`]) — which is what
 /// keeps a sub matching *inside* an earlier sub's span reading the same
 /// characters a whole-content match would see there.
+///
+/// `level` is this level's [`LevelStrings`] slot, and the returned flag says
+/// whether anything in this level's subtree changed. A **child's** change can
+/// reshape what this level's match string holds — a transparent span's
+/// placeholder is wrapped in its body's own outer characters — so a changed
+/// descent stales the slot before [`match_level`] reads it; each child level
+/// gets a fresh throwaway slot, since nothing outlives one sub's visit there.
 fn apply_quote_sub<'src>(
     sub: &QuoteSub,
-    nodes: Vec<InlineNode<'src>>,
+    nodes: &mut Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
     ctx: LevelContext,
-) -> Vec<InlineNode<'src>> {
+    level: &mut Option<LevelStrings>,
+) -> bool {
     // Recurse into the spans produced by earlier subs *before* matching at this
     // level. A span this sub itself creates below is therefore never revisited
     // by the same sub (a sub runs once per level). A level
@@ -729,23 +757,34 @@ fn apply_quote_sub<'src>(
     // never touched. This loop runs once per sub, so what it avoids is
     // moving every node of every span-bearing level once per sub in
     // `quote_subs`'s list.
-    let mut nodes = nodes;
+    let mut changed = false;
 
     if nodes
         .iter()
         .any(|node| matches!(node, InlineNode::Styled(_)))
     {
-        let contexts = LevelContext::child_contexts(&nodes, ctx, Masked::UNKNOWN);
+        let contexts = LevelContext::child_contexts(nodes, ctx, Masked::UNKNOWN);
 
         for (node, inner) in nodes.iter_mut().zip(contexts) {
             if let InlineNode::Styled(styled) = node {
-                let children = std::mem::take(&mut styled.children);
-                styled.children = apply_quote_sub(sub, children, root, parser, inner);
+                let mut child_level = None;
+                changed |= apply_quote_sub(
+                    sub,
+                    &mut styled.children,
+                    root,
+                    parser,
+                    inner,
+                    &mut child_level,
+                );
             }
         }
     }
 
-    match_level(sub, nodes, root, parser, ctx)
+    if changed {
+        *level = None;
+    }
+
+    changed | match_level(sub, nodes, root, parser, ctx, level)
 }
 
 /// One leaf/opaque node's placement in a level's reconstructed match string.
@@ -785,42 +824,59 @@ pub(super) struct Piece {
 }
 
 /// Matches `sub` once at this level, wrapping each accepted match in a
-/// [`Styled`] span and leaving everything else in place.
+/// [`Styled`] span and leaving everything else in place. Returns whether the
+/// level changed.
+///
+/// `level` is the level's [`LevelStrings`] slot: an empty slot is filled by
+/// building the match string, a filled one is reused as-is — the caller
+/// guarantees it still describes `nodes` — and a rebuild empties it again,
+/// since the rebuilt level is no longer the one it described. A sub that
+/// matches nothing therefore leaves a *filled* slot behind for the next sub's
+/// turn, which is the whole point: most subs match nothing.
 fn match_level<'src>(
     sub: &QuoteSub,
-    nodes: Vec<InlineNode<'src>>,
+    nodes: &mut Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
     ctx: LevelContext,
-) -> Vec<InlineNode<'src>> {
+    level: &mut Option<LevelStrings>,
+) -> bool {
     // Cheap pre-filter, taken *before* the match string is materialized: if
     // this sub's own marker character(s) (see `sub_markers`) are not present
     // anywhere at this level, `sub` cannot possibly match, so skip the build
     // (and its allocations) entirely — see `level_may_match_sub`'s own doc
     // comment for why this is sub-specific rather than one gate shared by
     // every sub in `quote_subs`.
-    if !level_may_match_sub(&nodes, sub) {
-        return nodes;
+    if !level_may_match_sub(nodes, sub) {
+        return false;
     }
 
-    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
+    let (s, pieces) = {
+        let entry = level.get_or_insert_with(|| build_match_string(nodes, Masked::UNKNOWN));
+        (&entry.0, &entry.1)
+    };
 
     // The pattern runs over the level wrapped in its enclosing construct's own
     // boundary characters, and every offset it reports is mapped back into the
     // level's own coordinates (see [`LevelContext`]).
-    let (haystack, prefix) = ctx.haystack(&s);
+    let (haystack, prefix) = ctx.haystack(s);
 
     let matches: Vec<QuoteMatch> = find_matches(sub, &haystack)
         .into_iter()
         .map(|m| m.unshift(prefix, s.len()))
-        .filter(|m| attrlist_is_readable(&nodes, &pieces, m))
+        .filter(|m| attrlist_is_readable(nodes, pieces, m))
         .collect();
 
     if matches.is_empty() {
-        return nodes;
+        return false;
     }
 
-    rebuild_level(&nodes, &pieces, &s, &matches, root, parser)
+    let rebuilt = rebuild_level(nodes, pieces, s, &matches, root, parser);
+
+    *level = None;
+    *nodes = rebuilt;
+
+    true
 }
 
 /// Reports whether a match's attribute list, if it has one, is readable from
