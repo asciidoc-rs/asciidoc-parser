@@ -408,7 +408,7 @@ use passthrough_step::apply_passthroughs;
 use post_replacements::apply_post_replacements;
 use quotes::apply_quotes;
 #[cfg(test)]
-pub(crate) use quotes::{candidate_needle, find_matches, reference_find_matches};
+pub(crate) use quotes::{candidate_needle, closing_needle, find_matches, reference_find_matches};
 use special_chars::{
     Masked, apply_special_characters, classify_unescaped_specials, flatten_prior_markup,
     masked_locations,

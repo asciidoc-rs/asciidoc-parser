@@ -12,7 +12,7 @@
 
 use crate::{
     content::{
-        inline_builder::{candidate_needle, find_matches, reference_find_matches},
+        inline_builder::{candidate_needle, closing_needle, find_matches, reference_find_matches},
         quote_subs,
     },
     parser::{QuoteScope, QuoteType},
@@ -47,6 +47,22 @@ fn every_quote_sub_has_a_candidate_needle() {
         assert!(
             opening.as_bytes().starts_with(needle),
             "{:?}/{:?}: needle {needle_text:?} is not how {tail:?} opens",
+            sub.type_,
+            sub.scope,
+        );
+
+        // And the closing needle must be how the pattern's tail closes: the
+        // literal run before the trailing zero-width boundary assertion,
+        // escapes stripped. The span-decomposing group derivation
+        // (`derive_groups`) trusts both needles as the match's own edges.
+        let closing = closing_needle(sub.type_, sub.scope);
+        let closing_text = std::str::from_utf8(closing).unwrap();
+        let end = tail.strip_suffix(r"\b{end-half}").unwrap_or(tail);
+        let closing_literal = end.replace('\\', "");
+
+        assert!(
+            closing_literal.as_bytes().ends_with(closing),
+            "{:?}/{:?}: closing needle {closing_text:?} is not how {tail:?} ends",
             sub.type_,
             sub.scope,
         );

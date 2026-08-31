@@ -32,6 +32,8 @@ pub use substitution_group::SubstitutionGroup;
 
 mod substitution_step;
 pub use substitution_step::SubstitutionStep;
+#[cfg(test)]
+pub(crate) use substitution_step::quote_sub;
 pub(crate) use substitution_step::{
     ATTRIBUTE_REFERENCE, AttributeMissing, CharacterReplacement, QuoteSub, apply_attributes,
     build_callout_regexes, character_replacements, hard_line_break_pattern, maybe_has_replacements,
