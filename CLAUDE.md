@@ -66,10 +66,39 @@ Run all of the following for any change to `parser/` (or other Rust crates in th
 
 ## Inline AST branch
 
-This repo has a long-running `inline-ast` feature branch (see `docs/design/inline-ast-architecture.md`)
-implementing a structured inline AST alongside the existing string-substitution pipeline. Work on that
-branch lands in small, additive increments, each gated by a byte-for-byte differential corpus against the
-existing string pipeline's output (`golden_*` test helpers). When picking up the next step:
+This repo has a long-running `inline-ast` feature branch, not yet merged into `main`, that replaced
+the crate's original string-substitution inline-content pipeline with a structured inline AST (a tree
+of `InlineNode`s — see `parser/src/content/inline_builder/README.md` and
+`docs/design/inline-ast-architecture.md`). **That migration is done**, not in progress: every parse
+builds the tree unconditionally, `Content::rendered_html()` is a fold over it, every macro family's
+catalog/warning registration is replayed from it, and the original string-substitution pipeline and
+its three sentinel-character encodings (for passthroughs, deferred cross-references, and footnote
+markers) are fully retired from production code — see `parser/snapshots/README.md` for that history.
+`golden_*` test helpers compare against **frozen recordings** of the old pipeline's output
+(`parser/snapshots/*.txt`), not a live second implementation.
+
+There is no more step-by-step migration checklist to work through. `docs/design/inline-ast-architecture.md`
+used to be a ~12,000-line proposal-plus-build-log tracking that migration phase by phase; once the
+migration it tracked was done, it was rewritten down to a normal, ~400-line architecture reference (data
+model, source-location policy, rendering model, the ASG-conformance decision) with no phase/step tracking
+left in it and no "next phase" to read off it. Do not look for a §5.2 "Phased plan," a "Step N landed as"
+note, or an exit-gate checklist — none of that exists in the doc any more, and CLAUDE.md previously
+pointed at it; that guidance was itself part of the migration-tracking apparatus and has been removed
+along with the doc structure it depended on.
+
+What typically remains on this branch, until it lands in `main`, is narrower and case-by-case: polish and
+documentation work (this section's own rewrite is an example), small mechanism refinements, and whatever
+the branch's own pre-landing validation against the Ruby-to-Rust `asciidoctor` port still requires. There
+is no standing document that enumerates it. To find out what's actually landed and what's in flight:
+
+- `git log --oneline origin/main..origin/inline-ast` is the authoritative record of everything the branch
+  carries that `main` doesn't — fetch first, since a stale local `inline-ast` ref under-reports it.
+- Open PRs against `inline-ast` (not `main`) are the record of what's in flight right now.
+- If the user's request doesn't name a specific next step, ask rather than inventing a step-tracking
+  scheme to justify one — there isn't a checklist to consult, and guessing at "the next increment" is
+  how the removed apparatus accumulated in the first place.
+
+When picking up work here:
 
 - **Branch from `origin/inline-ast`, not `main`.** This file, the design doc, and the whole
   `inline_builder` module exist only on that branch, so a work branch cut from `main` starts with none
@@ -89,109 +118,8 @@ existing string pipeline's output (`golden_*` test helpers). When picking up the
   git checkout -B <work-branch> origin/inline-ast   # only to re-point a harness-created branch
   ```
 
-- **Don't read the whole design doc — it is ~4,500 lines.** Read §5.2 ("Phased plan") for the phase
-  status, then the **last two** "*Step N (prep) landed as (…)*" paragraphs and the **tail** of the
-  Phase 4 checklist. The closing paragraph of the most recent increment always names what is left
-  ("what still defers is …"), which is the menu the next increment is picked from.
-- `git log --oneline origin/main..origin/inline-ast` is the fastest authoritative record of what has
-  actually landed — the local `inline-ast` ref can be stale, so fetch first. Every increment's commit
-  subject carries its own step number, so the log doubles as the real checklist when the doc's own
-  lags. Listing merged PRs against the branch tells you the same thing more slowly; do that only when
-  you need to check for a still-open one.
-- **One increment per branch/PR.** Every prior increment is a single narrow behavior change plus its
-  corpora and its design-doc note. Resist bundling two.
+- **One change per branch/PR.** Resist bundling unrelated cleanups into one PR.
 - **Open the PR as a draft**, not ready-to-review — the maintainer flips it when they pick it up.
-- After landing a step, update the design doc's narrative (a new "*Step N landed as (...)*" paragraph)
-  and its checklist entry, matching the existing entries' style — this is how every prior increment on
-  this branch has recorded its landing.
-- **Close with a progress estimate.** In your final summary to the user, say how many further sessions
-  the *whole* inline-AST branch looks like — not just the step you landed. See below for how to ground
-  it.
-
-### Estimating what is left
-
-The branch has been running long enough that "how much further?" is a standing question, and a session
-that has just surveyed §5.2 is the cheapest place to answer it. Ground the estimate in four things
-rather than guessing:
-
-1. **The unchecked items in the Phase 4 checklist**, plus the phase *exit gates*, Phase 5, and
-   Landing. Phase 4's step list is now fully ticked — step 7 is closed: `render_with` and the
-   `attribute-missing` retirement landed, and both `Document::render_to` and
-   `Document::to_asg()` are recorded as *not being built* (the latter by §6's decision 7 — the
-   ASG schema is a parked 2023 draft that cannot express the crate's inline vocabulary; see
-   §3.5). **A ticked step list is not a met exit gate**, though, and the two are easy to
-   conflate. §5.2's **"Exit-gate audit (2026-08-29)"** records the current state criterion by
-   criterion: every one of Phases 2–5 still has something outstanding, the two substantial ones
-   being the xref template mechanism (§4.2's third sentinel system, still live in production)
-   and the `asciidoctor`-port review, which gates Phase 3 and Landing alike. Start from that
-   table rather than inferring completion from step ticks, and re-run it if it has aged.
-2. **The "what still defers" sentence** in the newest landed-as note — those are the increments
-   already named and sized.
-3. **The observed rate.** Every increment so far is one branch, one PR, one session, so an increment
-   count *is* a session count. `git log --oneline origin/main..origin/inline-ast` gives you the run
-   rate directly.
-4. **The two things that move the number most:** the step 6 cutover itself is bundled work (the
-   authoritative fold, wiring each staged side effect for real, deleting three sentinel systems,
-   retiring the `with_inline_tree` flag) and is worth several sessions on its own; and the corpus-wide
-   audit has repeatedly *discovered* new preps mid-flight, so the remaining-prep count is a floor, not
-   a ceiling.
-
-Give a **range** with the reasoning attached, and say plainly which parts are firm (an enumerated
-checklist item) and which are open-ended (anything gated on an audit that has not run yet). A single
-confident number would be false precision.
-
-### The corpus-wide fold-parity audit
-
-Several increments were found (or cleared) by an audit the design doc refers to as "tree building
-forced on for every parse in the suite". It is not checked in — rebuild it as a throwaway patch, run
-it on your branch **and** on `origin/inline-ast`, and compare the two sets. The bar every increment
-has to clear is *no **new** divergence*; a set that also shrinks is a bonus, not a requirement (an
-increment closing a form no golden source exercises leaves the set unchanged).
-
-In `parser/src/content/substitution_group.rs`, inside `SubstitutionGroup::apply`:
-
-1. Force the seed on: `let tree_seed = if parser.build_inline_tree {` → `let tree_seed = if true {`.
-2. Just before `content.set_inlines(tree)`, fold the tree with `HtmlInlineRenderer` and, when
-   the result differs from `content.rendered`, append `src` / `rendered` / `folded` to a log file —
-   one `writeln!` per divergence, formatting all three with `{:?}` (see the third gotcha below).
-
-Then:
-
-```
-cargo test --workspace -- --test-threads=1     # see the gotchas below
-sort -u <logfile> > after.txt                  # repeat on origin/inline-ast for before.txt
-comm -13 before.txt after.txt                  # must be empty: these are NEW divergences
-comm -23 before.txt after.txt                  # divergences this increment closed
-```
-
-Four gotchas that will silently waste a run — each produces a plausible-looking but wrong answer
-rather than an error:
-
-- **Log to a file, not `eprintln!`.** `cargo test` captures a passing test's output, so `eprintln!`
-  divergences vanish unless every run also passes `--nocapture` (which then interleaves them with the
-  harness's own progress lines).
-- **`--test-threads=1`.** Tests append to the log concurrently otherwise, and the interleaved lines
-  make the two sets impossible to `comm`.
-- **Format the three values with `{:?}`, not `{}`.** `sort -u` and `comm` are line-based, so the
-  whole comparison rests on one record being one physical line. Debug-escaping is what guarantees
-  that: a multi-line block's content comes out as `\n` rather than as real newlines. Under `{}` such
-  a record spills across lines that then get deduplicated against unrelated records' lines, and a
-  genuinely new divergence can drop out of `comm -13` — the one output the audit exists to read.
-- **Revert the patch before *any* `git stash`, and get the baseline from a detached checkout of the
-  base rather than from a stash.** Both halves of this have bitten. Applying the patch to a tree that
-  already holds your real changes and then stashing sweeps *both* away together, and the later `stash
-  pop` brings *both* back — which is how the audit patch reached a commit and turned every CI job red.
-  And once your work is committed, `git stash` has nothing to stash, so the "before" run silently
-  measures your own branch and the two sets match for the wrong reason. `git checkout <base-sha>`,
-  patch, run, **take the probe back out with the same targeted edit that put it in**, then
-  `git checkout <branch>` has neither failure mode. Take it out that way on the base too, not with a
-  whole-file discard: a discard happens to be harmless *there* — the detached base holds nothing but
-  the probe — but the recipe is the thing that gets copied, and the fourth papercut below is what
-  happens when it is copied onto a branch where the file also holds your work.
-
-Revert the patch before committing, and verify it by grepping for what should be **absent**
-(`scratchpad`, `OpenOptions`, the log path) rather than for the changes you meant to keep. Confirming
-that your own edits survived says nothing about whether the probe went with them.
 
 ### Coverage on this branch
 
