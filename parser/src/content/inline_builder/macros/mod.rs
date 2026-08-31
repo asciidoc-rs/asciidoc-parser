@@ -1748,6 +1748,15 @@ mod tests {
             );
         }
 
+        // Each of the five bytes opens the gate on its own, so no family's
+        // needle rides on a byte the class does not carry.
+        for value in [":", "[", "(", "@", "&"] {
+            assert!(
+                level_may_have_macros(value),
+                "gate byte {value:?} does not open the gate"
+            );
+        }
+
         // And the shape the gate exists for answers `false`.
         assert!(!level_may_have_macros(
             "plain prose with nothing any macro family recognizes"
