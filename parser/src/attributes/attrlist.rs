@@ -1020,8 +1020,8 @@ mod tests {
 
     #[test]
     fn attribute_reference_substitution_shifts_a_placeholder_byte_offset_in_source_text() {
-        // Direct evidence for the design doc's "The masked-piece placeholder's
-        // offset table cannot be carried through `Attrlist::parse`" note's
+        // Direct evidence for the design doc's §3.5 ("A rejected refinement:
+        // carrying a byte-offset table through `Attrlist::parse`") and its
         // first blocker, checked against this method's own `source_text()`
         // rather than only a full document's final rendered HTML (as
         // `tests/sentinels.rs`'s

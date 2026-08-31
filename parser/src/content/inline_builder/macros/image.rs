@@ -5,7 +5,10 @@ use std::borrow::Cow;
 use super::{MacroMatch, MacroMatchKind, links::restore_masked_passthroughs, rebuild_macro_level};
 use crate::{
     Parser, Span,
-    attributes::{Attrlist, AttrlistContext, element_attribute::MASKED_PIECE_PLACEHOLDER},
+    attributes::{
+        Attrlist, AttrlistContext,
+        element_attribute::{MASKED_PIECE_PLACEHOLDER, escape_masked_piece_bytes},
+    },
     content::{
         INLINE_IMAGE_MACRO, basename,
         inline_builder::{
@@ -1065,16 +1068,27 @@ pub(in crate::content::inline_builder) fn tokened_bracket<'a, 'src>(
                 masked_pieces.push(masked);
             }
 
-            None => tokened.push_str(
+            // A piece that keeps its own bytes has them **escaped** on the way
+            // in: after this, the only `MASKED_PIECE_PLACEHOLDER` occurrences
+            // in `tokened` are the ones written just above. See
+            // [`escape_masked_piece_bytes`].
+            None => tokened.push_str(&escape_masked_piece_bytes(
                 bracket_text
                     .get(lo.saturating_sub(range.start)..hi.saturating_sub(range.start))
                     .unwrap_or_default(),
-            ),
+            )),
         }
     }
 
+    // A bracket that tokened nothing keeps the whole match string as written
+    // rather than the piece-by-piece copy above — but still **escaped**, so
+    // every consumer can unescape unconditionally without having to know
+    // whether this bracket held anything to token.
     if masked_pieces.is_empty() {
-        return (bracket_text.to_string(), masked_pieces);
+        return (
+            escape_masked_piece_bytes(bracket_text).into_owned(),
+            masked_pieces,
+        );
     }
 
     (tokened, masked_pieces)
@@ -2151,11 +2165,14 @@ mod tests {
         let image = assert_image(&nodes[0]);
         assert_eq!(image.alt.as_deref(), Some("x\u{96}1\u{97}y b"));
 
-        // The leniency the positional restore rests on, in both spellings a
-        // bracket can present: a run that is not the well-formed placeholder
-        // pair (a lone `\u{96}` or `\u{97}`, or the two separated by other
-        // bytes) is left exactly as the author wrote it, rather than being
-        // mistaken for a real occurrence.
+        // An author-typed run of the same bytes is left exactly as written,
+        // in every spelling a bracket can present: a lone `\u{96}` or
+        // `\u{97}`, the two separated by other bytes, or the well-formed
+        // adjacent pair itself. None of them is mistaken for a real
+        // occurrence, because none of them survives `tokened_bracket`'s own
+        // copy as those bytes — [`escape_masked_piece_bytes`] rewrites each
+        // one on the way into the parse, and the restore puts it back on the
+        // way out.
         let nodes = build_src(Span::new(
             "image:x.png[++a++ \u{96}x\u{97} \u{96}9\u{97} ++b++]",
         ));
@@ -2166,26 +2183,23 @@ mod tests {
             Some("a \u{96}x\u{97} \u{96}9\u{97} b")
         );
 
-        // And the leniency on the *other* side of the same shape: an
-        // author-typed **adjacent** pair — the well-formed placeholder shape
-        // itself, with no real masked piece behind it — is left as written
-        // too, rather than consuming a body meant for a later real
-        // occurrence. Only one passthrough (`++a++`) supplies a body here, so
-        // the cursor is already past `bodies.len()` by the time the typed
-        // pair is reached, and `restore_tokens`' own leniency for that case
-        // is what keeps it literal instead of panicking or misattributing.
-        //
-        // The leniency is *order-dependent*, and only this order is safe: a
-        // typed pair **ahead** of the bracket's real masked piece reaches an
-        // unspent `bodies` and takes that piece's body. That is a known gap,
-        // pinned by
-        // `a_typed_placeholder_before_a_masked_piece_forges_a_bracket_restore`
-        // (`tests/sentinels.rs`) — see `escape_passthrough_sentinels`' own
-        // "Known limits" section for why it is open.
+        // The adjacent pair, in both orders relative to the bracket's one real
+        // masked piece. Neither order matters any more: the escape settles it
+        // before `bodies` is ever consulted, where the restore's own leniency
+        // for an occurrence past the end of `bodies` used to save only the
+        // *behind* order and the *ahead* one forged a restore (a gap this
+        // comment recorded until 2026-08-31, now pinned closed by
+        // `a_typed_placeholder_beside_a_masked_piece_cannot_forge_a_bracket_restore`
+        // in `tests/sentinels.rs`).
         let nodes = build_src(Span::new("image:x.png[++a++ \u{96}\u{97}]"));
         let image = assert_image(&nodes[0]);
 
         assert_eq!(image.alt.as_deref(), Some("a \u{96}\u{97}"));
+
+        let nodes = build_src(Span::new("image:x.png[\u{96}\u{97} ++a++]"));
+        let image = assert_image(&nodes[0]);
+
+        assert_eq!(image.alt.as_deref(), Some("\u{96}\u{97} a"));
 
         // The golden output reads the first fixture differently, and the
         // difference is its own wart rather than something to reproduce:

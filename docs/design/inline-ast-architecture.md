@@ -240,14 +240,30 @@ and rejected, for two reasons that don't show up at the call site:
   coordinates would mean threading a byte mapping through most of
   [`parser/src/attributes/`](../../parser/src/attributes/).
 
-The mechanism that *would* get the equivalent construction-time guarantee is different: escape
-the placeholder's own codepoints in the bytes `tokened_bracket`/`tokened_text` **copy** from
-their non-tokened pieces, at the one moment provenance is still known, rather than escaping the
-content-level splice that feeds them
-([`escape_passthrough_sentinels`](../../parser/src/content/inline_builder/attribute_refs.rs),
-§3.4 case 2). That would let `escape_passthrough_sentinels` retire, but it requires auditing
-every consumer of a tokened parse to apply the matching un-escape, so it remains a scoped,
-not-yet-taken-up follow-up rather than something this document tracks as in progress.
+The mechanism that gets the equivalent construction-time guarantee is a different one, and it
+is what the crate does: escape the placeholder's own codepoints in the bytes
+`tokened_bracket`/`tokened_text` **copy** from their non-tokened pieces, at the one moment
+provenance is still known
+([`escape_masked_piece_bytes`](../../parser/src/attributes/element_attribute.rs)). The escape
+leaves neither of the placeholder's codepoints standing anywhere in its output, so every
+occurrence of the pair in a tokened text is one a tokener wrote, and no reader downstream has
+to ask whether the occurrence in front of it is genuine. It escapes each codepoint
+individually, and its own introducer alongside them, so neither a half arriving from one source
+beside a half from another nor a document that types the introducer can produce a pair the
+escape did not intend. Unlike the content-level splice guard it replaced
+(`escape_passthrough_sentinels`, retired), it is **two-way**: every consumer of a tokened parse
+applies the matching
+[`unescape_masked_piece_bytes`](../../parser/src/attributes/element_attribute.rs) on its way
+out — `restore_into` in the same walk that substitutes the bodies, so the shorthand offsets and
+restored ranges it records stay in the coordinates of the string it is building, and
+`untranslated_value`/`computed_value_children` on the runs between occurrences — so a
+document's own copy of a reserved codepoint round-trips to the output as written.
+
+One road is left uncovered, and it is the first bullet above: `Attrlist::parse` re-substitutes
+attribute references over the text handed to it, *after* the tokener escaped its copy, so a
+`subs=` list naming `macros` without `attributes` can still expand a reference whose value
+spells the pair into the tokened text. Closing it means escaping inside that parse, which
+requires the parse to know it has been handed tokened text.
 
 ## 4. Cross-reference and title resolution
 

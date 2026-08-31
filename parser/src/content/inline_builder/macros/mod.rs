@@ -22,7 +22,9 @@ use super::{
 };
 use crate::{
     HasSpan, Parser, Span,
-    attributes::element_attribute::MASKED_PIECE_PLACEHOLDER,
+    attributes::element_attribute::{
+        MASKED_PIECE_PLACEHOLDER, escape_masked_piece_bytes, unescape_masked_piece_bytes,
+    },
     content::restored_entity_pattern,
     inlines::{CharRef, InlineNode},
     strings::CowStr,
@@ -793,15 +795,23 @@ pub(super) fn tokened_text<'src>(
                 carried.push(node.clone());
             }
 
-            None => tokened.push_str(
+            // A piece that keeps its own bytes has them **escaped** on the way
+            // in, exactly as in
+            // [`tokened_bracket`](image::tokened_bracket): after this, the
+            // only `MASKED_PIECE_PLACEHOLDER` occurrences in `tokened` are the
+            // ones written just above.
+            None => tokened.push_str(&escape_masked_piece_bytes(
                 text.get(lo.saturating_sub(range.start)..hi.saturating_sub(range.start))
                     .unwrap_or_default(),
-            ),
+            )),
         }
     }
 
+    // A text that tokened nothing keeps its own bytes as written rather than
+    // the piece-by-piece copy above — but still escaped, so every consumer can
+    // unescape unconditionally.
     if carried.is_empty() {
-        return (text.to_string(), carried);
+        return (escape_masked_piece_bytes(text).into_owned(), carried);
     }
 
     (tokened, carried)
@@ -861,7 +871,13 @@ pub(super) fn untranslated_value(text: &str, carried: &[InlineNode<'_>]) -> Stri
             break;
         };
 
-        out.push_str(rest.get(..pos).unwrap_or_default());
+        // Only the bytes *between* occurrences are unescaped: they are the
+        // tokener's own copy of the author's text (see
+        // [`escape_masked_piece_bytes`]), where a node's untranslated bytes
+        // below come straight from the source and never passed through it.
+        out.push_str(&unescape_masked_piece_bytes(
+            rest.get(..pos).unwrap_or_default(),
+        ));
 
         match node {
             InlineNode::Raw { value, .. } => out.push_str(value.as_ref()),
@@ -873,7 +889,7 @@ pub(super) fn untranslated_value(text: &str, carried: &[InlineNode<'_>]) -> Stri
             .unwrap_or_default();
     }
 
-    out.push_str(rest);
+    out.push_str(&unescape_masked_piece_bytes(rest));
 
     out
 }
@@ -955,9 +971,19 @@ pub(super) fn computed_value_children<'src>(
     location: Span<'src>,
     specials: ComputedSpecials,
 ) -> Vec<InlineNode<'src>> {
+    // This is where a run of a tokened text's own bytes leaves the pipeline,
+    // so it is where the tokener's escape comes back off (see
+    // [`escape_masked_piece_bytes`]). Its caller
+    // ([`restored_value_children`]) has already split the genuine
+    // `MASKED_PIECE_PLACEHOLDER` occurrences out, so what arrives here is only
+    // ever the author's own bytes — unescaping ahead of the special/entity
+    // trichotomy below is safe because none of the escape's own codepoints is
+    // an `&`.
+    let text = unescape_masked_piece_bytes(text);
+
     match specials {
-        ComputedSpecials::Escaped => escaped_value_children(text, location),
-        ComputedSpecials::Verbatim => unescaped_value_children(text, location),
+        ComputedSpecials::Escaped => escaped_value_children(&text, location),
+        ComputedSpecials::Verbatim => unescaped_value_children(&text, location),
     }
 }
 

@@ -1713,7 +1713,12 @@ fn text_attrlist<'src>(
         return Some(TextAttrlist {
             adopted: text != tokened,
             text,
-            attrs: attrs.into_owned(source),
+            // `into_owned_restoring` with no bodies rather than the plain
+            // `into_owned`: the parse still has to come back **unescaped**
+            // (`tokened_bracket` escapes whether or not it tokened anything),
+            // and the restoring conversion is where that happens. With
+            // `bodies` empty the two are otherwise the same walk.
+            attrs: attrs.into_owned_restoring(source, &[]),
             escaped: true,
             restores: vec![],
         });
@@ -3785,11 +3790,12 @@ mod tests {
         // `replace_all` over the *finished* string, so an author's own
         // `\u{96}0\u{97}` bytes were rewritten too (both copies became the
         // body). This restore instead finds the placeholder **pair**
-        // (`MASKED_PIECE_PLACEHOLDER`) by position, so the author's own bytes
-        // — `\u{96}`, `0`, `\u{97}`, none of them adjacent to their own
-        // matching half in a way that forms the pair — are never mistaken
-        // for one and stay exactly where the author put them, ahead of the
-        // real passthrough's own body. Neither reading is reachable by
+        // (`MASKED_PIECE_PLACEHOLDER`) by position, over a text whose own
+        // copies of those codepoints `tokened_bracket` has already escaped
+        // (`escape_masked_piece_bytes`) — so the author's `\u{96}`, `0`,
+        // `\u{97}` are never mistaken for one, in this or any other
+        // arrangement, and stay exactly where the author put them, ahead of
+        // the real passthrough's own body. Neither reading is reachable by
         // ordinary authoring — these are C1 control characters.
         use super::super::super::test_support::golden_passthroughs;
 
