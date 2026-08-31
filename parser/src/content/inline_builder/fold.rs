@@ -11,6 +11,7 @@ use crate::{
     parser::{
         InlineRenderer, QuoteScope, QuoteType, RenderContext, SpecialCharacter, XrefRenderParams,
     },
+    span::HasSpan,
     strings::CowStr,
 };
 
@@ -39,7 +40,12 @@ pub(crate) fn fold_html(
     renderer: &dyn InlineRenderer,
     context: &RenderContext,
 ) -> String {
-    let mut out = String::new();
+    // Sized from the content's own source extent: rendered HTML is the
+    // source text plus markup, so the source length seeds the buffer at the
+    // plain-prose case's exact size and one growth doubling absorbs typical
+    // markup. An estimate — the string grows normally past it.
+    let source_len: usize = nodes.iter().map(|node| node.span().data().len()).sum();
+    let mut out = String::with_capacity(source_len + 16);
     fold_into_html(
         nodes,
         renderer,
@@ -410,7 +416,10 @@ fn fold_into_html(
                 // Fold the children to the body, then wrap it with the same
                 // `QuoteType`, attribute list, and id the quotes step
                 // recognized, matching Asciidoctor's own output.
-                let mut body = String::new();
+                // Sized like `fold_html`'s own buffer: the span's own
+                // source extent, which its body's text plus nested markup
+                // stays near for typical spans.
+                let mut body = String::with_capacity(styled.location.data().len() + 16);
                 fold_into_html(
                     &styled.children,
                     renderer,

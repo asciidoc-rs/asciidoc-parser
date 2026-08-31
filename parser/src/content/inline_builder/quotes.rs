@@ -1851,7 +1851,12 @@ fn rebuild_level<'src>(
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
-    let mut out = Vec::new();
+    // Sized for the usual shape of a rebuild: every piece re-emitted about
+    // once (a gap slice or a clone), plus each match's own `Styled` node and
+    // the extra slice its cut can leave on either side. An estimate, not a
+    // bound — a piece overlapping many ranges can emit more — but it removes
+    // the one-at-a-time growth of the common case.
+    let mut out = Vec::with_capacity(pieces.len() + 2 * matches.len());
     let mut cursor = 0usize;
 
     for m in matches {
@@ -1885,7 +1890,9 @@ fn rebuild_level<'src>(
                     }
                 }
 
-                let mut children = Vec::new();
+                // A span's body is one sliced text run in the overwhelmingly
+                // common case.
+                let mut children = Vec::with_capacity(1);
                 emit_range(nodes, pieces, body.clone(), &mut children);
 
                 let location = source_slice(pieces, construct.clone(), root);
