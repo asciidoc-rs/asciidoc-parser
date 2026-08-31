@@ -8,11 +8,10 @@
 //! (and a bibliography entry) registers its id in the reference catalog, an
 //! image whose `link=` names a dangerous scheme records a warning, and a
 //! `footnote:`/`footnoteref:` macro registers its numbered entry — text and
-//! deferred cross-references included — in the footnote catalog. Step 6 of
-//! the inline-AST cutover has to replay the first four from the tree, exactly
-//! once per parse and in the string pipeline's own pass order, which is what
+//! deferred cross-references included — in the footnote catalog.
 //! [`apply_macro_side_effects`](crate::content::inline_builder::apply_macro_side_effects)
-//! is staged to do.
+//! replays the first four from the tree, exactly once per parse and in the
+//! string pipeline's own pass order.
 //!
 //! The **footnote** catalog is the one that cannot be staged, and the builder
 //! has always written it during the build: a footnote's number *is* its
@@ -40,16 +39,17 @@
 //! catalog entries, in registration order, and the warnings, in the order one
 //! shared list received them.
 //!
-//! The golden side is **frozen** (`snapshots/side_effects.txt`). Its source is
-//! `SubstitutionGroup::apply_string_pipeline`, which step 6 of the cutover is
-//! about to delete; without the freeze every assertion below would be left
-//! comparing the builder against itself the moment it went. The survey that
-//! scoped that deletion named this corpus as the second of the two
-//! *record-shaped* ones — a flat list of plainly serializable facts, needing a
-//! codec for its own record rather than the `InlineNode` serialization the
-//! tree-shaped corpora still owe. See [`frozen`] for why this one round-trips
-//! the recording rather than comparing bytes, and [`key`] for why it is the
-//! first corpus whose recording key is not the fixture source alone.
+//! The golden side is **frozen** (`snapshots/side_effects.txt`). Its source
+//! was `SubstitutionGroup::apply_string_pipeline`, retired along with the
+//! rest of the crate's string-substitution implementation; without the
+//! freeze every assertion below would now be comparing the builder against
+//! itself. The survey that scoped that retirement named this corpus as the
+//! second of the two *record-shaped* ones — a flat list of plainly serializable
+//! facts, needing a codec for its own record rather than the `InlineNode`
+//! serialization the tree-shaped corpora still owe. See [`frozen`] for why this
+//! one round-trips the recording rather than comparing bytes, and [`key`] for
+//! why it is the first corpus whose recording key is not the fixture source
+//! alone.
 
 use crate::{
     Parser, Span,
@@ -191,15 +191,16 @@ fn snapshot(parser: &Parser) -> SideEffects {
 /// What the **string pipeline** wrote down, read back from the recording — the
 /// frozen half of every comparison in this module.
 ///
-/// The pipeline still runs, and `recorded` still checks its answer
-/// against the recorded one on every call, so nothing here is taken on trust
-/// while the pipeline exists. What the freeze buys is the day it does not:
-/// `apply_string_pipeline` is this corpus's only golden source, so deleting it
-/// would otherwise leave every assertion below comparing the builder against
-/// itself. This corpus is the second of the two *record-shaped* ones — a flat
-/// list of plainly serializable facts, needing a
-/// codec for its own record rather than an `InlineNode` serialization — and
-/// this is that codec.
+/// While the pipeline still ran, `recorded` also checked its answer against
+/// the recorded one on every call, so nothing here was taken on trust while
+/// the pipeline existed. What the freeze bought is the day it stopped:
+/// `apply_string_pipeline` was this corpus's only golden source, and it was
+/// retired along with the rest of the crate's string-substitution
+/// implementation; without the freeze every assertion below would now be
+/// comparing the builder against itself. This corpus is the second of
+/// the two *record-shaped* ones — a flat list of plainly serializable facts,
+/// needing a codec for its own record rather than an `InlineNode` serialization
+/// — and this is that codec.
 ///
 /// It is a **round trip** rather than a string comparison for the same reason
 /// the passthrough record corpus's is: the assertions below read the golden's

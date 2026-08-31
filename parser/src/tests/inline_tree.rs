@@ -4,10 +4,10 @@
 //! [`IsBlock::inlines`](crate::blocks::IsBlock) — and for the resolution
 //! machinery that installs cross-reference destinations back into it.
 //!
-//! This began life as `inline_recorder.rs`, the Strategy-A recorder's own
-//! corpus. The recorder — a `RecordingRenderer` that recovered a tree from the
-//! string pipeline's rendered output — retired with the string pipeline it
-//! wrapped at the step 6 cutover; its corpus tests, which compared
+//! This began life as `inline_recorder.rs`, the corpus for a since-retired
+//! `RecordingRenderer` that recovered a tree from the string pipeline's
+//! rendered output. That recorder retired along with the string pipeline it
+//! wrapped; its corpus tests, which compared
 //! its tree against that pipeline's own bytes, could only ever compare the
 //! pipeline against itself once both were gone, so they went with it. What
 //! stayed is everything here: tests whose subject is the single-pass
@@ -668,8 +668,8 @@ fn inline_tree_for_a_listing_block_carries_callout_nodes() {
 
 #[test]
 fn the_xref_mirror_correlates_the_form_that_used_to_defer() {
-    // The counterpart of the deferral divergence at the step 6 cutover, seen
-    // from resolution.
+    // The counterpart of the deferral divergence that closed with the
+    // string-substitution pipeline's retirement, seen from resolution.
     //
     // `xref:sec[a *b, c* d,role=hl]` used to be deferred by the builder,
     // because the string replacer splits the attribute list over the span's
@@ -1217,13 +1217,14 @@ fn inline_tree_xref_resolution_matches_the_rendered_string() {
 #[test]
 fn inline_tree_build_tolerates_a_stateful_renderer() {
     /// A renderer whose output depends on mutable internal state: it emits
-    /// different bytes on each invocation. Under the retired Strategy-A
-    /// recorder, tree building re-ran the whole pipeline through the shared
-    /// renderer instance, so such a renderer poisoned the recorded tree (and a
-    /// debug assertion rejected it). The single-pass builder derives the tree
-    /// from source instead — a `CharRef` node carries the *logical* character,
-    /// not renderer output — so a stateful renderer is now safe: the
-    /// authoritative rendered string sees the renderer's stateful bytes, and
+    /// different bytes on each invocation. Under the retired
+    /// `RecordingRenderer` (see the module doc), tree building re-ran the
+    /// whole pipeline through the shared renderer instance, so such a
+    /// renderer poisoned the recorded tree (and a debug assertion rejected
+    /// it). The single-pass builder derives the tree from source instead —
+    /// a `CharRef` node carries the *logical* character, not renderer
+    /// output — so a stateful renderer is now safe: the authoritative
+    /// rendered string sees the renderer's stateful bytes, and
     /// the tree stays logical.
     #[derive(Debug, Default)]
     struct FlipRenderer {

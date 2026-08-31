@@ -4,19 +4,20 @@
 //! ([`inline_builder`](crate::content::inline_builder)'s test module) drive
 //! [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup)
 //! on a bare [`Content`](crate::content::Content), which has no document
-//! catalog and so **cannot resolve cross-references**. (The whole-document
-//! sweep that used to sit beside this one drove the *Strategy-A recorder* and
-//! retired with it.)
+//! catalog and so **cannot resolve cross-references**. (A whole-document
+//! sweep used to sit beside this one, driving a since-retired recorder that
+//! reconstructed trees from the string pipeline's rendered output; it
+//! retired along with that recorder.)
 //!
-//! That leaves one thing unverified, and it is the thing the
-//! cutover rests on: **the tree the single-pass builder produces, folded
-//! *after* cross-reference resolution has run, reproduces the rendered string
-//! byte-for-byte.** Design §4.2 retires the deferred-cross-reference sentinel
-//! system on exactly that basis — an `xref` is a
+//! That leaves one thing unverified, and it is the guarantee the whole
+//! single-pass design rests on: **the tree the single-pass builder produces,
+//! folded *after* cross-reference resolution has run, reproduces the
+//! rendered string byte-for-byte.** Design §4 describes resolution as
+//! non-destructive and re-resolvable by construction — an `xref` is a
 //! [`Ref`](crate::inlines::Ref)`{resolved: None}` node that resolution fills in
-//! place, "non-destructive by construction, re-resolvable, no template" — and
-//! §4.3 extends the same claim to section titles (whose own document-order
-//! pass mutates the title's tree) and to footnote-embedded references (which
+//! place, with no template involved — for all three cases this harness
+//! checks: plain cross-references, section titles (whose own document-order
+//! pass mutates the title's tree), and footnote-embedded references (which
 //! live in a footnote's subtree).
 //!
 //! This harness checks all three, over whole documents, in one parse: every
@@ -425,7 +426,7 @@ fn fold_matches_the_rendered_string_after_resolution() {
 fn a_stateful_renderer_is_not_required_for_the_fold() {
     // The fold takes the renderer as an argument, so the same tree renders
     // through a second, independently-constructed renderer to the same bytes —
-    // the property `render_with` will rest on (design §3.3.1). Driven here on
+    // the property `render_with` rests on. Driven here on
     // a document whose references resolve, since that is this harness's own
     // subject.
     let mut parser = parser();
@@ -465,9 +466,8 @@ fn a_stateful_renderer_is_not_required_for_the_fold() {
     }
 }
 
-// The document-attribute state each content retains for the fold that will run
-// *after* resolution — design §4.2's second sentinel system, whose retirement
-// is the increment this one stages.
+// The document-attribute state each content retains for the fold that runs
+// *after* resolution.
 
 #[test]
 fn document_stays_send_and_sync() {
