@@ -244,6 +244,9 @@ fn build_stem_node<'src>(
         },
     };
 
+    // Group 4 (the expression body) is a mandatory capture in
+    // `INLINE_STEM_MACRO` — not wrapped in an optional quantifier — so it is
+    // always present whenever the regex matches at all.
     #[allow(clippy::unwrap_used)]
     let expr_match = caps.get(4).unwrap();
     let expr_range = expr_match.start()..expr_match.end();

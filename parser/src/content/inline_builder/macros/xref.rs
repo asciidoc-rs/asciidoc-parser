@@ -615,6 +615,11 @@ fn xref_macro_text<'src>(
         // to the split as the one indivisible run the string replacer's own
         // markup is there (see [`tokened_text`]). A text enclosing none comes
         // back byte-identical, which is every list that was already at parity.
+        //
+        // `raw_text` is non-empty here (the `is_empty` guard above), and the
+        // caller derives `raw_text` from `caps.get(4).map_or("", ...)` while
+        // passing `caps.get(4)` as `text_span`, so a non-empty `raw_text`
+        // means `text_span` is `Some`.
         #[allow(clippy::unwrap_used)]
         let text_range = text_span.unwrap();
 
@@ -696,6 +701,10 @@ fn plain_xref_text<'src>(
     pieces: &[Piece],
     root: Span<'src>,
 ) -> Vec<InlineNode<'src>> {
+    // The sole caller, `xref_macro_text`, only reaches this function once its
+    // own `raw_text.is_empty()` guard has passed, and it derives `raw_text`
+    // from `caps.get(4).map_or("", ...)` while passing `caps.get(4)` on as
+    // `text_span` — so `text_span` is `Some` whenever `raw_text` is non-empty.
     #[allow(clippy::unwrap_used)]
     let span = text_span.unwrap();
 

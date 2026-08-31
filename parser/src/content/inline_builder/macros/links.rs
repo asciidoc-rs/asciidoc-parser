@@ -543,6 +543,9 @@ fn build_inline_link_node<'src>(
         // otherwise. Only a text crossing an **opaque** piece is deferred
         // there.
         if link_text.contains('=') {
+            // `link_text` (the outer `Option`) is only ever set to `Some` when
+            // `raw_text_m` is `Some` (see above), and `text_location_range` is
+            // `raw_text_m.map(...)`, so it is `Some` whenever this branch runs.
             #[allow(clippy::unwrap_used)]
             let range = text_location_range.clone().unwrap();
 
@@ -654,6 +657,11 @@ fn build_inline_link_node<'src>(
         // `InlineLinkReplacer` performs. The `^` window suffix is one ASCII
         // byte at the end of the bracketed text, so the range simply stops
         // short of it.
+        //
+        // Reaching this arm means neither `bare` nor `computed_text` is set.
+        // `bare` is unconditionally set whenever the outer `link_text` was
+        // `None`, so not being `bare` here means `link_text` was `Some` — and
+        // (as above) that only happens when `raw_text_m` is `Some`.
         #[allow(clippy::unwrap_used)]
         let m = raw_text_m.unwrap();
 
@@ -1322,6 +1330,10 @@ pub(super) fn build_link_node<'src>(
         // have no `'src` slice at all.
         if is_mailto {
             if link_text.contains(',') {
+                // Reaching here means `link_text` is non-empty (the enclosing
+                // `if`), and `link_text` is derived from
+                // `raw_text_m.map_or("", |m| m.as_str())`, so a non-empty
+                // `link_text` means `raw_text_m` is `Some`.
                 #[allow(clippy::unwrap_used)]
                 let m = raw_text_m.unwrap();
 
@@ -1361,6 +1373,8 @@ pub(super) fn build_link_node<'src>(
                 attrs = Some(parsed.attrs);
             }
         } else if link_text.contains('=') {
+            // Same reasoning as the `mailto` arm above: a non-empty
+            // `link_text` means `raw_text_m` is `Some`.
             #[allow(clippy::unwrap_used)]
             let m = raw_text_m.unwrap();
 
@@ -1485,6 +1499,12 @@ pub(super) fn build_link_node<'src>(
         // `InlineLinkMacroReplacer` performs. The `^` window suffix is one
         // ASCII byte at the end of the bracketed text, so the range simply
         // stops short of it.
+        //
+        // Reaching this arm means `link_text` is non-empty and
+        // `bare_text_range` is `None`, so the earlier `link_text.is_empty()`
+        // bare-text fill-in never ran — meaning `link_text` still holds its
+        // original value from `raw_text_m.map_or("", |m| m.as_str())`, which
+        // is only non-empty when `raw_text_m` is `Some`.
         #[allow(clippy::unwrap_used)]
         let m = raw_text_m.unwrap();
 
