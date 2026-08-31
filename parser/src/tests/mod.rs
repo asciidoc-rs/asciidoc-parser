@@ -12,6 +12,7 @@ mod hash;
 mod inline_builder_document_parity;
 mod inline_builder_macro_gate;
 mod inline_builder_passthrough_record_parity;
+mod inline_builder_quotes_candidate_scan;
 mod inline_builder_side_effect_parity;
 mod inline_renderer;
 mod inline_tree;

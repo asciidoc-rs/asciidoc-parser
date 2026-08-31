@@ -1438,7 +1438,7 @@ pub(super) fn charref_entity<'a>(node: &'a InlineNode<'_>) -> Option<&'a str> {
 
 /// One accepted quote match at a level, in absolute match-string byte offsets.
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-struct QuoteMatch {
+pub(crate) struct QuoteMatch {
     /// The whole match, `[start, end)`.
     full: Range<usize>,
 
@@ -1480,7 +1480,7 @@ impl QuoteMatch {
 }
 
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-enum QuoteMatchKind {
+pub(crate) enum QuoteMatchKind {
     /// An escaped construct (`\*x*`): drop the leading backslash, keep the rest
     /// as literal text, wrap nothing.
     Unescape,
@@ -1514,7 +1514,7 @@ enum QuoteMatchKind {
 /// Drives `sub` over the match string with a look-ahead retry: a rejected
 /// monospace-before-quote match slices the haystack forward and re-searches,
 /// rather than giving up on the level.
-fn find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
+pub(crate) fn find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
     let mut matches = Vec::new();
 
     // Absolute offset of the current (possibly sliced) haystack within `s`.
@@ -1637,7 +1637,7 @@ fn find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
 /// The three types no [`QuoteSub`] carries answer an empty needle (the same
 /// shape as [`sub_markers`]'s empty answer for them;
 /// `every_quote_sub_has_a_candidate_needle` pins that no real sub does).
-fn candidate_needle(type_: QuoteType, scope: QuoteScope) -> &'static [u8] {
+pub(crate) fn candidate_needle(type_: QuoteType, scope: QuoteScope) -> &'static [u8] {
     match (type_, scope) {
         (QuoteType::Strong, QuoteScope::Unconstrained) => b"**",
         (QuoteType::Strong, QuoteScope::Constrained) => b"*",
@@ -2326,6 +2326,127 @@ pub(super) fn quote_type_of(variant: StyleVariant) -> QuoteType {
         StyleVariant::SingleQuote => QuoteType::SingleQuote,
         StyleVariant::Unquoted => QuoteType::Unquoted,
     }
+}
+
+#[cfg(test)]
+/// The unanchored `captures_iter` loop the candidate scan replaced,
+/// compiled from each sub's own [`source`](QuoteSub::source)
+/// through the `regex` crate exactly as the subs were built before — the
+/// reference `candidate_scan_matches_the_unanchored_reference` (in
+/// `crate::tests::inline_builder_quotes_candidate_scan`, kept outside this
+/// module so its lines stay out of the coverage measurement on every
+/// platform) pins [`find_matches`] against, match for match.
+// Test-only code (see `#[cfg(test)]` above); the unwraps are the tests-module
+// idiom, which the lint's own in-tests carve-out misses only because this fn
+// sits outside a `mod tests`.
+#[allow(clippy::unwrap_used)]
+pub(crate) fn reference_find_matches(sub: &QuoteSub, s: &str) -> Vec<QuoteMatch> {
+    // As every sub was compiled before the candidate scan: through
+    // `RegexBuilder` with `dot_matches_new_line`. (The superscript and
+    // subscript patterns were built without the flag, but contain no `.`
+    // metacharacter, so this is the same matcher.)
+    let pattern = regex::RegexBuilder::new(sub.source)
+        .dot_matches_new_line(true)
+        .build()
+        .unwrap();
+
+    let abs_kind = |caps: &regex::Captures<'_>, base: usize| -> Option<QuoteMatchKind> {
+        let abs = |r: std::ops::Range<usize>| (base + r.start)..(base + r.end);
+        let whole = caps.get(0).unwrap();
+        let escaped = whole.as_str().starts_with('\\');
+
+        match sub.scope {
+            QuoteScope::Constrained => {
+                let prefix_end = caps.get(1).map_or(base, |m| base + m.end());
+                let attrlist = caps.get(2).map(|m| abs(m.range()));
+                let body = caps.get(3).map(|m| abs(m.range()))?;
+
+                if escaped {
+                    let attrlist = attrlist?;
+
+                    return Some(QuoteMatchKind::Wrap {
+                        keep_literal: Some((attrlist.start - 1)..(attrlist.end + 1)),
+                        body,
+                        construct: (attrlist.end + 1)..(base + whole.end()),
+                        attrlist: None,
+                        variant: style_variant(sub.type_, false),
+                        form: crate::inlines::SpanForm::Constrained,
+                    });
+                }
+
+                let has_attrs = attrlist.is_some();
+
+                Some(QuoteMatchKind::Wrap {
+                    keep_literal: None,
+                    construct: prefix_end..(base + whole.end()),
+                    body,
+                    attrlist,
+                    variant: style_variant(sub.type_, has_attrs),
+                    form: crate::inlines::SpanForm::Constrained,
+                })
+            }
+
+            QuoteScope::Unconstrained => {
+                if escaped {
+                    return None;
+                }
+
+                let attrlist = caps.get(1).map(|m| abs(m.range()));
+                let body = caps.get(2).map(|m| abs(m.range()))?;
+                let has_attrs = attrlist.is_some();
+
+                Some(QuoteMatchKind::Wrap {
+                    keep_literal: None,
+                    construct: (base + whole.start())..(base + whole.end()),
+                    body,
+                    attrlist,
+                    variant: style_variant(sub.type_, has_attrs),
+                    form: crate::inlines::SpanForm::Unconstrained,
+                })
+            }
+        }
+    };
+
+    let mut matches = Vec::new();
+    let mut base = 0usize;
+
+    'retry: loop {
+        let haystack = &s[base..];
+
+        for caps in pattern.captures_iter(haystack) {
+            let whole = caps.get(0).unwrap();
+
+            let full = (base + whole.start())..(base + whole.end());
+            let after = &haystack[whole.end()..];
+
+            if sub.type_ == QuoteType::Monospaced
+                && sub.scope == QuoteScope::Constrained
+                && after.starts_with(['"', '\'', '`'])
+            {
+                let skip = if whole.as_str().starts_with('\\') {
+                    2
+                } else {
+                    whole.as_str().chars().next().map_or(1, char::len_utf8)
+                };
+
+                base = full.start + skip;
+                continue 'retry;
+            }
+
+            if let Some(kind) = abs_kind(&caps, base) {
+                matches.push(QuoteMatch { full, kind });
+            } else {
+                matches.push(QuoteMatch {
+                    full,
+                    kind: QuoteMatchKind::Unescape,
+                });
+            }
+        }
+
+        break;
+    }
+
+    matches
 }
 
 #[cfg(test)]
@@ -4801,283 +4922,6 @@ mod tests {
             );
 
             assert_ne!(folded, golden_html, "expected a divergence for {source:?}");
-        }
-    }
-
-    #[test]
-    fn every_quote_sub_has_a_candidate_needle() {
-        // The candidate scan hops between occurrences of each sub's own
-        // opening delimiter, so a real sub answering an empty needle would
-        // make its scan find nothing at all — and a needle that is not
-        // literally the text the pattern's own opening delimiter spells
-        // (escapes stripped) would skip real constructs. The three types no
-        // `QuoteSub` carries are the only ones allowed to answer empty,
-        // mirroring `sub_markers`'s empty answer for them.
-        use super::candidate_needle;
-        use crate::{
-            content::quote_subs,
-            parser::{QuoteScope, QuoteType},
-        };
-
-        for sub in quote_subs() {
-            let needle = candidate_needle(sub.type_, sub.scope);
-
-            assert!(
-                !needle.is_empty(),
-                "{:?}/{:?} has no candidate needle",
-                sub.type_,
-                sub.scope
-            );
-
-            // The needle must be the pattern's own opening delimiter: the
-            // literal run its source spells right after the optional-attrs
-            // group, with regex escapes stripped.
-            let (_, tail) = sub.source.split_once(r#"(?:\[([^\[\]]+)\])?"#).unwrap();
-            let opening = tail.replace('\\', "");
-            let needle_text = std::str::from_utf8(needle).unwrap();
-
-            assert!(
-                opening.as_bytes().starts_with(needle),
-                "{:?}/{:?}: needle {needle_text:?} is not how {tail:?} opens",
-                sub.type_,
-                sub.scope,
-            );
-        }
-
-        for type_ in [
-            QuoteType::Unquoted,
-            QuoteType::AsciiMath,
-            QuoteType::LatexMath,
-        ] {
-            for scope in [QuoteScope::Constrained, QuoteScope::Unconstrained] {
-                assert!(candidate_needle(type_, scope).is_empty(), "{type_:?}");
-            }
-        }
-    }
-
-    /// The unanchored `captures_iter` loop the candidate scan replaced,
-    /// compiled from each sub's own [`source`](super::QuoteSub::source)
-    /// through the `regex` crate exactly as the subs were built before — the
-    /// reference [`candidate_scan_matches_the_unanchored_reference`] pins
-    /// [`find_matches`](super::find_matches) against, match for match.
-    fn reference_find_matches(sub: &super::QuoteSub, s: &str) -> Vec<super::QuoteMatch> {
-        use super::{QuoteMatch, QuoteMatchKind, style_variant};
-        use crate::parser::{QuoteScope, QuoteType};
-
-        // As every sub was compiled before the candidate scan: through
-        // `RegexBuilder` with `dot_matches_new_line`. (The superscript and
-        // subscript patterns were built without the flag, but contain no `.`
-        // metacharacter, so this is the same matcher.)
-        let pattern = regex::RegexBuilder::new(sub.source)
-            .dot_matches_new_line(true)
-            .build()
-            .unwrap();
-
-        let abs_kind = |caps: &regex::Captures<'_>, base: usize| -> Option<QuoteMatchKind> {
-            let abs = |r: std::ops::Range<usize>| (base + r.start)..(base + r.end);
-            let whole = caps.get(0).unwrap();
-            let escaped = whole.as_str().starts_with('\\');
-
-            match sub.scope {
-                QuoteScope::Constrained => {
-                    let prefix_end = caps.get(1).map_or(base, |m| base + m.end());
-                    let attrlist = caps.get(2).map(|m| abs(m.range()));
-                    let body = caps.get(3).map(|m| abs(m.range()))?;
-
-                    if escaped {
-                        let attrlist = attrlist?;
-
-                        return Some(QuoteMatchKind::Wrap {
-                            keep_literal: Some((attrlist.start - 1)..(attrlist.end + 1)),
-                            body,
-                            construct: (attrlist.end + 1)..(base + whole.end()),
-                            attrlist: None,
-                            variant: style_variant(sub.type_, false),
-                            form: crate::inlines::SpanForm::Constrained,
-                        });
-                    }
-
-                    let has_attrs = attrlist.is_some();
-
-                    Some(QuoteMatchKind::Wrap {
-                        keep_literal: None,
-                        construct: prefix_end..(base + whole.end()),
-                        body,
-                        attrlist,
-                        variant: style_variant(sub.type_, has_attrs),
-                        form: crate::inlines::SpanForm::Constrained,
-                    })
-                }
-
-                QuoteScope::Unconstrained => {
-                    if escaped {
-                        return None;
-                    }
-
-                    let attrlist = caps.get(1).map(|m| abs(m.range()));
-                    let body = caps.get(2).map(|m| abs(m.range()))?;
-                    let has_attrs = attrlist.is_some();
-
-                    Some(QuoteMatchKind::Wrap {
-                        keep_literal: None,
-                        construct: (base + whole.start())..(base + whole.end()),
-                        body,
-                        attrlist,
-                        variant: style_variant(sub.type_, has_attrs),
-                        form: crate::inlines::SpanForm::Unconstrained,
-                    })
-                }
-            }
-        };
-
-        let mut matches = Vec::new();
-        let mut base = 0usize;
-
-        'retry: loop {
-            let haystack = &s[base..];
-
-            for caps in pattern.captures_iter(haystack) {
-                let whole = caps.get(0).unwrap();
-
-                let full = (base + whole.start())..(base + whole.end());
-                let after = &haystack[whole.end()..];
-
-                if sub.type_ == QuoteType::Monospaced
-                    && sub.scope == QuoteScope::Constrained
-                    && after.starts_with(['"', '\'', '`'])
-                {
-                    let skip = if whole.as_str().starts_with('\\') {
-                        2
-                    } else {
-                        whole.as_str().chars().next().map_or(1, char::len_utf8)
-                    };
-
-                    base = full.start + skip;
-                    continue 'retry;
-                }
-
-                if let Some(kind) = abs_kind(&caps, base) {
-                    matches.push(QuoteMatch { full, kind });
-                } else {
-                    matches.push(QuoteMatch {
-                        full,
-                        kind: QuoteMatchKind::Unescape,
-                    });
-                }
-            }
-
-            break;
-        }
-
-        matches
-    }
-
-    #[test]
-    fn candidate_scan_matches_the_unanchored_reference() {
-        // The candidate scan must enumerate exactly the matches the
-        // unanchored sweep it replaced would have found, in the same order,
-        // with the same capture ranges. The fixtures concentrate on the
-        // shapes the scan's start enumeration has to get right: attribute
-        // lists that contain marker bytes (the one way a match starts well
-        // before the candidate that anchors it), escapes riding the prefix
-        // class, doubled and tripled delimiters, matches at either edge,
-        // multi-byte characters beside delimiters, unclosed brackets, and
-        // the constrained-monospace retry.
-        let fixtures = [
-            // Nothing to find.
-            "",
-            "plain prose with none of it",
-            // The plain shapes, at every position.
-            "*b*",
-            "a *b* c",
-            "*b* tail",
-            "head *b*",
-            "**b**",
-            "a **b** c",
-            "***b***",
-            "*a*b*",
-            "**a**b**",
-            "_i_ and __ii__",
-            "`m` and ``mm``",
-            "#h# and ##hh##",
-            "^s^ x ~t~",
-            "\"`dq`\" '`sq`'",
-            // Escapes (constrained: the backslash is the prefix char;
-            // unconstrained: its own optional group).
-            r"\*b*",
-            r"a \*b* c",
-            r"\**b**",
-            r"\[a]*b*",
-            r"[a]\*b*",
-            // Attribute lists, including marker bytes *inside* the list —
-            // the leftmost-faithfulness case.
-            "[a]*b*",
-            "x [.role]#m#",
-            "[a*b]*c*",
-            "[z#z]#A#",
-            ".[z#z]#A#",
-            "x[a#b]#body#",
-            "[*]*b*",
-            "[a]b *c*",
-            // Unclosed and empty brackets.
-            "[open *b*",
-            "[]*b*",
-            "]*b*",
-            "[a][b]*c*",
-            "*[a]b*",
-            // Word-adjacent (constrained boundary failures).
-            "a*b*c",
-            "1*2*3",
-            "*b*word",
-            // Doubled-delimiter interplay.
-            "**a* b*",
-            "*a **b** c*",
-            "``a` b`",
-            // Multi-byte characters beside markers.
-            "é*ü*é",
-            "→*b*←",
-            "«*b*»",
-            "*é*",
-            // Multi-line bodies (dot_matches_new_line).
-            "*a\nb*",
-            "**a\nb**",
-            // The constrained-monospace retry chain.
-            "`a`'",
-            "x `a`' y",
-            "`a`'`b`'",
-            r"\`a`'",
-            "`a`\"",
-            "`a`` b``",
-            // Smart quotes beside their own markers.
-            "\"`a`\"b",
-            "'`a`'.",
-            "\"`a`'",
-            // Prose full of the smart-quote subs' *first* bytes with no
-            // construct — the shape the whole-delimiter needle exists for —
-            // and the overlap traps beside it: a lone first byte directly
-            // before a real construct, and a needle occurrence split across
-            // an apostrophe and a monospace span.
-            "It's the author's own text, \"quoted\" the plain way.",
-            "''`a`'",
-            "\"\"`a`\"",
-            "it'`s`'",
-            "'`a`''`b`'",
-            // Dense soup.
-            "*a* [b*c]*d* \\*e* [f]#g# `h`' **i**",
-        ];
-
-        use crate::content::quote_subs;
-
-        for sub in quote_subs() {
-            for fixture in fixtures {
-                assert_eq!(
-                    super::find_matches(sub, fixture),
-                    reference_find_matches(sub, fixture),
-                    "candidate scan diverged for {:?}/{:?} on {fixture:?}",
-                    sub.type_,
-                    sub.scope,
-                );
-            }
         }
     }
 }
