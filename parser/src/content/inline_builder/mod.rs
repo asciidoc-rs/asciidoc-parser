@@ -799,8 +799,8 @@ mod tests {
         );
     }
 
-    /// Builds and folds the single-pass tree for `source` — the same [`build`]
-    /// a real cutover would call — through the built-in HTML renderer.
+    /// Builds and folds the single-pass tree for `source` through the
+    /// built-in HTML renderer.
     fn built(source: &str, parser: &Parser) -> String {
         let nodes = build(Span::new(source), parser, None);
         fold_html(&nodes, &HtmlInlineRenderer {}, &parser.render_context())

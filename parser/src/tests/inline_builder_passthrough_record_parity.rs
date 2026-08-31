@@ -1,11 +1,10 @@
 //! A differential harness for [`Content::passthroughs`], which is now a **view
 //! over the inline tree** rather than the extraction pass's own list.
 //!
-//! Design §5.2's survey named this API as one of the six things `run_pipeline`
-//! still solely owned, and called it the one where *deleting* the API was as
-//! live an option as building a tree-backed view. The view is the chosen path,
-//! and this is the corpus that gates it: for every fixture, what the string
-//! pipeline extracted and what the tree holds must be the same facts.
+//! Deleting the API outright was as live an option as building a tree-backed
+//! view; the view is the path that was chosen, and this is the corpus that
+//! gated it: for every fixture, what the string pipeline extracted and what
+//! the tree holds must be the same facts.
 //!
 //! Three increments were needed before the tree could answer at all, and each
 //! one is visible in what this corpus asserts:
@@ -27,9 +26,10 @@
 //! [`the_view_returns_document_order`] pins it from both ends.
 //!
 //! The golden side is **frozen** (`snapshots/passthrough_records.txt`). Its
-//! source is [`Passthroughs::extract_from`] — the passthrough sentinel system
-//! design §4.2 retires — so it is one of the corpora that would otherwise have
-//! nothing left to compare against once that system is deleted. See
+//! source was `Passthroughs::extract_from` — the passthrough sentinel system,
+//! retired along with the rest of the crate's string-substitution
+//! implementation — so this is one of the corpora that would otherwise have
+//! nothing left to compare against now that system is gone. See
 //! [`golden`] for why this one round-trips the recording rather than comparing
 //! rendered bytes, and why the sentinel it preserves is the point.
 
@@ -48,30 +48,32 @@ const RECORDING: &str = "passthrough_records";
 /// group it is restored under.
 type Record = (String, SubstitutionGroup);
 
-/// What the **string pipeline** extracts, in extraction order — read back from
-/// the recording, having been frozen there while the extraction pass still ran.
+/// What the **string pipeline** extracted, in extraction order — read back
+/// from the recording, having been frozen there while the extraction pass
+/// still ran.
 ///
-/// Read from a throwaway [`Passthroughs::extract_from`] over the same source
-/// rather than from the content under test, whose own list is the view now —
-/// comparing that against itself would assert nothing.
+/// The recording was read from a throwaway `Passthroughs::extract_from` over
+/// the same source rather than from the content under test, whose own list
+/// was the view even then — comparing that against itself would have
+/// asserted nothing.
 ///
-/// That independence is what the recording *keeps*. `Passthroughs` is the
-/// passthrough sentinel system (design §4.2), which this branch is about to
-/// delete: once it is gone the extraction pass cannot answer, and a golden
-/// computed from it would have nowhere left to come from but the view. So the
-/// answer is frozen now, exactly as design §5.2's own freeze did for the
-/// golden-HTML corpora — the helper's body becomes a lookup and none of this
-/// module's assertions move.
+/// That independence is what the recording *keeps*. `Passthroughs` was the
+/// passthrough sentinel system, retired along with the rest of the crate's
+/// string-substitution implementation: once it was gone the extraction pass
+/// could no longer answer, and a golden computed from it would have had
+/// nowhere left to come from but the view. So the answer was frozen ahead of
+/// that, the same way the golden-HTML corpora's own freeze was — the
+/// helper's body is a lookup and none of this module's assertions move.
 ///
 /// The freeze is a **round trip**, not a string comparison, because this
 /// corpus's assertions read the golden's *structure*: its length, whether it
 /// `contains` one of the view's entries, and — in
 /// [`a_stem_expression_embedding_a_passthrough_reports_both_entries`] — whether
 /// its outer STEM body still carries the `\u{96}` extraction sentinel. That
-/// last one is the reason to freeze this corpus rather than retire it with the
-/// pass: the recording preserves the exact artifact the deletion removes, so
+/// last one is the reason this corpus was frozen rather than retired with the
+/// pass: the recording preserves the exact artifact the deletion removed, so
 /// the documented difference between the two sides stays pinned to bytes
-/// afterwards rather than becoming untestable.
+/// rather than becoming untestable.
 fn golden(source: &str, _parser: &Parser) -> Vec<Record> {
     decode(&recorded(RECORDING, source))
 }
@@ -404,8 +406,8 @@ fn a_stem_expression_embedding_a_passthrough_reports_both_entries() {
     // Reporting the restored body is the decision, not an oversight: the
     // sentinel is an artifact of the extraction pass's own bookkeeping, and a
     // caller asking what the author wrote is better served by `x <b> y` than by
-    // a private control character. The sentinel disappears entirely when step 6
-    // deletes that pass.
+    // a private control character. The sentinel disappeared entirely once that
+    // pass was deleted; only this frozen recording still carries it.
     let parser = Parser::default();
 
     for (source, restored) in [
@@ -448,10 +450,11 @@ fn a_deferred_stem_macro_reports_only_its_inner_passthrough() {
     // `children`, and nothing to report the outer entry from. The view reports
     // only the inner passthrough where the pass reports both.
     //
-    // Closing it means building the node anyway, which would risk a construct
-    // spanning the boundary going unrecognized — a rendering regression traded
-    // for a reporting one. It waits for the cutover that deletes the extraction
-    // pass and with it the question.
+    // Closing it would mean building the node anyway, which would risk a
+    // construct spanning the boundary going unrecognized — a rendering
+    // regression traded for a reporting one. That trade was never made: the
+    // extraction pass retired with the divergence still open, so it is now
+    // pinned to the frozen recording rather than closed.
     let parser = Parser::default();
 
     let (golden, view) = both("a stem:c,q[x +++<b>+++ y] z", &parser);

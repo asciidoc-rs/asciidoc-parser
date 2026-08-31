@@ -445,9 +445,8 @@ The mix of constrained and unconstrained formatting marks in the line is ambiguo
             panic!("Unexpected block type: {block2:?}");
         };
 
-        // NOTE: this is the **one golden output the inline-AST cutover
-        // changes** (design §5.2 Phase 4, step 6), and it changes for
-        // the better.
+        // NOTE: this is the **one golden output the inline-AST migration
+        // changes**, and it changes for the better.
         //
         // The string pipeline ran its quoted-text subs as passes over one flat
         // string, so the `#`-delimited highlight pass matched across the markup
