@@ -267,35 +267,32 @@ fn apply_attribute_references_recursive<'src>(
     diagnostics: &mut Vec<(Span<'src>, String)>,
 ) -> Vec<InlineNode<'src>> {
     // A level with no `Styled` child — the common leaf-only case — has
-    // nothing to descend into, so it skips the rebuild of its node vector
-    // entirely.
-    let nodes: Vec<InlineNode<'src>> = if nodes
+    // nothing to descend into, so it skips the walk over its nodes entirely.
+    // The descent mutates each span's children in place rather than moving
+    // every node through a rebuild of the level's vector: only the one field
+    // the recursion refines changes hands.
+    let mut nodes = nodes;
+
+    if nodes
         .iter()
         .any(|node| matches!(node, InlineNode::Styled(_)))
     {
-        nodes
-            .into_iter()
-            .map(|node| match node {
-                InlineNode::Styled(mut styled) => {
-                    styled.children = apply_attribute_references_recursive(
-                        styled.children,
-                        root,
-                        parser,
-                        counters,
-                        missing.nested(),
-                        &[],
-                        specials,
-                        diagnostics,
-                    );
-                    InlineNode::Styled(styled)
-                }
-
-                other => other,
-            })
-            .collect()
-    } else {
-        nodes
-    };
+        for node in nodes.iter_mut() {
+            if let InlineNode::Styled(styled) = node {
+                let children = std::mem::take(&mut styled.children);
+                styled.children = apply_attribute_references_recursive(
+                    children,
+                    root,
+                    parser,
+                    counters,
+                    missing.nested(),
+                    &[],
+                    specials,
+                    diagnostics,
+                );
+            }
+        }
+    }
 
     attribute_references_level(
         nodes,

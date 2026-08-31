@@ -50,31 +50,32 @@ fn apply_level<'src>(
     // span before this level's own pass runs. A nested level is never the
     // root. A level with
     // neither — the common leaf-only case — has nothing to descend into, so
-    // it skips the rebuild of its node vector entirely.
-    let nodes: Vec<InlineNode<'src>> = if nodes
+    // it skips the walk over its nodes entirely. The descent mutates each
+    // parent's children in place rather than moving every node through a
+    // rebuild of the level's vector: only the one field the recursion
+    // refines changes hands.
+    let mut nodes = nodes;
+
+    if nodes
         .iter()
         .any(|node| matches!(node, InlineNode::Styled(_) | InlineNode::Ref(_)))
     {
-        nodes
-            .into_iter()
-            .map(|node| match node {
-                InlineNode::Styled(mut styled) => {
-                    styled.children = apply_level(styled.children, root, parser, attrlist, false);
-                    InlineNode::Styled(styled)
+        for node in nodes.iter_mut() {
+            match node {
+                InlineNode::Styled(styled) => {
+                    let children = std::mem::take(&mut styled.children);
+                    styled.children = apply_level(children, root, parser, attrlist, false);
                 }
 
-                InlineNode::Ref(mut reference) => {
-                    reference.children =
-                        apply_level(reference.children, root, parser, attrlist, false);
-                    InlineNode::Ref(reference)
+                InlineNode::Ref(reference) => {
+                    let children = std::mem::take(&mut reference.children);
+                    reference.children = apply_level(children, root, parser, attrlist, false);
                 }
 
-                other => other,
-            })
-            .collect()
-    } else {
-        nodes
-    };
+                _ => {}
+            }
+        }
+    }
 
     if parser.is_attribute_set("hardbreaks-option")
         || attrlist.is_some_and(|attrlist| attrlist.has_option("hardbreaks"))
