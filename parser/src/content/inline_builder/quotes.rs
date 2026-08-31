@@ -616,18 +616,87 @@ fn probe_styled_boundaries_markup(styled: &Styled<'_>) -> (String, String) {
 ///
 /// `root` is the whole-content source span; every node's precise `location` is
 /// sliced from it. `parser` parses an attributed quote's attribute list.
+///
+/// While the content is one lone [`Text`](InlineNode::Text) node — every
+/// level's shape until some sub first matches, and a plain paragraph's shape
+/// through the whole loop — the per-sub [`level_may_match_sub`] answer is
+/// read off a [`marker_mask`] computed **once** from that node's value
+/// instead of one `contains` scan per marker per sub: thirteen subs re-answer
+/// "is my marker byte present?" from one pass over the text. The mask is
+/// keyed to the value's own address and length, so a sub that changes the
+/// level (or replaces the value, as an unescape does) simply misses the key
+/// and the next sub's turn recomputes it.
 pub(super) fn apply_quotes<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
     let mut nodes = nodes;
+    let mut cached_mask: Option<(usize, usize, u8)> = None;
 
     for sub in quote_subs() {
+        if let Some(value) = single_text_value(&nodes) {
+            let key = (value.as_ptr() as usize, value.len());
+
+            let mask = match cached_mask {
+                Some((ptr, len, mask)) if (ptr, len) == key => mask,
+                _ => {
+                    let mask = marker_mask(value);
+                    cached_mask = Some((key.0, key.1, mask));
+                    mask
+                }
+            };
+
+            // The same answer `level_may_match_sub` gives for a lone `Text`
+            // node — every marker byte present somewhere in the value — read
+            // off the mask. A sub ruled out here matches nothing and has
+            // nothing to descend into, so its whole turn is skipped.
+            if !sub_markers(sub.type_)
+                .iter()
+                .all(|&marker| mask & marker_bit(marker) != 0)
+            {
+                continue;
+            }
+        }
+
         nodes = apply_quote_sub(sub, nodes, root, parser, LevelContext::ROOT);
     }
 
     nodes
+}
+
+/// The bit [`marker_mask`] records the presence of `marker` under, or `0` for
+/// a character that is not one of the eight [`sub_markers`] characters (which
+/// no [`QuoteSub`] then asks about; `every_quote_sub_marker_has_a_mask_bit`
+/// pins that no marker answers `0` here).
+fn marker_bit(marker: char) -> u8 {
+    match marker {
+        '*' => 1 << 0,
+        '"' => 1 << 1,
+        '\'' => 1 << 2,
+        '`' => 1 << 3,
+        '_' => 1 << 4,
+        '#' => 1 << 5,
+        '^' => 1 << 6,
+        '~' => 1 << 7,
+        _ => 0,
+    }
+}
+
+/// One pass over `text` recording which of the eight [`sub_markers`]
+/// characters occur in it, as a bitmask of [`marker_bit`]s. Each marker is a
+/// single ASCII character, so byte presence and character presence coincide —
+/// which is also why probing byte-by-byte cannot miss one: a marker byte
+/// never occurs inside a multi-byte character's encoding, and a non-ASCII
+/// byte read as a `char` is a Latin-1 character no marker equals.
+fn marker_mask(text: &str) -> u8 {
+    let mut mask = 0u8;
+
+    for b in text.bytes() {
+        mask |= marker_bit(b as char);
+    }
+
+    mask
 }
 
 /// Applies one [`QuoteSub`] to `nodes`, first descending into the [`Styled`]
@@ -2083,6 +2152,56 @@ mod tests {
             QuoteType::LatexMath,
         ] {
             assert!(sub_markers(type_).is_empty(), "{type_:?}");
+        }
+    }
+
+    #[test]
+    fn every_quote_sub_marker_has_a_mask_bit() {
+        // `apply_quotes`'s single-text fast path answers `level_may_match_sub`
+        // from `marker_mask`, so every marker a real sub asks about must have
+        // its own bit — a marker `marker_bit` answered `0` for would make the
+        // mask test `!= 0` fail even with the marker present, silently
+        // skipping a sub that should run.
+        use super::{marker_bit, quote_subs, sub_markers};
+
+        for sub in quote_subs() {
+            for &marker in sub_markers(sub.type_) {
+                assert_ne!(
+                    marker_bit(marker),
+                    0,
+                    "{:?}'s marker {marker:?} has no mask bit",
+                    sub.type_
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_marker_mask_agrees_with_a_contains_scan_per_marker() {
+        // The mask is a one-pass restatement of "is this marker character
+        // present?", so for any text the two must agree marker by marker —
+        // including multi-byte text, where a marker byte can never be part of
+        // another character's encoding.
+        use super::{marker_bit, marker_mask};
+
+        for text in [
+            "",
+            "plain prose, nothing quote-like at all",
+            "*bold* and _italic_ and `mono`",
+            "#mark# ^sup^ ~sub~",
+            "\"`smart`\" and '`single`'",
+            "unicode — with * one marker",
+            "\u{201c}curly\u{201d} but no markers",
+        ] {
+            let mask = marker_mask(text);
+
+            for marker in ['*', '"', '\'', '`', '_', '#', '^', '~'] {
+                assert_eq!(
+                    mask & marker_bit(marker) != 0,
+                    text.contains(marker),
+                    "mask disagrees with contains for {marker:?} in {text:?}"
+                );
+            }
         }
     }
 
