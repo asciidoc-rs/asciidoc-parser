@@ -469,8 +469,13 @@ fn resolve_counters<'nodes, 'src>(
                 continue;
             }
 
+            // Group 3 is part of the same alternation branch as group 2
+            // (`(counter2?):([^{}]+?)`), so it is always present once group 2
+            // matched, per `ATTRIBUTE_REFERENCE`'s definition.
             #[allow(clippy::unwrap_used)]
             let expr = caps.get(3).unwrap().as_str();
+            // `unwrap` on group 0 is safe: a capture always has an overall
+            // match.
             #[allow(clippy::unwrap_used)]
             let start = caps.get(0).unwrap().start();
 
@@ -976,7 +981,9 @@ fn find_attribute_matches(s: &str, parser: &Parser, missing: MissingHandling) ->
             continue;
         }
 
-        // Otherwise this is a plain attribute reference (group 4).
+        // Otherwise this is a plain attribute reference (group 4): the only
+        // remaining alternation branch once group 2 (checked above) is absent,
+        // so group 4 is always present here.
         #[allow(clippy::unwrap_used)]
         let attr_name = caps.get(4).unwrap().as_str();
         let lookup_name = attribute_lookup_name(attr_name);

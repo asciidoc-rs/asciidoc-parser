@@ -1116,6 +1116,10 @@ fn build_bare_attrlisted_passthrough_node<'src>(
         (caps.get(3), caps.get(5))
     };
 
+    // `attrlist` is group 1 when `is_backtick` (which is itself derived from
+    // `caps.get(1).is_some()` at the call site) or else group 3, which is
+    // guaranteed `Some` here since reaching this function requires either
+    // `is_backtick` or `is_plus_attrlisted` (`caps.get(3).is_some()`) to hold.
     #[allow(clippy::unwrap_used)]
     let attrlist_m = attrlist.unwrap();
     let attrlist_span = source_slice(

@@ -230,6 +230,9 @@ fn find_indexterm_matches<'src>(
             let full = whole.start()..whole.end();
             let is_visible = name.as_str() == "indexterm2";
 
+            // Group 2 (the macro argument) is part of the same alternation
+            // branch as group 1 (`(indexterm2?):\[ (.*?[^\\]) \]`), so it is
+            // always present once group 1 matched.
             #[allow(clippy::unwrap_used)]
             let arg = caps.get(2).unwrap().range();
 
@@ -250,6 +253,10 @@ fn find_indexterm_matches<'src>(
         // this match's `full` range instead; a run of `)` never starts
         // a new match, so the next `captures_iter` match still lands
         // past them.
+        //
+        // The only remaining alternation branch once group 1 (checked above)
+        // is absent, so group 3 (the shorthand enclosed text) is always
+        // present here.
         #[allow(clippy::unwrap_used)]
         let inner = caps.get(3).unwrap().range();
 
@@ -503,8 +510,10 @@ fn emit_shown_term_range<'src>(
             offset += 2;
             cursor = offset - 1;
         } else {
-            // `SPAN_PLACEHOLDER` is a multi-byte character, so the scan
-            // advances by whole characters rather than by bytes.
+            // `rest` is non-empty here (the loop guard `offset < range.end`
+            // ensures at least one byte remains), so a first character always
+            // exists. The scan advances by whole characters because
+            // index-term text can contain multi-byte UTF-8 characters.
             #[allow(clippy::unwrap_used)]
             let c = rest.chars().next().unwrap();
             offset += c.len_utf8();
