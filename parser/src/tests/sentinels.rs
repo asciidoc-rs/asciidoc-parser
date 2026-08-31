@@ -23,6 +23,17 @@
 //!     read back as the parser's own; and
 //!   * the typed codepoints reach the output unchanged, since a Private Use
 //!     Area character is content like any other.
+//!
+//! One byte-pattern mechanism is still live, and the last five tests here are
+//! about it rather than about issue #1235: `tokened_bracket`/`tokened_text`
+//! write a `MASKED_PIECE_PLACEHOLDER` pair per masked piece into the text
+//! `Attrlist::parse` splits, and every reader recovers which piece an
+//! occurrence stands for by counting occurrences in the parsed text. Two of
+//! those tests pin `escape_passthrough_sentinels`, the guard on the one road a
+//! forged occurrence can take today; one records the road it does *not* guard;
+//! and two pin the inputs that rule out replacing the whole scheme with a
+//! byte-offset table (see the design doc's "The masked-piece placeholder's
+//! offset table cannot be carried through `Attrlist::parse`" note).
 
 use crate::{
     Document, Parser,
@@ -124,15 +135,26 @@ fn a_placeholder_from_an_attribute_value_cannot_forge_an_image_restore() {
     // occurrence (`tokened_bracket`/`Attrlist::into_owned_restoring`), rather
     // than by node structure. An attribute reference is substituted into the
     // bracket *before* the image macro is even recognized, so an attribute
-    // whose value happens to spell that same byte — sitting in the same
+    // whose value happens to spell that same pair — sitting in the same
     // bracket as a real passthrough — would otherwise be indistinguishable
     // from the pipeline's own placeholder and splice the passthrough's
     // rendered body into `alt` instead of the literal text the document
     // defined.
+    //
+    // The forged value has to spell the placeholder **exactly**
+    // (`MASKED_PIECE_PLACEHOLDER`'s own two adjacent codepoints, no digit
+    // between them) and has to sit **ahead** of the real masked piece in the
+    // list's own parse order: the restore walks a shared cursor left to
+    // right, so a forgery behind the real piece only reaches an already
+    // spent `bodies` and is copied through by `restore_tokens`' leniency
+    // instead. Both halves matter — this test spelled the retired
+    // digit-carrying shape in the other order until 2026-08-30 and passed
+    // with the escape guard removed, pinning the escape's *output* rather
+    // than the forgery it exists to prevent.
     let doc = Parser::default().parse(concat!(
-        ":forge: \u{96}0\u{97}\n",
+        ":forge: \u{96}\u{97}\n",
         "\n",
-        "image:x.png[++real++,alt={forge}]\n",
+        "image:x.png[alt={forge},++real++]\n",
     ));
 
     let rendered = last_paragraph(&doc);
@@ -141,9 +163,125 @@ fn a_placeholder_from_an_attribute_value_cannot_forge_an_image_restore() {
         !rendered.contains("alt=\"real\""),
         "the forged attribute value must not restore the passthrough's body: {rendered:?}"
     );
+
+    // The genuine occurrence keeps the one body supplied, in the positional
+    // slot it actually stands in (`width`), and the forged value reaches the
+    // output escaped.
     assert_eq!(
         rendered,
-        "<span class=\"image\"><img src=\"x.png\" alt=\"\u{e005}s0\u{e005}e\"></span>"
+        "<span class=\"image\"><img src=\"x.png\" alt=\"\u{e005}s\u{e005}e\" width=\"real\"></span>"
+    );
+}
+
+#[test]
+fn a_typed_placeholder_before_a_masked_piece_forges_a_bracket_restore() {
+    // The **open** half of the same hole, pinned rather than fixed (see the
+    // design doc's "The masked-piece placeholder's offset table cannot be
+    // carried through `Attrlist::parse`" note).
+    //
+    // `escape_passthrough_sentinels` guards exactly one road to a forged
+    // placeholder: a value spliced in by `split_attribute_value`, the
+    // attribute-reference step's own content-level splice. A document that
+    // types the pair **in the clear** inside the bracket never passes through
+    // that splice, so nothing escapes it — and ahead of a real masked piece
+    // it captures that piece's body exactly as a spliced forgery would.
+    //
+    // `image.rs`'s
+    // `a_bracket_body_carrying_sentinel_shaped_bytes_is_not_re_matched`
+    // covers the *other* order (a typed pair behind the only real piece,
+    // where `bodies` is already spent and the leniency keeps it literal),
+    // which is why this one went unnoticed. The fix is the mechanism change
+    // the design-doc note recommends — escaping the placeholder codepoints in
+    // the bytes `tokened_bracket`/`tokened_text` *copy*, so every occurrence
+    // in the tokened text is one the tokener itself wrote — and it is a
+    // separate increment; until it lands this test records the behavior
+    // rather than blessing it.
+    let doc = Parser::default().parse("image:x.png[alt=\u{96}\u{97},++real++]\n");
+
+    assert_eq!(
+        last_paragraph(&doc),
+        "<span class=\"image\"><img src=\"x.png\" alt=\"real\" width=\"\u{96}\u{97}\"></span>",
+        "known gap: the typed pair captured the passthrough's body"
+    );
+
+    // The link family's display-text list shares `tokened_bracket`, so it
+    // shares the gap: the typed pair takes `++real++`'s body as the role, and
+    // the display text falls back to the target.
+    let doc = Parser::default().parse("link:x[role=\u{96}\u{97},++real++]\n");
+
+    assert_eq!(
+        last_paragraph(&doc),
+        "<a href=\"x\" class=\"bare real\">x</a>",
+        "known gap: the typed pair captured the passthrough's body"
+    );
+}
+
+#[test]
+fn an_attrlist_level_reference_expansion_moves_a_placeholder_in_the_tokened_text() {
+    // Evidence for the design-doc note named above: the byte offsets
+    // `tokened_bracket` could record for the occurrences it writes are not
+    // stable across the parse that consumes them.
+    //
+    // `Attrlist::parse` runs an attribute-reference substitution of its own
+    // over the text it is handed, whenever that text holds both a `{` and a
+    // `}`. A `subs=` list naming `macros` but not `attributes` reaches the
+    // macros step with every reference still unresolved — the content-level
+    // pass never ran — so that inner substitution is the one that expands
+    // `{name}` here, *after* `tokened_bracket` has already written its
+    // placeholder into the same string. The text splits as
+    // `alt=a-much-longer-value,title=\u{96}\u{97}` where the tokener wrote
+    // `alt={name},title=\u{96}\u{97}`: the occurrence sits at byte 30, not at
+    // byte 17.
+    //
+    // Restoration by *position* is unaffected — the occurrence count either
+    // side of the expansion is what it walks — which is why this renders
+    // correctly today and would not under a byte-offset table.
+    let doc = Parser::default().parse(concat!(
+        ":name: a-much-longer-value\n",
+        "\n",
+        "[subs=macros]\n",
+        "image:x.png[alt={name},title=++real++]\n",
+    ));
+
+    assert_eq!(
+        last_paragraph(&doc),
+        "<span class=\"image\"><img src=\"x.png\" alt=\"a-much-longer-value\" title=\"real\"></span>"
+    );
+
+    // The link family's display-text list reaches the same inner
+    // substitution through the same `Attrlist::parse` call.
+    let doc = Parser::default().parse(concat!(
+        ":name: a-much-longer-value\n",
+        "\n",
+        "[subs=macros]\n",
+        "link:x[++real++,role={name}]\n",
+    ));
+
+    assert_eq!(
+        last_paragraph(&doc),
+        "<a href=\"x\" class=\"a-much-longer-value\">real</a>"
+    );
+}
+
+#[test]
+fn a_quoted_values_own_unescape_moves_a_placeholder_in_the_parsed_value() {
+    // The second, brace-independent half of the same evidence.
+    //
+    // Even if the text `Attrlist::parse` splits were byte-identical to what
+    // `tokened_bracket` wrote, a *parsed value* is not a slice of it:
+    // `ElementAttribute::parse` skips leading whitespace, strips the name and
+    // `=`, strips the quotes, rewrites `\"` to `"` with a plain
+    // `String::replace`, and trims trailing spaces — and reports none of
+    // that back, returning only the attribute and the offset the entry ends
+    // at. The `\"` here sits ahead of the placeholder and shortens the value
+    // by one byte, so an offset recorded against the tokened text lands one
+    // byte late inside the value even before the four bytes `alt="` accounts
+    // for.
+    let doc = Parser::default().parse("image:x.png[alt=\"a \\\" b ++real++ c\"]\n");
+
+    assert_eq!(
+        last_paragraph(&doc),
+        "<span class=\"image\"><img src=\"x.png\" alt=\"a &quot; b real c\"></span>"
     );
 }
 
@@ -151,25 +289,29 @@ fn a_placeholder_from_an_attribute_value_cannot_forge_an_image_restore() {
 fn a_placeholder_from_an_attribute_value_cannot_forge_a_link_display_text_restore() {
     // The `link:` macro's display-text list shares `tokened_bracket` and
     // `Attrlist::into_owned_restoring` with the image family's bracket (see
-    // `a_placeholder_from_an_attribute_value_cannot_forge_an_image_restore`),
-    // so the same forgery would reach it through a `role=` attribute sitting
-    // beside a real passthrough in the same display-text list, absent the
-    // same escape guard.
+    // `a_placeholder_from_an_attribute_value_cannot_forge_an_image_restore`,
+    // including why the forged value has to spell the pair exactly and sit
+    // ahead of the real passthrough), so the same forgery reaches it through
+    // a `role=` attribute sitting beside a real passthrough in the same
+    // display-text list, absent the same escape guard.
     let doc = Parser::default().parse(concat!(
-        ":forge: \u{96}0\u{97}\n",
+        ":forge: \u{96}\u{97}\n",
         "\n",
-        "link:x[++real++,role={forge}]\n",
+        "link:x[role={forge},++real++]\n",
     ));
 
     let rendered = last_paragraph(&doc);
 
     assert!(
-        !rendered.contains("class=\"real\""),
+        !rendered.contains("class=\"bare real\""),
         "the forged attribute value must not restore the passthrough's body: {rendered:?}"
     );
+
+    // With no positional attribute left to be the display text, the target
+    // stands in for it and the auto-link `bare` role joins the escaped one.
     assert_eq!(
         rendered,
-        "<a href=\"x\" class=\"\u{e005}s0\u{e005}e\">real</a>"
+        "<a href=\"x\" class=\"bare \u{e005}s\u{e005}e\">x</a>"
     );
 }
 
