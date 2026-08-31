@@ -211,7 +211,11 @@ pub(super) fn apply_macros<'src>(
 /// Reports whether `value` holds any byte a macro family's own sniff could
 /// possibly be satisfied by — see the gate in [`apply_macros`] for the
 /// needle-by-needle accounting this five-byte class summarizes.
-fn level_may_have_macros(value: &str) -> bool {
+///
+/// `pub(super)` (and re-exported for tests) so
+/// `tests::inline_builder_macro_gate` can pin every family's needle
+/// against the byte class from outside this module.
+pub(crate) fn level_may_have_macros(value: &str) -> bool {
     value
         .bytes()
         .any(|b| matches!(b, b':' | b'[' | b'(' | b'@' | b'&'))
@@ -1712,54 +1716,5 @@ mod tests {
                 WarningType::UnsafeLinkSchemeRejected("javascript:alert(1)".to_string()),
             ]
         );
-    }
-
-    #[test]
-    fn every_macro_family_needle_carries_a_gate_byte() {
-        // The gate in `apply_macros` skips the whole step for a lone `Text`
-        // value holding none of its five bytes, so a minimal construct of
-        // every family — spelled as the *value* the step reads, meaning
-        // post-escaping for the xref's angle form — must answer `true`, or
-        // the gate would silently disable that family.
-        use super::level_may_have_macros;
-
-        for construct in [
-            "[[[biblio]]]",
-            "[[id]]",
-            "anchor:id[]",
-            "image:a.png[alt]",
-            "icon:heart[]",
-            "kbd:[F1]",
-            "btn:[OK]",
-            "menu:File[Save]",
-            "((term))",
-            "indexterm:[primary]",
-            "indexterm2:[shown]",
-            "https://example.com",
-            "link:page.html[text]",
-            "mailto:a@example.org[]",
-            "doc@example.org",
-            "xref:section[]",
-            "&lt;&lt;section&gt;&gt;",
-        ] {
-            assert!(
-                level_may_have_macros(construct),
-                "the gate would wrongly skip {construct:?}"
-            );
-        }
-
-        // Each of the five bytes opens the gate on its own, so no family's
-        // needle rides on a byte the class does not carry.
-        for value in [":", "[", "(", "@", "&"] {
-            assert!(
-                level_may_have_macros(value),
-                "gate byte {value:?} does not open the gate"
-            );
-        }
-
-        // And the shape the gate exists for answers `false`.
-        assert!(!level_may_have_macros(
-            "plain prose with nothing any macro family recognizes"
-        ));
     }
 }
