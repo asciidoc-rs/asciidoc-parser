@@ -12,7 +12,7 @@ use crate::{
     content::{
         INLINE_IMAGE_MACRO, basename,
         inline_builder::{
-            fold::{fold_html, fold_stem, render_char},
+            fold::{fold_html, fold_stem, render_text},
             quotes::{
                 LevelContext, Piece, build_match_string, charref_entity, single_text_value,
                 source_slice, text_slice,
@@ -517,11 +517,7 @@ pub(in crate::content::inline_builder) fn restorable_body<'a>(
             ..
         } => {
             let mut out = String::with_capacity(value.len());
-
-            for ch in value.chars() {
-                render_char(ch, renderer, &mut out);
-            }
-
+            render_text(value, renderer, &mut out);
             Some(Cow::Owned(out))
         }
 
