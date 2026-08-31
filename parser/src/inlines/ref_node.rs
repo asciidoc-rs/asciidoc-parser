@@ -60,10 +60,9 @@ pub struct Ref<'src> {
     /// For a cross-reference whose target names another document, or the
     /// empty target naming the current document as a whole, the destination
     /// derived from the target itself — computed once, at build time, without
-    /// consulting any catalog (mirroring the string pipeline's own target
-    /// interpretation). `None` for a same-document reference to a specific id,
-    /// which resolves through [`resolved`](Self::resolved) instead, and always
-    /// `None` for a [`Link`](RefVariant::Link).
+    /// consulting any catalog. `None` for a same-document reference to a
+    /// specific id, which resolves through [`resolved`](Self::resolved)
+    /// instead, and always `None` for a [`Link`](RefVariant::Link).
     pub derived: Option<DerivedReference>,
 
     /// For a cross-reference, the **effective** `xrefstyle`: the
@@ -81,10 +80,9 @@ pub struct Ref<'src> {
     /// effect at the end of the parse. Reading it at fold time would therefore
     /// re-style a reference whenever the fold runs later than the parse — which
     /// is precisely what a re-fold at reference-resolution time does. Resolving
-    /// it into the node is design §3.3.1 point 1 (rendering is a pure fold,
-    /// with every order-dependent fact already resolved into node values),
-    /// and it is the same reading `InlineXrefReplacer` makes, in the same
-    /// pass.
+    /// it into the node keeps rendering a pure fold, with every
+    /// order-dependent fact already resolved into node values before the
+    /// fold ever runs.
     ///
     /// The `<<id>>` shorthand carries no attribute-list text, so its effective
     /// style is always the document-wide one.

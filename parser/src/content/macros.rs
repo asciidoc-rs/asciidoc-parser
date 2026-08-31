@@ -319,12 +319,12 @@ pub(crate) static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
 /// A branch-agnostic view over the capture groups of [`INLINE_LINK`], which has
 /// three parallel top-level branches (angle / link-macro / non-angle). Exactly
 /// one branch participates in any given match; this resolves the relevant
-/// groups so the replacer doesn't have to special-case the branch numbering
+/// groups so a caller doesn't have to special-case the branch numbering
 /// everywhere.
 ///
-/// Shared `pub(crate)` (with the string replacer) so the single-pass
+/// `pub(crate)` so the single-pass
 /// [`inline_builder`](crate::content::inline_builder) resolves an `INLINE_LINK`
-/// match's branch through the *same* group-numbering logic, rather than
+/// match's branch through this shared group-numbering logic, rather than
 /// duplicating that knowledge at its own recognition sink.
 pub(crate) struct NormalizedCaps<'c, 't> {
     caps: &'c Captures<'t>,
@@ -431,10 +431,10 @@ impl<'c, 't> NormalizedCaps<'c, 't> {
     /// bracketed attribute list, or an unterminated bare URL) and for both
     /// non-angle branches.
     ///
-    /// Shared `pub(crate)` (with the string replacer) so the single-pass
+    /// `pub(crate)` so the single-pass
     /// [`inline_builder`](crate::content::inline_builder) tells the ANGLE
-    /// branch's three alternatives apart through the *same* group-numbering
-    /// logic the replacer uses.
+    /// branch's three alternatives apart through this shared group-numbering
+    /// logic.
     pub(crate) fn angle_url(&self) -> Option<Match<'t>> {
         self.angle_url.and_then(|g| self.caps.get(g))
     }

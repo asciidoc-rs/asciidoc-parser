@@ -27,17 +27,17 @@ pub(super) fn apply_post_replacements<'src>(
 
 /// A break needs a `+`, and — off the root level, where an end-of-level
 /// match is discarded (see [`apply_level`]) — a `\n` for the pattern's `$` to
-/// anchor against. The string pipeline's own pre-check is the root form of
-/// this: it guards on a `+` alone, since its haystack is the whole rendered
-/// string. Shared between [`apply_level`]'s pre-build sniff and its
-/// post-build one, so the two answers cannot drift apart.
+/// anchor against. At the root, the guard is on a `+` alone, since the whole
+/// content's own haystack is checked there. Shared between [`apply_level`]'s
+/// pre-build sniff and its post-build one, so the two answers cannot drift
+/// apart.
 fn level_prefilter(s: &str, is_root: bool) -> bool {
     s.contains('+') && (is_root || s.contains('\n'))
 }
 
 /// One level of the post-replacement pass. `is_root` marks the content's own
 /// top level, which is the only level whose end coincides with the end of the
-/// string pipeline's haystack — see the match filter below for why that
+/// content's own match string — see the match filter below for why that
 /// decides whether a ` +` ending the level is a break.
 fn apply_level<'src>(
     nodes: Vec<InlineNode<'src>>,
@@ -46,8 +46,9 @@ fn apply_level<'src>(
     attrlist: Option<&Attrlist<'src>>,
     is_root: bool,
 ) -> Vec<InlineNode<'src>> {
-    // Descend into spans/refs first, matching the string pipeline's
-    // whole-string pass. A nested level is never the root. A level with
+    // Descend into spans/refs first, recognizing a break inside a nested
+    // span before this level's own pass runs. A nested level is never the
+    // root. A level with
     // neither — the common leaf-only case — has nothing to descend into, so
     // it skips the rebuild of its node vector entirely.
     let nodes: Vec<InlineNode<'src>> = if nodes
@@ -92,8 +93,8 @@ fn apply_level<'src>(
 
     // A break needs a `+`, and — off the root level, where an end-of-level
     // match is discarded below — a `\n` for the pattern's `$` to anchor
-    // against. The string pipeline's own pre-check is the root form of this: it
-    // guards on a `+` alone, since its haystack is the whole rendered string.
+    // against. At the root, the guard is on a `+` alone, since the whole
+    // content's own haystack is checked there.
     if !level_prefilter(&s, is_root) {
         return nodes;
     }
@@ -103,14 +104,12 @@ fn apply_level<'src>(
     // and group 1 (the `(.*)` line content) always participate in this pattern.
     //
     // The pattern's `$` (multiline) matches before each `\n` *and* at the end
-    // of the haystack. The string pipeline's haystack is the whole rendered
-    // string, so its end-of-haystack match can only fire at the very end of the
-    // content; this transducer matches over one level at a time, where end of
-    // level and end of haystack coincide only at the root. A nested `Styled` or
-    // `Ref` level is always followed by its own closing markup (`</strong>`,
-    // `</a>`, …) in the string pipeline's haystack, so a ` +` ending a span is
-    // not at a line end there and stays literal: `*bold +*` renders
-    // `<strong>bold +</strong>`, not `<strong>bold<br></strong>`. Dropping the
+    // of the haystack. This transducer matches over one level at a time,
+    // where end of level and end of content coincide only at the root: a
+    // nested `Styled` or `Ref` level is always followed by its own closing
+    // markup (`</strong>`, `</a>`, …), so a ` +` ending a span is not at a
+    // line end and stays literal — `*bold +*` renders `<strong>bold
+    // +</strong>`, not `<strong>bold<br></strong>`. Dropping the
     // end-of-level match off the root reproduces that, while a ` +` before a
     // `\n` is unaffected at every level.
     let breaks: Vec<std::ops::Range<usize>> = hard_line_break_pattern()
@@ -138,12 +137,9 @@ fn apply_level<'src>(
 }
 
 /// The `hardbreaks` form of the post-replacement substitution: every line
-/// ending (`\n`) in the level's match string becomes a break, mirroring the
-/// string pipeline's own `line.ends_with(" +")`-stripping, line-by-line
-/// rejoin exactly — a trailing ` +` is stripped rather than kept *and*
-/// doubled, and the level's *last* line (nothing follows its own `\n`, since
-/// there is none) never gets one, matching the string pipeline leaving the
-/// popped last line unbroken.
+/// ending (`\n`) in the level's match string becomes a break — a trailing
+/// ` +` is stripped rather than kept *and* doubled, and the level's *last*
+/// line (nothing follows its own `\n`, since there is none) never gets one.
 fn apply_hardbreaks<'src>(nodes: Vec<InlineNode<'src>>, root: Span<'src>) -> Vec<InlineNode<'src>> {
     // Cheap pre-filter, taken *before* the match string is materialized: see
     // `apply_level`'s own copy of this comment.
@@ -222,31 +218,20 @@ mod tests {
 
     #[test]
     fn a_post_replacement_in_a_cross_reference_text_is_now_at_parity() {
-        // Once a documented divergence, and **closed by the retirement of the
-        // deferred-cross-reference sentinel system** (design §4.2's second) —
-        // exactly where this test's own note said it would close.
+        // Once a documented divergence (see this module's README for the
+        // retired deferred-cross-reference mechanism that caused it): a
+        // link's display text and a cross-reference's sit in the same
+        // position in the source, and this step treats them alike — a
+        // display text is a subtree either way, and this step walks
+        // subtrees regardless of which macro family built it. So all three
+        // rows below are at parity, and the cross-reference's `<br>` is no
+        // longer conditional on how it was resolved.
         //
-        // The asymmetry was the sentinel system showing through. A link's
-        // display text and a cross-reference's sit in the same position in the
-        // source, and this step treats them alike. The string pipeline could
-        // not: by the time it ran, a *link* had been rendered inline into the
-        // one flat string this step scans, so its display text got its `<br>`
-        // — while a deferred cross-reference had been replaced by a sentinel
-        // pair whose text lived in a **template**, which this step never saw at
-        // all. The same bytes in the same place got a line break in one and not
-        // the other, decided by nothing the author wrote.
-        //
-        // A tree has one answer for both, because a display text is a subtree
-        // either way and this step walks subtrees. Now that a deferred content
-        // is *folded* after resolution rather than rebuilt from its template,
-        // that one answer is the one a caller reads: all three rows below are
-        // at parity, and the cross-reference's `<br>` is no longer conditional
-        // on which pipeline produced it.
-        //
-        // Driven through a real document, where the cross-reference resolves —
-        // a bare `Content` has no catalog, so *every* cross-reference is left
-        // as the sentinel there and the two would differ for a second,
-        // unrelated reason.
+        // Driven through a real document, where the cross-reference
+        // resolves — a bare `Content` has no catalog, so every
+        // cross-reference falls back to its unresolved rendering there,
+        // which would make the two folds differ for a second, unrelated
+        // reason.
         use crate::blocks::{FindBlocks, IsBlock};
 
         let doc = crate::Parser::default().parse(concat!(
@@ -355,7 +340,7 @@ mod tests {
         );
     }
 
-    /// Runs `source` through the string pipeline (the golden oracle) and
+    /// Runs `source` through the frozen recording (the golden oracle) and
     /// through [`super::super::build`] + [`fold_html`], asserting byte
     /// parity.
     fn assert_parity(source: &str) {

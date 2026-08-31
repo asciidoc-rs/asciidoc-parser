@@ -40,9 +40,9 @@ pub(super) fn seed(source: Span<'_>) -> Vec<InlineNode<'_>> {
     }]
 }
 
-/// Builds the tree **through the special-characters step only**, so a
-/// staged differential test compares against the matching partial golden
-/// (the full [`build`] runs later steps that would perturb it).
+/// Builds the tree **through the special-characters step only**, so a test
+/// can compare this partial state against the matching partial golden
+/// recording (the full [`build`] runs later steps that would perturb it).
 pub(super) fn build_through_special(source: Span<'_>) -> Vec<InlineNode<'_>> {
     apply_special_characters(seed(source))
 }
@@ -209,10 +209,9 @@ pub(super) fn assert_styled<'a, 'src>(
     }
 }
 
-/// The string pipeline's recorded output through the **macros** step for
-/// `source` — what that pipeline produced while it existed: the five steps
-/// [`build`] runs, in order, with attribute references skipped, frozen into
-/// `snapshots/macros.txt`.
+/// The frozen recording (see `parser/snapshots/README.md`) through the
+/// **macros** step for `source`: the five steps [`build`] runs, in order,
+/// with attribute references skipped, frozen into `snapshots/macros.txt`.
 ///
 /// The `_parser` no longer participates — a recording is keyed by source alone
 /// — but the parameter stays so the several dozen call sites that configured
@@ -262,13 +261,11 @@ pub(super) fn link_text_of(reference: &Ref<'_>) -> String {
     s
 }
 
-/// The string pipeline's recorded output for `source`, frozen for both the
-/// passthrough and STEM families (their steps shared one extraction pass):
-/// extraction, the five steps [`build`] runs, then the restore — what
-/// `run_pipeline` did for [`SubstitutionGroup::Normal`]
-/// while it existed, read back from `snapshots/passthroughs.txt`. The
-/// `_parser` stays for the same non-churn reason [`golden_macros_with`]'s
-/// does.
+/// The frozen recording (see `parser/snapshots/README.md`) for `source`, for
+/// both the passthrough and STEM families (their steps shared one extraction
+/// pass): extraction, the five steps [`build`] runs, then the restore, read
+/// back from `snapshots/passthroughs.txt`. The `_parser` stays for the same
+/// non-churn reason [`golden_macros_with`]'s does.
 pub(super) fn golden_passthroughs_with(source: &str, _parser: &Parser) -> String {
     golden_passthroughs_in("passthroughs", source, _parser)
 }

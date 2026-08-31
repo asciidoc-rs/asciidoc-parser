@@ -28,12 +28,11 @@ impl<'src> HasSpan<'src> for Callout<'src> {
 ///
 /// This used to be mirrored by a render-time `parser::CalloutGuard` that the
 /// fold converted into, on the reasoning that a node should stay canonical
-/// structured data rather than a render-seam type. Phase 5 retired that
-/// duplicate: with
-/// [`render_callout`](crate::parser::InlineRenderer::render_callout) taking
-/// the [`Callout`] node itself, the node *is* what the seam carries, and a
+/// structured data rather than a render-seam type. That duplicate is retired:
+/// [`render_callout`](crate::parser::InlineRenderer::render_callout) takes
+/// the [`Callout`] node itself, so the node *is* what the seam carries, and a
 /// second enum saying the same thing in `&str` where this one says
-/// [`CowStr`] bought nothing but a conversion.
+/// [`CowStr`] would buy nothing but a conversion.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CalloutGuard<'src> {
     /// A line-comment (or absent) guard. Holds the line-comment prefix that

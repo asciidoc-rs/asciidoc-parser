@@ -62,12 +62,11 @@ impl SubstitutionStep {
             Self::AttributeReferences => {
                 apply_attributes(content, parser);
             }
-            // The five steps whose string implementations went with the
-            // pipeline (design §5.2 step 6's tail). Their tree
-            // implementations live in
-            // [`inline_builder`](crate::content::inline_builder) and run
-            // through [`SubstitutionGroup::apply`](super::SubstitutionGroup);
-            // nothing applies one directly any more, so this arm exists only
+            // The five remaining steps have no per-step implementation here:
+            // each is implemented as a tree transducer in
+            // [`inline_builder`](crate::content::inline_builder) and runs
+            // through [`SubstitutionGroup::apply`](super::SubstitutionGroup).
+            // Nothing applies one of them directly, so this arm exists only
             // to satisfy match exhaustiveness.
             step => unreachable!(
                 "the string implementation of {step:?} is deleted; apply the step through a \
@@ -134,9 +133,8 @@ impl Replacer for SpecialCharacterReplacer<'_> {
 /// the [`Regex`] that recognizes it.
 ///
 /// The rules are `pub(crate)` (via [`quote_subs`]) so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) reuses the *exact* same
-/// patterns the string pipeline matches with — the design's core principle of
-/// changing the recognition *sink*, not the recognition itself (§4.1).
+/// [`inline_builder`](crate::content::inline_builder) reuses these *exact*
+/// same patterns rather than duplicating them at its own recognition sink.
 pub(crate) struct QuoteSub {
     pub(crate) type_: QuoteType,
     pub(crate) scope: QuoteScope,
@@ -441,9 +439,9 @@ impl<'p> AttributeReplacer<'p> {
     /// Records this step's `attribute-missing` diagnostic — unless the
     /// single-pass builder is going to record it instead.
     ///
-    /// The fifth and last of the recognition diagnostics the tree-walk replay
-    /// cannot carry (design §5.2 Phase 4, step 6): a dropped or warned-about
-    /// reference leaves no node to hang a diagnostic on, so the builder records
+    /// One of the recognition diagnostics the tree-walk replay cannot carry:
+    /// a dropped or warned-about reference leaves no node to hang a
+    /// diagnostic on, so the builder records
     /// it at its own recognition site (see
     /// [`apply_attribute_references`](crate::content::inline_builder)) and it
     /// is carried onto the real parser afterwards. A direct
@@ -712,10 +710,9 @@ pub(crate) fn substitute_attributes_in_reftext<'src>(
 /// [`CharacterReplacementType`] and the [`Regex`] that recognizes it.
 ///
 /// The rules are `pub(crate)` (via [`character_replacements`]) so the
-/// single-pass [`inline_builder`](crate::content::inline_builder) reuses the
-/// *exact* same patterns the string pipeline matches with — the design's core
-/// principle of changing the recognition *sink*, not the recognition itself
-/// (§4.1). This mirrors how [`quote_subs`] is shared.
+/// single-pass [`inline_builder`](crate::content::inline_builder) reuses these
+/// *exact* same patterns rather than duplicating them at its own recognition
+/// sink. This mirrors how [`quote_subs`] is shared.
 pub(crate) struct CharacterReplacement {
     pub(crate) type_: CharacterReplacementType,
     pub(crate) pattern: Regex,
@@ -938,8 +935,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     // Pins (and covers) the exhaustiveness arm in `SubstitutionStep::apply`:
-    // the five steps whose string implementations went with the pipeline
-    // refuse direct application rather than silently doing nothing.
+    // the five steps with no per-step implementation here refuse direct
+    // application rather than silently doing nothing.
     #[test]
     #[should_panic(expected = "the string implementation of Quotes is deleted")]
     fn a_deleted_steps_direct_application_is_refused() {
