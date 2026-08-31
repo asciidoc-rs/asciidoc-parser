@@ -145,9 +145,10 @@ pub(super) fn xref_macros_level<'src>(
     rebuild_macro_level(&nodes, &pieces, &s, matches)
 }
 
-/// Mirrors the string replacer's own `id.contains('<')` refusal: a shorthand
-/// whose id holds rendered inline markup is not a valid reference, and
-/// Asciidoctor leaves it untouched (`<<link:https://example.com[], Example>>`).
+/// A shorthand whose id holds rendered inline markup is not a valid
+/// reference — Asciidoctor leaves it untouched
+/// (`<<link:https://example.com[], Example>>`) — so this refuses it the same
+/// way, via `id.contains('<')`.
 ///
 /// This became reachable only with
 /// [`range_is_substitution_restorable`].
@@ -173,7 +174,8 @@ fn shorthand_id_has_no_rendered_markup(
 
 /// The bytes a range of the level's match string holds once every placeholder
 /// standing in for a **substitution-produced** [`Raw`](InlineNode::Raw) leaf is
-/// filled in — which is what the string replacer's own haystack held there.
+/// filled in — the fully-resolved bytes the construct's rendered value is
+/// computed from.
 ///
 /// Borrowed unchanged when the range crosses no such leaf, which is every
 /// ordinary cross-reference.
@@ -205,8 +207,8 @@ fn restored_range<'a>(
 /// cross-reference computes two values from the level's match string — its
 /// **target** (the `xref:` macro's group 3, the shorthand's own id half) and,
 /// when the text carries an attribute list, that list's parsed positional value
-/// — and each needs a match string whose bytes are the string replacer's own.
-/// A **reference text**, by contrast, becomes *structured children*
+/// — and each needs a match string whose bytes are already fully resolved and
+/// escaped. A **reference text**, by contrast, becomes *structured children*
 /// ([`macro_text_children`]), so it needs no recoverable bytes at all; see the
 /// rendered-span section below.
 ///
@@ -219,7 +221,8 @@ fn restored_range<'a>(
 /// run's bytes exactly — and its own attribute list is parsed from a normalized
 /// *copy* rather than a source slice (see
 /// [`xref_macro_text`]), so `attrs` is always `None` here. Only the node's
-/// `location` (and its children's) takes design §4.4's coarse fallback. This
+/// `location` (and its children's) takes the coarse fallback span used when a
+/// construct has no `Span`-typed field of its own. This
 /// is the same lift the anchor, bare-e-mail, UI, and index-term families
 /// already made, and for the same reason; the families that hold a real
 /// [`Attrlist`]`<'src>` (image, link) still cannot make it.
@@ -228,44 +231,43 @@ fn restored_range<'a>(
 /// **restored entity** (`xref:sec[Tom &copy; Jerry]`) are admitted for the same
 /// reason: the level's match string carries the
 /// [`CharRef`](InlineNode::CharRef) leaf's own bytes — a `Special`'s canonical
-/// entity, an `Entity`'s entity itself — the very bytes the string replacer's
-/// own escaped haystack holds there — so every
+/// entity, an `Entity`'s entity itself — so every
 /// value this family computes off that string (the target, the
 /// `raw_text.contains('=')` attribute-list probe, the attrlist parse itself,
-/// the shorthand's `split_once(',')`) sees exactly what the string replacer
-/// sees. The reference *text* is then rebuilt as structured children rather
-/// than one sliced [`Text`](InlineNode::Text) (see [`macro_text_children`]), so
-/// the leaf folds back to its own bytes instead of being escaped
-/// twice — and the attribute-list branch, whose value comes back from a parse
-/// rather than from a range, re-derives the same split with
+/// the shorthand's `split_once(',')`) sees the construct's fully-escaped
+/// bytes directly. The reference *text* is then rebuilt as structured children
+/// rather than one sliced [`Text`](InlineNode::Text) (see
+/// [`macro_text_children`]), so the leaf folds back to its own bytes instead of
+/// being escaped twice — and the attribute-list branch, whose value comes back
+/// from a parse rather than from a range, re-derives the same split with
 /// [`computed_value_children`].
 ///
 /// # A rendered span inside the reference text
 ///
 /// A **rendered span** — a [`Styled`](crate::inlines::Styled) span, an
 /// already-recognized macro node, a masked passthrough — is *not* recoverable:
-/// it is one opaque placeholder here where the string pipeline's haystack holds
-/// its markup (or its own passthrough mask) inline, and that markup exists only
-/// at fold time. It is nonetheless admitted **inside a reference text**,
+/// it is one opaque placeholder here, standing in for markup (or a passthrough
+/// mask) that exists only at fold time. It is nonetheless admitted **inside a
+/// reference text**,
 /// because a reference text is the one capture this family never reads as
 /// bytes: it becomes the node's children through [`macro_text_children`], whose
 /// [`emit_range`](super::super::quotes::emit_range) path clones the opaque
 /// piece's own node whole into them — so the text is carried *structurally*,
-/// and the fold re-renders exactly the markup the string replacer captured
-/// there. This is the same "nesting is the point" recovery a footnote's own
-/// content has always used, applied to the display text of a reference.
+/// and the fold re-renders exactly that markup. This is the same "nesting is
+/// the point" recovery a footnote's own content has always used, applied to
+/// the display text of a reference.
 ///
-/// What that admission cannot do is make the *recognition* agree in every case,
-/// because the string replacer matches over the markup itself where this
-/// matches over one placeholder standing in for it. The two read the same
-/// extent unless the markup carries a character the pattern is sensitive to,
-/// which leaves two documented divergences of *extent* (each pinned by its own
-/// test), both of them cases where the string pipeline's own reading is the
-/// markup-perturbed one and the tree's is the well-formed one — exactly as the
-/// quotes step's crossed-delimiter divergence is:
+/// What that admission cannot do is make the *recognition* agree in every case:
+/// matching over one placeholder instead of the markup itself reads a
+/// different extent whenever that markup carries a character the pattern is
+/// sensitive to, which leaves two documented divergences of *extent* (each
+/// pinned by its own test); in both, the well-formed reading is the tree's,
+/// not the one a match over the raw, markup-perturbed text would give —
+/// exactly as the quotes step's crossed-delimiter divergence is:
 ///
-/// - a `]` inside the span (`xref:sec[*a ] b*]`), which ends the macro form's
-///   own lazy text capture early for the string replacer but not here;
+/// - a `]` inside the span (`xref:sec[*a ] b*]`), which would end the macro
+///   form's own lazy text capture early if matched over raw markup, but not
+///   here;
 /// - a `&gt;&gt;` inside the span (`<<sec,*a >> b*>>`), the shorthand's own
 ///   terminator, for the same reason.
 ///
@@ -276,13 +278,13 @@ fn restored_range<'a>(
 /// value cannot be mapped back to the node it stands in for — the same reason
 /// the image and link families defer their own `Attrlist`-bearing captures. The
 /// probe for that branch is `raw_text.contains('=')`, read here off the match
-/// string; the string replacer reads it off the markup, so a span whose markup
-/// carries an `=` (an attributed span, a link, an image) sends the string
-/// pipeline down its attribute-list branch where this one stays plain. That
-/// costs nothing wherever the parse finds the `=` incidental (an attribute list
-/// with no comma to split on yields one positional value equal to the whole
-/// text, which is every unattributed markup shape) and is a third documented
-/// divergence otherwise.
+/// string; matching over rendered markup instead would read it off the markup
+/// itself, so a span whose markup carries an `=` (an attributed span, a link,
+/// an image) would take the attribute-list branch where this one stays plain.
+/// That costs nothing wherever the parse finds the `=` incidental (an attribute
+/// list with no comma to split on yields one positional value equal to the
+/// whole text, which is every unattributed markup shape) and is a third
+/// documented divergence otherwise.
 fn find_xref_matches<'src>(
     nodes: &[InlineNode<'src>],
     s: &str,
@@ -312,8 +314,7 @@ fn find_xref_matches<'src>(
         let recoverable = match &shorthand_inner {
             Some(inner) => {
                 // The shorthand's id is its inner up to the first `,` — the
-                // very split `build_xref_shorthand_node` (and
-                // the string replacer) makes. A comma the
+                // very split `build_xref_shorthand_node` makes. A comma the
                 // *markup* of an opaque piece contributes
                 // cannot move that split unnoticed: such a piece would have to
                 // sit in the id half, which this gate then rejects.
@@ -359,16 +360,16 @@ fn find_xref_matches<'src>(
         };
 
         // An escape (`\xref:` / `\<<`) is honored by dropping the backslash and
-        // keeping the rest literal, mirroring the string replacer's leading
-        // `caps.get(1)` check — which it makes *before* looking at anything
-        // else, so the escape needs no gate of its own here either: dropping
-        // the backslash keeps the rest of the match as its **own original
-        // nodes** (a rendered span or an escaped special among them), which
-        // fold back to exactly the bytes the replacer's `caps[0][1..]` emits.
-        // (This is the same check-order fix the `footnoteref:` and menu
-        // increments made for their own families; before it, an escaped
-        // `\xref:sec[*bold*]` whose match the gate rejected was left
-        // unrecognized, backslash and all.)
+        // keeping the rest literal. That check is made *before* looking at
+        // anything else, so the escape needs no gate of its own here either:
+        // dropping the backslash keeps the rest of the match as its
+        // **own original nodes** (a rendered span or an escaped special
+        // among them), which fold back to exactly the bytes the
+        // replacer's `caps[0][1..]` emits. (This is the same
+        // check-order fix the `footnoteref:` and menu increments made
+        // for their own families; before it, an escaped `\xref:sec[*
+        // bold*]` whose match the gate rejected was left unrecognized,
+        // backslash and all.)
         if whole.as_str().starts_with('\\') {
             matches.push(MacroMatch {
                 kind: MacroMatchKind::Unescape {
@@ -460,12 +461,11 @@ fn attrlist_text_carries_its_opaque_pieces(
     }
 
     // A token reaching one of the three values this family reads as a
-    // **string** — `window`, `xrefstyle`, a role — used to refuse the whole
-    // match here, because a node has no bytes to put in a string slot. It no
-    // longer does: `untranslated_value` gives the slot the author's *source*
-    // for the piece the token stands for, which is a value a string can hold.
-    // See its doc comment for the rules and for the divergence from the string
-    // pipeline that follows.
+    // **string** — `window`, `xrefstyle`, a role — would have no bytes to put
+    // in a string slot on its own: `untranslated_value` gives the slot the
+    // author's *source* for the piece the token stands for instead, which is
+    // a value a string can hold. See its doc comment for the rules and for
+    // the deliberate divergence from Asciidoctor that follows.
     true
 }
 
@@ -497,8 +497,8 @@ fn text_carries_author_written_token_bytes(raw_text: &str) -> bool {
 
 /// The match-string range of a `<<…>>` shorthand's **id half**: its inner up to
 /// the first `,`, or the whole inner when it carries none — the very split
-/// [`build_xref_shorthand_node`] then makes on the same bytes, and the string
-/// replacer's own `inner.split_once(',')`.
+/// [`build_xref_shorthand_node`] then makes on the same bytes, matching
+/// Asciidoctor's own `inner.split_once(',')`.
 ///
 /// This is the half [`find_xref_matches`] gates, since the id is the one value
 /// the shorthand *reads* off the match string; the reference text after the
@@ -513,8 +513,8 @@ fn shorthand_id_range(s: &str, inner: &std::ops::Range<usize>) -> std::ops::Rang
 }
 
 /// Builds one [`Ref`](InlineNode::Ref)`{Xref}` node from a verbatim `xref:`
-/// macro match, computing the target and display text exactly as the string
-/// replacer does so the fold reproduces the same bytes.
+/// macro match, computing the target and display text to match Asciidoctor's
+/// own rendering byte-for-byte.
 ///
 /// The scope this builder claims is every macro-form target, including a text
 /// carrying an attribute list; the `<<id>>` shorthand is built by
@@ -524,8 +524,7 @@ fn shorthand_id_range(s: &str, inner: &std::ops::Range<usize>) -> std::ops::Rang
 /// None`); the empty target (`xref:#[]`), a target naming another document
 /// (`xref:other.adoc#frag[]`), and a target naming this document (or a file
 /// included into it in full) all carry a destination *derived* from the
-/// target itself, computed by [`xref_target_and_derived`] exactly as the
-/// string replacer computes it.
+/// target itself, computed by [`xref_target_and_derived`].
 ///
 /// The display text becomes the node's children as a single
 /// [`Text`](InlineNode::Text), so the fold recovers the provided text by
@@ -535,9 +534,9 @@ fn shorthand_id_range(s: &str, inner: &std::ops::Range<usize>) -> std::ops::Rang
 /// list (an `=`) is interpreted.
 ///
 /// As in the additive builder generally, this performs *no* recognition side
-/// effect — notably it does **not** register the reference for resolution,
-/// which the string replacer does by recording a deferred `XrefSegment`; the
-/// cutover (design §5.2 Phase 4, step 6) wires resolution to the tree.
+/// effect — notably it does **not** register the reference for resolution
+/// itself; that happens once per parse, at fold time, via
+/// `xref_segment_from_node`.
 fn build_xref_node<'src>(
     caps: &regex::Captures<'_>,
     full: &std::ops::Range<usize>,
@@ -554,12 +553,12 @@ fn build_xref_node<'src>(
     #[allow(clippy::unwrap_used)]
     let target_match = caps.get(3).unwrap();
 
-    // The target's bytes as the string replacer reads them. A leaf the match
+    // The target's fully-resolved bytes. A leaf the match
     // string stands in as a placeholder — an expanded attribute value's `&`,
     // say (`xref:{cpp}[…]`, where `{cpp}` is `C&#43;&#43;`) — contributes its
     // own bytes here. The gate admits only such leaves, so the splice always
-    // finishes the value into bytes the replacer's own haystack held; a
-    // *masked* construct, whose bytes it would not have held yet, keeps the
+    // finishes the value into bytes already fully resolved; a
+    // *masked* construct, whose bytes are not yet resolved, keeps the
     // match deferred instead.
     let restored_target = restored_range(
         target_match.as_str(),
@@ -590,9 +589,8 @@ fn build_xref_node<'src>(
         // The *effective* style, not the macro's override: an
         // `xrefstyle=` on the macro wins, and otherwise the document-wide
         // `xrefstyle` **in effect at this point in the document** is resolved
-        // into the node here — the same reading, at the same moment, the string
-        // replacer makes (design §3.3.1 point 1: every order-dependent fact is
-        // resolved into node values at build time, so the fold is pure).
+        // into the node here — every order-dependent fact is resolved into
+        // node values at build time, so the fold stays pure.
         xrefstyle: xrefstyle.or_else(|| document_xrefstyle(parser)),
         attrs: Attrlist::empty(location.slice(0..0)),
         location,
@@ -603,7 +601,7 @@ fn build_xref_node<'src>(
 /// [`InlineXrefReplacer::replace_append`](crate::content::macros)'s own text
 /// interpretation exactly so the fold reproduces the same bytes: a text
 /// carrying an `=` is parsed — from a newline-normalized copy, since the parse
-/// is not necessarily verbatim (mirroring the string replacer, which parses
+/// is not necessarily verbatim (matching Asciidoctor, which parses
 /// the same normalized copy rather than a source slice) — as an
 /// [`Attrlist`], whose first positional attribute becomes the display text
 /// and whose `window`/`role`/`xrefstyle` named attributes are honored. If the
@@ -637,9 +635,9 @@ fn xref_macro_text<'src>(
 
     if raw_text.contains('=') {
         // Tokened before the parse, so an opaque piece the text encloses reads
-        // to the split as the one indivisible run the string replacer's own
-        // markup is there (see [`tokened_text`]). A text enclosing none comes
-        // back byte-identical, which is every list that was already at parity.
+        // to the split as one indivisible run standing in for its rendered
+        // markup (see [`tokened_text`]). A text enclosing none comes
+        // back byte-identical.
         #[allow(clippy::unwrap_used)]
         let text_range = text_span.unwrap();
 
@@ -709,9 +707,8 @@ fn xref_macro_text<'src>(
                     // with no `'src` slice of its own (it comes from the
                     // normalized, attrlist-parsed copy, not the source
                     // directly); it falls back to the bracketed text's own
-                    // span (design §4.4), mirroring the synthesized-value
-                    // location policy `apply_attribute_references` already
-                    // establishes.
+                    // span, the same synthesized-value location policy
+                    // `apply_attribute_references` already establishes.
                     let location = source_slice(pieces, text_range.start()..text_range.end(), root);
 
                     // Each occurrence this value still holds becomes the node
@@ -744,7 +741,7 @@ fn xref_macro_text<'src>(
 }
 
 /// Builds the display-text children for a text with no attribute list (or one
-/// whose `=` was incidental), mirroring the string replacer's own
+/// whose `=` was incidental), matching Asciidoctor's own
 /// `raw_text.replace("\\]", "]")` unescape.
 fn plain_xref_text<'src>(
     raw_text: &str,
@@ -762,12 +759,12 @@ fn plain_xref_text<'src>(
 }
 
 /// Builds one [`Ref`](InlineNode::Ref)`{Xref}` node from a `<<id>>` shorthand
-/// cross-reference, computing the target and display text exactly as the string
-/// replacer's shorthand branch does so the fold reproduces the same bytes.
+/// cross-reference, computing the target and display text to match
+/// Asciidoctor's own shorthand handling byte-for-byte.
 ///
 /// `inner` is the shorthand's inner text (`INLINE_XREF` group 2) in
 /// match-string coordinates. It is split on the first `,` into an id and an
-/// optional reference text, each trimmed — mirroring the string replacer's
+/// optional reference text, each trimmed — matching Asciidoctor's
 /// `inner.split_once(',')` with `id.trim()` / `text.trim()`, which runs over
 /// the very same bytes.
 ///
@@ -779,14 +776,14 @@ fn plain_xref_text<'src>(
 /// comma that split them. The reference text after that comma carries no such
 /// guarantee: it becomes the node's children through [`macro_text_children`] —
 /// a single [`Text`](InlineNode::Text) borrowed from `'src` in the common
-/// verbatim case (§4.5), owned when it crosses a synthesized run, structured
+/// verbatim case, owned when it crosses a synthesized run, structured
 /// when it crosses an escaped special or an opaque piece (whose own node the
 /// children then carry). The whole `<<…>>` — its `CharRef` delimiters
 /// included — is the node's `location` (a synthesized run's coarse enclosing
-/// span, per design §4.4).
+/// span, for a construct with no `Span`-typed field of its own).
 ///
-/// **A comma is what makes a text *present*, not what it contains.** The
-/// string replacer's own split records `<<id,>>` (and `<<id,   >>`) as a
+/// **A comma is what makes a text *present*, not what it contains.**
+/// Asciidoctor's own split records `<<id,>>` (and `<<id,   >>`) as a
 /// *present-but-empty* text — `Some("")`, which renders an empty `<a>…</a>`
 /// rather than the bracketed `[id]` fallback `None` renders — so a shorthand
 /// carrying a comma always builds at least one child, empty value and
@@ -806,17 +803,17 @@ fn plain_xref_text<'src>(
 /// [`xref_target_and_derived`] exactly as the macro form's.
 ///
 /// A shorthand whose id already carries a rendered `<` (an earlier-substituted
-/// macro, e.g. `<<link:https://example.com[], Example>>`) — which the string
-/// replacer's own `id.contains('<')` guard leaves untouched — cannot reach here
+/// macro, e.g. `<<link:https://example.com[], Example>>`) — which Asciidoctor's
+/// own `id.contains('<')` guard leaves untouched — cannot reach here
 /// at all: rendered markup is an *opaque* piece, so the caller never calls this
-/// builder. That is why no counterpart to the guard is needed: an id carrying a
-/// merely *escaped* `<`, which the gate does admit, is an entity by macro time
-/// in both pipelines, so neither the guard nor this builder ever sees a bare
-/// `<` there.
+/// builder. That is why no counterpart to the guard is needed here: an id
+/// carrying a merely *escaped* `<`, which the gate does admit, is an entity
+/// by macro time, so this builder never sees a bare `<` there.
 ///
 /// As in the additive builder generally, this performs *no* recognition side
-/// effect — notably it does **not** register the reference for resolution; the
-/// cutover (design §5.2 Phase 4, step 6) wires resolution to the tree.
+/// effect — notably it does **not** register the reference for resolution
+/// itself; that happens once per parse, at fold time, via
+/// `xref_segment_from_node`.
 fn build_xref_shorthand_node<'src>(
     inner: std::ops::Range<usize>,
     full: &std::ops::Range<usize>,
@@ -827,8 +824,8 @@ fn build_xref_shorthand_node<'src>(
     parser: &Parser,
 ) -> InlineNode<'src> {
     // The inner crosses no atomic piece (the caller checked), so the match
-    // string carries its logical bytes exactly — which is what the string
-    // replacer's own `inner.split_once(',')` sees. Reading them here rather
+    // string carries its logical bytes exactly — which is what
+    // Asciidoctor's own `inner.split_once(',')` sees. Reading them here rather
     // than through the inner's source slice is what lets a shorthand inside an
     // expanded attribute value be recognized: a synthesized run has no `'src`
     // slice of its own. A byte offset within `inner_data` maps to a
@@ -852,9 +849,9 @@ fn build_xref_shorthand_node<'src>(
         None => inner_data,
     };
 
-    // The id's bytes as the string replacer reads them — see
+    // The id's fully-resolved bytes — see
     // [`restored_range`]. The `trim` is applied after, on the restored value,
-    // exactly as the replacer trims its own `id`.
+    // matching Asciidoctor's own trim of its `id`.
     let id_range = inner.start..inner.start + raw_id.len();
     let restored_id = restored_range(raw_id, id_range, nodes, pieces, parser);
 
@@ -874,7 +871,7 @@ fn build_xref_shorthand_node<'src>(
             // when the text is empty (or whitespace-only), which is the
             // present-but-empty text the doc comment describes — while a
             // synthesized one keeps its exact expanded bytes against the
-            // enclosing run's coarse location (design §4.4).
+            // enclosing run's coarse location.
             let lead = raw_text.len() - raw_text.trim_start().len();
 
             let text_start = inner.start + index + 1 + lead;
@@ -882,9 +879,9 @@ fn build_xref_shorthand_node<'src>(
 
             // The same one-child-or-structured-children split the macro form
             // makes, reached through the shared helper — but with **no** `\]`
-            // unescape: the shorthand has no bracket to escape, and the string
-            // replacer's own shorthand branch performs no such replace, so a
-            // `\]` written here stays literal in both pipelines. An empty (or
+            // unescape: the shorthand has no bracket to escape, and
+            // Asciidoctor's own shorthand branch performs no such replace, so a
+            // `\]` written here stays literal. An empty (or
             // whitespace-only) text crosses nothing, so it takes the helper's
             // single-child path and keeps the zero-length child the fold keys
             // `provided_text` on.
@@ -929,9 +926,9 @@ mod tests {
         parser::{HtmlInlineRenderer, XrefStyle},
     };
 
-    /// The string pipeline's output through the **whole** `Normal` group —
-    /// the attributes step included — with any deferred cross-reference
-    /// finalized to its unresolved fallback.
+    /// The frozen recording of `source`'s rendered output through the
+    /// **whole** `Normal` group — the attributes step included — with any
+    /// deferred cross-reference finalized to its unresolved fallback.
     ///
     /// [`golden_xref`] deliberately drives the macro-family steps only, which
     /// is right for a verbatim fixture and wrong for one whose target is
@@ -942,13 +939,13 @@ mod tests {
         crate::content::inline_builder::snapshot::recorded("xref_whole_pipeline", source)
     }
 
-    /// The string pipeline's output through the **macros** step for `source`,
-    /// with any deferred cross-references finalized to their unresolved
-    /// fallback. Unlike [`golden_macros`], the macros step defers a
-    /// cross-reference to a placeholder rather than rendering it, so the
-    /// placeholder must be finalized — no catalog resolution runs, so the
-    /// result is the unresolved-fallback rendering the additive builder's
-    /// fold (always unresolved) must reproduce.
+    /// The frozen recording of `source`'s rendered output through the
+    /// **macros** step, with any deferred cross-references finalized to their
+    /// unresolved fallback. Unlike [`golden_macros`], the macros step
+    /// defers a cross-reference to a placeholder rather than rendering it,
+    /// so the placeholder must be finalized — no catalog resolution runs,
+    /// so the result is the unresolved-fallback rendering the additive
+    /// builder's fold (always unresolved) must reproduce.
     fn golden_xref_with(source: &str, _parser: &Parser) -> String {
         crate::content::inline_builder::snapshot::recorded("xref_macros", source)
     }
@@ -971,12 +968,12 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_through_xrefs() {
         // For each fixture, folding the single-pass tree (all five steps)
-        // reproduces the string pipeline's output byte-for-byte. This is the
-        // differential corpus (design §5.3) that pins the cross-reference
-        // increment. Every fixture is a *verbatim* cross-reference in either
+        // reproduces the frozen recording byte-for-byte. This is the
+        // differential corpus that pins cross-reference behavior. Every
+        // fixture is a *verbatim* cross-reference in either
         // spelling, whether it resolves through the catalog (same-document) or
         // through a target-derived destination (inter-document, or the
-        // document-as-a-whole form) — the boundary this increment claims (an
+        // document-as-a-whole form) — the boundary this family claims (an
         // attribute-list text, and a shorthand crossing a special/span, are
         // deferred and live in divergence tests below).
         let fixtures = [
@@ -1058,7 +1055,7 @@ mod tests {
             "*see <<x>>*",
             "_<<y,Y>> in em_",
             // A reference text crossing an *escaped special*: the match string
-            // carries the entity the string replacer's own haystack carries, so
+            // carries the entity itself, so
             // both spellings are recognized, the text becoming structured
             // children (a `CharRef` between two `Text` runs) that fold back to
             // the same entity.
@@ -1079,10 +1076,10 @@ mod tests {
             "xref:install[Tom & Jerry,role=hl]",
             "xref:install[a<b,window=_blank]",
             "xref:install[a > b,role=hl]",
-            // A *target* crossing one. The macro form reads it exactly as the
-            // string replacer does (an id of `foo&amp;bar`); the shorthand
+            // A *target* crossing one. The macro form reads it the same way
+            // Asciidoctor does (an id of `foo&amp;bar`); the shorthand
             // form's own `id.contains('<')` guard never fires, since an escaped
-            // special is an entity by macro time in both pipelines.
+            // special is an entity by macro time.
             "xref:foo&bar[Ampersand]",
             "<<foo&bar,Ampersand>>",
             // Escaped, crossing one: the backslash is dropped and the rest
@@ -1103,7 +1100,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_xref(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen recording for {fixture:?}"
             );
         }
     }
@@ -1159,17 +1156,16 @@ mod tests {
         // `xref:#install[]` uses the explicit-`#` same-document form. The
         // node's `target` is the *interpreted* id (`install`), not the
         // raw `#install`: it is the value the renderer builds the
-        // `href` from and resolution keys on, matching the string
-        // pipeline and the recorder tree (see the `Ref::target` field
+        // `href` from and resolution keys on (see the `Ref::target` field
         // docs). Storing `#install` would fold to `href="##install"`
-        // and break parity.
+        // instead.
         let nodes = build_src(Span::new("xref:#install[Install]"));
 
         let reference = assert_xref(&nodes[0]);
         assert_eq!(reference.target.as_ref(), "install");
         assert_eq!(link_text_of(reference), "Install");
 
-        // The fold reproduces the string pipeline's `href="#install"` exactly.
+        // The fold produces `href="#install"` exactly.
         let folded = fold_html(&nodes, &HtmlInlineRenderer {});
         assert!(folded.contains(r##"href="#install""##), "folded: {folded}");
         assert_eq!(folded, golden_xref("xref:#install[Install]"));
@@ -1193,8 +1189,7 @@ mod tests {
     #[test]
     fn an_escaped_xref_stays_literal() {
         // `\xref:…` drops the backslash and keeps the macro as literal text —
-        // no reference node — exactly as the string replacer's escape
-        // branch does.
+        // no reference node.
         let source = "\\xref:install[Installation]";
         let nodes = build_src(Span::new(source));
 
@@ -1211,8 +1206,7 @@ mod tests {
 
     #[test]
     fn an_escaped_xref_the_gate_rejects_still_drops_its_backslash() {
-        // The escape check runs *ahead* of the gate, mirroring the string
-        // replacer's own `caps.get(1)`-first order: a macro the gate rejects
+        // The escape check runs *ahead* of the gate: a macro the gate rejects
         // (here, an *attribute-list* display text crossing a rendered span,
         // the one text shape that still needs its own bytes) still drops its
         // backslash and keeps the rest — the rendered span included — as its
@@ -1270,8 +1264,7 @@ mod tests {
     fn an_xref_shorthand_display_text_is_located_at_its_trimmed_source() {
         // The reference text's `Text` child locates at the *trimmed* text
         // within the shorthand, not at the whole shorthand and not
-        // including the surrounding whitespace the string replacer
-        // trims.
+        // including the surrounding whitespace that gets trimmed.
         let nodes = build_src(Span::new("<<install, Install Now >>"));
 
         let reference = assert_xref(&nodes[0]);
@@ -1300,8 +1293,7 @@ mod tests {
     #[test]
     fn an_escaped_xref_shorthand_stays_literal() {
         // `\<<id>>` drops the backslash and keeps the shorthand as literal text
-        // — no reference node — exactly as the string replacer's escape
-        // branch does. Its delimiters are non-verbatim `CharRef`s, so
+        // — no reference node. Its delimiters are non-verbatim `CharRef`s, so
         // this also exercises the escape path that does not require a
         // verbatim inner.
         let source = "\\<<install,Install Now>>";
@@ -1374,8 +1366,8 @@ mod tests {
 
     #[test]
     fn an_xref_shorthand_with_an_empty_text_keeps_it_present() {
-        // `<<id,>>` records a *present-but-empty* reference text: the string
-        // replacer renders an empty `<a href="#install"></a>`, not the
+        // `<<id,>>` records a *present-but-empty* reference text: it
+        // renders an empty `<a href="#install"></a>`, not the
         // bracketed `[install]` fallback a comma-less shorthand renders. The
         // node keeps the distinction structurally — the text is present as one
         // empty `Text` child — so the fold reproduces the same bytes.
@@ -1417,14 +1409,14 @@ mod tests {
     fn a_real_documents_empty_shorthand_text_reaches_its_tree() {
         // End-to-end, through the real parse path, and with the reference
         // *resolved*: this is the shape that makes the form a blocker for the
-        // authoritative fold rather than an unclaimed one — a golden test
+        // fold rather than an unclaimed one — a golden test
         // already exercises it (`xref_should_use_title_of_target_as_link_text_
         // when_explicit_link_text_is_empty` in `tests/asciidoctor_rb/
-        // links_test.rs`, design §5.3's oracle). Resolution reaches the node
-        // too: the positional mirror skips a list whose node count diverges
-        // from the string pipeline's deferred segments, so leaving the
-        // shorthand unrecognized used to cost the whole content its resolved
-        // destinations.
+        // links_test.rs`, part of the ported `asciidoctor` test suite).
+        // Resolution reaches the node too: the positional mirror skips a list
+        // whose node count diverges from the number of deferred segments the
+        // tree produces, so leaving the shorthand unrecognized would cost the
+        // whole content its resolved destinations.
         use crate::blocks::{FindBlocks, IsBlock};
 
         let doc = Parser::default().parse("<<tigers,>>\n\n[#tigers]\n== Tigers");
@@ -1454,7 +1446,7 @@ mod tests {
 
     #[test]
     fn a_whitespace_only_xref_shorthand_text_trims_to_an_empty_present_text() {
-        // The reference text is trimmed exactly as the string replacer trims
+        // The reference text is trimmed the same way Asciidoctor trims
         // it, so a whitespace-only text is the same present-but-empty text —
         // its zero-length span sitting where the trim left it, after the
         // leading whitespace.
@@ -1477,8 +1469,7 @@ mod tests {
         // the span is one opaque placeholder in the match string, but
         // `macro_text_children` recovers the text with `emit_range`, which
         // clones the span's own node whole into the reference's children. The
-        // fold then re-renders exactly the markup the string replacer captured
-        // in its own reference text.
+        // fold then re-renders exactly that markup.
         let source = "<<x,a *bold* b>>";
         let nodes = build_src(Span::new(source));
 
@@ -1509,8 +1500,7 @@ mod tests {
     fn an_inter_document_xref_becomes_a_ref_node() {
         // An inter-document target (`other.adoc#frag`) carries a *derived*
         // destination computed from the target itself — the AsciiDoc extension
-        // stripped, the output suffix substituted in — mirroring the string
-        // replacer's own target interpretation exactly.
+        // stripped, the output suffix substituted in.
         let source = "xref:other.adoc#frag[Elsewhere]";
         let nodes = build_src(Span::new(source));
 
@@ -1540,8 +1530,8 @@ mod tests {
 
     #[test]
     fn an_xref_text_over_a_special_character_becomes_structured_children() {
-        // A cross-reference whose text contains `<` is matched by the string
-        // pipeline over the *escaped* text (`xref:foo[a&lt;b]`), which is
+        // A cross-reference whose text contains `<` is matched over the
+        // *escaped* text (`xref:foo[a&lt;b]`), which is
         // exactly what the level's match string carries too. The text becomes
         // structured children rather than one sliced `Text`, so the escaped
         // special stays the `CharRef` it already is — folding back to the same
@@ -1581,7 +1571,7 @@ mod tests {
     fn an_xref_shorthand_text_over_a_special_character_becomes_structured_children() {
         // The shorthand's own version of the case directly above: the id is
         // read from the match string (where an escaped special is its entity,
-        // so the string replacer's `id.contains('<')` guard never fires there
+        // so the `id.contains('<')` guard never fires there
         // either) and the trimmed reference text becomes structured children.
         let source = "<< spaced , Tom & Jerry >>";
         let nodes = build_src(Span::new(source));
@@ -1610,8 +1600,8 @@ mod tests {
     fn an_xref_attribute_list_text_over_a_special_character_holds_logical_text() {
         // The attribute-list branch computes its display text by *parsing* the
         // already-escaped match-string text, so the positional value comes back
-        // holding `&amp;`. A `Text` node holds logical text the fold escapes
-        // (design §3.4), so the entity is put back to its character here and
+        // holding `&amp;`. A `Text` node holds logical text the fold escapes,
+        // so the entity is put back to its character here and
         // re-escaped at fold time — one round trip, not two escapes.
         let source = "xref:install[Tom & Jerry,role=hl]";
         let nodes = build_src(Span::new(source));
@@ -1632,8 +1622,8 @@ mod tests {
     fn fold_matches_the_string_pipeline_for_a_cross_reference_crossing_a_restored_entity() {
         // A restored entity (`&copy;`, `&#8217;`) is admitted for the same
         // reason an escaped special is: the level's match string carries its
-        // own bytes — the string pipeline's haystack bytes from the
-        // replacements step onward — and the fold emits them verbatim.
+        // own bytes — the fully-resolved bytes from the character-replacements
+        // step onward — and the fold emits them verbatim.
         let fixtures = [
             // A reference text crossing one, in both spellings.
             "xref:sec[Tom &copy; Jerry]",
@@ -1671,7 +1661,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_xref(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen recording for {fixture:?}"
             );
         }
     }
@@ -1681,7 +1671,7 @@ mod tests {
         // A typographic replacement is the third recoverable piece, admitted
         // for the same reason the two entity leaves are: the level's match
         // string carries the entity the built-in backend renders it as — the
-        // string pipeline's own haystack bytes from the replacements step
+        // same fully-resolved bytes from the character-replacements step
         // onward — and the fold routes the leaf back through the renderer to
         // those same bytes.
         let fixtures = [
@@ -1717,7 +1707,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_xref(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen recording for {fixture:?}"
             );
         }
     }
@@ -1751,7 +1741,7 @@ mod tests {
         // `escaped_value_children` re-derives the same split from the value's
         // own bytes: the escaped special becomes the character a `Text` holds
         // logically, and the restored entity its own `CharRef` leaf. Both fold
-        // back to one escape level, as the string replacer's own text does.
+        // back to one escape level, as Asciidoctor's own text does.
         let source = "xref:sec[Tom &copy; & Jerry,role=hl]";
         let nodes = build_src(Span::new(source));
 
@@ -1760,7 +1750,7 @@ mod tests {
         assert_eq!(reference.children.len(), 3);
 
         // Every part of a parsed positional value shares the bracketed text's
-        // own coarse span (design §4.4) — it has no `'src` slice of its own.
+        // own coarse span — it has no `'src` slice of its own.
         let text_span = reference.children[0].span();
         assert_eq!(text_span.data(), "Tom &copy; & Jerry,role=hl");
 
@@ -1864,15 +1854,15 @@ mod tests {
 
     #[test]
     fn fold_matches_the_string_pipeline_for_a_text_crossing_a_rendered_span() {
-        // The differential corpus for this increment: a display or reference
+        // The differential corpus for cross-reference text: a display or
+        // reference
         // text crossing an **opaque** piece — a rendered span, an
         // already-recognized macro node, a masked passthrough — in both
         // spellings. The text is carried structurally (each opaque piece's own
-        // node becomes a child), so the fold re-renders exactly the markup the
-        // string replacer captured in its own text.
+        // node becomes a child), so the fold re-renders exactly that markup.
         let fixtures = [
-            // (A masked passthrough is opaque here too — and in the string
-            // pipeline, which restores passthroughs only after every step — but
+            // (A masked passthrough is opaque here too, and restored only
+            // after every step, but
             // this oracle runs the steps directly, without the extraction the
             // real `SubstitutionGroup::apply` performs around them, so those
             // fixtures live in the whole-pipeline sweep instead; see
@@ -1925,7 +1915,7 @@ mod tests {
             assert_eq!(
                 folded,
                 golden_xref(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen recording for {fixture:?}"
             );
         }
     }
@@ -1983,7 +1973,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(fixture)), &HtmlInlineRenderer {}),
                 golden_xref(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen recording for {fixture:?}"
             );
         }
     }
@@ -2008,8 +1998,7 @@ mod tests {
 
                 // The bytes around the token take the same rebuild every
                 // attribute-list value takes: an owned run off the parse,
-                // whose location is the bracketed text's own coarse span
-                // (design §4.4).
+                // whose location is the bracketed text's own coarse span.
                 assert_eq!(value.as_ref(), " here");
             }
 
@@ -2019,12 +2008,13 @@ mod tests {
 
     #[test]
     fn an_attribute_list_delimiter_inside_a_span_is_the_trees_to_read() {
-        // The deferral divergence (design §5.2's step 6), decided in favor of
+        // The deferral divergence, decided in favor of
         // the tree.
         //
         // A token carries none of the `,` / `=` / `"` a bracket split reads, so
         // the tree's split sees `a ␖ d,role=hl` — a display text and a role.
-        // The string replacer splits over the piece's own **markup**: `a *b, c*
+        // Splitting over the piece's own rendered **markup** instead gives a
+        // different answer: `a *b, c*
         // d` renders `a <strong>b, c</strong> d`, whose list splits at the
         // comma *inside the tag*, ending the anchor at `a <strong>b` and
         // leaving it unbalanced. Asciidoctor does the same.
@@ -2032,9 +2022,9 @@ mod tests {
         // This used to defer where the two readings disagreed, which made the
         // presence of a comma inside a span decide whether the macro was
         // recognized **at all** — the fixtures below came out as literal text.
-        // Emitting the replacer's split is the wrong answer and reproducing it
-        // was never on the table, so the tree's reading stands and this crate
-        // diverges from both the replacer and Asciidoctor here.
+        // Splitting over rendered markup is the wrong answer, and reproducing
+        // it was never on the table, so the tree's reading stands and this
+        // crate diverges from Asciidoctor here.
         for (source, expected) in [
             (
                 "xref:sec[a *b, c* d,role=hl]",
@@ -2052,7 +2042,8 @@ mod tests {
             };
 
             // The role landed as a role rather than being swallowed into the
-            // display text, which is the half the replacer's split loses.
+            // display text, which is the half a split over rendered markup
+            // would lose.
             assert_eq!(
                 ref_.roles.iter().map(|r| r.as_ref()).collect::<Vec<_>>(),
                 ["hl"],
@@ -2074,8 +2065,8 @@ mod tests {
                 "for {source:?}"
             );
 
-            // The divergence, stated as bytes: the replacer cuts the anchor
-            // short inside the tag it just wrote.
+            // The divergence, stated as bytes: the frozen recording cuts the
+            // anchor short inside the tag it just wrote.
             assert_ne!(golden_xref(source), expected, "for {source:?}");
         }
 
@@ -2088,7 +2079,7 @@ mod tests {
             assert_eq!(
                 fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
                 golden_xref(source),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the frozen recording for {source:?}"
             );
         }
     }
@@ -2115,15 +2106,15 @@ mod tests {
                 "an author-written token byte must defer the match: {nodes:?}"
             );
 
-            // The string pipeline builds one, keeping the author's bytes: it
-            // reaches its own restore over the *finished* string, which never
-            // rewrites a `role=` it did not extract into.
+            // The frozen recording builds one, keeping the author's bytes:
+            // passthrough restoration ran over the *finished* string, which
+            // never rewrote a `role=` it did not extract into.
             assert!(golden_whole_pipeline(source).contains("<a href"));
         }
 
         // A text with **no** opaque piece never reaches that gate, and needs
         // not to: there is no token to confuse, so the author's bytes pass
-        // through to the slot exactly as the string pipeline passes them.
+        // through to the slot unchanged.
         let source = "xref:sec[a,role=\u{96}0\u{97}hl]";
         assert_eq!(
             fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {}),
@@ -2150,9 +2141,9 @@ mod tests {
 
         // A masked passthrough contributes its **body**, not its source span:
         // the `+++` delimiters are syntax saying *do not substitute this*, so
-        // the body is exactly the literal text asked for — here a value the
-        // string pipeline cannot express at all (`full` reaches the slot as a
-        // sentinel, so it never selects a style).
+        // the body is exactly the literal text asked for — a value that used
+        // to reach this slot only as its passthrough-placeholder token, never
+        // as `full` itself, so it could never select a style.
         let nodes = build_src(Span::new("xref:sec[a,xrefstyle=+++full+++]"));
         let reference = assert_xref(&nodes[0]);
         assert_eq!(reference.xrefstyle, Some(XrefStyle::Full));
@@ -2237,11 +2228,11 @@ mod tests {
     fn an_untranslated_string_attribute_is_escaped_by_the_renderer() {
         // What the slot holds is *text*, and the renderer escapes it for the
         // attribute it is building — so a body carrying a `"` or an `&` lands
-        // inert rather than breaking out of the tag. The string pipeline
-        // cannot make this guarantee (a passthrough is restored into the
-        // rendered string after every escape has run), which is the whole
-        // reason the values differ; here it does not even reach the value,
-        // leaking the sentinel that stood for it instead.
+        // inert rather than breaking out of the tag. The frozen recording
+        // cannot make this guarantee: a passthrough there is restored into
+        // the rendered string only after every escape has run, so it never
+        // reaches the value at all — leaking the sentinel that stood for it
+        // instead.
         for (source, expected) in [
             (
                 "xref:sec[a,role=+++x&y\"z+++]",
@@ -2260,7 +2251,7 @@ mod tests {
 
             assert!(
                 golden_whole_pipeline(source).contains('\u{96}'),
-                "the string pipeline is expected to leak its sentinel for {source:?}"
+                "the frozen recording is expected to leak its sentinel for {source:?}"
             );
         }
 
@@ -2275,25 +2266,27 @@ mod tests {
     #[test]
     fn a_span_whose_markup_perturbs_the_string_pipeline_is_a_documented_divergence() {
         // What the structural recovery cannot do is make the *recognition*
-        // agree in every case: the string replacer matches over the span's
-        // markup where this matches over the one placeholder standing in for
-        // it, so the two read the same extent only while that markup carries
-        // no character the pattern is sensitive to. These are the three shapes
-        // where it does — and in each the string pipeline's reading is the
-        // markup-perturbed one (a truncated text, a text the attribute-list
-        // parse cut in half) and the tree's the well-formed one, exactly as
+        // agree in every case: matching over the span's rendered markup
+        // instead of the one placeholder standing in for it reads a different
+        // extent whenever that markup carries a character the pattern is
+        // sensitive to. These are the three shapes
+        // where it does — and in each the well-formed reading is the tree's,
+        // not the markup-perturbed one a match over raw text would give
+        // (a truncated text, a text the attribute-list
+        // parse cut in half) — exactly as
         // the quotes step's own crossed-delimiter divergence is.
         for source in [
-            // A `]` inside the span ends the macro form's lazy text capture
-            // early for the string replacer, but not here.
+            // A `]` inside the span would end the macro form's lazy text
+            // capture early if matched over raw markup, but not here.
             "xref:sec[a *b ] c* d]",
-            // A `>>` inside the span is the shorthand's own terminator, seen
-            // as `&gt;&gt;` in the string pipeline's haystack.
+            // A `>>` inside the span is the shorthand's own terminator, which
+            // a match over raw markup would see as `&gt;&gt;`.
             "<<x,a *b >> c* d>>",
             // Markup carrying an `=` (an attributed span) *and* a comma
-            // elsewhere in the text: the string replacer's attribute-list
-            // probe fires on the markup's own `=`, and the parse then splits
-            // the text at that comma, keeping only what precedes it.
+            // elsewhere in the text: matching over raw markup would have its
+            // attribute-list probe fire on the markup's own `=`, and the
+            // parse then split the text at that comma, keeping only what
+            // precedes it.
             "xref:sec[one, [.hl]#two#]",
         ] {
             let nodes = build_src(Span::new(source));
@@ -2301,7 +2294,7 @@ mod tests {
             assert_ne!(
                 fold_html(&nodes, &HtmlInlineRenderer {}),
                 golden_xref(source),
-                "{source:?} now agrees with the string pipeline; fold it into the parity corpus"
+                "{source:?} now agrees with the frozen recording; fold it into the parity corpus"
             );
         }
     }
@@ -2311,17 +2304,17 @@ mod tests {
         // The cross-reference family keeps the opaque-piece gate over a
         // masked passthrough — unlike the `link:`/`mailto:` family, which
         // restores one into its target — because a deferred cross-reference's
-        // target is used *before* the restore pass can reach it: the string
-        // pipeline captures it into the deferred segment while the haystack
-        // still holds the `\u{96}`*n*`\u{97}` sentinel, and the restore pass
-        // rewrites only the rendered string, so the sentinel bytes leak into
-        // the golden output's own `href` and fallback text. The tree defers
+        // target used to be captured into the deferred segment while the
+        // haystack still held the `\u{96}`*n*`\u{97}` passthrough sentinel,
+        // before the restore pass — which rewrote only the rendered string —
+        // could reach it, so the sentinel bytes leaked into the recorded
+        // output's own `href` and fallback text. The tree defers
         // instead and folds the restored literal — the well-formed reading
-        // against the string pipeline's leaked one.
+        // against that recorded, leaked one.
         let source = "xref:++someid++[]";
 
         // Recorded, so the leaked bytes this divergence is *about* outlive the
-        // string pipeline that leaked them (see [`snapshot`]).
+        // retired mechanism that produced them (see [`snapshot`]).
         let golden = crate::content::inline_builder::snapshot::recorded(
             "xref_passthrough_divergence",
             source,
@@ -2329,7 +2322,7 @@ mod tests {
 
         assert!(
             golden.contains('\u{96}'),
-            "expected the string pipeline's sentinel leak to still reproduce: {golden:?}"
+            "expected the frozen recording's sentinel leak to still reproduce: {golden:?}"
         );
 
         let nodes = build_src(Span::new(source));
@@ -2469,8 +2462,8 @@ mod tests {
     fn fold_matches_the_string_pipeline_under_a_document_wide_xrefstyle() {
         // The differential corpus for the reading above: with the style
         // resolved into the node rather than read at fold time, the fold still
-        // reproduces the string pipeline's bytes — the string replacer making
-        // the very same `document_xrefstyle` call in the very same pass.
+        // reproduces the frozen recording's bytes — `document_xrefstyle` is
+        // called at build time, in the very same pass the recording reflects.
         //
         // These fold to the *unresolved* fallback (a bare `Content` has no
         // catalog), which is the shape both sides agree on here; the resolved
@@ -2494,7 +2487,7 @@ mod tests {
                 assert_eq!(
                     folded,
                     golden_xref_with(fixture, &parser),
-                    "fold diverged from the string pipeline for {fixture:?} under xrefstyle={style:?}"
+                    "fold diverged from the frozen recording for {fixture:?} under xrefstyle={style:?}"
                 );
             }
         }
@@ -2640,11 +2633,12 @@ mod tests {
     #[test]
     fn fold_matches_the_string_pipeline_for_xrefs_inside_expanded_values() {
         // A cross-reference whose target or reference text crosses a
-        // *synthesized* run (an attribute expansion) is now recognized:
+        // *synthesized* run (an attribute expansion) is recognized:
         // nothing on a `Ref{Xref}` node is `Span`-typed — its target and text
         // come from the match string, which carries a synthesized run's bytes
         // exactly — so only the node's `location` takes
-        // design §4.4's coarse fallback. This is the same lift the anchor,
+        // the coarse fallback span used when a construct has no `Span`-typed
+        // field of its own. This is the same lift the anchor,
         // bare-e-mail, UI, and index-term families already made.
         let parser = expanding_parser();
 
@@ -2696,7 +2690,7 @@ mod tests {
                     &parser.render_context()
                 ),
                 golden_normal(source, &parser),
-                "fold diverged from the string pipeline for {source:?}"
+                "fold diverged from the frozen recording for {source:?}"
             );
         }
     }
@@ -2704,8 +2698,8 @@ mod tests {
     #[test]
     fn an_xref_inside_an_expanded_value_keeps_a_coarse_location() {
         // The values are exact; only the node's `location` (and its children's)
-        // falls back to the enclosing synthesized run's coarse span (design
-        // §4.4), since an expanded value's bytes have no `'src` counterpart of
+        // falls back to the enclosing synthesized run's coarse span,
+        // since an expanded value's bytes have no `'src` counterpart of
         // their own. A reference text recovered from such a run is necessarily
         // owned rather than borrowed.
         use crate::strings::CowStr;
@@ -2769,16 +2763,19 @@ mod tests {
 
     #[test]
     fn an_xref_target_may_be_attribute_expanded() {
-        // The point of this increment. `{cpp}` is `C&#43;&#43;`, and §3.4.1
-        // leaves an expanded value's `&` unescaped — so the target crosses two
+        // `{cpp}` is `C&#43;&#43;`, and an expanded attribute value's `&` is
+        // left unescaped, since the attributes step runs after
+        // `specialcharacters` — so the target crosses two
         // `Raw` leaves, which the match string stands in as placeholders.
         //
         // Those leaves are `RawOrigin::Substitution`: nothing extracted them
-        // and nothing restores them, so the string replacer's own haystack held
-        // exactly these bytes. Filling the placeholders in therefore reaches
-        // parity rather than departing from it — where a *masked* passthrough,
-        // which the replacer would not have restored yet, keeps its match
-        // deferred (`a_deferred_xref_target_over_a_passthrough_is_a_documented_divergence`).
+        // and nothing restores them, so these are exactly the bytes a
+        // rendered value holds. Filling the placeholders in therefore
+        // reproduces that value rather than departing from it — where a
+        // *masked* passthrough, not yet restored at this point, keeps its
+        // match deferred
+        // (`a_deferred_xref_target_over_a_passthrough_is_a_documented_divergence`).
+        //
         let renderer = HtmlInlineRenderer {};
 
         for fixture in [
@@ -2792,7 +2789,7 @@ mod tests {
             assert_eq!(
                 fold_html(&nodes, &renderer),
                 golden_whole_pipeline(fixture),
-                "fold diverged from the string pipeline for {fixture:?}"
+                "fold diverged from the frozen recording for {fixture:?}"
             );
         }
 
@@ -2808,10 +2805,10 @@ mod tests {
     fn an_xref_over_a_rendered_span_in_an_expanded_value_is_still_deferred() {
         // Lifting the boundary admits a *synthesized* run, not an
         // [`atomic`](Piece::atomic) one: an expanded value whose own `<` became
-        // a `Raw` leaf (design §3.4.1 — the attributes step runs after
+        // a `Raw` leaf (the attributes step runs after
         // `specialcharacters`, so a literal special in a value is emitted
-        // unescaped) is opaque, so the shorthand around it still defers. The
-        // string pipeline leaves it literal too, for its own reason: its
+        // unescaped) is opaque, so the shorthand around it still defers.
+        // Asciidoctor leaves it literal too, for its own reason: its
         // `id.contains('<')` guard.
         use crate::parser::ModificationContext;
 

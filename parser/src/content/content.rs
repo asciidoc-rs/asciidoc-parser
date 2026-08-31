@@ -70,21 +70,15 @@ pub struct Content<'src> {
     passthroughs: Vec<Passthrough>,
 
     /// The inline AST for this content: the structured representation of its
-    /// inline nodes, built by the single-pass builder
-    /// (the crate-internal `inline_builder` module) directly from the
-    /// pre-substitution source, in parallel with the substitution pass that
-    /// produced [`rendered`](Self::rendered).
+    /// inline nodes, built by the single-pass builder (the crate-internal
+    /// `inline_builder` module) directly from the pre-substitution source.
     ///
-    /// This is a **derived artifact** — built alongside the rendered content,
-    /// which remains the source of truth (making the tree canonical, with
-    /// `rendered_html()` a fold of it, is the remaining half of the [inline
-    /// AST architecture] design's step 6). Every parse builds it: the
-    /// `with_inline_tree` opt-in that used to gate it is retired. Because it is
-    /// derived, it is deliberately excluded from [`PartialEq`]/[`Eq`]/[`Hash`]:
-    /// two `Content`s with equal rendered text compare equal regardless of
-    /// their trees.
-    ///
-    /// [inline AST architecture]: https://github.com/scouten/asciidoc-parser/blob/main/docs/design/inline-ast-architecture.md
+    /// This tree is **authoritative**: [`rendered`](Self::rendered) is a fold
+    /// of it (see `SubstitutionGroup::apply`), and every macro family's
+    /// catalog/warning registration replays from it. It is nonetheless
+    /// deliberately excluded from [`PartialEq`]/[`Eq`]/[`Hash`], as a derived
+    /// artifact: two `Content`s with equal rendered text compare equal
+    /// regardless of their trees.
     inlines: Vec<InlineNode<'src>>,
 
     /// The document attributes as of the point in the document this content
@@ -128,12 +122,10 @@ pub struct Content<'src> {
 /// The deferred (cross-reference-bearing) portion of a [`Content`].
 ///
 /// The cross-references are read off the content's own **inline tree** (see
-/// [`block_tree_xref_segments`] and [`footnote_tree_xref_segments`]), which is
-/// what design §5.2's survey named as the first of the six things
-/// `run_pipeline` still solely owned. They arrive already partitioned into the
-/// two lists resolution keeps apart, where the string pipeline produced one
-/// flat list that had to be split by asking which placeholders its template
-/// still spliced.
+/// [`block_tree_xref_segments`] and [`footnote_tree_xref_segments`]), and
+/// arrive already partitioned into the two lists resolution keeps apart —
+/// rather than a flat list that has to be split by asking which placeholder
+/// survived.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct DeferredContent {
     /// The **block-level** cross-references, in the order
@@ -389,10 +381,8 @@ impl<'src> Content<'src> {
     /// [`carried_title_template`]. The snapshot travels across the
     /// `'src`-erasing hop (`Parser::pending_block_title`) with its inline nodes
     /// dropped, so the claiming block's title is the one content that renders
-    /// from a template rather than folding a tree; this is where that template
-    /// stops being the string pipeline's and becomes a product of the tree,
-    /// which is what lets the oracle pipeline be deleted without losing the
-    /// carried title's resolution.
+    /// from a template rather than folding a tree — and that template is a
+    /// product of the tree, synthesized at this hop.
     ///
     /// `parser` supplies the renderer; the fold runs under the title's own
     /// retained render attributes, the same pairing [`refold`](Self::refold)
@@ -475,13 +465,11 @@ impl<'src> Content<'src> {
     /// Returns the default **HTML** rendering of this content: the final text
     /// after all substitutions have been applied.
     ///
-    /// This is the built-in HTML output. (A custom
-    /// [`InlineRenderer`] installed via
+    /// This is the built-in HTML output. A custom [`InlineRenderer`]
+    /// installed via
     /// [`Parser::with_inline_renderer`](crate::Parser::with_inline_renderer)
-    /// still drives this output during migration; moving renderer selection to
-    /// render time is a later step of the [inline AST architecture].)
-    ///
-    /// [inline AST architecture]: https://github.com/scouten/asciidoc-parser/blob/main/docs/design/inline-ast-architecture.md
+    /// drives this output too; [`render_with`](Self::render_with) folds the
+    /// same tree through any renderer supplied at render time instead.
     pub fn rendered_html(&'src self) -> &'src str {
         self.rendered.as_ref()
     }
@@ -490,7 +478,7 @@ impl<'src> Content<'src> {
     /// same [`inlines`](Self::inlines) tree
     /// [`rendered_html`](Self::rendered_html) is the built-in HTML answer for.
     /// Returns an owned `String`, and caches nothing — the crate memoizes only
-    /// the default HTML rendering (design §3.3.1).
+    /// the default HTML rendering.
     ///
     /// One parse feeds any number of renders: the tree is built once, with
     /// every order-dependent fact (footnote numbers, counters, expanded
@@ -617,32 +605,26 @@ impl<'src> Content<'src> {
     /// Returns the inline AST for this content: the structured, read-only
     /// representation of its inline nodes.
     ///
-    /// Every parse builds this — the `with_inline_tree` opt-in that used to
-    /// gate it is retired — so it is an empty slice only for content whose tree
-    /// is genuinely empty (empty content). The tree is built by the single-pass
-    /// builder
-    /// (the crate-internal `inline_builder` module) directly from the
-    /// pre-substitution source, so each node carries its own precise source
-    /// [`Span`] (a node born from a transformation, such as an attribute
-    /// expansion, falls back to a documented coarser span) and a macro node
-    /// carries its own parsed attribute list. The fold of the tree reproduces
-    /// [`rendered_html`](Self::rendered_html) byte-for-byte across the
-    /// builder's supported vocabulary; a small set of forms is documented as
-    /// deferred (documented in the `inline_builder`
-    /// module), each left as literal text in the tree rather than a wrong
-    /// node. The tree is not yet the canonical representation (see the
-    /// [inline AST architecture design], Phase 4 step 6).
+    /// Every parse builds this, so it is an empty slice only for content
+    /// whose tree is genuinely empty (empty content). The tree is built by
+    /// the single-pass builder (the crate-internal `inline_builder` module)
+    /// directly from the pre-substitution source, so each node carries its
+    /// own precise source [`Span`] (a node born from a transformation, such
+    /// as an attribute expansion, falls back to a documented coarser span)
+    /// and a macro node carries its own parsed attribute list. The tree is
+    /// **canonical**: [`rendered_html`](Self::rendered_html) is a fold of
+    /// it. A small set of forms is documented as deferred (in the
+    /// `inline_builder` module), each left as literal, already-rendered text
+    /// in the tree rather than a dedicated node — so the rendering is always
+    /// exact, but the tree's structure is coarser for those forms.
     ///
     /// Cross-references in the tree carry their resolved destination once a
     /// full [`Parser::parse`](crate::Parser::parse) has resolved the document's
     /// references: each resolved destination is mirrored into the corresponding
     /// [`Ref`](crate::inlines::Ref) node, so a caller that walks
     /// [`inlines`](Self::inlines) after the parse sees the same destinations
-    /// the rendered string reflects (§4.3 of the design). Before resolution
-    /// — or for a standalone parse with no document catalog — a `Ref`
-    /// node's destination is `None`.
-    ///
-    /// [inline AST architecture design]: https://github.com/scouten/asciidoc-parser/blob/main/docs/design/inline-ast-architecture.md
+    /// the rendered string reflects. Before resolution — or for a standalone
+    /// parse with no document catalog — a `Ref` node's destination is `None`.
     pub fn inlines(&self) -> &[InlineNode<'src>] {
         &self.inlines
     }
@@ -693,8 +675,7 @@ impl<'src> Content<'src> {
     }
 
     /// Installs this content's deferred cross-references, **read off its own
-    /// inline tree** — the sole producer of a production content's deferred
-    /// state now that the string pipeline no longer runs at the seam.
+    /// inline tree** — the sole producer of a content's deferred state.
     ///
     /// The two lists come from [`block_tree_xref_segments`] and
     /// [`footnote_tree_xref_segments`], already partitioned the way resolution
@@ -708,18 +689,11 @@ impl<'src> Content<'src> {
     /// boolean walk answers that first, and cheaply, because *most contents
     /// are exactly that* — a plain paragraph's nodes are text runs the walk
     /// rejects in one pass, where unconditionally deriving both segment lists
-    /// would traverse every tree twice to build two empty vectors. (The old
-    /// early return keyed this on the string pipeline having deferred
-    /// something; the walk is the same question asked of the tree.)
+    /// would traverse every tree twice to build two empty vectors.
     ///
-    /// The carve-out that used to live here — keeping the string pipeline's
-    /// whole answer where the tree held fewer cross-references than the
-    /// pipeline deferred — is gone with the pipeline it fell back to. It was
-    /// measured unreachable before the deletion (zero hits across the suite,
-    /// both of its member forms closed by their own increments); a form the
-    /// builder still declines is simply not a cross-reference of this content
-    /// any more, which is the documented-divergence reading every such form
-    /// already has.
+    /// A cross-reference form the builder declines to recognize is simply not
+    /// a cross-reference of this content — the documented-divergence reading
+    /// every such form already has.
     pub(crate) fn set_tree_xrefs(
         &mut self,
         tree: &[InlineNode<'src>],
@@ -832,13 +806,13 @@ impl<'src> Content<'src> {
     /// Re-renders this content from its **tree**, now that resolution has
     /// installed each cross-reference's destination into it.
     ///
-    /// This is what retires the deferred-cross-reference sentinel system
-    /// (design §4.2's second). `rendered_html()` became a fold of the tree for
-    /// every other content at the cutover; the one exception was content
-    /// carrying a deferred cross-reference, whose rendering is rebuilt on every
-    /// resolution pass and so could not be a fold *taken at parse time*. It can
-    /// be a fold taken **here** instead — after the pass that resolved it —
-    /// which is the same answer reached one step later.
+    /// `rendered_html()` is a fold of the tree for every content, taken once
+    /// at parse time. The one exception is content carrying a deferred
+    /// cross-reference: its rendering must be rebuilt on every resolution
+    /// pass, so it cannot be folded once and for all at parse time — what it
+    /// holds until resolution is the fold of the still-unresolved tree. This
+    /// re-fold, taken **here** after the pass that resolved it, is the same
+    /// answer reached one step later.
     ///
     /// `attributes` are the document attributes this content was parsed under,
     /// which it retained itself because they are order-dependent; they are
@@ -848,9 +822,9 @@ impl<'src> Content<'src> {
     ///
     /// The caller gates this on the content **holding a tree**, which every
     /// production content with deferred state does — the deferred lists are
-    /// read off that tree, the only producer left at the seam. The one
-    /// content that renders from a *template* instead — the carried block
-    /// title (see [`carried_title_template`]) — is resolved by the
+    /// read off that tree, the sole producer of a content's deferred state.
+    /// The one content that renders from a *template* instead — the carried
+    /// block title (see [`carried_title_template`]) — is resolved by the
     /// document-order title pass, never here.
     /// Folds each footnote this content **defines** from its own subtree, and
     /// hands the results to `warnings` for the resolution pass to install into
@@ -1012,8 +986,8 @@ impl<'src> Content<'src> {
     /// resolved state from `block_ordered` and `footnote_ordered`.
     ///
     /// Returns whether the **block-level** correlation ran — i.e. whether the
-    /// tree holds exactly the cross-reference nodes whose placeholders the
-    /// string pipeline left in the template. A `false` means the builder left
+    /// tree holds exactly the cross-reference nodes the carried title's own
+    /// template expects a slot for. A `false` means the builder left
     /// at least one of them unrecognized, so this content's tree is known not
     /// to describe its rendering; a caller that folds the tree instead of
     /// rebuilding from that template (see [`refold`](Self::refold)) uses this
@@ -1039,7 +1013,7 @@ impl<'src> Content<'src> {
         // documented set of divergent forms unrecognized (e.g. a display text
         // crossing a rendered span — see the `inline_builder` module), so the
         // tree can legitimately hold *fewer* cross-reference nodes than the
-        // string pipeline deferred. When the counts differ the positional
+        // template expects a slot for. When the counts differ the positional
         // pairing is unknowable; the mirror is skipped for that list — leaving
         // its nodes in their honest unresolved state — rather than assigning
         // destinations to the wrong nodes.
@@ -1077,26 +1051,19 @@ impl<'src> Content<'src> {
 ///
 /// `None` is the same carve-out
 /// [`mirror_tree_xref_resolution`](Content::mirror_tree_xref_resolution)
-/// reports: a tree holding fewer block-level cross-references than the string
-/// pipeline deferred does not describe this title, so folding it would drop the
-/// construct. The caller renders the template instead.
+/// reports: a tree holding fewer block-level cross-references than were
+/// deferred does not describe this title, so folding it would drop the
+/// construct. The caller renders the template instead — the fallback for a
+/// title with no tree to fold at all (a block title carried across a section
+/// heading, whose inline nodes cannot cross the `'src`-erasing hop it
+/// travels on).
 ///
 /// Folding renders the **whole** title, not just its cross-references — every
 /// styled span, image and special character in it — where the template render
-/// this replaces touched only the placeholders. Measured on a heading carrying
-/// all three, that is three more renderer callbacks per deferred title (13 → 16
-/// for `== A *bold* image:x.png[X] a < b <<t>>`). The calls are duplicates: the
-/// string pipeline already made them at parse time.
-///
-/// That is the transitional cost of an authoritative fold, not a cost this path
-/// adds. Every content already pays it — a plain paragraph's `<` is rendered
-/// twice today, once by `run_pipeline` and once by the fold that overwrites its
-/// answer — and a *deferred paragraph* has paid exactly this since the fold
-/// moved to resolution time. A title was the last content still on the cheaper
-/// template path, and it was cheaper only because its rendering was less
-/// correct. The duplication ends for all of them together, when step 6 takes
-/// the string pipeline off the production path; it cannot end here, because
-/// folding a tree means rendering it.
+/// touches only the placeholders. Measured on a heading carrying all three,
+/// that is three more renderer callbacks per deferred title (13 → 16 for
+/// `== A *bold* image:x.png[X] a < b <<t>>`) — the cost of an authoritative
+/// fold, paid once per deferred title.
 ///
 /// What this *does* avoid is rendering the same title twice within this pass:
 /// the fold replaces the template render rather than joining it — see the
@@ -1162,9 +1129,9 @@ fn count_tree_xrefs(nodes: &[InlineNode<'_>]) -> usize {
 
             InlineNode::Styled(styled) => count_tree_xrefs(&styled.children),
 
-            // A **visible index term** shows its text in the flow, so the
-            // string replacer's own haystack holds any cross-reference written
-            // inside it and defers a segment for one. It is the fifth nested
+            // A **visible index term** shows its text in the flow, so a
+            // cross-reference written inside it renders in place and defers a
+            // segment of its own. It is the fifth nested
             // node list a tree can hold a construct in (see the side-effect
             // sweep's own note), and the one a walk written by matching on
             // `children` is bound to miss.
@@ -1220,45 +1187,41 @@ fn tree_defers_xrefs(nodes: &[InlineNode<'_>]) -> bool {
 }
 
 /// Derives the **block-level** deferred cross-reference segments from an
-/// already-built inline tree — the list `run_pipeline`'s own
-/// `InlineXrefReplacer` produced and its `set_deferred_xrefs` installed,
-/// read off the nodes instead.
+/// already-built inline tree, read off the nodes.
 ///
-/// This is one of the six things design §5.2's survey found the string pipeline
-/// still solely owning — the first of them the survey called *blocked* rather
-/// than merely unbuilt. It is **wired**: [`Content::set_tree_xrefs`] installs
+/// [`Content::set_tree_xrefs`] installs
 /// what this returns, so what a content carries for its deferred
 /// cross-references is what its tree said.
 ///
 /// A [`Ref`](InlineNode::Ref)`{`[`Xref`](RefVariant::Xref)`}` node already
 /// carries every field an [`XrefSegment`] holds but one — `target`, `window`,
 /// `roles`, `xrefstyle` and `derived` are plain values the builder resolved at
-/// recognition time — so the survey recorded the family as blocked on
-/// [`provided_text`](XrefSegment::provided_text) alone, which the segment holds
-/// as a **string** where the node holds its display text as *children*.
+/// recognition time. Only
+/// [`provided_text`](XrefSegment::provided_text) needs deriving, which the
+/// segment holds as a **string** where the node holds its display text as
+/// *children*.
 ///
 /// That slot takes the **fold of those children**, and it is a different answer
-/// from the one the sibling increment gave `role=` / `window=` / `xrefstyle=`
+/// from the one given `role=` / `window=` / `xrefstyle=`
 /// (the author's untranslated source, see
 /// [`untranslated_value`](crate::content::inline_builder)) for a reason worth
 /// stating: a display text *is* markup by nature. `xref:sec[*bold*]` shows
-/// bold text, and the string replacer captures exactly
-/// `<strong>bold</strong>` out of its own already-rendered haystack — so the
-/// fold reproduces the byte string rather than approximating it, where a
-/// computed string slot had no such answer to match.
+/// bold text, and the fold of the node's own children reproduces exactly
+/// `<strong>bold</strong>` — the byte string a display text always renders as,
+/// rather than approximating it, where a computed string slot had no such
+/// answer to match.
 ///
 /// The fold runs **here**, at the end of the parse, with the renderer the parse
-/// carried — which is where the string replacer computes it too. Deriving it
+/// carried. Deriving it
 /// later, at resolution time, would read whatever renderer that caller passed
-/// and hand the resolver a different [`ResolutionContext`] than the string
-/// pipeline does; taking it at build time keeps the two byte-identical and
-/// keeps this function a pure function of the tree plus the parse's own
-/// renderer.
+/// and hand the resolver a different [`ResolutionContext`]; taking it at
+/// build time keeps this function a pure function of the tree plus the parse's
+/// own renderer.
 ///
 /// Present-but-empty is preserved, because it is a distinction the renderer
 /// acts on: the `<<id,>>` shorthand records one empty
-/// [`Text`](InlineNode::Text) child, which the string replacer carries as
-/// `Some("")` and renders as an empty `<a>…</a>`, where an absent text
+/// [`Text`](InlineNode::Text) child, folding to
+/// `Some("")` and rendering as an empty `<a>…</a>`, where an absent text
 /// (`None`) falls back to the target's reference text. So the `Option` keys on
 /// the **presence of a child**, not on what that child folds to — the same rule
 /// [`fold_xref`](crate::content::inline_builder) already applies, and the

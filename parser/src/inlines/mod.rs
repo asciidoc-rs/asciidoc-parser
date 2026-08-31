@@ -1,24 +1,17 @@
 //! A first-class **inline AST**: the structured representation of the inline
 //! content of a leaf block.
 //!
-//! This module defines the public node vocabulary described in the [inline AST
-//! architecture] design document. It is aligned with the Eclipse AsciiDoc
-//! Language project's [Abstract Semantic Graph (ASG)]: the ASG's small inline
-//! core — `span` / `ref` / `text` / `charref` / `raw` — forms the spine, and
-//! the constructs this crate supports beyond that core (images, footnotes, UI
-//! macros, index terms, callouts, anchors, line breaks, and STEM) are modeled
-//! as additional variants that project down to ASG-legal nodes when emitting
-//! conformant ASG.
+//! This module defines the public node vocabulary. It is aligned with the
+//! Eclipse AsciiDoc Language project's [Abstract Semantic Graph (ASG)]: the
+//! ASG's small inline core — `span` / `ref` / `text` / `charref` / `raw` —
+//! forms the spine, and the constructs this crate supports beyond that core
+//! (images, footnotes, UI macros, index terms, callouts, anchors, line
+//! breaks, and STEM) are modeled as additional variants that project down to
+//! ASG-legal nodes when emitting conformant ASG.
 //!
-//! # Status: skeleton (Phase 0)
-//!
-//! These are **types only, with no wiring.** Nothing in the parser or the
-//! rendering pipeline produces or consumes them yet; [`Content`] still exposes
-//! inline content as a rendered string. The types are landed first so the
-//! public shape can be reviewed and the later phases — building the tree,
-//! making it canonical, and folding it back to HTML — can proceed against a
-//! stable vocabulary. Field sets on the crate-extension nodes are provisional
-//! and will be refined against the first real consumer.
+//! This tree is the crate's single inline representation, built directly from
+//! source; both [`Content::rendered_html`] and every macro family's
+//! catalog/warning registration are derived from it.
 //!
 //! # Logical text, not output text
 //!
@@ -27,9 +20,8 @@
 //! meaning of the ASG's `text` / `charref` / `raw` trichotomy, captured here by
 //! [`InlineNode::Text`], [`InlineNode::CharRef`], and [`InlineNode::Raw`].
 //!
-//! [inline AST architecture]: https://github.com/scouten/asciidoc-parser/blob/main/docs/design/inline-ast-architecture.md
 //! [Abstract Semantic Graph (ASG)]: https://gitlab.eclipse.org/eclipse/asciidoc-lang/asciidoc-lang/-/blob/main/asg/schema.json
-//! [`Content`]: crate::content::Content
+//! [`Content::rendered_html`]: crate::content::Content::rendered_html
 
 mod anchor;
 pub use anchor::Anchor;

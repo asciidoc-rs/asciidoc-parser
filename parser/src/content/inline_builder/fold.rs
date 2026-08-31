@@ -111,8 +111,7 @@ pub(crate) enum Xrefs<'a> {
 /// cross-reference **nested** inside that other node — `footnote:[*<<tgt>>*]`,
 /// a `<<tgt>>` inside a styled span's body — cannot itself become a splice
 /// point: its placeholder would sit *inside* the span's own rendered markup,
-/// which a flat piece list cannot represent (the string pipeline's in-band
-/// placeholders could sit anywhere in a byte string; a piece list has no
+/// which a flat piece list cannot represent (it has no
 /// "inside another piece" position). It is folded in
 /// [`Deferred`](Xrefs::Deferred) mode regardless, though — not
 /// [`Rendered`](Xrefs::Rendered) — so its segment is still recorded: it is
@@ -152,16 +151,17 @@ pub(crate) enum Xrefs<'a> {
 ///
 /// # Why the template is built at *registration* time
 ///
-/// A footnote's catalog entry is registered when the footnote is recognized,
-/// which is the same moment the string replacer registers its own. That is not
+/// A footnote's catalog entry is registered when the footnote is recognized.
+/// That is not
 /// a convenience: `Footnote::resolve_references` runs on the **catalog entry**,
 /// driven from the catalog, with no access to the tree the footnote came from,
 /// so nothing later in the parse can go back and derive the pair. Recognition
 /// is also the last moment the subtree is still final —
 /// [`apply_post_replacements`](super::apply_post_replacements) descends into a
 /// [`Styled`](crate::inlines::Styled)/[`Ref`](InlineNode::Ref) child but not
-/// into a [`Footnote`](InlineNode::Footnote)'s, exactly as the string pipeline
-/// has the footnote's text out of the flat string by then.
+/// into a [`Footnote`](InlineNode::Footnote)'s — matching Asciidoctor's own
+/// order, whose footnote text is already extracted from the flow by the time
+/// post-replacements run.
 ///
 /// # This is a *build-time* fold, and the only one
 ///
@@ -171,16 +171,15 @@ pub(crate) enum Xrefs<'a> {
 /// stateful renderer. A footnote is the documented exception, and not by
 /// choice: its catalog entry is a **required** recognition side effect (the
 /// same reason its number is), and that entry's payload is a *rendered
-/// string*, so registering it and rendering it are one act. The string
-/// pipeline does exactly the same thing at exactly the same moment — its
-/// footnote replacer cuts already-rendered bytes out of the flat string it is
+/// string*, so registering it and rendering it are one act — as they were in
+/// this crate's original string-substitution implementation too, whose
+/// footnote replacer cut already-rendered bytes out of the flat string it was
 /// substituting.
 ///
 /// This adds no second rendering of the subtree. `fold_footnote` writes only
 /// the in-flow **marker**, never the footnote's children, so the block's own
 /// fold does not re-render what this one rendered: a footnote's subtree is
-/// folded exactly once per parse, here — the same once the string pipeline
-/// spends on it.
+/// folded exactly once per parse, here.
 ///
 /// [`Footnote::resolve_references`]: crate::document::Footnote::resolve_references
 pub(crate) fn fold_deferring_xrefs(
@@ -209,8 +208,8 @@ pub(crate) fn fold_deferring_xrefs(
         // its own piece.
         //
         // The footnote axis is inert here whichever way it is set: `nodes`
-        // is one footnote's own children, and footnotes do not nest (the
-        // string pipeline's lazy bracket match cannot recognize one inside
+        // is one footnote's own children, and footnotes do not nest (a
+        // footnote's own lazy bracket match cannot recognize one inside
         // another's content either), so no `Footnote` node can be reached.
         // `Marked` is the ordinary fold, which is the honest default for a
         // mode nothing consults.
@@ -255,8 +254,9 @@ pub(crate) fn fold_deferring_xrefs(
 /// folds of the same tree, and "which regions were footnote markers" is a
 /// question about node kinds rather than about bytes — still one substitution
 /// pass, so the counters are still processed once. `Section::parse` calls this
-/// for a heading's reference text, and the whole sentinel system (design
-/// §4.2's **first of three**) is deleted.
+/// for a heading's reference text, and the whole sentinel system — one of the
+/// three Unicode-sentinel hacks the string pipeline used (see this module's
+/// own `README.md`) — is deleted.
 ///
 /// The strip recurses, exactly as the byte-level one does over the whole
 /// rendered string: a footnote nested inside a rendered span, or inside a
@@ -411,9 +411,9 @@ fn fold_into_html(
             }
 
             InlineNode::Styled(styled) => {
-                // Fold the children to the body, then wrap it exactly as the
-                // string pipeline's quotes step did: the same `QuoteType`,
-                // attribute list, and id it recognized, so the bytes match.
+                // Fold the children to the body, then wrap it with the same
+                // `QuoteType`, attribute list, and id the quotes step
+                // recognized, matching Asciidoctor's own output.
                 let mut body = String::new();
                 fold_into_html(
                     &styled.children,
@@ -478,9 +478,8 @@ pub(super) fn render_char(ch: char, renderer: &dyn InlineRenderer, out: &mut Str
     renderer.render_special_character(type_, out);
 }
 
-/// Folds an [`Image`](InlineNode::Image) node through the same
-/// `render_image`/`render_icon` the string pipeline's macros step calls, so the
-/// output is byte-for-byte identical — handing over the node itself, since
+/// Folds an [`Image`](InlineNode::Image) node through `render_image`/
+/// `render_icon` — handing over the node itself, since
 /// `target`, `alt`, `width`/`height` and the restored-range list are all on it.
 ///
 /// The attribute list — which a renderer reads `title`, `link`, `format`, roles
@@ -501,10 +500,9 @@ fn fold_image(
     }
 }
 
-/// Folds a [`Ui`](InlineNode::Ui) node through the same
-/// `render_keyboard`/`render_button`/`render_menu` the string pipeline's macros
-/// step calls, reconstructing the render parameters from the keys / label /
-/// menu path the macro step captured, so the output is byte-for-byte identical.
+/// Folds a [`Ui`](InlineNode::Ui) node through
+/// `render_keyboard`/`render_button`/`render_menu`, reconstructing the render
+/// parameters from the keys / label / menu path the macro step captured.
 /// `context` is threaded through because rendering a menu reads the document's
 /// `icons` attribute to choose the caret between menu levels.
 fn fold_ui(ui: &Ui<'_>, renderer: &dyn InlineRenderer, context: &RenderContext, out: &mut String) {
@@ -527,8 +525,8 @@ fn fold_ui(ui: &Ui<'_>, renderer: &dyn InlineRenderer, context: &RenderContext, 
     }
 }
 
-/// Folds a link [`Ref`](InlineNode::Ref) node through the same `render_link`
-/// the string pipeline's macros step calls — handing over the node itself,
+/// Folds a link [`Ref`](InlineNode::Ref) node through `render_link` —
+/// handing over the node itself,
 /// since the target, window, roles (the `bare` class an auto-recognized URL
 /// picks up) and attribute list are all on it.
 ///
@@ -559,23 +557,21 @@ fn fold_link(
     renderer.render_link(reference, &link_text, out);
 }
 
-/// Folds a cross-reference [`Ref`](InlineNode::Ref) node through the same
-/// `render_xref` the string pipeline's macros step feeds at resolution time,
-/// reconstructing the [`XrefRenderParams`] from the node: the provided text is
-/// the fold of the children (empty children ⇒ no text, so the renderer emits
-/// the bracketed `[id]` fallback), and the target/window/roles/derived come
-/// straight off the node.
+/// Folds a cross-reference [`Ref`](InlineNode::Ref) node through
+/// `render_xref`, reconstructing the [`XrefRenderParams`] from the node: the
+/// provided text is the fold of the children (empty children ⇒ no text, so
+/// the renderer emits the bracketed `[id]` fallback), and the
+/// target/window/roles/derived come straight off the node.
 ///
-/// This increment recognizes both a same-document reference to a specific id
-/// (unresolved — no catalog-resolution pass runs, so `resolved` is always
-/// `None` here) and a target that carries its own destination without a
-/// catalog (`derived`, populated at build time — see the `Ref::derived` field
-/// docs): an inter-document target, and the empty target naming the current
-/// document as a whole. The `xrefstyle` is taken straight off the node, which
-/// carries the **effective** style resolved at build time (see the
-/// `Ref::xrefstyle` field docs), so this fold consults no document state for
-/// it; the cutover (design §5.2 Phase 4, step 6) wires catalog resolution to
-/// the tree.
+/// This handles both a same-document reference to a specific id — resolved by
+/// a later catalog-resolution pass that writes the outcome back into the
+/// node's own [`Ref::resolved`] field, which this fold simply reads — and a
+/// target that carries its own destination without a catalog (`derived`,
+/// populated at build time — see the `Ref::derived` field docs): an
+/// inter-document target, and the empty target naming the current document as
+/// a whole. The `xrefstyle` is taken straight off the node, which carries the
+/// **effective** style resolved at build time (see the `Ref::xrefstyle` field
+/// docs), so this fold consults no document state for it.
 fn fold_xref(
     reference: &Ref<'_>,
     renderer: &dyn InlineRenderer,
@@ -613,8 +609,8 @@ fn fold_xref(
 
     // Whether a display text was *provided* is the presence of a child, not
     // what that child folds to: the `<<id,>>` shorthand records a
-    // present-but-empty text (one empty `Text` child) that the string replacer
-    // carries as `Some("")` — an empty `<a>…</a>` — which an absent text
+    // present-but-empty text (one empty `Text` child), matching Asciidoctor's
+    // own `Some("")` — an empty `<a>…</a>` — which an absent text
     // (`None`, the bracketed `[id]` / reference-text fallback) renders quite
     // differently. Every text the builder recognizes is baked into exactly one
     // child, so the two cases never collide.
@@ -647,29 +643,29 @@ fn fold_xref(
     renderer.render_xref(&params, out);
 }
 
-/// Folds an [`Anchor`](InlineNode::Anchor) through the same `render_anchor` the
-/// string step calls. The built-in HTML backend emits only `<a id="…"></a>`, so
+/// Folds an [`Anchor`](InlineNode::Anchor) through `render_anchor`. The
+/// built-in HTML backend emits only `<a id="…"></a>`, so
 /// the reference text never reaches the flow; a custom backend that consults it
 /// (e.g. one using it as an `xreflabel`) receives the folded reference text
 /// **when the node captured it**.
 ///
 /// That capture is verbatim-only: a *non-verbatim* reference text (a rendered
 /// span or an escaped special) is `None` on the node (see
-/// `build_anchor_reftext`), so `render_anchor` receives `None` here where the
-/// string replacer would have passed the substituted text. This changes no HTML
+/// `build_anchor_reftext`), so `render_anchor` receives `None` here where
+/// Asciidoctor would have passed the substituted text. This changes no HTML
 /// output — the built-in backend ignores the reference text entirely — and is
 /// the same verbatim boundary the node documents; a custom backend that needs
 /// the full reference text unconditionally will get it once a re-flow consumer
 /// pins richer `reftext` population.
 ///
 /// A **bibliography** anchor (`[[[label]]]`) passes `None` regardless of what
-/// its node carries, mirroring its own replacer exactly: that pass calls
+/// its node carries, matching Asciidoctor's own handling exactly: it calls
 /// `render_anchor(id, None, …)` and pushes the bracketed label into the flow
 /// itself. The label is in the flow here too — as the sibling nodes following
 /// this one (see `biblio_anchor_level`) — so folding the node's `reftext`,
 /// which holds that same bracketed label as the entry's *registered* reference
-/// text, into `render_anchor` would hand a custom backend a reference text the
-/// string pipeline never passes it.
+/// text, into `render_anchor` would hand a custom backend a reference text
+/// Asciidoctor never passes it.
 fn fold_anchor(
     anchor: &Anchor<'_>,
     renderer: &dyn InlineRenderer,
@@ -706,15 +702,15 @@ fn fold_anchor(
     renderer.render_anchor(&anchor.id, reftext, out);
 }
 
-/// Folds an [`IndexTerm`](InlineNode::IndexTerm) through the same
-/// `render_index_term` the string step's macros pass calls.
+/// Folds an [`IndexTerm`](InlineNode::IndexTerm) through
+/// `render_index_term`.
 ///
 /// A **concealed** term (`visible == false`) has an empty `terms` and renders
 /// nothing — the HTML backend generates no index. A **visible** (flow) term
 /// carries its shown text as `terms[0]` in the *already-substituted* form the
 /// recognizer computed (matching the seam's "already-substituted visible term"
 /// contract), so `render_index_term` emits it verbatim and the fold reproduces
-/// the string pipeline's bytes exactly.
+/// those bytes exactly.
 ///
 /// A visible term whose text encloses an earlier-recognized construct
 /// (`((*tiger*))`) carries it as [`children`](IndexTerm::children) instead, and
@@ -731,7 +727,7 @@ fn fold_anchor(
 /// (test-only) `inline_tree` recorder stores — the single
 /// shown term for a visible node, empty for a concealed one; the richer
 /// primary/secondary/tertiary structure the field can hold is left to a re-flow
-/// consumer to pin (the field is provisional, per the node's Phase-0 note),
+/// consumer to pin (the field is provisional, per its own doc comment),
 /// exactly as an anchor's `reftext` is.
 fn fold_index_term(
     index_term: &IndexTerm<'_>,
@@ -764,10 +760,10 @@ fn fold_index_term(
     renderer.render_index_term(index_term, visible_term, out);
 }
 
-/// Folds a [`Footnote`](InlineNode::Footnote) through the same
-/// `render_footnote` the string step calls — handing over the node itself,
+/// Folds a [`Footnote`](InlineNode::Footnote) through
+/// `render_footnote` — handing over the node itself,
 /// since everything the marker needs is on it (`is_reference`, `number`, `id`)
-/// and no build-time state is required (design §3.3.1).
+/// and no build-time state is required.
 ///
 /// Only the in-flow **marker** is folded here (`[1]`, or `[id]` for an
 /// unresolved reference): `render_footnote` never emits the footnote's own
@@ -785,13 +781,12 @@ fn fold_footnote(footnote: &Footnote<'_>, renderer: &dyn InlineRenderer, out: &m
     renderer.render_footnote(footnote, out);
 }
 
-/// Folds a [`Callout`](InlineNode::Callout) through the same `render_callout`
-/// the string step's `Callouts` group calls, handing over the node itself —
-/// no build-time state is needed, mirroring [`fold_footnote`]. This is design
-/// §4.6's Phase 5 reshape arrived at: the node was already the canonical
-/// structured record, and the render-params struct this fold used to rebuild
-/// from it (along with a second `CalloutGuard` differing only in whether the
-/// prefix was a `CowStr` or a `&str`) is gone.
+/// Folds a [`Callout`](InlineNode::Callout) through `render_callout`,
+/// handing over the node itself — no build-time state is needed, mirroring
+/// [`fold_footnote`]. The node was already the canonical structured record,
+/// so the render-params struct this fold used to rebuild from it (along with
+/// a second `CalloutGuard` differing only in whether the prefix was a
+/// `CowStr` or a `&str`) is gone.
 fn fold_callout(
     callout: &Callout<'_>,
     renderer: &dyn InlineRenderer,
@@ -801,14 +796,12 @@ fn fold_callout(
     renderer.render_callout(callout, context, out);
 }
 
-/// Folds a [`Stem`](InlineNode::Stem) through the same
-/// `render_styled` the string pipeline's passthrough-restore step
-/// calls for a STEM entry (design §3.3.1's fold-time seam). The node's `value`
-/// already carries the resolved substitution group's output (special
+/// Folds a [`Stem`](InlineNode::Stem) through `render_styled`. The node's
+/// `value` already carries the resolved substitution group's output (special
 /// characters only, by default), so the fold passes it straight through as
-/// the body — no further processing is needed, mirroring how a STEM
-/// passthrough is restored with no attribute list or id (`INLINE_STEM_MACRO`
-/// captures neither).
+/// the body — no further processing is needed, matching how Asciidoctor
+/// restores a STEM passthrough with no attribute list or id
+/// (`INLINE_STEM_MACRO` captures neither).
 ///
 /// Shared with the macro families, whose *restore* of a masked STEM
 /// expression into a computed target must emit exactly the bytes this fold
@@ -860,20 +853,22 @@ mod tests {
 
     #[test]
     fn fold_reference_text_omits_a_headings_footnote_markers() {
-        // The tree's answer to the footnote-marker sentinel system this
-        // increment deleted: the two strings `Section::parse` needs — the
+        // The tree's answer to the footnote-marker sentinel system that was
+        // deleted: the two strings `Section::parse` needs — the
         // rendering the heading shows, and the footnote-free text its reference
         // and auto-generated id are derived from — are two *folds of the same
         // tree*, and "which regions were footnote markers" is a question about
         // node kinds rather than about bytes.
         //
         // Every fixture is checked from both ends. The heading's own rendering
-        // is compared against the string pipeline, which still produces it and
-        // is the golden-HTML oracle (§5.3). The footnote-free reference text is
-        // compared against a **literal** expected string: with the sentinel
-        // strip gone there is no second implementation left to differentiate
-        // against, so the expectation is written down instead — these are the
-        // exact bytes that strip produced, captured before it was deleted.
+        // is compared against `Content::rendered_html()` for the same source
+        // under the `Title` group — the public entry point's own
+        // build-and-fold of the same tree, confirming the two paths agree.
+        // The footnote-free reference text is compared against a **literal**
+        // expected string: with the sentinel strip gone there is no second
+        // implementation left to differentiate against, so the expectation is
+        // written down instead — these are the exact bytes that strip
+        // produced, captured before it was deleted.
         let fixtures = [
             // No footnote at all: the two strings are the same.
             ("Plain title", "Plain title"),
@@ -916,7 +911,7 @@ mod tests {
 
         for (fixture, expected_reftext) in fixtures {
             // Two independent parsers, since a footnote's number is document
-            // state: one for each side of the comparison (design §5.3).
+            // state: one for each side of the comparison.
             let golden_parser = Parser::default();
             let mut golden = crate::content::Content::from(Span::new(fixture));
             crate::content::SubstitutionGroup::Title.apply(&mut golden, &golden_parser, None);
@@ -1079,7 +1074,8 @@ mod tests {
         // `xrefstyle` in effect *there* is whatever the last `:xrefstyle:` line
         // in the document left set — not what was in effect where the
         // reference was written. Reading it at fold time would therefore
-        // silently re-style a reference the string pipeline had already styled.
+        // silently re-style a reference that was already styled correctly at
+        // the point it was written.
         let renderer = HtmlInlineRenderer {};
 
         // A parser whose document-wide `xrefstyle` says `full`, which the
