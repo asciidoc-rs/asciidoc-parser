@@ -992,6 +992,48 @@ mod tests {
     }
 
     #[test]
+    fn quoted_values_own_unescape_shortens_a_value_by_one_byte_ahead_of_a_placeholder() {
+        // Direct evidence for the design doc's "The masked-piece placeholder's
+        // offset table cannot be carried through `Attrlist::parse`" note's
+        // second blocker, checked against this method's own parsed value
+        // rather than only a full document's final rendered HTML (as
+        // `tests/sentinels.rs`'s
+        // `a_quoted_values_own_unescape_moves_a_placeholder_in_the_parsed_value`
+        // does). `\"` is rewritten to `"` by a plain `String::replace` on the
+        // way to a quoted value — one byte shorter than what it replaces —
+        // and that rewrite is not reported back anywhere a caller could use
+        // to remap a byte offset recorded against the source it parsed.
+        use crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER;
+
+        let source = format!(r#"alt="a \" b {MASKED_PIECE_PLACEHOLDER} c""#);
+        let written_offset = source.find(MASKED_PIECE_PLACEHOLDER).unwrap();
+
+        let p = Parser::default();
+        let (attr, _offset, warning_types) = crate::attributes::ElementAttribute::parse(
+            &CowStr::from(source.as_str()),
+            0,
+            &p,
+            ParseShorthand(false),
+            AttrlistContext::Inline,
+        );
+
+        assert!(warning_types.is_empty());
+        assert!(attr.value_is_quoted());
+
+        let parsed_offset = attr.value().find(MASKED_PIECE_PLACEHOLDER).unwrap();
+
+        // `alt="` (5 bytes) is stripped entirely, since the parsed value
+        // holds only the entry's own content; the `\"` -> `"` unescape ahead
+        // of the placeholder accounts for the other byte.
+        assert_eq!(
+            parsed_offset,
+            written_offset - 5 - 1,
+            "the value's own unescape must shorten it by one byte ahead of the placeholder: {:?}",
+            attr.value()
+        );
+    }
+
+    #[test]
     fn empty_source() {
         let p = Parser::default();
 

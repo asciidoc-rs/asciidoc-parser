@@ -1019,6 +1019,59 @@ mod tests {
     }
 
     #[test]
+    fn attribute_reference_substitution_shifts_a_placeholder_byte_offset_in_source_text() {
+        // Direct evidence for the design doc's "The masked-piece placeholder's
+        // offset table cannot be carried through `Attrlist::parse`" note's
+        // first blocker, checked against this method's own `source_text()`
+        // rather than only a full document's final rendered HTML (as
+        // `tests/sentinels.rs`'s
+        // `an_attrlist_level_reference_expansion_moves_a_placeholder_in_the_tokened_text`
+        // does) — so a future change to how this substitution works cannot
+        // silently stop supporting the claim while rendering still happens to
+        // come out right.
+        //
+        // `tokened_bracket`/`tokened_text` would write
+        // `MASKED_PIECE_PLACEHOLDER` at byte 17 of
+        // `alt={name},title=<placeholder>` — right after `title=`. This
+        // method's own attribute-reference substitution
+        // expands `{name}` before splitting entries — unconditional whenever
+        // the text holds both a `{` and a `}` — so the placeholder the parsed
+        // entries actually see has moved by however much longer the expanded
+        // `alt` value is than the reference that named it.
+        use crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER;
+
+        let p = Parser::default().with_intrinsic_attribute(
+            "name",
+            "a-much-longer-value",
+            ModificationContext::Anywhere,
+        );
+
+        let source = format!("alt={{name}},title={MASKED_PIECE_PLACEHOLDER}");
+        let written_offset = source.find(MASKED_PIECE_PLACEHOLDER).unwrap();
+        assert_eq!(written_offset, 17);
+
+        let attrlist = crate::attributes::Attrlist::parse(
+            crate::Span::new(&source),
+            &p,
+            AttrlistContext::Inline,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        let split_offset = attrlist
+            .source_text()
+            .find(MASKED_PIECE_PLACEHOLDER)
+            .unwrap();
+
+        assert_eq!(
+            split_offset,
+            30,
+            "the substitution's own extra length must have moved the placeholder: {:?}",
+            attrlist.source_text()
+        );
+    }
+
+    #[test]
     fn token_offset_helpers_count_placeholders_before_the_target_attribute() {
         // Two masked pieces (each one `MASKED_PIECE_PLACEHOLDER` occurrence,
         // as `tokened_bracket`/`tokened_text` would leave it before a
