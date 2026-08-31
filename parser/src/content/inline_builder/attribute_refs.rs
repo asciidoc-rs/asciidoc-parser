@@ -477,7 +477,8 @@ fn resolve_counters<'nodes, 'src>(
             // matched, per `ATTRIBUTE_REFERENCE`'s definition.
             #[allow(clippy::unwrap_used)]
             let expr = caps.get(3).unwrap().as_str();
-            // `unwrap` on group 0 is safe: a capture always has an overall match.
+            // `unwrap` on group 0 is safe: a capture always has an overall
+            // match.
             #[allow(clippy::unwrap_used)]
             let start = caps.get(0).unwrap().start();
 
