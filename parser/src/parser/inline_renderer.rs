@@ -1435,13 +1435,17 @@ impl InlineRenderer for HtmlInlineRenderer {
 /// deliberately leaves them unescaped for a passthrough attribute list, so
 /// re-escaping here would double-escape the former and diverge on the latter.
 fn push_attribute_value(dest: &mut String, value: &str) {
-    for ch in value.chars() {
-        if ch == '"' {
-            dest.push_str("&quot;");
-        } else {
-            dest.push(ch);
-        }
+    // The overwhelmingly common value carries no `"` at all and is appended
+    // as one block copy; only a value that does pays the per-segment walk.
+    let mut rest = value;
+
+    while let Some(quote) = rest.find('"') {
+        dest.push_str(rest.get(..quote).unwrap_or_default());
+        dest.push_str("&quot;");
+        rest = rest.get(quote + 1..).unwrap_or_default();
     }
+
+    dest.push_str(rest);
 }
 
 fn wrap_body_in_html_tag(
