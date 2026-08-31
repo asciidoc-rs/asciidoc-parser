@@ -271,28 +271,28 @@ targets).
 
 ## 5. Rendering
 
-`Content::rendered_html()` is the default HTML rendering: a fold of `inlines()` through the
-crate's built-in `HtmlInlineRenderer`, computed lazily and cached on first read.
-`Content::render_with(renderer, parser)` folds the same tree through any other
-`InlineRenderer` implementation, returning an owned `String` — a pure function of the tree, not
-cached by the crate (a caller with a custom renderer is responsible for caching its own output
-if it needs to).
+`Content::rendered_html()` returns the HTML rendering stored on `Content`: a fold of
+`inlines()` through the crate's built-in `HtmlInlineRenderer`, computed once during parsing and
+stored eagerly, not computed lazily on first read. A content carrying a deferred
+cross-reference is folded again after each resolution pass, so the stored output picks up the
+newly resolved destinations. `Content::render_with(renderer, parser)` independently folds the
+same tree through any other `InlineRenderer` implementation, returning an owned `String` that
+the crate does not cache (a caller with a custom renderer is responsible for caching its own
+output if it needs to).
 
-Parsing does not render: it produces the tree with every order-dependent fact already resolved
-into node values (footnote numbers, callout numbers, counters, attribute-expanded text,
-resolved cross-reference destinations where known at parse time). Rendering is then a pure
-fold — `(tree, renderer, render context) → String` — so one parse can feed any number of
-renders, to any number of backends, without reparsing.
+The tree records every order-dependent fact in node values as it is built — footnote numbers,
+callout numbers, counters, attribute-expanded text, and resolved cross-reference destinations
+where known at parse time — so once built it can feed any number of additional renderer folds,
+to any number of backends, without reparsing.
 
 `InlineRenderer` ([`parser/src/parser/inline_renderer.rs`](../../parser/src/parser/inline_renderer.rs))
 is the seam: an AST-walking backend invoked by the fold, with one method per node kind it needs
 to render (`render_xref`, `render_image`, `render_styled`, …). Each method receives the
 relevant node (or its fields) and appends to the output.
 
-**Cache invalidation.** `rendered_html()`'s cache is empty until first read and computed on
-demand. Reading before cross-reference resolution has run is legal and defined — it yields the
-unresolved-fallback HTML — and once resolution runs and clears the cache, the next read
-reflects the resolved destinations.
+Reading `rendered_html()` before cross-reference resolution has run is legal and defined — it
+reflects the unresolved-fallback HTML the initial fold produced — and once resolution runs and
+re-folds, a subsequent read reflects the resolved destinations.
 
 ---
 
@@ -361,8 +361,8 @@ stand as the crate's own settled decisions.
    `Macro{kind, text}` that loses structure.
 3. **Owned vs. borrowed strings?** → **`CowStr<'src>`**, borrowed by default.
 4. **Spans from day one?** → **Yes**, as a field on every node (§3.3).
-5. **Retain a rendered-string accessor?** → **Yes** — `rendered_html()`, a cached default-HTML
-   fold (§5); custom backends go through `render_with`.
+5. **Retain a rendered-string accessor?** → **Yes** — `rendered_html()`, storing the default
+   HTML fold on `Content` (§5); custom backends go through `render_with`.
 6. **Which downstream tool pins the API?** → the Ruby-to-Rust `asciidoctor` port, the crate's
    most demanding consumer: it walks and renders the entire inline vocabulary, so it exercises
    the renderer seam and node kinds comprehensively, and its own byte-exact HTML parity
