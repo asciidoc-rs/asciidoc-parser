@@ -190,9 +190,7 @@ pub(super) fn apply_macros<'src>(
     // `every_macro_family_needle_carries_a_gate_byte` pins the needle list).
     // Nothing to recognize also means nothing to descend into: a lone `Text`
     // node has no children, so the whole step is a no-op.
-    if let Some(value) = single_text_value(&nodes)
-        && !level_may_have_macros(value)
-    {
+    if single_text_value(&nodes).is_some_and(|value| !level_may_have_macros(value)) {
         return nodes;
     }
 
