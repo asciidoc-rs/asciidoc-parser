@@ -211,6 +211,7 @@ fn sequential_replacement_rules<'src>(
 
 /// One character-replacement match at a level, in absolute match-string byte
 /// offsets.
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 struct ReplacementMatch {
     /// The whole match, `[start, end)`.
     full: std::ops::Range<usize>,
@@ -260,6 +261,7 @@ impl ReplacementMatch {
     }
 }
 
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 enum ReplacementKind {
     /// An escaped construct (`\(C)`, `\-&gt;`, …): drop the single backslash at
     /// this offset and keep the rest of the match as literal nodes, replacing
@@ -333,15 +335,20 @@ fn replace_level<'src>(
 
 /// Finds every non-overlapping match of `repl` in the escaped match string
 /// `s`, left to right.
+///
+/// The search is bounds-only ([`find_iter`](regex::Regex::find_iter), which
+/// never touches the capture engine): once the escape case is peeled off,
+/// every sub-range a rule's pattern captures is fully determined by its match
+/// span, and [`classify_replacement`] derives it from the matched text
+/// directly. The test-only `reference_find_replacement_matches` keeps the
+/// capture-engine reading, and the
+/// `span_classification_matches_the_capture_engine` pin holds the two equal
+/// per rule across the differential corpus.
 fn find_replacement_matches(repl: &CharacterReplacement, s: &str) -> Vec<ReplacementMatch> {
     let mut matches = Vec::new();
 
-    for caps in repl.pattern.captures_iter(s) {
-        // `unwrap` on group 0 is safe: a capture always has an overall match.
-        #[allow(clippy::unwrap_used)]
-        let whole = caps.get(0).unwrap();
-
-        let full = whole.start()..whole.end();
+    for whole in repl.pattern.find_iter(s) {
+        let full = whole.range();
 
         // An escaped construct keeps its literal text with the single backslash
         // dropped, and replaces nothing.
@@ -358,23 +365,32 @@ fn find_replacement_matches(repl: &CharacterReplacement, s: &str) -> Vec<Replace
 
         matches.push(ReplacementMatch {
             full: full.clone(),
-            kind: classify_replacement(repl, &caps, full),
+            kind: classify_replacement(repl, whole.as_str(), full),
         });
     }
 
     matches
 }
 
-/// Classifies one non-escaped capture into the leaf it produces. Group presence
-/// distinguishes the two rules that share [`CharacterReplacementType`]: a bare
-/// `` `' `` apostrophe (no groups) versus a word-internal `w'w` one (two).
+/// Classifies one non-escaped match into the leaf it produces, deriving each
+/// rule's kept-versus-consumed split from the match span itself.
+///
+/// The caller has already peeled off the escape case, so `text` (the matched
+/// bytes) carries no backslash, and each pattern's captures collapse to fixed
+/// affixes of its span: the `(\w)` a `w--` em dash keeps is everything before
+/// the trailing `--`; the `w'w` apostrophe's kept letters are its first and
+/// last bytes (both ASCII — the rule's POSIX classes match nothing wider);
+/// and a restored entity's name sits between the literal `&amp;` and `;`.
+/// The two rules sharing the
+/// [`TypographicApostrophe`](CharacterReplacementType::TypographicApostrophe)
+/// type are told apart by the matched text — only the
+/// bare smart-apostrophe rule can match `` `' ``, a backtick being neither
+/// alphanumeric nor an apostrophe.
 fn classify_replacement(
     repl: &CharacterReplacement,
-    caps: &regex::Captures<'_>,
+    text: &str,
     full: std::ops::Range<usize>,
 ) -> ReplacementKind {
-    let group = |i: usize| caps.get(i).map(|m| m.range());
-
     // The whole match becomes a single replacement leaf with nothing kept.
     let whole = |value| ReplacementKind::Replace {
         consumed: full.clone(),
@@ -393,32 +409,113 @@ fn classify_replacement(
         CharacterReplacementType::DoubleRightArrow => whole("\u{21d2}"),
 
         CharacterReplacementType::EmDashWithoutSpace => {
-            // `(\w)--`: the leading word character (group 1) stays; only the
+            // `(\w)--`: the leading word character stays — everything up to
+            // the trailing `--`, however many bytes it spans — and only the
             // `--` after it is consumed.
-            let before = group(1).unwrap_or(full.start..full.start);
-
             ReplacementKind::Replace {
-                consumed: before.end..full.end,
+                consumed: (full.end - "--".len())..full.end,
                 value: "\u{2014}\u{200b}",
             }
         }
 
-        CharacterReplacementType::TypographicApostrophe => match (group(1), group(2)) {
-            // `w'w`: the surrounding letters stay; only the apostrophe between
-            // them is consumed.
-            (Some(before), Some(after)) => ReplacementKind::Replace {
-                consumed: before.end..after.start,
-                value: "\u{2019}",
-            },
-
-            // `` `' ``: the whole match is the apostrophe.
-            _ => whole("\u{2019}"),
-        },
+        CharacterReplacementType::TypographicApostrophe => {
+            if text == "`'" {
+                // `` `' ``: the whole match is the apostrophe.
+                whole("\u{2019}")
+            } else {
+                // `w'w`: the surrounding letters (one byte each — the rule's
+                // POSIX classes are ASCII-only) stay; only the apostrophe
+                // between them is consumed.
+                ReplacementKind::Replace {
+                    consumed: (full.start + 1)..(full.end - 1),
+                    value: "\u{2019}",
+                }
+            }
+        }
 
         CharacterReplacementType::CharacterReference(_) => ReplacementKind::Entity {
-            name: group(1).unwrap_or(full),
+            name: (full.start + "&amp;".len())..(full.end - ";".len()),
         },
     }
+}
+
+/// The capture-engine reading [`find_replacement_matches`] replaced — every
+/// sub-range read back out of the pattern's own capture groups rather than
+/// derived from the span — kept verbatim as the reference the
+/// `span_classification_matches_the_capture_engine` pin compares the
+/// derivation against.
+#[cfg(test)]
+fn reference_find_replacement_matches(
+    repl: &CharacterReplacement,
+    s: &str,
+) -> Vec<ReplacementMatch> {
+    let mut matches = Vec::new();
+
+    for caps in repl.pattern.captures_iter(s) {
+        // `unwrap` on group 0 is safe: a capture always has an overall match.
+        #[allow(clippy::unwrap_used)]
+        let whole = caps.get(0).unwrap();
+
+        let full = whole.start()..whole.end();
+
+        if let Some(rel) = whole.as_str().find('\\') {
+            matches.push(ReplacementMatch {
+                full,
+                kind: ReplacementKind::Unescape {
+                    backslash: whole.start() + rel,
+                },
+            });
+
+            continue;
+        }
+
+        let group = |i: usize| caps.get(i).map(|m| m.range());
+
+        let whole_kind = |value| ReplacementKind::Replace {
+            consumed: full.clone(),
+            value,
+        };
+
+        let kind = match repl.type_ {
+            CharacterReplacementType::Copyright => whole_kind("\u{a9}"),
+            CharacterReplacementType::Registered => whole_kind("\u{ae}"),
+            CharacterReplacementType::Trademark => whole_kind("\u{2122}"),
+            CharacterReplacementType::EmDashSurroundedBySpaces => {
+                whole_kind("\u{2009}\u{2014}\u{2009}")
+            }
+            CharacterReplacementType::Ellipsis => whole_kind("\u{2026}\u{200b}"),
+            CharacterReplacementType::SingleLeftArrow => whole_kind("\u{2190}"),
+            CharacterReplacementType::DoubleLeftArrow => whole_kind("\u{21d0}"),
+            CharacterReplacementType::SingleRightArrow => whole_kind("\u{2192}"),
+            CharacterReplacementType::DoubleRightArrow => whole_kind("\u{21d2}"),
+
+            CharacterReplacementType::EmDashWithoutSpace => {
+                let before = group(1).unwrap_or(full.start..full.start);
+
+                ReplacementKind::Replace {
+                    consumed: before.end..full.end,
+                    value: "\u{2014}\u{200b}",
+                }
+            }
+
+            CharacterReplacementType::TypographicApostrophe => match (group(1), group(2)) {
+                (Some(before), Some(after)) => ReplacementKind::Replace {
+                    consumed: before.end..after.start,
+                    value: "\u{2019}",
+                },
+
+                _ => whole_kind("\u{2019}"),
+            },
+
+            CharacterReplacementType::CharacterReference(_) => ReplacementKind::Entity {
+                name: group(1).unwrap_or(full.clone()),
+            },
+        };
+
+        matches.push(ReplacementMatch { full, kind });
+    }
+
+    matches
 }
 
 /// Rebuilds a level's node list from its character-replacement matches: each
@@ -1035,6 +1132,55 @@ mod tests {
                 fused, sequential,
                 "fused pass diverged from sequential for {source:?}"
             );
+        }
+    }
+
+    #[test]
+    fn span_classification_matches_the_capture_engine() {
+        // `find_replacement_matches` derives each rule's kept-versus-consumed
+        // split from the match span; `reference_find_replacement_matches`
+        // keeps the capture-engine reading it replaced. Every rule is run
+        // over every haystack — written in escaped match-string form, as the
+        // rules see it — and the two must agree match for match, including
+        // on the escape (`Unescape`) arm only the sequential pass reaches.
+        use super::{find_replacement_matches, reference_find_replacement_matches};
+        use crate::content::character_replacements;
+
+        let haystacks = [
+            // Each rule's own shapes, at edges and mid-string.
+            "(C) (R) (TM)",
+            "a -- b",
+            "--a a-- \n-- --\n",
+            "x--y",
+            "x...y ... ...",
+            "`' it`'s `'`'",
+            "it's 90's a'b'c",
+            "a-&gt;b =&gt; &lt;- &lt;= -&gt;-&gt;",
+            "&amp;copy; &amp;#8217; &amp;#x2014; &amp;nbsp;x&amp;amp;",
+            // A multi-byte `\w` before an em dash (the one derived affix
+            // whose width varies).
+            "caf\u{e9}--x \u{4e16}--y",
+            // Escapes: the backslash arm, shared by both readings.
+            r"\(C) \(R) \(TM)",
+            r"a\--b \-- x",
+            r"\... a\'b \`'",
+            r"\-&gt; \=&gt; \&lt;- \&lt;=",
+            r"\&amp;copy; \&amp;#8217;",
+            // Near-misses that must not match (or match narrower).
+            "(c) (r) (tm) .. - -&amp; &amp;; &amp;x; '",
+            "&amp;#12345678; &amp;#xZ; &amp;a;",
+        ];
+
+        for repl in character_replacements() {
+            for haystack in haystacks {
+                assert_eq!(
+                    find_replacement_matches(repl, haystack),
+                    reference_find_replacement_matches(repl, haystack),
+                    "span derivation diverged from the capture engine for \
+                     {:?} over {haystack:?}",
+                    repl.type_,
+                );
+            }
         }
     }
 }
