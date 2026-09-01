@@ -2681,7 +2681,7 @@ mod tests {
     /// quotes, character replacements) — the state the macros step consumes —
     /// so a test can drive [`apply_macros`] directly.
     fn build_through_special_and_replacements(source: Span<'_>) -> Vec<InlineNode<'_>> {
-        apply_character_replacements(build_through_quotes(source), source)
+        apply_character_replacements(build_through_quotes(source), source, &mut None)
     }
 
     // ---- `apply_image_side_effects` ----------------------------------------

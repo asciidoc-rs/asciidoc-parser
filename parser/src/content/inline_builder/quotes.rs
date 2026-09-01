@@ -636,10 +636,10 @@ pub(super) fn apply_quotes<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
+    level: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     let mut nodes = nodes;
     let mut cached_mask: Option<(usize, usize, u8)> = None;
-    let mut level: Option<LevelStrings> = None;
 
     for sub in quote_subs() {
         if let Some(value) = single_text_value(&nodes) {
@@ -667,23 +667,19 @@ pub(super) fn apply_quotes<'src>(
             }
         }
 
-        apply_quote_sub(
-            sub,
-            &mut nodes,
-            root,
-            parser,
-            LevelContext::ROOT,
-            &mut level,
-        );
+        apply_quote_sub(sub, &mut nodes, root, parser, LevelContext::ROOT, level);
     }
 
     nodes
 }
 
 /// A level's reconstructed match string and its [`Piece`] map — one
-/// [`build_match_string`] result, held so a rule loop can reuse it across
-/// rules while nothing has changed the level it describes.
-type LevelStrings = (String, Vec<Piece>);
+/// [`build_match_string`] result (under [`Masked::UNKNOWN`]), held so a rule
+/// loop — or, for the **root** level, the whole run of step families that
+/// build under that same mask (see `build_for_group`'s shared slot) — can
+/// reuse it while nothing has changed the level it describes. Whoever
+/// changes the level it describes empties (or refreshes) the slot.
+pub(super) type LevelStrings = (String, Vec<Piece>);
 
 /// The bit [`marker_mask`] records the presence of `marker` under, or `0` for
 /// a character that is not one of the eight [`sub_markers`] characters (which

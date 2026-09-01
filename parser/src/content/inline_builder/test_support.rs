@@ -50,7 +50,12 @@ pub(super) fn build_through_special(source: Span<'_>) -> Vec<InlineNode<'_>> {
 /// Builds the tree **through the quotes step**, for the quotes-stage
 /// differential (see [`build_through_special`]).
 pub(super) fn build_through_quotes(source: Span<'_>) -> Vec<InlineNode<'_>> {
-    apply_quotes(build_through_special(source), source, &Parser::default())
+    apply_quotes(
+        build_through_special(source),
+        source,
+        &Parser::default(),
+        &mut None,
+    )
 }
 
 /// Asserts that `node` is a [`Text`](InlineNode::Text) whose `value`

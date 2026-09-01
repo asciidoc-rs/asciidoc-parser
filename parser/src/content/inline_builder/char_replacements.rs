@@ -2,7 +2,7 @@
 
 use super::{
     quotes::{
-        LevelContext, Piece, TakenNodes, build_match_string, emit_range_from,
+        LevelContext, LevelStrings, Piece, TakenNodes, build_match_string, emit_range_from,
         level_may_have_replacements, source_slice,
     },
     special_chars::Masked,
@@ -37,8 +37,9 @@ use crate::{
 pub(super) fn apply_character_replacements<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
+    level: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
-    apply_replacements_recursive(nodes, root, LevelContext::ROOT)
+    apply_replacements_recursive(nodes, root, LevelContext::ROOT, level)
 }
 
 /// Applies every [`character_replacements`] rule to `nodes`, descending into
@@ -61,6 +62,7 @@ fn apply_replacements_recursive<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     ctx: LevelContext,
+    shared: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     // A level with no parent node to descend into — the common leaf-only
     // case — skips the walk over its nodes entirely. The descent mutates
@@ -78,13 +80,18 @@ fn apply_replacements_recursive<'src>(
                 InlineNode::Styled(styled) => {
                     let inner = LevelContext::inside_styled(styled, ctx);
                     let children = std::mem::take(&mut styled.children);
-                    styled.children = apply_replacements_recursive(children, root, inner);
+                    styled.children =
+                        apply_replacements_recursive(children, root, inner, &mut None);
                 }
 
                 InlineNode::Ref(reference) => {
                     let children = std::mem::take(&mut reference.children);
-                    reference.children =
-                        apply_replacements_recursive(children, root, LevelContext::INSIDE_REF);
+                    reference.children = apply_replacements_recursive(
+                        children,
+                        root,
+                        LevelContext::INSIDE_REF,
+                        &mut None,
+                    );
                 }
 
                 _ => {}
@@ -103,9 +110,16 @@ fn apply_replacements_recursive<'src>(
     }
 
     // The match string is a pure function of the level's node list, so one
-    // build here serves every rule that leaves the level unchanged — the
-    // common outcome by far.
-    let level = build_match_string(&nodes, Masked::UNKNOWN);
+    // build serves every rule that leaves the level unchanged — the common
+    // outcome by far. The root call reuses whatever an earlier step family
+    // left in the shared slot (built under the same `Masked::UNKNOWN`; the
+    // child descent above cannot change it, since a span contributes only
+    // its placeholder and fixed boundary characters there), and each pass
+    // below hands the slot back whatever still describes the nodes it
+    // returns.
+    let level = shared
+        .take()
+        .unwrap_or_else(|| build_match_string(&nodes, Masked::UNKNOWN));
 
     // A haystack with no backslash anywhere — real prose, almost always —
     // takes the fused pass: every rule matched against this one string, one
@@ -114,9 +128,9 @@ fn apply_replacements_recursive<'src>(
     // touch, but the sequenced strings differ), so those levels keep the
     // rule-at-a-time pass whose semantics the escapes were specified against.
     if ctx.haystack(&level.0).0.contains('\\') {
-        sequential_replacement_rules(nodes, level, root, ctx)
+        sequential_replacement_rules(nodes, level, root, ctx, shared)
     } else {
-        fused_replacement_rules(nodes, &level, root, ctx)
+        fused_replacement_rules(nodes, level, root, ctx, shared)
     }
 }
 
@@ -136,11 +150,12 @@ fn apply_replacements_recursive<'src>(
 /// passes against each other across the rule list's interaction shapes.
 fn fused_replacement_rules<'src>(
     nodes: Vec<InlineNode<'src>>,
-    level: &(String, Vec<Piece>),
+    level: LevelStrings,
     root: Span<'src>,
     ctx: LevelContext,
+    shared: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
-    let (s, pieces) = level;
+    let (s, pieces) = &level;
     let (haystack, prefix) = ctx.haystack(s);
 
     let mut merged: Vec<ReplacementMatch> = Vec::new();
@@ -166,6 +181,8 @@ fn fused_replacement_rules<'src>(
     }
 
     if merged.is_empty() {
+        // Nothing changed: the level strings still describe `nodes`.
+        *shared = Some(level);
         return nodes;
     }
 
@@ -193,9 +210,10 @@ fn fused_replacement_rules<'src>(
 /// the fused pass against.
 fn sequential_replacement_rules<'src>(
     mut nodes: Vec<InlineNode<'src>>,
-    mut level: (String, Vec<Piece>),
+    mut level: LevelStrings,
     root: Span<'src>,
     ctx: LevelContext,
+    shared: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     // Only a rule that actually matched something invalidates the level's
     // match string, by rebuilding the level (which takes it by value — see
@@ -206,6 +224,9 @@ fn sequential_replacement_rules<'src>(
             level = build_match_string(&nodes, Masked::UNKNOWN);
         }
     }
+
+    // Whether any rule matched or not, `level` describes the nodes returned.
+    *shared = Some(level);
 
     nodes
 }
@@ -958,7 +979,7 @@ mod tests {
             location: loc,
         });
 
-        let out = apply_character_replacements(vec![reference], loc);
+        let out = apply_character_replacements(vec![reference], loc, &mut None);
 
         assert_eq!(out.len(), 1);
 
@@ -1132,8 +1153,15 @@ mod tests {
                 "fixture {source:?} belongs to the sequential-only path"
             );
 
-            let fused = fused_replacement_rules(nodes.clone(), &level, root, LevelContext::ROOT);
-            let sequential = sequential_replacement_rules(nodes, level, root, LevelContext::ROOT);
+            let fused = fused_replacement_rules(
+                nodes.clone(),
+                level.clone(),
+                root,
+                LevelContext::ROOT,
+                &mut None,
+            );
+            let sequential =
+                sequential_replacement_rules(nodes, level, root, LevelContext::ROOT, &mut None);
 
             assert_eq!(
                 fused, sequential,
