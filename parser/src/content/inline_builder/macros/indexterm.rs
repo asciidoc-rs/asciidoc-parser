@@ -77,7 +77,7 @@ pub(super) fn indexterm_macros_level<'src>(
 
     let macro_matches = matches.into_iter().map(|m| m.macro_match).collect();
 
-    let rebuilt = rebuild_macro_level(&nodes, pieces, s, macro_matches);
+    let rebuilt = rebuild_macro_level(nodes, pieces, s, macro_matches);
     level.invalidate();
     rebuilt
 }

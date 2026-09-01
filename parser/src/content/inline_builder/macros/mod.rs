@@ -16,8 +16,8 @@ use xref::xref_macros_level;
 
 use super::{
     quotes::{
-        LevelContext, Piece, build_match_string, charref_entity, emit_range, single_text_value,
-        source_slice, special_entity, text_slice,
+        LevelContext, Piece, TakenNodes, build_match_string, charref_entity, emit_range,
+        emit_range_from, single_text_value, source_slice, special_entity, text_slice,
     },
     special_chars::{Masked, unescaped_value_children},
 };
@@ -693,11 +693,20 @@ pub(super) enum MacroMatchKind<'src> {
 /// macro families, which differ only in how they produce the [`MacroMatch`]
 /// list.
 pub(super) fn rebuild_macro_level<'src>(
-    nodes: &[InlineNode<'src>],
+    nodes: Vec<InlineNode<'src>>,
     pieces: &[Piece],
     s: &str,
     matches: Vec<MacroMatch<'src>>,
 ) -> Vec<InlineNode<'src>> {
+    // The level is taken by value: every caller replaces it with the rebuilt
+    // vector, so each node re-emitted whole is **moved** out rather than
+    // deep-cloned and then dropped with the old vector — the same owning
+    // rebuild the quotes step takes, on the same disjointness argument (a
+    // gap ends where a node's consumed range starts, a kept suffix starts
+    // where it ends, an unescape skips only its backslash, and the cursor
+    // only advances). See [`NodeSupply`](super::quotes::NodeSupply).
+    let mut supply = TakenNodes::new(nodes);
+
     let mut out = Vec::new();
     let mut cursor = 0usize;
 
@@ -707,17 +716,17 @@ pub(super) fn rebuild_macro_level<'src>(
         match kind {
             MacroMatchKind::Unescape { backslash } => {
                 // Keep the whole match with the single backslash dropped.
-                emit_range(nodes, pieces, cursor..backslash, &mut out);
-                emit_range(nodes, pieces, (backslash + 1)..full.end, &mut out);
+                emit_range_from(&mut supply, pieces, cursor..backslash, &mut out);
+                emit_range_from(&mut supply, pieces, (backslash + 1)..full.end, &mut out);
             }
 
             MacroMatchKind::Node { consumed, node } => {
                 // The gap runs to the node, absorbing any kept boundary prefix;
                 // the node replaces `consumed`; any stripped trailing
                 // punctuation after it is kept as literal.
-                emit_range(nodes, pieces, cursor..consumed.start, &mut out);
+                emit_range_from(&mut supply, pieces, cursor..consumed.start, &mut out);
                 out.push(*node);
-                emit_range(nodes, pieces, consumed.end..full.end, &mut out);
+                emit_range_from(&mut supply, pieces, consumed.end..full.end, &mut out);
             }
         }
 
@@ -725,7 +734,7 @@ pub(super) fn rebuild_macro_level<'src>(
     }
 
     if cursor < s.len() {
-        emit_range(nodes, pieces, cursor..s.len(), &mut out);
+        emit_range_from(&mut supply, pieces, cursor..s.len(), &mut out);
     }
 
     out

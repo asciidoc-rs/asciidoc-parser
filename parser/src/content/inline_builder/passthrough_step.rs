@@ -221,7 +221,7 @@ fn apply_pass_macro_level<'src>(
         return nodes;
     }
 
-    rebuild_macro_level(&nodes, &pieces, &s, matches)
+    rebuild_macro_level(nodes, &pieces, &s, matches)
 }
 
 /// Mirrors `Passthroughs::extract_from`'s own guard for `INLINE_PASS`.
@@ -260,7 +260,7 @@ fn apply_bare_attrlisted_pass_level<'src>(
         return nodes;
     }
 
-    rebuild_macro_level(&nodes, &pieces, &s, matches)
+    rebuild_macro_level(nodes, &pieces, &s, matches)
 }
 
 /// Finds every passthrough at this level.
