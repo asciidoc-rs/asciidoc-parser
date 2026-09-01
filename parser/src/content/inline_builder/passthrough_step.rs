@@ -1071,7 +1071,7 @@ fn build_attrlisted_passthrough_node<'src>(
 
     let (id, roles, attrs) = attributes_of(attrlist_span, parser);
 
-    InlineNode::Styled(Styled {
+    InlineNode::Styled(Box::new(Styled {
         variant,
         form: SpanForm::Unconstrained,
         id,
@@ -1083,7 +1083,7 @@ fn build_attrlisted_passthrough_node<'src>(
             text: body_span.data().to_string(),
         }),
         location,
-    })
+    }))
 }
 
 /// Builds one [`Styled`] node from a verbatim, unescaped, attribute-listed
@@ -1173,7 +1173,7 @@ fn build_bare_attrlisted_passthrough_node<'src>(
 
     let (id, roles, attrs) = attributes_of(attrlist_span, parser);
 
-    InlineNode::Styled(Styled {
+    InlineNode::Styled(Box::new(Styled {
         variant,
         form: SpanForm::Unconstrained,
         id,
@@ -1185,7 +1185,7 @@ fn build_bare_attrlisted_passthrough_node<'src>(
             text: body_span.data().to_string(),
         }),
         location,
-    })
+    }))
 }
 
 /// Splits an old-behavior-eligible attrlist span into its final attrlist body
@@ -1342,7 +1342,7 @@ mod tests {
                 value: CowStr::from("+++"),
                 location,
             },
-            InlineNode::Styled(Styled {
+            InlineNode::Styled(Box::new(Styled {
                 variant: StyleVariant::Strong,
                 form: SpanForm::Constrained,
                 id: None,
@@ -1351,7 +1351,7 @@ mod tests {
                 children: vec![],
                 passthrough: None,
                 location,
-            }),
+            })),
             InlineNode::Text {
                 value: CowStr::from("+++"),
                 location,
@@ -2466,7 +2466,7 @@ mod tests {
                 value: CowStr::from("[attrs]+"),
                 location: source.slice(0..8),
             },
-            InlineNode::Styled(Styled {
+            InlineNode::Styled(Box::new(Styled {
                 variant: StyleVariant::Strong,
                 form: SpanForm::Constrained,
                 id: None,
@@ -2475,7 +2475,7 @@ mod tests {
                 children: vec![],
                 passthrough: None,
                 location: source.slice(8..9),
-            }),
+            })),
             InlineNode::Text {
                 value: CowStr::from("+"),
                 location: source.slice(9..10),
@@ -2878,7 +2878,7 @@ mod tests {
                 value: CowStr::from("+"),
                 location: source.slice(0..1),
             },
-            InlineNode::Styled(Styled {
+            InlineNode::Styled(Box::new(Styled {
                 variant: StyleVariant::Strong,
                 form: SpanForm::Constrained,
                 id: None,
@@ -2887,7 +2887,7 @@ mod tests {
                 children: vec![],
                 passthrough: None,
                 location: source.slice(1..2),
-            }),
+            })),
             InlineNode::Text {
                 value: CowStr::from("+"),
                 location: source.slice(2..3),

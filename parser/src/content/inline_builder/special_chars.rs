@@ -709,7 +709,7 @@ mod tests {
         // the step must descend into a `Styled` span's children.
         let loc = Span::new("a<b");
 
-        let styled = InlineNode::Styled(Styled {
+        let styled = InlineNode::Styled(Box::new(Styled {
             variant: StyleVariant::Strong,
             form: SpanForm::Constrained,
             id: None,
@@ -721,7 +721,7 @@ mod tests {
             }],
             passthrough: None,
             location: loc,
-        });
+        }));
 
         let out = apply_special_characters(vec![styled]);
 
@@ -744,7 +744,7 @@ mod tests {
         // A reference's display text is likewise refined in place.
         let loc = Span::new("x&y");
 
-        let reference = InlineNode::Ref(Ref {
+        let reference = InlineNode::Ref(Box::new(Ref {
             variant: RefVariant::Link,
             link_form: Some(crate::inlines::LinkForm::Macro),
             target: CowStr::from("https://example.com"),
@@ -759,7 +759,7 @@ mod tests {
             xrefstyle: None,
             attrs: crate::attributes::Attrlist::empty(loc.slice(0..0)),
             location: loc,
-        });
+        }));
 
         let out = apply_special_characters(vec![reference]);
 
@@ -967,7 +967,7 @@ mod tests {
         };
 
         let out = classify_unescaped_specials(vec![
-            InlineNode::Styled(Styled {
+            InlineNode::Styled(Box::new(Styled {
                 variant: StyleVariant::Strong,
                 form: SpanForm::Constrained,
                 id: None,
@@ -976,8 +976,8 @@ mod tests {
                 children: child(),
                 passthrough: None,
                 location: loc,
-            }),
-            InlineNode::Ref(Ref {
+            })),
+            InlineNode::Ref(Box::new(Ref {
                 variant: RefVariant::Link,
                 link_form: Some(crate::inlines::LinkForm::Macro),
                 target: CowStr::from("https://example.com"),
@@ -989,20 +989,20 @@ mod tests {
                 xrefstyle: None,
                 attrs: crate::attributes::Attrlist::empty(loc.slice(0..0)),
                 location: loc,
-            }),
+            })),
             InlineNode::Anchor(Anchor {
                 id: CowStr::from("id"),
                 reftext: Some(child()),
                 is_bibliography: false,
                 location: loc,
             }),
-            InlineNode::Footnote(Footnote {
+            InlineNode::Footnote(Box::new(Footnote {
                 id: None,
                 number: Some(CowStr::from("1")),
                 is_reference: false,
                 children: child(),
                 location: loc,
-            }),
+            })),
         ]);
 
         assert_eq!(out.len(), 4);

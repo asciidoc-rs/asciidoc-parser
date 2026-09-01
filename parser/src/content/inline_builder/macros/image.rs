@@ -678,7 +678,7 @@ fn build_image_node<'src>(
         (Some(CowStr::from(alt)), width, height)
     };
 
-    InlineNode::Image(Image {
+    InlineNode::Image(Box::new(Image {
         is_icon,
         target,
         restored_target_ranges,
@@ -687,7 +687,7 @@ fn build_image_node<'src>(
         height,
         attrs: attrlist,
         location,
-    })
+    }))
 }
 
 /// Rewrites this level's match string so each masked **passthrough** or
@@ -2601,14 +2601,14 @@ mod tests {
                 },
                 location: root,
             },
-            InlineNode::Stem(crate::inlines::Stem {
+            InlineNode::Stem(Box::new(crate::inlines::Stem {
                 notation: crate::inlines::StemNotation::AsciiMath,
                 value: CowStr::from("x"),
                 subs: crate::content::SubstitutionGroup::Stem,
                 source_text: None,
                 children: vec![],
                 location: root,
-            }),
+            })),
         ];
 
         for node in &restorable {
@@ -2769,7 +2769,7 @@ mod tests {
         let image = build_with(root, &Parser::default());
         assert_eq!(image.len(), 1);
 
-        let reference = InlineNode::Ref(Ref {
+        let reference = InlineNode::Ref(Box::new(Ref {
             variant: RefVariant::Link,
             link_form: Some(crate::inlines::LinkForm::Macro),
             target: CowStr::from("https://example.org"),
@@ -2781,7 +2781,7 @@ mod tests {
             xrefstyle: None,
             attrs: crate::attributes::Attrlist::empty(root.slice(0..0)),
             location: root,
-        });
+        }));
 
         let parser = Parser::default().with_catalog_assets(true);
         apply_image_side_effects(std::slice::from_ref(&reference), &parser, root);

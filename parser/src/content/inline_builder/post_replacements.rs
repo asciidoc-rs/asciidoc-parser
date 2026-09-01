@@ -417,7 +417,7 @@ mod tests {
         // recognized (driven directly, as above).
         let loc = Span::new("x +\ny");
 
-        let reference = InlineNode::Ref(Ref {
+        let reference = InlineNode::Ref(Box::new(Ref {
             variant: RefVariant::Link,
             link_form: Some(crate::inlines::LinkForm::Macro),
             target: CowStr::from("https://example.com"),
@@ -432,7 +432,7 @@ mod tests {
             xrefstyle: None,
             attrs: Attrlist::empty(loc.slice(0..0)),
             location: loc,
-        });
+        }));
 
         let out =
             apply_post_replacements(vec![reference], loc, &Parser::default(), None, &mut None);

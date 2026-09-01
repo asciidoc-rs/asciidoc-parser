@@ -625,7 +625,7 @@ fn build_xref_node<'src>(
 
     let location = source_slice(pieces, full.clone(), root);
 
-    InlineNode::Ref(Ref {
+    InlineNode::Ref(Box::new(Ref {
         variant: RefVariant::Xref,
         link_form: None,
         target: CowStr::from(target),
@@ -643,7 +643,7 @@ fn build_xref_node<'src>(
         xrefstyle: xrefstyle.or_else(|| document_xrefstyle(parser)),
         attrs: Attrlist::empty(location.slice(0..0)),
         location,
-    })
+    }))
 }
 
 /// Interprets the bracketed display text of an `xref:` macro, mirroring
@@ -927,7 +927,7 @@ fn build_xref_shorthand_node<'src>(
         }
     };
 
-    InlineNode::Ref(Ref {
+    InlineNode::Ref(Box::new(Ref {
         variant: RefVariant::Xref,
         link_form: None,
         target: CowStr::from(target),
@@ -943,7 +943,7 @@ fn build_xref_shorthand_node<'src>(
         xrefstyle: document_xrefstyle(parser),
         attrs: Attrlist::empty(location.slice(0..0)),
         location,
-    })
+    }))
 }
 
 #[cfg(test)]

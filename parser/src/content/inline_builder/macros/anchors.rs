@@ -1477,7 +1477,7 @@ mod tests {
         let anchor = build_with(root, &Parser::default());
         assert_eq!(anchor.len(), 1);
 
-        let reference = InlineNode::Ref(Ref {
+        let reference = InlineNode::Ref(Box::new(Ref {
             variant: RefVariant::Link,
             link_form: Some(crate::inlines::LinkForm::Macro),
             target: CowStr::from("https://example.org"),
@@ -1489,7 +1489,7 @@ mod tests {
             xrefstyle: None,
             attrs: crate::attributes::Attrlist::empty(root.slice(0..0)),
             location: root,
-        });
+        }));
 
         let source = "*see [[a]]* and footnote:[see [[b]]]";
         let parser = Parser::default();
