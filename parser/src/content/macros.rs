@@ -1,7 +1,7 @@
 use std::{path::Path, sync::LazyLock};
 
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
-use regex::{Captures, Match, Regex};
+use regex::Regex;
 
 use crate::{
     Parser, Span,
@@ -268,8 +268,9 @@ pub(crate) fn normalize_index_text(text: &str, unescape_brackets: bool) -> Strin
 // rather than matching as a bare link and then being rejected as invalid macro
 // syntax in the replacer.
 //
-// `InlineLinkReplacer` normalizes the three capture-group sets into a single
-// view (see `NormalizedCaps`), so the numbering below is only referenced there.
+// The single-pass builder derives the three capture-group sets from each
+// match span (see `inline_builder::macros::links::link_groups`), so the
+// numbering below is only referenced by that derivation's differential pin.
 //
 // Shared `pub(crate)` so the single-pass
 // [`inline_builder`](crate::content::inline_builder) recognizes auto-links and
@@ -315,134 +316,6 @@ pub(crate) static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
-
-/// A branch-agnostic view over the capture groups of [`INLINE_LINK`], which has
-/// three parallel top-level branches (angle / link-macro / non-angle). Exactly
-/// one branch participates in any given match; this resolves the relevant
-/// groups so a caller doesn't have to special-case the branch numbering
-/// everywhere.
-///
-/// `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) resolves an `INLINE_LINK`
-/// match's branch through this shared group-numbering logic, rather than
-/// duplicating that knowledge at its own recognition sink.
-pub(crate) struct NormalizedCaps<'c, 't> {
-    caps: &'c Captures<'t>,
-
-    /// True when the ANGLE branch matched (prefix was `&lt;`). Corresponds to
-    /// the `&lt;` flag (old capture group 2) in the Ruby implementation.
-    is_angle: bool,
-    prefix: usize,
-    scheme: usize,
-
-    /// Formal-macro target: the URL preceding a `[…]` attrlist.
-    target: usize,
-    attrlist: usize,
-
-    /// URL captured inside `<…&gt;`; only present in the ANGLE branch.
-    angle_url: Option<usize>,
-
-    /// Bare (auto-linked) URL; absent in the LINK-MACRO branch, which always
-    /// has a trailing attrlist.
-    bare: Option<usize>,
-}
-
-impl<'c, 't> NormalizedCaps<'c, 't> {
-    pub(crate) fn new(caps: &'c Captures<'t>) -> Self {
-        if caps.get(1).is_some() {
-            // ANGLE branch.
-            NormalizedCaps {
-                caps,
-                is_angle: true,
-                prefix: 1,
-                scheme: 2,
-                target: 3,
-                attrlist: 4,
-                angle_url: Some(5),
-                bare: Some(6),
-            }
-        } else if caps.get(8).is_some() {
-            // LINK-MACRO branch: a `link:` prefix always paired with a trailing
-            // attrlist, so there is no bare-link group.
-            NormalizedCaps {
-                caps,
-                is_angle: false,
-                prefix: 8,
-                scheme: 9,
-                target: 10,
-                attrlist: 11,
-                angle_url: None,
-                bare: None,
-            }
-        } else {
-            // NON-ANGLE branch.
-            NormalizedCaps {
-                caps,
-                is_angle: false,
-                prefix: 12,
-                scheme: 13,
-                target: 14,
-                attrlist: 15,
-                angle_url: None,
-                bare: Some(16),
-            }
-        }
-    }
-
-    /// Whether the ANGLE branch matched (its prefix was a leading `&lt;`).
-    pub(crate) fn is_angle(&self) -> bool {
-        self.is_angle
-    }
-
-    /// Whether the LINK-MACRO branch matched (a literal `link:` prefix paired
-    /// with a trailing `[…]`). The single-pass builder leaves this branch to
-    /// its `link:`/`mailto:` pass, which produces the identical node.
-    pub(crate) fn is_link_macro(&self) -> bool {
-        self.prefix == 8
-    }
-
-    fn prefix(&self) -> &'t str {
-        self.caps.get(self.prefix).map_or("", |m| m.as_str())
-    }
-
-    /// The boundary-prefix capture (a leading `&lt;`, a `link:`, or the single
-    /// boundary character before a non-angle URL), if it participated.
-    pub(crate) fn prefix_str(&self) -> &'t str {
-        self.prefix()
-    }
-
-    /// The scheme capture (`https://`, `\https://`, …) as a [`Match`], so a
-    /// caller can recover its source offset.
-    pub(crate) fn scheme_match(&self) -> Option<Match<'t>> {
-        self.caps.get(self.scheme)
-    }
-
-    pub(crate) fn target(&self) -> Option<Match<'t>> {
-        self.caps.get(self.target)
-    }
-
-    pub(crate) fn attrlist(&self) -> Option<Match<'t>> {
-        self.caps.get(self.attrlist)
-    }
-
-    /// The URL captured between an angle-bracketed link's `&lt;` and `&gt;`
-    /// (the ANGLE branch's `<url>` alternative), if that alternative
-    /// participated. `None` for the branch's two other alternatives (a
-    /// bracketed attribute list, or an unterminated bare URL) and for both
-    /// non-angle branches.
-    ///
-    /// `pub(crate)` so the single-pass
-    /// [`inline_builder`](crate::content::inline_builder) tells the ANGLE
-    /// branch's three alternatives apart through this shared group-numbering
-    /// logic.
-    pub(crate) fn angle_url(&self) -> Option<Match<'t>> {
-        self.angle_url.and_then(|g| self.caps.get(g))
-    }
-
-    pub(crate) fn bare(&self) -> Option<Match<'t>> {
-        self.bare.and_then(|g| self.caps.get(g))
-    }
-}
 
 /// Matches an inline link (`link:target[…]`) or `mailto:` macro.
 ///

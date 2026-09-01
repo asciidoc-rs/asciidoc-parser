@@ -22,8 +22,8 @@ use crate::{
         element_attribute::{MASKED_PIECE_PLACEHOLDER, SplicedValueEscaping},
     },
     content::{
-        INLINE_EMAIL, INLINE_LINK, INLINE_LINK_MACRO, NormalizedCaps, URI_SNIFF,
-        encode_uri_component, extract_attributes_from_text,
+        INLINE_EMAIL, INLINE_LINK, INLINE_LINK_MACRO, URI_SNIFF, encode_uri_component,
+        extract_attributes_from_text,
         inline_builder::{
             quotes::{LevelContext, Piece, SPAN_PLACEHOLDER, single_text_value, source_slice},
             special_chars::Masked,
@@ -224,6 +224,182 @@ pub(super) fn inline_link_level<'src>(
     rebuilt
 }
 
+/// One derived capture group: its haystack slice plus where that slice
+/// starts, mirroring the [`regex::Match`] surface the consumers read.
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+#[derive(Clone, Copy)]
+struct GroupSpan<'t> {
+    text: &'t str,
+    start: usize,
+}
+
+impl<'t> GroupSpan<'t> {
+    fn as_str(&self) -> &'t str {
+        self.text
+    }
+
+    fn start(&self) -> usize {
+        self.start
+    }
+
+    fn end(&self) -> usize {
+        self.start + self.text.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+}
+
+/// The branch-agnostic reading of one [`INLINE_LINK`] match, derived from the
+/// span by [`link_groups`] — the shape the retired `NormalizedCaps` view
+/// resolved out of the capture engine, without the capture engine. Exactly one
+/// of `target`(+ `attrlist`), `angle_url`, and `bare` is `Some`, except that
+/// the ANGLE branch's unterminated form carries `bare` alone and the LINK-MACRO
+/// branch always carries `target` + `attrlist`.
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+struct LinkGroups<'t> {
+    /// The ANGLE branch matched (its prefix was a leading `&lt;`).
+    is_angle: bool,
+
+    /// The LINK-MACRO branch matched (a literal `link:` prefix).
+    is_link_macro: bool,
+
+    /// The boundary prefix: `\?&lt;`, `link:`, a single boundary character,
+    /// or empty (the non-angle branch's `^` alternative).
+    prefix: GroupSpan<'t>,
+
+    /// The scheme, its escaping backslash included (`https://`,
+    /// `\https://`, …).
+    scheme: GroupSpan<'t>,
+
+    /// Formal-macro target: the URL preceding a `[…]` attrlist.
+    target: Option<GroupSpan<'t>>,
+    attrlist: Option<GroupSpan<'t>>,
+
+    /// URL captured inside `<…&gt;`; only in the ANGLE branch.
+    angle_url: Option<GroupSpan<'t>>,
+
+    /// Bare (auto-linked) URL.
+    bare: Option<GroupSpan<'t>>,
+}
+
+/// The escaped angle delimiters' lengths.
+const LINK_ANGLE_OPEN: usize = "&lt;".len();
+const LINK_ANGLE_CLOSE: usize = "&gt;".len();
+
+/// Decomposes one [`INLINE_LINK`] match — `m`, the engine-reported span
+/// starting at `start` — into its groups, replacing the capture-engine
+/// resolution ([`find_inline_link_matches`] searches bounds-only). Every
+/// group is determined by the span:
+///
+/// - The **branch** is the span's opening bytes: `&lt;` (optionally escaped)
+///   opens the ANGLE branch and `link:` the LINK-MACRO branch — neither is a
+///   non-angle boundary character, and no scheme starts with `&` or `l` — and
+///   otherwise a first byte in the non-angle boundary class is a one-character
+///   prefix while anything else (a scheme's own first byte, or its escaping
+///   backslash) is the branch's `^` alternative, whose prefix is empty.
+/// - The **scheme** follows the prefix: an optional backslash, then whichever
+///   of the five scheme names the span carries, then `://`.
+/// - The **alternative** after the scheme is told by the span's end: a `]` ends
+///   the formal `target[attrlist]` form (the target class excludes `[`, so the rest's
+///   first `[` splits them — a `]` can end no other form, the bare trailing class
+///   excluding it); otherwise, in the ANGLE branch, a trailing `&gt;` with a non-empty
+///   interior is the `<url>` form — the engine prefers that alternative wherever
+///   any `&gt;` is reachable, and ends the match at the *first* one, so a span ending
+///   in `&gt;` with interior bytes can be nothing else, while `&lt;https://&gt;`
+///   (an empty interior) falls through to the bare alternative exactly as the
+///   engine's own `+?` does; every remaining span is a bare link, the rest of
+///   the span being its capture.
+///
+/// The `unwrap_or` fallbacks below cannot be taken on an engine-produced span
+/// (a formal form always carries its `[`, and every branch carries its
+/// `://`); they exist only to keep this reading total.
+/// `link_groups_match_the_capture_engine` pins the whole derivation against
+/// the capture engine's own branch numbering across the differential corpus.
+fn link_groups<'t>(m: &'t str, start: usize) -> LinkGroups<'t> {
+    let bytes = m.as_bytes();
+
+    let (is_angle, is_link_macro, prefix_len) = if m.starts_with("&lt;") || m.starts_with(r"\&lt;")
+    {
+        (
+            true,
+            false,
+            usize::from(bytes.first() == Some(&b'\\')) + LINK_ANGLE_OPEN,
+        )
+    } else if m.starts_with("link:") {
+        (false, true, "link:".len())
+    } else {
+        // The non-angle branch: its prefix is empty (the `^` alternative)
+        // exactly when the span opens on the scheme or its escaping
+        // backslash — no boundary character is an `h`, `f`, `i`, or `\` —
+        // and otherwise it is the one boundary character the span opens
+        // with, whatever its width.
+        let boundary = match bytes.first() {
+            Some(b'h' | b'f' | b'i' | b'\\') => 0,
+            _ => m.chars().next().map_or(0, char::len_utf8),
+        };
+
+        (false, false, boundary)
+    };
+
+    let prefix = GroupSpan {
+        text: m.get(..prefix_len).unwrap_or_default(),
+        start,
+    };
+
+    let scheme_start = prefix_len;
+    let after_esc = scheme_start + usize::from(bytes.get(scheme_start) == Some(&b'\\'));
+    let scheme_rest = m.get(after_esc..).unwrap_or_default();
+
+    let name_len = ["https", "http", "file", "ftp", "irc"]
+        .iter()
+        .find(|name| scheme_rest.starts_with(**name))
+        .map_or(0, |name| name.len());
+
+    let scheme_end = after_esc + name_len + "://".len();
+
+    let scheme = GroupSpan {
+        text: m.get(scheme_start..scheme_end).unwrap_or_default(),
+        start: start + scheme_start,
+    };
+
+    let rest_start = scheme_end;
+    let rest = m.get(rest_start..).unwrap_or_default();
+
+    let group = |from: usize, to: usize| GroupSpan {
+        text: m.get(from..to).unwrap_or_default(),
+        start: start + from,
+    };
+
+    let mut target = None;
+    let mut attrlist = None;
+    let mut angle_url = None;
+    let mut bare = None;
+
+    if rest.ends_with(']') {
+        // The formal `target[attrlist]` form, in any branch.
+        let bracket = rest_start + rest.find('[').unwrap_or(0);
+        target = Some(group(rest_start, bracket));
+        attrlist = Some(group(bracket + 1, m.len() - 1));
+    } else if is_angle && rest.ends_with("&gt;") && rest.len() > LINK_ANGLE_CLOSE {
+        angle_url = Some(group(rest_start, m.len() - LINK_ANGLE_CLOSE));
+    } else {
+        bare = Some(group(rest_start, m.len()));
+    }
+
+    LinkGroups {
+        is_angle,
+        is_link_macro,
+        prefix,
+        scheme,
+        target,
+        attrlist,
+        angle_url,
+        bare,
+    }
+}
+
 /// Finds every recognized auto-link / formal-URL / angle-bracketed link at this
 /// level, skipping a `link:` macro match and any form
 /// [`build_inline_link_node`] defers — including one whose *computed* bytes
@@ -240,18 +416,14 @@ fn find_inline_link_matches<'src>(
 ) -> Vec<MacroMatch<'src>> {
     let mut matches = Vec::new();
 
-    for caps in INLINE_LINK.captures_iter(s) {
-        // `unwrap` on group 0 is safe: a capture always has an overall match.
-        #[allow(clippy::unwrap_used)]
-        let whole = caps.get(0).unwrap();
+    for whole in INLINE_LINK.find_iter(s) {
+        let full = whole.range();
 
-        let full = whole.start()..whole.end();
-
-        let n = NormalizedCaps::new(&caps);
+        let n = link_groups(whole.as_str(), full.start);
 
         // The `link:` URL macro form is left to `link_macro_level`, which folds
         // the identical node.
-        if n.is_link_macro() {
+        if n.is_link_macro {
             continue;
         }
 
@@ -321,7 +493,7 @@ fn find_inline_link_matches<'src>(
 ///
 /// [`InlineLinkReplacer`]: crate::content::macros
 fn build_inline_link_node<'src>(
-    n: &NormalizedCaps<'_, '_>,
+    n: &LinkGroups<'_>,
     full: &std::ops::Range<usize>,
     nodes: &[InlineNode<'src>],
     pieces: &[Piece],
@@ -329,15 +501,13 @@ fn build_inline_link_node<'src>(
     parser: &Parser,
     specials: ComputedSpecials,
 ) -> Option<MacroMatch<'src>> {
-    // `scheme_match` is always present (no branch can match without it); fall
-    // through defensively if it is somehow absent.
-    let scheme_m = n.scheme_match()?;
+    let scheme_m = n.scheme;
     let scheme = scheme_m.as_str();
 
     // The `<url>` form is handled separately, on exactly this condition —
     // checked before anything else, including this branch's own escape check
     // and gate.
-    if n.is_angle() && n.attrlist().is_none() {
+    if n.is_angle && n.attrlist.is_none() {
         return build_angle_link_node(n, &scheme_m, full, nodes, pieces, root, parser);
     }
 
@@ -393,17 +563,17 @@ fn build_inline_link_node<'src>(
     // boundary-prefix class admits none of the characters
     // [`build_match_string`] stands a piece in as, and its scheme is literal
     // ASCII no single-character piece can supply.
-    let computed_end = n.attrlist().map_or(full.end, |m| m.start());
+    let computed_end = n.attrlist.map_or(full.end, |m| m.start());
 
     if !range_is_restorable(nodes, pieces, &(full.start..computed_end)) {
         return None;
     }
 
-    let prefix = n.prefix_str();
+    let prefix = n.prefix.as_str();
 
     // The URL body is the formal-macro target group or, for a bare link, the
     // bare group; the two are mutually exclusive.
-    let url_m = n.target().or_else(|| n.bare());
+    let url_m = n.target.or(n.bare);
     let url_part = url_m.map_or("", |m| m.as_str());
     let mut target = format!("{scheme}{url_part}");
 
@@ -421,7 +591,7 @@ fn build_inline_link_node<'src>(
 
     let mut link_text: Option<String> = None;
 
-    let raw_text_m = n.attrlist();
+    let raw_text_m = n.attrlist;
     let raw_text = raw_text_m.map_or("", |m| m.as_str());
 
     if let Some(attrlist_m) = raw_text_m {
@@ -749,8 +919,8 @@ fn build_inline_link_node<'src>(
 ///
 /// [`InlineLinkReplacer`]: crate::content::macros
 fn build_angle_link_node<'src>(
-    n: &NormalizedCaps<'_, '_>,
-    scheme_m: &regex::Match<'_>,
+    n: &LinkGroups<'_>,
+    scheme_m: &GroupSpan<'_>,
     full: &std::ops::Range<usize>,
     nodes: &[InlineNode<'src>],
     pieces: &[Piece],
@@ -759,7 +929,7 @@ fn build_angle_link_node<'src>(
 ) -> Option<MacroMatch<'src>> {
     // An escaped `&lt;` (`\<https://…>`) drops that backslash and leaves the
     // whole match literal, exactly as the replacer's `caps[0][1..]` does.
-    if n.prefix_str().starts_with('\\') {
+    if n.prefix.as_str().starts_with('\\') {
         return Some(MacroMatch {
             kind: MacroMatchKind::Unescape {
                 backslash: full.start,
@@ -781,7 +951,7 @@ fn build_angle_link_node<'src>(
 
     // The `<url>` alternative did not participate: an unterminated
     // angle-bracketed URL, which the replacer leaves wholly literal.
-    let angle_url = n.angle_url()?;
+    let angle_url = n.angle_url?;
 
     let interior = scheme_m.start()..angle_url.end();
 
@@ -2155,6 +2325,130 @@ mod tests {
         assert_entity, assert_link, assert_raw, assert_special_char, assert_styled, assert_text,
         build_src, fold_html, golden_macros, golden_macros_in, link_text_of,
     };
+
+    #[test]
+    fn link_groups_match_the_capture_engine() {
+        // `link_groups` derives INLINE_LINK's branch-agnostic groups from
+        // each match span; this pins it against the capture engine's own
+        // reading — the branch told by which prefix group participated
+        // (group 1 angle, 8 link-macro, 12 non-angle), and the branch's own
+        // scheme / target / attrlist / angle-URL / bare numbering — group for
+        // group, across a corpus covering all three branches, every inner
+        // alternative, escapes of the prefix and of the scheme, empty and
+        // escaped-bracket attrlists, multibyte prefixes and URLs, trailing
+        // punctuation, and multi-match haystacks.
+        use super::{GroupSpan, link_groups};
+        use crate::content::INLINE_LINK;
+
+        fn span(m: Option<regex::Match<'_>>) -> Option<GroupSpan<'_>> {
+            m.map(|m| GroupSpan {
+                text: m.as_str(),
+                start: m.start(),
+            })
+        }
+
+        let haystacks = [
+            // ANGLE branch: url form, formal form, bare (unterminated), and
+            // the empty-interior fallthrough.
+            "&lt;https://example.org&gt;",
+            "&lt;https://a/b[c]&gt;",
+            "&lt;https://a/b[c]",
+            "&lt;https://unterminated",
+            "&lt;https://&gt;",
+            "&lt;ftp://x&gt;y&gt;",
+            r"\&lt;https://escaped&gt;",
+            "&lt;\\https://escaped-scheme&gt;",
+            // LINK-MACRO branch.
+            "link:https://a[]",
+            "link:https://a[Docs]",
+            r"link:https://a[a\]b]",
+            "link:\\https://a[x]",
+            // NON-ANGLE branch: line-start (empty prefix), each boundary
+            // shape, bare and formal, trailing punctuation, escapes.
+            "https://example.org",
+            "https://example.org/a[Text]",
+            "https://a[]",
+            " https://spaced.example",
+            "\u{a0}https://nbsp.example",
+            "(https://parens.example)",
+            ">https://after-gt",
+            ";https://after-semi",
+            "\"https://quoted\"",
+            "\'https://single\'",
+            "[https://bracketed]x",
+            r"\https://escaped.example",
+            "https://a.example/x;",
+            "https://a.example/x:",
+            "https://a.example/(x):",
+            "https://\u{e9}l\u{e8}ve.example/\u{fc}",
+            "irc://irc.example/#chan",
+            "file:///etc/hosts x",
+            "ftp://f.example/y.",
+            // Multi-match, mixed branches.
+            "see https://a.example and &lt;https://b.example&gt; or link:https://c[d] end",
+            "a\nhttps://line-start.example",
+        ];
+
+        for haystack in haystacks {
+            let mut any = false;
+
+            for caps in INLINE_LINK.captures_iter(haystack) {
+                any = true;
+
+                let whole = caps.get(0).unwrap();
+
+                // The branch numbering `NormalizedCaps` used to resolve.
+                let (prefix, scheme, target, attrlist, angle_url, bare) = if caps.get(1).is_some() {
+                    (1, 2, 3, 4, Some(5), Some(6))
+                } else if caps.get(8).is_some() {
+                    (8, 9, 10, 11, None, None)
+                } else {
+                    (12, 13, 14, 15, None, Some(16))
+                };
+
+                let derived = link_groups(whole.as_str(), whole.start());
+
+                assert_eq!(derived.is_angle, prefix == 1, "branch over {haystack:?}");
+                assert_eq!(
+                    derived.is_link_macro,
+                    prefix == 8,
+                    "branch over {haystack:?}"
+                );
+                assert_eq!(
+                    Some(derived.prefix),
+                    span(caps.get(prefix)),
+                    "prefix over {haystack:?}"
+                );
+                assert_eq!(
+                    Some(derived.scheme),
+                    span(caps.get(scheme)),
+                    "scheme over {haystack:?}"
+                );
+                assert_eq!(
+                    derived.target,
+                    span(caps.get(target)),
+                    "target over {haystack:?}"
+                );
+                assert_eq!(
+                    derived.attrlist,
+                    span(caps.get(attrlist)),
+                    "attrlist over {haystack:?}"
+                );
+                assert_eq!(
+                    derived.angle_url,
+                    span(angle_url.and_then(|g| caps.get(g))),
+                    "angle_url over {haystack:?}"
+                );
+                assert_eq!(
+                    derived.bare,
+                    span(bare.and_then(|g| caps.get(g))),
+                    "bare over {haystack:?}"
+                );
+            }
+
+            assert!(any, "corpus haystack {haystack:?} produced no match");
+        }
+    }
     use crate::{
         HasSpan, Parser, Span,
         content::inline_builder::build,
