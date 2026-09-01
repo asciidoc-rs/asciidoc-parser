@@ -282,7 +282,7 @@ fn build_stem_node<'src>(
 
     let (value, source) = stem_expression_value(&emitted, notation, &subs, parser);
 
-    Some(InlineNode::Stem(Stem {
+    Some(InlineNode::Stem(Box::new(Stem {
         notation,
         // The body's own nodes, kept rather than folded away: an embedded
         // passthrough is its own extraction entry, and `value` alone gives a
@@ -294,7 +294,7 @@ fn build_stem_node<'src>(
         value: CowStr::from(value),
         subs,
         location,
-    }))
+    })))
 }
 
 /// Computes a [`Stem`](InlineNode::Stem) node's `value` from the expression
@@ -389,7 +389,7 @@ mod tests {
     };
     use crate::{
         Parser, Span,
-        inlines::{InlineNode, Stem, StemNotation},
+        inlines::{InlineNode, StemNotation},
         parser::HtmlInlineRenderer,
     };
 
@@ -397,13 +397,9 @@ mod tests {
     /// with the given `value`.
     fn assert_stem(node: &InlineNode<'_>, notation: StemNotation, value: &str) {
         match node {
-            InlineNode::Stem(Stem {
-                notation: n,
-                value: v,
-                ..
-            }) => {
-                assert_eq!(*n, notation, "notation");
-                assert_eq!(v.as_ref(), value, "value");
+            InlineNode::Stem(stem) => {
+                assert_eq!(stem.notation, notation, "notation");
+                assert_eq!(stem.value.as_ref(), value, "value");
             }
 
             other => panic!("expected Stem({notation:?}, {value:?}), got {other:?}"),

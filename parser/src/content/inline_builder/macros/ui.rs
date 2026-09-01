@@ -178,7 +178,7 @@ fn build_kbd_btn_node<'src>(
         UiKind::Button(CowStr::from(normalize_index_text(content, true)))
     };
 
-    InlineNode::Ui(Ui { kind, location })
+    InlineNode::Ui(Box::new(Ui { kind, location }))
 }
 
 /// The menu UI macro pass at a level: matches [`INLINE_MENU_MACRO`] over the
@@ -345,14 +345,14 @@ fn build_menu_node<'src>(
 
     let (submenus, item) = split_menu_items(caps.get(2).map(|m| m.as_str()));
 
-    InlineNode::Ui(Ui {
+    InlineNode::Ui(Box::new(Ui {
         kind: UiKind::Menu {
             menu,
             submenus,
             item,
         },
         location,
-    })
+    }))
 }
 
 /// Splits a menu macro's item list into its submenu path and trailing item: a

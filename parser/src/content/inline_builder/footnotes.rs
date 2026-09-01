@@ -559,13 +559,13 @@ fn build_footnote_node<'src>(
     if let Some(id) = id {
         if let Some(number) = parser.footnote_index_for_id(id.as_ref()) {
             // A reference to an already-defined footnote: reuse its number.
-            return Some(InlineNode::Footnote(Footnote {
+            return Some(InlineNode::Footnote(Box::new(Footnote {
                 id: Some(id),
                 number: Some(CowStr::from(number)),
                 is_reference: true,
                 children: vec![],
                 location,
-            }));
+            })));
         }
 
         return match content_match {
@@ -574,13 +574,13 @@ fn build_footnote_node<'src>(
                 let children = footnote_children(content, s, pieces, nodes);
                 let number = register_footnote_number(parser, Some(id.as_ref()), &children, root);
 
-                Some(InlineNode::Footnote(Footnote {
+                Some(InlineNode::Footnote(Box::new(Footnote {
                     id: Some(id),
                     number: Some(CowStr::from(number)),
                     is_reference: false,
                     children,
                     location,
-                }))
+                })))
             }
 
             // A reference to an id that was never defined, reported right
@@ -594,13 +594,13 @@ fn build_footnote_node<'src>(
                     crate::warnings::WarningType::InvalidFootnoteReference(id.to_string()),
                 );
 
-                Some(InlineNode::Footnote(Footnote {
+                Some(InlineNode::Footnote(Box::new(Footnote {
                     id: Some(id),
                     number: None,
                     is_reference: true,
                     children: vec![],
                     location,
-                }))
+                })))
             }
         };
     }
@@ -611,13 +611,13 @@ fn build_footnote_node<'src>(
     let children = footnote_children(content, s, pieces, nodes);
     let number = register_footnote_number(parser, None, &children, root);
 
-    Some(InlineNode::Footnote(Footnote {
+    Some(InlineNode::Footnote(Box::new(Footnote {
         id: None,
         number: Some(CowStr::from(number)),
         is_reference: false,
         children,
         location,
-    }))
+    })))
 }
 
 /// Builds one [`Footnote`](InlineNode::Footnote) node from a `footnoteref:`
@@ -698,13 +698,13 @@ fn build_footnoteref_node<'src>(
 
     if let Some(number) = parser.footnote_index_for_id(id.as_ref()) {
         // A reference to an already-defined footnote: reuse its number.
-        return Some(InlineNode::Footnote(Footnote {
+        return Some(InlineNode::Footnote(Box::new(Footnote {
             id: Some(id),
             number: Some(CowStr::from(number)),
             is_reference: true,
             children: vec![],
             location,
-        }));
+        })));
     }
 
     match content_range {
@@ -713,13 +713,13 @@ fn build_footnoteref_node<'src>(
             let children = footnote_children(content_range, s, pieces, nodes);
             let number = register_footnote_number(parser, Some(id.as_ref()), &children, root);
 
-            Some(InlineNode::Footnote(Footnote {
+            Some(InlineNode::Footnote(Box::new(Footnote {
                 id: Some(id),
                 number: Some(CowStr::from(number)),
                 is_reference: false,
                 children,
                 location,
-            }))
+            })))
         }
 
         // A reference to an id that was never defined — see the sibling site
@@ -731,13 +731,13 @@ fn build_footnoteref_node<'src>(
                 crate::warnings::WarningType::InvalidFootnoteReference(id.to_string()),
             );
 
-            Some(InlineNode::Footnote(Footnote {
+            Some(InlineNode::Footnote(Box::new(Footnote {
                 id: Some(id),
                 number: None,
                 is_reference: true,
                 children: vec![],
                 location,
-            }))
+            })))
         }
     }
 }

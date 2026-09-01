@@ -2105,7 +2105,7 @@ fn rebuild_level<'src>(
                     None => (None, Vec::new(), Attrlist::empty(location.slice(0..0))),
                 };
 
-                out.push(InlineNode::Styled(Styled {
+                out.push(InlineNode::Styled(Box::new(Styled {
                     variant: *variant,
                     form: *form,
                     id,
@@ -2114,7 +2114,7 @@ fn rebuild_level<'src>(
                     children,
                     passthrough: None,
                     location,
-                }));
+                })));
             }
         }
 
@@ -2934,7 +2934,7 @@ mod tests {
         assert_eq!(styled_boundaries(&bare), None);
         assert_eq!(
             LevelContext::child_contexts(
-                &[InlineNode::Styled(bare)],
+                &[InlineNode::Styled(Box::new(bare))],
                 LevelContext::INSIDE_REF,
                 Masked::UNKNOWN
             ),
@@ -3027,7 +3027,7 @@ mod tests {
             (Some('a'), Some('a'))
         );
 
-        transparent.children = vec![InlineNode::Styled(span(StyleVariant::Strong))];
+        transparent.children = vec![InlineNode::Styled(Box::new(span(StyleVariant::Strong)))];
 
         assert_eq!(
             styled_sibling_boundaries(&transparent, Masked::UNKNOWN),
@@ -3169,7 +3169,7 @@ mod tests {
         const TAG: LevelContext = LevelContext::INSIDE_REF;
 
         fn styled(variant: StyleVariant) -> InlineNode<'static> {
-            InlineNode::Styled(Styled {
+            InlineNode::Styled(Box::new(Styled {
                 variant,
                 form: SpanForm::Constrained,
                 id: None,
@@ -3178,7 +3178,7 @@ mod tests {
                 children: Vec::new(),
                 passthrough: None,
                 location: Span::new("x"),
-            })
+            }))
         }
 
         fn text(value: &'static str) -> InlineNode<'static> {
@@ -3316,7 +3316,7 @@ mod tests {
         // first one's body ends with, which is what a whole-content match
         // would read between the two.
         fn transparent(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
-            InlineNode::Styled(Styled {
+            InlineNode::Styled(Box::new(Styled {
                 variant: StyleVariant::Unquoted,
                 form: SpanForm::Constrained,
                 id: None,
@@ -3325,7 +3325,7 @@ mod tests {
                 children,
                 passthrough: None,
                 location: Span::new("x"),
-            })
+            }))
         }
 
         assert_eq!(
@@ -3592,7 +3592,7 @@ mod tests {
         );
 
         let (s, pieces) = build_match_string(
-            &[InlineNode::Styled(styled.clone())],
+            &[InlineNode::Styled(Box::new(styled.clone()))],
             Masked::known(&[identity]),
         );
 
@@ -3603,7 +3603,8 @@ mod tests {
         // The same node, *not* named by the identity, is a span that really
         // has been rendered — and presents the two characters its
         // `<span class="x">…</span>` puts beside its siblings.
-        let (s, pieces) = build_match_string(&[InlineNode::Styled(styled)], Masked::known(&[]));
+        let (s, pieces) =
+            build_match_string(&[InlineNode::Styled(Box::new(styled))], Masked::known(&[]));
 
         assert_eq!(s, format!("<{SPAN_PLACEHOLDER}>"));
         assert_eq!(pieces.len(), 1);
@@ -3646,8 +3647,10 @@ mod tests {
         // on either side of the placeholder — and the piece still covers the
         // placeholder alone, so the two belong to no node and no range a
         // caller slices moves.
-        let (s, pieces) =
-            build_match_string(&[InlineNode::Styled(styled(body()))], Masked::known(&[]));
+        let (s, pieces) = build_match_string(
+            &[InlineNode::Styled(Box::new(styled(body())))],
+            Masked::known(&[]),
+        );
 
         assert_eq!(s, format!("x{SPAN_PLACEHOLDER} "));
         assert_eq!(pieces.len(), 1);
@@ -3656,8 +3659,10 @@ mod tests {
         // Without it — every step but `macros` — the span this module cannot
         // rule out being an extraction wrapper keeps the bare placeholder,
         // byte for byte what it carried before.
-        let (s, pieces) =
-            build_match_string(&[InlineNode::Styled(styled(body()))], Masked::UNKNOWN);
+        let (s, pieces) = build_match_string(
+            &[InlineNode::Styled(Box::new(styled(body())))],
+            Masked::UNKNOWN,
+        );
 
         assert_eq!(s, SPAN_PLACEHOLDER.to_string());
         assert_eq!(pieces[0].s_start, 0);
@@ -3673,7 +3678,10 @@ mod tests {
             wrapper.location.data().len(),
         );
 
-        let (s, _) = build_match_string(&[InlineNode::Styled(wrapper)], Masked::known(&[identity]));
+        let (s, _) = build_match_string(
+            &[InlineNode::Styled(Box::new(wrapper))],
+            Masked::known(&[identity]),
+        );
 
         assert_eq!(s, SPAN_PLACEHOLDER.to_string());
     }
@@ -3696,7 +3704,7 @@ mod tests {
         };
 
         let styled = |variant| {
-            InlineNode::Styled(Styled {
+            InlineNode::Styled(Box::new(Styled {
                 variant,
                 form: SpanForm::Constrained,
                 id: None,
@@ -3705,7 +3713,7 @@ mod tests {
                 children: vec![text("x")],
                 passthrough: None,
                 location: Span::new("\"`x`\""),
-            })
+            }))
         };
 
         // A `CharRef` contributes its entity, whose `&` sniffs.
@@ -4224,7 +4232,7 @@ mod tests {
         let source = Span::new("abcd");
 
         let with_children = |variant, children: Vec<InlineNode<'static>>| {
-            vec![InlineNode::Styled(Styled {
+            vec![InlineNode::Styled(Box::new(Styled {
                 variant,
                 form: SpanForm::Constrained,
                 id: None,
@@ -4233,7 +4241,7 @@ mod tests {
                 children,
                 passthrough: None,
                 location: source,
-            })]
+            }))]
         };
 
         for variant in variants {
@@ -4374,7 +4382,7 @@ mod tests {
         // splitting one clones it whole, exactly as before.
         let source = Span::new("*x*");
 
-        let nodes = vec![InlineNode::Styled(Styled {
+        let nodes = vec![InlineNode::Styled(Box::new(Styled {
             variant: StyleVariant::Strong,
             form: SpanForm::Constrained,
             id: None,
@@ -4383,7 +4391,7 @@ mod tests {
             children: vec![],
             passthrough: None,
             location: source,
-        })];
+        }))];
 
         let (_, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
 

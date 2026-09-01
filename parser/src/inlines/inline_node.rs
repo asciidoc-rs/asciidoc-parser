@@ -80,25 +80,32 @@ pub enum InlineNode<'src> {
     },
 
     // ─── ASG parent nodes ─────────────────────────────────────────────
+    //
+    // The wide payloads here (and among the extensions below) are boxed so
+    // the enum stays small: nearly every node in a real document is a
+    // `Text`/`CharRef` leaf, and the builder moves whole node vectors
+    // through each substitution step's rebuild, so element size is paid on
+    // every step. The boxed structs are a small minority of nodes and each
+    // box is allocated once at construction, then moves as one pointer.
     /// A formatted span (strong, emphasis, code, mark, and crate extensions).
     /// ASG: `inlineSpan`.
-    Styled(Styled<'src>),
+    Styled(Box<Styled<'src>>),
 
     /// A link or cross-reference. ASG: `inlineRef`.
-    Ref(Ref<'src>),
+    Ref(Box<Ref<'src>>),
 
     // ─── crate extensions (no ASG inline node yet) ────────────────────
     /// An inline image (`image:target[…]`).
-    Image(Image<'src>),
+    Image(Box<Image<'src>>),
 
     /// A footnote (`footnote:[…]` or `footnote:id[…]`).
-    Footnote(Footnote<'src>),
+    Footnote(Box<Footnote<'src>>),
 
     /// An inline anchor (`[[id]]` or `anchor:id[reftext]`).
     Anchor(Anchor<'src>),
 
     /// A UI macro: `kbd:`, `btn:`, or `menu:`.
-    Ui(Ui<'src>),
+    Ui(Box<Ui<'src>>),
 
     /// An index term (`((term))`, `(((primary, secondary)))`,
     /// `indexterm:[…]`, or `indexterm2:[…]`).
@@ -108,7 +115,7 @@ pub enum InlineNode<'src> {
     Callout(Callout<'src>),
 
     /// Inline STEM content (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`).
-    Stem(Stem<'src>),
+    Stem(Box<Stem<'src>>),
 
     /// An explicit line break (a trailing `+` at the end of a line).
     LineBreak {
@@ -116,6 +123,12 @@ pub enum InlineNode<'src> {
         location: Span<'src>,
     },
 }
+
+// The size the boxing above buys, pinned: the builder pipeline moves whole
+// node vectors through each substitution step's rebuild, so a widened enum
+// is a per-step cost on every node in the document. A variant that pushes
+// past this bound should be boxed instead.
+const _: () = assert!(std::mem::size_of::<InlineNode<'_>>() <= 128);
 
 impl<'src> HasSpan<'src> for InlineNode<'src> {
     fn span(&self) -> Span<'src> {
@@ -168,7 +181,7 @@ mod tests {
                 origin: RawOrigin::Substitution,
                 location,
             },
-            InlineNode::Styled(Styled {
+            InlineNode::Styled(Box::new(Styled {
                 variant: StyleVariant::Strong,
                 form: SpanForm::Constrained,
                 id: None,
@@ -177,8 +190,8 @@ mod tests {
                 children: vec![],
                 passthrough: None,
                 location,
-            }),
-            InlineNode::Ref(Ref {
+            })),
+            InlineNode::Ref(Box::new(Ref {
                 variant: RefVariant::Link,
                 link_form: Some(crate::inlines::LinkForm::Macro),
                 target: CowStr::from("https://example.com"),
@@ -190,8 +203,8 @@ mod tests {
                 xrefstyle: None,
                 attrs: crate::attributes::Attrlist::empty(location.slice(0..0)),
                 location,
-            }),
-            InlineNode::Image(Image {
+            })),
+            InlineNode::Image(Box::new(Image {
                 is_icon: false,
                 target: CowStr::from("photo.png"),
                 restored_target_ranges: vec![],
@@ -200,24 +213,24 @@ mod tests {
                 height: None,
                 attrs: crate::attributes::Attrlist::empty(location.slice(0..0)),
                 location,
-            }),
-            InlineNode::Footnote(Footnote {
+            })),
+            InlineNode::Footnote(Box::new(Footnote {
                 id: None,
                 number: Some(CowStr::from("1")),
                 is_reference: false,
                 children: vec![],
                 location,
-            }),
+            })),
             InlineNode::Anchor(Anchor {
                 id: CowStr::from("intro"),
                 reftext: None,
                 is_bibliography: false,
                 location,
             }),
-            InlineNode::Ui(Ui {
+            InlineNode::Ui(Box::new(Ui {
                 kind: UiKind::Button(CowStr::from("Save")),
                 location,
-            }),
+            })),
             InlineNode::IndexTerm(IndexTerm {
                 terms: vec![CowStr::from("term")],
                 children: vec![],
@@ -229,14 +242,14 @@ mod tests {
                 guard: CalloutGuard::LineComment(CowStr::from("# ")),
                 location,
             }),
-            InlineNode::Stem(Stem {
+            InlineNode::Stem(Box::new(Stem {
                 notation: StemNotation::AsciiMath,
                 value: CowStr::from("x^2"),
                 subs: crate::content::SubstitutionGroup::Stem,
                 source_text: None,
                 children: vec![],
                 location,
-            }),
+            })),
             InlineNode::LineBreak { location },
         ]
     }

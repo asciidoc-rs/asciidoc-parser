@@ -847,7 +847,7 @@ fn build_inline_link_node<'src>(
         macro_text_children(trimmed, m.start()..end, true, nodes, pieces, root)
     };
 
-    let node = InlineNode::Ref(Ref {
+    let node = InlineNode::Ref(Box::new(Ref {
         variant: RefVariant::Link,
         link_form: Some(LinkForm::AutoOrFormal),
         target: CowStr::from(target),
@@ -859,7 +859,7 @@ fn build_inline_link_node<'src>(
         derived: None,
         xrefstyle: None,
         location,
-    });
+    }));
 
     Some(MacroMatch {
         kind: MacroMatchKind::Node {
@@ -1000,7 +1000,7 @@ fn build_angle_link_node<'src>(
         root,
     );
 
-    let node = InlineNode::Ref(Ref {
+    let node = InlineNode::Ref(Box::new(Ref {
         variant: RefVariant::Link,
         link_form: Some(LinkForm::AutoOrFormal),
         target: CowStr::from(target),
@@ -1012,7 +1012,7 @@ fn build_angle_link_node<'src>(
         derived: None,
         xrefstyle: None,
         location,
-    });
+    }));
 
     Some(MacroMatch {
         kind: MacroMatchKind::Node {
@@ -1692,7 +1692,7 @@ pub(super) fn build_link_node<'src>(
         macro_text_children(trimmed, m.start()..end, true, nodes, pieces, root)
     };
 
-    Some(InlineNode::Ref(Ref {
+    Some(InlineNode::Ref(Box::new(Ref {
         variant: RefVariant::Link,
         link_form: Some(LinkForm::Macro),
         target: CowStr::from(target),
@@ -1704,7 +1704,7 @@ pub(super) fn build_link_node<'src>(
         derived: None,
         xrefstyle: None,
         location,
-    }))
+    })))
 }
 
 /// One link display text read as an attribute list — the result
@@ -2190,7 +2190,7 @@ fn build_email_node<'src>(
     let range = address_m.start()..address_m.end();
     let location = source_slice(pieces, range.clone(), root);
 
-    InlineNode::Ref(Ref {
+    InlineNode::Ref(Box::new(Ref {
         variant: RefVariant::Link,
         link_form: Some(LinkForm::Email),
         target: CowStr::from(format!("mailto:{address}")),
@@ -2202,7 +2202,7 @@ fn build_email_node<'src>(
         derived: None,
         xrefstyle: None,
         location,
-    })
+    }))
 }
 
 /// Performs the recognition side effect a matched link needs —

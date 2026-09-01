@@ -962,7 +962,7 @@ mod tests {
         // running the macros step, to drive the recursion in isolation.)
         let loc = Span::new("(C)");
 
-        let reference = InlineNode::Ref(Ref {
+        let reference = InlineNode::Ref(Box::new(Ref {
             variant: RefVariant::Link,
             link_form: Some(crate::inlines::LinkForm::Macro),
             target: CowStr::from("https://example.com"),
@@ -977,7 +977,7 @@ mod tests {
             xrefstyle: None,
             attrs: crate::attributes::Attrlist::empty(loc.slice(0..0)),
             location: loc,
-        });
+        }));
 
         let out = apply_character_replacements(vec![reference], loc, &mut None);
 

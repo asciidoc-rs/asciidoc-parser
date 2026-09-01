@@ -1030,7 +1030,7 @@ mod tests {
         // per_character`] exercises a hand-built replacement.)
         let location = Span::new("image:sunset.jpg[Sunset]");
 
-        let hand_built = InlineNode::Image(Image {
+        let hand_built = InlineNode::Image(Box::new(Image {
             is_icon: false,
             target: CowStr::from("sunset.jpg"),
             restored_target_ranges: vec![],
@@ -1039,7 +1039,7 @@ mod tests {
             height: None,
             attrs: crate::attributes::Attrlist::empty(location.slice(0..0)),
             location,
-        });
+        }));
 
         // The macro-built equivalent (which carries an attribute list) is the
         // oracle: the two must fold identically.
@@ -1058,7 +1058,7 @@ mod tests {
         // target, so the fold still resolves and renders the plain path.
         let location = Span::new("image:sunset.jpg[Sunset]");
 
-        let hand_built = InlineNode::Image(Image {
+        let hand_built = InlineNode::Image(Box::new(Image {
             is_icon: false,
             target: CowStr::from("sunset.jpg"),
             restored_target_ranges: vec![3..99, 100..200],
@@ -1067,7 +1067,7 @@ mod tests {
             height: None,
             attrs: crate::attributes::Attrlist::empty(location.slice(0..0)),
             location,
-        });
+        }));
 
         let renderer = HtmlInlineRenderer {};
 
@@ -1082,7 +1082,7 @@ mod tests {
     /// `xrefstyle` formatting actually changes (design's `apply_xrefstyle`
     /// only alters output when a signifier is present).
     fn resolved_xref_with_signifier(xrefstyle: Option<XrefStyle>) -> InlineNode<'static> {
-        InlineNode::Ref(Ref {
+        InlineNode::Ref(Box::new(Ref {
             variant: RefVariant::Xref,
             link_form: None,
             target: CowStr::from("install"),
@@ -1101,7 +1101,7 @@ mod tests {
             xrefstyle,
             attrs: crate::attributes::Attrlist::empty(Span::new("").slice(0..0)),
             location: Span::new(""),
-        })
+        }))
     }
 
     #[test]

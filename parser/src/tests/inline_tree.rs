@@ -921,7 +921,7 @@ fn collect_footnote_refs<'a>(doc: &'a Document<'a>) -> Vec<Ref<'a>> {
 
                 InlineNode::Ref(reference) => {
                     if in_footnote {
-                        out.push(reference.clone());
+                        out.push((**reference).clone());
                     }
 
                     walk(&reference.children, in_footnote, out);
@@ -992,7 +992,7 @@ fn collect_refs<'a>(doc: &'a Document<'a>) -> Vec<Ref<'a>> {
         for node in nodes {
             match node {
                 InlineNode::Ref(reference) => {
-                    out.push(reference.clone());
+                    out.push((**reference).clone());
                     walk(&reference.children, out);
                 }
 
@@ -1300,7 +1300,7 @@ fn collect_section_title_refs<'a>(doc: &'a Document<'a>) -> Vec<Ref<'a>> {
         for node in nodes {
             match node {
                 InlineNode::Ref(reference) => {
-                    out.push(reference.clone());
+                    out.push((**reference).clone());
                     refs_in(&reference.children, out);
                 }
 
@@ -1521,7 +1521,7 @@ fn first_footnote<'a>(doc: &'a Document<'a>) -> Footnote<'a> {
     fn find<'a>(nodes: &[InlineNode<'a>]) -> Option<Footnote<'a>> {
         for node in nodes {
             let found = match node {
-                InlineNode::Footnote(footnote) => Some(footnote.clone()),
+                InlineNode::Footnote(footnote) => Some((**footnote).clone()),
                 InlineNode::Styled(styled) => find(&styled.children),
                 InlineNode::Ref(reference) => find(&reference.children),
                 _ => None,
@@ -1555,7 +1555,7 @@ fn refs_in<'a>(nodes: &[InlineNode<'a>]) -> Vec<crate::inlines::Ref<'a>> {
         for node in nodes {
             match node {
                 InlineNode::Ref(reference) => {
-                    out.push(reference.clone());
+                    out.push((**reference).clone());
                     walk(&reference.children, out);
                 }
 
@@ -1643,7 +1643,7 @@ fn footnote_reference_keeps_an_empty_subtree() {
         })
         .flat_map(|simple| simple.content().inlines().to_vec())
         .filter_map(|node| match node {
-            InlineNode::Footnote(footnote) => Some(footnote),
+            InlineNode::Footnote(footnote) => Some(*footnote),
             _ => None,
         })
         .collect();
@@ -1988,7 +1988,7 @@ fn section_title_footnote_carries_its_subtree_and_resolved_xref() {
 
 /// A cross-reference node, unresolved.
 fn unresolved_xref() -> InlineNode<'static> {
-    crate::inlines::InlineNode::Ref(crate::inlines::Ref {
+    crate::inlines::InlineNode::Ref(Box::new(crate::inlines::Ref {
         variant: RefVariant::Xref,
         link_form: None,
         target: "tgt".into(),
@@ -2000,23 +2000,23 @@ fn unresolved_xref() -> InlineNode<'static> {
         xrefstyle: None,
         attrs: crate::attributes::Attrlist::empty(Span::new("").slice(0..0)),
         location: Span::new(""),
-    })
+    }))
 }
 
 /// A defining footnote node holding `children`.
 fn defining_footnote(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
-    InlineNode::Footnote(crate::inlines::Footnote {
+    InlineNode::Footnote(Box::new(crate::inlines::Footnote {
         id: None,
         number: Some("1".into()),
         is_reference: false,
         children,
         location: Span::new(""),
-    })
+    }))
 }
 
 /// A link node holding `children` as its display text.
 fn link_over(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
-    InlineNode::Ref(crate::inlines::Ref {
+    InlineNode::Ref(Box::new(crate::inlines::Ref {
         variant: RefVariant::Link,
         link_form: Some(crate::inlines::LinkForm::Macro),
         target: "https://example.org".into(),
@@ -2028,12 +2028,12 @@ fn link_over(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
         xrefstyle: None,
         attrs: crate::attributes::Attrlist::empty(Span::new("").slice(0..0)),
         location: Span::new(""),
-    })
+    }))
 }
 
 /// A strong span holding `children`.
 fn strong_over(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
-    InlineNode::Styled(crate::inlines::Styled {
+    InlineNode::Styled(Box::new(crate::inlines::Styled {
         variant: StyleVariant::Strong,
         form: SpanForm::Constrained,
         id: None,
@@ -2042,7 +2042,7 @@ fn strong_over(children: Vec<InlineNode<'static>>) -> InlineNode<'static> {
         children,
         passthrough: None,
         location: Span::new(""),
-    })
+    }))
 }
 
 /// A `Content` carrying `inlines` as its inline tree.
