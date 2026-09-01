@@ -12,7 +12,10 @@ use super::{
 use crate::{
     Parser, Span,
     content::{INLINE_PASS, INLINE_PASS_MACRO, SubstitutionGroup},
-    inlines::{InlineNode, PassthroughWrapper, RawForm, RawOrigin, SpanForm, StyleVariant, Styled},
+    inlines::{
+        InlineNode, PassthroughOrigin, PassthroughWrapper, RawForm, RawOrigin, SpanForm,
+        StyleVariant, Styled,
+    },
     strings::CowStr,
 };
 
@@ -693,10 +696,10 @@ fn build_bare_unconstrained_match<'src>(
                 // already-extracted construct, that body with each inner
                 // node's own fold bytes spliced in — matching what
                 // Asciidoctor's own restore produces there too).
-                origin: RawOrigin::Passthrough {
+                origin: RawOrigin::Passthrough(Box::new(PassthroughOrigin {
                     subs: SubstitutionGroup::Verbatim,
                     source_text: None,
-                },
+                })),
                 location,
             }),
         },
@@ -837,10 +840,10 @@ fn build_passthrough_node<'src>(
         return InlineNode::Raw {
             value: CowStr::from(content.data()),
             form: RawForm::AsIs,
-            origin: RawOrigin::Passthrough {
+            origin: RawOrigin::Passthrough(Box::new(PassthroughOrigin {
                 subs: SubstitutionGroup::None,
                 source_text: None,
-            },
+            })),
             location,
         };
     }
@@ -858,10 +861,10 @@ fn build_passthrough_node<'src>(
         return InlineNode::Raw {
             value: CowStr::from(content.data()),
             form: RawForm::Escaped,
-            origin: RawOrigin::Passthrough {
+            origin: RawOrigin::Passthrough(Box::new(PassthroughOrigin {
                 subs: SubstitutionGroup::Verbatim,
                 source_text: None,
-            },
+            })),
             location,
         };
     }
@@ -967,7 +970,7 @@ fn build_passthrough_node<'src>(
     InlineNode::Raw {
         value,
         form: RawForm::AsIs,
-        origin: RawOrigin::Passthrough { subs, source_text },
+        origin: RawOrigin::Passthrough(Box::new(PassthroughOrigin { subs, source_text })),
         location,
     }
 }
@@ -1057,14 +1060,14 @@ fn build_attrlisted_passthrough_node<'src>(
             // passthrough, whose `Styled` wrapper is what the extraction pass
             // records as one entry; the group here is the body's own, read off
             // the delimiters exactly as the unprefixed forms above read theirs.
-            origin: RawOrigin::Passthrough {
+            origin: RawOrigin::Passthrough(Box::new(PassthroughOrigin {
                 subs: if form == RawForm::AsIs {
                     SubstitutionGroup::None
                 } else {
                     SubstitutionGroup::Verbatim
                 },
                 source_text: None,
-            },
+            })),
             location: body_span,
         }]
     };
@@ -1163,10 +1166,10 @@ fn build_bare_attrlisted_passthrough_node<'src>(
         vec![InlineNode::Raw {
             value: CowStr::from(body_span.data()),
             form: RawForm::Escaped,
-            origin: RawOrigin::Passthrough {
+            origin: RawOrigin::Passthrough(Box::new(PassthroughOrigin {
                 subs: SubstitutionGroup::Verbatim,
                 source_text: None,
-            },
+            })),
             location: body_span,
         }]
     };

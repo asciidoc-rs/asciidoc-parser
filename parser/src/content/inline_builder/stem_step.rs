@@ -767,7 +767,7 @@ mod tests {
         // embeds a passthrough — the case the field exists for, since an
         // embedded passthrough is its own extraction entry and folding it into
         // `value` left a walk no way to reach it.
-        use crate::inlines::{InlineNode, RawOrigin};
+        use crate::inlines::{InlineNode, PassthroughOrigin, RawOrigin};
 
         // A flat body: one `Text` run, and `value` says the same thing.
         let nodes = build_src(Span::new("stem:[x^2]"));
@@ -795,10 +795,10 @@ mod tests {
         assert_eq!(value.as_ref(), "<b>");
         assert_eq!(
             *origin,
-            RawOrigin::Passthrough {
+            RawOrigin::Passthrough(Box::new(PassthroughOrigin {
                 subs: crate::content::SubstitutionGroup::None,
                 source_text: None,
-            }
+            }))
         );
 
         // The rendering is unchanged by keeping them — this increment moves no

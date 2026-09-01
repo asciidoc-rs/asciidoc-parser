@@ -172,7 +172,7 @@ pub(super) fn biblio_anchor_level<'src>(
 
     let location = source_slice(&pieces, full.clone(), root);
 
-    let mut out = vec![InlineNode::Anchor(Anchor {
+    let mut out = vec![InlineNode::Anchor(Box::new(Anchor {
         id,
         reftext: Some(vec![InlineNode::Text {
             value: reftext,
@@ -180,7 +180,7 @@ pub(super) fn biblio_anchor_level<'src>(
         }]),
         is_bibliography: true,
         location,
-    })];
+    }))];
 
     // The bracketed label pushed into the flow. Its brackets are
     // the match's own outer `[` and `]` (the very characters the triple bracket
@@ -397,12 +397,12 @@ fn build_anchor_node<'src>(
         )
     });
 
-    Some(InlineNode::Anchor(Anchor {
+    Some(InlineNode::Anchor(Box::new(Anchor {
         id,
         reftext,
         is_bibliography: false,
         location,
-    }))
+    })))
 }
 
 /// Builds an inline anchor's `reftext` — a single [`Text`](InlineNode::Text)

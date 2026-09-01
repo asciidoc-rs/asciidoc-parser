@@ -42,7 +42,7 @@ mod index_term;
 pub use index_term::IndexTerm;
 
 mod inline_node;
-pub use inline_node::{InlineNode, RawForm, RawOrigin};
+pub use inline_node::{InlineNode, PassthroughOrigin, RawForm, RawOrigin};
 
 mod ref_node;
 pub use ref_node::{LinkForm, Ref, RefVariant};

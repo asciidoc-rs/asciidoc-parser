@@ -292,11 +292,11 @@ fn rebuild_callout_level<'src>(
                     None => CalloutGuard::LineComment(CowStr::Borrowed("")),
                 };
 
-                out.push(InlineNode::Callout(Callout {
+                out.push(InlineNode::Callout(Box::new(Callout {
                     number: CowStr::from(number.clone()),
                     guard,
                     location: source_slice(pieces, m.full.clone(), root),
-                }));
+                })));
 
                 cursor = m.full.end;
             }
@@ -448,7 +448,7 @@ mod tests {
         nodes
             .iter()
             .filter_map(|n| match n {
-                InlineNode::Callout(callout) => Some(callout),
+                InlineNode::Callout(callout) => Some(&**callout),
                 _ => None,
             })
             .collect()

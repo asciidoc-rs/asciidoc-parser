@@ -886,7 +886,9 @@ mod tests {
     };
     use crate::{
         Parser, Span,
-        inlines::{CharRef, Image, InlineNode, RawForm, RawOrigin, Ref, RefVariant},
+        inlines::{
+            CharRef, Image, InlineNode, PassthroughOrigin, RawForm, RawOrigin, Ref, RefVariant,
+        },
         parser::{
             HtmlInlineRenderer, ModificationContext, ResolvedReference, XrefSignifier, XrefStyle,
         },
@@ -990,10 +992,10 @@ mod tests {
         let raw = InlineNode::Raw {
             value: CowStr::from(location.data()),
             form: RawForm::AsIs,
-            origin: RawOrigin::Passthrough {
+            origin: RawOrigin::Passthrough(Box::new(PassthroughOrigin {
                 subs: crate::content::SubstitutionGroup::None,
                 source_text: None,
-            },
+            })),
             location,
         };
 
