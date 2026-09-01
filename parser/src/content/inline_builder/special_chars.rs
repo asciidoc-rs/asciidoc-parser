@@ -604,8 +604,8 @@ mod tests {
         Span,
         content::{Content, SubstitutionStep},
         inlines::{
-            Anchor, CharRef, Footnote, InlineNode, RawForm, RawOrigin, Ref, RefVariant, SpanForm,
-            StyleVariant, Styled,
+            Anchor, CharRef, Footnote, InlineNode, PassthroughOrigin, RawForm, RawOrigin, Ref,
+            RefVariant, SpanForm, StyleVariant, Styled,
         },
         parser::HtmlInlineRenderer,
         strings::CowStr,
@@ -990,12 +990,12 @@ mod tests {
                 attrs: crate::attributes::Attrlist::empty(loc.slice(0..0)),
                 location: loc,
             })),
-            InlineNode::Anchor(Anchor {
+            InlineNode::Anchor(Box::new(Anchor {
                 id: CowStr::from("id"),
                 reftext: Some(child()),
                 is_bibliography: false,
                 location: loc,
-            }),
+            })),
             InlineNode::Footnote(Box::new(Footnote {
                 id: None,
                 number: Some(CowStr::from("1")),
@@ -1046,10 +1046,10 @@ mod tests {
             InlineNode::Raw {
                 value: CowStr::from(location.data()),
                 form: RawForm::AsIs,
-                origin: RawOrigin::Passthrough {
+                origin: RawOrigin::Passthrough(Box::new(PassthroughOrigin {
                     subs: crate::content::SubstitutionGroup::None,
                     source_text: None,
-                },
+                })),
                 location,
             },
         ]);

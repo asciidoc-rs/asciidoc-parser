@@ -1245,7 +1245,10 @@ mod tests {
             build, char_replacements::apply_character_replacements, macros::apply_macros,
             special_chars::Masked,
         },
-        inlines::{CharRef, Image, InlineNode, RawForm, RawOrigin, SpanForm, StyleVariant},
+        inlines::{
+            CharRef, Image, InlineNode, PassthroughOrigin, RawForm, RawOrigin, SpanForm,
+            StyleVariant,
+        },
         parser::{DefaultPathResolver, HtmlInlineRenderer},
         strings::CowStr,
     };
@@ -2595,10 +2598,10 @@ mod tests {
             InlineNode::Raw {
                 value: CowStr::from("raw"),
                 form: RawForm::AsIs,
-                origin: RawOrigin::Passthrough {
+                origin: RawOrigin::Passthrough(Box::new(PassthroughOrigin {
                     subs: crate::content::SubstitutionGroup::None,
                     source_text: None,
-                },
+                })),
                 location: root,
             },
             InlineNode::Stem(Box::new(crate::inlines::Stem {

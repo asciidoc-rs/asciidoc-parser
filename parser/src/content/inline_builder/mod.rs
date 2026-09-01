@@ -768,7 +768,7 @@ mod tests {
     use crate::{
         Parser, Span,
         content::inline_builder::fold_html,
-        inlines::{InlineNode, RawOrigin},
+        inlines::{InlineNode, PassthroughOrigin, RawOrigin},
         parser::{HtmlInlineRenderer, ModificationContext},
         strings::CowStr,
     };
@@ -819,31 +819,31 @@ mod tests {
             vec![
                 (
                     "+++<b>x</b>+++",
-                    vec![RawOrigin::Passthrough {
+                    vec![RawOrigin::Passthrough(Box::new(PassthroughOrigin {
                         subs: crate::content::SubstitutionGroup::None,
-                        source_text: None
-                    }]
+                        source_text: None,
+                    }))]
                 ),
                 (
                     "++a < b++",
-                    vec![RawOrigin::Passthrough {
+                    vec![RawOrigin::Passthrough(Box::new(PassthroughOrigin {
                         subs: crate::content::SubstitutionGroup::Verbatim,
-                        source_text: None
-                    }]
+                        source_text: None,
+                    }))]
                 ),
                 (
                     "$$<i>$$",
-                    vec![RawOrigin::Passthrough {
+                    vec![RawOrigin::Passthrough(Box::new(PassthroughOrigin {
                         subs: crate::content::SubstitutionGroup::Verbatim,
-                        source_text: None
-                    }]
+                        source_text: None,
+                    }))]
                 ),
                 (
                     "pass:[<b>]",
-                    vec![RawOrigin::Passthrough {
+                    vec![RawOrigin::Passthrough(Box::new(PassthroughOrigin {
                         subs: crate::content::SubstitutionGroup::None,
-                        source_text: None
-                    }]
+                        source_text: None,
+                    }))]
                 ),
             ]
         );

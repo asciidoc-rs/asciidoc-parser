@@ -618,24 +618,24 @@ fn build_indexterm_macro_match<'src>(
         };
 
         (
-            InlineNode::IndexTerm(IndexTerm {
+            InlineNode::IndexTerm(Box::new(IndexTerm {
                 terms,
                 children,
                 visible: true,
                 location,
-            }),
+            })),
             rendered_nonempty,
         )
     } else {
         // A concealed term renders nothing, so it is always recognized; its
         // argument (which never reaches the flow) is not reconstructed.
         (
-            InlineNode::IndexTerm(IndexTerm {
+            InlineNode::IndexTerm(Box::new(IndexTerm {
                 terms: vec![],
                 children: vec![],
                 visible: false,
                 location,
-            }),
+            })),
             false,
         )
     };
@@ -807,12 +807,12 @@ fn push_indexterm_shorthand_matches<'src>(
             .computed
             .map_or_else(Vec::new, |term| vec![CowStr::from(term)]);
 
-        let node = InlineNode::IndexTerm(IndexTerm {
+        let node = InlineNode::IndexTerm(Box::new(IndexTerm {
             terms,
             children: shown.children,
             visible: true,
             location: source_slice(pieces, term_full.clone(), root),
-        });
+        }));
 
         matches.push(RecognizedIndexterm {
             macro_match: MacroMatch {
@@ -865,22 +865,22 @@ fn push_indexterm_shorthand_matches<'src>(
         let rendered_nonempty = before || after || shown_nonempty;
 
         (
-            InlineNode::IndexTerm(IndexTerm {
+            InlineNode::IndexTerm(Box::new(IndexTerm {
                 terms,
                 children: shown.children,
                 visible: true,
                 location,
-            }),
+            })),
             rendered_nonempty,
         )
     } else {
         (
-            InlineNode::IndexTerm(IndexTerm {
+            InlineNode::IndexTerm(Box::new(IndexTerm {
                 terms: vec![],
                 children: vec![],
                 visible: false,
                 location,
-            }),
+            })),
             false,
         )
     };

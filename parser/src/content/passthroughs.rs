@@ -98,7 +98,7 @@ fn collect_from_tree(nodes: &[InlineNode<'_>], out: &mut Vec<Passthrough>) {
         match node {
             InlineNode::Raw {
                 value,
-                origin: RawOrigin::Passthrough { subs, source_text },
+                origin: RawOrigin::Passthrough(origin),
                 ..
             } => {
                 out.push(Passthrough {
@@ -108,10 +108,11 @@ fn collect_from_tree(nodes: &[InlineNode<'_>], out: &mut Vec<Passthrough>) {
                     // what the enclosing level's `Raw` leaf carries.
                     // `source_text` is the input that produced it, and is
                     // `None` wherever the group changed nothing.
-                    text: source_text
+                    text: origin
+                        .source_text
                         .clone()
                         .unwrap_or_else(|| value.as_ref().to_string()),
-                    subs: subs.clone(),
+                    subs: origin.subs.clone(),
                 });
             }
 

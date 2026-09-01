@@ -102,17 +102,17 @@ pub enum InlineNode<'src> {
     Footnote(Box<Footnote<'src>>),
 
     /// An inline anchor (`[[id]]` or `anchor:id[reftext]`).
-    Anchor(Anchor<'src>),
+    Anchor(Box<Anchor<'src>>),
 
     /// A UI macro: `kbd:`, `btn:`, or `menu:`.
     Ui(Box<Ui<'src>>),
 
     /// An index term (`((term))`, `(((primary, secondary)))`,
     /// `indexterm:[…]`, or `indexterm2:[…]`).
-    IndexTerm(IndexTerm<'src>),
+    IndexTerm(Box<IndexTerm<'src>>),
 
     /// A callout number in verbatim content (`<1>`, `<.>`).
-    Callout(Callout<'src>),
+    Callout(Box<Callout<'src>>),
 
     /// Inline STEM content (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`).
     Stem(Box<Stem<'src>>),
@@ -128,7 +128,7 @@ pub enum InlineNode<'src> {
 // node vectors through each substitution step's rebuild, so a widened enum
 // is a per-step cost on every node in the document. A variant that pushes
 // past this bound should be boxed instead.
-const _: () = assert!(std::mem::size_of::<InlineNode<'_>>() <= 128);
+const _: () = assert!(std::mem::size_of::<InlineNode<'_>>() <= 80);
 
 impl<'src> HasSpan<'src> for InlineNode<'src> {
     fn span(&self) -> Span<'src> {
@@ -221,27 +221,27 @@ mod tests {
                 children: vec![],
                 location,
             })),
-            InlineNode::Anchor(Anchor {
+            InlineNode::Anchor(Box::new(Anchor {
                 id: CowStr::from("intro"),
                 reftext: None,
                 is_bibliography: false,
                 location,
-            }),
+            })),
             InlineNode::Ui(Box::new(Ui {
                 kind: UiKind::Button(CowStr::from("Save")),
                 location,
             })),
-            InlineNode::IndexTerm(IndexTerm {
+            InlineNode::IndexTerm(Box::new(IndexTerm {
                 terms: vec![CowStr::from("term")],
                 children: vec![],
                 visible: false,
                 location,
-            }),
-            InlineNode::Callout(Callout {
+            })),
+            InlineNode::Callout(Box::new(Callout {
                 number: CowStr::from("1"),
                 guard: CalloutGuard::LineComment(CowStr::from("# ")),
                 location,
-            }),
+            })),
             InlineNode::Stem(Box::new(Stem {
                 notation: StemNotation::AsciiMath,
                 value: CowStr::from("x^2"),
@@ -352,42 +352,18 @@ mod tests {
 /// extraction pass resolved for it, which nothing else in the tree records: the
 /// substitution group its body is restored under, and — for the one form whose
 /// [`value`](InlineNode::Raw) is *not* the author's own bytes — that body. See
-/// the variant's own documentation.
+/// [`PassthroughOrigin`].
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum RawOrigin {
     /// An explicit passthrough the extraction pass pulled out before any step
     /// ran: `+++…+++`, `++…++`, `$$…$$`, `pass:[…]`, or an inline STEM body.
     ///
     /// The author asked for this text to be off limits.
-    Passthrough {
-        /// The substitution group this body is restored under, as the
-        /// extraction pass resolved it — `None` for `+++…+++` and a bare
-        /// `pass:[…]`, `Verbatim` for `++…++` and `$$…$$`, and whatever list a
-        /// `pass:c,q[…]` spelled out.
-        ///
-        /// [`RawForm`] is the *fold's* two-valued view of this: a group that
-        /// applies nothing renders [`AsIs`](RawForm::AsIs), one that applies
-        /// special characters and nothing else renders
-        /// [`Escaped`](RawForm::Escaped). The two agree for every group the
-        /// fold can carry out by itself, and the group says more than the fold
-        /// needs precisely so that a consumer asking *what the author wrote*
-        /// does not have to infer it back from what the fold did.
-        subs: SubstitutionGroup,
-
-        /// The author's body **before** its group was applied, when
-        /// [`value`](InlineNode::Raw) is not it.
-        ///
-        /// For every form the fold can restore by itself, `value` *is* the
-        /// author's body and this is `None`. The exception is a `pass:` macro
-        /// carrying an explicit substitution list (`pass:c,q[…]`): rendering an
-        /// arbitrary group means building the body's own tree under that group,
-        /// which needs a `Parser`, and a fold takes a renderer and a
-        /// [`RenderContext`](crate::parser::RenderContext) instead — so that
-        /// body is rendered at **build** time and `value` holds the result.
-        /// Recording the input beside it is what keeps the author's own text
-        /// answerable from the tree.
-        source_text: Option<String>,
-    },
+    ///
+    /// The payload is boxed for the same reason [`InlineNode`]'s wide variants
+    /// are: a `Raw` node's origin rides inside every such node through every
+    /// rebuild, and the passthrough facts are both wide and rare.
+    Passthrough(Box<PassthroughOrigin>),
 
     /// Raw output a substitution produced **in place**, with no extraction
     /// involved: a literal `<`, `>`, or `&` from an expanded attribute value
@@ -395,6 +371,40 @@ pub enum RawOrigin {
     /// ran), a special an effective order never escaped, or a slice of an
     /// entity's own bytes.
     Substitution,
+}
+
+/// The two facts the extraction pass resolved for a
+/// [`Passthrough`](RawOrigin::Passthrough)-origin [`Raw`](InlineNode::Raw)
+/// node, which nothing else in the tree records.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct PassthroughOrigin {
+    /// The substitution group this body is restored under, as the
+    /// extraction pass resolved it — `None` for `+++…+++` and a bare
+    /// `pass:[…]`, `Verbatim` for `++…++` and `$$…$$`, and whatever list a
+    /// `pass:c,q[…]` spelled out.
+    ///
+    /// [`RawForm`] is the *fold's* two-valued view of this: a group that
+    /// applies nothing renders [`AsIs`](RawForm::AsIs), one that applies
+    /// special characters and nothing else renders
+    /// [`Escaped`](RawForm::Escaped). The two agree for every group the
+    /// fold can carry out by itself, and the group says more than the fold
+    /// needs precisely so that a consumer asking *what the author wrote*
+    /// does not have to infer it back from what the fold did.
+    pub subs: SubstitutionGroup,
+
+    /// The author's body **before** its group was applied, when
+    /// [`value`](InlineNode::Raw) is not it.
+    ///
+    /// For every form the fold can restore by itself, `value` *is* the
+    /// author's body and this is `None`. The exception is a `pass:` macro
+    /// carrying an explicit substitution list (`pass:c,q[…]`): rendering an
+    /// arbitrary group means building the body's own tree under that group,
+    /// which needs a `Parser`, and a fold takes a renderer and a
+    /// [`RenderContext`](crate::parser::RenderContext) instead — so that
+    /// body is rendered at **build** time and `value` holds the result.
+    /// Recording the input beside it is what keeps the author's own text
+    /// answerable from the tree.
+    pub source_text: Option<String>,
 }
 
 /// How a [`Raw`](InlineNode::Raw) node's value reaches the output.

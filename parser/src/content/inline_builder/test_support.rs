@@ -10,7 +10,9 @@
 use super::{build, quotes::apply_quotes, special_chars::apply_special_characters};
 use crate::{
     HasSpan, Parser, Span,
-    inlines::{CharRef, InlineNode, RawOrigin, Ref, RefVariant, SpanForm, StyleVariant},
+    inlines::{
+        CharRef, InlineNode, PassthroughOrigin, RawOrigin, Ref, RefVariant, SpanForm, StyleVariant,
+    },
     parser::HtmlInlineRenderer,
     strings::CowStr,
 };
@@ -166,10 +168,10 @@ pub(super) fn assert_raw<'src>(node: &InlineNode<'src>, value: &str) -> Span<'sr
 /// [`RawForm`](crate::inlines::RawForm) beside it. The two deliberately
 /// disagree for the bare `+…+` form, which is `Verbatim` but folds `AsIs`.
 pub(super) fn passthrough(subs: crate::content::SubstitutionGroup) -> RawOrigin {
-    RawOrigin::Passthrough {
+    RawOrigin::Passthrough(Box::new(PassthroughOrigin {
         subs,
         source_text: None,
-    }
+    }))
 }
 
 pub(super) fn assert_raw_form(
