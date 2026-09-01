@@ -2,8 +2,8 @@
 
 use super::{
     quotes::{
-        LevelContext, Piece, build_match_string, emit_range, level_may_have_replacements,
-        source_slice,
+        LevelContext, Piece, TakenNodes, build_match_string, emit_range_from,
+        level_may_have_replacements, source_slice,
     },
     special_chars::Masked,
 };
@@ -182,7 +182,7 @@ fn fused_replacement_rules<'src>(
     // each needs at least two characters, and a context is one — so `merged`
     // being non-empty means `matches` is too, and the rebuild below always
     // has work.
-    rebuild_replacements(&nodes, pieces, s, &matches, root)
+    rebuild_replacements(nodes, pieces, s, &matches, root)
 }
 
 /// Every [`character_replacements`] rule applied to the level in list order,
@@ -197,11 +197,12 @@ fn sequential_replacement_rules<'src>(
     root: Span<'src>,
     ctx: LevelContext,
 ) -> Vec<InlineNode<'src>> {
-    // Only a rule that actually replaced something invalidates the level's
-    // match string, by handing back the rebuilt level.
+    // Only a rule that actually matched something invalidates the level's
+    // match string, by rebuilding the level (which takes it by value — see
+    // [`rebuild_replacements`]) and re-deriving the string.
     for repl in character_replacements() {
-        if let Some(rebuilt) = replace_level(repl, &nodes, &level, root, ctx) {
-            nodes = rebuilt;
+        if let Some(matches) = replace_level(repl, &level, ctx) {
+            nodes = rebuild_replacements(nodes, &level.1, &level.0, &matches, root);
             level = build_match_string(&nodes, Masked::UNKNOWN);
         }
     }
@@ -302,14 +303,12 @@ enum ReplacementKind {
 /// So once true for a level, the sniff cannot go false again for the rest of
 /// that level's rule loop, and re-taking it on every rule's own turn would
 /// only ever confirm what the caller already established.
-fn replace_level<'src>(
+fn replace_level(
     repl: &CharacterReplacement,
-    nodes: &[InlineNode<'src>],
     level: &(String, Vec<Piece>),
-    root: Span<'src>,
     ctx: LevelContext,
-) -> Option<Vec<InlineNode<'src>>> {
-    let (s, pieces) = level;
+) -> Option<Vec<ReplacementMatch>> {
+    let (s, _) = level;
 
     // The rule runs over the level wrapped in its enclosing construct's own
     // boundary characters, and every offset it reports is mapped back into the
@@ -330,7 +329,7 @@ fn replace_level<'src>(
         return None;
     }
 
-    Some(rebuild_replacements(nodes, pieces, s, &matches, root))
+    Some(matches)
 }
 
 /// Finds every non-overlapping match of `repl` in the escaped match string
@@ -522,12 +521,20 @@ fn reference_find_replacement_matches(
 /// gap keeps its original nodes; each match becomes its kept literal text plus
 /// the replacement leaf.
 fn rebuild_replacements<'src>(
-    nodes: &[InlineNode<'src>],
+    nodes: Vec<InlineNode<'src>>,
     pieces: &[Piece],
     s: &str,
     matches: &[ReplacementMatch],
     root: Span<'src>,
 ) -> Vec<InlineNode<'src>> {
+    // The level is taken by value: both callers replace it with the rebuilt
+    // vector, so each node re-emitted whole is **moved** out rather than
+    // deep-cloned and then dropped with the old vector — the same owning
+    // rebuild the quotes and macro steps take, on the same disjointness
+    // argument (every gap runs from the monotone cursor forward). See
+    // [`NodeSupply`](super::quotes::NodeSupply).
+    let mut supply = TakenNodes::new(nodes);
+
     let mut out = Vec::new();
     let mut cursor = 0usize;
 
@@ -535,8 +542,8 @@ fn rebuild_replacements<'src>(
         match &m.kind {
             ReplacementKind::Unescape { backslash } => {
                 // Keep the whole match with the single backslash dropped.
-                emit_range(nodes, pieces, cursor..*backslash, &mut out);
-                emit_range(nodes, pieces, (*backslash + 1)..m.full.end, &mut out);
+                emit_range_from(&mut supply, pieces, cursor..*backslash, &mut out);
+                emit_range_from(&mut supply, pieces, (*backslash + 1)..m.full.end, &mut out);
                 cursor = m.full.end;
             }
 
@@ -546,7 +553,7 @@ fn rebuild_replacements<'src>(
                 // `consumed.end`, so a kept trailing letter
                 // (the second letter of a `w'w` apostrophe) is
                 // absorbed by the next gap.
-                emit_range(nodes, pieces, cursor..consumed.start, &mut out);
+                emit_range_from(&mut supply, pieces, cursor..consumed.start, &mut out);
 
                 out.push(InlineNode::CharRef {
                     value: CharRef::Replacement(value),
@@ -559,7 +566,7 @@ fn rebuild_replacements<'src>(
             ReplacementKind::Entity { name } => {
                 // The entity is emitted as written (`&copy;`); its `&`/`;` come
                 // from the pattern, its name from the level's escaped text.
-                emit_range(nodes, pieces, cursor..m.full.start, &mut out);
+                emit_range_from(&mut supply, pieces, cursor..m.full.start, &mut out);
 
                 let entity = format!("&{};", &s[name.clone()]);
 
@@ -574,7 +581,7 @@ fn rebuild_replacements<'src>(
     }
 
     if cursor < s.len() {
-        emit_range(nodes, pieces, cursor..s.len(), &mut out);
+        emit_range_from(&mut supply, pieces, cursor..s.len(), &mut out);
     }
 
     out

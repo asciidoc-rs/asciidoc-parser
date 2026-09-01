@@ -134,7 +134,7 @@ pub(super) fn xref_macros_level<'src>(
         return nodes;
     }
 
-    let rebuilt = rebuild_macro_level(&nodes, pieces, s, matches);
+    let rebuilt = rebuild_macro_level(nodes, pieces, s, matches);
     level.invalidate();
     rebuilt
 }

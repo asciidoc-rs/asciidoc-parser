@@ -166,7 +166,7 @@ pub(super) fn apply_stem<'src>(
         return nodes;
     }
 
-    rebuild_macro_level(&nodes, &pieces, &s, matches)
+    rebuild_macro_level(nodes, &pieces, &s, matches)
 }
 
 /// Finds every STEM macro at this level — both the bare form and one
