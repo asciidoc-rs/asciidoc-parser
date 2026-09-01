@@ -872,7 +872,7 @@ fn match_level<'src>(
         return false;
     }
 
-    let rebuilt = rebuild_level(nodes, pieces, s, &matches, root, parser);
+    let rebuilt = rebuild_level(std::mem::take(nodes), pieces, s, &matches, root, parser);
 
     *level = None;
     *nodes = rebuilt;
@@ -2040,13 +2040,18 @@ fn classify_match(
 /// original nodes; each match becomes kept prefix/literal text plus (for a
 /// wrap) a [`Styled`] span over the mapped-back body nodes.
 fn rebuild_level<'src>(
-    nodes: &[InlineNode<'src>],
+    nodes: Vec<InlineNode<'src>>,
     pieces: &[Piece],
     s: &str,
     matches: &[QuoteMatch],
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
+    // The level is taken by value: the caller replaces it with the rebuilt
+    // vector, so each node re-emitted whole is **moved** out rather than
+    // deep-cloned and then dropped with the old vector (see [`NodeSupply`]).
+    let mut supply = TakenNodes::new(nodes);
+
     // Sized for the usual shape of a rebuild: every piece re-emitted about
     // once (a gap slice or a clone), plus each match's own `Styled` node and
     // the extra slice its cut can leave on either side. An estimate, not a
@@ -2060,8 +2065,13 @@ fn rebuild_level<'src>(
             QuoteMatchKind::Unescape => {
                 // Emit the gap, then drop the leading backslash and keep the
                 // remainder as literal text.
-                emit_range(nodes, pieces, cursor..m.full.start, &mut out);
-                emit_range(nodes, pieces, (m.full.start + 1)..m.full.end, &mut out);
+                emit_range_from(&mut supply, pieces, cursor..m.full.start, &mut out);
+                emit_range_from(
+                    &mut supply,
+                    pieces,
+                    (m.full.start + 1)..m.full.end,
+                    &mut out,
+                );
             }
 
             QuoteMatchKind::Wrap {
@@ -2076,20 +2086,20 @@ fn rebuild_level<'src>(
                     // Ordinary case: the gap runs all the way to the construct,
                     // absorbing any boundary prefix into one contiguous run of
                     // kept text.
-                    None => emit_range(nodes, pieces, cursor..construct.start, &mut out),
+                    None => emit_range_from(&mut supply, pieces, cursor..construct.start, &mut out),
 
                     // Escaped-with-attributes: the gap stops at the backslash,
                     // then the `[a]` literal (skipping the backslash) is kept.
                     Some(literal) => {
-                        emit_range(nodes, pieces, cursor..m.full.start, &mut out);
-                        emit_range(nodes, pieces, literal.clone(), &mut out);
+                        emit_range_from(&mut supply, pieces, cursor..m.full.start, &mut out);
+                        emit_range_from(&mut supply, pieces, literal.clone(), &mut out);
                     }
                 }
 
                 // A span's body is one sliced text run in the overwhelmingly
                 // common case.
                 let mut children = Vec::with_capacity(1);
-                emit_range(nodes, pieces, body.clone(), &mut children);
+                emit_range_from(&mut supply, pieces, body.clone(), &mut children);
 
                 let location = source_slice(pieces, construct.clone(), root);
 
@@ -2117,7 +2127,7 @@ fn rebuild_level<'src>(
 
     // Emit the trailing gap.
     if cursor < s.len() {
-        emit_range(nodes, pieces, cursor..s.len(), &mut out);
+        emit_range_from(&mut supply, pieces, cursor..s.len(), &mut out);
     }
 
     out
@@ -2235,6 +2245,67 @@ pub(super) fn emit_range<'src>(
     range: std::ops::Range<usize>,
     out: &mut Vec<InlineNode<'src>>,
 ) {
+    emit_range_from(&mut &*nodes, pieces, range, out);
+}
+
+/// A rebuild's supply of the level's existing nodes — how [`emit_range_from`]
+/// reads a node it re-emits.
+///
+/// A borrowed slice is the ordinary supply: each whole-node emission clones,
+/// and the caller keeps its level. [`TakenNodes`] is the owning one: a
+/// rebuild that *replaces* the level it reads from — as every rule-loop
+/// rebuild does, dropping the old vector the moment the new one exists — can
+/// hand its nodes over and have each whole-node emission **move** the node
+/// out instead of deep-cloning a subtree it is about to drop anyway.
+pub(super) trait NodeSupply<'src> {
+    /// A shared view of the node at `index`, for the reads that never
+    /// re-emit it whole (slicing a text run, splitting an entity).
+    fn peek(&self, index: usize) -> Option<&InlineNode<'src>>;
+
+    /// The node at `index`, to re-emit whole. Sound for an owning supply
+    /// exactly because the ranges one rebuild emits are disjoint, so a piece
+    /// wholly inside one of them can be wholly inside no other — each node
+    /// is asked for whole at most once.
+    fn whole(&mut self, index: usize) -> Option<InlineNode<'src>>;
+}
+
+impl<'src> NodeSupply<'src> for &[InlineNode<'src>] {
+    fn peek(&self, index: usize) -> Option<&InlineNode<'src>> {
+        self.get(index)
+    }
+
+    fn whole(&mut self, index: usize) -> Option<InlineNode<'src>> {
+        self.get(index).cloned()
+    }
+}
+
+/// The owning [`NodeSupply`]: a level's nodes, each moved out at most once.
+pub(super) struct TakenNodes<'src>(Vec<Option<InlineNode<'src>>>);
+
+impl<'src> TakenNodes<'src> {
+    pub(super) fn new(nodes: Vec<InlineNode<'src>>) -> Self {
+        Self(nodes.into_iter().map(Some).collect())
+    }
+}
+
+impl<'src> NodeSupply<'src> for TakenNodes<'src> {
+    fn peek(&self, index: usize) -> Option<&InlineNode<'src>> {
+        self.0.get(index).and_then(Option::as_ref)
+    }
+
+    fn whole(&mut self, index: usize) -> Option<InlineNode<'src>> {
+        self.0.get_mut(index).and_then(Option::take)
+    }
+}
+
+/// [`emit_range`] over any [`NodeSupply`] — the shared implementation behind
+/// the borrowed wrapper above and the owning rebuilds.
+pub(super) fn emit_range_from<'src, S: NodeSupply<'src>>(
+    supply: &mut S,
+    pieces: &[Piece],
+    range: std::ops::Range<usize>,
+    out: &mut Vec<InlineNode<'src>>,
+) {
     // An empty range (e.g. a macro whose node consumes its whole match, so the
     // kept-suffix range is zero-width) emits nothing — never a spurious empty
     // `Text` node sliced from a piece the range merely touches.
@@ -2251,17 +2322,19 @@ pub(super) fn emit_range<'src>(
             continue;
         }
 
-        let Some(node) = nodes.get(piece.node_index) else {
-            continue;
-        };
-
         if piece.atomic {
             // An atomic piece falling wholly inside the range is emitted as
             // its own node, which is the overwhelmingly common case.
             if p_start >= range.start && p_end <= range.end {
-                out.push(node.clone());
+                if let Some(node) = supply.whole(piece.node_index) {
+                    out.push(node);
+                }
                 continue;
             }
+
+            let Some(node) = supply.peek(piece.node_index) else {
+                continue;
+            };
 
             // A boundary that *splits* one is answerable for exactly the
             // leaves [`charref_entity`] names — the three
@@ -2310,7 +2383,7 @@ pub(super) fn emit_range<'src>(
         let lo = range.start.max(p_start) - p_start;
         let hi = range.end.min(p_end) - p_start;
 
-        if let InlineNode::Text { value, location } = node {
+        if let Some(InlineNode::Text { value, location }) = supply.peek(piece.node_index) {
             if piece.synthesized {
                 // No `'src` slice exists for these bytes: slice the node's
                 // *value* instead, keeping the whole original `location` as
@@ -4121,6 +4194,42 @@ mod tests {
         assert_eq!(s_to_src(&pieces, 14, Bias::Start), 110);
         assert_eq!(s_to_src(&pieces, 14, Bias::End), 110);
         assert_eq!(s_to_src(&pieces, 16, Bias::Start), 112);
+    }
+
+    #[test]
+    fn an_owning_supply_moves_each_node_out_at_most_once() {
+        // `TakenNodes` hands each node out whole exactly once — the contract
+        // an owning rebuild relies on (its emitted ranges are disjoint, so a
+        // second whole-emission of the same piece cannot happen; if it ever
+        // did, the second ask comes back empty rather than duplicating a
+        // node). `peek` keeps answering for a node not yet moved, and stops
+        // for one that was.
+        use super::{
+            super::{special_chars::apply_special_characters, test_support::seed},
+            Masked, NodeSupply, TakenNodes, build_match_string, emit_range_from,
+        };
+
+        // One `CharRef::Special` leaf: an atomic piece, so re-emitting its
+        // whole range goes through `whole` rather than the slicing reads.
+        let source = Span::new("&");
+        let nodes = apply_special_characters(seed(source));
+
+        let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
+
+        let mut supply = TakenNodes::new(nodes);
+
+        assert!(supply.peek(0).is_some());
+        assert!(supply.whole(0).is_some());
+        assert!(supply.whole(0).is_none());
+        assert!(supply.peek(0).is_none());
+        assert!(supply.whole(1).is_none());
+
+        // An emission over a taken supply emits nothing rather than a
+        // duplicate — the guard the whole-node path keeps for the shape the
+        // disjointness argument rules out.
+        let mut out = Vec::new();
+        emit_range_from(&mut supply, &pieces, 0..s.len(), &mut out);
+        assert!(out.is_empty());
     }
 
     #[test]
