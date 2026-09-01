@@ -1,7 +1,9 @@
 //! The post-replacements substitution step (hard line breaks).
 
 use super::{
-    quotes::{Piece, build_match_string, emit_range, single_text_value, source_slice},
+    quotes::{
+        LevelStrings, Piece, build_match_string, emit_range, single_text_value, source_slice,
+    },
     special_chars::Masked,
 };
 use crate::{
@@ -21,8 +23,9 @@ pub(super) fn apply_post_replacements<'src>(
     root: Span<'src>,
     parser: &Parser,
     attrlist: Option<&Attrlist<'src>>,
+    shared: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
-    apply_level(nodes, root, parser, attrlist, true)
+    apply_level(nodes, root, parser, attrlist, true, shared)
 }
 
 /// A break needs a `+`, and — off the root level, where an end-of-level
@@ -45,6 +48,7 @@ fn apply_level<'src>(
     parser: &Parser,
     attrlist: Option<&Attrlist<'src>>,
     is_root: bool,
+    shared: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     // Descend into spans/refs first, recognizing a break inside a nested
     // span before this level's own pass runs. A nested level is never the
@@ -64,12 +68,14 @@ fn apply_level<'src>(
             match node {
                 InlineNode::Styled(styled) => {
                     let children = std::mem::take(&mut styled.children);
-                    styled.children = apply_level(children, root, parser, attrlist, false);
+                    styled.children =
+                        apply_level(children, root, parser, attrlist, false, &mut None);
                 }
 
                 InlineNode::Ref(reference) => {
                     let children = std::mem::take(&mut reference.children);
-                    reference.children = apply_level(children, root, parser, attrlist, false);
+                    reference.children =
+                        apply_level(children, root, parser, attrlist, false, &mut None);
                 }
 
                 _ => {}
@@ -80,6 +86,8 @@ fn apply_level<'src>(
     if parser.is_attribute_set("hardbreaks-option")
         || attrlist.is_some_and(|attrlist| attrlist.has_option("hardbreaks"))
     {
+        // The hardbreak rebuild replaces the level.
+        *shared = None;
         return apply_hardbreaks(nodes, root);
     }
 
@@ -90,13 +98,21 @@ fn apply_level<'src>(
         return nodes;
     }
 
-    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
+    // The root call reuses whatever an earlier step family left in the
+    // shared slot (built under the same `Masked::UNKNOWN`; the child descent
+    // above cannot change it, since a span contributes only its placeholder
+    // and fixed boundary characters there); the no-match paths below hand it
+    // back, and a rebuild leaves it empty.
+    let (s, pieces) = shared
+        .take()
+        .unwrap_or_else(|| build_match_string(&nodes, Masked::UNKNOWN));
 
     // A break needs a `+`, and — off the root level, where an end-of-level
     // match is discarded below — a `\n` for the pattern's `$` to anchor
     // against. At the root, the guard is on a `+` alone, since the whole
     // content's own haystack is checked there.
     if !level_prefilter(&s, is_root) {
+        *shared = Some((s, pieces));
         return nodes;
     }
 
@@ -131,6 +147,7 @@ fn apply_level<'src>(
         .collect();
 
     if breaks.is_empty() {
+        *shared = Some((s, pieces));
         return nodes;
     }
 
@@ -417,7 +434,8 @@ mod tests {
             location: loc,
         });
 
-        let out = apply_post_replacements(vec![reference], loc, &Parser::default(), None);
+        let out =
+            apply_post_replacements(vec![reference], loc, &Parser::default(), None, &mut None);
 
         match &out[0] {
             InlineNode::Ref(reference) => {

@@ -636,10 +636,10 @@ pub(super) fn apply_quotes<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
+    level: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     let mut nodes = nodes;
     let mut cached_mask: Option<(usize, usize, u8)> = None;
-    let mut level: Option<LevelStrings> = None;
 
     for sub in quote_subs() {
         if let Some(value) = single_text_value(&nodes) {
@@ -667,23 +667,19 @@ pub(super) fn apply_quotes<'src>(
             }
         }
 
-        apply_quote_sub(
-            sub,
-            &mut nodes,
-            root,
-            parser,
-            LevelContext::ROOT,
-            &mut level,
-        );
+        apply_quote_sub(sub, &mut nodes, root, parser, LevelContext::ROOT, level);
     }
 
     nodes
 }
 
 /// A level's reconstructed match string and its [`Piece`] map — one
-/// [`build_match_string`] result, held so a rule loop can reuse it across
-/// rules while nothing has changed the level it describes.
-type LevelStrings = (String, Vec<Piece>);
+/// [`build_match_string`] result (under [`Masked::UNKNOWN`]), held so a rule
+/// loop — or, for the **root** level, the whole run of step families that
+/// build under that same mask (see `build_for_group`'s shared slot) — can
+/// reuse it while nothing has changed the level it describes. Whoever
+/// changes the level it describes empties (or refreshes) the slot.
+pub(super) type LevelStrings = (String, Vec<Piece>);
 
 /// The bit [`marker_mask`] records the presence of `marker` under, or `0` for
 /// a character that is not one of the eight [`sub_markers`] characters (which
@@ -4194,6 +4190,85 @@ mod tests {
         assert_eq!(s_to_src(&pieces, 14, Bias::Start), 110);
         assert_eq!(s_to_src(&pieces, 14, Bias::End), 110);
         assert_eq!(s_to_src(&pieces, 16, Bias::Start), 112);
+    }
+
+    #[test]
+    fn a_spans_contribution_under_an_unknown_mask_ignores_its_children() {
+        // The invariant the shared root-level slot rests on (see
+        // `build_for_group`): under [`Masked::UNKNOWN`] — the mask every
+        // family that takes the slot builds with — a [`Styled`] span of
+        // *every* variant contributes only its placeholder and, for the two
+        // smart-quote variants, the fixed `&`/`;` its rendering always
+        // presents. The child-reading probe
+        // (`probe_styled_sibling_boundaries` / the transparent fallback) sits
+        // behind the identity-mask guard and is unreachable here, so a
+        // descent that rewrites a span's children cannot change the parent
+        // level's match string — which is what lets a family reuse the slot
+        // across its own child descent, and lets one family hand it to the
+        // next.
+        use super::{Masked, build_match_string};
+        use crate::inlines::Styled;
+
+        let variants = [
+            StyleVariant::Strong,
+            StyleVariant::Emphasis,
+            StyleVariant::Code,
+            StyleVariant::Mark,
+            StyleVariant::Superscript,
+            StyleVariant::Subscript,
+            StyleVariant::DoubleQuote,
+            StyleVariant::SingleQuote,
+            StyleVariant::Unquoted,
+        ];
+
+        let source = Span::new("abcd");
+
+        let with_children = |variant, children: Vec<InlineNode<'static>>| {
+            vec![InlineNode::Styled(Styled {
+                variant,
+                form: SpanForm::Constrained,
+                id: None,
+                roles: vec![],
+                attrs: crate::attributes::Attrlist::empty(source.slice(0..0)),
+                children,
+                passthrough: None,
+                location: source,
+            })]
+        };
+
+        for variant in variants {
+            // Two child lists whose outer characters differ in every way the
+            // probe could read them: different letters, and a child list
+            // that is empty outright.
+            let a = with_children(
+                variant,
+                vec![InlineNode::Text {
+                    value: CowStr::from("xy"),
+                    location: source,
+                }],
+            );
+            let b = with_children(
+                variant,
+                vec![InlineNode::Text {
+                    value: CowStr::from("qr"),
+                    location: source,
+                }],
+            );
+            let c = with_children(variant, vec![]);
+
+            let s_a = build_match_string(&a, Masked::UNKNOWN).0;
+            let s_b = build_match_string(&b, Masked::UNKNOWN).0;
+            let s_c = build_match_string(&c, Masked::UNKNOWN).0;
+
+            assert_eq!(
+                s_a, s_b,
+                "{variant:?}'s contribution read its children's bytes"
+            );
+            assert_eq!(
+                s_a, s_c,
+                "{variant:?}'s contribution read its children's shape"
+            );
+        }
     }
 
     #[test]

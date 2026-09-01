@@ -3,7 +3,9 @@
 use super::{
     fold_deferring_xrefs,
     macros::{emit_range_unescaping_brackets, image::range_has_no_opaque_piece},
-    quotes::{Piece, build_match_string, single_text_value, source_slice, text_slice},
+    quotes::{
+        LevelStrings, Piece, build_match_string, single_text_value, source_slice, text_slice,
+    },
     special_chars::Masked,
 };
 use crate::{
@@ -54,6 +56,7 @@ pub(super) fn apply_footnotes<'src>(
     nodes: Vec<InlineNode<'src>>,
     root: Span<'src>,
     parser: &Parser,
+    shared: &mut Option<LevelStrings>,
 ) -> Vec<InlineNode<'src>> {
     // A subtree with no `"tnote"` substring anywhere — the overwhelmingly
     // common case — has nothing for this pass to do, so return it completely
@@ -69,11 +72,17 @@ pub(super) fn apply_footnotes<'src>(
     // the rebuild entirely when there is nothing to find keeps every other
     // family's nodes byte- *and* representation-identical to what
     // `apply_macros` produced.
-    if !subtree_might_have_footnote(&nodes) {
+    if !subtree_might_have_footnote(&nodes, Some(shared)) {
         return nodes;
     }
 
-    let (s, pieces) = build_match_string(&nodes, Masked::UNKNOWN);
+    // The root call reuses whatever an earlier step family left in the
+    // shared slot (built under the same `Masked::UNKNOWN`); the rebuild
+    // below replaces the level, so the slot is emptied by the `take`. A
+    // recursive call reaches here with an empty local slot and builds.
+    let (s, pieces) = shared
+        .take()
+        .unwrap_or_else(|| build_match_string(&nodes, Masked::UNKNOWN));
 
     // Cheap pre-filter mirroring the string step's `found_macroish &&
     // text.contains("tnote")`: both `footnote:` and the deprecated
@@ -99,7 +108,10 @@ pub(super) fn apply_footnotes<'src>(
 /// [`Text`](InlineNode::Text) pieces the way a per-node substring check
 /// could) but allocates no [`InlineNode`], letting a subtree with nothing to
 /// find come back from `apply_footnotes` completely unchanged.
-fn subtree_might_have_footnote(nodes: &[InlineNode<'_>]) -> bool {
+fn subtree_might_have_footnote(
+    nodes: &[InlineNode<'_>],
+    level: Option<&mut Option<LevelStrings>>,
+) -> bool {
     // Cheap pre-filter, taken *before* the match string is materialized: a
     // lone `Text` node has no `Styled`/`Ref`/`IndexTerm` child to recurse
     // into either, so this level's own value is the whole answer for it —
@@ -109,16 +121,32 @@ fn subtree_might_have_footnote(nodes: &[InlineNode<'_>]) -> bool {
         return value.contains("tnote");
     }
 
-    let (s, _) = build_match_string(nodes, Masked::UNKNOWN);
+    // The root call reads the level strings an earlier step family left in
+    // the shared slot rather than rebuilding them — and fills an empty slot
+    // with the build it makes, which [`apply_footnotes`] then takes rather
+    // than building the same strings again. Child levels build their own,
+    // read-only.
+    let built;
+    let s = match level {
+        Some(slot) => {
+            &slot
+                .get_or_insert_with(|| build_match_string(nodes, Masked::UNKNOWN))
+                .0
+        }
+        None => {
+            built = build_match_string(nodes, Masked::UNKNOWN);
+            &built.0
+        }
+    };
 
     if s.contains("tnote") {
         return true;
     }
 
     nodes.iter().any(|node| match node {
-        InlineNode::Styled(styled) => subtree_might_have_footnote(&styled.children),
-        InlineNode::Ref(reference) => subtree_might_have_footnote(&reference.children),
-        InlineNode::IndexTerm(index_term) => subtree_might_have_footnote(&index_term.children),
+        InlineNode::Styled(styled) => subtree_might_have_footnote(&styled.children, None),
+        InlineNode::Ref(reference) => subtree_might_have_footnote(&reference.children, None),
+        InlineNode::IndexTerm(term) => subtree_might_have_footnote(&term.children, None),
         _ => false,
     })
 }
@@ -241,12 +269,13 @@ fn emit_range_recursing_footnotes<'src>(
         if piece.atomic {
             match node.clone() {
                 InlineNode::Styled(mut styled) => {
-                    styled.children = apply_footnotes(styled.children, root, parser);
+                    styled.children = apply_footnotes(styled.children, root, parser, &mut None);
                     out.push(InlineNode::Styled(styled));
                 }
 
                 InlineNode::Ref(mut reference) => {
-                    reference.children = apply_footnotes(reference.children, root, parser);
+                    reference.children =
+                        apply_footnotes(reference.children, root, parser, &mut None);
                     out.push(InlineNode::Ref(reference));
                 }
 
@@ -261,7 +290,8 @@ fn emit_range_recursing_footnotes<'src>(
                 // so a `footnote:[…]` written there never reaches this
                 // footnote pass either.
                 InlineNode::IndexTerm(mut index_term) => {
-                    index_term.children = apply_footnotes(index_term.children, root, parser);
+                    index_term.children =
+                        apply_footnotes(index_term.children, root, parser, &mut None);
                     out.push(InlineNode::IndexTerm(index_term));
                 }
 

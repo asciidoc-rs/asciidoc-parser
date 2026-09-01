@@ -557,6 +557,16 @@ pub(crate) fn build_for_group<'src>(
     // exactly as before.
     let mut sniff = trigger_scan::LoneTextSniff::default();
 
+    // The root level's reconstructed match string, shared across the step
+    // families that build it the same way (under `Masked::UNKNOWN`) — the
+    // quotes step, character replacements, footnotes, and post-replacements
+    // each reuse whatever the previous family left valid instead of
+    // rebuilding it for an unchanged level. Each family that takes the slot
+    // maintains it honestly (a rebuild empties or refreshes it); a step that
+    // does not take it clears it in its own arm below. `LevelStrings`
+    // documents the contract.
+    let mut root_level: Option<quotes::LevelStrings> = None;
+
     // Passthroughs are extracted before every other step (mirroring
     // `Passthroughs::extract_from`'s own gate), so their content is
     // never touched by specialcharacters, quotes, replacements, or macros.
@@ -625,10 +635,11 @@ pub(crate) fn build_for_group<'src>(
                     flatten_prior_markup(nodes, &masked, &*parser.renderer, parser)
                 };
 
+                root_level = None;
                 apply_special_characters(nodes)
             }
 
-            SubstitutionStep::Quotes => apply_quotes(nodes, location, parser),
+            SubstitutionStep::Quotes => apply_quotes(nodes, location, parser, &mut root_level),
 
             // In the *normal* effective order (specialcharacters → quotes →
             // attributes → replacements → macros), by this
@@ -652,11 +663,12 @@ pub(crate) fn build_for_group<'src>(
                     SplicedSpecials::Verbatim
                 };
 
+                root_level = None;
                 apply_attribute_references(nodes, location, parser, specials)
             }
 
             SubstitutionStep::CharacterReplacements => {
-                apply_character_replacements(nodes, location)
+                apply_character_replacements(nodes, location, &mut root_level)
             }
 
             SubstitutionStep::Macros => {
@@ -685,14 +697,22 @@ pub(crate) fn build_for_group<'src>(
                 // comment for why this cannot be folded into `apply_macros`
                 // as an ordinary level pass.
                 let nodes = apply_macros(nodes, location, parser, Masked::known(&masked), specials);
-                apply_footnotes(nodes, location, parser)
+
+                // The macros step builds its strings under `Masked::known`
+                // and keeps its own cache (`LevelSniff`), so the shared slot
+                // is stale by construction here.
+                root_level = None;
+                apply_footnotes(nodes, location, parser, &mut root_level)
             }
 
             SubstitutionStep::PostReplacement => {
-                apply_post_replacements(nodes, location, parser, attrlist)
+                apply_post_replacements(nodes, location, parser, attrlist, &mut root_level)
             }
 
-            SubstitutionStep::Callouts => apply_callouts(nodes, location, parser, attrlist),
+            SubstitutionStep::Callouts => {
+                root_level = None;
+                apply_callouts(nodes, location, parser, attrlist)
+            }
         };
     }
 
