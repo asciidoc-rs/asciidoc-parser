@@ -279,6 +279,67 @@ fn restored_range<'a>(
 /// list with no comma to split on yields one positional value equal to the
 /// whole text, which is every unattributed markup shape) and is a third
 /// documented divergence otherwise.
+/// The two shapes an [`INLINE_XREF`] match decomposes into, in match-string
+/// byte offsets: the `&lt;&lt;…&gt;&gt;` shorthand's inner text (the pattern's
+/// group 2), or the `xref:` macro's target and bracketed text (groups 3
+/// and 4). The escape backslash (group 1) is not carried here — the caller
+/// reads it off the span's first byte, as it always has.
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+enum XrefGroups {
+    /// A `&lt;&lt;refid[, reftext]&gt;&gt;` shorthand.
+    Shorthand {
+        /// The text between the escaped angle brackets.
+        inner: std::ops::Range<usize>,
+    },
+
+    /// An `xref:target[text]` macro.
+    Macro {
+        /// The target between `xref:` and the opening `[`.
+        target: std::ops::Range<usize>,
+
+        /// The bracketed display text (possibly empty).
+        text: std::ops::Range<usize>,
+    },
+}
+
+/// The escaped shorthand delimiters' shared length (`&lt;&lt;` and
+/// `&gt;&gt;`).
+const XREF_SHORTHAND_DELIM: usize = "&lt;&lt;".len();
+
+/// Decomposes one [`INLINE_XREF`] match — `m`, the engine-reported span
+/// starting at `start` — into its groups, replacing the capture-engine
+/// resolution ([`find_xref_matches`] searches bounds-only): every group the
+/// pattern captures is fully determined by the span. After the optional
+/// escape backslash, the first byte tells the two alternatives apart (`&` for
+/// the shorthand, `x` for the macro). The shorthand's inner text is the span
+/// minus its fixed-width delimiters. The macro's target runs from `xref:` to
+/// the span's first `[` — the target class excludes `[`, so that `[` is the
+/// pattern's own — and the text runs from there to the `]` the span ends
+/// with, wherever the lazy body stopped.
+///
+/// The `unwrap_or` fallback below cannot be taken on an engine-produced span
+/// (the macro alternative always carries its `[`); it exists only to keep
+/// this reading total. `xref_groups_match_the_capture_engine` pins the whole
+/// derivation against the capture engine across the differential corpus.
+fn xref_groups(m: &str, start: usize) -> XrefGroups {
+    let escape = usize::from(m.as_bytes().first() == Some(&b'\\'));
+
+    if m.as_bytes().get(escape) == Some(&b'&') {
+        return XrefGroups::Shorthand {
+            inner: (start + escape + XREF_SHORTHAND_DELIM)
+                ..(start + m.len() - XREF_SHORTHAND_DELIM),
+        };
+    }
+
+    let target_start = escape + "xref:".len();
+    let bracket = m.find('[').unwrap_or(target_start);
+
+    XrefGroups::Macro {
+        target: (start + target_start)..(start + bracket),
+        text: (start + bracket + 1)..(start + m.len() - 1),
+    }
+}
+
 fn find_xref_matches<'src>(
     nodes: &[InlineNode<'src>],
     s: &str,
@@ -289,24 +350,19 @@ fn find_xref_matches<'src>(
 ) -> Vec<MacroMatch<'src>> {
     let mut matches = Vec::new();
 
-    for caps in INLINE_XREF.captures_iter(s) {
-        // `unwrap` on group 0 is safe: a capture always has an overall match.
-        #[allow(clippy::unwrap_used)]
-        let whole = caps.get(0).unwrap();
+    for whole in INLINE_XREF.find_iter(s) {
+        let full = whole.range();
+        let groups = xref_groups(whole.as_str(), full.start);
 
-        let full = whole.start()..whole.end();
-
-        // The `xref:` macro (group 3) and the `<<…>>` shorthand (group 2) reach
-        // the same two computed values by different spellings. Whichever it is,
-        // the gate covers exactly the bytes the node *reads* — its target, and
-        // an attribute-list text's parsed value — and not the ones it carries
+        // The `xref:` macro and the `<<…>>` shorthand reach the same two
+        // computed values by different spellings. Whichever it is, the gate
+        // covers exactly the bytes the node *reads* — its target, and an
+        // attribute-list text's parsed value — and not the ones it carries
         // structurally (a reference text) or consumes without reading (the
-        // shorthand's own `&lt;&lt;` / `&gt;&gt;` delimiters, always `CharRef`s
-        // by macro time).
-        let shorthand_inner = caps.get(2).map(|inner| inner.start()..inner.end());
-
-        let recoverable = match &shorthand_inner {
-            Some(inner) => {
+        // shorthand's own `&lt;&lt;` / `&gt;&gt;` delimiters, always
+        // `CharRef`s by macro time).
+        let recoverable = match &groups {
+            XrefGroups::Shorthand { inner } => {
                 // The shorthand's id is its inner up to the first `,` — the
                 // very split `build_xref_shorthand_node` makes. A comma the
                 // *markup* of an opaque piece contributes
@@ -318,14 +374,16 @@ fn find_xref_matches<'src>(
                     && shorthand_id_has_no_rendered_markup(s, &id_range, nodes, pieces, parser)
             }
 
-            None => {
-                // The macro form's target (group 3) always participates in this
+            XrefGroups::Macro { target, text } => {
+                // The macro form's target always participates in this
                 // branch. Its `xref:` prefix and brackets need no gate of their
                 // own: those bytes are literal, and no atomic piece — a
                 // placeholder, or an entity delimited by `&` and `;` — can
                 // supply them.
-                #[allow(clippy::unwrap_used)]
-                let target = caps.get(3).unwrap();
+                //
+                // (The empty-slice fallback cannot be taken: the range is the
+                // engine-reported span's, so it always slices.)
+                let text_str = s.get(text.clone()).unwrap_or_default();
 
                 // A text carrying an `=` is read as an attribute list. Its
                 // *positional* value becomes the node's children, so an opaque
@@ -337,19 +395,14 @@ fn find_xref_matches<'src>(
                 // tokened parse the builder performs, on the same bytes: this
                 // gate already re-derives the shorthand's own comma split for
                 // the same reason.
-                let attrlist_text = caps.get(4).filter(|text| text.as_str().contains('='));
+                let attrlist_text = text_str.contains('=');
 
-                range_is_substitution_restorable(nodes, pieces, &(target.start()..target.end()))
-                    && attrlist_text.is_none_or(|text| {
-                        range_has_no_opaque_piece(nodes, pieces, &(text.start()..text.end()))
-                            || attrlist_text_carries_its_opaque_pieces(
-                                text.as_str(),
-                                &(text.start()..text.end()),
-                                nodes,
-                                pieces,
-                                parser,
-                            )
-                    })
+                range_is_substitution_restorable(nodes, pieces, target)
+                    && (!attrlist_text
+                        || range_has_no_opaque_piece(nodes, pieces, text)
+                        || attrlist_text_carries_its_opaque_pieces(
+                            text_str, text, nodes, pieces, parser,
+                        ))
             }
         };
 
@@ -382,11 +435,13 @@ fn find_xref_matches<'src>(
         // Both builders claim every shape they are handed, so an admitted match
         // always yields a node: what a cross-reference *defers* is decided by
         // the gate above, not by the builders.
-        let node = match &shorthand_inner {
-            Some(inner) => {
-                build_xref_shorthand_node(inner.clone(), &full, nodes, s, pieces, root, parser)
+        let node = match groups {
+            XrefGroups::Shorthand { inner } => {
+                build_xref_shorthand_node(inner, &full, nodes, s, pieces, root, parser)
             }
-            None => build_xref_node(&caps, &full, nodes, pieces, root, parser, specials),
+            XrefGroups::Macro { target, text } => build_xref_node(
+                target, text, &full, nodes, s, pieces, root, parser, specials,
+            ),
         };
 
         matches.push(MacroMatch {
@@ -535,21 +590,23 @@ fn shorthand_id_range(s: &str, inner: &std::ops::Range<usize>) -> std::ops::Rang
 /// effect — notably it does **not** register the reference for resolution
 /// itself; that happens once per parse, at fold time, via
 /// `xref_segment_from_node`.
+#[allow(clippy::too_many_arguments)]
 fn build_xref_node<'src>(
-    caps: &regex::Captures<'_>,
+    target: std::ops::Range<usize>,
+    text: std::ops::Range<usize>,
     full: &std::ops::Range<usize>,
     nodes: &[InlineNode<'src>],
+    s: &str,
     pieces: &[Piece],
     root: Span<'src>,
     parser: &Parser,
     specials: ComputedSpecials,
 ) -> InlineNode<'src> {
-    // Group 3 is the `xref:` macro target. It always participates here: the
-    // pattern's two branches are mutually exclusive, and the caller routes a
-    // match whose group 2 (the shorthand's inner) participated to
-    // [`build_xref_shorthand_node`] instead.
-    #[allow(clippy::unwrap_used)]
-    let target_match = caps.get(3).unwrap();
+    // `target` and `text` are the `xref:` macro's own groups, derived from
+    // the span by [`xref_groups`]: the caller routes a shorthand match to
+    // [`build_xref_shorthand_node`] instead. (The empty-slice fallbacks
+    // cannot be taken — both ranges slice the engine-reported span.)
+    let target_str = s.get(target.clone()).unwrap_or_default();
 
     // The target's fully-resolved bytes. A leaf the match
     // string stands in as a placeholder — an expanded attribute value's `&`,
@@ -558,19 +615,13 @@ fn build_xref_node<'src>(
     // finishes the value into bytes already fully resolved; a
     // *masked* construct, whose bytes are not yet resolved, keeps the
     // match deferred instead.
-    let restored_target = restored_range(
-        target_match.as_str(),
-        target_match.range(),
-        nodes,
-        pieces,
-        parser,
-    );
+    let restored_target = restored_range(target_str, target, nodes, pieces, parser);
 
     let (target, derived) = xref_target_and_derived(restored_target.as_ref(), true, parser);
 
-    let raw_text = caps.get(4).map_or("", |m| m.as_str());
+    let raw_text = s.get(text.clone()).unwrap_or_default();
     let (children, window, roles, xrefstyle) =
-        xref_macro_text(raw_text, caps.get(4), nodes, pieces, root, parser, specials);
+        xref_macro_text(raw_text, text, nodes, pieces, root, parser, specials);
 
     let location = source_slice(pieces, full.clone(), root);
 
@@ -615,7 +666,7 @@ fn build_xref_node<'src>(
 /// [`Ref::xrefstyle`]'s field docs).
 fn xref_macro_text<'src>(
     raw_text: &str,
-    text_span: Option<regex::Match<'_>>,
+    text_range: std::ops::Range<usize>,
     nodes: &[InlineNode<'src>],
     pieces: &[Piece],
     root: Span<'src>,
@@ -637,19 +688,8 @@ fn xref_macro_text<'src>(
         // markup (see [`tokened_text`]). A text enclosing none comes
         // back byte-identical.
         //
-        // `raw_text` is non-empty here (the `is_empty` guard above), and the
-        // caller derives `raw_text` from `caps.get(4).map_or("", ...)` while
-        // passing `caps.get(4)` as `text_span`, so a non-empty `raw_text`
-        // means `text_span` is `Some`.
-        #[allow(clippy::unwrap_used)]
-        let text_range = text_span.unwrap();
-
-        let (normalized, carried) = tokened_text(
-            &raw_text.replace('\n', " "),
-            &(text_range.start()..text_range.end()),
-            nodes,
-            pieces,
-        );
+        let (normalized, carried) =
+            tokened_text(&raw_text.replace('\n', " "), &text_range, nodes, pieces);
 
         let attrlist = Attrlist::parse_tokened(Span::new(&normalized), parser)
             .item
@@ -712,7 +752,7 @@ fn xref_macro_text<'src>(
                     // directly); it falls back to the bracketed text's own
                     // span, the same synthesized-value location policy
                     // `apply_attribute_references` already establishes.
-                    let location = source_slice(pieces, text_range.start()..text_range.end(), root);
+                    let location = source_slice(pieces, text_range.clone(), root);
 
                     // Each occurrence this value still holds becomes the node
                     // it stands for, so an enclosed span is carried as the
@@ -736,7 +776,7 @@ fn xref_macro_text<'src>(
     }
 
     (
-        plain_xref_text(raw_text, text_span, nodes, pieces, root),
+        plain_xref_text(raw_text, text_range, nodes, pieces, root),
         None,
         vec![],
         None,
@@ -748,20 +788,11 @@ fn xref_macro_text<'src>(
 /// `raw_text.replace("\\]", "]")` unescape.
 fn plain_xref_text<'src>(
     raw_text: &str,
-    text_span: Option<regex::Match<'_>>,
+    text_range: std::ops::Range<usize>,
     nodes: &[InlineNode<'src>],
     pieces: &[Piece],
     root: Span<'src>,
 ) -> Vec<InlineNode<'src>> {
-    // The sole caller, `xref_macro_text`, only reaches this function once its
-    // own `raw_text.is_empty()` guard has passed, and it derives `raw_text`
-    // from `caps.get(4).map_or("", ...)` while passing `caps.get(4)` on as
-    // `text_span` — so `text_span` is `Some` whenever `raw_text` is non-empty.
-    #[allow(clippy::unwrap_used)]
-    let span = text_span.unwrap();
-
-    let text_range = span.start()..span.end();
-
     macro_text_children(raw_text, text_range, true, nodes, pieces, root)
 }
 
@@ -932,6 +963,65 @@ mod tests {
         inlines::{CharRef, InlineNode, Ref, RefVariant, SpanForm, StyleVariant},
         parser::{HtmlInlineRenderer, XrefStyle},
     };
+
+    #[test]
+    fn xref_groups_match_the_capture_engine() {
+        // `xref_groups` derives the pattern's groups from each match span;
+        // this pins it against the capture engine's own reading, group for
+        // group, across a corpus covering both alternatives, escapes, empty
+        // and comma-carrying shorthand inners, empty and attribute-carrying
+        // macro texts, escaped and nested brackets, multibyte targets, and
+        // matches at every offset a multi-match haystack produces.
+        use super::{INLINE_XREF, XrefGroups, xref_groups};
+
+        let haystacks = [
+            "&lt;&lt;a&gt;&gt;",
+            "&lt;&lt;a,Reference Text&gt;&gt;",
+            "&lt;&lt;&gt;&gt;",
+            r"\&lt;&lt;a&gt;&gt;",
+            "&lt;&lt;a&gt;b&gt;&gt; tail",
+            "xref:t[]",
+            "xref:t[Text]",
+            "xref:t[window=_blank,role=x]",
+            r"\xref:t[x]",
+            r"xref:t[a\]b]",
+            "xref:t[with [bracket]",
+            "xref:\u{e9}l\u{e8}ve[\u{fc}ber]",
+            "pre &lt;&lt;a&gt;&gt; mid xref:b[c] post \\xref:d[e]",
+            "xref:a[]xref:b[B]&lt;&lt;c,d&gt;&gt;",
+        ];
+
+        for haystack in haystacks {
+            let mut any = false;
+
+            for caps in INLINE_XREF.captures_iter(haystack) {
+                any = true;
+
+                let whole = caps.get(0).unwrap();
+
+                let expected = match (caps.get(2), caps.get(3), caps.get(4)) {
+                    (Some(inner), None, None) => XrefGroups::Shorthand {
+                        inner: inner.range(),
+                    },
+                    (None, Some(target), Some(text)) => XrefGroups::Macro {
+                        target: target.range(),
+                        text: text.range(),
+                    },
+                    other => panic!("unexpected group participation {other:?}"),
+                };
+
+                assert_eq!(
+                    xref_groups(whole.as_str(), whole.start()),
+                    expected,
+                    "derivation diverged from the capture engine over \
+                     {haystack:?} at {}",
+                    whole.start(),
+                );
+            }
+
+            assert!(any, "corpus haystack {haystack:?} produced no match");
+        }
+    }
 
     /// The frozen recording of `source`'s rendered output through the
     /// **whole** `Normal` group — the attributes step included — with any
