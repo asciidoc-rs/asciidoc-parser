@@ -4226,9 +4226,12 @@ mod tests {
 
         // An emission over a taken supply emits nothing rather than a
         // duplicate — the guard the whole-node path keeps for the shape the
-        // disjointness argument rules out.
+        // disjointness argument rules out. The same holds for a *partial*
+        // overlap (the entity-splitting read), whose peek also comes back
+        // empty.
         let mut out = Vec::new();
         emit_range_from(&mut supply, &pieces, 0..s.len(), &mut out);
+        emit_range_from(&mut supply, &pieces, 0..(s.len() - 1), &mut out);
         assert!(out.is_empty());
     }
 
