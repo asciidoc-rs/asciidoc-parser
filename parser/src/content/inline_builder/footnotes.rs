@@ -146,7 +146,7 @@ fn rebuild_footnote_level<'src>(
     nodes: &[InlineNode<'src>],
     pieces: &[Piece],
     s: &str,
-    matches: Vec<FootnoteMatch<'_>>,
+    matches: Vec<FootnoteMatch>,
     root: Span<'src>,
     parser: &Parser,
 ) -> Vec<InlineNode<'src>> {
@@ -176,7 +176,7 @@ fn rebuild_footnote_level<'src>(
                 cursor = full.end;
             }
 
-            FootnoteMatch::Candidate { full, caps } => {
+            FootnoteMatch::Candidate { full, groups } => {
                 emit_range_recursing_footnotes(
                     nodes,
                     pieces,
@@ -189,7 +189,7 @@ fn rebuild_footnote_level<'src>(
                 cursor = full.start;
 
                 if let Some(node) =
-                    build_candidate_node(&caps, &full, s, pieces, nodes, root, parser)
+                    build_candidate_node(&groups, &full, s, pieces, nodes, root, parser)
                 {
                     out.push(node);
                     cursor = full.end;
@@ -311,7 +311,7 @@ fn emit_range_recursing_footnotes<'src>(
 /// reverses exactly that pair. Carrying the capture instead lets
 /// [`rebuild_footnote_level`] build each node at the moment its walk reaches
 /// it, after the gap before it — children and all — has been emitted.
-enum FootnoteMatch<'h> {
+enum FootnoteMatch {
     /// An escape (`\footnote:…`, `\footnoteref:…`): the backslash is dropped
     /// and the rest kept literal. Whether the match is escaped is checked
     /// (`whole.as_str().starts_with('\\')`, see [`find_footnote_matches`])
@@ -328,21 +328,78 @@ enum FootnoteMatch<'h> {
     /// literal, exactly as it did when the scan decided that.
     Candidate {
         full: std::ops::Range<usize>,
-        caps: regex::Captures<'h>,
+        groups: FootnoteGroups,
     },
+}
+
+/// One [`INLINE_FOOTNOTE_MACRO`] match's groups, derived from the span by
+/// [`footnote_groups`] rather than read back out of the capture engine.
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+struct FootnoteGroups {
+    /// Whether this is the deprecated `footnoteref:` form (the pattern's
+    /// group 1).
+    is_ref_form: bool,
+
+    /// The `footnote:id` form's optional id (group 2), in match-string
+    /// bytes.
+    id: Option<std::ops::Range<usize>>,
+
+    /// The bracketed text (group 3), participating only when non-empty —
+    /// the pattern's `(?: | (.*?[^\\]) )` keeps the group out of an empty
+    /// bracket.
+    text: Option<std::ops::Range<usize>>,
+}
+
+/// Decomposes one [`INLINE_FOOTNOTE_MACRO`] match — `m`, the engine-reported
+/// span starting at `start` — into its groups
+/// ([`find_footnote_matches`] searches bounds-only): every group the pattern
+/// captures is fully determined by the span. After the optional escape
+/// backslash and the fixed `footnote`, the next byte tells the two forms
+/// apart (`r` opens the deprecated `ref:`, `:` the id form); the id runs
+/// from that `:` to the span's first `[` — its `[\w-]+` class excludes `[`,
+/// so that bracket is the pattern's own — and the text runs from there to
+/// the `]` the span ends with, wherever the lazy body stopped, participating
+/// only when non-empty, exactly as the capture does.
+///
+/// The `unwrap_or` fallback below cannot be taken on an engine-produced span
+/// (every form carries its `[`); it exists only to keep this reading total.
+/// `footnote_groups_match_the_capture_engine` pins the whole derivation
+/// against the capture engine across the differential corpus.
+fn footnote_groups(m: &str, start: usize) -> FootnoteGroups {
+    let escape = usize::from(m.as_bytes().first() == Some(&b'\\'));
+
+    let is_ref_form = m.as_bytes().get(escape + "footnote".len()) == Some(&b'r');
+
+    let after_prefix = escape
+        + if is_ref_form {
+            "footnoteref:".len()
+        } else {
+            "footnote:".len()
+        };
+
+    let bracket = m.find('[').unwrap_or(after_prefix);
+
+    let id =
+        (!is_ref_form && bracket > after_prefix).then(|| (start + after_prefix)..(start + bracket));
+
+    let text_start = bracket + 1;
+    let text_end = m.len() - 1;
+    let text = (text_end > text_start).then(|| (start + text_start)..(start + text_end));
+
+    FootnoteGroups {
+        is_ref_form,
+        id,
+        text,
+    }
 }
 
 /// Finds every footnote occurrence at this level, without building any of them
 /// — see [`FootnoteMatch`] for why construction is deferred.
-fn find_footnote_matches(s: &str) -> Vec<FootnoteMatch<'_>> {
+fn find_footnote_matches(s: &str) -> Vec<FootnoteMatch> {
     let mut matches = Vec::new();
 
-    for caps in INLINE_FOOTNOTE_MACRO.captures_iter(s) {
-        // `unwrap` on group 0 is safe: a capture always has an overall match.
-        #[allow(clippy::unwrap_used)]
-        let whole = caps.get(0).unwrap();
-
-        let full = whole.start()..whole.end();
+    for whole in INLINE_FOOTNOTE_MACRO.find_iter(s) {
+        let full = whole.range();
 
         if whole.as_str().starts_with('\\') {
             matches.push(FootnoteMatch::Unescape {
@@ -366,7 +423,9 @@ fn find_footnote_matches(s: &str) -> Vec<FootnoteMatch<'_>> {
             continue;
         }
 
-        matches.push(FootnoteMatch::Candidate { full, caps });
+        let groups = footnote_groups(whole.as_str(), full.start);
+
+        matches.push(FootnoteMatch::Candidate { full, groups });
     }
 
     matches
@@ -378,7 +437,7 @@ fn find_footnote_matches(s: &str) -> Vec<FootnoteMatch<'_>> {
 /// it — or `None` for the forms this family leaves unrecognized.
 #[allow(clippy::too_many_arguments)]
 fn build_candidate_node<'src>(
-    caps: &regex::Captures<'_>,
+    groups: &FootnoteGroups,
     full: &std::ops::Range<usize>,
     s: &str,
     pieces: &[Piece],
@@ -387,19 +446,19 @@ fn build_candidate_node<'src>(
     parser: &Parser,
 ) -> Option<InlineNode<'src>> {
     // The deprecated `footnoteref:[id,text]` / `footnoteref:[id]` form
-    // (group 1) packs its id and text into one bracket, split on the first
+    // packs its id and text into one bracket, split on the first
     // comma, rather than taking the id from the macro target the way
     // `footnote:id[…]` does.
-    if caps.get(1).is_some() {
+    if groups.is_ref_form {
         // With no bracketed text at all (`footnoteref:[]`), it is left
         // unrecognized: the match's own text is emitted unchanged, matching
         // Asciidoctor's behavior for this form.
-        let raw = caps.get(3)?;
+        let raw = groups.text.clone()?;
 
         return build_footnoteref_node(raw, full, s, pieces, nodes, root, parser);
     }
 
-    build_footnote_node(caps, full, s, pieces, nodes, root, parser)
+    build_footnote_node(groups, full, s, pieces, nodes, root, parser)
 }
 
 /// Builds one [`Footnote`](InlineNode::Footnote) node from a `footnote:` match,
@@ -441,7 +500,7 @@ fn build_candidate_node<'src>(
 /// in the ranges it emits rather than rebuilding the pieces around it — see
 /// that helper for why a per-node `replace` cannot express the same unescape.
 fn build_footnote_node<'src>(
-    caps: &regex::Captures<'_>,
+    groups: &FootnoteGroups,
     full: &std::ops::Range<usize>,
     s: &str,
     pieces: &[Piece],
@@ -460,11 +519,12 @@ fn build_footnote_node<'src>(
     // [`footnote_id_text`] therefore recovers it exactly in both cases. `id`
     // is `None` only when the macro carries none (an anonymous
     // `footnote:[…]`).
-    let id: Option<CowStr<'src>> = caps
-        .get(2)
-        .map(|m| footnote_id_text(m.start()..m.end(), s, pieces, nodes));
+    let id: Option<CowStr<'src>> = groups
+        .id
+        .clone()
+        .map(|range| footnote_id_text(range, s, pieces, nodes));
 
-    let content_match = caps.get(3);
+    let content_match = groups.text.clone();
 
     if let Some(id) = id {
         if let Some(number) = parser.footnote_index_for_id(id.as_ref()) {
@@ -481,7 +541,7 @@ fn build_footnote_node<'src>(
         return match content_match {
             Some(content) => {
                 // A defining occurrence that also carries an id.
-                let children = footnote_children(content.range(), s, pieces, nodes);
+                let children = footnote_children(content, s, pieces, nodes);
                 let number = register_footnote_number(parser, Some(id.as_ref()), &children, root);
 
                 Some(InlineNode::Footnote(Footnote {
@@ -518,7 +578,7 @@ fn build_footnote_node<'src>(
     // An anonymous defining occurrence.
     let content = content_match?;
 
-    let children = footnote_children(content.range(), s, pieces, nodes);
+    let children = footnote_children(content, s, pieces, nodes);
     let number = register_footnote_number(parser, None, &children, root);
 
     Some(InlineNode::Footnote(Footnote {
@@ -557,7 +617,7 @@ fn build_footnote_node<'src>(
 /// `compat-mode` is raised here too, from the whole match's own text, exactly
 /// as that replacer raises it.
 fn build_footnoteref_node<'src>(
-    raw: regex::Match<'_>,
+    raw: std::ops::Range<usize>,
     full: &std::ops::Range<usize>,
     s: &str,
     pieces: &[Piece],
@@ -584,13 +644,13 @@ fn build_footnoteref_node<'src>(
     // Split on the first comma: `id` is everything before it (the whole raw
     // text when there is no comma at all), `content` is everything after it
     // (present, possibly empty, only when a comma was found).
-    let (id_range, content_range) = match s[raw.range()].find(',') {
+    let (id_range, content_range) = match s.get(raw.clone()).unwrap_or_default().find(',') {
         Some(offset) => (
-            raw.start()..(raw.start() + offset),
-            Some((raw.start() + offset + 1)..raw.end()),
+            raw.start..(raw.start + offset),
+            Some((raw.start + offset + 1)..raw.end),
         ),
 
-        None => (raw.range(), None),
+        None => (raw, None),
     };
 
     // Unlike the `footnote:` form's own `[\w-]+` id — which no opaque piece
@@ -824,6 +884,60 @@ mod tests {
     use super::super::test_support::{
         assert_link, assert_styled, assert_text, build_src, fold_html, golden_macros,
     };
+
+    #[test]
+    fn footnote_groups_match_the_capture_engine() {
+        // `footnote_groups` derives the pattern's groups from each match
+        // span; this pins it against the capture engine's own reading, group
+        // for group, across a corpus covering both forms, escapes, present
+        // and absent ids, empty and escaped-bracket texts, and multi-match
+        // haystacks at varying offsets.
+        use super::{FootnoteGroups, footnote_groups};
+        use crate::content::INLINE_FOOTNOTE_MACRO;
+
+        let haystacks = [
+            "footnote:[text]",
+            "footnote:id[text]",
+            "footnote:id[]",
+            "footnote:[]",
+            "footnote:a-b_c[x]",
+            r"\footnote:id[text]",
+            "footnoteref:[id,text]",
+            "footnoteref:[id]",
+            "footnoteref:[]",
+            r"\footnoteref:[id]",
+            r"footnote:[a\]b]",
+            "footnote:[a[b]",
+            "footnote:[\u{fc}ber]",
+            "pre footnote:[a] mid footnoteref:[b,c] footnote:d[e] post",
+        ];
+
+        for haystack in haystacks {
+            let mut any = false;
+
+            for caps in INLINE_FOOTNOTE_MACRO.captures_iter(haystack) {
+                any = true;
+
+                let whole = caps.get(0).unwrap();
+
+                let expected = FootnoteGroups {
+                    is_ref_form: caps.get(1).is_some(),
+                    id: caps.get(2).map(|m| m.range()),
+                    text: caps.get(3).map(|m| m.range()),
+                };
+
+                assert_eq!(
+                    footnote_groups(whole.as_str(), whole.start()),
+                    expected,
+                    "derivation diverged from the capture engine over \
+                     {haystack:?} at {}",
+                    whole.start(),
+                );
+            }
+
+            assert!(any, "corpus haystack {haystack:?} produced no match");
+        }
+    }
     use crate::{
         Span,
         inlines::{Footnote, InlineNode, SpanForm, StyleVariant},
