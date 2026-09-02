@@ -1030,6 +1030,41 @@ mod tests {
     }
 
     #[test]
+    fn emit_range_recursing_footnotes_skips_a_stale_piece_index() {
+        // The same defensive posture as
+        // `quotes::tests::emit_range_skips_a_stale_piece_index`, exercised
+        // directly against this module's own copy of the lookup (see
+        // `emit_range_recursing_footnotes`'s own doc comment for why it
+        // duplicates `emit_range` rather than calling it): a piece whose
+        // `node_index` no longer resolves is skipped rather than panicking.
+        use super::{Piece, emit_range_recursing_footnotes};
+        use crate::Parser;
+
+        let root = Span::new("x");
+
+        let piece = Piece {
+            node_index: 9,
+            s_start: 0,
+            s_len: 1,
+            src_offset: 0,
+            src_len: 1,
+            atomic: true,
+            synthesized: false,
+        };
+
+        let mut out = Vec::new();
+        emit_range_recursing_footnotes(
+            &[],
+            std::slice::from_ref(&piece),
+            0..1,
+            root,
+            &Parser::default(),
+            &mut out,
+        );
+        assert!(out.is_empty(), "{out:?}");
+    }
+
+    #[test]
     fn emit_range_recursing_footnotes_skips_a_synthesized_piece_whose_declared_length_overruns_its_value()
      {
         // The same defensive posture as

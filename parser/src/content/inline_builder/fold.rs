@@ -17,16 +17,16 @@ use crate::{
 
 /// Folds an inline node tree to output bytes through `renderer`.
 ///
-/// This is the fold over the *public* [`InlineNode`] tree. It handles the node
-/// kinds the transducer steps produce so far — [`Text`](InlineNode::Text),
-/// [`CharRef`](InlineNode::CharRef), [`Styled`](crate::inlines::Styled),
-/// [`Image`](InlineNode::Image), [`Ui`](InlineNode::Ui),
-/// [`Ref`](InlineNode::Ref) (both link and cross-reference),
-/// [`Anchor`](InlineNode::Anchor), [`IndexTerm`](InlineNode::IndexTerm),
-/// [`Footnote`](InlineNode::Footnote), [`Callout`](InlineNode::Callout),
-/// [`Stem`](InlineNode::Stem), and [`LineBreak`](InlineNode::LineBreak), plus
-/// the design-legal [`Raw`](InlineNode::Raw) leaf; a later increment extends
-/// it as the transducer grows new kinds.
+/// This is the fold over the *public* [`InlineNode`] tree. It handles every
+/// node kind the type admits — [`Text`](InlineNode::Text),
+/// [`CharRef`](InlineNode::CharRef), [`Raw`](InlineNode::Raw),
+/// [`Styled`](crate::inlines::Styled), [`Image`](InlineNode::Image),
+/// [`Ui`](InlineNode::Ui), [`Ref`](InlineNode::Ref) (both link and
+/// cross-reference), [`Anchor`](InlineNode::Anchor),
+/// [`IndexTerm`](InlineNode::IndexTerm), [`Footnote`](InlineNode::Footnote),
+/// [`Callout`](InlineNode::Callout), [`Stem`](InlineNode::Stem), and
+/// [`LineBreak`](InlineNode::LineBreak) — so the match is exhaustive with no
+/// defensive fallback arm.
 ///
 /// `context` is the document state this fold renders under — see
 /// [`RenderContext`]. It is taken as a parameter rather than derived from a
@@ -377,13 +377,15 @@ fn fold_into_html(
                 fold_ui(ui, renderer, context, out);
             }
 
-            InlineNode::Ref(reference) if reference.variant == RefVariant::Link => {
-                fold_link(reference, renderer, context, footnotes, xrefs, out);
-            }
+            InlineNode::Ref(reference) => match reference.variant {
+                RefVariant::Link => {
+                    fold_link(reference, renderer, context, footnotes, xrefs, out);
+                }
 
-            InlineNode::Ref(reference) if reference.variant == RefVariant::Xref => {
-                fold_xref(reference, renderer, context, footnotes, xrefs, out);
-            }
+                RefVariant::Xref => {
+                    fold_xref(reference, renderer, context, footnotes, xrefs, out);
+                }
+            },
 
             InlineNode::Anchor(anchor) => {
                 fold_anchor(anchor, renderer, context, footnotes, out);
@@ -441,24 +443,6 @@ fn fold_into_html(
                     styled.id.as_ref().map(|id| id.to_string()),
                     &body,
                     out,
-                );
-            }
-
-            other => {
-                // The steps wired up so far produce only `Text`,
-                // `CharRef::Special`, `Styled`, `Image`, `Ui`, `Ref` (link and
-                // cross-reference), `Anchor`, `IndexTerm`, `Footnote`,
-                // `Callout`, `Stem`, and `LineBreak` nodes, and this fold
-                // additionally emits the design-legal `Raw` leaf; no other
-                // node kind reaches the fold in this increment. A later
-                // increment fills in the arms above as the transducer grows
-                // new kinds.
-                // Guard against a premature caller in debug builds and emit
-                // nothing in release, mirroring the safe defensive fallback in
-                // [`content`](super::content).
-                debug_assert!(
-                    false,
-                    "inline_builder::fold_html reached an unsupported node kind: {other:?}"
                 );
             }
         }
