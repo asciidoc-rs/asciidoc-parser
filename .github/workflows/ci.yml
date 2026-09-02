@@ -9,16 +9,8 @@ on:
       - synchronize
       - labeled
   push:
-    # `inline-ast` is here for the benchmarks. CodSpeed compares a pull
-    # request against the most recent successful run on its **base** branch,
-    # and without one it silently falls back to an unrelated commit and
-    # reports that fallback's differences as the pull request's own. The
-    # long-running `inline-ast` branch had no such run — nothing triggered CI
-    # on a push to it — so every pull request into it was measured against a
-    # stale `main`, which reported the whole branch's cost as a regression.
     branches:
       - main
-      - inline-ast
 
 # Every job below is gated on the same condition: run automatically for
 # pushes, for pull requests whose head branch lives in this repository
