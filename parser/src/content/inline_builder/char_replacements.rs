@@ -556,7 +556,11 @@ fn rebuild_replacements<'src>(
     // [`NodeSupply`](super::quotes::NodeSupply).
     let mut supply = TakenNodes::new(nodes);
 
-    let mut out = Vec::new();
+    // Sized the same way `rebuild_level`'s own rebuild is: every piece
+    // re-emitted about once (a gap slice or a clone), plus each match's own
+    // replacement/entity leaf. An estimate, not a bound, but it removes the
+    // one-at-a-time growth of the common case.
+    let mut out = Vec::with_capacity(pieces.len() + matches.len());
     let mut cursor = 0usize;
 
     for m in matches {
