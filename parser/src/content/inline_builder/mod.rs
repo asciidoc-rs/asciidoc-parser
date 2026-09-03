@@ -532,6 +532,31 @@ pub(crate) fn build_from_value<'src>(
 /// because an empty `Text` node *elsewhere* in the tree is meaningful — a
 /// `<<id,>>` cross-reference's present-but-empty reference text is exactly one
 /// — so the steps themselves preserve one where they find it.)
+///
+/// ## Relationship to [`SubstitutionGroup::apply`]
+///
+/// This function does the recognition — text in, tree out — and nothing
+/// else: no rendering, no catalog registration, no state stored anywhere. It
+/// is the shared, side-effect-free primitive underneath **two** kinds of
+/// caller, neither of which duplicates the other:
+///
+/// - [`SubstitutionGroup::apply`] is the one caller that turns a build into an
+///   *authoritative* pass over a [`Content`](crate::content::Content): it calls
+///   this function once, then folds the tree to HTML, replays macro
+///   registration, and stores the tree back onto that `Content`. See its own
+///   doc comment for the full list.
+/// - Every other production caller (rebuilding an attribute value's tree
+///   fragment in [`attribute_refs`], a passthrough's own body in
+///   [`passthrough_text`](passthrough_step::passthrough_text), a footnote's
+///   macros-only rebuild, a macro family's own display-text fragment) wants
+///   *just the tree* for some sub-computation, with no `Content` to store state
+///   on and no registration to replay — replaying it would double-register
+///   catalog entries and warnings that the enclosing
+///   [`apply`](SubstitutionGroup::apply) call already replays once for the
+///   whole content. Those callers, and the tests that call this function
+///   directly to inspect the tree it produces or to compare it against
+///   [`apply`](SubstitutionGroup::apply)'s own golden output, are expected to
+///   reach for this function rather than `apply` for exactly that reason.
 pub(crate) fn build_for_group<'src>(
     group: &SubstitutionGroup,
     value: CowStr<'src>,
@@ -2037,6 +2062,13 @@ mod tests {
                 .with_intrinsic_attribute("host", "a&b.example.org", ModificationContext::Anywhere)
         }
 
+        /// The "actual" side of this module's parity tests: the tree
+        /// `build_for_group` produces for `source` under `group`, compared
+        /// against [`golden_for_group`]'s frozen recording below. Calls
+        /// `build_for_group` directly rather than going through
+        /// `SubstitutionGroup::apply` because there is no `Content` here to
+        /// fold onto or replay registration against — see
+        /// `build_for_group`'s own doc comment for that split.
         fn build_group<'src>(
             group: &SubstitutionGroup,
             source: &'src str,

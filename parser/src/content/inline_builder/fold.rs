@@ -944,6 +944,14 @@ mod tests {
             let mut golden = crate::content::Content::from(Span::new(fixture));
             crate::content::SubstitutionGroup::Title.apply(&mut golden, &golden_parser, None);
 
+            // The `golden` side above went through `SubstitutionGroup::apply`
+            // (the authoritative pass — fold, catalog registration, the
+            // works); this side calls `build_for_group` directly to get the
+            // same tree without any of that, then folds it independently
+            // through `fold_html_with_context` below. Comparing the two
+            // outputs is exactly what proves the two code paths agree — see
+            // `build_for_group`'s own doc comment for why they're two paths
+            // in the first place.
             let built_parser = Parser::default();
             let nodes = crate::content::inline_builder::build_for_group(
                 &crate::content::SubstitutionGroup::Title,

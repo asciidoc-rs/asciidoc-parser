@@ -994,6 +994,10 @@ mod tests {
         // `&lt;/a&gt;`, the guard stays quiet, and the footnote is recognized.
         let source = Span::new("x footnote:[note]</a>");
 
+        // `build_for_group` directly, not `SubstitutionGroup::apply`: this
+        // test only needs the tree the Macros step alone produces, with no
+        // `Content` to fold onto and no registration to replay (see
+        // `build_for_group`'s own doc comment for that split).
         let macros_only = crate::content::inline_builder::build_for_group(
             &crate::content::SubstitutionGroup::Custom(vec![
                 crate::content::SubstitutionStep::Macros,

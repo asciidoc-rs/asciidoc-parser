@@ -222,6 +222,38 @@ impl SubstitutionGroup {
         (Self::Custom(deduped), invalid)
     }
 
+    /// Runs this group's substitution over `content`, making it reflect
+    /// having gone through an **authoritative** substitution pass.
+    ///
+    /// The tree itself comes from one call to
+    /// [`inline_builder::build_for_group`](crate::content::inline_builder::build_for_group)
+    /// — this method does no recognition of its own. What it does beyond that
+    /// one build is everything a real pass over a `Content` needs and a bare
+    /// tree build does not:
+    ///
+    /// - discards the *incidental* diagnostics a build can produce (e.g. an
+    ///   `Attrlist` parsed out of a match string) while keeping the deliberate
+    ///   recognition diagnostics;
+    /// - derives `content.rendered` by folding the finished tree
+    ///   ([`Content::rendered_html`](crate::content::Content::rendered_html)'s
+    ///   own fold, run once here);
+    /// - replays every macro family's and the callouts step's registration side
+    ///   effects (catalog entries, warnings) from the finished tree, **exactly
+    ///   once** — see `apply_macro_side_effects` /
+    ///   `apply_callout_side_effects`;
+    /// - derives and stores the deferred cross-reference segments
+    ///   ([`Content::set_tree_xrefs`](crate::content::Content::set_tree_xrefs));
+    /// - stores the tree, the extracted passthroughs, and a snapshot of the
+    ///   document attributes back onto `content` for later re-folding.
+    ///
+    /// Because registration is stateful, `build_for_group` is deliberately
+    /// *not* the place any of this lives: many other call sites (rebuilding
+    /// an attribute value's tree fragment, a passthrough's own body, a
+    /// footnote's macros-only rebuild, …) want just the tree, and would
+    /// double-register catalog entries and warnings if this method's side
+    /// effects ran on every such build. Those callers reach
+    /// `build_for_group` directly and stay unregistered fragments; this
+    /// method is the one caller that turns a build into the real thing.
     pub(crate) fn apply<'src>(
         &self,
         content: &mut Content<'src>,

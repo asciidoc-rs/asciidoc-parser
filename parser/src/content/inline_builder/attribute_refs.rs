@@ -1536,6 +1536,11 @@ mod tests {
 
         let parser = parser_with_attribute("tag", "<b>");
         let source = "{tag}";
+
+        // `build_for_group` directly, not `SubstitutionGroup::apply`: this
+        // test wants to inspect the produced tree's node shape itself, with
+        // no `Content` to store state on and no registration to replay (see
+        // `build_for_group`'s own doc comment for that split).
         let nodes = build_for_group(
             &group,
             CowStr::from(source),

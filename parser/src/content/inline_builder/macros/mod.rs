@@ -1299,6 +1299,13 @@ mod tests {
         warnings::WarningType,
     };
 
+    // Several tests below call `build_for_group` directly rather than going
+    // through `SubstitutionGroup::apply`: each wants only the tree a
+    // particular group's steps produce, to inspect its node shape or fold it
+    // independently, with no `Content` to store state on and no macro-family
+    // registration to replay. See `build_for_group`'s own doc comment for
+    // that split of responsibilities.
+
     #[test]
     fn a_display_text_after_an_escaped_attribute_reference_drops_the_backslash() {
         // `macro_text_children` recovers its value with `text_slice`, not by

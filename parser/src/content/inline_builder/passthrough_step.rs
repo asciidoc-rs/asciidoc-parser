@@ -1266,6 +1266,14 @@ fn apply_normal_subs<'src>(text: Span<'src>, parser: &Parser) -> Vec<InlineNode<
 /// own tree to a string and wrapping it in a `Raw` leaf keeps it opaque to
 /// every later step, which is the same containment `subs.apply` bought.
 ///
+/// This is also why the call below goes straight to
+/// [`build_for_group`](super::build_for_group) rather than
+/// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup::apply):
+/// there is no `Content` here for `apply` to fold onto or replay macro
+/// registration against — a passthrough body is a nested fragment computed
+/// once, folded to a string, and thrown away, not a `Content` of its own
+/// (see `build_for_group`'s own doc comment for the general split).
+///
 /// `text` is a [`Span`] rather than a `&str` so that a warning this body's
 /// substitution records lands on the reference's **own** position in the
 /// document — the answer #1301 settled. It stays true through the tree: the
