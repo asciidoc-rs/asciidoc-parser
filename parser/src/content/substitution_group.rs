@@ -3,7 +3,8 @@ use crate::{
     attributes::Attrlist,
     content::{Content, Passthrough, SubstitutionStep},
     document::RefType,
-    warnings::WarningType,
+    inlines::InlineNode,
+    warnings::{Warning, WarningType},
 };
 
 /// Each block and inline element has a default substitution group that is
@@ -248,7 +249,7 @@ impl SubstitutionGroup {
         &self,
         content: &mut Content<'src>,
         parser: &Parser,
-        warnings: &mut Vec<crate::warnings::Warning<'src>>,
+        warnings: &mut Vec<Warning<'src>>,
     ) {
         self.apply_inner(content, parser, None, Some(warnings));
     }
@@ -258,7 +259,7 @@ impl SubstitutionGroup {
         content: &mut Content<'src>,
         parser: &Parser,
         attrlist: Option<&Attrlist<'src>>,
-        term_warnings: Option<&mut Vec<crate::warnings::Warning<'src>>>,
+        term_warnings: Option<&mut Vec<Warning<'src>>>,
     ) {
         // The pre-substitution value the build is seeded from.
         //
@@ -446,13 +447,11 @@ impl SubstitutionGroup {
     /// first place, since a bibliography list item's principal text is never
     /// parsed as one. Both would be branches no input can take.
     fn register_term_leading_anchor<'src>(
-        tree: &[crate::inlines::InlineNode<'src>],
+        tree: &[InlineNode<'src>],
         parser: &Parser,
         content: &Content<'src>,
-        warnings: &mut Vec<crate::warnings::Warning<'src>>,
+        warnings: &mut Vec<Warning<'src>>,
     ) -> bool {
-        use crate::inlines::InlineNode;
-
         let Some(InlineNode::Anchor(anchor)) = tree.first() else {
             return false;
         };
@@ -479,7 +478,7 @@ impl SubstitutionGroup {
             .register_ref(&anchor.id, reftext.as_deref(), RefType::Anchor)
             .is_err()
         {
-            warnings.push(crate::warnings::Warning::new(
+            warnings.push(Warning::new(
                 content.original(),
                 WarningType::DuplicateId(anchor.id.to_string()),
             ));

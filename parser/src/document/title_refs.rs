@@ -23,7 +23,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    HasSpan, Span,
+    HasSpan, Parser, Span,
     blocks::{Block, IsBlock},
     content::{
         XrefSegment, XrefTemplatePiece, fold_resolved_title, render_xref_template,
@@ -32,7 +32,8 @@ use crate::{
     document::Catalog,
     inlines::InlineNode,
     parser::{
-        InlineRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext, ResolvedReference,
+        InlineRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
+        ResolvedAttributes, ResolvedReference,
     },
 };
 
@@ -94,7 +95,7 @@ struct TitleNode<'src> {
     ///
     /// `None` leaves the title on the template path, as it does everywhere
     /// else.
-    render_attributes: Option<crate::parser::ResolvedAttributes>,
+    render_attributes: Option<ResolvedAttributes>,
 }
 
 /// Resolves the cross-references embedded in every section heading and block
@@ -111,7 +112,7 @@ pub(crate) fn resolve_title_references<'src>(
     resolver: &dyn ReferenceResolver,
     renderer: &dyn InlineRenderer,
     warnings: &mut ReferenceWarnings<'src>,
-    parser: &crate::Parser,
+    parser: &Parser,
 ) {
     let mut nodes: Vec<TitleNode<'src>> = Vec::new();
     collect(blocks, &mut nodes);
@@ -229,7 +230,7 @@ fn write_back<'src>(
     index: &mut usize,
     renderer: &dyn InlineRenderer,
     warnings: &mut ReferenceWarnings<'src>,
-    parser: &crate::Parser,
+    parser: &Parser,
 ) {
     for block in blocks.iter_mut() {
         if let Block::Section(section) = block
@@ -305,7 +306,7 @@ fn compute<'src>(
     memo: &mut [Option<Resolution>],
     in_progress: &mut [bool],
     warnings: &mut ReferenceWarnings<'src>,
-    parser: &crate::Parser,
+    parser: &Parser,
 ) -> String {
     if let Some(Some(resolution)) = memo.get(index) {
         return resolution.rendered.clone();

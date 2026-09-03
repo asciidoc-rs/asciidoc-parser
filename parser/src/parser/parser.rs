@@ -18,14 +18,15 @@ use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use regex::Regex;
 
 use crate::{
-    Document, HasSpan,
+    Document, HasSpan, Span,
     blocks::{SectionNumber, SectionType},
-    document::{Attribute, Catalog, InterpretedValue, RefType},
+    content::{OwnedTitle, SubstitutionGroup, XrefSegment, XrefTemplatePiece},
+    document::{Attribute, Catalog, DuplicateIdError, Footnote, InterpretedValue, RefType},
     parser::{
         AllowableValue, AttributeValue, DatetimeContext, DefaultPathResolver, DocinfoFileHandler,
         HtmlInlineRenderer, ImageFileHandler, IncludeFileHandler, InlineRenderer,
         ModificationContext, PathResolver, ReferenceTime, RenderContext, ResolvedAttributes,
-        SafeMode, SourceLine, SourceMap, SvgFileHandler,
+        SafeMode, SourceLine, SourceMap, SvgFileHandler, XrefSignifier,
         built_in_attrs::{
             built_in_attr, built_in_default_values, derived_backend_value,
             is_derived_backend_value, max_attribute_value_size_default, synthesized_attr,
@@ -210,7 +211,7 @@ pub struct Parser {
     /// supplied via a `title=` attribute. The snapshot keeps any deferred
     /// cross-references, so an embedded `<<id>>` in a carried title still
     /// resolves once the catalog is complete.
-    pub(crate) pending_block_title: Option<crate::content::OwnedTitle>,
+    pub(crate) pending_block_title: Option<OwnedTitle>,
 
     /// Live values of [counter] attributes, keyed by counter name (e.g.
     /// `index`, `example-number`, `table-number`).
@@ -422,7 +423,7 @@ pub struct Parser {
     /// inside the attributes substitution step, where only a shared `&Parser`
     /// is available. Each entry stores the byte offset and length of the source
     /// span the warning refers to (rather than a borrowed
-    /// [`Span`](crate::Span), which the lifetime-free `Parser` cannot
+    /// [`Span`], which the lifetime-free `Parser` cannot
     /// hold), so the warnings can be turned into
     /// spanned [`Warning`]s once the document's owned source is available.
     substitution_warnings: RefCell<Vec<DeferredWarning>>,
@@ -808,7 +809,7 @@ impl Parser {
     /// reimplementing (or taking a dependency on) this crate's
     /// `regex`-based substitution logic.
     ///
-    /// Pass any [`SubstitutionGroup`](crate::content::SubstitutionGroup),
+    /// Pass any [`SubstitutionGroup`],
     /// including a [`Custom`](crate::content::SubstitutionGroup::Custom) group
     /// built from an explicit list of
     /// [`SubstitutionStep`](crate::content::SubstitutionStep)s, to select
@@ -840,11 +841,7 @@ impl Parser {
     /// );
     /// ```
     #[must_use]
-    pub fn apply_substitutions(
-        &self,
-        text: &str,
-        group: &crate::content::SubstitutionGroup,
-    ) -> String {
+    pub fn apply_substitutions(&self, text: &str, group: &SubstitutionGroup) -> String {
         let mut content = crate::content::Content::from(crate::Span::new(text));
         group.apply(&mut content, self, None);
         content.rendered_owned()
@@ -1225,7 +1222,7 @@ impl Parser {
     /// crate::warnings::WarningType::MaxBlockNestingExceeded
     pub(crate) fn warn_block_nesting_exceeded<'src>(
         &self,
-        source: crate::Span<'src>,
+        source: Span<'src>,
         warnings: &mut Vec<Warning<'src>>,
     ) {
         warnings.push(Warning::new(
@@ -1342,7 +1339,7 @@ impl Parser {
     fn resolve_leveloffset_and_warn<'src>(
         &self,
         value: InterpretedValue,
-        span: crate::Span<'src>,
+        span: Span<'src>,
         warnings: &mut Vec<Warning<'src>>,
     ) -> InterpretedValue {
         let value = self.resolve_leveloffset_assignment(value);
@@ -1783,19 +1780,19 @@ impl Parser {
         id: &str,
         reftext: Option<&str>,
         ref_type: RefType,
-    ) -> Result<(), crate::document::DuplicateIdError> {
+    ) -> Result<(), DuplicateIdError> {
         self.catalog
             .borrow_mut()
             .register_ref(id, reftext, ref_type)
     }
 
-    /// Attaches an [`XrefSignifier`](crate::parser::XrefSignifier) to an
+    /// Attaches an [`XrefSignifier`] to an
     /// already-registered catalog element, so a cross-reference to it can build
     /// `full`/`short` [`xrefstyle`](crate::parser::XrefStyle) text.
     ///
     /// Takes `&self` for the same reason as
     /// [`register_ref`](Self::register_ref).
-    pub(crate) fn set_ref_signifier(&self, id: &str, signifier: crate::parser::XrefSignifier) {
+    pub(crate) fn set_ref_signifier(&self, id: &str, signifier: XrefSignifier) {
         self.catalog.borrow_mut().set_signifier(id, signifier);
     }
 
@@ -1885,9 +1882,9 @@ impl Parser {
     pub(crate) fn define_footnote(
         &self,
         id: Option<&str>,
-        template: Vec<crate::content::XrefTemplatePiece>,
-        xrefs: Vec<crate::content::XrefSegment>,
-        source: crate::Span<'_>,
+        template: Vec<XrefTemplatePiece>,
+        xrefs: Vec<XrefSegment>,
+        source: Span<'_>,
     ) -> String {
         // A footnote's text is extracted out of the block during macro
         // substitution, so any cross-reference inside it never reaches the
@@ -1935,15 +1932,13 @@ impl Parser {
             None
         };
 
-        self.catalog
-            .borrow_mut()
-            .register_footnote(crate::document::Footnote {
-                index: index.clone(),
-                id: id.map(|s| s.to_owned()),
-                text,
-                deferred,
-                location,
-            });
+        self.catalog.borrow_mut().register_footnote(Footnote {
+            index: index.clone(),
+            id: id.map(|s| s.to_owned()),
+            text,
+            deferred,
+            location,
+        });
 
         index
     }
@@ -1953,14 +1948,14 @@ impl Parser {
     /// cell) its own footnote registry; see [`restore_footnotes`].
     ///
     /// [`restore_footnotes`]: Self::restore_footnotes
-    pub(crate) fn take_footnotes(&self) -> Vec<crate::document::Footnote> {
+    pub(crate) fn take_footnotes(&self) -> Vec<Footnote> {
         self.catalog.borrow_mut().take_footnotes()
     }
 
     /// Restores a previously-[taken](Self::take_footnotes) footnote list,
     /// discarding any footnotes registered in the meantime (i.e. those defined
     /// inside the nested document).
-    pub(crate) fn restore_footnotes(&self, footnotes: Vec<crate::document::Footnote>) {
+    pub(crate) fn restore_footnotes(&self, footnotes: Vec<Footnote>) {
         self.catalog.borrow_mut().restore_footnotes(footnotes);
     }
 
@@ -1971,11 +1966,7 @@ impl Parser {
     /// text the warning refers to; its byte offset and length are stored so a
     /// spanned [`Warning`] can be reconstructed later (see
     /// [`take_substitution_warnings`](Self::take_substitution_warnings)).
-    pub(crate) fn record_substitution_warning(
-        &self,
-        source: crate::Span<'_>,
-        warning: WarningType,
-    ) {
+    pub(crate) fn record_substitution_warning(&self, source: Span<'_>, warning: WarningType) {
         self.substitution_warnings
             .borrow_mut()
             .push(DeferredWarning {
@@ -2030,7 +2021,7 @@ impl Parser {
     ///
     /// So the two are kept apart at the source: this buffer holds only what the
     /// builder means to report, and only it is transplanted.
-    pub(crate) fn record_builder_diagnostic(&self, source: crate::Span<'_>, warning: WarningType) {
+    pub(crate) fn record_builder_diagnostic(&self, source: Span<'_>, warning: WarningType) {
         self.builder_diagnostics.borrow_mut().push(DeferredWarning {
             offset: source.byte_offset(),
             len: source.len(),
@@ -3522,9 +3513,12 @@ mod tests {
     use crate::{
         attributes::Attrlist,
         blocks::Block,
+        inlines::{Callout, Footnote, Image, IndexTerm, Ref},
         parser::{
             CharacterReplacementType, InlineRenderer, QuoteScope, QuoteType, SpecialCharacter,
+            XrefRenderParams,
         },
+        strings::CowStr,
         tests::prelude::*,
     };
 
@@ -4606,34 +4600,24 @@ mod tests {
             dest.push_str("[BR]");
         }
 
-        fn render_image(
-            &self,
-            _image: &crate::inlines::Image<'_>,
-            _context: &crate::parser::RenderContext,
-            dest: &mut String,
-        ) {
+        fn render_image(&self, _image: &Image<'_>, _context: &RenderContext, dest: &mut String) {
             dest.push_str("[IMAGE]");
         }
 
         fn image_uri(
             &self,
             target_image_path: &str,
-            _context: &crate::parser::RenderContext,
+            _context: &RenderContext,
             _asset_dir_key: Option<&str>,
         ) -> String {
             target_image_path.to_string()
         }
 
-        fn render_icon(
-            &self,
-            _icon: &crate::inlines::Image<'_>,
-            _context: &crate::parser::RenderContext,
-            dest: &mut String,
-        ) {
+        fn render_icon(&self, _icon: &Image<'_>, _context: &RenderContext, dest: &mut String) {
             dest.push_str("[ICON]");
         }
 
-        fn render_link(&self, _link: &crate::inlines::Ref<'_>, _text: &str, dest: &mut String) {
+        fn render_link(&self, _link: &Ref<'_>, _text: &str, dest: &mut String) {
             dest.push_str("[LINK]");
         }
 
@@ -4641,14 +4625,14 @@ mod tests {
             dest.push_str(&format!("[ANCHOR:{}]", id));
         }
 
-        fn render_xref(&self, params: &crate::parser::XrefRenderParams, dest: &mut String) {
+        fn render_xref(&self, params: &XrefRenderParams, dest: &mut String) {
             dest.push_str(&format!("[XREF:{}]", params.target));
         }
 
         fn render_callout(
             &self,
-            callout: &crate::inlines::Callout<'_>,
-            _context: &crate::parser::RenderContext,
+            callout: &Callout<'_>,
+            _context: &RenderContext,
             dest: &mut String,
         ) {
             dest.push_str(&format!("[CALLOUT:{}]", callout.number));
@@ -4656,7 +4640,7 @@ mod tests {
 
         fn render_index_term(
             &self,
-            _index_term: &crate::inlines::IndexTerm<'_>,
+            _index_term: &IndexTerm<'_>,
             visible_term: Option<&str>,
             dest: &mut String,
         ) {
@@ -4670,7 +4654,7 @@ mod tests {
             dest.push_str(&format!("[BUTTON:{text}]"));
         }
 
-        fn render_keyboard(&self, keys: &[crate::strings::CowStr<'_>], dest: &mut String) {
+        fn render_keyboard(&self, keys: &[CowStr<'_>], dest: &mut String) {
             let keys: Vec<&str> = keys.iter().map(|k| k.as_ref()).collect();
             dest.push_str(&format!("[KBD:{}]", keys.join("+")));
         }
@@ -4678,15 +4662,15 @@ mod tests {
         fn render_menu(
             &self,
             menu: &str,
-            _submenus: &[crate::strings::CowStr<'_>],
+            _submenus: &[CowStr<'_>],
             _menuitem: Option<&str>,
-            _context: &crate::parser::RenderContext,
+            _context: &RenderContext,
             dest: &mut String,
         ) {
             dest.push_str(&format!("[MENU:{menu}]"));
         }
 
-        fn render_footnote(&self, footnote: &crate::inlines::Footnote<'_>, dest: &mut String) {
+        fn render_footnote(&self, footnote: &Footnote<'_>, dest: &mut String) {
             match footnote.number.as_deref() {
                 Some(index) => dest.push_str(&format!("[FOOTNOTE:{index}]")),
                 None => dest.push_str(&format!(

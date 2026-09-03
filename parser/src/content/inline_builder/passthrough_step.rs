@@ -1305,7 +1305,7 @@ mod tests {
     use crate::{
         HasSpan, Parser, Span,
         inlines::{InlineNode, SpanForm, StyleVariant, Styled},
-        parser::HtmlInlineRenderer,
+        parser::{HtmlInlineRenderer, InlineRenderer, SpecialCharacter},
         strings::CowStr,
     };
 
@@ -1535,16 +1535,12 @@ mod tests {
         #[derive(Debug)]
         struct BracketRenderer;
 
-        impl crate::parser::InlineRenderer for BracketRenderer {
-            fn render_special_character(
-                &self,
-                type_: crate::parser::SpecialCharacter,
-                dest: &mut String,
-            ) {
+        impl InlineRenderer for BracketRenderer {
+            fn render_special_character(&self, type_: SpecialCharacter, dest: &mut String) {
                 dest.push_str(match type_ {
-                    crate::parser::SpecialCharacter::Lt => "[LT]",
-                    crate::parser::SpecialCharacter::Gt => "[GT]",
-                    crate::parser::SpecialCharacter::Ampersand => "[AMP]",
+                    SpecialCharacter::Lt => "[LT]",
+                    SpecialCharacter::Gt => "[GT]",
+                    SpecialCharacter::Ampersand => "[AMP]",
                 });
             }
         }
@@ -1651,16 +1647,12 @@ mod tests {
         #[derive(Debug)]
         struct BracketRenderer;
 
-        impl crate::parser::InlineRenderer for BracketRenderer {
-            fn render_special_character(
-                &self,
-                type_: crate::parser::SpecialCharacter,
-                dest: &mut String,
-            ) {
+        impl InlineRenderer for BracketRenderer {
+            fn render_special_character(&self, type_: SpecialCharacter, dest: &mut String) {
                 dest.push_str(match type_ {
-                    crate::parser::SpecialCharacter::Lt => "[LT]",
-                    crate::parser::SpecialCharacter::Gt => "[GT]",
-                    crate::parser::SpecialCharacter::Ampersand => "[AMP]",
+                    SpecialCharacter::Lt => "[LT]",
+                    SpecialCharacter::Gt => "[GT]",
+                    SpecialCharacter::Ampersand => "[AMP]",
                 });
             }
         }
@@ -1704,12 +1696,8 @@ mod tests {
             calls: std::cell::Cell<usize>,
         }
 
-        impl crate::parser::InlineRenderer for OrdinalRenderer {
-            fn render_special_character(
-                &self,
-                _type_: crate::parser::SpecialCharacter,
-                dest: &mut String,
-            ) {
+        impl InlineRenderer for OrdinalRenderer {
+            fn render_special_character(&self, _type_: SpecialCharacter, dest: &mut String) {
                 self.calls.set(self.calls.get() + 1);
                 dest.push_str(&format!("[{}]", self.calls.get()));
             }
@@ -1722,7 +1710,7 @@ mod tests {
         let mut probe = String::new();
         parser
             .renderer
-            .render_special_character(crate::parser::SpecialCharacter::Lt, &mut probe);
+            .render_special_character(SpecialCharacter::Lt, &mut probe);
 
         assert_eq!(
             probe, "[1]",
@@ -1748,12 +1736,8 @@ mod tests {
             calls: std::cell::Cell<usize>,
         }
 
-        impl crate::parser::InlineRenderer for OrdinalRenderer {
-            fn render_special_character(
-                &self,
-                _type_: crate::parser::SpecialCharacter,
-                dest: &mut String,
-            ) {
+        impl InlineRenderer for OrdinalRenderer {
+            fn render_special_character(&self, _type_: SpecialCharacter, dest: &mut String) {
                 self.calls.set(self.calls.get() + 1);
                 dest.push_str(&format!("[{}]", self.calls.get()));
             }
@@ -1778,7 +1762,7 @@ mod tests {
         let mut probe = String::new();
         parser
             .renderer
-            .render_special_character(crate::parser::SpecialCharacter::Lt, &mut probe);
+            .render_special_character(SpecialCharacter::Lt, &mut probe);
 
         assert_eq!(
             probe, "[2]",

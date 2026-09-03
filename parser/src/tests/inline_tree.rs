@@ -910,11 +910,7 @@ fn a_footnote_subtree_that_defers_a_reference_form_still_mirrors_what_it_holds()
 fn collect_footnote_refs<'a>(doc: &'a Document<'a>) -> Vec<Ref<'a>> {
     use crate::blocks::Block;
 
-    fn walk<'a>(
-        nodes: &[InlineNode<'a>],
-        in_footnote: bool,
-        out: &mut Vec<crate::inlines::Ref<'a>>,
-    ) {
+    fn walk<'a>(nodes: &[InlineNode<'a>], in_footnote: bool, out: &mut Vec<Ref<'a>>) {
         for node in nodes {
             match node {
                 InlineNode::Footnote(footnote) => walk(&footnote.children, true, out),
@@ -988,7 +984,7 @@ fn inline_tree_numbers_footnotes_in_document_order() {
 fn collect_refs<'a>(doc: &'a Document<'a>) -> Vec<Ref<'a>> {
     use crate::blocks::Block;
 
-    fn walk<'a>(nodes: &[InlineNode<'a>], out: &mut Vec<crate::inlines::Ref<'a>>) {
+    fn walk<'a>(nodes: &[InlineNode<'a>], out: &mut Vec<Ref<'a>>) {
         for node in nodes {
             match node {
                 InlineNode::Ref(reference) => {
@@ -1296,7 +1292,7 @@ fn inline_tree_build_tolerates_a_stateful_renderer() {
 fn collect_section_title_refs<'a>(doc: &'a Document<'a>) -> Vec<Ref<'a>> {
     use crate::blocks::{Block, FindBlocks};
 
-    fn refs_in<'a>(nodes: &[InlineNode<'a>], out: &mut Vec<crate::inlines::Ref<'a>>) {
+    fn refs_in<'a>(nodes: &[InlineNode<'a>], out: &mut Vec<Ref<'a>>) {
         for node in nodes {
             match node {
                 InlineNode::Ref(reference) => {
@@ -1311,10 +1307,7 @@ fn collect_section_title_refs<'a>(doc: &'a Document<'a>) -> Vec<Ref<'a>> {
         }
     }
 
-    fn walk<'a>(
-        blocks: impl Iterator<Item = &'a Block<'a>>,
-        out: &mut Vec<crate::inlines::Ref<'a>>,
-    ) {
+    fn walk<'a>(blocks: impl Iterator<Item = &'a Block<'a>>, out: &mut Vec<Ref<'a>>) {
         for block in blocks {
             if let Block::Section(section) = block {
                 refs_in(section.section_title_inlines(), out);
@@ -1548,10 +1541,10 @@ fn first_footnote<'a>(doc: &'a Document<'a>) -> Footnote<'a> {
 
 /// Every cross-reference node in `nodes`, recursing through formatting spans,
 /// reference children, and footnote subtrees.
-fn refs_in<'a>(nodes: &[InlineNode<'a>]) -> Vec<crate::inlines::Ref<'a>> {
+fn refs_in<'a>(nodes: &[InlineNode<'a>]) -> Vec<Ref<'a>> {
     let mut out = vec![];
 
-    fn walk<'a>(nodes: &[InlineNode<'a>], out: &mut Vec<crate::inlines::Ref<'a>>) {
+    fn walk<'a>(nodes: &[InlineNode<'a>], out: &mut Vec<Ref<'a>>) {
         for node in nodes {
             match node {
                 InlineNode::Ref(reference) => {
@@ -1635,7 +1628,7 @@ fn footnote_reference_keeps_an_empty_subtree() {
 
     use crate::blocks::Block;
 
-    let footnotes: Vec<crate::inlines::Footnote<'_>> = doc
+    let footnotes: Vec<Footnote<'_>> = doc
         .child_blocks()
         .filter_map(|block| match block {
             Block::Simple(simple) => Some(simple),
@@ -1988,7 +1981,7 @@ fn section_title_footnote_carries_its_subtree_and_resolved_xref() {
 
 /// A cross-reference node, unresolved.
 fn unresolved_xref() -> InlineNode<'static> {
-    crate::inlines::InlineNode::Ref(Box::new(crate::inlines::Ref {
+    InlineNode::Ref(Box::new(crate::inlines::Ref {
         variant: RefVariant::Xref,
         link_form: None,
         target: "tgt".into(),
@@ -2226,7 +2219,7 @@ fn description_term_tree<'a>(doc: &'a Document<'a>) -> Vec<InlineNode<'a>> {
 }
 
 /// One resolved destination, for the footnote-embedded list.
-fn fixed_destination() -> Vec<Option<crate::parser::ResolvedReference>> {
+fn fixed_destination() -> Vec<Option<ResolvedReference>> {
     vec![Some(crate::parser::ResolvedReference::new(
         "#tgt".to_string(),
         None,

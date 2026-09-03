@@ -9,6 +9,7 @@
 use crate::{
     Span,
     content::{Content, SubstitutionStep},
+    inlines::Image,
     parser::{InlineRenderer, RenderContext, SpecialCharacter},
     tests::{
         fixtures::{
@@ -81,12 +82,7 @@ fn overrides_one_method_and_inherits_the_rest() {
 struct FigureImages;
 
 impl InlineRenderer for FigureImages {
-    fn render_image(
-        &self,
-        image: &crate::inlines::Image<'_>,
-        context: &RenderContext,
-        dest: &mut String,
-    ) {
+    fn render_image(&self, image: &Image<'_>, context: &RenderContext, dest: &mut String) {
         // `image_uri` is not overridden, so this inherits the crate's data-uri
         // embedding, which reads the image bytes through the registered
         // `ImageFileHandler` — behavior a custom renderer previously could not

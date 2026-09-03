@@ -6,9 +6,9 @@
 use crate::{
     Parser, Span,
     content::Passthrough,
-    inlines::{InlineNode, RefVariant},
+    inlines::{InlineNode, Ref, RefVariant},
     parser::{
-        InlineRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
+        InlineRenderer, ReferenceResolver, ReferenceWarnings, RenderContext, ResolutionContext,
         ResolvedAttributes, ResolvedReference, XrefRenderParams,
     },
     strings::CowStr,
@@ -97,7 +97,7 @@ pub struct Content<'src> {
     /// effect at the end of a document is not generally what was in effect
     /// where this content was written.
     ///
-    /// # Why the attributes and not a whole [`RenderContext`](crate::parser::RenderContext)
+    /// # Why the attributes and not a whole [`RenderContext`]
     ///
     /// A fold also needs the path resolver and the file handlers. Those are
     /// *parse-wide configuration* rather than document state — they cannot
@@ -489,7 +489,7 @@ impl<'src> Content<'src> {
     ///
     /// # Why this takes `parser`
     ///
-    /// A fold needs a [`RenderContext`](crate::parser::RenderContext), which
+    /// A fold needs a [`RenderContext`], which
     /// pairs two things from different places. The **document attributes** are
     /// order-dependent — a `:imagesdir:` or `:icons:` line rebinds them for
     /// everything after it — so they must be the ones *this content* was
@@ -621,7 +621,7 @@ impl<'src> Content<'src> {
     /// Cross-references in the tree carry their resolved destination once a
     /// full [`Parser::parse`](crate::Parser::parse) has resolved the document's
     /// references: each resolved destination is mirrored into the corresponding
-    /// [`Ref`](crate::inlines::Ref) node, so a caller that walks
+    /// [`Ref`] node, so a caller that walks
     /// [`inlines`](Self::inlines) after the parse sees the same destinations
     /// the rendered string reflects. Before resolution — or for a standalone
     /// parse with no document catalog — a `Ref` node's destination is `None`.
@@ -698,7 +698,7 @@ impl<'src> Content<'src> {
         &mut self,
         tree: &[InlineNode<'src>],
         renderer: &dyn InlineRenderer,
-        context: &crate::parser::RenderContext,
+        context: &RenderContext,
     ) {
         if !tree_defers_xrefs(tree) {
             return;
@@ -1236,7 +1236,7 @@ fn tree_defers_xrefs(nodes: &[InlineNode<'_>]) -> bool {
 pub(crate) fn block_tree_xref_segments(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineRenderer,
-    context: &crate::parser::RenderContext,
+    context: &RenderContext,
 ) -> Vec<XrefSegment> {
     let mut out = Vec::new();
     collect_tree_xref_segments(nodes, renderer, context, &mut out);
@@ -1254,7 +1254,7 @@ pub(crate) fn block_tree_xref_segments(
 pub(crate) fn footnote_tree_xref_segments(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineRenderer,
-    context: &crate::parser::RenderContext,
+    context: &RenderContext,
 ) -> Vec<XrefSegment> {
     let mut out = Vec::new();
     collect_footnote_tree_xref_segments(nodes, renderer, context, &mut out);
@@ -1267,7 +1267,7 @@ pub(crate) fn footnote_tree_xref_segments(
 fn collect_tree_xref_segments(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineRenderer,
-    context: &crate::parser::RenderContext,
+    context: &RenderContext,
     out: &mut Vec<XrefSegment>,
 ) {
     for node in nodes {
@@ -1298,7 +1298,7 @@ fn collect_tree_xref_segments(
 fn collect_footnote_tree_xref_segments(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineRenderer,
-    context: &crate::parser::RenderContext,
+    context: &RenderContext,
     out: &mut Vec<XrefSegment>,
 ) {
     for node in nodes {
@@ -1340,9 +1340,9 @@ fn collect_footnote_tree_xref_segments(
 /// sweep therefore yields the same segment it yielded before one, which is what
 /// makes this derivation idempotent.
 pub(crate) fn xref_segment_from_node(
-    reference: &crate::inlines::Ref<'_>,
+    reference: &Ref<'_>,
     renderer: &dyn InlineRenderer,
-    context: &crate::parser::RenderContext,
+    context: &RenderContext,
 ) -> XrefSegment {
     let provided_text = (!reference.children.is_empty())
         .then(|| crate::content::inline_builder::fold_html(&reference.children, renderer, context));
@@ -1391,7 +1391,7 @@ pub(crate) fn xref_segment_from_node(
 fn carried_title_template(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineRenderer,
-    context: &crate::parser::RenderContext,
+    context: &RenderContext,
 ) -> (Vec<XrefTemplatePiece>, Vec<XrefSegment>) {
     let mut template: Vec<XrefTemplatePiece> = Vec::new();
     let mut segments = Vec::new();

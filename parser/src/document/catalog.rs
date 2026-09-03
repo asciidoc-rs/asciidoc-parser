@@ -1,6 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
 
-use crate::{content::FootnoteDeferred, internal::debug::DebugHashMapFrom, parser::XrefSignifier};
+use crate::{
+    content::FootnoteDeferred,
+    internal::debug::DebugHashMapFrom,
+    parser::{InlineRenderer, XrefSignifier},
+};
 
 /// Document catalog for tracking referenceable elements.
 ///
@@ -423,7 +427,7 @@ impl Footnote {
     pub(crate) fn resolve_references<'src>(
         &mut self,
         resolver: &dyn crate::parser::ReferenceResolver,
-        renderer: &dyn crate::parser::InlineRenderer,
+        renderer: &dyn InlineRenderer,
         warnings: &mut crate::parser::ReferenceWarnings<'src>,
         document_source: crate::Span<'src>,
         folded: Option<String>,

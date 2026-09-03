@@ -1,4 +1,7 @@
-use crate::{HasSpan, Span, attributes::Attrlist, inlines::InlineNode, strings::CowStr};
+use crate::{
+    HasSpan, Span, attributes::Attrlist, content::SubstitutionGroup, inlines::InlineNode,
+    strings::CowStr,
+};
 
 /// A formatted span, such as strong, emphasis, code, or mark. ASG:
 /// `inlineSpan`.
@@ -60,7 +63,7 @@ pub struct Styled<'src> {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct PassthroughWrapper {
     /// The substitution group the extraction pass resolved for the body.
-    pub subs: crate::content::SubstitutionGroup,
+    pub subs: SubstitutionGroup,
 
     /// The author's body, before that group was applied.
     pub text: String,
