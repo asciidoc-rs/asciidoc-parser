@@ -25,15 +25,9 @@ use crate::{
 /// without a target (`image:[]`) is thus left as literal text, matching
 /// Asciidoctor's `InlineImageMacroRx`.
 ///
-/// Shared `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) recognizes image and icon
-/// macros with the *exact* same pattern this string step matches with, changing
-/// only the recognition *sink* (a node instead of rendered markup) — which is
-/// what carries the target rule above onto the tree side unchanged.
-///
 /// [inline image]: https://docs.asciidoctor.org/asciidoc/latest/macros/images/
 /// [inline icon]: https://docs.asciidoctor.org/asciidoc/latest/macros/icons/
-pub(crate) static INLINE_IMAGE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_IMAGE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)                    
@@ -62,7 +56,7 @@ pub(crate) static INLINE_IMAGE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-pub(crate) fn basename(path: &str) -> String {
+pub(super) fn basename(path: &str) -> String {
     Path::new(path)
         .file_stem()
         .and_then(|s| s.to_str())
@@ -72,18 +66,13 @@ pub(crate) fn basename(path: &str) -> String {
 
 /// Matches a keyboard (`kbd:[…]`) or button (`btn:[…]`) UI macro.
 ///
-/// Shared `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) recognizes keyboard and
-/// button macros with the *exact* same pattern this string step matches with,
-/// changing only the recognition *sink* (a node instead of rendered markup).
-///
 /// ## Examples
 ///
 /// * `kbd:[F3]`
 /// * `kbd:[Ctrl+Shift+T]`
 /// * `kbd:[Ctrl+\]]`
 /// * `btn:[Save]`
-pub(crate) static INLINE_KBD_BTN_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_KBD_BTN_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)                    # extended mode; dot matches newline
@@ -107,10 +96,8 @@ pub(crate) static INLINE_KBD_BTN_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 /// delimiter, that trailing delimiter is preserved as the value of the final
 /// key (e.g. `kbd:[Ctrl + +]` yields `Ctrl` and `+`).
 ///
-/// Shared `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) splits a keyboard macro's
-/// keys exactly as this string step does.
-pub(crate) fn split_kbd_keys(raw: &str) -> Vec<String> {
+/// Splits a `kbd:` macro's key list on its delimiter.
+pub(super) fn split_kbd_keys(raw: &str) -> Vec<String> {
     let mut keys = raw.trim().to_string();
     if keys.contains(']') {
         keys = keys.replace("\\]", "]");
@@ -156,18 +143,13 @@ pub(crate) fn split_kbd_keys(raw: &str) -> Vec<String> {
 /// The shorthand form (`"File > Save"`) is intentionally not matched here; per
 /// the spec it is not on a standards track.
 ///
-/// Shared `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) recognizes menu macros
-/// with the *exact* same pattern this string step matches with, changing only
-/// the recognition *sink* (a node instead of rendered markup).
-///
 /// ## Examples
 ///
 /// * `menu:File[]`
 /// * `menu:File[Save]`
 /// * `menu:View[Zoom > Reset]`
 /// * `menu:Tools[Project, Build]`
-pub(crate) static INLINE_MENU_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_MENU_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)                        # extended mode; dot matches newline
@@ -191,7 +173,7 @@ pub(crate) static INLINE_MENU_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-pub(crate) fn normalize_text_lf_escaped_bracket(text: &str) -> String {
+pub(super) fn normalize_text_lf_escaped_bracket(text: &str) -> String {
     text.replace("\n", " ").replace("\\]", "]")
 }
 
@@ -206,13 +188,8 @@ pub(crate) fn normalize_text_lf_escaped_bracket(text: &str) -> String {
 /// behavior by absorbing any trailing `)` that follow the matched `))` —
 /// as the tree builder's index-term family still does.
 ///
-/// Shared `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) recognizes index terms
-/// with the *exact* same pattern this string step matches with, changing only
-/// the recognition *sink* (a node instead of rendered markup).
-///
 /// [index term]: https://docs.asciidoctor.org/asciidoc/latest/sections/user-index/
-pub(crate) static INLINE_INDEXTERM: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_INDEXTERM: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)                         # extended mode; dot matches newline
@@ -232,10 +209,9 @@ pub(crate) static INLINE_INDEXTERM: LazyLock<Regex> = LazyLock::new(|| {
 /// term onto a single line). When `unescape_brackets` is set (the macro forms),
 /// an escaped closing square bracket (`\]`) is also unescaped.
 ///
-/// Shared `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) normalizes a button
-/// macro's label exactly as this string step does.
-pub(crate) fn normalize_index_text(text: &str, unescape_brackets: bool) -> String {
+/// Normalizes an index term's text: trims it, collapses newlines to spaces,
+/// and, for a visible term, unescapes an escaped closing bracket.
+pub(super) fn normalize_index_text(text: &str, unescape_brackets: bool) -> String {
     let normalized = text.trim().replace('\n', " ");
     if unescape_brackets {
         normalized.replace("\\]", "]")
@@ -271,12 +247,7 @@ pub(crate) fn normalize_index_text(text: &str, unescape_brackets: bool) -> Strin
 // The single-pass builder derives the three capture-group sets from each
 // match span (see `inline_builder::macros::links::link_groups`), so the
 // numbering below is only referenced by that derivation's differential pin.
-//
-// Shared `pub(crate)` so the single-pass
-// [`inline_builder`](crate::content::inline_builder) recognizes auto-links and
-// formal-URL links with the *exact* same pattern this string step matches with,
-// changing only the recognition *sink* (a node instead of rendered markup).
-pub(crate) static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?msx)
@@ -318,13 +289,7 @@ pub(crate) static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Matches an inline link (`link:target[…]`) or `mailto:` macro.
-///
-/// Shared `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) recognizes the link and
-/// `mailto:` macros with the *exact* same pattern this string step matches
-/// with, changing only the recognition *sink* (a node instead of rendered
-/// markup).
-pub(crate) static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)                # (?x) extended mode, (?s) dot matches newline
@@ -364,12 +329,6 @@ pub(crate) static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 /// Precondition: Any new-line characters (`\n`) must be replaced with spaces
 /// prior to calling this function.
 ///
-/// Shared `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) can parse a link's
-/// attribute-list-bearing display text with the *exact* same interpretation
-/// this string step uses, changing only the recognition *sink* (a node field
-/// instead of a borrow of the node's own attribute list).
-///
 /// `escaping` names which of the link family's two display-text paths `text`
 /// came off: a verbatim slice of the source
 /// ([`Verbatim`](SplicedValueEscaping::Verbatim)) or the output of
@@ -377,7 +336,7 @@ pub(crate) static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 /// ([`MaskedPieceBytes`](SplicedValueEscaping::MaskedPieceBytes)),
 /// whose masked-piece invariant this parse's own attribute-reference
 /// substitution has to keep. See [`Attrlist::parse_tokened`].
-pub(crate) fn extract_attributes_from_text<'src>(
+pub(super) fn extract_attributes_from_text<'src>(
     text: Span<'src>,
     parser: &Parser,
     default_text: Option<&str>,
@@ -450,11 +409,9 @@ const CGI_ESCAPE_SET: &AsciiSet = &CONTROLS
     .add(b'|')
     .add(b'}');
 
-/// Shared `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) can encode a `mailto:`
-/// subject/body into the target exactly as this string step does when
-/// recognizing a `mailto:` macro's own comma-delimited attribute-list text.
-pub(crate) fn encode_uri_component(s: &str) -> String {
+/// Percent-encodes a `mailto:` macro's subject/body into its target, matching
+/// Ruby's `CGI.escape`.
+pub(super) fn encode_uri_component(s: &str) -> String {
     // First escape with percent-encoding.
     let encoded = utf8_percent_encode(s, CGI_ESCAPE_SET).to_string();
 
@@ -470,12 +427,7 @@ pub(crate) fn encode_uri_component(s: &str) -> String {
 ///
 /// # Example
 /// `doc.writer@example.com`
-///
-/// Shared `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) recognizes bare e-mail
-/// auto-links with the *exact* same pattern this string step matches with,
-/// changing only the recognition *sink* (a node instead of rendered markup).
-pub(crate) static INLINE_EMAIL: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_EMAIL: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?x)                         # verbose mode (ignore whitespace & comments)
@@ -511,19 +463,13 @@ pub(crate) static INLINE_EMAIL: LazyLock<Regex> = LazyLock::new(|| {
 /// Asciidoctor). The documented escape `[\[[id]]]` likewise does not start with
 /// `[[[` and is handled there.
 ///
-/// Shared `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) recognizes a
-/// bibliography anchor with the *exact* same pattern this string step matches
-/// with, changing only the recognition *sink* (an
-/// [`Anchor`](crate::inlines::Anchor) node whose `is_bibliography` is set,
-/// instead of rendered markup). Group 1 is the label and group 2 its optional
-/// xreftext.
+/// Group 1 is the label and group 2 its optional xreftext.
 ///
 /// ## Examples
 ///
 /// * `[[[label]]]`
 /// * `[[[label,xreftext]]]`
-pub(crate) static INLINE_BIBLIO_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_BIBLIO_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?x)
@@ -549,14 +495,10 @@ pub(crate) static INLINE_BIBLIO_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
 /// * `anchor:idname[]`
 /// * `anchor:idname[Reference Text]`
 ///
-/// Shared `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) recognizes inline anchors
-/// with the *exact* same pattern this string step matches with, changing only
-/// the recognition *sink* (an [`Anchor`](crate::inlines::Anchor) node instead
-/// of rendered markup). Group 1 is the optional escape backslash, groups 2/3
-/// the shorthand id and its optional reference text, and groups 4/5 the
-/// `anchor:id[…]` macro id and its optional reference text.
-pub(crate) static INLINE_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
+/// Group 1 is the optional escape backslash, groups 2/3 the shorthand id and
+/// its optional reference text, and groups 4/5 the `anchor:id[…]` macro id
+/// and its optional reference text.
+pub(super) static INLINE_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?x)
@@ -595,13 +537,9 @@ pub(crate) static INLINE_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
 /// Note that the special-characters substitution runs before macros, so by this
 /// point `<<` and `>>` have already become `&lt;&lt;` and `&gt;&gt;`.
 ///
-/// Shared `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) recognizes
-/// cross-references with the *exact* same pattern this string step matches
-/// with, changing only the recognition *sink* (a node instead of a deferred
-/// placeholder). Group 1 is the optional escape backslash, group 2 the
-/// shorthand's inner text, group 3 the `xref:` macro target, and group 4 the
-/// macro's bracketed text.
+/// Group 1 is the optional escape backslash, group 2 the shorthand's inner
+/// text, group 3 the `xref:` macro target, and group 4 the macro's bracketed
+/// text.
 ///
 /// ## Examples
 ///
@@ -609,7 +547,7 @@ pub(crate) static INLINE_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
 /// * `<<idname,Reference Text>>`
 /// * `xref:idname[]`
 /// * `xref:idname[Reference Text]`
-pub(crate) static INLINE_XREF: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_XREF: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)
@@ -635,7 +573,7 @@ pub(crate) static INLINE_XREF: LazyLock<Regex> = LazyLock::new(|| {
 /// An unset attribute yields `None` (the target's reftext is used verbatim). A
 /// set-but-empty value (`:xrefstyle:`) and any unrecognized value both resolve
 /// to [`XrefStyle::Basic`], mirroring Asciidoctor.
-pub(crate) fn document_xrefstyle(parser: &Parser) -> Option<XrefStyle> {
+pub(super) fn document_xrefstyle(parser: &Parser) -> Option<XrefStyle> {
     match parser.attribute_value("xrefstyle") {
         InterpretedValue::Value(value) => Some(XrefStyle::parse(&value)),
         InterpretedValue::Set => Some(XrefStyle::Basic),
@@ -660,7 +598,7 @@ pub(crate) fn document_xrefstyle(parser: &Parser) -> Option<XrefStyle> {
 /// inspecting the text that follows the match.
 ///
 /// [footnote]: https://docs.asciidoctor.org/asciidoc/latest/macros/footnote/
-pub(crate) static INLINE_FOOTNOTE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_FOOTNOTE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)                     # extended mode; dot matches newline
@@ -681,11 +619,7 @@ pub(crate) static INLINE_FOOTNOTE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Sniffs a leading URI scheme (e.g. `https://`), used to strip it from a link's
 /// display text under the `hide-uri-scheme` document attribute.
-///
-/// Shared `pub(crate)` so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) reproduces the same
-/// `hide-uri-scheme` display text the string step's link macro computes.
-pub(crate) static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(r#"^\p{alpha}[\p{alpha}\p{digit}.+-]+:/{0,2}"#).unwrap()
 });

@@ -367,7 +367,7 @@ impl<'src> Content<'src> {
     /// [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup),
     /// after the pipeline has run and the deferred cross-references (if any)
     /// are known.
-    pub(crate) fn set_render_attributes(&mut self, attributes: ResolvedAttributes) {
+    pub(super) fn set_render_attributes(&mut self, attributes: ResolvedAttributes) {
         self.render_attributes = Some(Box::new(attributes));
     }
 
@@ -598,7 +598,7 @@ impl<'src> Content<'src> {
     /// Records the inline passthroughs read off this content's tree, so they
     /// remain observable via [`passthroughs`](Self::passthroughs) after the
     /// parse.
-    pub(crate) fn set_passthroughs(&mut self, passthroughs: Vec<Passthrough>) {
+    pub(super) fn set_passthroughs(&mut self, passthroughs: Vec<Passthrough>) {
         self.passthroughs = passthroughs;
     }
 
@@ -694,7 +694,7 @@ impl<'src> Content<'src> {
     /// A cross-reference form the builder declines to recognize is simply not
     /// a cross-reference of this content — the documented-divergence reading
     /// every such form already has.
-    pub(crate) fn set_tree_xrefs(
+    pub(super) fn set_tree_xrefs(
         &mut self,
         tree: &[InlineNode<'src>],
         renderer: &dyn InlineRenderer,
@@ -1233,7 +1233,7 @@ fn tree_defers_xrefs(nodes: &[InlineNode<'_>]) -> bool {
 /// **not** descend into a [`Footnote`](InlineNode::Footnote) subtree, whose
 /// segments are re-homed out of the block template.
 /// [`footnote_tree_xref_segments`] derives the complementary list.
-pub(crate) fn block_tree_xref_segments(
+fn block_tree_xref_segments(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineRenderer,
     context: &RenderContext,
@@ -1251,7 +1251,7 @@ pub(crate) fn block_tree_xref_segments(
 /// A footnote cannot nest another footnote, so handing each footnote's own
 /// children to the block collector cannot skip anything — the same reuse
 /// [`assign_footnote_tree_xrefs`] makes.
-pub(crate) fn footnote_tree_xref_segments(
+fn footnote_tree_xref_segments(
     nodes: &[InlineNode<'_>],
     renderer: &dyn InlineRenderer,
     context: &RenderContext,
@@ -1339,7 +1339,7 @@ fn collect_footnote_tree_xref_segments(
 /// [`Content::mirror_tree_xref_resolution`]. A node re-read after a resolution
 /// sweep therefore yields the same segment it yielded before one, which is what
 /// makes this derivation idempotent.
-pub(crate) fn xref_segment_from_node(
+pub(super) fn xref_segment_from_node(
     reference: &Ref<'_>,
     renderer: &dyn InlineRenderer,
     context: &RenderContext,
@@ -1558,14 +1558,13 @@ pub(crate) fn render_xref_template(
 /// A segment's fields are the tree's reads — the document's own text, never in
 /// escaped form; `derived` and `resolved` never entered it either.
 ///
-/// `pub(crate)` rather than private: [`fold_deferring_xrefs`]'s own deferred
-/// fold (crate-internal to `inline_builder`) renders a **nested**
-/// cross-reference's unresolved fallback in place through this same function,
-/// so a footnote's baked-literal reading and [`render_xref_template`]'s
-/// spliced one can never drift apart.
+/// `pub(super)` rather than private: [`fold_deferring_xrefs`]'s own deferred
+/// fold renders a **nested** cross-reference's unresolved fallback in place
+/// through this same function, so a footnote's baked-literal reading and
+/// [`render_xref_template`]'s spliced one can never drift apart.
 ///
 /// [`fold_deferring_xrefs`]: crate::content::inline_builder::fold_deferring_xrefs
-pub(crate) fn render_xref_segment(
+pub(super) fn render_xref_segment(
     xref: &XrefSegment,
     renderer: &dyn InlineRenderer,
     out: &mut String,

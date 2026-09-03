@@ -25,7 +25,7 @@ const ASCIIDOC_EXTENSIONS: [&str; 5] = [".adoc", ".asciidoc", ".asc", ".ad", ".t
 
 /// How a cross-reference target was interpreted.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum XrefTarget {
+pub(super) enum XrefTarget {
     /// A reference to the current document: the string is the ID (or reference
     /// text) to look up in the document's catalog.
     SameDocument(String),
@@ -52,7 +52,7 @@ pub(crate) enum XrefTarget {
 /// rules. `macro_form` distinguishes the `xref:target[]` macro from the
 /// `<<target>>` shorthand: the two differ in how a target *without* a `#` is
 /// read, and in which file extensions imply an AsciiDoc source document.
-pub(crate) fn interpret_xref_target(target: &str, macro_form: bool) -> XrefTarget {
+pub(super) fn interpret_xref_target(target: &str, macro_form: bool) -> XrefTarget {
     // A `#` immediately preceded by an `&` is part of a numeric character
     // reference (`&#8658;`), not a document/fragment separator. As in
     // Asciidoctor, only the *first* `#` is considered: if it is disqualified
@@ -162,7 +162,7 @@ const SELF_REFERENCE_FALLBACK_TEXT: &str = "[^top]";
 /// reference: `relfileprefix` is prepended, and — for a path that names an
 /// AsciiDoc source document — `relfilesuffix` (which falls back to
 /// `outfilesuffix`) is appended in place of the extension that was stripped.
-pub(crate) fn other_document_reference(
+pub(super) fn other_document_reference(
     parser: &Parser,
     path: &str,
     source: bool,
@@ -197,7 +197,7 @@ pub(crate) fn other_document_reference(
 /// Builds the destination of a cross reference to the current document as a
 /// whole: the top of this document, named by the document's `reftext` or, if it
 /// has none, its title.
-pub(crate) fn this_document_reference(parser: &Parser) -> DerivedReference {
+pub(super) fn this_document_reference(parser: &Parser) -> DerivedReference {
     let reftext = parser.attribute_value("reftext");
     let doctitle = parser.attribute_value("doctitle");
 

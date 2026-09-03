@@ -85,7 +85,7 @@ impl Passthrough {
     /// where the author wrote `A, B, C, D`. Document order is the deliberate
     /// choice; extraction order is simply an artifact of the multi-pass
     /// extraction implementation.
-    pub(crate) fn from_tree(nodes: &[InlineNode<'_>]) -> Vec<Self> {
+    pub(super) fn from_tree(nodes: &[InlineNode<'_>]) -> Vec<Self> {
         let mut out = vec![];
         collect_from_tree(nodes, &mut out);
         out
@@ -160,7 +160,7 @@ fn collect_from_tree(nodes: &[InlineNode<'_>], out: &mut Vec<Passthrough>) {
 ///
 /// NOTE: We have to support an empty `pass:[]` for compatibility with
 /// AsciiDoc.py.
-pub(crate) static INLINE_PASS_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_PASS_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)
@@ -206,7 +206,7 @@ pub(crate) static INLINE_PASS_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 /// * `[x-]\`text\``
 ///
 /// NOTE: We do not support compat-mode in the Rust implementation.
-pub(crate) static INLINE_PASS: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_PASS: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)
@@ -250,7 +250,7 @@ pub(crate) static INLINE_PASS: LazyLock<Regex> = LazyLock::new(|| {
 ///
 /// The content group requires at least one character whose final character is
 /// not a backslash, so an empty macro (e.g. `stem:[]`) is not recognized.
-pub(crate) static INLINE_STEM_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_STEM_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)
@@ -269,7 +269,7 @@ pub(crate) static INLINE_STEM_MACRO: LazyLock<Regex> = LazyLock::new(|| {
 /// Resolves the STEM notation to apply for a bare `stem` macro or block from
 /// the `stem` document attribute. Any value other than `latexmath`, `latex`, or
 /// `tex` (including an unset, empty, or unrecognized value) maps to AsciiMath.
-pub(crate) fn stem_notation(parser: &Parser) -> QuoteType {
+pub(super) fn stem_notation(parser: &Parser) -> QuoteType {
     match parser.attribute_value("stem").as_maybe_str() {
         Some("latexmath") | Some("latex") | Some("tex") => QuoteType::LatexMath,
         _ => QuoteType::AsciiMath,

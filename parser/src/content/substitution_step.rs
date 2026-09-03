@@ -140,10 +140,6 @@ impl Replacer for SpecialCharacterReplacer<'_> {
 /// One quoted-text recognition rule: a [`QuoteType`]/[`QuoteScope`] pairing and
 /// the pattern that recognizes it.
 ///
-/// The rules are `pub(crate)` (via [`quote_subs`]) so the single-pass
-/// [`inline_builder`](crate::content::inline_builder) reuses these *exact*
-/// same patterns rather than duplicating them at its own recognition sink.
-///
 /// The pattern is compiled through `regex-automata`'s meta engine rather than
 /// the `regex` crate's own wrapper of it, because the recognition sink's
 /// candidate scan needs the one thing the wrapper does not expose: an
@@ -169,7 +165,7 @@ pub(crate) struct QuoteSub {
 /// (The superscript and subscript patterns were built without the flag, but
 /// neither contains a `.` metacharacter, so the flag is inert for them and
 /// one shared configuration serves all twelve.)
-pub(crate) fn quote_sub(type_: QuoteType, scope: QuoteScope, source: &'static str) -> QuoteSub {
+pub(super) fn quote_sub(type_: QuoteType, scope: QuoteScope, source: &'static str) -> QuoteSub {
     #[allow(clippy::unwrap_used)]
     let pattern = regex_automata::meta::Regex::builder()
         .syntax(regex_automata::util::syntax::Config::new().dot_matches_new_line(true))
@@ -292,7 +288,7 @@ static QUOTE_SUBS: LazyLock<Vec<QuoteSub>> = LazyLock::new(|| {
     ]
 });
 
-pub(crate) static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     // Either a `counter`/`counter2` directive (group 2) with its `name[:seed]`
     // expression (group 3), or a plain attribute name (group 4). This mirrors
     // the `counter2?:` branch of Asciidoctor's `AttributeReferenceRx`.
@@ -774,34 +770,26 @@ pub(crate) fn substitute_attributes_in_reftext<'src>(
 
 /// One character-replacement recognition rule: a
 /// [`CharacterReplacementType`] and the [`Regex`] that recognizes it.
-///
-/// The rules are `pub(crate)` (via [`character_replacements`]) so the
-/// single-pass [`inline_builder`](crate::content::inline_builder) reuses these
-/// *exact* same patterns rather than duplicating them at its own recognition
-/// sink. This mirrors how [`quote_subs`] is shared.
-pub(crate) struct CharacterReplacement {
-    pub(crate) type_: CharacterReplacementType,
-    pub(crate) pattern: Regex,
+pub(super) struct CharacterReplacement {
+    pub(super) type_: CharacterReplacementType,
+    pub(super) pattern: Regex,
 }
 
-/// The ordered character-replacement recognition rules, shared with the
-/// single-pass [`inline_builder`](crate::content::inline_builder). The order is
+/// The ordered character-replacement recognition rules. The order is
 /// significant: it encodes Asciidoctor's precedence (see [`REPLACEMENTS`]).
-pub(crate) fn character_replacements() -> &'static [CharacterReplacement] {
+pub(super) fn character_replacements() -> &'static [CharacterReplacement] {
     &REPLACEMENTS
 }
 
 /// Reports whether `text` contains any character that could open a
-/// character-replacement construct. A cheap pre-filter (shared with the
-/// single-pass builder) that lets a caller skip the full pattern sweep when
-/// nothing replaceable is present.
+/// character-replacement construct. A cheap pre-filter that lets a caller
+/// skip the full pattern sweep when nothing replaceable is present.
 pub(crate) fn maybe_has_replacements(text: &str) -> bool {
     REPLACEABLE_TEXT_SNIFF.is_match(text)
 }
 
-/// The hard-line-break recognition pattern (a line ending in ` +`), shared with
-/// the single-pass [`inline_builder`](crate::content::inline_builder).
-pub(crate) fn hard_line_break_pattern() -> &'static Regex {
+/// The hard-line-break recognition pattern (a line ending in ` +`).
+pub(super) fn hard_line_break_pattern() -> &'static Regex {
     &HARD_LINE_BREAK
 }
 
@@ -920,7 +908,7 @@ const ENTITY_NAME: &str =
 /// string, so the entity becomes its own
 /// [`CharRef`](crate::inlines::InlineNode::CharRef)`::Entity` child rather than
 /// text a fold would escape a second time.
-pub(crate) fn restored_entity_pattern() -> &'static Regex {
+pub(super) fn restored_entity_pattern() -> &'static Regex {
     &RESTORED_ENTITY
 }
 
@@ -969,7 +957,7 @@ static CUSTOM_CALLOUT_TAIL_RX: LazyLock<Regex> = LazyLock::new(|| {
 /// The default-mode regexes and both tail regexes are constant, so they are
 /// built once. Only a custom (non-empty) prefix requires building a regex from
 /// the attribute value, which is borrowed otherwise.
-pub(crate) fn build_callout_regexes(
+pub(super) fn build_callout_regexes(
     line_comment: Option<&str>,
 ) -> (Cow<'static, Regex>, &'static Regex) {
     match line_comment {
