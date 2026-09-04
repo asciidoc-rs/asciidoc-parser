@@ -3,9 +3,10 @@
 //! See this module's own `README.md` for the background this doc comment
 //! assumes — how the crate's inline-substitution implementation moved from
 //! string rewriting to this tree, the escaping-order rule several steps
-//! below refer to, how a construct with no `Span`-typed field recovers its
-//! text from a level's match string, and what "defer"/"deferred" means
-//! throughout the comments below (several distinct senses share the word).
+//! below refer to, and how a construct with no `Span`-typed field recovers
+//! its text from a level's match string. See "What \"defer\" means" below
+//! for what "defer"/"deferred" means throughout the comments here (several
+//! distinct senses share the word).
 //!
 //! Each substitution step is recast as a **transducer** over a node list,
 //! `Vec<InlineNode<'src>> -> Vec<InlineNode<'src>>`, that refines the tree in
@@ -347,6 +348,63 @@
 //! deferred elsewhere in this module is left as literal text in the tree
 //! (never a wrong node), so the fold-parity guarantee is scoped to the
 //! claimed vocabulary.
+//!
+//! # What "defer" means
+//!
+//! A family that **defers** a construct in some shape does not recognize it as
+//! a node at all: the shape's source text is left untouched in the tree, as
+//! ordinary [`Text`](InlineNode::Text) — the same literal reading the retired
+//! string-substitution pipeline gave it. This is the module's most common
+//! sense of the word, used throughout the macro families' own doc comments
+//! and gate functions ([`range_is_verbatim`](macros::image::range_is_verbatim),
+//! [`range_is_verbatim_or_synthesized`](macros::image::range_is_verbatim_or_synthesized),
+//! and the family-specific gates built on them). Each site that defers a
+//! shape pairs the comment with a divergence or golden test pinning that the
+//! fold output still matches what the string pipeline produced — a construct
+//! this module declines to structure is never silently rendered *wrong*, only
+//! less richly.
+//!
+//! Deferred text is picked back up in exactly one way, and otherwise not at
+//! all:
+//!
+//! - **By a later step in the same build.** [`apply_attribute_references`]
+//!   splices a set attribute's value in as plain text; a macro embedded in that
+//!   value (an image's attribute-list-bearing bracket, a wholly expanded
+//!   `link:`/`mailto:` target) is not recognized there — it is picked up by
+//!   [`apply_macros`], which runs later in the same [`build_for_group`] call
+//!   and scans the now-spliced text like any other. See
+//!   [`apply_attribute_references`]'s own doc comment for the shapes it defers
+//!   this way, and why.
+//! - **Never, for every other site.** The overwhelming majority of "defers"
+//!   comments name a shape no later step is prepared to recognize either — a
+//!   `Styled` span's rendered markup, a construct split across an opaque piece
+//!   — so the text simply stays literal for the rest of the build. This is
+//!   deliberate scope, not a gap: each such site is pinned by its own test
+//!   showing the fold still matches the golden reading.
+//!
+//! Two other, similarly-named mechanisms in this module are unrelated to this
+//! one:
+//!
+//! - **Recognition side effects** (catalog registration, warnings) are also
+//!   deferred, but to a single replay pass after the tree is folded — see
+//!   "Recognition side effects" below.
+//! - A **deferred cross-reference** is a distinct concept entirely: a
+//!   [`Ref`](InlineNode::Ref) node whose destination is not yet known at build
+//!   time, resolved in place once the document's catalog is complete (see
+//!   [`fold_deferring_xrefs`]'s own doc comment). It has nothing to do with a
+//!   family declining to recognize a construct.
+//!
+//! [`attribute_refs`] uses "defer" a third way, narrower than either. A
+//! missing-attribute reference under `AttributeMissing::Drop`/
+//! `AttributeMissing::DropLine` *is* recognized, as an
+//! `AttributeMatchKind::DropMissing` match — what's deferred is only the
+//! decision of what removing it actually does to the surrounding line, since
+//! that requires seeing every match at the level together. `surviving_lines`
+//! picks that decision up once recognition of the whole level is complete.
+//! The one exception is the two shapes [`apply_attribute_references`]'s own
+//! "shapes it defers" section names, where that line-based reasoning cannot
+//! be trusted at all: those fall back to leaving the reference literal, so
+//! `surviving_lines` never gets a chance to resolve them either.
 //!
 //! # Recognition side effects
 //!

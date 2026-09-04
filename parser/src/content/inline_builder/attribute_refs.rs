@@ -46,8 +46,8 @@ use crate::{
 /// leave the reference literal, which this step reproduces by recording no
 /// match at all — the surrounding gap logic then emits the source text
 /// unchanged. [`AttributeMissing::Drop`] and [`AttributeMissing::DropLine`]
-/// *remove* content instead, so they need the line granularity the string
-/// pipeline's own `apply_attributes` gets from its line loop: see
+/// *remove* content instead, so they need the line granularity
+/// `AttributeReplacer`'s own `apply_attributes` gets from its line loop: see
 /// [`MissingHandling`] and [`surviving_lines`] for how this transducer
 /// reproduces it, and for the two shapes it defers.
 ///

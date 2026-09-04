@@ -532,11 +532,10 @@ impl HtmlInlineRenderer {
     /// runs with
     /// each of them — and each restored range of the macro-level `imagesdir`
     /// value — replaced by an index-keyed `\u{96}`*n*`\u{97}` token, the
-    /// bodies spliced back into the resolved path afterwards. This is the
-    /// string substitution pipeline's own order: its `web_path` only ever
-    /// sees the sentinel (no space to percent-encode, no backslash to
-    /// posixify, no `/` or `.` for the segment arithmetic to read), and
-    /// `Passthroughs::restore_to`
+    /// bodies spliced back into the resolved path afterwards. The sentinel is
+    /// chosen so `web_path` only ever sees an opaque token (no space to
+    /// percent-encode, no backslash to posixify, no `/` or `.` for the
+    /// segment arithmetic to read), and `Passthroughs::restore_to`
     /// splices the body into the finished `src` — so a fold over restored
     /// values reproduces the same bytes, identically on every platform.
     ///
@@ -593,12 +592,10 @@ impl HtmlInlineRenderer {
 /// `first_index`, returning the masked text alongside the bodies the tokens
 /// stand for.
 ///
-/// The token spelling is the substitution pipeline's own passthrough sentinel,
-/// which is the point: handed to `web_path`, the masked text has the very
-/// shape the string pipeline's own resolver sees — an opaque run carrying no
-/// space, separator, or dot — so both resolve identically, and
-/// [`splice_restored_bodies`] then restores each body exactly where
-/// `Passthroughs::restore_to` splices its own. A range that does not fall on
+/// The token is an opaque run carrying no space, separator, or dot — the
+/// shape `web_path` resolves cleanly — so [`splice_restored_bodies`] then
+/// restores each body exactly where `Passthroughs::restore_to` splices its
+/// own. A range that does not fall on
 /// `value`'s character boundaries (no caller produces one) is skipped rather
 /// than split.
 fn mask_restored_ranges<'v>(
@@ -994,8 +991,8 @@ impl InlineRenderer for HtmlInlineRenderer {
         // As in `render_image`, a target restored from a masked construct
         // resolves with its restored ranges masked — the whole `icon_uri`
         // computation included, since its extension probe (`has_extname`)
-        // must read the sentinel-shaped bytes the string pipeline's own
-        // probe reads — and the bodies splice back in afterwards.
+        // must read the same opaque, dot-free sentinel bytes `web_path`'s own
+        // probe does — and the bodies splice back in afterwards.
         let src = if icon.restored_target_ranges.is_empty() {
             self.icon_uri(target, attrlist, context)
         } else {
