@@ -3,8 +3,9 @@
 //! See this module's own `README.md` for the background this doc comment
 //! assumes — how the crate's inline-substitution implementation moved from
 //! string rewriting to this tree, the escaping-order rule several steps
-//! below refer to, and how a construct with no `Span`-typed field recovers
-//! its text from a level's match string.
+//! below refer to, how a construct with no `Span`-typed field recovers its
+//! text from a level's match string, and what "defer"/"deferred" means
+//! throughout the comments below (several distinct senses share the word).
 //!
 //! Each substitution step is recast as a **transducer** over a node list,
 //! `Vec<InlineNode<'src>> -> Vec<InlineNode<'src>>`, that refines the tree in
@@ -13,8 +14,7 @@
 //!
 //! 1. **Honest per-node spans.** A node is sliced straight from the source
 //!    [`Span`], so its `location` reports the real `line`/`col`/`offset` of the
-//!    construct (issue #944), instead of every node carrying the whole-content
-//!    span.
+//!    construct, instead of every node carrying the whole-content span.
 //! 2. **`'src` borrowing by construction.** A verbatim text run's `value`
 //!    borrows the very bytes its `location` covers, so the common case does not
 //!    allocate.
@@ -52,16 +52,20 @@
 //!   pattern. A `counter`/`counter2` directive resolves *and advances* the
 //!   named counter via [`Parser::counter`], the same required side effect
 //!   [`apply_footnotes`] performs for footnote numbering. A missing-attribute
-//!   reference under `AttributeMissing::Drop` / `::DropLine` is deferred (see
-//!   [`apply_attribute_references`] for why). A character replacement *inside*
-//!   an expanded value ((C) → ©, `--`, …) is recognized too:
-//!   [`build_match_string`](quotes::build_match_string) looks inside a
-//!   [`synthesized`](quotes::Piece::synthesized) run rather than treating it as
-//!   opaque, and no **macro** family defers there. An [`Attrlist`] a node
-//!   carries needs no `'src` slice of its own — an image's bracket, both link
-//!   families' attribute-list-bearing display texts, and an attributed span's
-//!   own list are parsed from the level's own match string and
-//!   [`into_owned`](Attrlist::into_owned)ed off it — so
+//!   reference under `AttributeMissing::Drop` / `::DropLine` *is* recognized
+//!   (unlike this doc comment's other uses of "defer") — what's deferred is
+//!   only the decision of what removing it does to the surrounding line, which
+//!   `surviving_lines` picks up once every match at the level is known (see
+//!   [`apply_attribute_references`] and the README's "What \"defer\" means"
+//!   section for the two narrower shapes this can't resolve at all). A
+//!   character replacement *inside* an expanded value ((C) → ©, `--`, …) is
+//!   recognized too: [`build_match_string`](quotes::build_match_string) looks
+//!   inside a [`synthesized`](quotes::Piece::synthesized) run rather than
+//!   treating it as opaque, and no **macro** family defers there. An
+//!   [`Attrlist`] a node carries needs no `'src` slice of its own — an image's
+//!   bracket, both link families' attribute-list-bearing display texts, and an
+//!   attributed span's own list are parsed from the level's own match string
+//!   and [`into_owned`](Attrlist::into_owned)ed off it — so
 //!   [`range_is_verbatim`](macros::image::range_is_verbatim) survives only
 //!   where a *borrow* is still preferred, not as a boundary. And a macro
 //!   needing only its own *text* (no `Span`-typed field) — an anchor's id, a
@@ -332,7 +336,8 @@
 //!     https://docs.asciidoctor.org/asciidoc/latest/subs/replacements/
 //!
 //! This module is **the production tree source** for every parse:
-//! `SubstitutionGroup::apply` calls [`build_for_group`] — the group-aware
+//! [`SubstitutionGroup::apply`](crate::content::SubstitutionGroup::apply) calls
+//! [`build_for_group`] — the group-aware
 //! entry point mirroring the step selection for the content's substitution
 //! group — over the pre-substitution content value, against a counter-safe
 //! clone of the parser, and stores the result on
@@ -475,7 +480,7 @@ pub(crate) fn build<'src>(
 ///   [`from_filtered_lines`](crate::content::Content::from_filtered_lines)'s
 ///   single-surviving-line fast path borrowed unmodified): every node built
 ///   from it gets an honest, precise `'src` span, sliced straight from
-///   `location` (issue #944).
+///   `location`.
 /// - **`value` differs from `location.data()`** (a multi-line block whose
 ///   surviving lines were joined with `\n`, or any other filtered value with no
 ///   single contiguous `'src` slice of its own): the seed is *synthesized* —

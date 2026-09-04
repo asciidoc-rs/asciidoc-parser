@@ -1640,7 +1640,7 @@ mod tests {
         assert_eq!(reference.target.as_ref(), "foo");
         assert_eq!(reference.children.len(), 3);
 
-        // Each recovered piece keeps its own precise span (#944).
+        // Each recovered piece keeps its own precise span.
         assert_text(&reference.children[0], "a", 1, 10);
 
         match &reference.children[1] {

@@ -417,9 +417,6 @@ stand as the crate's own settled decisions.
 ## 10. Relationship to existing issues
 
 - **#892** — resolved: inline content is exposed as structure, not opaque HTML.
-- **#943** — subsumed: the read-only tree is canonical rather than an additive, opt-in layer.
-- **#944** — resolved: the single-pass builder assigns per-node source positions by span
-  containment (§3.4).
 - **#564** — resolved: the `attribute-missing` diagnostic uses the offending node's own span
   rather than a per-line correlation hack.
 - **#942** — superseded: its `InlineNode` shape and marker-recording renderer were reused as

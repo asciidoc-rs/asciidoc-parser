@@ -187,7 +187,7 @@ pub(super) fn unescaped_value_children<'src>(
 ///
 /// When `value` is exactly the source its `location` covers — the common
 /// verbatim run — each sub-node is sliced from `location`, so its
-/// `line`/`col`/`offset` stay honest (issue #944) and its run text borrows from
+/// `line`/`col`/`offset` stay honest and its run text borrows from
 /// `'src`. When `value` is *synthesized* — it has no source of its own — the
 /// runs are owned slices of the value and every sub-node falls back to the
 /// whole `location` span, the documented coarse fallback.

@@ -3196,7 +3196,7 @@ mod tests {
         // A display text crossing an escaped special is rebuilt out of the
         // nodes it covers rather than baked into one `Text` child: the special
         // stays the `CharRef` it already is — keeping its own precise `'src`
-        // span (#944) — and folds back to the same entity, where a single
+        // span — and folds back to the same entity, where a single
         // `Text` holding `&lt;` would be escaped a
         // second time.
         let source = "link:index.html[a < b]";
@@ -4862,7 +4862,7 @@ mod tests {
         // `apply_special_characters` made, so the target this pass computes is
         // the correctly escaped one. A bare link's shown text *is* that
         // target, so it is recovered from the URL's own range as structured
-        // children (each special keeping its precise `'src` span, #944) rather
+        // children (each special keeping its precise `'src` span) rather
         // than baked, already escaped, into one `Text` the fold would escape
         // twice.
         let source = "https://example.org/?a=1&b=2";
