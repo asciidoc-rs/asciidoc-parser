@@ -40,6 +40,6 @@ use substitution_step::{
     hard_line_break_pattern, restored_entity_pattern,
 };
 pub(crate) use substitution_step::{
-    AttributeMissing, QuoteSub, apply_attributes, maybe_has_replacements, quote_subs,
-    substitute_attributes_in_macro_target, substitute_attributes_in_reftext,
+    AttributeMissing, QuoteSub, apply_attributes, apply_special_characters, maybe_has_replacements,
+    quote_subs, substitute_attributes_in_macro_target, substitute_attributes_in_reftext,
 };

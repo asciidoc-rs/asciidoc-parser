@@ -602,7 +602,6 @@ mod tests {
     };
     use crate::{
         Span,
-        content::{Content, SubstitutionStep},
         inlines::{
             Anchor, CharRef, Footnote, InlineNode, PassthroughOrigin, RawForm, RawOrigin, Ref,
             RefVariant, SpanForm, StyleVariant, Styled,
@@ -842,10 +841,6 @@ mod tests {
     /// The frozen recording (see `parser/snapshots/README.md`) for `source`,
     /// used as the golden oracle.
     fn golden(source: &str) -> String {
-        let parser = crate::Parser::default();
-        let mut content = Content::from(Span::new(source));
-        SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
-
         crate::content::inline_builder::snapshot::recorded("special_chars", source)
     }
 

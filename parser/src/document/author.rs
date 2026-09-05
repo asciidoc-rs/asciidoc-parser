@@ -845,14 +845,14 @@ pub(crate) fn matches_author_pattern(source: &str) -> bool {
 /// references in the literal text are preserved (see
 /// [`apply_author_special_characters`]).
 fn apply_author_subs(source: &str, parser: &Parser) -> String {
-    use crate::content::SubstitutionStep;
+    use crate::{attributes::element_attribute::SplicedValueEscaping, content::apply_attributes};
 
     let with_special_characters = apply_author_special_characters(source, parser);
 
     let span = Span::new(&with_special_characters);
     let mut content = Content::from(span);
 
-    SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+    apply_attributes(&mut content, parser, SplicedValueEscaping::Verbatim);
 
     content.rendered_html().to_string()
 }
@@ -871,14 +871,14 @@ fn apply_author_subs(source: &str, parser: &Parser) -> String {
 /// this second, raw-value pass discards the warnings it would otherwise
 /// duplicate.
 fn resolve_attribute_references(source: &str, parser: &Parser) -> String {
-    use crate::content::SubstitutionStep;
+    use crate::{attributes::element_attribute::SplicedValueEscaping, content::apply_attributes};
 
     let warnings_before = parser.substitution_warnings_len();
 
     let span = Span::new(source);
     let mut content = Content::from(span);
 
-    SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+    apply_attributes(&mut content, parser, SplicedValueEscaping::Verbatim);
 
     parser.truncate_substitution_warnings(warnings_before);
 
@@ -909,6 +909,8 @@ fn apply_author_special_characters(source: &str, parser: &Parser) -> String {
 /// Run the special-characters substitution step over `source`, escaping `<`,
 /// `>`, and `&`.
 fn escape_special_characters(source: &str, parser: &Parser) -> String {
+    use crate::content::apply_special_characters;
+
     if source.is_empty() {
         return String::new();
     }
@@ -916,7 +918,7 @@ fn escape_special_characters(source: &str, parser: &Parser) -> String {
     let span = Span::new(source);
     let mut content = Content::from(span);
 
-    crate::content::SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
+    apply_special_characters(&mut content, &*parser.renderer);
 
     content.rendered_html().to_string()
 }

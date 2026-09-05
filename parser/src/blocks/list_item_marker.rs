@@ -4,7 +4,8 @@ use regex::Regex;
 
 use crate::{
     HasSpan, Parser, Span,
-    content::{Content, SubstitutionGroup, SubstitutionStep},
+    attributes::element_attribute::SplicedValueEscaping,
+    content::{Content, SubstitutionGroup, SubstitutionStep, apply_attributes},
     span::MatchedItem,
     warnings::Warning,
 };
@@ -193,7 +194,7 @@ impl<'src> ListItemMarker<'src> {
         // references like `{blank}` are resolved before
         // determining if this is a valid definition list
         // marker.
-        SubstitutionStep::AttributeReferences.apply(&mut term, parser, None);
+        apply_attributes(&mut term, parser, SplicedValueEscaping::Verbatim);
 
         let marker = source.slice_from(term_len..);
 

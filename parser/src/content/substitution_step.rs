@@ -4,10 +4,7 @@ use regex::{Captures, Regex, Replacer};
 
 use crate::{
     Parser, Span,
-    attributes::{
-        Attrlist,
-        element_attribute::{SplicedValueEscaping, escape_masked_piece_bytes},
-    },
+    attributes::element_attribute::{SplicedValueEscaping, escape_masked_piece_bytes},
     content::Content,
     document::InterpretedValue,
     parser::{
@@ -51,40 +48,19 @@ pub enum SubstitutionStep {
     Callouts,
 }
 
-impl SubstitutionStep {
-    pub(crate) fn apply(
-        &self,
-        content: &mut Content<'_>,
-        parser: &Parser,
-        _attrlist: Option<&Attrlist<'_>>,
-    ) {
-        match self {
-            Self::SpecialCharacters => {
-                apply_special_characters(content, &*parser.renderer);
-            }
-            Self::AttributeReferences => {
-                // Ordinary, never-tokened content: nothing here has a
-                // masked-piece invariant to protect, so a resolved value is
-                // spliced exactly as the document wrote it. The one caller
-                // that needs otherwise — `Attrlist::parse_tokened` — reaches
-                // `apply_attributes` directly.
-                apply_attributes(content, parser, SplicedValueEscaping::Verbatim);
-            }
-            // The five remaining steps have no per-step implementation here:
-            // each is implemented as a tree transducer in
-            // [`inline_builder`](crate::content::inline_builder) and runs
-            // through [`SubstitutionGroup::apply`](super::SubstitutionGroup).
-            // Nothing applies one of them directly, so this arm exists only
-            // to satisfy match exhaustiveness.
-            step => unreachable!(
-                "the string implementation of {step:?} is deleted; apply the step through a \
-                 SubstitutionGroup"
-            ),
-        }
-    }
-}
-
-fn apply_special_characters(content: &mut Content<'_>, renderer: &dyn InlineRenderer) {
+/// Runs the special-characters substitution directly over `content.rendered`,
+/// escaping `<`, `>`, and `&`.
+///
+/// This is the narrow, non-tree entry point for a caller that has a bare
+/// string fragment rather than real inline content to substitute — an
+/// author-line piece, for instance — and wants exactly this one step's output
+/// with no tree built. Every other step is a node transducer in
+/// [`inline_builder`](crate::content::inline_builder), reached through
+/// [`SubstitutionGroup::apply`](super::SubstitutionGroup); special characters
+/// and [`apply_attributes`] are the only two steps with a standalone
+/// string-based implementation left, because they're the only two a caller
+/// still needs this way.
+pub(crate) fn apply_special_characters(content: &mut Content<'_>, renderer: &dyn InlineRenderer) {
     if !content.rendered.contains(['<', '>', '&']) {
         return;
     }
@@ -764,7 +740,7 @@ pub(crate) fn substitute_attributes_in_reftext<'src>(
     }
 
     let mut content = Content::from(reftext);
-    SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+    apply_attributes(&mut content, parser, SplicedValueEscaping::Verbatim);
     CowStr::from(content.rendered.to_string())
 }
 
@@ -988,24 +964,9 @@ pub(super) fn build_callout_regexes(
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    // Pins (and covers) the exhaustiveness arm in `SubstitutionStep::apply`:
-    // the five steps with no per-step implementation here refuse direct
-    // application rather than silently doing nothing.
-    #[test]
-    #[should_panic(expected = "the string implementation of Quotes is deleted")]
-    fn a_deleted_steps_direct_application_is_refused() {
-        let mut content = crate::content::Content::from(crate::Span::new("x"));
-
-        crate::content::SubstitutionStep::Quotes.apply(
-            &mut content,
-            &crate::Parser::default(),
-            None,
-        );
-    }
-
     mod special_characters {
         use crate::{
-            content::{Content, SubstitutionStep},
+            content::{Content, apply_special_characters},
             strings::CowStr,
             tests::prelude::*,
         };
@@ -1014,7 +975,7 @@ mod tests {
         fn empty() {
             let mut content = Content::from(crate::Span::default());
             let p = Parser::default();
-            SubstitutionStep::SpecialCharacters.apply(&mut content, &p, None);
+            apply_special_characters(&mut content, &*p.renderer);
             assert!(content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed(""));
         }
@@ -1023,7 +984,7 @@ mod tests {
         fn basic_non_empty_span() {
             let mut content = Content::from(crate::Span::new("blah"));
             let p = Parser::default();
-            SubstitutionStep::SpecialCharacters.apply(&mut content, &p, None);
+            apply_special_characters(&mut content, &*p.renderer);
             assert!(!content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed("blah"));
         }
@@ -1032,7 +993,7 @@ mod tests {
         fn match_lt_and_gt() {
             let mut content = Content::from(crate::Span::new("bl<ah>"));
             let p = Parser::default();
-            SubstitutionStep::SpecialCharacters.apply(&mut content, &p, None);
+            apply_special_characters(&mut content, &*p.renderer);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1044,7 +1005,7 @@ mod tests {
         fn match_amp() {
             let mut content = Content::from(crate::Span::new("bl<a&h>"));
             let p = Parser::default();
-            SubstitutionStep::SpecialCharacters.apply(&mut content, &p, None);
+            apply_special_characters(&mut content, &*p.renderer);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1180,7 +1141,8 @@ mod tests {
 
     mod attribute_references {
         use crate::{
-            content::{Content, SubstitutionStep},
+            attributes::element_attribute::SplicedValueEscaping,
+            content::{Content, apply_attributes},
             strings::CowStr,
             tests::prelude::*,
         };
@@ -1189,7 +1151,7 @@ mod tests {
         fn empty() {
             let mut content = Content::from(crate::Span::default());
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert!(content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed(""));
         }
@@ -1198,7 +1160,7 @@ mod tests {
         fn basic_non_empty_span() {
             let mut content = Content::from(crate::Span::new("blah"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert!(!content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed("blah"));
         }
@@ -1207,7 +1169,7 @@ mod tests {
         fn ignore_non_match() {
             let mut content = Content::from(crate::Span::new("bl{ah}"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1222,7 +1184,7 @@ mod tests {
             // matching Asciidoctor (see issue #667).
             let mut content = Content::from(crate::Span::new("bl\\{ah}"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1234,7 +1196,7 @@ mod tests {
         fn replace_sp_match() {
             let mut content = Content::from(crate::Span::new("bl{sp}ah"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1246,7 +1208,7 @@ mod tests {
         fn ignore_escaped_sp_match() {
             let mut content = Content::from(crate::Span::new("bl\\{sp}ah"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1258,7 +1220,7 @@ mod tests {
         fn counter_directive_displays_and_advances() {
             let mut content = Content::from(crate::Span::new("{counter:n}-{counter:n}"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert_eq!(
                 content.rendered,
                 CowStr::Boxed("1-2".to_string().into_boxed_str())
@@ -1269,7 +1231,7 @@ mod tests {
         fn counter2_directive_advances_silently() {
             let mut content = Content::from(crate::Span::new("{counter2:n}{counter:n}"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert_eq!(
                 content.rendered,
                 CowStr::Boxed("2".to_string().into_boxed_str())
@@ -1280,7 +1242,7 @@ mod tests {
         fn escaped_counter_directive_is_literal_and_does_not_advance() {
             let mut content = Content::from(crate::Span::new("\\{counter:n} {counter:n}"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert_eq!(
                 content.rendered,
                 CowStr::Boxed("{counter:n} 1".to_string().into_boxed_str())
@@ -1300,7 +1262,7 @@ mod tests {
             );
 
             let mut content = Content::from(crate::Span::new("\\{group-id\\}"));
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert_eq!(
                 content.rendered,
                 CowStr::Boxed("{group-id}".to_string().into_boxed_str())
@@ -1319,7 +1281,7 @@ mod tests {
             );
 
             let mut content = Content::from(crate::Span::new("{group-id\\}"));
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert_eq!(
                 content.rendered,
                 CowStr::Boxed("{group-id}".to_string().into_boxed_str())
@@ -1334,7 +1296,7 @@ mod tests {
             // counter, so the following unescaped reference is `1`.
             let mut content = Content::from(crate::Span::new("{counter:n\\} {counter:n}"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert_eq!(
                 content.rendered,
                 CowStr::Boxed("{counter:n} 1".to_string().into_boxed_str())
@@ -1346,7 +1308,8 @@ mod tests {
 
             use crate::{
                 Span,
-                content::{Content, SubstitutionGroup, SubstitutionStep},
+                attributes::element_attribute::SplicedValueEscaping,
+                content::{Content, SubstitutionGroup, apply_attributes},
                 parser::ModificationContext,
                 tests::prelude::*,
                 warnings::WarningType,
@@ -1362,7 +1325,7 @@ mod tests {
 
             fn render(text: &str, parser: &Parser) -> String {
                 let mut content = Content::from(crate::Span::new(text));
-                SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+                apply_attributes(&mut content, parser, SplicedValueEscaping::Verbatim);
                 content.rendered.to_string()
             }
 
@@ -1553,7 +1516,7 @@ mod tests {
                 let p = parser_with_mode("drop-line");
                 let text = "x {foo} y";
                 let mut content = Content::from(Span::new(text));
-                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+                apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 1);
@@ -1711,7 +1674,7 @@ mod tests {
                 let p = parser_with_mode("warn");
                 let text = "x {foo} y";
                 let mut content = Content::from(Span::new(text));
-                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+                apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 1);
