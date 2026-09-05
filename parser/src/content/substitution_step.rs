@@ -179,7 +179,7 @@ impl AttributeMissing {
 /// warning cannot simply slice `content.original()` at the rendered offset.
 ///
 /// The positional per-line correlation this once carried to recover a precise
-/// span from a rendered offset (issue #564's approach 3) is **retired**: block
+/// span from a rendered offset is **retired**: block
 /// content is substituted by the single-pass builder now, which recognizes
 /// each reference against `'src` and hands its own node span to
 /// [`record_builder_diagnostic`](crate::Parser) — the honest answer the
@@ -195,7 +195,7 @@ impl AttributeMissing {
 /// - A haystack rendered from somewhere else — an author line, a docinfo file,
 ///   a `Custom` group applied to a caller's string — where no source mapping
 ///   exists to recover and the warning names
-///   [`fallback_source`](Self::fallback_source), exactly as it did before #564.
+///   [`fallback_source`](Self::fallback_source).
 #[derive(Debug)]
 struct AttributeReplacer<'p> {
     parser: &'p Parser,
@@ -1190,7 +1190,7 @@ mod tests {
 
             // The tests below drive `SubstitutionGroup::Normal` — the
             // production seam — so the precise per-reference `warn` location
-            // (issue #564) is exercised where it is actually produced: the
+            // is exercised where it is actually produced: the
             // single-pass builder recognizes each reference against `'src` and
             // records its own node span. The `render`-based tests above call
             // the string step directly, which has no source mapping to recover
@@ -1226,9 +1226,10 @@ mod tests {
 
             #[test]
             fn warn_locates_references_across_multiple_lines() {
-                // The acceptance case from issue #564: several distinct
-                // references on different lines of one block, each pointed at
-                // individually rather than at the shared whole-block span.
+                // The acceptance case for precise per-reference warning
+                // locations: several distinct references on different lines
+                // of one block, each pointed at individually rather than at
+                // the shared whole-block span.
                 let p = parser_with_mode("warn");
                 let text = "first {alpha} line\nsecond {beta} line\nthird {gamma} line";
                 let mut content = Content::from(Span::new(text));
@@ -1299,8 +1300,8 @@ mod tests {
             #[test]
             fn warn_falls_back_to_whole_span_on_a_direct_step_call() {
                 // A direct step call has no source mapping to recover, so the
-                // warning degrades to the whole-content span (the pre-#564
-                // behavior) rather than misreporting a location.
+                // warning degrades to the whole-content span rather than
+                // misreporting a location.
                 let p = parser_with_mode("warn");
                 let text = "x {foo} y";
                 let mut content = Content::from(Span::new(text));
