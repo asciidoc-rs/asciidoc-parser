@@ -127,12 +127,12 @@
 //!   lets a `link:`/`mailto:` macro be recognized when its own marker is not
 //!   verbatim source — a *wholly* expanded macro (`:m: link:index.html[Docs]`,
 //!   then `{m}`), one in a wholly-synthesized seed, and one written inside
-//!   markup an earlier step of the same order flattened. Each family reuses the shared
-//!   pattern the string step
-//!   matches with ([`INLINE_IMAGE_MACRO`](crate::content::INLINE_IMAGE_MACRO), [`INLINE_KBD_BTN_MACRO`](crate::content::INLINE_KBD_BTN_MACRO),
-//!   [`INLINE_MENU_MACRO`](crate::content::INLINE_MENU_MACRO), [`INLINE_LINK_MACRO`](crate::content::INLINE_LINK_MACRO), [`INLINE_LINK`](crate::content::INLINE_LINK),
-//!   [`INLINE_EMAIL`](crate::content::INLINE_EMAIL),
-//!   [`INLINE_XREF`](crate::content::INLINE_XREF), [`INLINE_ANCHOR`](crate::content::INLINE_ANCHOR), [`INLINE_INDEXTERM`](crate::content::INLINE_INDEXTERM)), builds
+//!   markup an earlier step of the same order flattened. Each family matches
+//!   with the same pattern the retired string step matched that construct
+//!   with (`INLINE_IMAGE_MACRO`, `INLINE_KBD_BTN_MACRO`,
+//!   `INLINE_MENU_MACRO`, `INLINE_LINK_MACRO`, `INLINE_LINK`,
+//!   `INLINE_EMAIL`, `INLINE_XREF`, `INLINE_ANCHOR`, `INLINE_INDEXTERM`) —
+//!   now private to that family's own module rather than shared — and builds
 //!   `'src`-borrowing nodes for verbatim macros only (see [`apply_macros`] for
 //!   the boundary the escaped-content case defers), and — for the UI macros — is
 //!   recognized only under the `experimental` document attribute, exactly as the
@@ -257,13 +257,13 @@
 //!   node's `location` taking the coarse fallback).
 //! - [`apply_footnotes`] recognizes **footnotes** (`footnote:[…]`,
 //!   `footnote:id[…]`, `footnote:id[]`), replacing each with a
-//!   [`Footnote`](InlineNode::Footnote) node, folding through the shared
-//!   [`INLINE_FOOTNOTE_MACRO`](crate::content::INLINE_FOOTNOTE_MACRO) pattern
-//!   like every other family. It is its **own step** in [`build`], run once
-//!   over the whole tree *after* [`apply_macros`] has resolved every other
-//!   family at every level, rather than a level pass inside [`apply_macros`] —
-//!   because it is the one macro family whose recognition performs a *required*
-//!   side effect: a footnote's marker digits are the number
+//!   [`Footnote`](InlineNode::Footnote) node, matching the same
+//!   `INLINE_FOOTNOTE_MACRO` pattern every other family matches its own
+//!   construct against. It is its **own step** in [`build`], run once over the
+//!   whole tree *after* [`apply_macros`] has resolved every other family at
+//!   every level, rather than a level pass inside [`apply_macros`] — because it
+//!   is the one macro family whose recognition performs a *required* side
+//!   effect: a footnote's marker digits are the number
 //!   [`Parser::define_footnote`] / [`Parser::footnote_index_for_id`] assign, so
 //!   numbering must follow true left-to-right source order regardless of
 //!   nesting depth, which [`apply_macros`]'s depth-first child recursion does

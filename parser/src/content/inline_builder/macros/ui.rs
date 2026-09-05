@@ -1,22 +1,142 @@
 //! UI macro recognition (`kbd:[…]`, `btn:[…]`, `menu:…[…]`).
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use super::{
     KBD_BTN_DIGRAMS, LevelSniff, MENU_DIGRAMS, MacroMatch, MacroMatchKind,
     image::range_has_no_opaque_piece, rebuild_macro_level,
 };
 use crate::{
     Span,
-    content::{
-        INLINE_KBD_BTN_MACRO, INLINE_MENU_MACRO,
-        inline_builder::{
-            quotes::{LevelContext, Piece, source_slice, text_slice},
-            special_chars::Masked,
-        },
-        normalize_index_text, split_kbd_keys,
+    content::inline_builder::{
+        quotes::{LevelContext, Piece, source_slice, text_slice},
+        special_chars::Masked,
     },
     inlines::{InlineNode, Ui, UiKind},
     strings::CowStr,
 };
+
+/// Matches a keyboard (`kbd:[…]`) or button (`btn:[…]`) UI macro.
+///
+/// ## Examples
+///
+/// * `kbd:[F3]`
+/// * `kbd:[Ctrl+Shift+T]`
+/// * `kbd:[Ctrl+\]]`
+/// * `btn:[Save]`
+static INLINE_KBD_BTN_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?xs)                    # extended mode; dot matches newline
+        (\\)?                       # (1) optional escape backslash
+        (kbd|btn):                  # (2) macro name
+        \[
+            ( .*?[^\\] )            # (3) bracketed content, ending in a non-backslash
+        \]
+        "#,
+    )
+    .unwrap()
+});
+
+/// Splits the raw argument of a `kbd:[…]` macro into individual keys, mirroring
+/// Asciidoctor's delimiter handling.
+///
+/// A single key produces a one-element vector; a key sequence is split on the
+/// first delimiter found — a comma (`,`) or a plus (`+`) — searching from the
+/// *second* character so that a leading delimiter is treated as a literal key
+/// (e.g. `kbd:[,te]` is the single key `,te`). If the argument ends with the
+/// delimiter, that trailing delimiter is preserved as the value of the final
+/// key (e.g. `kbd:[Ctrl + +]` yields `Ctrl` and `+`).
+fn split_kbd_keys(raw: &str) -> Vec<String> {
+    let mut keys = raw.trim().to_string();
+    if keys.contains(']') {
+        keys = keys.replace("\\]", "]");
+    }
+
+    // The delimiter is the earliest comma or plus that is not the first
+    // character. Scanning from the second character and taking the first match
+    // yields the same choice as Asciidoctor's `min` of the two candidate
+    // indexes. Because the scan starts at the second character, a single-key
+    // argument (or one whose only delimiter is a leading literal) yields `None`
+    // here, so no separate length check is needed.
+    let delim = keys.chars().skip(1).find(|c| *c == ',' || *c == '+');
+
+    if let Some(delim) = delim {
+        let ends_with_delim = keys.ends_with(delim);
+
+        // Drop the trailing delimiter before splitting; it is restored on the
+        // last key below. (Rust's `split` keeps trailing empty segments, which
+        // matches Asciidoctor's `split delim, -1`.)
+        let split_source = if ends_with_delim {
+            &keys[..keys.len() - delim.len_utf8()]
+        } else {
+            keys.as_str()
+        };
+
+        let mut parts: Vec<String> = split_source
+            .split(delim)
+            .map(|k| k.trim().to_string())
+            .collect();
+
+        if ends_with_delim && let Some(last) = parts.last_mut() {
+            last.push(delim);
+        }
+
+        parts
+    } else {
+        vec![keys]
+    }
+}
+
+/// Matches a menu (`menu:…[…]`) UI macro.
+///
+/// The shorthand form (`"File > Save"`) is intentionally not matched here; per
+/// the spec it is not on a standards track.
+///
+/// ## Examples
+///
+/// * `menu:File[]`
+/// * `menu:File[Save]`
+/// * `menu:View[Zoom > Reset]`
+/// * `menu:Tools[Project, Build]`
+static INLINE_MENU_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?xs)                        # extended mode; dot matches newline
+        \\?                             # optional escape backslash (not captured)
+        menu:
+        (                               # (1) menu name
+            \w                              # a single word character
+          |                                 # or
+            [\w&] [^\n\[]* [^\s\[]           # first word/ampersand char, then any run
+                                            # not containing a newline or '[', ending
+                                            # in a non-space, non-'[' character
+        )
+        \[ \x20*                        # opening '[' then optional spaces
+        (?:                             # menu items (optional)
+            |                               # empty
+            ( .*?[^\\] )                    # (2) items, ending in a non-backslash
+        )
+        \]
+        "#,
+    )
+    .unwrap()
+});
+
+/// Normalizes the text of an index term: trims surrounding whitespace and
+/// collapses embedded newlines to spaces (Asciidoctor compacts a multi-line
+/// term onto a single line). When `unescape_brackets` is set (the macro forms),
+/// an escaped closing square bracket (`\]`) is also unescaped.
+fn normalize_index_text(text: &str, unescape_brackets: bool) -> String {
+    let normalized = text.trim().replace('\n', " ");
+    if unescape_brackets {
+        normalized.replace("\\]", "]")
+    } else {
+        normalized
+    }
+}
 
 /// The delimiter a menu macro's item list is split on: the *escaped* form of
 /// the source `>` submenu caret — the special-characters step runs long

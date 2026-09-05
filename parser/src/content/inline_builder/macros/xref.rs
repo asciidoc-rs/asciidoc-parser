@@ -5,6 +5,10 @@
 // it directly.
 // Referenced by the doc comments below; the code itself reaches the level's
 // match string through [`shifted_level`]'s shared slot now.
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 #[allow(unused_imports)]
 use super::super::quotes::build_match_string;
 #[allow(unused_imports)]
@@ -23,7 +27,6 @@ use crate::{
         element_attribute::{MASKED_PIECE_PLACEHOLDER_END, MASKED_PIECE_PLACEHOLDER_START},
     },
     content::{
-        INLINE_XREF, document_xrefstyle,
         inline_builder::{
             quotes::{LevelContext, Piece, source_slice},
             special_chars::Masked,
@@ -32,14 +35,65 @@ use crate::{
             XrefTarget, interpret_xref_target, other_document_reference, this_document_reference,
         },
     },
+    document::InterpretedValue,
     inlines::{InlineNode, Ref, RefVariant},
     parser::{DerivedReference, XrefStyle},
     strings::CowStr,
 };
 
+/// Matches a cross-reference, in either the double-angle-bracket shorthand or
+/// the `xref:` macro form.
+///
+/// Note that the special-characters substitution runs before macros, so by this
+/// point `<<` and `>>` have already become `&lt;&lt;` and `&gt;&gt;`.
+///
+/// Group 1 is the optional escape backslash, group 2 the shorthand's inner
+/// text, group 3 the `xref:` macro target, and group 4 the macro's bracketed
+/// text.
+///
+/// ## Examples
+///
+/// * `<<idname>>` (seen here as `&lt;&lt;idname&gt;&gt;`)
+/// * `<<idname,Reference Text>>`
+/// * `xref:idname[]`
+/// * `xref:idname[Reference Text]`
+static INLINE_XREF: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?xs)
+        (\\)?                           # (1) optional escape backslash
+        (?:
+            &lt;&lt;                     #   shorthand: << (post special-chars)
+              ( .*? )                    # (2) refid plus optional ", reftext"
+            &gt;&gt;                     #   >>
+          |
+            xref:                        #   'xref:' macro form
+              ( [^:\s\[] [^\s\[]* )      # (3) target
+            \[                           #   opening '['
+              ( | .*?[^\\] )             # (4) reftext: empty or ends non-escaped
+            \]                           #   closing ']'
+        )
+        "#,
+    )
+    .unwrap()
+});
+
+/// Reads the document-wide `xrefstyle` attribute as an [`XrefStyle`].
+///
+/// An unset attribute yields `None` (the target's reftext is used verbatim). A
+/// set-but-empty value (`:xrefstyle:`) and any unrecognized value both resolve
+/// to [`XrefStyle::Basic`], mirroring Asciidoctor.
+fn document_xrefstyle(parser: &Parser) -> Option<XrefStyle> {
+    match parser.attribute_value("xrefstyle") {
+        InterpretedValue::Value(value) => Some(XrefStyle::parse(&value)),
+        InterpretedValue::Set => Some(XrefStyle::Basic),
+        InterpretedValue::Unset => None,
+    }
+}
+
 /// Interprets a cross-reference `target` and computes the pieces the [`Ref`]
 /// node needs to render it, mirroring
-/// [`InlineXrefReplacer::replace_append`](crate::content::macros)'s own target
+/// `InlineXrefReplacer::replace_append`'s own target
 /// interpretation exactly so the fold reproduces the same bytes:
 ///
 /// - a same-document reference to a specific id resolves through the catalog
@@ -647,7 +701,7 @@ fn build_xref_node<'src>(
 }
 
 /// Interprets the bracketed display text of an `xref:` macro, mirroring
-/// [`InlineXrefReplacer::replace_append`](crate::content::macros)'s own text
+/// `InlineXrefReplacer::replace_append`'s own text
 /// interpretation exactly so the fold reproduces the same bytes: a text
 /// carrying an `=` is parsed — from a newline-normalized copy, since the parse
 /// is not necessarily verbatim (matching Asciidoctor, which parses

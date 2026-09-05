@@ -2,28 +2,111 @@
 //! the bibliography anchor (`[[[label]]]`) that prefixes a bibliography list
 //! item.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use super::{
     ANCHOR_DIGRAMS, LevelSniff, MacroMatch, MacroMatchKind, emit_range_unescaping_brackets,
     image::range_is_verbatim_or_synthesized, rebuild_macro_level,
 };
 use crate::{
     Parser, Span,
-    content::{
-        INLINE_ANCHOR, INLINE_BIBLIO_ANCHOR,
-        inline_builder::{
-            fold_html,
-            quotes::{
-                LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, emit_range,
-                range_overlaps_synthesized, single_text_value, source_slice, text_slice,
-            },
-            special_chars::Masked,
+    content::inline_builder::{
+        fold_html,
+        quotes::{
+            LevelContext, Piece, SPAN_PLACEHOLDER, build_match_string, emit_range,
+            range_overlaps_synthesized, single_text_value, source_slice, text_slice,
         },
+        special_chars::Masked,
     },
     document::RefType,
     inlines::{Anchor, InlineNode},
     strings::CowStr,
     warnings::WarningType,
 };
+
+/// Matches a bibliography anchor that prefixes a bibliography list item.
+///
+/// The anchor is matched only at the very start of the entry (`^`), mirroring
+/// Asciidoctor: a `[[[…]]]` appearing later in the text is left to the regular
+/// inline-anchor pass. The label must be _non-numeric_ (it may contain digits,
+/// but must not begin with one), so an entry that opens with something like
+/// `[[[1984]]]` is left untouched. An optional xreftext follows a comma.
+///
+/// A leading backslash is deliberately *not* accepted as an escape: `\[[[id]]]`
+/// does not begin with `[[[`, so it simply isn't a bibliography anchor (the
+/// backslash and inner `[[id]]` are handled by the inline-anchor pass, matching
+/// Asciidoctor). The documented escape `[\[[id]]]` likewise does not start with
+/// `[[[` and is handled there.
+///
+/// Group 1 is the label and group 2 its optional xreftext.
+///
+/// ## Examples
+///
+/// * `[[[label]]]`
+/// * `[[[label,xreftext]]]`
+static INLINE_BIBLIO_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?x)
+        ^                               # the anchor must prefix the entry
+        \[\[\[                          # opening triple bracket
+          (                             # (1) bibliography label
+            [\p{Alphabetic}_:]              # first char: letter, '_' or ':' (never a digit)
+            [\p{Alphabetic}\p{Nd}_\-:.]*    # rest: letters/digits/_/-/:/.
+          )
+          (?: , \s* (.+?) )?            # (2) optional xreftext after a comma
+        \]\]\]                          # closing triple bracket
+        "#,
+    )
+    .unwrap()
+});
+
+/// Matches an anchor (i.e., id + optional reference text) in the flow of text.
+///
+/// ##Examples
+///
+/// * `[[idname]]`
+/// * `[[idname,Reference Text]]`
+/// * `anchor:idname[]`
+/// * `anchor:idname[Reference Text]`
+///
+/// Group 1 is the optional escape backslash, groups 2/3 the shorthand id and
+/// its optional reference text, and groups 4/5 the `anchor:id[…]` macro id
+/// and its optional reference text.
+static INLINE_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?x)
+    (\\)?                           # (1) optional escape backslash before the anchor
+
+    (?:                             # either [[id[, reftext]]] OR anchor:id[reftext]
+      \[\[                          # [[
+        (                           # (2) anchor id for [[...]]
+          [\p{Alphabetic}_:]        #     first char: letter, '_' or ':'
+          [\p{Alphabetic}\p{Nd}_\-:.]*  # rest: letters/digits/_ or '-', ':', '.'
+        )
+        (?: , \s* (.+?) )?          # (3) optional reftext after comma (lazy)
+        \]\]                        # ]]
+      |
+        anchor:                     # 'anchor:' prefix
+        (                           # (4) anchor id for anchor:...[]
+          [\p{Alphabetic}_:]        #     first char: letter, '_' or ':'
+          [\p{Alphabetic}\p{Nd}_\-:.]*  # rest: letters/digits/_ or '-', ':', '.'
+        )                           # end (4)
+        \[                          # opening '[' for reftext
+          (?:                       # either empty [] or a non-empty reftext
+            \]                      #   empty -> immediate ']'
+          |                         #   OR
+            (.*?[^\\])              # (5) non-empty reftext (ends with a non-escaped char)
+            \]                      #   closing ']'
+          )
+    )                               # end alternation
+        "#,
+    )
+    .unwrap()
+});
 
 /// Matches `INLINE_BIBLIO_ANCHOR` at the **content's own top level**, replacing
 /// a bibliography anchor (`[[[label]]]` / `[[[label,xreftext]]]`) with the
@@ -557,7 +640,7 @@ fn structural_anchor_reftext<'src>(
 /// `source` is the whole original content span being processed, used — like
 /// [`image::apply_image_side_effects`](super::image::apply_image_side_effects)'
 /// s own `source` parameter — to locate the duplicate-id warning exactly as
-/// [`InlineAnchorReplacer`](crate::content::macros) does (against the
+/// `InlineAnchorReplacer` does (against the
 /// content's own span, not the individual anchor's).
 ///
 /// `leading_anchor_registered` says a description-list **term**'s leading
@@ -820,6 +903,721 @@ mod tests {
         parser::HtmlInlineRenderer,
         strings::CowStr,
     };
+
+    mod inline_anchor {
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn inline_ref_double_brackets() {
+            let doc = Parser::default().parse("Here you can read about tigers.[[tigers]]");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "Here you can read about tigers.[[tigers]]",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "Here you can read about tigers.<a id=\"tigers\"></a>",
+                        },
+                        source: Span {
+                            data: "Here you can read about tigers.[[tigers]]",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "Here you can read about tigers.[[tigers]]",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog {
+                        refs: HashMap::from([(
+                            "tigers",
+                            RefEntry {
+                                id: "tigers",
+                                reftext: None,
+                                ref_type: crate::document::RefType::Anchor,
+                            },
+                        )]),
+                        reftext_to_id: HashMap::new(),
+                    },
+                }
+            );
+        }
+
+        #[test]
+        fn duplicate_inline_anchor_records_warning() {
+            let doc = Parser::default()
+                .parse("[#in-use]\nA paragraph with an id.\n\nAnother paragraph\n[[in-use]]that uses an id\nwhich is already in use.\n");
+
+            let warnings: Vec<_> = doc.warnings().collect();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings.first().unwrap().warning,
+                WarningType::DuplicateId("in-use".to_string())
+            );
+        }
+
+        #[test]
+        fn inline_ref_macro() {
+            let doc = Parser::default().parse("Here you can read about tigers.anchor:tigers[]");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "Here you can read about tigers.anchor:tigers[]",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "Here you can read about tigers.<a id=\"tigers\"></a>",
+                        },
+                        source: Span {
+                            data: "Here you can read about tigers.anchor:tigers[]",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "Here you can read about tigers.anchor:tigers[]",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog {
+                        refs: HashMap::from([(
+                            "tigers",
+                            RefEntry {
+                                id: "tigers",
+                                reftext: None,
+                                ref_type: crate::document::RefType::Anchor,
+                            },
+                        )]),
+                        reftext_to_id: HashMap::new(),
+                    },
+                }
+            );
+        }
+
+        #[test]
+        fn inline_ref_with_reftext_double_brackets() {
+            let doc = Parser::default().parse("Here you can read about tigers.[[tigers,Tigers]]");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "Here you can read about tigers.[[tigers,Tigers]]",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "Here you can read about tigers.<a id=\"tigers\"></a>",
+                        },
+                        source: Span {
+                            data: "Here you can read about tigers.[[tigers,Tigers]]",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "Here you can read about tigers.[[tigers,Tigers]]",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog {
+                        refs: HashMap::from([(
+                            "tigers",
+                            RefEntry {
+                                id: "tigers",
+                                reftext: Some("Tigers"),
+                                ref_type: crate::document::RefType::Anchor,
+                            },
+                        )]),
+                        reftext_to_id: HashMap::from([("Tigers", "tigers")]),
+                    },
+                }
+            );
+        }
+
+        #[test]
+        fn inline_ref_with_reftext_macro() {
+            let doc =
+                Parser::default().parse("Here you can read about tigers.anchor:tigers[Tigers]");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "Here you can read about tigers.anchor:tigers[Tigers]",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "Here you can read about tigers.<a id=\"tigers\"></a>",
+                        },
+                        source: Span {
+                            data: "Here you can read about tigers.anchor:tigers[Tigers]",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "Here you can read about tigers.anchor:tigers[Tigers]",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog {
+                        refs: HashMap::from([(
+                            "tigers",
+                            RefEntry {
+                                id: "tigers",
+                                reftext: Some("Tigers"),
+                                ref_type: crate::document::RefType::Anchor,
+                            },
+                        )]),
+                        reftext_to_id: HashMap::from([("Tigers", "tigers")]),
+                    },
+                }
+            );
+        }
+
+        #[test]
+        fn mixed_inline_anchor_macro_and_anchor_shorthand_with_empty_reftext() {
+            let doc =
+                Parser::default().parse("anchor:one[][[two]]anchor:three[][[four]]anchor:five[]");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "anchor:one[][[two]]anchor:three[][[four]]anchor:five[]",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: r#"<a id="one"></a><a id="two"></a><a id="three"></a><a id="four"></a><a id="five"></a>"#,
+                        },
+                        source: Span {
+                            data: "anchor:one[][[two]]anchor:three[][[four]]anchor:five[]",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "anchor:one[][[two]]anchor:three[][[four]]anchor:five[]",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog {
+                        refs: HashMap::from([
+                            (
+                                "one",
+                                RefEntry {
+                                    id: "one",
+                                    reftext: None,
+                                    ref_type: crate::document::RefType::Anchor,
+                                },
+                            ),
+                            (
+                                "two",
+                                RefEntry {
+                                    id: "two",
+                                    reftext: None,
+                                    ref_type: crate::document::RefType::Anchor,
+                                },
+                            ),
+                            (
+                                "three",
+                                RefEntry {
+                                    id: "three",
+                                    reftext: None,
+                                    ref_type: crate::document::RefType::Anchor,
+                                },
+                            ),
+                            (
+                                "four",
+                                RefEntry {
+                                    id: "four",
+                                    reftext: None,
+                                    ref_type: crate::document::RefType::Anchor,
+                                },
+                            ),
+                            (
+                                "five",
+                                RefEntry {
+                                    id: "five",
+                                    reftext: None,
+                                    ref_type: crate::document::RefType::Anchor,
+                                },
+                            ),
+                        ]),
+                        reftext_to_id: HashMap::new(),
+                    },
+                }
+            );
+        }
+
+        #[test]
+        fn inline_ref_can_start_with_colon() {
+            let doc = Parser::default().parse("[[:idname]] text");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "[[:idname]] text",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "<a id=\":idname\"></a> text",
+                        },
+                        source: Span {
+                            data: "[[:idname]] text",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "[[:idname]] text",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog {
+                        refs: HashMap::from([(
+                            ":idname",
+                            RefEntry {
+                                id: ":idname",
+                                reftext: None,
+                                ref_type: crate::document::RefType::Anchor,
+                            },
+                        )]),
+                        reftext_to_id: HashMap::new(),
+                    },
+                }
+            );
+        }
+
+        #[test]
+        fn inline_ref_cannot_start_with_digit() {
+            let doc = Parser::default().parse("[[1-install]] text");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "[[1-install]] text",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "[[1-install]] text",
+                        },
+                        source: Span {
+                            data: "[[1-install]] text",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "[[1-install]] text",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog::default(),
+                }
+            );
+        }
+
+        #[test]
+        fn escaped_inline_ref_square_brackets() {
+            let doc = Parser::default().parse("Here you can read about tigers.\\[[tigers]]");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "Here you can read about tigers.\\[[tigers]]",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "Here you can read about tigers.[[tigers]]",
+                        },
+                        source: Span {
+                            data: "Here you can read about tigers.\\[[tigers]]",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "Here you can read about tigers.\\[[tigers]]",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog::default(),
+                }
+            );
+        }
+
+        #[test]
+        fn escaped_inline_ref_macro() {
+            let doc = Parser::default().parse("Here you can read about tigers.\\anchor:tigers[]");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "Here you can read about tigers.\\anchor:tigers[]",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "Here you can read about tigers.anchor:tigers[]",
+                        },
+                        source: Span {
+                            data: "Here you can read about tigers.\\anchor:tigers[]",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "Here you can read about tigers.\\anchor:tigers[]",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog::default(),
+                }
+            );
+        }
+    }
+
+    mod bibliography_anchor {
+        #![allow(clippy::indexing_slicing)]
+
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn recognized_only_when_it_prefixes_the_entry() {
+            // A `[[[id]]]` that does not prefix the entry is not a bibliography
+            // anchor: it falls through to the regular inline-anchor pass
+            // (matching Asciidoctor), rendering as `[<a
+            // id="mid"></a>]` rather than the bibliography form `<a
+            // id="mid"></a>[mid]`.
+            let doc = Parser::default().parse("[bibliography]\n* Smith. See [[[mid]]] inline.\n");
+
+            let rendered = &rendered_paragraphs(&doc)[0];
+            assert!(
+                rendered.contains("[<a id=\"mid\"></a>]"),
+                "unexpected: {rendered}"
+            );
+            assert!(!rendered.contains("<a id=\"mid\"></a>[mid]"));
+
+            // The inner `[[mid]]` is preceded by a `[`, so — like Asciidoctor's
+            // inline-anchor scan (`InlineAnchorScanRx`) — the id is rendered
+            // but not registered in the catalog, neither as a
+            // bibliography anchor nor as a normal one. See #769.
+            assert!(doc.catalog().get_ref("mid").is_none());
+        }
+
+        #[test]
+        fn leading_backslash_is_not_a_bibliography_escape() {
+            // A leading backslash does not escape a bibliography anchor (the
+            // only documented escape is `[\[[id]]]`). `\[[[id]]]`
+            // does not begin with `[[[`, so it is not a
+            // bibliography anchor; the backslash stays literal and
+            // the inner `[[id]]` becomes a normal inline anchor,
+            // matching Asciidoctor's `\[<a id="x"></a>]`.
+            let doc = Parser::default().parse("[bibliography]\n* \\[[[x]]] Leading backslash.\n");
+
+            let rendered = &rendered_paragraphs(&doc)[0];
+            assert!(
+                rendered.starts_with("\\[<a id=\"x\"></a>]"),
+                "unexpected: {rendered}"
+            );
+        }
+
+        #[test]
+        fn explicit_style_applies_to_an_ordered_list() {
+            // An explicit `[bibliography]` attribute applies to any list type,
+            // so an ordered list's entries are recognized as
+            // bibliography anchors, matching Asciidoctor (`<div
+            // class="olist bibliography">`).
+            let doc = Parser::default().parse("[bibliography]\n. [[[ord]]] Ordered entry.\n");
+
+            assert_css(&doc, ".olist.bibliography", 1);
+            assert!(rendered_paragraphs(&doc)[0].starts_with("<a id=\"ord\"></a>[ord] "));
+        }
+
+        #[test]
+        fn section_style_does_not_apply_to_an_ordered_list() {
+            // The style inherited from a `bibliography` section applies only to
+            // unordered lists, so an ordered list in that section is not a
+            // bibliography list; its leading `[[[id]]]` is a regular inline
+            // anchor.
+            let doc = Parser::default()
+                .parse("[bibliography]\n== References\n\n. [[[ord]]] Ordered entry.\n");
+
+            assert_css(&doc, ".bibliography", 0);
+            assert!(rendered_paragraphs(&doc)[0].starts_with("[<a id=\"ord\"></a>] "));
+        }
+    }
 
     /// Asserts that `node` is an [`Anchor`](InlineNode::Anchor), returning it.
     fn assert_anchor<'a, 'src>(node: &'a InlineNode<'src>) -> &'a Anchor<'src> {

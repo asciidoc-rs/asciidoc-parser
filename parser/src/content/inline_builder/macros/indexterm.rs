@@ -1,25 +1,47 @@
 //! Index-term recognition (`((term))`, `(((primary, secondary)))`,
 //! `indexterm:[…]`, `indexterm2:[…]`).
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use super::{INDEXTERM_DIGRAMS, LevelSniff, MacroMatch, MacroMatchKind, rebuild_macro_level};
-// Referenced by the doc comments below, whose offset arithmetic mirrors this
-// rewrite (see [`shown_term_range`]); the code performs it structurally
-// rather than calling it.
-#[allow(unused_imports)]
-use crate::content::normalize_index_text;
 use crate::{
     Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    content::{
-        INLINE_INDEXTERM,
-        inline_builder::{
-            quotes::{LevelContext, Piece, SPAN_PLACEHOLDER, emit_range, source_slice},
-            special_chars::Masked,
-        },
+    content::inline_builder::{
+        quotes::{LevelContext, Piece, SPAN_PLACEHOLDER, emit_range, source_slice},
+        special_chars::Masked,
     },
     inlines::{IndexTerm, InlineNode},
     strings::CowStr,
 };
+
+/// Matches an [index term] inline macro, in either the macro form
+/// (`indexterm:[…]` / `indexterm2:[…]`) or the shorthand form
+/// (`(((primary, secondary, tertiary)))` / `((primary))`).
+///
+/// The shorthand alternative captures the text between the outermost `((` and
+/// `))`. Asciidoctor anchors the closing `))` with a `(?!\))` look-ahead so
+/// that the *last* pair in a run of parentheses closes the term; Rust's regex
+/// engine has no look-ahead, so this family re-created that behavior by
+/// absorbing any trailing `)` that follow the matched `))`.
+///
+/// [index term]: https://docs.asciidoctor.org/asciidoc/latest/sections/user-index/
+static INLINE_INDEXTERM: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?xs)                         # extended mode; dot matches newline
+        \\?                              # optional escaping backslash
+        (?:
+            (indexterm2?):\[ (.*?[^\\]) \]   # (1) macro name, (2) macro argument
+          |
+            \(\( (.+?) \)\)                  # (3) shorthand enclosed text
+        )
+        "#,
+    )
+    .unwrap()
+});
 
 /// Mirrors the string step's guard: a shorthand needs a `((` … `))` pair (its
 /// parens are not special, so they reach the macros step intact), and a
@@ -344,7 +366,7 @@ struct ShownTerm<'src> {
 /// The range of `text` that is *shown*, as a narrowing of the
 /// term's own bytes.
 ///
-/// This is [`normalize_index_text`] and `strip_see_and_seealso` re-expressed
+/// This is `normalize_index_text` and `strip_see_and_seealso` re-expressed
 /// as offsets rather than as a rebuilt string, which is what lets the shown
 /// text be recovered structurally (see [`shown_term`]) as well as computed. The
 /// two agree by construction:
@@ -409,7 +431,7 @@ fn shown_term_range(text: &str, strip_see: bool) -> std::ops::Range<usize> {
 /// # What the normalization becomes
 ///
 /// [`shown_term_range`] answers `trim` and the `see` / `see-also` strip as
-/// offsets. The other two rewrites [`normalize_index_text`] performs are
+/// offsets. The other two rewrites `normalize_index_text` performs are
 /// emitted rather than applied: a `\n` becomes its own one-space
 /// [`Text`](InlineNode::Text) node (the same collapse `normalize_index_text`
 /// performs with `replace`), and — for the macro form alone — an escaped
@@ -461,7 +483,7 @@ fn shown_term<'src>(
 }
 
 /// Emits the nodes one contiguous range of a shown term covers, performing
-/// [`normalize_index_text`]'s two byte rewrites structurally — see
+/// `normalize_index_text`'s two byte rewrites structurally — see
 /// [`shown_term`] for why each takes the shape it does.
 fn emit_shown_term_range<'src>(
     s: &str,
@@ -515,7 +537,7 @@ fn emit_shown_term_range<'src>(
 ///
 /// A concealed `indexterm:[…]` is always recognized (it renders nothing, so its
 /// argument is never reconstructed). A visible `indexterm2:[…]`'s term is
-/// normalized via [`normalize_index_text`]
+/// normalized via `normalize_index_text`
 /// with bracket-unescaping, and reduced through [`shown_macro_term`] when the
 /// argument is an attribute list, then baked into the node's `terms` in its
 /// already-substituted form — or, when it encloses a construct whose rendering
@@ -655,7 +677,7 @@ fn build_indexterm_macro_match<'src>(
 }
 
 /// The text an `indexterm2:[…]` shows in the flow, given its already
-/// [`normalize_index_text`]-ed argument.
+/// `normalize_index_text`-ed argument.
 ///
 /// An argument carrying an `=` is an **attribute list**, whose first
 /// *positional* attribute is the shown term (`indexterm2:[Coffee,

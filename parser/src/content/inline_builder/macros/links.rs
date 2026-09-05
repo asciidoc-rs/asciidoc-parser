@@ -1,5 +1,10 @@
 //! Auto-link, formal-URL-link, and `link:`/`mailto:` macro recognition.
 
+use std::sync::LazyLock;
+
+use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
+use regex::Regex;
+
 // Referenced by the doc comments below, whose own rebuild is the one this
 // family reaches through `restored_value_children`; the code no longer calls
 // it directly.
@@ -18,21 +23,253 @@ use super::{
 use crate::{
     Parser, Span,
     attributes::{
-        Attrlist,
+        Attrlist, AttrlistContext,
         element_attribute::{MASKED_PIECE_PLACEHOLDER, SplicedValueEscaping},
     },
-    content::{
-        INLINE_EMAIL, INLINE_LINK, INLINE_LINK_MACRO, URI_SNIFF, encode_uri_component,
-        extract_attributes_from_text,
-        inline_builder::{
-            quotes::{LevelContext, Piece, SPAN_PLACEHOLDER, single_text_value, source_slice},
-            special_chars::Masked,
-        },
+    content::inline_builder::{
+        quotes::{LevelContext, Piece, SPAN_PLACEHOLDER, single_text_value, source_slice},
+        special_chars::Masked,
     },
     inlines::{InlineNode, LinkForm, Ref, RefVariant},
     parser::{InlineRenderer, has_dangerous_scheme},
     strings::CowStr,
 };
+
+// Ruby Asciidoctor's `InlineLinkRx` gates the angle-bracketed-URL alternative
+// (`\2([^\s]+?)&gt;`) with a back-reference to the `&lt;`-prefix capture group,
+// so it fires *only* when a leading `&lt;` was seen. The `regex` crate has no
+// back-references, so we can't express that gate inline. Instead we split the
+// pattern into two parallel top-level branches:
+//
+//   * the ANGLE branch requires a literal `&lt;` prefix and therefore keeps the
+//     angle-bracketed-URL alternative, and
+//   * the NON-ANGLE branch omits that alternative entirely.
+//
+// A stray `&gt;` with no matching `&lt;` (e.g. `https://example.org>;`) can then
+// only match the bare-link alternative, exactly as Ruby routes it. See #503.
+//
+// The blank alternative in the prefix (`[\ \t\p{Zs}]`) mirrors Asciidoctor's
+// `CG_BLANK` (`\p{Blank}`), which under Ruby's Unicode-aware engine treats any
+// space separator — including a no-break space (U+00A0) — as a boundary before
+// the scheme. A plain ASCII `[\ \t]` would leave such a URL as literal text
+// (see #768).
+//
+// The `link:` prefix is broken out into its own branch (below) that *requires*
+// a trailing `[…]`, so a `link:` with no brackets simply fails to match here
+// rather than matching as a bare link and then being rejected as invalid macro
+// syntax in the replacer.
+//
+// The single-pass builder derives the three capture-group sets from each
+// match span (see `link_groups`), so the numbering below is only referenced by
+// that derivation's differential pin.
+static INLINE_LINK: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?msx)
+        (?:
+            #### ANGLE branch: prefix is `&lt;`, keeping the `&gt;` alternative.
+            ( \\?&lt; )                                       # group 1: prefix
+            ( \\? (?: https? | file | ftp | irc ):// )        # group 2: scheme
+            (?:
+                ( [^\s\[\]]+ )                                # group 3: target
+                \[ ( | .*?[^\\] ) \]                          # group 4: attrlist
+              | ( [^\s]+? ) &gt;                              # group 5: URL inside <>
+              | ( [^\s\[\]<]* ( [^\s,.?!\[\]<\)] ) )          # group 6: bare link,
+                                                              # group 7: trailing char
+            )
+          |
+            #### LINK-MACRO branch: a `link:` prefix, which REQUIRES a trailing
+            #### `[…]`. Because this branch has no bare-link alternative, a
+            #### `link:` followed by a URL but no brackets does not match at all
+            #### (it is left as literal text), so it can never reach the
+            #### invalid-macro-syntax path in the replacer.
+            ( link: )                                         # group 8: prefix
+            ( \\? (?: https? | file | ftp | irc ):// )        # group 9: scheme
+            ( [^\s\[\]]+ )                                    # group 10: target
+            \[ ( | .*?[^\\] ) \]                              # group 11: attrlist
+          |
+            #### NON-ANGLE branch: no `&gt;` alternative (unreachable without `&lt;`).
+            ( ^ | [\ \t\p{Zs}] | [>\(\)\[\];"'] )             # group 12: prefix
+            ( \\? (?: https? | file | ftp | irc ):// )        # group 13: scheme
+            (?:
+                ( [^\s\[\]]+ )                                # group 14: target
+                \[ ( | .*?[^\\] ) \]                          # group 15: attrlist
+              | ( [^\s\[\]<]* ( [^\s,.?!\[\]<\)] ) )          # group 16: bare link,
+                                                              # group 17: trailing char
+            )
+        )
+    "#,
+    )
+    .unwrap()
+});
+
+/// Matches an inline link (`link:target[…]`) or `mailto:` macro.
+static INLINE_LINK_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?xs)                # (?x) extended mode, (?s) dot matches newline
+
+        \\?                     # Optional backslash escape before macro
+
+        (?:                     # Non-capturing group for macro name
+            link                #   'link'
+          | (mailto)            #   capture group 1: 'mailto'
+        )
+
+        :                       # Colon after macro name
+
+        (?:                     # Non-capturing outer group
+            ()                  #   capture group 2: empty target
+          | ([^:\s\[] [^\s\[]*) #   capture group 3: valid target (no colon/space/'[')
+        )
+
+        \[                      # Opening square bracket
+
+        (?:                     # Non-capturing outer group
+            ()                  #   capture group 4: empty label
+          | (.*?[^\\])          #   capture group 5: minimally match anything, not ending in '\'
+        )
+
+        \]                      # Closing square bracket
+    "#,
+    )
+    .unwrap()
+});
+
+/// This function is used in cases when the attrlist can be mixed with the text
+/// of a macro. If no attributes are detected aside from the first positional
+/// attribute, and the first positional attribute matches the attrlist, then the
+/// original text is returned.
+///
+/// Precondition: Any new-line characters (`\n`) must be replaced with spaces
+/// prior to calling this function.
+///
+/// `escaping` names which of the link family's two display-text paths `text`
+/// came off: a verbatim slice of the source
+/// ([`Verbatim`](SplicedValueEscaping::Verbatim)) or the output of
+/// `tokened_bracket`
+/// ([`MaskedPieceBytes`](SplicedValueEscaping::MaskedPieceBytes)),
+/// whose masked-piece invariant this parse's own attribute-reference
+/// substitution has to keep. See [`Attrlist::parse_tokened`].
+fn extract_attributes_from_text<'src>(
+    text: Span<'src>,
+    parser: &Parser,
+    default_text: Option<&str>,
+    escaping: SplicedValueEscaping,
+) -> (String, Attrlist<'src>) {
+    let attrlist_maw = match escaping {
+        SplicedValueEscaping::Verbatim => Attrlist::parse(text, parser, AttrlistContext::Inline),
+        SplicedValueEscaping::MaskedPieceBytes => Attrlist::parse_tokened(text, parser),
+    };
+
+    let attrs = attrlist_maw.item.item;
+
+    if let Some(resolved_text) = attrs.nth_attribute(1) {
+        // If the resolved text is unchanged from the input — i.e. the attribute
+        // list parse produced a single positional value equal to the whole text
+        // and split nothing off as a named attribute — clear the attributes and
+        // return the text unparsed. This matches Asciidoctor's
+        // `extract_attributes_from_text` (substitutors.rb) and is what makes a
+        // macro nested inside a link/xref's text (e.g. `link[image:...[]]`)
+        // survive intact: the already-rendered inner macro output happens to
+        // contain `=` and `"` characters, but is not a real attribute list.
+        if resolved_text.value() == text.data() {
+            // A zero-length span: no bytes to splice into, so it takes the
+            // plain parse whichever path the caller is on.
+            let empty_attrs = Attrlist::parse(Span::default(), parser, AttrlistContext::Inline)
+                .item
+                .item;
+            (text.data().to_owned(), empty_attrs)
+        } else {
+            (resolved_text.value().to_owned(), attrs)
+        }
+    } else {
+        let default_text = default_text.map(|s| s.to_string());
+        (default_text.unwrap_or_default(), attrs)
+    }
+}
+
+// Ruby CGI.escape (Ruby 2.5+) leaves only A-Z a-z 0-9 _.-~ unescaped and
+// encodes everything else; notably `*` is escaped to `%2A` while `~` is not.
+// It encodes space as '+'. (We'll fix afterward.)
+// Start with the standard URL encoding set.
+const CGI_ESCAPE_SET: &AsciiSet = &CONTROLS
+    .add(b' ') // space
+    .add(b'!')
+    .add(b'"')
+    .add(b'#')
+    .add(b'$')
+    .add(b'%')
+    .add(b'&')
+    .add(b'\'')
+    .add(b'(')
+    .add(b')')
+    .add(b'*') // asterisk must be escaped (CGI.escape emits %2A)
+    .add(b'+') // plus must be escaped
+    .add(b',')
+    .add(b'/')
+    .add(b':')
+    .add(b';')
+    .add(b'<')
+    .add(b'=')
+    .add(b'>')
+    .add(b'?')
+    .add(b'@')
+    .add(b'[')
+    .add(b'\\')
+    .add(b']')
+    .add(b'^')
+    .add(b'`')
+    .add(b'{')
+    .add(b'|')
+    .add(b'}');
+
+/// Percent-encodes a `mailto:` macro's subject/body into its target, matching
+/// Ruby's `CGI.escape`.
+fn encode_uri_component(s: &str) -> String {
+    // First escape with percent-encoding.
+    let encoded = utf8_percent_encode(s, CGI_ESCAPE_SET).to_string();
+
+    // Then apply the Ruby `.gsub('+', '%20')` logic.
+    // But note: percent-encoding gives us "%20" for space already,
+    // so we need to manually *introduce* '+' for space first,
+    // then swap them out.
+    let with_plus = encoded.replace("%20", "+");
+    with_plus.replace('+', "%20")
+}
+
+/// Matches an inline e-mail address.
+///
+/// # Example
+/// `doc.writer@example.com`
+static INLINE_EMAIL: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?x)                         # verbose mode (ignore whitespace & comments)
+
+        ([\\>:/]?)                      # capture group 1: prefix that causes mismatch: \, >, :, or /
+
+        (                               # capture group 2: actual e-mail address
+            [\w_]                           # leading word character
+            (?: &amp; | [\w\-.%+] )*        # subsequent word chars or symbols (&amp;, ., -, %, +)
+            @                               # at sign
+            [\p{L}\p{Nd}]                   # leading letter or digit in domain
+            [\p{L}\p{Nd}_\-.]*              # rest of domain
+            \.[a-zA-Z]{2,5}                 # dot + TLD (2–5 ASCII letters)
+        )
+
+        \b                              # word boundary
+        "#,
+    )
+    .unwrap()
+});
+
+/// Sniffs a leading URI scheme (e.g. `https://`), used to strip it from a link's
+/// display text under the `hide-uri-scheme` document attribute.
+static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r#"^\p{alpha}[\p{alpha}\p{digit}.+-]+:/{0,2}"#).unwrap()
+});
 
 /// The auto-link / formal-URL-link pass at a level: matches [`INLINE_LINK`]
 /// over the level's escaped text and replaces each verbatim, recognized match
@@ -448,7 +685,7 @@ fn find_inline_link_matches<'src>(
 /// for a form this increment defers or that the string step leaves literal (see
 /// [`inline_link_level`]).
 ///
-/// The value computation mirrors [`InlineLinkReplacer`] exactly — target, bare
+/// The value computation mirrors `InlineLinkReplacer` exactly — target, bare
 /// vs. labeled display text, `hide-uri-scheme`, the `^` window suffix, and the
 /// trailing-punctuation strip — so the fold reproduces the same bytes through
 /// the same `render_link` [`link_macro_level`]'s nodes fold through. The
@@ -490,8 +727,6 @@ fn find_inline_link_matches<'src>(
 /// tests can build and inspect a tree without a full `Parser`/`Content`
 /// round trip. (The same applies to the `link:`/`mailto:` macro node built by
 /// [`build_link_node`].)
-///
-/// [`InlineLinkReplacer`]: crate::content::macros
 fn build_inline_link_node<'src>(
     n: &LinkGroups<'_>,
     full: &std::ops::Range<usize>,
@@ -872,7 +1107,7 @@ fn build_inline_link_node<'src>(
 
 /// Builds one [`MacroMatch`] for an angle-bracketed URL (`<https://example.org>`
 /// — [`INLINE_LINK`]'s ANGLE branch with no `[…]`), mirroring
-/// [`InlineLinkReplacer`]'s own angle path exactly. That path differs from the
+/// `InlineLinkReplacer`'s own angle path exactly. That path differs from the
 /// general one in three ways, each reproduced here:
 ///
 /// - **The delimiters are consumed, not kept.** The replacer emits *only* the
@@ -916,8 +1151,6 @@ fn build_inline_link_node<'src>(
 /// no angle-specific case, since an angle node records the same
 /// [`AutoOrFormal`](LinkForm::AutoOrFormal)
 /// [`link_form`](crate::inlines::Ref::link_form) its non-angle sibling does.
-///
-/// [`InlineLinkReplacer`]: crate::content::macros
 fn build_angle_link_node<'src>(
     n: &LinkGroups<'_>,
     scheme_m: &GroupSpan<'_>,
@@ -1726,7 +1959,7 @@ struct TextAttrlist<'src> {
 
     /// Whether a real named attribute actually split off, mirroring the
     /// `lt != link_text_for_attrlist` guard that
-    /// [`InlineLinkReplacer`](crate::content::macros) applies and
+    /// `InlineLinkReplacer` applies and
     /// `InlineLinkMacroReplacer` does not (see this module's two call sites).
     /// `false` means the `=` was incidental and the whole text is the sole
     /// positional value.
@@ -2326,6 +2559,830 @@ mod tests {
         build_src, fold_html, golden_macros, golden_macros_in, link_text_of,
     };
 
+    mod encode_uri_component {
+        use super::super::encode_uri_component;
+
+        // Mirrors Asciidoctor's `Helpers.encode_uri_component`
+        // (helpers_test.rb, `context 'URI Encoding'`): non-word characters are
+        // percent-encoded, including `*` → `%2A`. `encode_uri_component` is
+        // private and reachable in production only via `mailto:` subject/body
+        // rendering, where the special-characters substitution rewrites the
+        // input first; this exercises the helper's contract directly.
+        #[test]
+        fn encodes_non_word_characters_generally() {
+            assert_eq!(
+                encode_uri_component(" !*/%&?\\="),
+                "%20%21%2A%2F%25%26%3F%5C%3D"
+            );
+        }
+
+        // `-` and `.` are left unencoded, as is `~` on Ruby 2.5+ (which this
+        // crate matches).
+        #[test]
+        fn leaves_select_non_word_characters_unencoded() {
+            assert_eq!(encode_uri_component("-.~"), "-.~");
+        }
+    }
+
+    mod inline_link {
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn escape_angle_bracket_autolink_before_lt() {
+            let doc = Parser::default()
+                .parse("You'll often see \\<https://example.org> used in examples.");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "You'll often see \\<https://example.org> used in examples.",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "You&#8217;ll often see &lt;https://example.org&gt; used in examples.",
+                        },
+                        source: Span {
+                            data: "You'll often see \\<https://example.org> used in examples.",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "You'll often see \\<https://example.org> used in examples.",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog::default(),
+                }
+            );
+        }
+
+        #[test]
+        fn escape_angle_bracket_autolink_before_scheme() {
+            let doc = Parser::default()
+                .parse("You'll often see <\\https://example.org> used in examples.");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "You'll often see <\\https://example.org> used in examples.",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "You&#8217;ll often see &lt;https://example.org&gt; used in examples.",
+                        },
+                        source: Span {
+                            data: "You'll often see <\\https://example.org> used in examples.",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "You'll often see <\\https://example.org> used in examples.",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog::default(),
+                }
+            );
+        }
+
+        #[test]
+        fn empty_inside_angle_brackets() {
+            let doc = Parser::default().parse("There's no actual link <https://> in here.");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "There's no actual link <https://> in here.",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "There&#8217;s no actual link &lt;https://&gt; in here.",
+                        },
+                        source: Span {
+                            data: "There's no actual link <https://> in here.",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "There's no actual link <https://> in here.",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog::default(),
+                }
+            );
+        }
+
+        #[test]
+        fn hide_uri_scheme() {
+            let doc = Parser::default().parse("= Test Page\n:hide-uri-scheme:\n\nWe don't want you to know that this is HTTP: <https://example.com> just now.");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: Some(Span {
+                            data: "Test Page",
+                            line: 1,
+                            col: 3,
+                            offset: 2,
+                        },),
+                        title: Some("Test Page",),
+                        attributes: &[Attribute {
+                            name: Span {
+                                data: "hide-uri-scheme",
+                                line: 2,
+                                col: 2,
+                                offset: 13,
+                            },
+                            value_source: None,
+                            value: InterpretedValue::Set,
+                            source: Span {
+                                data: ":hide-uri-scheme:",
+                                line: 2,
+                                col: 1,
+                                offset: 12,
+                            },
+                        },],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "= Test Page\n:hide-uri-scheme:",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "We don't want you to know that this is HTTP: <https://example.com> just now.",
+                                line: 4,
+                                col: 1,
+                                offset: 31,
+                            },
+                            rendered: "We don&#8217;t want you to know that this is HTTP: <a href=\"https://example.com\" class=\"bare\">example.com</a> just now.",
+                        },
+                        source: Span {
+                            data: "We don't want you to know that this is HTTP: <https://example.com> just now.",
+                            line: 4,
+                            col: 1,
+                            offset: 31,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "= Test Page\n:hide-uri-scheme:\n\nWe don't want you to know that this is HTTP: <https://example.com> just now.",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog::default(),
+                }
+            );
+        }
+
+        #[test]
+        fn link_with_semicolon_suffix() {
+            let doc = Parser::default().parse(
+                "You shouldn't visit https://example.com; it's just there to illustrate examples.",
+            );
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "You shouldn't visit https://example.com; it's just there to illustrate examples.",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "You shouldn&#8217;t visit <a href=\"https://example.com\" class=\"bare\">https://example.com</a>; it&#8217;s just there to illustrate examples.",
+                        },
+                        source: Span {
+                            data: "You shouldn't visit https://example.com; it's just there to illustrate examples.",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "You shouldn't visit https://example.com; it's just there to illustrate examples.",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog::default(),
+                }
+            );
+        }
+
+        #[test]
+        fn link_with_paren_and_colon_suffix() {
+            let doc = Parser::default().parse(
+            "You shouldn't visit that site (https://example.com): it's just there to illustrate examples.",
+        );
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "You shouldn't visit that site (https://example.com): it's just there to illustrate examples.",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "You shouldn&#8217;t visit that site (<a href=\"https://example.com\" class=\"bare\">https://example.com</a>): it&#8217;s just there to illustrate examples.",
+                        },
+                        source: Span {
+                            data: "You shouldn't visit that site (https://example.com): it's just there to illustrate examples.",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "You shouldn't visit that site (https://example.com): it's just there to illustrate examples.",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog::default(),
+                }
+            );
+        }
+
+        #[test]
+        fn named_attributes_without_link_text_and_hide_uri_scheme() {
+            let doc = Parser::default()
+            .parse("= Test\n:hide-uri-scheme:\n\nhttps://chat.asciidoc.org[role=button,window=_blank,opts=nofollow]");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: Some(Span {
+                            data: "Test",
+                            line: 1,
+                            col: 3,
+                            offset: 2,
+                        },),
+                        title: Some("Test",),
+                        attributes: &[Attribute {
+                            name: Span {
+                                data: "hide-uri-scheme",
+                                line: 2,
+                                col: 2,
+                                offset: 8,
+                            },
+                            value_source: None,
+                            value: InterpretedValue::Set,
+                            source: Span {
+                                data: ":hide-uri-scheme:",
+                                line: 2,
+                                col: 1,
+                                offset: 7,
+                            },
+                        },],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "= Test\n:hide-uri-scheme:",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "https://chat.asciidoc.org[role=button,window=_blank,opts=nofollow]",
+                                line: 4,
+                                col: 1,
+                                offset: 26,
+                            },
+                            rendered: "<a href=\"https://chat.asciidoc.org\" class=\"bare button\" target=\"_blank\" rel=\"nofollow noopener\">chat.asciidoc.org</a>",
+                        },
+                        source: Span {
+                            data: "https://chat.asciidoc.org[role=button,window=_blank,opts=nofollow]",
+                            line: 4,
+                            col: 1,
+                            offset: 26,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "= Test\n:hide-uri-scheme:\n\nhttps://chat.asciidoc.org[role=button,window=_blank,opts=nofollow]",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog::default(),
+                }
+            );
+        }
+
+        #[test]
+        fn stray_gt_followed_by_punctuation() {
+            // Regression for https://github.com/asciidoc-rs/asciidoc-parser/issues/503:
+            // a bare URL abutting `>;` (rendered to `&gt;;`) with NO matching
+            // leading `<`. Ruby Asciidoctor treats the whole run as a bare link
+            // (keeping the literal `&gt;` in the URL) and strips a single
+            // trailing `;`.
+            //
+            // Reference (Ruby Asciidoctor 2.0.23):
+            //   $ printf '%s' 'foo https://example.org>;' | asciidoctor -e -o - -
+            //   <p>foo <a href="https://example.org&gt;" class="bare">https://example.org&gt;</a>;</p>
+            //
+            // Previously the ungated angle-URL alternative fired for the stray
+            // `&gt;` and split the run, dropping the `;` from the `&gt;`
+            // entity.
+            let doc = Parser::default().parse("foo https://example.org>;");
+
+            let rendered = doc
+                .child_blocks()
+                .next()
+                .unwrap()
+                .rendered_html_content()
+                .unwrap();
+
+            assert_eq!(
+                rendered,
+                r#"foo <a href="https://example.org&gt;" class="bare">https://example.org&gt;</a>;"#
+            );
+        }
+
+        #[test]
+        fn angle_bracketed_url_still_matches() {
+            // Companion to `stray_gt_followed_by_punctuation` (issue #503): the
+            // genuine angle-bracketed autolink (`<url>`) must keep working. The
+            // `&lt;` prefix gates the angle-URL alternative back on, so the
+            // `&gt;` delimiter is consumed and the brackets are
+            // dropped from the link.
+            let doc = Parser::default().parse("See <https://example.org> for details.");
+
+            let rendered = doc
+                .child_blocks()
+                .next()
+                .unwrap()
+                .rendered_html_content()
+                .unwrap();
+
+            assert_eq!(
+                rendered,
+                r#"See <a href="https://example.org" class="bare">https://example.org</a> for details."#
+            );
+        }
+    }
+
+    mod link_macro {
+        use crate::tests::prelude::*;
+
+        #[test]
+        fn escape_link_macro() {
+            let doc =
+                Parser::default().parse("A link macro looks like this: \\link:target[link text].");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "A link macro looks like this: \\link:target[link text].",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "A link macro looks like this: link:target[link text].",
+                        },
+                        source: Span {
+                            data: "A link macro looks like this: \\link:target[link text].",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "A link macro looks like this: \\link:target[link text].",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog::default(),
+                }
+            );
+        }
+
+        #[test]
+        fn empty_mailto_link() {
+            let doc = Parser::default().parse("mailto:[,Subscribe me]");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: None,
+                        title: None,
+                        attributes: &[],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "mailto:[,Subscribe me]",
+                                line: 1,
+                                col: 1,
+                                offset: 0,
+                            },
+                            rendered: "<a href=\"mailto:?subject=Subscribe%20me\"></a>",
+                        },
+                        source: Span {
+                            data: "mailto:[,Subscribe me]",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "mailto:[,Subscribe me]",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog::default(),
+                }
+            );
+        }
+
+        #[test]
+        fn empty_link_text_with_hide_uri_scheme() {
+            let doc = Parser::default()
+                .parse("= Test Document\n:hide-uri-scheme:\n\nlink:https://example.com[]");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: Some(Span {
+                            data: "Test Document",
+                            line: 1,
+                            col: 3,
+                            offset: 2,
+                        },),
+                        title: Some("Test Document",),
+                        attributes: &[Attribute {
+                            name: Span {
+                                data: "hide-uri-scheme",
+                                line: 2,
+                                col: 2,
+                                offset: 17,
+                            },
+                            value_source: None,
+                            value: InterpretedValue::Set,
+                            source: Span {
+                                data: ":hide-uri-scheme:",
+                                line: 2,
+                                col: 1,
+                                offset: 16,
+                            },
+                        },],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "= Test Document\n:hide-uri-scheme:",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "link:https://example.com[]",
+                                line: 4,
+                                col: 1,
+                                offset: 35,
+                            },
+                            rendered: "<a href=\"https://example.com\" class=\"bare\">example.com</a>",
+                        },
+                        source: Span {
+                            data: "link:https://example.com[]",
+                            line: 4,
+                            col: 1,
+                            offset: 35,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "= Test Document\n:hide-uri-scheme:\n\nlink:https://example.com[]",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog::default(),
+                }
+            );
+        }
+
+        #[test]
+        fn empty_mailto_link_text_with_hide_uri_scheme() {
+            let doc = Parser::default()
+                .parse("= Test Document\n:hide-uri-scheme:\n\nlink:mailto:fred@example.com[]");
+
+            assert_eq!(
+                doc,
+                Document {
+                    header: Header {
+                        title_source: Some(Span {
+                            data: "Test Document",
+                            line: 1,
+                            col: 3,
+                            offset: 2,
+                        },),
+                        title: Some("Test Document",),
+                        attributes: &[Attribute {
+                            name: Span {
+                                data: "hide-uri-scheme",
+                                line: 2,
+                                col: 2,
+                                offset: 17,
+                            },
+                            value_source: None,
+                            value: InterpretedValue::Set,
+                            source: Span {
+                                data: ":hide-uri-scheme:",
+                                line: 2,
+                                col: 1,
+                                offset: 16,
+                            },
+                        },],
+                        author_line: None,
+                        revision_line: None,
+                        comments: &[],
+                        source: Span {
+                            data: "= Test Document\n:hide-uri-scheme:",
+                            line: 1,
+                            col: 1,
+                            offset: 0,
+                        },
+                    },
+                    blocks: &[Block::Simple(SimpleBlock {
+                        content: Content {
+                            original: Span {
+                                data: "link:mailto:fred@example.com[]",
+                                line: 4,
+                                col: 1,
+                                offset: 35,
+                            },
+                            rendered: "<a href=\"mailto:fred@example.com\" class=\"bare\">fred@example.com</a>",
+                        },
+                        source: Span {
+                            data: "link:mailto:fred@example.com[]",
+                            line: 4,
+                            col: 1,
+                            offset: 35,
+                        },
+                        style: SimpleBlockStyle::Paragraph,
+                        title_source: None,
+                        title: None,
+                        caption: None,
+                        number: None,
+                        anchor: None,
+                        anchor_reftext: None,
+                        attrlist: None,
+                    },),],
+                    source: Span {
+                        data: "= Test Document\n:hide-uri-scheme:\n\nlink:mailto:fred@example.com[]",
+                        line: 1,
+                        col: 1,
+                        offset: 0,
+                    },
+                    warnings: &[],
+                    source_map: SourceMap(&[]),
+                    catalog: Catalog::default(),
+                }
+            );
+        }
+    }
+
     #[test]
     fn link_groups_match_the_capture_engine() {
         // `link_groups` derives INLINE_LINK's branch-agnostic groups from
@@ -2337,8 +3394,7 @@ mod tests {
         // alternative, escapes of the prefix and of the scheme, empty and
         // escaped-bracket attrlists, multibyte prefixes and URLs, trailing
         // punctuation, and multi-match haystacks.
-        use super::{GroupSpan, link_groups};
-        use crate::content::INLINE_LINK;
+        use super::{GroupSpan, INLINE_LINK, link_groups};
 
         fn span(m: Option<regex::Match<'_>>) -> Option<GroupSpan<'_>> {
             m.map(|m| GroupSpan {

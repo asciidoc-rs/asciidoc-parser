@@ -1,6 +1,8 @@
 //! Image and icon macro recognition (`image:target[…]`, `icon:target[…]`).
 
-use std::borrow::Cow;
+use std::{borrow::Cow, path::Path, sync::LazyLock};
+
+use regex::Regex;
 
 // Referenced by the doc comments below; the code itself reaches the level's
 // match string through [`shifted_level`]'s shared slot now.
@@ -16,20 +18,74 @@ use crate::{
         Attrlist, AttrlistContext,
         element_attribute::{MASKED_PIECE_PLACEHOLDER, escape_masked_piece_bytes},
     },
-    content::{
-        INLINE_IMAGE_MACRO, basename,
-        inline_builder::{
-            fold::{fold_html, fold_stem, render_text},
-            quotes::{LevelContext, Piece, charref_entity, source_slice, text_slice},
-            special_chars::Masked,
-        },
-        normalize_text_lf_escaped_bracket,
+    content::inline_builder::{
+        fold::{fold_html, fold_stem, render_text},
+        quotes::{LevelContext, Piece, charref_entity, source_slice, text_slice},
+        special_chars::Masked,
     },
     inlines::{Image, InlineNode, RawForm, RawOrigin},
     parser::{InlineRenderer, has_dangerous_scheme, has_dangerous_self_href, is_uri_ish},
     strings::CowStr,
     warnings::WarningType,
 };
+
+/// Matches an [inline image] (`image:target[…]`) or [inline icon]
+/// (`icon:target[…]`) macro.
+///
+/// ## Examples
+///
+/// * `image:sunset.jpg[]`
+/// * `image:sunset.jpg[Sunset,300,200]`
+/// * `icon:tags[]`
+/// * `icon:t[]` — a single-character target
+///
+/// The target is required; only its trailing portion is optional, so a
+/// one-character target matches but an empty one does not. A macro written
+/// without a target (`image:[]`) is thus left as literal text, matching
+/// Asciidoctor's `InlineImageMacroRx`.
+///
+/// [inline image]: https://docs.asciidoctor.org/asciidoc/latest/macros/images/
+/// [inline icon]: https://docs.asciidoctor.org/asciidoc/latest/macros/icons/
+static INLINE_IMAGE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?xs)
+            \\?                         # Optional escape: literal backslash
+            i(?:mage|con):              # 'image:' or 'icon:' prefix
+
+            (                           # Group 1: the target (required)
+                [^:\s\[\n]                  # First char: not colon, whitespace, [, or newline
+                (?:                         # Remainder is optional: a target
+                                            # may be a single character
+                    [^\[\n]*?                   # Middle chars: any except [ or newline, lazily
+                    [^\s\[\n]                   # Last char: not whitespace, [, or newline
+                )?
+            )
+
+            \[                          # Opening square bracket
+
+            (                           # Group 2: bracketed text
+                |                       #   EITHER: empty alt text
+                .*?[^\\]                #   OR: content ending in a non-backslash
+            )
+
+            \]                          # Closing square bracket
+        "#,
+    )
+    .unwrap()
+});
+
+fn basename(path: &str) -> String {
+    Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn normalize_text_lf_escaped_bracket(text: &str) -> String {
+    text.replace("\n", " ").replace("\\]", "]")
+}
 
 /// Mirrors the string step's `found_macroish`: an image or icon macro needs
 /// its name prefix and an opening bracket. Shared between
@@ -1252,6 +1308,63 @@ mod tests {
         parser::{DefaultPathResolver, HtmlInlineRenderer},
         strings::CowStr,
     };
+
+    mod inline_image_macro {
+        use crate::{
+            content::{Content, SubstitutionStep},
+            strings::CowStr,
+            tests::prelude::*,
+        };
+
+        fn apply_macros(source: &'static str) -> Content<'static> {
+            let mut content = Content::from(crate::Span::new(source));
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Macros]).apply(
+                &mut content,
+                &Parser::default(),
+                None,
+            );
+            content
+        }
+
+        // An `image:`/`icon:` macro written without a target is not an image
+        // macro (Asciidoctor's `InlineImageMacroRx` requires one), so the text
+        // is left exactly as the author typed it. This used to panic: the
+        // target capture group was optional but indexed unconditionally.
+        #[test]
+        fn image_macro_without_target_is_left_literal() {
+            let content = apply_macros("image:[]");
+            assert_eq!(content.rendered, CowStr::Borrowed("image:[]"));
+        }
+
+        #[test]
+        fn icon_macro_without_target_is_left_literal() {
+            let content = apply_macros("icon:[]");
+            assert_eq!(content.rendered, CowStr::Borrowed("icon:[]"));
+        }
+
+        // Same, with alt text in the brackets and surrounding text: the macro
+        // is not recognized, and no part of the line is consumed.
+        #[test]
+        fn image_macro_without_target_but_with_alt_text_is_left_literal() {
+            let content = apply_macros("See image:[alt] here.");
+            assert_eq!(content.rendered, CowStr::Borrowed("See image:[alt] here."));
+        }
+
+        // Only the *trailing* portion of the target is optional, so a
+        // one-character target is a valid macro.
+        #[test]
+        fn single_character_target_is_an_image() {
+            let content = apply_macros("image:a[Alt]");
+            assert_eq!(
+                content.rendered,
+                CowStr::Boxed(
+                    r#"<span class="image"><img src="a" alt="Alt"></span>"#
+                        .to_string()
+                        .into_boxed_str()
+                )
+            );
+        }
+    }
 
     #[test]
     fn fold_matches_the_string_pipeline_through_macros() {

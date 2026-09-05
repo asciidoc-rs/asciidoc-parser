@@ -1,5 +1,9 @@
 //! The footnote substitution step.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use super::{
     fold_deferring_xrefs,
     macros::{emit_range_unescaping_brackets, image::range_has_no_opaque_piece},
@@ -10,10 +14,45 @@ use super::{
 };
 use crate::{
     Parser, Span,
-    content::{INLINE_FOOTNOTE_MACRO, XrefTemplatePiece},
+    content::XrefTemplatePiece,
     inlines::{Footnote, InlineNode},
     strings::CowStr,
 };
+
+/// Matches a [footnote] inline macro, in either the `footnote:` form or the
+/// deprecated `footnoteref:` form.
+///
+/// ## Examples
+///
+/// * `footnote:[text]` — an anonymous footnote
+/// * `footnote:id[text]` — a footnote with an ID, so it can be referenced again
+/// * `footnote:id[]` — a reference to a previously-defined footnote
+/// * `footnoteref:[id,text]` / `footnoteref:[id]` — the deprecated equivalents
+///
+/// Asciidoctor anchors the match with a `(?!</a>)` look-ahead after the closing
+/// bracket so a `footnote:[…]` that forms the text of an already-rendered link
+/// is not matched again; the `regex` crate has no look-ahead, so this family
+/// re-creates that guard by inspecting the text that follows the match.
+///
+/// [footnote]: https://docs.asciidoctor.org/asciidoc/latest/macros/footnote/
+static INLINE_FOOTNOTE_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(
+        r#"(?xs)                     # extended mode; dot matches newline
+        \\?                          # optional escaping backslash
+        footnote
+        (?:
+            (ref):                   # (1) the deprecated 'footnoteref:' form
+          |
+            : ([\w-]+)?              # (2) optional id for the 'footnote:id' form
+        )
+        \[
+            (?: | (.*?[^\\]) )       # (3) text: empty, or ends in a non-backslash
+        \]
+        "#,
+    )
+    .unwrap()
+});
 
 /// The footnote substitution, as a **whole-tree**, order-preserving
 /// transducer: matches [`INLINE_FOOTNOTE_MACRO`] at every level of `nodes`,
@@ -922,8 +961,7 @@ mod tests {
         // for group, across a corpus covering both forms, escapes, present
         // and absent ids, empty and escaped-bracket texts, and multi-match
         // haystacks at varying offsets.
-        use super::{FootnoteGroups, footnote_groups};
-        use crate::content::INLINE_FOOTNOTE_MACRO;
+        use super::{FootnoteGroups, INLINE_FOOTNOTE_MACRO, footnote_groups};
 
         let haystacks = [
             "footnote:[text]",
