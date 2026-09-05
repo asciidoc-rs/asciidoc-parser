@@ -5,15 +5,6 @@ use std::sync::LazyLock;
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use regex::Regex;
 
-// Referenced by the doc comments below, whose own rebuild is the one this
-// family reaches through `restored_value_children`; the code no longer calls
-// it directly.
-// Referenced by the doc comments below; the code itself reaches the level's
-// match string through [`shifted_level`]'s shared slot now.
-#[allow(unused_imports)]
-use super::super::quotes::build_match_string;
-#[allow(unused_imports)]
-use super::computed_value_children;
 use super::{
     ComputedSpecials, INLINE_LINK_DIGRAMS, LINK_MACRO_DIGRAMS, LevelSniff, MacroMatch,
     MacroMatchKind,
@@ -297,11 +288,11 @@ static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
 /// - A **target** — or, for a bare link, the whole match, whose shown text is a
 ///   slice of that same target — crossing an **opaque** piece: a rendered
 ///   [`Styled`](crate::inlines::Styled) span, or any other construct
-///   [`build_match_string`] stands in as one [`SPAN_PLACEHOLDER`]. A
-///   **bracketed display text** crossing one is admitted (see below), and so is
-///   a **masked** construct — a passthrough or a STEM expression — anywhere in
-///   the target, whose own body the computed value is finished into (see "A
-///   masked construct in the target" below).
+///   [`build_match_string`](super::super::quotes::build_match_string) stands in
+///   as one [`SPAN_PLACEHOLDER`]. A **bracketed display text** crossing one is
+///   admitted (see below), and so is a **masked** construct — a passthrough or
+///   a STEM expression — anywhere in the target, whose own body the computed
+///   value is finished into (see "A masked construct in the target" below).
 /// - A **bare URL whose stripped trailing punctuation is not its own**: the
 ///   strip keys off the target's final character (`;` or `:`, plus an adjacent
 ///   `)`), and a bare URL ending in an escaped special has an entity there
@@ -343,9 +334,9 @@ static URI_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
 ///
 /// A **rendered span** — a [`Styled`](crate::inlines::Styled) span, or an
 /// already-recognized macro node of another family — is *not* recoverable:
-/// [`build_match_string`] stands it in as one
-/// [`SPAN_PLACEHOLDER`], since that markup exists only at fold time. It is
-/// nonetheless admitted
+/// [`build_match_string`](super::super::quotes::build_match_string) stands it
+/// in as one [`SPAN_PLACEHOLDER`], since that markup exists only at fold time.
+/// It is nonetheless admitted
 /// **inside the bracketed display text** of a formal URL link
 /// (`https://example.org[a *b* c]`, and the angle spelling
 /// `<https://example.org[a *b* c]` that keeps its `&lt;`), because that text is
@@ -699,15 +690,16 @@ fn find_inline_link_matches<'src>(
 /// The bytes this pass *computes* off the match string — the boundary prefix it
 /// inspects, the scheme, and the URL that becomes the target — must not cross
 /// an **opaque** piece: a rendered [`Styled`](crate::inlines::Styled) span, or
-/// anything else [`build_match_string`] stands in as one [`SPAN_PLACEHOLDER`].
-/// The gate therefore covers the match up to the bracketed display text, which
-/// reads nothing and is carried structurally (see [`inline_link_level`]'s own
-/// rendered-span section) — and, for a **bare** link, the whole match, whose
-/// shown text is a slice of the target's own range. The check sits here, not in
-/// [`find_inline_link_matches`], for two reasons: it must run *after* the
-/// escape checks (so an escaped link the gate would reject still drops its
-/// backslash, mirroring the replacer's own check order), and the ANGLE
-/// branch's `<url>` form gates only its own interior (see
+/// anything else
+/// [`build_match_string`](super::super::quotes::build_match_string) stands in
+/// as one [`SPAN_PLACEHOLDER`]. The gate therefore covers the match up to the
+/// bracketed display text, which reads nothing and is carried structurally (see
+/// [`inline_link_level`]'s own rendered-span section) — and, for a **bare**
+/// link, the whole match, whose shown text is a slice of the target's own
+/// range. The check sits here, not in [`find_inline_link_matches`], for two
+/// reasons: it must run *after* the escape checks (so an escaped link the gate
+/// would reject still drops its backslash, mirroring the replacer's own check
+/// order), and the ANGLE branch's `<url>` form gates only its own interior (see
 /// [`build_angle_link_node`]).
 ///
 /// A [`synthesized`](Piece::synthesized) run and an *escaped special* (a
@@ -1322,9 +1314,9 @@ fn hide_uri_scheme_text(target: &str, parser: &Parser) -> String {
 ///
 /// A **rendered span** — a [`Styled`](crate::inlines::Styled) span, or an
 /// already-recognized macro node of another family — is *not* recoverable:
-/// [`build_match_string`] stands it in as one
-/// [`SPAN_PLACEHOLDER`], since that markup exists only at fold time. It is
-/// nonetheless admitted
+/// [`build_match_string`](super::super::quotes::build_match_string) stands it
+/// in as one [`SPAN_PLACEHOLDER`], since that markup exists only at fold time.
+/// It is nonetheless admitted
 /// **inside the bracketed display text**, because that text is the one capture
 /// this family never reads as bytes: it becomes the node's children through
 /// [`macro_text_children`], whose
@@ -1615,7 +1607,8 @@ pub(super) fn restore_masked_passthroughs(
 ///   of the bracket's own verbatim `'src` slice yields logical text, so it
 ///   stays a single synthesized `Text` (that slice carries no entity to undo);
 ///   a parse of the level's **match string** yields already-escaped bytes
-///   instead, so it is rebuilt through [`computed_value_children`] — the
+///   instead, so it is rebuilt through
+///   [`computed_value_children`](super::computed_value_children) — the
 ///   escaped/entity/replacement trichotomy under an order that has already
 ///   escaped, and the literal reading under one that has not — exactly as the
 ///   cross-reference family's own attribute-list value is, with each **masked**
@@ -1954,7 +1947,8 @@ struct TextAttrlist<'src> {
     /// Whether [`text`](Self::text) came back from a parse of the level's
     /// **match string** (already-escaped bytes) rather than of the
     /// source's own (logical text). The caller rebuilds the former through
-    /// [`computed_value_children`] so an entity in it is not escaped twice.
+    /// [`computed_value_children`](super::computed_value_children) so an entity
+    /// in it is not escaped twice.
     escaped: bool,
 
     /// Whether a real named attribute actually split off, mirroring the
@@ -2010,13 +2004,15 @@ struct TextAttrlist<'src> {
 /// `'src` parse, and with it the borrow — the shape every ordinary
 /// `link:index.html[Docs,role=hl]` takes. Both halves of that test are load
 /// bearing. The range must be verbatim because bytes can coincide without the
-/// text being the source's: [`build_match_string`] gives a *restored* entity
-/// leaf its own bytes as written, so `link:x[a &copy; b,role=hl]` reads
-/// identically either way while its parsed value is escaped text, not logical
-/// text. And the bytes must be compared because a verbatim range need not be
-/// contiguous in the source: the attribute-references step drops an escaped
-/// reference's backslash as a *gap* (`link:x[\{name},role=hl]`), so the
-/// enclosing slice carries a byte the replacer's own text does not.
+/// text being the source's:
+/// [`build_match_string`](super::super::quotes::build_match_string) gives a
+/// *restored* entity leaf its own bytes as written, so `link:x[a &copy;
+/// b,role=hl]` reads identically either way while its parsed value is escaped
+/// text, not logical text. And the bytes must be compared because a verbatim
+/// range need not be contiguous in the source: the attribute-references step
+/// drops an escaped reference's backslash as a *gap*
+/// (`link:x[\{name},role=hl]`), so the enclosing slice carries a byte the
+/// replacer's own text does not.
 ///
 /// A **masked** construct — a passthrough or a STEM expression — is admitted
 /// too, and restored the way the image family's own bracket is: the text is
@@ -2213,7 +2209,7 @@ fn text_attrlist<'src>(
 ///   (`</strong>`, `</a>`,
 ///   and `<img …>` all end in `>`, a mismatch character, so the address would
 ///   stay
-///   literal), while here [`build_match_string`] stands the construct in
+///   literal), while here [`build_match_string`](super::super::quotes::build_match_string) stands the construct in
 ///   as one opaque [`SPAN_PLACEHOLDER`] belonging to no mismatch class. A tree
 ///   whose markup exists only at fold time cannot reproduce that decision, so
 ///   the address is left literal rather than recognized into a link matching

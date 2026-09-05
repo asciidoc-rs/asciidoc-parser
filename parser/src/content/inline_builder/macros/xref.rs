@@ -1,18 +1,9 @@
 //! Cross-reference recognition (`xref:id[…]`, `<<id>>`).
 
-// Referenced by the doc comments below, whose own rebuild is the one this
-// family reaches through `restored_value_children`; the code no longer calls
-// it directly.
-// Referenced by the doc comments below; the code itself reaches the level's
-// match string through [`shifted_level`]'s shared slot now.
 use std::sync::LazyLock;
 
 use regex::Regex;
 
-#[allow(unused_imports)]
-use super::super::quotes::build_match_string;
-#[allow(unused_imports)]
-use super::computed_value_children;
 use super::{
     ComputedSpecials, LevelSniff, MacroMatch, MacroMatchKind, XREF_DIGRAMS,
     image::{range_has_no_opaque_piece, range_is_substitution_restorable},
@@ -288,7 +279,7 @@ fn restored_range<'a>(
 /// [`macro_text_children`]), so the leaf folds back to its own bytes instead of
 /// being escaped twice — and the attribute-list branch, whose value comes back
 /// from a parse rather than from a range, re-derives the same split with
-/// [`computed_value_children`].
+/// [`computed_value_children`](super::computed_value_children).
 ///
 /// # A rendered span inside the reference text
 ///
@@ -577,11 +568,12 @@ fn attrlist_text_carries_its_opaque_pieces(
 /// [`MASKED_PIECE_PLACEHOLDER`](crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER)
 /// pair a [`tokened_text`] occurrence is built from.
 ///
-/// It should not: [`build_match_string`] stands an opaque piece in as
-/// [`SPAN_PLACEHOLDER`](super::super::quotes), a private-use codepoint, so
-/// every occurrence of either codepoint reaching here is one the **author**
-/// wrote — checked individually, not as the adjacent pair, since a stray
-/// half sitting beside the *other* half completed by a real placeholder
+/// It should not:
+/// [`build_match_string`](super::super::quotes::build_match_string) stands an
+/// opaque piece in as [`SPAN_PLACEHOLDER`](super::super::quotes), a private-use
+/// codepoint, so every occurrence of either codepoint reaching here is one the
+/// **author** wrote — checked individually, not as the adjacent pair, since a
+/// stray half sitting beside the *other* half completed by a real placeholder
 /// nearby would be just as ambiguous as a whole stray pair.
 ///
 /// Those bytes used to make the whole tokening ambiguous: an occurrence was

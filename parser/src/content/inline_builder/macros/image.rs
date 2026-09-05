@@ -4,10 +4,6 @@ use std::{borrow::Cow, path::Path, sync::LazyLock};
 
 use regex::Regex;
 
-// Referenced by the doc comments below; the code itself reaches the level's
-// match string through [`shifted_level`]'s shared slot now.
-#[allow(unused_imports)]
-use super::super::quotes::build_match_string;
 use super::{
     IMAGE_DIGRAMS, LevelSniff, MacroMatch, MacroMatchKind, links::restore_masked_passthroughs,
     rebuild_macro_level,
@@ -298,8 +294,9 @@ pub(in crate::content::inline_builder) fn range_is_verbatim_or_synthesized(
 /// rejecting only an **opaque** piece: a rendered
 /// [`Styled`](crate::inlines::Styled) span, an
 /// earlier-recognized macro node, or a masked passthrough or STEM expression,
-/// each of which [`build_match_string`] stands in as one
-/// `SPAN_PLACEHOLDER` rather than its rendered markup or entity.
+/// each of which
+/// [`build_match_string`](super::super::quotes::build_match_string) stands in
+/// as one `SPAN_PLACEHOLDER` rather than its rendered markup or entity.
 ///
 /// All three `CharRef` leaves are admissible for the same reason: their
 /// match-string bytes — a special's canonical entity (`&lt;`, `&gt;`,
@@ -344,10 +341,10 @@ pub(in crate::content::inline_builder) fn range_has_no_opaque_piece(
 }
 
 /// Tells whether one [`atomic`](Piece::atomic) piece is a leaf
-/// [`build_match_string`] gives real bytes to — the classification
-/// [`range_has_no_opaque_piece`] applies per overlapping piece (see its own
-/// doc comment for why exactly these three [`CharRef`](crate::inlines::CharRef)
-/// leaves qualify).
+/// [`build_match_string`](super::super::quotes::build_match_string) gives real
+/// bytes to — the classification [`range_has_no_opaque_piece`] applies per
+/// overlapping piece (see its own doc comment for why exactly these three
+/// [`CharRef`](crate::inlines::CharRef) leaves qualify).
 fn atomic_piece_is_recoverable(nodes: &[InlineNode<'_>], piece: &Piece) -> bool {
     // The atomic pieces `build_match_string` gives real bytes to are the
     // three `CharRef` leaves — an escaped special, a restored entity, and
