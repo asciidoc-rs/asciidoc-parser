@@ -1,16 +1,12 @@
-use std::{borrow::Cow, fmt::Write as _, sync::LazyLock};
+use std::sync::LazyLock;
 
-use regex::{Captures, Regex, Replacer};
+use regex::Regex;
 
 use crate::{
-    Parser, Span,
-    attributes::{Attrlist, AttrlistContext},
-    content::{
-        Content, PASSTHROUGH_PLACEHOLDER_END, PASSTHROUGH_PLACEHOLDER_START, SubstitutionGroup,
-        substitution_step::substitute_attributes_in_text,
-    },
-    parser::{QuoteScope, QuoteType},
-    warnings::WarningType,
+    Parser,
+    content::SubstitutionGroup,
+    inlines::{InlineNode, RawOrigin},
+    parser::QuoteType,
 };
 
 /// Records one inline passthrough (`+++…+++`, `++…++`, `$$…$$`, `pass:[…]`, or
@@ -27,8 +23,6 @@ use crate::{
 pub struct Passthrough {
     pub(crate) text: String,
     pub(crate) subs: SubstitutionGroup,
-    pub(crate) type_: Option<QuoteType>,
-    pub(crate) attrlist: Option<String>,
 }
 
 impl Passthrough {
@@ -55,108 +49,103 @@ impl Passthrough {
     }
 }
 
-/// Saves content of passthrough (`+++`-bracketed) passages for later
-/// re-expansion.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct Passthroughs(pub(crate) Vec<Passthrough>);
-
-impl Passthroughs {
-    pub(crate) fn extract_from(content: &mut Content<'_>, parser: &Parser) -> Self {
-        let mut passthroughs = Self(vec![]);
-
-        // TRANSLATION GUIDE:
-        // * compat_mode => always false
-        // * passthroughs => self.saved_spans
-        // * old_behavior => appears to affect the entire span
-
-        {
-            let text = content.rendered.as_ref();
-            if text.contains("++") || text.contains("$$") || text.contains("ss:") {
-                let source = content.original();
-                let replacer = InlinePassMacroReplacer {
-                    passthroughs: &mut passthroughs,
-                    parser,
-                    source,
-                };
-
-                if let Cow::Owned(new_result) = INLINE_PASS_MACRO.replace_all(text, replacer) {
-                    content.rendered = new_result.into();
-                }
-            }
-        }
-
-        {
-            let text = content.rendered.as_ref();
-            if text.contains('+') || text.contains("-]") {
-                let replacer = InlinePassReplacer(&mut passthroughs);
-
-                if let Cow::Owned(new_result) = INLINE_PASS.replace_all(text, replacer) {
-                    content.rendered = new_result.into();
-                }
-            }
-        }
-
-        // Inline STEM macros (`stem:[…]`, `asciimath:[…]`, `latexmath:[…]`) are
-        // implicit passthroughs. They are extracted last so that any earlier
-        // passthrough placeholders nested inside a STEM expression are
-        // preserved and recursively restored. (Mirrors the `text.gsub
-        // InlineStemMacroRx` block in Ruby Asciidoctor's
-        // substitutors.rb.)
-        {
-            let text = content.rendered.as_ref();
-            if text.contains(':') && (text.contains("stem:") || text.contains("math:")) {
-                let original = content.original();
-                let replacer = InlineStemMacroReplacer {
-                    passthroughs: &mut passthroughs,
-                    parser,
-                    source: original,
-                };
-
-                if let Cow::Owned(new_result) = INLINE_STEM_MACRO.replace_all(text, replacer) {
-                    content.rendered = new_result.into();
-                }
-            }
-        }
-
-        passthroughs
+impl Passthrough {
+    /// Builds the collection
+    /// [`Content::passthroughs`](crate::content::Content::passthroughs)
+    /// returns by walking the
+    /// content's inline tree — the tree being authoritative for what the
+    /// content *is*, exactly as it already is for what the content renders
+    /// to.
+    ///
+    /// # Which nodes are entries
+    ///
+    /// Each of the seven passthrough forms records where the extraction pass
+    /// makes its one entry, which is not always a leaf:
+    ///
+    ///   * a [`Raw`](InlineNode::Raw) node of
+    ///     [`Passthrough`](RawOrigin::Passthrough) origin — `+++…+++`, `++…++`,
+    ///     `$$…$$`, `pass:[…]`, and the bare `+…+` form;
+    ///   * a [`Stem`](InlineNode::Stem) node, an *implicit* passthrough, plus
+    ///     whatever its body's own nodes hold;
+    ///   * a **marked** [`Styled`](InlineNode::Styled) span — the wrapper the
+    ///     pass builds for an attribute-list-prefixed passthrough
+    ///     (`[.role]++x++`, `` [x-]`x` ``). The wrapper *is* the entry, so this
+    ///     records it and does **not** descend: two of the three spellings also
+    ///     carry the same pair on a `Raw` leaf inside, and descending would
+    ///     report them twice where the pass records once.
+    ///
+    /// Everything else is a container to walk through.
+    ///
+    /// # Order
+    ///
+    /// **Document order** — the tree's own — where the extraction pass returns
+    /// *extraction* order. The two are not the same: the bare `+…+` form is
+    /// pulled out in a second pass and STEM in a third, so
+    /// `+++A+++ and stem:[B] and [x-]++C++ and ++D++` extracts as `A, C, D, B`
+    /// where the author wrote `A, B, C, D`. Document order is the deliberate
+    /// choice; extraction order is simply an artifact of the multi-pass
+    /// extraction implementation.
+    pub(super) fn from_tree(nodes: &[InlineNode<'_>]) -> Vec<Self> {
+        let mut out = vec![];
+        collect_from_tree(nodes, &mut out);
+        out
     }
+}
 
-    pub(crate) fn restore_to(&self, content: &mut Content<'_>, parser: &Parser) {
-        if self.0.is_empty() {
-            return;
-        }
-
-        if let Cow::Owned(new_result) = PASS_WITH_INDEX.replace_all(
-            content.rendered().as_ref(),
-            PassthroughRestoreReplacer(self, parser),
-        ) {
-            content.rendered = new_result.into();
-        }
-
-        // A deferred cross-reference's explicit text is pulled out of the main
-        // rendered string before this point, so any passthrough placeholder it
-        // carries (e.g. `<<id, `+[literal]+`>>`) must be restored here too —
-        // otherwise the placeholder sentinels leak into the link text.
-        content.restore_deferred_xref_passthroughs(|text| {
-            if let Cow::Owned(restored) =
-                PASS_WITH_INDEX.replace_all(text, PassthroughRestoreReplacer(self, parser))
-            {
-                *text = restored;
+/// The recursive half of [`Passthrough::from_tree`].
+fn collect_from_tree(nodes: &[InlineNode<'_>], out: &mut Vec<Passthrough>) {
+    for node in nodes {
+        match node {
+            InlineNode::Raw {
+                value,
+                origin: RawOrigin::Passthrough(origin),
+                ..
+            } => {
+                out.push(Passthrough {
+                    // `value` is the author's body for every form but one: a
+                    // `pass:c,q[…]` body is substituted at build time, since
+                    // its group is resolved there and the resulting value is
+                    // what the enclosing level's `Raw` leaf carries.
+                    // `source_text` is the input that produced it, and is
+                    // `None` wherever the group changed nothing.
+                    text: origin
+                        .source_text
+                        .clone()
+                        .unwrap_or_else(|| value.as_ref().to_string()),
+                    subs: origin.subs.clone(),
+                });
             }
-        });
-    }
 
-    pub(super) fn push(&mut self, passthrough: Passthrough, dest: &mut String) {
-        let index = self.0.len();
-        self.0.push(passthrough);
+            InlineNode::Stem(stem) => {
+                out.push(Passthrough {
+                    text: stem
+                        .source_text
+                        .clone()
+                        .unwrap_or_else(|| stem.value.as_ref().to_string()),
+                    subs: stem.subs.clone(),
+                });
 
-        dest.push(PASSTHROUGH_PLACEHOLDER_START);
+                // A STEM expression may *embed* an already-extracted
+                // passthrough (`stem:[x +++<b>+++ y]`), which the pass records
+                // as an entry of its own. Those nodes are `Stem::children`.
+                collect_from_tree(&stem.children, out);
+            }
 
-        // Append the index in place with `write!`, avoiding the temporary
-        // `String` a `push_str(&format!(...))` would allocate.
-        let _ = write!(dest, "{index}");
+            InlineNode::Styled(styled) => match &styled.passthrough {
+                Some(wrapper) => out.push(Passthrough {
+                    text: wrapper.text.clone(),
+                    subs: wrapper.subs.clone(),
+                }),
 
-        dest.push(PASSTHROUGH_PLACEHOLDER_END);
+                None => collect_from_tree(&styled.children, out),
+            },
+
+            InlineNode::Ref(reference) => collect_from_tree(&reference.children, out),
+            InlineNode::Footnote(footnote) => collect_from_tree(&footnote.children, out),
+            InlineNode::IndexTerm(index_term) => collect_from_tree(&index_term.children, out),
+
+            _ => {}
+        }
     }
 }
 
@@ -171,7 +160,7 @@ impl Passthroughs {
 ///
 /// NOTE: We have to support an empty `pass:[]` for compatibility with
 /// AsciiDoc.py.
-static INLINE_PASS_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_PASS_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)
@@ -208,192 +197,6 @@ static INLINE_PASS_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-#[derive(Debug)]
-struct InlinePassMacroReplacer<'p> {
-    passthroughs: &'p mut Passthroughs,
-    parser: &'p Parser,
-    source: Span<'p>,
-}
-
-impl Replacer for InlinePassMacroReplacer<'_> {
-    fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        if caps.get(4).is_some() {
-            // +++
-            self.handle_quoted_text(caps, 5, dest);
-        } else if caps.get(7).is_some() {
-            // ++
-            self.handle_quoted_text(caps, 8, dest);
-        } else if caps.get(10).is_some() {
-            // %%
-            self.handle_quoted_text(caps, 11, dest);
-        } else {
-            // NOTE: We don't look for nested `pass:[]` macros.
-
-            if caps.get(13).is_some_and(|m| !m.as_str().is_empty()) {
-                // Honor escape of `pass:` macro.
-                dest.push_str("pass:");
-                if let Some(subs) = caps.get(14) {
-                    dest.push_str(subs.as_str());
-                }
-                dest.push('[');
-                dest.push_str(&caps[15]);
-                dest.push(']');
-                return;
-            }
-
-            // Resolve the substitution list. An explicit but unrecognized
-            // substitution name (e.g. `pass:bogus[…]`) is warned about and
-            // skipped while any recognized names in the list are still
-            // honored, mirroring Asciidoctor's `resolve_subs`.
-            let subs = match caps.get(14).map(|m| m.as_str()) {
-                None => SubstitutionGroup::None,
-                Some(subs_list) => {
-                    let (group, invalid) = SubstitutionGroup::from_custom_string(None, subs_list);
-
-                    if !invalid.is_empty() {
-                        self.parser.record_substitution_warning(
-                            self.source,
-                            WarningType::InvalidSubstitutionTypeForPassthroughMacro(
-                                invalid.join(", "),
-                            ),
-                        );
-                    }
-
-                    group
-                }
-            };
-
-            let mut text = caps[15].to_string();
-            if !text.is_empty() {
-                text = text.replace("\\]", "]");
-            }
-
-            self.passthroughs.push(
-                Passthrough {
-                    text,
-                    subs,
-                    type_: None,
-                    attrlist: None,
-                },
-                dest,
-            );
-        }
-    }
-}
-
-impl InlinePassMacroReplacer<'_> {
-    fn handle_quoted_text(
-        &mut self,
-        caps: &Captures<'_>,
-        quoted_text_index: usize,
-        dest: &mut String,
-    ) {
-        let escape_count = caps.get(3).map_or(0, |m| m.len());
-
-        let boundary = caps.get(4).or_else(|| caps.get(7)).or_else(|| caps.get(10));
-        let boundary = boundary.map(|m| m.as_str()).unwrap_or_default();
-
-        let quoted_text = caps.get(5).or_else(|| caps.get(8)).or_else(|| caps.get(11));
-        let quoted_text = quoted_text.map(|m| m.as_str()).unwrap_or_default();
-
-        let mut old_behavior = false;
-
-        let attrlist: Option<String> = if let Some(attrlist) = caps.get(2) {
-            let attrlist = attrlist.as_str();
-
-            if escape_count > 0 {
-                dest.push_str(caps[1].as_ref());
-                dest.push('[');
-                dest.push_str(caps[2].as_ref());
-                dest.push(']');
-                dest.push_str(&("\\".repeat(escape_count - 1)));
-                dest.push_str(caps[quoted_text_index - 1].as_ref());
-                dest.push_str(caps[quoted_text_index].as_ref());
-                dest.push_str(caps[quoted_text_index - 1].as_ref());
-                return;
-            }
-
-            if &caps[1] == "\\" {
-                dest.push_str(&format!("[{attrlist}]", attrlist = &caps[2]));
-                None
-            } else if boundary == "++" {
-                if attrlist == "x-" {
-                    old_behavior = true;
-                    Some("".to_owned())
-                } else if attrlist.ends_with(" x-") {
-                    old_behavior = true;
-                    Some(attrlist[0..attrlist.len() - 3].to_owned())
-                } else {
-                    Some(attrlist.to_owned())
-                }
-            } else {
-                Some(attrlist.to_owned())
-            }
-        } else if escape_count > 0 {
-            // NOTE: We don't look for nested unconstrained pass macros.
-            dest.push_str(&("\\".repeat(escape_count - 1)));
-            dest.push_str(boundary);
-            dest.push_str(quoted_text);
-            dest.push_str(boundary);
-            return;
-        } else {
-            None
-        };
-
-        let passthrough = if let Some(attrlist) = attrlist {
-            if old_behavior {
-                Passthrough {
-                    text: caps
-                        .get(quoted_text_index)
-                        .map(|m| m.as_str().to_owned())
-                        .unwrap_or_default(),
-                    subs: SubstitutionGroup::Normal,
-                    type_: Some(QuoteType::Monospaced),
-                    attrlist: Some(attrlist),
-                }
-            } else {
-                Passthrough {
-                    text: caps
-                        .get(quoted_text_index)
-                        .map(|m| m.as_str().to_owned())
-                        .unwrap_or_default(),
-                    subs: if boundary == "+++" {
-                        SubstitutionGroup::None
-                    } else {
-                        SubstitutionGroup::Verbatim
-                    },
-                    type_: Some(QuoteType::Unquoted),
-                    attrlist: Some(attrlist),
-                }
-            }
-        } else {
-            Passthrough {
-                text: caps
-                    .get(quoted_text_index)
-                    .map(|m| m.as_str().to_owned())
-                    .unwrap_or_default(),
-                subs: if boundary == "+++" {
-                    SubstitutionGroup::None
-                } else {
-                    SubstitutionGroup::Verbatim
-                },
-                type_: None,
-                attrlist: None,
-            }
-        };
-
-        self.passthroughs.push(passthrough, dest);
-    }
-}
-
-static PASS_WITH_INDEX: LazyLock<Regex> = LazyLock::new(|| {
-    #[allow(clippy::unwrap_used)]
-    Regex::new(&format!(
-        "{PASSTHROUGH_PLACEHOLDER_START}(\\d+){PASSTHROUGH_PLACEHOLDER_END}"
-    ))
-    .unwrap()
-});
-
 /// Matches an inline passthrough, which may span multiple lines.
 ///
 /// ## Examples
@@ -403,7 +206,7 @@ static PASS_WITH_INDEX: LazyLock<Regex> = LazyLock::new(|| {
 /// * `[x-]\`text\``
 ///
 /// NOTE: We do not support compat-mode in the Rust implementation.
-static INLINE_PASS: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_PASS: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)
@@ -436,109 +239,6 @@ static INLINE_PASS: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-#[derive(Debug)]
-struct InlinePassReplacer<'p>(&'p mut Passthroughs);
-
-impl Replacer for InlinePassReplacer<'_> {
-    fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        if dest.ends_with('\\') || dest.ends_with(':') || dest.ends_with(';') {
-            // Honor the prohibited prefix.
-            // EDGE CASE: Since we don't have lookarounds in Rust's regex, we
-            // have to retry the inline pass replacement here.
-            // Possible it might miss a few very obscure cases, but
-            // this should cover most cases where the attrlist is off-limits,
-            // but the quoted text is still subject to inline pass
-            // replacement.
-            let replacer = InlinePassReplacer(self.0);
-
-            // Split off the first character (a char boundary, since Option 3
-            // may consume a multi-byte preceding character) and retry on the
-            // remainder.
-            let first_len = caps[0].chars().next().map_or(0, char::len_utf8);
-            let (first, rem) = &caps[0].split_at(first_len);
-            dest.push_str(first);
-
-            let new_result = INLINE_PASS.replace_all(rem, replacer);
-            dest.push_str(&new_result);
-
-            return;
-        }
-
-        // Option 3 consumes one preceding character (mirroring Asciidoctor's
-        // `InlinePassRx`, whose leading group absorbs the character before the
-        // passthrough). Re-emit it verbatim ahead of whatever this match
-        // produces. Options 1 and 2 never capture it, so this is a no-op there.
-        let preceding = caps.get(6).map_or("", |m| m.as_str());
-        dest.push_str(preceding);
-
-        let escapes = caps.get(4).or_else(|| caps.get(7));
-        let escape_count = escapes.map_or(0, |m| m.len());
-
-        let format_mark = if caps.get(2).is_some() { '`' } else { '+' };
-        let orig_attrlist_body = caps.get(1).or_else(|| caps.get(3)).map(|m| m.as_str());
-
-        let (attrlist_body, old_behavior) = orig_attrlist_body.map_or((None, false), |m| {
-            if m == "x-" {
-                (Some("".to_string()), true)
-            } else if m.ends_with(" x-") {
-                (Some(m[0..m.len() - 3].to_string()), true)
-            } else {
-                (Some(m.to_string()), false)
-            }
-        });
-
-        let quoted_text = caps.get(2).or_else(|| caps.get(5)).or_else(|| caps.get(8));
-        let quoted_text = quoted_text.map_or("", |m| m.as_str());
-
-        if let Some(orig_attrlist_body) = orig_attrlist_body {
-            if escape_count > 0 {
-                // Honor the escape of the formatting mark.
-                dest.push('[');
-                dest.push_str(orig_attrlist_body);
-                dest.push(']');
-                dest.push_str(&("\\".repeat(escape_count - 1)));
-                dest.push(format_mark);
-                dest.push_str(quoted_text);
-                dest.push(format_mark);
-                return;
-            }
-        } else if escape_count > 0 {
-            // Honor the escape of the formatting mark.
-            dest.push_str(&("\\".repeat(escape_count - 1)));
-            dest.push(format_mark);
-            dest.push_str(quoted_text);
-            dest.push(format_mark);
-            return;
-        };
-
-        let subs = if attrlist_body.is_some() && old_behavior && format_mark != '`' {
-            SubstitutionGroup::Normal
-        } else {
-            SubstitutionGroup::Verbatim
-        };
-
-        let type_ = if attrlist_body.is_some() {
-            if old_behavior {
-                Some(QuoteType::Monospaced)
-            } else {
-                Some(QuoteType::Unquoted)
-            }
-        } else {
-            None
-        };
-
-        self.0.push(
-            Passthrough {
-                text: quoted_text.to_string(),
-                subs,
-                type_,
-                attrlist: attrlist_body,
-            },
-            dest,
-        );
-    }
-}
-
 /// Matches a STEM inline macro (`stem`, and its alternatives `asciimath` and
 /// `latexmath`), which may span multiple lines.
 ///
@@ -550,7 +250,7 @@ impl Replacer for InlinePassReplacer<'_> {
 ///
 /// The content group requires at least one character whose final character is
 /// not a backslash, so an empty macro (e.g. `stem:[]`) is not recognized.
-static INLINE_STEM_MACRO: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static INLINE_STEM_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
         r#"(?xs)
@@ -566,168 +266,13 @@ static INLINE_STEM_MACRO: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-#[derive(Debug)]
-struct InlineStemMacroReplacer<'p> {
-    passthroughs: &'p mut Passthroughs,
-    parser: &'p Parser,
-    source: Span<'p>,
-}
-
-impl Replacer for InlineStemMacroReplacer<'_> {
-    fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        // Honor the escape: drop the leading backslash and emit the macro
-        // literally.
-        if caps.get(1).is_some_and(|m| !m.as_str().is_empty()) {
-            dest.push_str(&caps[0][1..]);
-            return;
-        }
-
-        let type_ = match &caps[2] {
-            "latexmath" => QuoteType::LatexMath,
-            "asciimath" => QuoteType::AsciiMath,
-
-            // `stem`: the notation is resolved from the `stem` document
-            // attribute (defaulting to AsciiMath).
-            _ => stem_notation(self.parser),
-        };
-
-        // Unescape any escaped closing brackets in the expression.
-        let mut content = caps[4].to_string();
-        if content.contains("\\]") {
-            content = content.replace("\\]", "]");
-        }
-
-        // Drop legacy enclosing `$…$` around latexmath content (for backwards
-        // compatibility with AsciiDoc.py).
-        if type_ == QuoteType::LatexMath
-            && content.len() >= 2
-            && content.starts_with('$')
-            && content.ends_with('$')
-        {
-            content = content[1..content.len() - 1].to_string();
-        }
-
-        // Resolve the substitution group. When no explicit substitution list is
-        // given, HTML output applies only the special characters substitution.
-        // An unrecognized substitution name is warned about and skipped while
-        // any recognized names in the list are still honored, mirroring
-        // Asciidoctor's `resolve_subs`.
-        let subs = match caps.get(3).map(|m| m.as_str()) {
-            None => SubstitutionGroup::Stem,
-            Some(subs_list) => {
-                let (group, invalid) = SubstitutionGroup::from_custom_string(None, subs_list);
-
-                if !invalid.is_empty() {
-                    self.parser.record_substitution_warning(
-                        self.source,
-                        WarningType::InvalidSubstitutionTypeForStemMacro(invalid.join(", ")),
-                    );
-                }
-
-                group
-            }
-        };
-
-        self.passthroughs.push(
-            Passthrough {
-                text: content,
-                subs,
-                type_: Some(type_),
-                attrlist: None,
-            },
-            dest,
-        );
-    }
-}
-
 /// Resolves the STEM notation to apply for a bare `stem` macro or block from
 /// the `stem` document attribute. Any value other than `latexmath`, `latex`, or
 /// `tex` (including an unset, empty, or unrecognized value) maps to AsciiMath.
-fn stem_notation(parser: &Parser) -> QuoteType {
+pub(super) fn stem_notation(parser: &Parser) -> QuoteType {
     match parser.attribute_value("stem").as_maybe_str() {
         Some("latexmath") | Some("latex") | Some("tex") => QuoteType::LatexMath,
         _ => QuoteType::AsciiMath,
-    }
-}
-
-#[derive(Debug)]
-struct PassthroughRestoreReplacer<'p>(&'p Passthroughs, &'p Parser);
-
-impl Replacer for PassthroughRestoreReplacer<'_> {
-    fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        let index = caps[1].parse::<usize>().unwrap_or_default();
-
-        let Some(pass) = self.0.0.get(index) else {
-            dest.push_str(&format!(
-                "(INTERNAL ERROR: Unresolved passthrough index {index})"
-            ));
-            return;
-        };
-
-        let span = Span::new(&pass.text);
-
-        let mut subbed_text = Content::from(span);
-        pass.subs.apply(&mut subbed_text, self.1, None);
-
-        if let Some(type_) = pass.type_ {
-            // Resolve attribute references in the stored attrlist before
-            // parsing it. Inline passthroughs are extracted before
-            // the substitution pipeline runs, so — unlike the
-            // inline quoted-text path, whose attrlist is a slice of
-            // the already-substituted buffer — a reference embedded
-            // in a passthrough role (e.g. `['{myrole}']++x++`) would
-            // otherwise render verbatim. This mirrors Asciidoctor's
-            // `parse_quoted_text_attributes`, which runs `sub_attributes` on
-            // the attribute list.
-            let attrlist_body = pass.attrlist.as_ref().map(|attrlist_body| {
-                // The stored attrlist is owned text whose offsets do not refer
-                // to the document source, so any `warn`/`drop-line` warning
-                // this substitution records cannot be mapped
-                // back to a document span. Discard such
-                // warnings rather than surface them mislocated
-                // against the document root (mirrors the docinfo text path).
-                let saved = self.1.substitution_warnings_len();
-                let substituted = substitute_attributes_in_text(attrlist_body, self.1);
-                self.1.truncate_substitution_warnings(saved);
-                substituted
-            });
-
-            let attrlist = attrlist_body.as_ref().map(|attrlist_body| {
-                let span = Span::new(attrlist_body);
-                let maw = Attrlist::parse(span, self.1, AttrlistContext::Inline);
-                maw.item.item
-            });
-
-            let id = attrlist
-                .as_ref()
-                .and_then(|attrlist| attrlist.id().map(|id| id.to_string()));
-
-            let mut new_text = String::default();
-            self.1.renderer.render_quoted_substitution(
-                type_,
-                QuoteScope::Unconstrained,
-                attrlist,
-                id,
-                subbed_text.rendered(),
-                &mut new_text,
-            );
-
-            subbed_text.rendered = new_text.into();
-        }
-
-        if subbed_text
-            .rendered()
-            .contains(PASSTHROUGH_PLACEHOLDER_START)
-        {
-            // Recursively apply passthrough replacement and write the result.
-            let replacer = PassthroughRestoreReplacer(self.0, self.1);
-
-            let new_result = PASS_WITH_INDEX.replace_all(subbed_text.rendered().as_ref(), replacer);
-
-            dest.push_str(new_result.as_ref());
-        } else {
-            dest.push_str(subbed_text.rendered());
-        }
     }
 }
 
@@ -737,10 +282,7 @@ mod tests {
     #![allow(clippy::panic)]
     #![allow(clippy::unwrap_used)]
 
-    use crate::{
-        content::{Passthroughs, SubstitutionStep, passthroughs::Passthrough},
-        tests::prelude::*,
-    };
+    use crate::{content::passthroughs::Passthrough, tests::prelude::*};
 
     #[test]
     fn inline_double_plus_with_escaped_attrlist() {
@@ -813,6 +355,49 @@ mod tests {
     }
 
     #[test]
+    fn two_entries_with_the_same_body_and_group_are_equal() {
+        // What splitting the restore-only facts out actually changes for a
+        // caller, and the reason the split had to happen before the tree-built
+        // view: a `Passthrough` is now *exactly* its body and its group.
+        //
+        // These two spellings extract the same body under the same group and
+        // differ only in the attribute list the restore pass re-renders the
+        // result inside. They used to compare **unequal** — `Passthrough`
+        // derives `PartialEq` over its fields, and the prefixed one carried
+        // `type_: Some(Unquoted)` and `attrlist: Some("role")` where the bare
+        // one carried `None`. A tree-built view cannot reproduce either fact
+        // (the wrapper node holds a *parsed* attrlist built from the
+        // substituted source, not the author's bytes), so leaving them on the
+        // public type would have made equality depend on which side built the
+        // entry.
+        let entry = |source: &str| -> Passthrough {
+            let mut p = Parser::default();
+            let maw = crate::blocks::Block::parse(crate::Span::new(source), &mut p);
+
+            let crate::blocks::Block::Simple(block) = maw.item.unwrap().item else {
+                panic!("expected a simple block");
+            };
+
+            let passthroughs = block.content().passthroughs();
+            assert_eq!(passthroughs.len(), 1, "{source:?}");
+
+            passthroughs[0].clone()
+        };
+
+        let bare = entry("a ++dup++ x");
+        let prefixed = entry("a [.role]++dup++ x");
+
+        assert_eq!(bare.text(), "dup");
+        assert_eq!(bare, prefixed);
+
+        // Still unequal where the *documented* facts differ, so the assertion
+        // above is about the fields that left rather than about `PartialEq`
+        // having stopped discriminating.
+        assert_ne!(bare, entry("a +++dup+++ x"));
+        assert_ne!(bare, entry("a ++other++ x"));
+    }
+
+    #[test]
     fn passthrough_attrlist_drop_line_does_not_leak_a_mislocated_warning() {
         // A missing reference in a passthrough's stored attribute list is
         // substituted against temporary (owned) text, so any warning it records
@@ -832,9 +417,176 @@ mod tests {
     }
 
     #[test]
+    fn passthrough_body_warnings_survive_the_builds_own_discard() {
+        // The complement of the test above, and the two together are the whole
+        // of the distinction.
+        //
+        // A passthrough carrying its own substitution list has its body
+        // rendered by `passthrough_text`, which builds the body's own tree and
+        // folds it. A reference the body carries is therefore recognized by
+        // that build, and its `attribute-missing` diagnostic is recorded the
+        // way every build records one — through `record_builder_diagnostic`,
+        // which the enclosing seam drains and carries across.
+        //
+        // The distinction this pins is against the test above: the enclosing
+        // build discards everything it records into the *substitution-warning*
+        // buffer, because what lands there during a build is incidental (the
+        // mislocated `Attrlist` warning). A body's own diagnostics are not
+        // incidental, and they survive because they never go into that buffer
+        // in the first place.
+        //
+        // Before the authoritative-pass closure the route was different — the
+        // body re-entered `SubstitutionGroup::apply`, which raised the
+        // warning into the discarded range, and a
+        // `nested_authoritative_warnings` buffer on the `Parser` carried it
+        // back out. That buffer is retired along with the re-entry it existed
+        // for. Both routes surfaced the same warning at the same location,
+        // which is what this test has always asserted and still does.
+        for (source, mode) in [
+            ("pass:a[{missing}]", "warn"),
+            ("pass:a[{missing}]", "drop-line"),
+            ("pass:q,a[*{missing}*]", "warn"),
+            ("pass:c,a[{missing}]", "warn"),
+        ] {
+            let mut parser = Parser::default().with_intrinsic_attribute(
+                "attribute-missing",
+                mode,
+                ModificationContext::Anywhere,
+            );
+
+            let doc = parser.parse(source);
+
+            // The whole list, not a filtered count: these fixtures raise
+            // exactly this one warning, so comparing the list also says nothing
+            // *else* was surfaced — and leaves the test with no branch of its
+            // own that never runs.
+            let warnings: Vec<_> = doc
+                .warnings()
+                .map(|warning| warning.warning.clone())
+                .collect();
+
+            assert_eq!(
+                warnings,
+                [WarningType::SkippingReferenceToMissingAttribute(
+                    "missing".to_string()
+                )],
+                "the body's own missing-reference warning was lost for {source:?} under {mode}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_rescued_passthrough_warning_points_at_the_reference_itself() {
+        // The rescue above carries a warning across the build's discard; this
+        // pins *where* the warning it carries points.
+        //
+        // It used to point at offset 0 — anywhere the passthrough sat.
+        // `passthrough_text` seeded the body's `Content` from an unanchored
+        // `Span::new`, so a reference inside the body had no position in the
+        // document to be located against and every such warning collapsed onto
+        // the document start. `origin/inline-ast` before this branch's
+        // authoritative-pass inversion was mislocated too, differently: the
+        // body's warning came from the *builder* rather than from this
+        // authoritative string pass,
+        // and reported the reference's offset within the body (2 for
+        // `['{alpha}'`) read as though it were a document offset.
+        //
+        // Neither number pointed at the reference, so restoring the older one
+        // was not on the table; the body is now substituted against its own
+        // source span and the warning lands on the reference, exactly as the
+        // plain non-passthrough control below always has. That control is what
+        // says the two paths agree rather than merely both moving.
+        let mut parser = Parser::default().with_intrinsic_attribute(
+            "attribute-missing",
+            "warn",
+            ModificationContext::Anywhere,
+        );
+
+        let doc = parser.parse("Intro.\n\nA later para with pass:a[{missing}] in it.");
+
+        let located: Vec<_> = doc
+            .warnings()
+            .map(|warning| (warning.source.line(), warning.source.byte_offset()))
+            .collect();
+
+        assert_eq!(
+            located,
+            [(3, 33)],
+            "a passthrough body's warning must point at the reference in the body"
+        );
+
+        let mut parser = Parser::default().with_intrinsic_attribute(
+            "attribute-missing",
+            "warn",
+            ModificationContext::Anywhere,
+        );
+
+        let doc = parser.parse("Intro.\n\nA later para with {missing} in it.");
+
+        let located: Vec<_> = doc
+            .warnings()
+            .map(|warning| (warning.source.line(), warning.source.byte_offset()))
+            .collect();
+
+        assert_eq!(
+            located,
+            [(3, 26)],
+            "a plain missing reference must still be located exactly"
+        );
+    }
+
+    #[test]
+    fn a_nested_attributed_passthrough_locates_each_reference_separately() {
+        // The shape nothing covered, and the gap the authoritative-pass
+        // inversion's own offset shift went unnoticed through: a `pass:`
+        // macro whose list
+        // includes `a`, whose body is itself an attribute-listed inline
+        // passthrough. The macro's body stops at the first `]`, so the body
+        // substituted here is `['{alpha}'` — the inner passthrough's attribute
+        // list, reached through the body path rather than through
+        // `PassthroughRestoreReplacer`'s own stored-attrlist path.
+        //
+        // Two references, one inside that body and one after it, so the
+        // assertion says each is located on its own rather than that some
+        // single offset happens to be right. Byte offsets rather than a
+        // matched substring because the whole point is the position: 11 is
+        // `{alpha}` and 30 is `{beta}` in the source below.
+        for mode in ["warn", "drop-line"] {
+            let mut parser = Parser::default().with_intrinsic_attribute(
+                "attribute-missing",
+                mode,
+                ModificationContext::Anywhere,
+            );
+
+            let doc = parser.parse("pass:m,a[['{alpha}']++x++ and {beta}]");
+
+            let located: Vec<_> = doc
+                .warnings()
+                .map(|warning| (warning.warning.clone(), warning.source.byte_offset()))
+                .collect();
+
+            assert_eq!(
+                located,
+                [
+                    (
+                        WarningType::SkippingReferenceToMissingAttribute("alpha".to_string()),
+                        11
+                    ),
+                    (
+                        WarningType::SkippingReferenceToMissingAttribute("beta".to_string()),
+                        30
+                    ),
+                ],
+                "each reference must be located where it is written, under {mode}"
+            );
+        }
+    }
+
+    #[test]
     fn content_without_passthroughs_exposes_an_empty_collection() {
         // Plain content — and content whose substitution group never extracts
-        // passthroughs — exposes an empty collection rather than any sentinel.
+        // passthroughs — exposes an empty collection rather than a
+        // placeholder value.
         let mut p = Parser::default();
 
         let maw = crate::blocks::Block::parse(crate::Span::new("just plain prose"), &mut p);
@@ -844,64 +596,5 @@ mod tests {
         };
 
         assert!(block.content().passthroughs().is_empty());
-    }
-
-    #[test]
-    fn adds_warning_text_for_unresolved_passthrough_id() {
-        let mut content =
-            crate::content::Content::from(crate::Span::new("pass:q,a[*<{backend}>*]"));
-        let parser_for_extract = Parser::default();
-        let pt = Passthroughs::extract_from(&mut content, &parser_for_extract);
-
-        assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "pass:q,a[*<{backend}>*]",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "\u{96}0\u{97}",
-            }
-        );
-
-        assert_eq!(
-            pt,
-            Passthroughs(vec![Passthrough {
-                text: "*<{backend}>*".to_owned(),
-                subs: SubstitutionGroup::Custom(vec![
-                    SubstitutionStep::Quotes,
-                    SubstitutionStep::AttributeReferences,
-                ]),
-                type_: None,
-                attrlist: None,
-            },],)
-        );
-
-        let parser = Parser::default().with_intrinsic_attribute(
-            "backend",
-            "html5",
-            ModificationContext::ApiOnly,
-        );
-
-        pt.0[0].subs.apply(&mut content, &parser, None);
-
-        content.rendered = "\u{96}99\u{97}".into();
-
-        pt.restore_to(&mut content, &parser);
-
-        assert_eq!(
-            content,
-            Content {
-                original: Span {
-                    data: "pass:q,a[*<{backend}>*]",
-                    line: 1,
-                    col: 1,
-                    offset: 0,
-                },
-                rendered: "(INTERNAL ERROR: Unresolved passthrough index 99)",
-            }
-        );
     }
 }

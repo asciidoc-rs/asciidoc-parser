@@ -8,6 +8,7 @@ use crate::{
         metadata::{BlockMetadata, block_title_text},
     },
     content::{Content, SubstitutionGroup},
+    inlines::InlineNode,
     span::MatchedItem,
     strings::CowStr,
 };
@@ -79,7 +80,8 @@ impl<'src> SimpleBlock<'src> {
     /// This narrow seam exists for the document-order title resolution pass
     /// (see `document::title_refs`), which installs the re-rendered title
     /// after resolving any cross-references embedded in it. All other access
-    /// goes through the read-only [`IsBlock::title`] accessor.
+    /// goes through the read-only [`IsBlock::title`]/[`IsBlock::title_content`]
+    /// accessors.
     pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         self.title.as_mut()
     }
@@ -362,7 +364,6 @@ fn parse_lines<'src>(
     // `filtered_lines` so the attribute-references substitution can locate
     // an `attribute-missing=warn` warning at the precise source offset of
     // the offending reference (see `Content::from_filtered_lines`).
-    let mut filtered_line_spans: Vec<Span<'src>> = vec![];
     let mut skipped_comment_line = false;
 
     // Determine how much indentation to strip from literal paragraphs.
@@ -519,7 +520,6 @@ fn parse_lines<'src>(
         };
 
         let line = line.trim_trailing_whitespace();
-        filtered_line_spans.push(line);
         filtered_lines.push(line.data());
     }
 
@@ -528,8 +528,7 @@ fn parse_lines<'src>(
         return None;
     }
 
-    let mut content: Content<'src> =
-        Content::from_filtered_lines(source, &filtered_lines, filtered_line_spans);
+    let mut content: Content<'src> = Content::from_filtered_lines(source, &filtered_lines);
 
     // A `[comment]`-styled paragraph is the single-paragraph form of a comment
     // block. Its content is retained in the parsed model (this parser does not
@@ -580,8 +579,12 @@ impl<'src> IsBlock<'src> for SimpleBlock<'src> {
         Some(&mut self.content)
     }
 
-    fn rendered_content(&self) -> Option<&str> {
-        Some(self.content.rendered())
+    fn rendered_html_content(&self) -> Option<&str> {
+        Some(self.content.rendered_html())
+    }
+
+    fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
+        Some(self.content.inlines())
     }
 
     fn raw_context(&self) -> CowStr<'src> {
@@ -594,6 +597,10 @@ impl<'src> IsBlock<'src> for SimpleBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_ref().map(Content::rendered_str)
+    }
+
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
     }
 
     fn caption(&self) -> Option<&str> {
@@ -770,7 +777,7 @@ mod tests {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Simple);
-        assert_eq!(mi.item.rendered_content().unwrap(), "abc");
+        assert_eq!(mi.item.rendered_html_content().unwrap(), "abc");
         assert_eq!(mi.item.raw_context().deref(), "paragraph");
         assert_eq!(mi.item.resolved_context().deref(), "paragraph");
         assert!(mi.item.declared_style().is_none());
@@ -840,7 +847,7 @@ mod tests {
             }
         );
 
-        assert_eq!(mi.item.rendered_content().unwrap(), "abc\ndef");
+        assert_eq!(mi.item.rendered_html_content().unwrap(), "abc\ndef");
     }
 
     #[test]
@@ -951,7 +958,7 @@ mod tests {
         );
 
         assert_eq!(
-            mi.item.rendered_content().unwrap(),
+            mi.item.rendered_html_content().unwrap(),
             "a<b>c <strong>bold</strong>"
         );
     }

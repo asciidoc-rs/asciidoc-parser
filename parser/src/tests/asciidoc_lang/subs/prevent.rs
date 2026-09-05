@@ -79,7 +79,7 @@ The URL \https://example.org isn't converted into an active link.
                     panic!("Unexpected block type: {block:?}");
                 };
 
-                format!("{}\n\n", block.content().rendered())
+                format!("{}\n\n", block.content().rendered_html())
             })
             .collect::<String>();
 
@@ -121,7 +121,7 @@ include::example$subs.adoc[tag=double-slash]
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "The text __func__ will appear with two underscores\nin front of it and after it.\nIt won&#8217;t be italicized."
         );
     }
@@ -169,7 +169,7 @@ First, you can escape it using the `\{plus}` attribute reference:
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "<code>&#43;</code> and <code>&#43;</code>"
         );
     }
@@ -198,7 +198,7 @@ The backslash is only required before the pair, not before each occurance of the
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "<code>+</code> and <code>+</code>"
         );
     }

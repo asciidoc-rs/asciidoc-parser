@@ -11,8 +11,9 @@ use crate::{
         parse_utils::parse_blocks_until,
     },
     content::{Content, SubstitutionGroup},
+    inlines::InlineNode,
     internal::debug::DebugSliceReference,
-    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings},
+    parser::{InlineRenderer, ReferenceResolver, ReferenceWarnings},
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -127,7 +128,8 @@ impl<'src> QuoteBlock<'src> {
     /// This narrow seam exists for the document-order title resolution pass
     /// (see `document::title_refs`), which installs the re-rendered title
     /// after resolving any cross-references embedded in it. All other access
-    /// goes through the read-only [`IsBlock::title`] accessor.
+    /// goes through the read-only [`IsBlock::title`]/[`IsBlock::title_content`]
+    /// accessors.
     pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         self.title.as_mut()
     }
@@ -577,8 +579,9 @@ impl<'src> QuoteBlock<'src> {
     pub(crate) fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         warnings: &mut ReferenceWarnings<'src>,
+        parser: &Parser,
     ) {
         let source = self.source;
 
@@ -595,8 +598,19 @@ impl<'src> QuoteBlock<'src> {
                 let mut owned_warnings = ReferenceWarnings::default();
 
                 for block in &mut dependent.blocks {
-                    block.resolve_references(resolver, renderer, &mut owned_warnings);
+                    block.resolve_references(resolver, renderer, &mut owned_warnings, parser);
                 }
+
+                // A Markdown-style blockquote's blocks register their
+                // footnotes on the *document's* catalog, not on a list of their
+                // own, so their folded renderings belong to the enclosing pass
+                // and are carried out explicitly — `rehome_into` deliberately
+                // leaves them behind, since an AsciiDoc table cell in the same
+                // position must do the opposite. See
+                // `ReferenceWarnings::footnote_texts`.
+                warnings
+                    .footnote_texts
+                    .extend(owned_warnings.take_footnote_texts());
 
                 owned_warnings.rehome_into(warnings, source);
             });
@@ -784,8 +798,12 @@ impl<'src> IsBlock<'src> for QuoteBlock<'src> {
             .and_then(|attrlist| attrlist.block_style())
     }
 
-    fn rendered_content(&'src self) -> Option<&'src str> {
-        self.content.as_ref().map(|content| content.rendered())
+    fn rendered_html_content(&'src self) -> Option<&'src str> {
+        self.content.as_ref().map(|content| content.rendered_html())
+    }
+
+    fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
+        self.content.as_ref().map(|content| content.inlines())
     }
 
     /// Returns a mutable slice of the nested blocks of a `____`-delimited
@@ -811,6 +829,10 @@ impl<'src> IsBlock<'src> for QuoteBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_ref().map(Content::rendered_str)
+    }
+
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
     }
 
     fn anchor(&'src self) -> Option<Span<'src>> {
@@ -859,7 +881,7 @@ mod tests {
     use std::ops::Deref;
 
     use crate::{
-        blocks::{Block, ContentModel, IsBlock, QuoteType},
+        blocks::{Block, ContentModel, IsBlock, QuoteBlock, QuoteType},
         tests::prelude::*,
     };
 
@@ -871,7 +893,7 @@ mod tests {
             .item
     }
 
-    fn as_quote<'a>(block: &'a Block<'a>) -> &'a crate::blocks::QuoteBlock<'a> {
+    fn as_quote<'a>(block: &'a Block<'a>) -> &'a QuoteBlock<'a> {
         match block {
             Block::Quote(quote) => quote,
 
@@ -940,11 +962,11 @@ mod tests {
         assert_eq!(quote.type_(), QuoteType::Quote);
         assert_eq!(quote.content_model(), ContentModel::Simple);
         assert_eq!(
-            quote.content().unwrap().rendered(),
+            quote.content().unwrap().rendered_html(),
             "A person who never made a mistake."
         );
         assert_eq!(
-            quote.rendered_content(),
+            quote.rendered_html_content(),
             Some("A person who never made a mistake.")
         );
         assert_eq!(quote.attribution(), Some("Albert Einstein"));
@@ -960,7 +982,7 @@ mod tests {
         assert_eq!(quote.content_model(), ContentModel::Simple);
         assert_eq!(quote.raw_context().deref(), "verse");
         assert_eq!(
-            quote.content().unwrap().rendered(),
+            quote.content().unwrap().rendered_html(),
             "The fog comes\non little cat feet."
         );
         assert_eq!(quote.attribution(), Some("Carl Sandburg"));
@@ -975,7 +997,7 @@ mod tests {
         assert_eq!(quote.type_(), QuoteType::Verse);
         assert_eq!(quote.content_model(), ContentModel::Simple);
         assert_eq!(
-            quote.content().unwrap().rendered(),
+            quote.content().unwrap().rendered_html(),
             "A verse\ndelimited block"
         );
         assert!(quote.child_blocks().next().is_none());
@@ -1007,7 +1029,7 @@ mod tests {
         assert_eq!(quote.type_(), QuoteType::Quote);
         assert_eq!(quote.content_model(), ContentModel::Simple);
         assert_eq!(
-            quote.content().unwrap().rendered(),
+            quote.content().unwrap().rendered_html(),
             "A little rebellion is good."
         );
         assert_eq!(quote.attribution(), Some("Thomas Jefferson"));
@@ -1077,7 +1099,7 @@ mod tests {
             parse_one("\"line one\n-- not really an attribution\nline two\"\n-- Real Attribution");
         let quote = as_quote(&block);
         assert_eq!(quote.attribution(), Some("Real Attribution"));
-        let rendered = quote.content().unwrap().rendered();
+        let rendered = quote.content().unwrap().rendered_html();
         assert!(
             rendered.contains("line one") && rendered.contains("line two"),
             "content was: {rendered}"
@@ -1175,7 +1197,7 @@ mod tests {
 
         assert_eq!(quote.blocks().len(), 1);
         let inner = quote.blocks().first().unwrap();
-        assert_eq!(inner.rendered_content(), Some("line one\nline two"));
+        assert_eq!(inner.rendered_html_content(), Some("line one\nline two"));
     }
 
     #[test]
@@ -1238,7 +1260,7 @@ mod tests {
         assert!(format!("{compound:?}").starts_with("Block::Quote"));
 
         let simple = parse_one("[verse]\nverse text");
-        assert_eq!(simple.rendered_content(), Some("verse text"));
+        assert_eq!(simple.rendered_html_content(), Some("verse text"));
         assert_eq!(simple.content_model(), ContentModel::Simple);
     }
 

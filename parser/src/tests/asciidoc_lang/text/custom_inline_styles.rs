@@ -51,7 +51,7 @@ include::example$text.adoc[tag=css]
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             r#"Do werewolves believe in <span class="small">small print</span>?"#
         );
 
@@ -61,7 +61,7 @@ include::example$text.adoc[tag=css]
         };
 
         assert_eq!(
-            sb2.content().rendered(),
+            sb2.content().rendered_html(),
             r#"<span class="big">O</span>nce upon an infinite loop."#
         );
 
@@ -104,7 +104,7 @@ include::example$text.adoc[tag=css-custom-html]
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             "Type the word <span class=\"userinput\">asciidoctor</span> into the search bar."
         );
 

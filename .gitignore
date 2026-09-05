@@ -4,3 +4,5 @@
 /semver-checks/target/
 /target/
 Cargo.lock
+lcov*.info
+.claude/worktrees/

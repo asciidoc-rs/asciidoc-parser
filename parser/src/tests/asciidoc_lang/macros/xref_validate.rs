@@ -1,5 +1,5 @@
 use crate::{
-    parser::{CatalogResolver, HtmlSubstitutionRenderer},
+    parser::{CatalogResolver, HtmlInlineRenderer},
     tests::prelude::*,
 };
 
@@ -45,11 +45,12 @@ See <<foobar>>.
     // In pedantic (verbose) mode the resolution pass reports a reference it
     // cannot resolve within the same document. This crate surfaces that as a
     // `ReferenceWarning` returned from `resolve_references`.
-    let mut doc = Parser::default().parse_deferred("See <<foobar>>.\n\n[#foobaz]\n== Foobaz\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred("See <<foobar>>.\n\n[#foobaz]\n== Foobaz\n");
 
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
 
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].target, "foobar");
@@ -66,7 +67,7 @@ See <<foobar>>.
 
     // Resolution is repeatable: a second sweep replaces the first sweep's
     // warnings rather than accumulating a duplicate.
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
     assert_eq!(warnings.len(), 1);
     assert_eq!(doc.warnings().count(), 1);
 }

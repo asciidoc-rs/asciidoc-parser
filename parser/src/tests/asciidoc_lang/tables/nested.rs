@@ -42,7 +42,7 @@ fn nested_table<'a>(cell: &'a crate::blocks::TableCell<'_>) -> &'a crate::blocks
 /// cell.
 fn simple_text(cell: &crate::blocks::TableCell<'_>) -> String {
     match cell.content() {
-        crate::blocks::TableCellContent::Simple(content) => content.rendered().to_string(),
+        crate::blocks::TableCellContent::Simple(content) => content.rendered_html().to_string(),
         crate::blocks::TableCellContent::AsciiDoc(_) => panic!("expected simple cell content"),
     }
 }

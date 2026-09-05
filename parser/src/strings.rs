@@ -242,6 +242,25 @@ impl Borrow<str> for CowStr<'_> {
 }
 
 impl CowStr<'_> {
+    /// Rebuilds this string with no borrow left, so it can outlive the text it
+    /// was read from.
+    ///
+    /// A [`Boxed`](CowStr::Boxed) or [`Inlined`](CowStr::Inlined) value already
+    /// owns its bytes and is returned as-is (only its *declared* lifetime
+    /// changes); a [`Borrowed`](CowStr::Borrowed) one is copied, preferring the
+    /// inline representation for a short string exactly as
+    /// [`Clone`](CowStr::clone) does.
+    pub(crate) fn into_owned<'dst>(self) -> CowStr<'dst> {
+        match self {
+            CowStr::Boxed(b) => CowStr::Boxed(b),
+            CowStr::Inlined(s) => CowStr::Inlined(s),
+            CowStr::Borrowed(b) => match InlineStr::try_from(b) {
+                Ok(inline) => CowStr::Inlined(inline),
+                Err(..) => CowStr::Boxed(b.into()),
+            },
+        }
+    }
+
     /// Convert the `CowStr` into an owned `String`.
     pub fn into_string(self) -> String {
         match self {
@@ -410,6 +429,38 @@ mod tests {
             let size = std::mem::size_of::<CowStr>();
             let word_size = std::mem::size_of::<isize>();
             assert_eq!(3 * word_size, size);
+        }
+
+        #[test]
+        fn into_owned() {
+            // A borrowed short string is copied into the inline
+            // representation, a borrowed long one into a box, and a value that
+            // already owns its bytes is passed straight through — so the
+            // result never borrows, whichever variant it started as.
+            fn detach<'a>(s: CowStr<'_>) -> CowStr<'a> {
+                s.into_owned()
+            }
+
+            let short = String::from("0123456789abcde");
+            let long = String::from("0123456789abcdefghijklmnopqrstuvwxyz");
+
+            assert!(matches!(
+                detach(CowStr::Borrowed(&short)),
+                CowStr::Inlined(_)
+            ));
+
+            assert!(matches!(detach(CowStr::Borrowed(&long)), CowStr::Boxed(_)));
+
+            assert!(matches!(
+                detach(CowStr::Boxed(long.clone().into_boxed_str())),
+                CowStr::Boxed(_)
+            ));
+
+            assert!(matches!(detach(CowStr::from('x')), CowStr::Inlined(_)));
+
+            // The bytes survive every route.
+            assert_eq!(detach(CowStr::Borrowed(&short)).as_ref(), short);
+            assert_eq!(detach(CowStr::Borrowed(&long)).as_ref(), long);
         }
 
         #[test]

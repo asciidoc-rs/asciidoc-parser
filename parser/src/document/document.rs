@@ -13,7 +13,7 @@ use crate::{
     },
     internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     parser::{
-        CatalogResolver, DeferredWarning, InlineSubstitutionRenderer, Origin, ReferenceResolver,
+        CatalogResolver, DeferredWarning, InlineRenderer, Origin, ReferenceResolver,
         ReferenceWarning, ReferenceWarnings, ResolvedAttributes, SourceMap,
     },
     strings::CowStr,
@@ -556,7 +556,7 @@ impl<'src> Document<'src> {
     }
 
     /// Resolve the document's deferred cross-references using a caller-supplied
-    /// [`ReferenceResolver`] and [`InlineSubstitutionRenderer`].
+    /// [`ReferenceResolver`] and [`InlineRenderer`].
     ///
     /// This is the entry point for multi-document workflows: parse each
     /// document with [`Parser::parse_deferred`], then call this with a
@@ -586,17 +586,34 @@ impl<'src> Document<'src> {
     /// [`warnings()`](Self::warnings) sees it alongside every other parse-time
     /// diagnostic. Because each sweep is independent, those warnings replace
     /// (rather than accumulate on top of) any left by an earlier sweep.
+    ///
+    /// # The `parser` argument
+    ///
+    /// Pass the [`Parser`] that produced this document. Resolving a
+    /// cross-reference changes what its content renders to, and re-rendering
+    /// needs the parse-wide configuration a renderer reads — the path resolver
+    /// and the image/SVG file handlers. A [`Document`] cannot retain those
+    /// itself: they are `Rc`-held, and holding them would cost it `Send` and
+    /// `Sync`. The order-dependent half — the document attributes in force
+    /// where each block was written — *is* retained per content, so only the
+    /// parse-wide half is supplied here.
+    ///
+    /// A parser configured differently from the one that parsed will therefore
+    /// resolve targets identically but may render an affected block's images or
+    /// paths differently. Multi-document pipelines that build one parser per
+    /// document should pass that document's own.
     pub fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
+        parser: &Parser,
     ) -> Vec<ReferenceWarning> {
         self.internal.with_dependent_mut(|_owner, dependent| {
             let source = dependent.source;
             let mut warnings = ReferenceWarnings::default();
 
             for block in dependent.blocks.iter_mut() {
-                block.resolve_references(resolver, renderer, &mut warnings);
+                block.resolve_references(resolver, renderer, &mut warnings, parser);
             }
 
             // Section titles are resolved separately, in document order, so
@@ -608,14 +625,22 @@ impl<'src> Document<'src> {
                 resolver,
                 renderer,
                 &mut warnings,
+                parser,
             );
 
             // Footnote text is extracted out of block content, so its
             // cross-references are resolved here rather than by the block pass
             // above. The host resolver does not alias the catalog, so the
             // footnotes can be borrowed mutably in place.
+            // The tree's answer for each footnote, folded by the content that
+            // defines it during the block walk above. A footnote with an entry
+            // here renders from its subtree; one without falls back to its
+            // placeholder template. See `Footnote::resolve_references`.
+            let mut folded = crate::document::folds_by_index(warnings.take_footnote_texts());
+
             for footnote in dependent.catalog.footnotes.iter_mut() {
-                footnote.resolve_references(resolver, renderer, &mut warnings, source);
+                let mine = folded.remove(&footnote.index);
+                footnote.resolve_references(resolver, renderer, &mut warnings, source, mine);
             }
 
             replace_reference_warnings(&mut dependent.warnings, &mut warnings.doc);
@@ -630,7 +655,8 @@ impl<'src> Document<'src> {
     /// This is the single-document convenience path used by [`Parser::parse`].
     pub(crate) fn resolve_against_own_catalog(
         &mut self,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
+        parser: &Parser,
     ) -> Vec<ReferenceWarning> {
         self.internal.with_dependent_mut(|_owner, dependent| {
             let source = dependent.source;
@@ -645,7 +671,7 @@ impl<'src> Document<'src> {
 
             let resolver = CatalogResolver::new(&dependent.catalog);
             for block in dependent.blocks.iter_mut() {
-                block.resolve_references(&resolver, renderer, &mut warnings);
+                block.resolve_references(&resolver, renderer, &mut warnings, parser);
             }
 
             // Section titles are resolved separately, in document order, so
@@ -657,13 +683,18 @@ impl<'src> Document<'src> {
                 &resolver,
                 renderer,
                 &mut warnings,
+                parser,
             );
 
             // Footnote text is extracted out of block content, so its
             // cross-references are resolved here rather than by the block pass
             // above.
+            // See the sibling pass in `resolve_references` for what these are.
+            let mut folded = crate::document::folds_by_index(warnings.take_footnote_texts());
+
             for footnote in footnotes.iter_mut() {
-                footnote.resolve_references(&resolver, renderer, &mut warnings, source);
+                let mine = folded.remove(&footnote.index);
+                footnote.resolve_references(&resolver, renderer, &mut warnings, source, mine);
             }
 
             dependent.catalog.restore_footnotes(footnotes);

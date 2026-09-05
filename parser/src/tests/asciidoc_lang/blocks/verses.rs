@@ -36,7 +36,7 @@ Verses are defined by setting `verse` on a paragraph or an excerpt block delimit
     assert_css(&doc, ".verseblock", 1);
     assert_css(&doc, ".verseblock > pre.content", 1);
     assert_eq!(
-        quote.content().unwrap().rendered(),
+        quote.content().unwrap().rendered_html(),
         "Roses are red,\n  violets are blue."
     );
 
@@ -93,7 +93,7 @@ include::example$verse.adoc[tag=para]
     assert_css(&doc, ".verseblock > pre.content", 1);
     assert_css(&doc, ".verseblock p", 0);
     assert_eq!(
-        quote.content().unwrap().rendered(),
+        quote.content().unwrap().rendered_html(),
         "The fog comes\non little cat feet."
     );
 
@@ -150,7 +150,7 @@ include::example$verse.adoc[tag=bl]
     assert_css(&doc, ".verseblock", 1);
     assert_css(&doc, ".verseblock > pre.content", 1);
     assert_eq!(
-        quote.content().unwrap().rendered(),
+        quote.content().unwrap().rendered_html(),
         "The fog comes\non little cat feet.\n\nIt sits looking\nover harbor and city\non silent haunches\nand then moves on."
     );
 

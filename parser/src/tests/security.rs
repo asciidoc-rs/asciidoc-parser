@@ -7,10 +7,10 @@
 //!
 //! Two properties are covered:
 //!
-//!   * every `href`/`target`, the icon `class`/`title`/`width`/`height`
-//!     attributes, and the quoted-text `class` (role) attribute escape the `"`
-//!     delimiter, so a stray quote cannot close the attribute and inject
-//!     further markup; and
+//!   * every `href`/`target`, the link `id`/`class`, the image and icon
+//!     `class`/`title`/`width`/`height` attributes, and the quoted-text `class`
+//!     (role) attribute escape the `"` delimiter, so a stray quote cannot close
+//!     the attribute and inject further markup; and
 //!   * the explicit `link:` macro rejects targets whose scheme could execute
 //!     script (`javascript:`, `data:`, `vbscript:`), rendering them as inert
 //!     source text rather than a live link.
@@ -22,7 +22,7 @@
 use crate::{
     Parser,
     blocks::{Block, FindBlocks, SimpleBlock},
-    content::{Content, SubstitutionStep},
+    content::{Content, SubstitutionGroup, SubstitutionStep},
     parser::ModificationContext,
     warnings::WarningType,
 };
@@ -45,7 +45,7 @@ fn render_paragraph(src: &str) -> String {
     walk(doc.child_blocks())
         .expect("expected at least one simple block")
         .content()
-        .rendered()
+        .rendered_html()
         .to_string()
 }
 
@@ -58,10 +58,13 @@ fn render_icon(src: &str, icons: &str) -> String {
     let parser =
         Parser::default().with_intrinsic_attribute("icons", icons, ModificationContext::ApiOnly);
 
-    SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
-    SubstitutionStep::Macros.apply(&mut content, &parser, None);
+    SubstitutionGroup::Custom(vec![
+        SubstitutionStep::SpecialCharacters,
+        SubstitutionStep::Macros,
+    ])
+    .apply(&mut content, &parser, None);
 
-    content.rendered().to_string()
+    content.rendered_html().to_string()
 }
 
 /// Renders `src` through the special-characters and macros substitution steps
@@ -72,10 +75,13 @@ fn render_macros(src: &str) -> String {
     let mut content = Content::from(crate::Span::new(src));
     let parser = Parser::default();
 
-    SubstitutionStep::SpecialCharacters.apply(&mut content, &parser, None);
-    SubstitutionStep::Macros.apply(&mut content, &parser, None);
+    SubstitutionGroup::Custom(vec![
+        SubstitutionStep::SpecialCharacters,
+        SubstitutionStep::Macros,
+    ])
+    .apply(&mut content, &parser, None);
 
-    content.rendered().to_string()
+    content.rendered_html().to_string()
 }
 
 // ---- Link target escaping --------------------------------------------------
@@ -105,6 +111,29 @@ fn link_target_preserves_single_escaped_ampersand_in_query() {
     assert_eq!(
         render_paragraph("link:/search?a=1&b=2[txt]"),
         r#"<a href="/search?a=1&amp;b=2">txt</a>"#
+    );
+}
+
+#[test]
+fn link_id_class_and_target_escape_quote_delimiter() {
+    // The `href` and `title` were escaped from the start; the `id`, each role
+    // joined into the `class`, and the `window`'s `target` reach the same
+    // attribute row by the same author-supplied route, so a `"` in any of them
+    // must be escaped rather than close the attribute it sits in.
+    assert_eq!(
+        render_paragraph(r#"link:x[txt,id='a"b',role='c"d',window='e"f']"#),
+        r#"<a href="x" id="a&quot;b" class="c&quot;d" target="e&quot;f">txt</a>"#
+    );
+}
+
+#[test]
+fn link_class_does_not_double_escape_special_characters() {
+    // `< > &` arrive already escaped from the special-characters step; the
+    // added quote-escaping must leave them singly escaped, as it does for the
+    // `href` above.
+    assert_eq!(
+        render_paragraph("link:x[txt,role='a<b&c']"),
+        r#"<a href="x" class="a&lt;b&amp;c">txt</a>"#
     );
 }
 
@@ -236,6 +265,18 @@ fn image_link_self_escapes_src_and_href_without_double_escaping() {
     assert_eq!(
         render_macros(r#"image:a"x.png[alt,link=self]"#),
         r#"<span class="image"><a class="image" href="a&quot;x.png"><img src="a&quot;x.png" alt="alt"></a></span>"#
+    );
+}
+
+#[test]
+fn image_wrapper_class_and_link_target_escape_quote_delimiter() {
+    // The `<span class="image …">` wrapper joins the author's own roles (and a
+    // `float=`) into a `class`, and a `link=` may carry a `window=` whose value
+    // becomes the anchor's `target`. Both are author-supplied and take the same
+    // quote escape the `href` beside them already takes.
+    assert_eq!(
+        render_macros(r#"image:x.png[alt,role='a"b',link=y,window='c"d']"#),
+        r#"<span class="image a&quot;b"><a class="image" href="y" target="c&quot;d"><img src="x.png" alt="alt"></a></span>"#
     );
 }
 

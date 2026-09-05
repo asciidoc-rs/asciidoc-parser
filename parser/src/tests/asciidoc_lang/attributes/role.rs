@@ -477,7 +477,7 @@ Thus, roles are an ideal way to annotated elements in your document so you can u
         };
 
         assert_eq!(
-            sb1.content().rendered(),
+            sb1.content().rendered_html(),
             r#"This sentence contains <strong class="application">bold inline content</strong> that&#8217;s assigned a role."#
         );
 
@@ -487,7 +487,7 @@ Thus, roles are an ideal way to annotated elements in your document so you can u
         };
 
         assert_eq!(
-            sb2.content().rendered(),
+            sb2.content().rendered_html(),
             r#"This sentence contains <code class="varname">monospace text</code> that&#8217;s assigned a role."#
         );
 

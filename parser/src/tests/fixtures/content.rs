@@ -27,5 +27,5 @@ impl PartialEq<Content> for &crate::content::Content<'_> {
 }
 
 fn fixture_eq_observed(fixture: &Content, observed: &crate::content::Content) -> bool {
-    fixture.original == observed.original() && fixture.rendered == observed.rendered()
+    fixture.original == observed.original() && fixture.rendered == observed.rendered_html()
 }

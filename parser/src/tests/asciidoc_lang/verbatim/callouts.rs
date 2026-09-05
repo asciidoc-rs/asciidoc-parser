@@ -132,9 +132,10 @@ The risk of this approach is that you have to keep track of which numbers are be
         "first &lt;.&gt;\nsecond &lt;.&gt;\nrepeat &lt;1&gt;",
     ));
     let parser = Parser::default();
-    crate::content::SubstitutionStep::Callouts.apply(&mut content, &parser, None);
+    crate::content::SubstitutionGroup::Custom(vec![crate::content::SubstitutionStep::Callouts])
+        .apply(&mut content, &parser, None);
     assert_eq!(
-        content.rendered(),
+        content.rendered_html(),
         "first <b class=\"conum\">(1)</b>\nsecond <b class=\"conum\">(2)</b>\nrepeat <b class=\"conum\">(1)</b>"
     );
 }

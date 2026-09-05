@@ -38,7 +38,7 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This &amp; _that_ and icon:github[] +\nanother line with a{sp}space there ..."
         );
     }
@@ -62,7 +62,7 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This & <em>that</em> and icon:github[] +\nanother line with a{sp}space there ..."
         );
     }
@@ -86,7 +86,7 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This & _that_ and icon:github[] +\nanother line with a space there ..."
         );
     }
@@ -110,7 +110,7 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This &#169; _that_ and icon:github[] +\nanother line with a{sp}space there &#8230;&#8203;"
         );
     }
@@ -134,7 +134,7 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This &#169; _that_ and <span class=\"icon\">[github&#93;</span> +\nanother line with a{sp}space there ..."
         );
     }
@@ -159,7 +159,7 @@ The inline pass macro (`++pass:[]++`) accepts the shorthand values in addition t
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This &#169; _that_ and icon:github[]<br>\nanother line with a{sp}space there ..."
         );
     }
@@ -208,7 +208,7 @@ include::pass:example$pass.adoc[tag=in-macro]
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "The text <del>strike this</del> is marked as deleted."
         );
     }
@@ -245,7 +245,7 @@ include::pass:example$pass.adoc[tag=s-macro]
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "The text <del>strike <strong>this</strong></del> is marked as deleted, inside of which the word &#8220;me&#8221; is bold."
         );
     }
@@ -284,7 +284,7 @@ include::pass:example$pass.adoc[tag=sub-out]
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "I better not contain *bold* or _italic_ text.\nBut I should contain <strong>bold</strong> text."
         );
     }

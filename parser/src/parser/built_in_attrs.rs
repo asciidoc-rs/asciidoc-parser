@@ -1,7 +1,9 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, LazyLock},
-};
+use std::sync::{Arc, LazyLock};
+
+// See the matching comment in `parser.rs` for why this table (looked up on
+// every `attribute_value`/`is_attribute_set`/`has_attribute` miss against a
+// parser's own overrides) uses `ahash` rather than `std`'s `HashMap`.
+use ahash::{HashMap, HashMapExt};
 
 use crate::{
     ASCIIDOCTOR_VERSION,
@@ -243,10 +245,24 @@ pub(crate) fn derived_backend_value(
     name: &str,
     overrides: &HashMap<String, AttributeValue>,
 ) -> Option<InterpretedValue> {
+    // Checked before touching `overrides` at all: every caller of this
+    // function calls it for *any* attribute name (see `is_attribute_set`'s
+    // own use), so a name outside this family — the overwhelming majority of
+    // calls — must not pay for a `stored_value` lookup and clone of
+    // `backend`'s value only to discard it in the `match` below.
+    if !is_derived_backend_value(name) {
+        return None;
+    }
+
     let backend = stored_value("backend", overrides).filter(|b| !b.is_empty())?;
     match name {
         "basebackend" => Some(InterpretedValue::Value(basebackend_of(&backend).to_owned())),
         "filetype" => Some(InterpretedValue::Value(filetype_of(&backend))),
+
+        // Not reachable: the guard above already returned for every `name`
+        // outside this match's two arms. Kept because `match` on `&str`
+        // cannot be proven exhaustive over a two-value guard the way an enum
+        // match can.
         _ => None,
     }
 }

@@ -1,22 +1,32 @@
 use std::{
     borrow::Cow,
     cell::{Cell, RefCell},
-    collections::{HashMap, HashSet},
     rc::Rc,
     sync::{Arc, LazyLock},
 };
 
+// `ahash`'s `HashMap`/`HashSet`, not `std`'s: a drop-in replacement (same API,
+// same per-process-random keying and so the same resistance to a
+// crafted-input hash-flooding attack — `ahash::RandomState`'s default seeds
+// itself from `getrandom`, exactly as `std`'s `RandomState` does) that is
+// substantially faster to hash into for the short string keys an attribute
+// name always is. `attribute_value`/`is_attribute_set`/`has_attribute` are
+// among the hottest calls in the crate — every substitution step queries a
+// document attribute at least once per level — so the table these three read
+// is worth the one non-`std` dependency.
+use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use regex::Regex;
 
 use crate::{
-    Document, HasSpan,
+    Document, HasSpan, Span,
     blocks::{SectionNumber, SectionType},
-    document::{Attribute, Catalog, InterpretedValue, RefType},
+    content::{OwnedTitle, SubstitutionGroup, XrefSegment, XrefTemplatePiece},
+    document::{Attribute, Catalog, DuplicateIdError, Footnote, InterpretedValue, RefType},
     parser::{
         AllowableValue, AttributeValue, DatetimeContext, DefaultPathResolver, DocinfoFileHandler,
-        HtmlSubstitutionRenderer, ImageFileHandler, IncludeFileHandler, InlineSubstitutionRenderer,
+        HtmlInlineRenderer, ImageFileHandler, IncludeFileHandler, InlineRenderer,
         ModificationContext, PathResolver, ReferenceTime, RenderContext, ResolvedAttributes,
-        SafeMode, SourceLine, SourceMap, SvgFileHandler,
+        SafeMode, SourceLine, SourceMap, SvgFileHandler, XrefSignifier,
         built_in_attrs::{
             built_in_attr, built_in_default_values, derived_backend_value,
             is_derived_backend_value, max_attribute_value_size_default, synthesized_attr,
@@ -76,9 +86,9 @@ pub struct Parser {
     /// Specifies how the basic raw text of a simple block will be converted to
     /// the format which will ultimately be presented in the final output.
     ///
-    /// Typically this is an [`HtmlSubstitutionRenderer`] but clients may
+    /// Typically this is an [`HtmlInlineRenderer`] but clients may
     /// provide alternative implementations.
-    pub(crate) renderer: Rc<dyn InlineSubstitutionRenderer>,
+    pub(crate) renderer: Rc<dyn InlineRenderer>,
 
     /// Specifies the name of the primary file to be parsed.
     pub(crate) primary_file_name: Option<String>,
@@ -182,20 +192,6 @@ pub struct Parser {
     /// parser.
     pub(crate) in_bibliography_list_item: Cell<bool>,
 
-    /// True while a section title is being substituted, so each `footnote:[…]`
-    /// macro's rendered marker is bracketed with
-    /// [`FOOTNOTE_MARKER_START`](crate::content::FOOTNOTE_MARKER_START) /
-    /// [`FOOTNOTE_MARKER_END`](crate::content::FOOTNOTE_MARKER_END) sentinels.
-    /// The footnote is still defined and numbered in document order; the
-    /// sentinels merely let the marker be excised from the section's reference
-    /// text and auto-generated ID without a second substitution pass (see
-    /// `SectionBlock::parse`).
-    ///
-    /// Wrapped in a [`Cell`] for the same reason as
-    /// [`in_bibliography_list_item`](Self::in_bibliography_list_item): the
-    /// substitution code paths hold only a shared reference to the parser.
-    pub(crate) mark_footnote_spans: Cell<bool>,
-
     /// A block title carried over from a section heading to the first block
     /// parsed after it.
     ///
@@ -215,7 +211,7 @@ pub struct Parser {
     /// supplied via a `title=` attribute. The snapshot keeps any deferred
     /// cross-references, so an embedded `<<id>>` in a carried title still
     /// resolves once the catalog is complete.
-    pub(crate) pending_block_title: Option<crate::content::OwnedTitle>,
+    pub(crate) pending_block_title: Option<OwnedTitle>,
 
     /// Live values of [counter] attributes, keyed by counter name (e.g.
     /// `index`, `example-number`, `table-number`).
@@ -427,10 +423,17 @@ pub struct Parser {
     /// inside the attributes substitution step, where only a shared `&Parser`
     /// is available. Each entry stores the byte offset and length of the source
     /// span the warning refers to (rather than a borrowed
-    /// [`Span`](crate::Span), which the lifetime-free `Parser` cannot
+    /// [`Span`], which the lifetime-free `Parser` cannot
     /// hold), so the warnings can be turned into
     /// spanned [`Warning`]s once the document's owned source is available.
     substitution_warnings: RefCell<Vec<DeferredWarning>>,
+
+    /// Recognition diagnostics the single-pass builder raised, awaiting
+    /// transplant onto the real parser — see
+    /// [`record_builder_diagnostic`](Self::record_builder_diagnostic) for why
+    /// these are kept apart from
+    /// [`substitution_warnings`](Self::substitution_warnings).
+    builder_diagnostics: RefCell<Vec<DeferredWarning>>,
 
     /// An optional fixed reference time that pins the clock used to compute the
     /// time-dependent document attributes (`docdate`, `doctime`, `docdatetime`,
@@ -553,7 +556,7 @@ impl Default for Parser {
             attribute_values: Arc::new(HashMap::new()),
             baseline_attribute_values: Arc::new(HashMap::new()),
             default_attribute_values: built_in_default_values(),
-            renderer: Rc::new(HtmlSubstitutionRenderer {}),
+            renderer: Rc::new(HtmlInlineRenderer {}),
             primary_file_name: None,
             path_resolver: Rc::new(DefaultPathResolver::default()),
             include_file_handler: None,
@@ -574,7 +577,6 @@ impl Default for Parser {
             parsing_bibliography_section_body: false,
             in_delimited_block: false,
             in_bibliography_list_item: Cell::new(false),
-            mark_footnote_spans: Cell::new(false),
             pending_block_title: None,
             counter_values: RefCell::new(Arc::new(HashMap::new())),
             locked_counter_values: RefCell::new(HashMap::new()),
@@ -588,6 +590,7 @@ impl Default for Parser {
             owned_cell_warnings: RefCell::new(vec![]),
             callouts: RefCell::new(CalloutCatalog::default()),
             substitution_warnings: RefCell::new(vec![]),
+            builder_diagnostics: RefCell::new(vec![]),
             reference_time: None,
             input_mtime: None,
             datetime_context: RefCell::new(None),
@@ -683,7 +686,7 @@ impl Parser {
         // Resolve cross-references against this document's own catalog. For
         // multi-document workflows, use `parse_deferred` and resolve later with
         // a caller-supplied resolver via `Document::resolve_references`.
-        document.resolve_against_own_catalog(&*self.renderer);
+        document.resolve_against_own_catalog(&*self.renderer, self);
 
         document
     }
@@ -806,7 +809,7 @@ impl Parser {
     /// reimplementing (or taking a dependency on) this crate's
     /// `regex`-based substitution logic.
     ///
-    /// Pass any [`SubstitutionGroup`](crate::content::SubstitutionGroup),
+    /// Pass any [`SubstitutionGroup`],
     /// including a [`Custom`](crate::content::SubstitutionGroup::Custom) group
     /// built from an explicit list of
     /// [`SubstitutionStep`](crate::content::SubstitutionStep)s, to select
@@ -838,11 +841,7 @@ impl Parser {
     /// );
     /// ```
     #[must_use]
-    pub fn apply_substitutions(
-        &self,
-        text: &str,
-        group: &crate::content::SubstitutionGroup,
-    ) -> String {
+    pub fn apply_substitutions(&self, text: &str, group: &SubstitutionGroup) -> String {
         let mut content = crate::content::Content::from(crate::Span::new(text));
         group.apply(&mut content, self, None);
         content.rendered_owned()
@@ -1223,7 +1222,7 @@ impl Parser {
     /// crate::warnings::WarningType::MaxBlockNestingExceeded
     pub(crate) fn warn_block_nesting_exceeded<'src>(
         &self,
-        source: crate::Span<'src>,
+        source: Span<'src>,
         warnings: &mut Vec<Warning<'src>>,
     ) {
         warnings.push(Warning::new(
@@ -1340,7 +1339,7 @@ impl Parser {
     fn resolve_leveloffset_and_warn<'src>(
         &self,
         value: InterpretedValue,
-        span: crate::Span<'src>,
+        span: Span<'src>,
         warnings: &mut Vec<Warning<'src>>,
     ) -> InterpretedValue {
         let value = self.resolve_leveloffset_assignment(value);
@@ -1375,15 +1374,33 @@ impl Parser {
     /// This is the **only** way a context is built, in or out of the crate:
     /// [`RenderContext`]'s own constructor is not reachable from outside
     /// [`parser`](crate::parser), and this is crate-private. A consumer
-    /// receives a context (as an [`InlineSubstitutionRenderer`], a
+    /// receives a context (as an [`InlineRenderer`], a
     /// [`PathResolver`], an [`ImageFileHandler`], or a [`SvgFileHandler`])
     /// rather than constructing one. If a downstream need to construct one
     /// appears — unit-testing a handler implementation is the likely one —
     /// this is what would be made public.
     ///
-    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+    /// [`InlineRenderer`]: crate::parser::InlineRenderer
     pub(crate) fn render_context(&self) -> RenderContext {
         RenderContext::new(self)
+    }
+
+    /// Creates a [`RenderContext`] that pairs `attributes` with **this
+    /// parser's configuration** — its path resolver and file handlers.
+    ///
+    /// This is how a fold running *later than its parse* is assembled. The two
+    /// halves come from different places on purpose:
+    ///
+    /// - the document attributes are **order-dependent** (a `:imagesdir:` line
+    ///   rebinds them for everything after it), so they must be the ones the
+    ///   content was parsed under — retained on the content itself, see
+    ///   `Content::render_attributes`;
+    /// - the resolver and handlers are **parse-wide configuration** that cannot
+    ///   change mid-parse, so the parser supplies them at fold time. They are
+    ///   also `Rc<dyn …>`, which is why a content does not retain them: doing
+    ///   so would cost [`Document`] its `Send`/`Sync`.
+    pub(crate) fn render_context_with(&self, attributes: ResolvedAttributes) -> RenderContext {
+        RenderContext::from_parts(attributes, self)
     }
 
     /// Returns the reference instant this parse has already captured for its
@@ -1763,19 +1780,19 @@ impl Parser {
         id: &str,
         reftext: Option<&str>,
         ref_type: RefType,
-    ) -> Result<(), crate::document::DuplicateIdError> {
+    ) -> Result<(), DuplicateIdError> {
         self.catalog
             .borrow_mut()
             .register_ref(id, reftext, ref_type)
     }
 
-    /// Attaches an [`XrefSignifier`](crate::parser::XrefSignifier) to an
+    /// Attaches an [`XrefSignifier`] to an
     /// already-registered catalog element, so a cross-reference to it can build
     /// `full`/`short` [`xrefstyle`](crate::parser::XrefStyle) text.
     ///
     /// Takes `&self` for the same reason as
     /// [`register_ref`](Self::register_ref).
-    pub(crate) fn set_ref_signifier(&self, id: &str, signifier: crate::parser::XrefSignifier) {
+    pub(crate) fn set_ref_signifier(&self, id: &str, signifier: XrefSignifier) {
         self.catalog.borrow_mut().set_signifier(id, signifier);
     }
 
@@ -1856,31 +1873,41 @@ impl Parser {
     /// does not map to the document, so no location is recorded and
     /// resolution falls back to the whole-document span.
     ///
-    /// Takes `&self` so it can be called from the macros substitution step.
+    /// Takes `&self` so it can be called during substitution. `template` is
+    /// the single-pass builder's structured fold of the footnote's subtree
+    /// (see [`fold_deferring_xrefs`]), which never enters the escaped
+    /// sentinel form the string pipeline's entries were held in.
+    ///
+    /// [`fold_deferring_xrefs`]: crate::content::inline_builder::fold_deferring_xrefs
     pub(crate) fn define_footnote(
         &self,
         id: Option<&str>,
-        text: String,
-        xrefs: Vec<crate::content::XrefSegment>,
-        source: crate::Span<'_>,
+        template: Vec<XrefTemplatePiece>,
+        xrefs: Vec<XrefSegment>,
+        source: Span<'_>,
     ) -> String {
         // A footnote's text is extracted out of the block during macro
         // substitution, so any cross-reference inside it never reaches the
         // document-level resolution pass over block content. Those
-        // cross-references are captured (as placeholders in `text` plus the
-        // `xrefs` segments) so they can be resolved alongside the block
+        // cross-references are captured (as splice points in `template` plus
+        // the `xrefs` segments) so they can be resolved alongside the block
         // references. The stored `text` is the unresolved fallback rendering
         // until then, so it is always clean.
         let (text, deferred) = if xrefs.is_empty() {
-            // The text was extracted from content held in escaped sentinel form
-            // (see `escape_sentinels`); it is user-facing from here, so it
-            // leaves escaped form now. The deferred branch below does the same
-            // from `FootnoteDeferred::render`, keeping its template escaped for
-            // later re-rendering.
-            (crate::content::unescape_sentinels(&text).into_owned(), None)
+            // No cross-reference to defer: `template` holds no `Xref` piece
+            // either (the fold never emits one without pushing its segment
+            // into `xrefs`), so rendering it is just concatenating its
+            // literal run — cheap enough to do directly, with no
+            // `FootnoteDeferred` to construct or ever resolve again.
+            (
+                crate::content::render_xref_template(&template, &xrefs, &*self.renderer),
+                None,
+            )
         } else {
-            let deferred = crate::content::FootnoteDeferred::new(text, xrefs);
+            let deferred = crate::content::FootnoteDeferred::new(template, xrefs);
+
             let rendered = deferred.render(&*self.renderer);
+
             (rendered, Some(Box::new(deferred)))
         };
 
@@ -1905,15 +1932,13 @@ impl Parser {
             None
         };
 
-        self.catalog
-            .borrow_mut()
-            .register_footnote(crate::document::Footnote {
-                index: index.clone(),
-                id: id.map(|s| s.to_owned()),
-                text,
-                deferred,
-                location,
-            });
+        self.catalog.borrow_mut().register_footnote(Footnote {
+            index: index.clone(),
+            id: id.map(|s| s.to_owned()),
+            text,
+            deferred,
+            location,
+        });
 
         index
     }
@@ -1923,14 +1948,14 @@ impl Parser {
     /// cell) its own footnote registry; see [`restore_footnotes`].
     ///
     /// [`restore_footnotes`]: Self::restore_footnotes
-    pub(crate) fn take_footnotes(&self) -> Vec<crate::document::Footnote> {
+    pub(crate) fn take_footnotes(&self) -> Vec<Footnote> {
         self.catalog.borrow_mut().take_footnotes()
     }
 
     /// Restores a previously-[taken](Self::take_footnotes) footnote list,
     /// discarding any footnotes registered in the meantime (i.e. those defined
     /// inside the nested document).
-    pub(crate) fn restore_footnotes(&self, footnotes: Vec<crate::document::Footnote>) {
+    pub(crate) fn restore_footnotes(&self, footnotes: Vec<Footnote>) {
         self.catalog.borrow_mut().restore_footnotes(footnotes);
     }
 
@@ -1941,11 +1966,7 @@ impl Parser {
     /// text the warning refers to; its byte offset and length are stored so a
     /// spanned [`Warning`] can be reconstructed later (see
     /// [`take_substitution_warnings`](Self::take_substitution_warnings)).
-    pub(crate) fn record_substitution_warning(
-        &self,
-        source: crate::Span<'_>,
-        warning: WarningType,
-    ) {
+    pub(crate) fn record_substitution_warning(&self, source: Span<'_>, warning: WarningType) {
         self.substitution_warnings
             .borrow_mut()
             .push(DeferredWarning {
@@ -1977,6 +1998,80 @@ impl Parser {
     /// held `len` entries.
     pub(crate) fn drain_substitution_warnings_since(&self, len: usize) -> Vec<DeferredWarning> {
         self.substitution_warnings.borrow_mut().split_off(len)
+    }
+
+    /// Records a recognition **diagnostic** the single-pass builder raises,
+    /// into a buffer of its own.
+    ///
+    /// Deliberately *not*
+    /// [`record_substitution_warning`](Self::record_substitution_warning)'s
+    /// buffer. The builder runs against a counter-safe clone whose warning
+    /// buffer is discarded, so its diagnostics have to be carried across to the
+    /// real parser — but that clone's buffer also collects warnings the builder
+    /// records **incidentally**, through machinery it shares with the string
+    /// pipeline: an [`Attrlist`](crate::attributes::Attrlist) parse expands
+    /// attribute references over the list's own text, and where that text is a
+    /// match string rather than document source, the resulting
+    /// `attribute-missing` warning carries an offset that cannot be mapped
+    /// back. The string pipeline discards exactly those at its own site (see
+    /// `PassthroughRestoreReplacer`); carrying the clone's whole buffer across
+    /// would surface them mislocated against the document root
+    /// (`passthrough_attrlist_drop_line_does_not_leak_a_mislocated_warning`
+    /// catches it).
+    ///
+    /// So the two are kept apart at the source: this buffer holds only what the
+    /// builder means to report, and only it is transplanted.
+    pub(crate) fn record_builder_diagnostic(&self, source: Span<'_>, warning: WarningType) {
+        self.builder_diagnostics.borrow_mut().push(DeferredWarning {
+            offset: source.byte_offset(),
+            len: source.len(),
+            warning,
+            origin: None,
+        });
+    }
+
+    /// The number of builder diagnostics recorded so far — the mark
+    /// [`drain_builder_diagnostics_since`](Self::drain_builder_diagnostics_since)
+    /// drains from.
+    pub(crate) fn builder_diagnostics_len(&self) -> usize {
+        self.builder_diagnostics.borrow().len()
+    }
+
+    /// Removes and returns the builder diagnostics recorded since the buffer
+    /// held `len` entries — see
+    /// [`record_builder_diagnostic`](Self::record_builder_diagnostic).
+    ///
+    /// Taken from a **mark** rather than wholesale, for the same reason
+    /// [`drain_substitution_warnings_since`](Self::drain_substitution_warnings_since)
+    /// is: a build can nest. `passthrough_text` re-enters
+    /// `SubstitutionGroup::apply` for a passthrough body, and that call clones
+    /// the parser it is given — copying this buffer along with everything else
+    /// — so a nested drain that took the whole buffer would carry the *outer*
+    /// build's pending diagnostics across a second time. Marking before each
+    /// build and draining back to that mark leaves each build with exactly its
+    /// own.
+    pub(crate) fn drain_builder_diagnostics_since(&self, len: usize) -> Vec<DeferredWarning> {
+        self.builder_diagnostics.borrow_mut().split_off(len)
+    }
+
+    /// Appends already-built warnings to this parser's buffer, in order.
+    ///
+    /// This is the counterpart to
+    /// [`drain_substitution_warnings_since`](Self::drain_substitution_warnings_since),
+    /// and it exists for one caller: the single-pass builder records its
+    /// diagnostics against the counter-safe *clone*
+    /// `SubstitutionGroup::apply` hands it, whose buffer is discarded with the
+    /// clone, so they are drained from there and pushed here to reach the real
+    /// parser. A [`DeferredWarning`] is plain data — an offset, a length, a
+    /// [`WarningType`] and an origin — so moving one between parsers loses
+    /// nothing.
+    ///
+    /// A recognition diagnostic that *has* a node to hang on is replayed from
+    /// the tree instead (see `apply_macro_side_effects`); this carries the ones
+    /// that do not, which is why they are recorded where they are recognized
+    /// rather than after the fact.
+    pub(crate) fn push_substitution_warnings(&self, warnings: Vec<DeferredWarning>) {
+        self.substitution_warnings.borrow_mut().extend(warnings);
     }
 
     /// Takes the substitution warnings recorded during parsing, leaving the
@@ -2096,6 +2191,13 @@ impl Parser {
     /// held by the parser — after the document body has been parsed (so the
     /// catalog is complete) but before [`take_catalog`](Self::take_catalog)
     /// transfers it to the `Document`.
+    ///
+    /// Tests also use it to inspect a registration recorded via
+    /// [`register_image`](Self::register_image) or
+    /// [`register_link`](Self::register_link) directly against this `Parser`,
+    /// without going through a full [`Document`] parse (whose own
+    /// [`catalog`](crate::document::Document::catalog) is a separate, later
+    /// snapshot).
     pub(crate) fn catalog(&self) -> std::cell::Ref<'_, Catalog> {
         self.catalog.borrow()
     }
@@ -2330,17 +2432,14 @@ impl Parser {
             })
     }
 
-    /// Replace the default [`InlineSubstitutionRenderer`] for this parser.
+    /// Replace the default [`InlineRenderer`] for this parser.
     ///
-    /// The default implementation of [`InlineSubstitutionRenderer`] that is
+    /// The default implementation of [`InlineRenderer`] that is
     /// provided is suitable for HTML5 rendering. If you are targeting a
     /// different back-end rendering, you will need to provide your own
     /// implementation and set it using this call before parsing.
     #[must_use]
-    pub fn with_inline_substitution_renderer<ISR: InlineSubstitutionRenderer + 'static>(
-        mut self,
-        renderer: ISR,
-    ) -> Self {
+    pub fn with_inline_renderer<ISR: InlineRenderer + 'static>(mut self, renderer: ISR) -> Self {
         self.renderer = Rc::new(renderer);
         self
     }
@@ -2538,15 +2637,15 @@ impl Parser {
     /// [`with_image_file_handler`].
     ///
     /// A renderer is handed a [`RenderContext`] rather than a parser, so a
-    /// custom [`InlineSubstitutionRenderer`] that resolves image URIs itself
+    /// custom [`InlineRenderer`] that resolves image URIs itself
     /// (rather than inheriting [`image_uri`]'s default `data-uri` embedding)
     /// reaches the handler through
     /// [`RenderContext::image_file_handler`] instead of here. This accessor is
     /// for a caller that holds the parser.
     ///
     /// [`ImageFileHandler`]: crate::parser::ImageFileHandler
-    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
-    /// [`image_uri`]: crate::parser::InlineSubstitutionRenderer::image_uri
+    /// [`InlineRenderer`]: crate::parser::InlineRenderer
+    /// [`image_uri`]: crate::parser::InlineRenderer::image_uri
     /// [`with_image_file_handler`]: Self::with_image_file_handler
     pub fn image_file_handler(&self) -> Option<&dyn ImageFileHandler> {
         self.image_file_handler.as_deref()
@@ -2558,15 +2657,15 @@ impl Parser {
     /// [`with_svg_file_handler`].
     ///
     /// A renderer is handed a [`RenderContext`] rather than a parser, so a
-    /// custom [`InlineSubstitutionRenderer`] that renders inline SVG images
+    /// custom [`InlineRenderer`] that renders inline SVG images
     /// itself (rather than inheriting [`render_image`]'s `opts=inline`
     /// handling) reaches the handler through
     /// [`RenderContext::svg_file_handler`] instead of here. This accessor is
     /// for a caller that holds the parser.
     ///
     /// [`SvgFileHandler`]: crate::parser::SvgFileHandler
-    /// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
-    /// [`render_image`]: crate::parser::InlineSubstitutionRenderer::render_image
+    /// [`InlineRenderer`]: crate::parser::InlineRenderer
+    /// [`render_image`]: crate::parser::InlineRenderer::render_image
     /// [`with_svg_file_handler`]: Self::with_svg_file_handler
     pub fn svg_file_handler(&self) -> Option<&dyn SvgFileHandler> {
         self.svg_file_handler.as_deref()
@@ -3032,6 +3131,30 @@ impl Parser {
     ///
     /// [counter]: https://docs.asciidoctor.org/asciidoc/latest/attributes/counters/
     pub(crate) fn counter(&self, name: &str, seed: Option<&str>) -> String {
+        self.counter_impl(name, seed, false).0
+    }
+
+    /// Like [`counter`](Self::counter), but also reports whether the
+    /// returned value was advanced from the counter's own **persisted**
+    /// state (`true`) — a prior counter value, or a plain document attribute
+    /// of the same name — rather than freshly derived from `seed` or the
+    /// `"1"` default (`false`).
+    ///
+    /// A caller splicing this value into text that must stay free of
+    /// [`MASKED_PIECE_PLACEHOLDER`](crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER)-shaped
+    /// bytes it did not itself write needs this distinction: `seed` (from
+    /// `{counter:name:seed}`) is a slice of the caller's own already-escaped
+    /// haystack, so a value derived from it needs no further escaping — but
+    /// persisted state was never escaped for *this* haystack. It may be an
+    /// ordinary document attribute (`:name: value`) set anywhere, or this
+    /// same counter's own value from an earlier, unrelated reference
+    /// elsewhere in the document — either way, its bytes did not pass
+    /// through the tokener guarding the text this call is splicing into.
+    pub(crate) fn counter_reporting_provenance(
+        &self,
+        name: &str,
+        seed: Option<&str>,
+    ) -> (String, bool) {
         self.counter_impl(name, seed, false)
     }
 
@@ -3046,7 +3169,7 @@ impl Parser {
     /// reads back as its latest counter value (unlike a plain inline
     /// `{counter:…}`, which leaves the locked value in place).
     pub(crate) fn counter_for_caption(&self, name: &str, seed: Option<&str>) -> String {
-        self.counter_impl(name, seed, true)
+        self.counter_impl(name, seed, true).0
     }
 
     /// Advances the `name` counter and returns its new value. `seed` supplies
@@ -3072,7 +3195,16 @@ impl Parser {
     ///   mirrors Asciidoctor's `Document#counter`, which advances `@counters`
     ///   but leaves `@attributes` untouched while the attribute is
     ///   `attribute_locked?`.
-    fn counter_impl(&self, name: &str, seed: Option<&str>, commit_when_locked: bool) -> String {
+    ///
+    /// Returns the advanced value alongside whether it was derived from
+    /// persisted state (see
+    /// [`counter_reporting_provenance`](Self::counter_reporting_provenance)).
+    fn counter_impl(
+        &self,
+        name: &str,
+        seed: Option<&str>,
+        commit_when_locked: bool,
+    ) -> (String, bool) {
         let use_private_state = !commit_when_locked && self.attribute_is_locked(name);
 
         // The value to advance from: the private running state first (only
@@ -3088,6 +3220,8 @@ impl Parser {
             InterpretedValue::Value(current) if !current.is_empty() => Some(current),
             _ => None,
         });
+
+        let from_persisted_state = current.is_some();
 
         let next = match current {
             Some(current) => next_counter_value(&current),
@@ -3106,7 +3240,7 @@ impl Parser {
                 .insert(name.to_string(), next.clone());
         }
 
-        next
+        (next, from_persisted_state)
     }
 
     /// Reports whether `name` currently resolves to an attribute that is
@@ -3379,10 +3513,12 @@ mod tests {
     use crate::{
         attributes::Attrlist,
         blocks::Block,
+        inlines::{Callout, Footnote, Image, IndexTerm, Ref},
         parser::{
-            CharacterReplacementType, IconRenderParams, ImageRenderParams,
-            InlineSubstitutionRenderer, LinkRenderParams, QuoteScope, QuoteType, SpecialCharacter,
+            CharacterReplacementType, InlineRenderer, QuoteScope, QuoteType, SpecialCharacter,
+            XrefRenderParams,
         },
+        strings::CowStr,
         tests::prelude::*,
     };
 
@@ -4430,7 +4566,7 @@ mod tests {
     #[derive(Debug)]
     struct TestRenderer;
 
-    impl InlineSubstitutionRenderer for TestRenderer {
+    impl InlineRenderer for TestRenderer {
         fn render_special_character(&self, type_: SpecialCharacter, dest: &mut String) {
             // Custom rendering: wrap special characters in brackets.
             match type_ {
@@ -4440,11 +4576,11 @@ mod tests {
             }
         }
 
-        fn render_quoted_substitution(
+        fn render_styled(
             &self,
             _type_: QuoteType,
             _scope: QuoteScope,
-            _attrlist: Option<Attrlist<'_>>,
+            _attrlist: &Attrlist<'_>,
             _id: Option<String>,
             body: &str,
             dest: &mut String,
@@ -4464,24 +4600,24 @@ mod tests {
             dest.push_str("[BR]");
         }
 
-        fn render_image(&self, _params: &ImageRenderParams, dest: &mut String) {
+        fn render_image(&self, _image: &Image<'_>, _context: &RenderContext, dest: &mut String) {
             dest.push_str("[IMAGE]");
         }
 
         fn image_uri(
             &self,
             target_image_path: &str,
-            _context: &crate::parser::RenderContext,
+            _context: &RenderContext,
             _asset_dir_key: Option<&str>,
         ) -> String {
             target_image_path.to_string()
         }
 
-        fn render_icon(&self, _params: &IconRenderParams, dest: &mut String) {
+        fn render_icon(&self, _icon: &Image<'_>, _context: &RenderContext, dest: &mut String) {
             dest.push_str("[ICON]");
         }
 
-        fn render_link(&self, _params: &LinkRenderParams, dest: &mut String) {
+        fn render_link(&self, _link: &Ref<'_>, _text: &str, dest: &mut String) {
             dest.push_str("[LINK]");
         }
 
@@ -4489,20 +4625,26 @@ mod tests {
             dest.push_str(&format!("[ANCHOR:{}]", id));
         }
 
-        fn render_xref(&self, params: &crate::parser::XrefRenderParams, dest: &mut String) {
+        fn render_xref(&self, params: &XrefRenderParams, dest: &mut String) {
             dest.push_str(&format!("[XREF:{}]", params.target));
         }
 
-        fn render_callout(&self, params: &crate::parser::CalloutRenderParams, dest: &mut String) {
-            dest.push_str(&format!("[CALLOUT:{}]", params.number));
+        fn render_callout(
+            &self,
+            callout: &Callout<'_>,
+            _context: &RenderContext,
+            dest: &mut String,
+        ) {
+            dest.push_str(&format!("[CALLOUT:{}]", callout.number));
         }
 
         fn render_index_term(
             &self,
-            params: &crate::parser::IndexTermRenderParams,
+            _index_term: &IndexTerm<'_>,
+            visible_term: Option<&str>,
             dest: &mut String,
         ) {
-            match params.visible_term {
+            match visible_term {
                 Some(term) => dest.push_str(&format!("[INDEXTERM:{term}]")),
                 None => dest.push_str("[INDEXTERM]"),
             }
@@ -4512,25 +4654,36 @@ mod tests {
             dest.push_str(&format!("[BUTTON:{text}]"));
         }
 
-        fn render_keyboard(&self, keys: &[String], dest: &mut String) {
+        fn render_keyboard(&self, keys: &[CowStr<'_>], dest: &mut String) {
+            let keys: Vec<&str> = keys.iter().map(|k| k.as_ref()).collect();
             dest.push_str(&format!("[KBD:{}]", keys.join("+")));
         }
 
-        fn render_menu(&self, params: &crate::parser::MenuRenderParams, dest: &mut String) {
-            dest.push_str(&format!("[MENU:{}]", params.menu));
+        fn render_menu(
+            &self,
+            menu: &str,
+            _submenus: &[CowStr<'_>],
+            _menuitem: Option<&str>,
+            _context: &RenderContext,
+            dest: &mut String,
+        ) {
+            dest.push_str(&format!("[MENU:{menu}]"));
         }
 
-        fn render_footnote(&self, params: &crate::parser::FootnoteRenderParams, dest: &mut String) {
-            match params.index {
+        fn render_footnote(&self, footnote: &Footnote<'_>, dest: &mut String) {
+            match footnote.number.as_deref() {
                 Some(index) => dest.push_str(&format!("[FOOTNOTE:{index}]")),
-                None => dest.push_str(&format!("[FOOTNOTE:{}]", params.text)),
+                None => dest.push_str(&format!(
+                    "[FOOTNOTE:{}]",
+                    footnote.id.as_deref().unwrap_or("")
+                )),
             }
         }
     }
 
     #[test]
-    fn with_inline_substitution_renderer() {
-        let mut parser = Parser::default().with_inline_substitution_renderer(TestRenderer);
+    fn with_inline_renderer() {
+        let mut parser = Parser::default().with_inline_renderer(TestRenderer);
 
         // Parse a simple document with special characters and a footnote.
         let doc = parser.parse("Hello & goodbye < world > test footnote:[a note]");
@@ -4548,14 +4701,14 @@ mod tests {
         // Our custom renderer should show [AMP], [LT], and [GT] instead of HTML
         // entities, and a resolved footnote as [FOOTNOTE:<index>].
         assert_eq!(
-            simple_block.content().rendered(),
+            simple_block.content().rendered_html(),
             "Hello [AMP] goodbye [LT] world [GT] test [FOOTNOTE:1]"
         );
     }
 
     #[test]
     fn custom_renderer_renders_unresolved_footnote() {
-        let mut parser = Parser::default().with_inline_substitution_renderer(TestRenderer);
+        let mut parser = Parser::default().with_inline_renderer(TestRenderer);
 
         // An unresolved footnote reference exercises the renderer's `None`
         // (no index) branch, which our custom renderer shows as
@@ -4567,7 +4720,62 @@ mod tests {
             panic!("Expected simple block, got: {block:?}");
         };
 
-        assert_eq!(simple_block.content().rendered(), "test.[FOOTNOTE:missing]");
+        assert_eq!(
+            simple_block.content().rendered_html(),
+            "test.[FOOTNOTE:missing]"
+        );
+    }
+
+    #[test]
+    fn custom_renderer_renders_links_and_index_terms() {
+        // `render_link` takes the node plus its folded display text, and
+        // `render_index_term` the node plus its folded visible term, so this
+        // pins that both overrides are reached and that a concealed term
+        // (no visible text) is distinguishable from a flow one.
+        let mut parser = Parser::default().with_inline_renderer(TestRenderer);
+
+        let doc =
+            parser.parse("See https://example.org[Docs] for ((tigers)) and indexterm:[bears].");
+
+        let block = doc.child_blocks().next().unwrap();
+        let Block::Simple(simple_block) = block else {
+            panic!("Expected simple block, got: {block:?}");
+        };
+
+        assert_eq!(
+            simple_block.content().rendered_html(),
+            "See [LINK] for [INDEXTERM:tigers] and [INDEXTERM]."
+        );
+    }
+
+    #[test]
+    fn custom_renderer_renders_ui_macros_and_callouts() {
+        // The UI-macro and callout overrides take the node (or its fields)
+        // rather than a `*RenderParams` struct, so this pins that they are
+        // reached and read the values the node carries.
+        let mut parser = Parser::default().with_inline_renderer(TestRenderer);
+
+        let doc = parser.parse(
+            ":experimental:\n\nPress kbd:[Ctrl,T] then btn:[OK] from menu:File[Save As].\n\n\
+             [source]\n----\nlet x = 1; # <1>\n----",
+        );
+
+        let rendered: Vec<String> = doc
+            .child_blocks()
+            .filter_map(|b| match b {
+                Block::Simple(s) => Some(s.content().rendered_html().to_string()),
+                Block::RawDelimited(r) => Some(r.content().rendered_html().to_string()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            rendered,
+            vec![
+                "Press [KBD:Ctrl+T] then [BUTTON:OK] from [MENU:File].".to_string(),
+                "let x = 1; [CALLOUT:1]".to_string(),
+            ]
+        );
     }
 
     /// A custom [`PathResolver`](crate::parser::PathResolver) that rewrites
@@ -4597,7 +4805,7 @@ mod tests {
         };
 
         assert_eq!(
-            simple_block.content().rendered(),
+            simple_block.content().rendered_html(),
             r#"<span class="image"><img src="https://cdn.example.com/tiger.png" alt="tiger"></span>"#
         );
     }
@@ -4805,7 +5013,7 @@ mod tests {
             let Block::Simple(simple_block) = block else {
                 panic!("expected a simple block");
             };
-            assert_eq!(simple_block.content().rendered(), "{showtitle}");
+            assert_eq!(simple_block.content().rendered_html(), "{showtitle}");
         }
 
         #[test]

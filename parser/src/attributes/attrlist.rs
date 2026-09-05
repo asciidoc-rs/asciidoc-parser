@@ -1,7 +1,12 @@
 use crate::{
     HasSpan, Parser, Span,
-    attributes::{ElementAttribute, element_attribute::ParseShorthand},
-    content::{Content, SubstitutionStep},
+    attributes::{
+        ElementAttribute,
+        element_attribute::{
+            MASKED_PIECE_PLACEHOLDER, ParseShorthand, SplicedValueEscaping, restore_into,
+        },
+    },
+    content::{Content, apply_attributes},
     internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
     span::MatchedItem,
     strings::CowStr,
@@ -28,10 +33,18 @@ pub struct Attrlist<'src> {
     source: Span<'src>,
 
     /// The attrlist text this list was parsed from, kept only when `source`'s
-    /// own bytes are *not* that text — which happens exactly when
-    /// [`parse`](Self::parse) substituted an attribute reference into it, so
-    /// what was parsed is the *expanded* text while `source` holds the
-    /// author's `{name}` spelling. `None` otherwise, which is the common case.
+    /// own bytes are *not* that text. There are two such cases, and both are
+    /// about the same thing — the bytes the parse actually read:
+    ///
+    ///   - [`parse`](Self::parse) substituted attribute references into the
+    ///     text before splitting it, so what it parsed is the *expanded* text
+    ///     and `source` holds the author's `{name}` spelling.
+    ///   - [`into_owned`](Self::into_owned) rebuilt the list from a temporary
+    ///     and re-tagged it with a coarser source span, so `source` holds
+    ///     whatever that span covers rather than the attrlist text at all.
+    ///
+    /// `None` for every list whose `source.data()` already *is* the text it
+    /// was parsed from — the common case.
     ///
     /// Only [`source_text`](Self::source_text) reads it, for
     /// [`quoted_text_fallback_role`](Self::quoted_text_fallback_role) — the one
@@ -41,6 +54,155 @@ pub struct Attrlist<'src> {
 }
 
 impl<'src> Attrlist<'src> {
+    /// Rebuilds this attribute list with every borrowed string copied into an
+    /// owned one and `source` as its new span, so it can outlive the text it
+    /// was parsed from.
+    ///
+    /// [`parse`](Self::parse) reads its `source` span's bytes **as content**,
+    /// so an attribute list can only be parsed from a span that actually holds
+    /// the attrlist text. A caller that has those bytes only in a temporary
+    /// string — the inline AST builder, whose match string carries an escaped
+    /// or attribute-expanded value that no `'src` slice reproduces — parses
+    /// from a [`Span::new`] over that temporary and calls this to keep the
+    /// result, passing the coarser source span the text corresponds to as the
+    /// list's own location tag. Every parsed field is a [`CowStr`], so nothing
+    /// but the location depends on the original span — with one exception this
+    /// method itself handles:
+    /// [`quoted_text_fallback_role`](Self::quoted_text_fallback_role) reads the
+    /// attrlist's own *text*, which after the re-tag is no longer what `source`
+    /// holds (the temporary's escaped or expanded bytes are precisely what no
+    /// `'src` slice reproduces). An owned copy of the text this list was parsed
+    /// from therefore rides along in
+    /// [`source_text`](Self::source_text), so that accessor goes on reading it.
+    ///
+    /// That copy is taken through [`source_text`](Self::source_text) rather
+    /// than off `self.source` directly, so a list whose own
+    /// [`parse`](Self::parse) already expanded an attribute reference carries
+    /// the *expanded* text forward rather than reinstating the `{name}`
+    /// spelling the re-tag is discarding the span for.
+    pub(crate) fn into_owned<'dst>(self, source: Span<'dst>) -> Attrlist<'dst> {
+        let source_text = CowStr::from(self.source_text().to_string());
+
+        Attrlist {
+            attributes: self
+                .attributes
+                .into_iter()
+                .map(ElementAttribute::into_owned)
+                .collect(),
+            anchor: self.anchor.map(CowStr::into_owned),
+            source,
+            source_text: Some(source_text),
+        }
+    }
+
+    /// [`into_owned`](Self::into_owned), first substituting each
+    /// [`MASKED_PIECE_PLACEHOLDER`] occurrence in every parsed value — and in
+    /// the retained [`source_text`](Self::source_text) — with the next of
+    /// `bodies`, in left-to-right document order.
+    ///
+    /// This is how a caller restores a masked construct that its attribute
+    /// list text still holds. The restore has to happen **after** the parse,
+    /// not before it: [`Attrlist::parse`] has to see the placeholder still in
+    /// place, so the body's own bytes never reach the split that divides the
+    /// list into entries, names, and values.
+    ///
+    /// A single shared cursor, starting at `0`, walks
+    /// [`self.attributes`](Self) in the same order [`Attrlist::parse`] found
+    /// them in — which is left-to-right document order, the same order a
+    /// placeholder's own position in `bodies` was assigned in — so no index
+    /// needs to be carried in the placeholder's own bytes. `source_text` is
+    /// an independent full copy of the same text and is restored with a
+    /// fresh cursor of its own, from `0` again, for the same reason. See
+    /// [`ElementAttribute::into_owned_restoring`] for the per-attribute half,
+    /// including what it does to the shorthand offsets, and
+    /// [`nth_attribute_token_offset`](Self::nth_attribute_token_offset) /
+    /// [`named_attribute_token_offset`](Self::named_attribute_token_offset)
+    /// for a caller that needs to restore one attribute's value against a
+    /// *slice* of a global body/node list instead of the whole list this
+    /// method walks.
+    pub(crate) fn into_owned_restoring<'dst>(
+        self,
+        source: Span<'dst>,
+        bodies: &[&str],
+    ) -> Attrlist<'dst> {
+        let source_text = CowStr::from(self.source_text().to_string());
+        let mut cursor = 0usize;
+
+        let attributes = self
+            .attributes
+            .into_iter()
+            .map(|attribute| attribute.into_owned_restoring(bodies, &mut cursor))
+            .collect();
+
+        Attrlist {
+            attributes,
+            // The anchor takes the plain conversion rather than a restoring
+            // one. An anchor is only ever set for the `[…]`-delimited whole
+            // -bracket form, and no restoring caller can present one: each
+            // parses a macro's bracket capture, whose own pattern ends the
+            // match at the first `]`, so `[x]` never arrives here intact.
+            anchor: self.anchor.map(CowStr::into_owned),
+            source,
+            source_text: Some(restore_into(
+                source_text,
+                bodies,
+                &mut 0usize,
+                &mut [],
+                &mut Vec::new(),
+            )),
+        }
+    }
+
+    /// The number of [`MASKED_PIECE_PLACEHOLDER`] occurrences in every
+    /// attribute's name and value that come before `self.attributes[index]`,
+    /// in this list's own parse order.
+    ///
+    /// A caller restoring one attribute's own value against a **slice** of a
+    /// global body/node list — rather than the whole list
+    /// [`into_owned_restoring`](Self::into_owned_restoring) walks — uses this
+    /// to find where that attribute's own occurrences begin: the same
+    /// position `into_owned_restoring`'s own shared cursor would be at once
+    /// it reached this attribute. Counting occurrences needs no restore of
+    /// its own — it reads the still-tokened `name`/`value` text directly — so
+    /// this works before any restore has run.
+    fn token_offset_before(&self, index: usize) -> usize {
+        self.attributes
+            .get(..index)
+            .unwrap_or_default()
+            .iter()
+            .map(|attr| {
+                attr.name()
+                    .map_or(0, |name| name.matches(MASKED_PIECE_PLACEHOLDER).count())
+                    + attr.value().matches(MASKED_PIECE_PLACEHOLDER).count()
+            })
+            .sum()
+    }
+
+    /// [`nth_attribute`](Self::nth_attribute), plus the offset into a global
+    /// body/node list where that attribute's own placeholder occurrences
+    /// begin (see [`token_offset_before`](Self::token_offset_before)).
+    pub(crate) fn nth_attribute_token_offset(&self, n: usize) -> Option<usize> {
+        let index = self
+            .attributes
+            .iter()
+            .position(|attr| attr.positional_index() == Some(n))?;
+
+        Some(self.token_offset_before(index))
+    }
+
+    /// [`named_attribute`](Self::named_attribute), plus the offset into a
+    /// global body/node list where that attribute's own placeholder
+    /// occurrences begin (see
+    /// [`token_offset_before`](Self::token_offset_before)).
+    pub(crate) fn named_attribute_token_offset(&self, name: &str) -> Option<usize> {
+        let index = self
+            .attributes
+            .iter()
+            .position(|attr| attr.name() == Some(name))?;
+
+        Some(self.token_offset_before(index))
+    }
+
     /// **IMPORTANT:** This `source` span passed to this function should NOT
     /// include the opening or closing square brackets for the attrlist.
     /// This is because the rules for closing brackets differ when parsing
@@ -50,6 +212,56 @@ impl<'src> Attrlist<'src> {
         parser: &Parser,
         attrlist_context: AttrlistContext,
     ) -> MatchAndWarnings<'src, MatchedItem<'src, Self>> {
+        Self::parse_escaping(
+            source,
+            parser,
+            attrlist_context,
+            SplicedValueEscaping::Verbatim,
+        )
+    }
+
+    /// [`parse`](Self::parse) over **tokened** macro-bracket text — what
+    /// `tokened_bracket`/`tokened_text` (the macros step) hand back, in which
+    /// each masked passthrough or STEM piece stands as one
+    /// [`MASKED_PIECE_PLACEHOLDER`] occurrence and every other byte is escaped
+    /// ([`escape_masked_piece_bytes`]).
+    ///
+    /// The difference is the attribute-reference substitution this parse runs
+    /// of its own, below. That substitution is the **second** point at which
+    /// bytes enter a tokened text — a `subs=` list naming `macros` without
+    /// `attributes` reaches the macros step with every reference still
+    /// unresolved, so it is this parse, not the content-level step, that
+    /// expands one — and it runs *after* the tokener escaped its copy. Under
+    /// [`SplicedValueEscaping::MaskedPieceBytes`] each resolved value is
+    /// escaped as it is spliced, which is what keeps the tokener's property
+    /// total: every reserved codepoint standing in the text this splits is one
+    /// the tokener wrote, so [`restore_into`]'s positional walk has nothing to
+    /// be fooled by and a document attribute's own reserved bytes come back
+    /// out as the document wrote them.
+    ///
+    /// Every other caller wants [`parse`](Self::parse): ordinary content
+    /// carries no such invariant, and escaping into it would put the escape's
+    /// own bytes in front of a reader that never unescapes.
+    ///
+    /// [`escape_masked_piece_bytes`]: crate::attributes::element_attribute::escape_masked_piece_bytes
+    pub(crate) fn parse_tokened(
+        source: Span<'src>,
+        parser: &Parser,
+    ) -> MatchAndWarnings<'src, MatchedItem<'src, Self>> {
+        Self::parse_escaping(
+            source,
+            parser,
+            AttrlistContext::Inline,
+            SplicedValueEscaping::MaskedPieceBytes,
+        )
+    }
+
+    fn parse_escaping(
+        source: Span<'src>,
+        parser: &Parser,
+        attrlist_context: AttrlistContext,
+        escaping: SplicedValueEscaping,
+    ) -> MatchAndWarnings<'src, MatchedItem<'src, Self>> {
         let mut attributes: Vec<ElementAttribute> = vec![];
         let mut parse_shorthand_items = true;
         let mut warnings: Vec<Warning<'src>> = vec![];
@@ -57,7 +269,7 @@ impl<'src> Attrlist<'src> {
         // Apply attribute value substitutions before parsing attrlist content.
         let source_cow = if source.contains('{') && source.contains('}') {
             let mut content = Content::from(source);
-            SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+            apply_attributes(&mut content, parser, escaping);
             CowStr::from(content.rendered.to_string())
         } else {
             CowStr::from(source.data())
@@ -221,6 +433,32 @@ impl<'src> Attrlist<'src> {
     /// language via [`nth_attribute(2)`](Self::nth_attribute) — without
     /// this parser performing any syntax highlighting itself.
     ///
+    /// An attribute list with no attributes, located at `source`.
+    ///
+    /// This is what "the node carried no attribute list" looks like. The
+    /// inline nodes that can carry one — [`Image`](crate::inlines::Image),
+    /// [`Styled`](crate::inlines::Styled) and [`Ref`](crate::inlines::Ref) —
+    /// hold an `Attrlist` outright rather than an `Option<Attrlist>`, so every
+    /// consumer reads attributes the same way whether the author wrote a list
+    /// or not; the ones written without a list get this. `source` should be a
+    /// zero-length slice of the node's own location, so the empty list's
+    /// lifetime and position match the node it belongs to.
+    ///
+    /// It is public because those node fields are: a caller building a node by
+    /// hand needs to be able to say "no attributes", and every other route to
+    /// an `Attrlist` goes through parsing — which would cost an
+    /// attribute-reference substitution pass and, more to the point, require a
+    /// [`Parser`] where only a `Span` is at hand.
+    #[must_use]
+    pub fn empty(source: Span<'src>) -> Self {
+        Self {
+            attributes: vec![],
+            anchor: None,
+            source,
+            source_text: None,
+        }
+    }
+
     /// The `source` span is set to the language span, since that is the only
     /// portion of the synthesized list that appears in the document source.
     pub(crate) fn source_with_language(language: Span<'src>) -> Self {
@@ -574,6 +812,65 @@ impl<'src> Attrlist<'src> {
         roles
     }
 
+    /// [`roles`](Self::roles), pairing each role with the offset into a
+    /// global body/node list where *its own* placeholder occurrences begin
+    /// (see [`token_offset_before`](Self::token_offset_before)) — a role
+    /// from the first positional attribute's own shorthand items and one
+    /// from a named `role=` attribute are two different attributes in this
+    /// list's own parse order, so a caller restoring a role read off a
+    /// still-tokened list (e.g. `untranslated_value` in the macros step)
+    /// cannot use one starting offset for both.
+    ///
+    /// Nor can two roles split out of the *same* source attribute
+    /// (`role=++a++ ++b++` is one attribute, two space-separated roles, each
+    /// with its own placeholder): each role after the first has to skip past
+    /// every placeholder occurrence the roles *before* it, in the same
+    /// value, already account for — so the offset is a running count, seeded
+    /// from the source attribute's own base offset and advanced by each
+    /// role's own occurrence count as the split walks left to right, not one
+    /// shared starting point per attribute.
+    pub(crate) fn roles_with_token_offset(&'src self) -> Vec<(&'src str, usize)> {
+        let mut roles: Vec<(&'src str, usize)> = vec![];
+
+        if let Some(base) = self.nth_attribute_token_offset(1)
+            && let Some(attr1) = self.nth_attribute(1)
+        {
+            let mut offset = base;
+
+            for role in attr1.roles() {
+                roles.push((role, offset));
+                offset += role.matches(MASKED_PIECE_PLACEHOLDER).count();
+            }
+        }
+
+        if let Some(base) = self.named_attribute_token_offset("role")
+            && let Some(role_attr) = self.named_attribute("role")
+        {
+            let mut offset = base;
+
+            for role in split_role_value(role_attr.value()) {
+                roles.push((role, offset));
+                offset += role.matches(MASKED_PIECE_PLACEHOLDER).count();
+            }
+        }
+
+        roles
+    }
+
+    /// The attrlist text this list was parsed from.
+    ///
+    /// For every list parsed straight from the source it describes, that is
+    /// its [`source`](Self::span) span's own bytes. For one rebuilt by
+    /// [`into_owned`](Self::into_owned) from a temporary — whose `source` is a
+    /// coarser *location tag* rather than the text — it is the
+    /// owned copy that method kept.
+    fn source_text(&'src self) -> &'src str {
+        match &self.source_text {
+            Some(text) => text.as_ref(),
+            None => self.source.data(),
+        }
+    }
+
     /// Recovers the role from a quote-delimited first positional attribute (for
     /// example `['role']`) in a quoted-text attribute list.
     ///
@@ -605,16 +902,6 @@ impl<'src> Attrlist<'src> {
         // opening quote here, so the slice is never empty.
         let raw = self.source_text();
         Some(raw.split_once(',').map_or(raw, |(first, _)| first).trim())
-    }
-
-    /// The text this attribute list was parsed from: the attribute-expanded
-    /// text when [`parse`](Self::parse)'s own substitution changed anything,
-    /// and `source`'s own bytes otherwise.
-    fn source_text(&'src self) -> &'src str {
-        match &self.source_text {
-            Some(text) => text.as_ref(),
-            None => self.source.data(),
-        }
     }
 
     /// Returns any option attributes that were found.
@@ -781,6 +1068,230 @@ mod tests {
 
         let b2 = b1.item.clone();
         assert_eq!(b1.item, b2);
+    }
+
+    #[test]
+    fn attribute_reference_substitution_shifts_a_placeholder_byte_offset_in_source_text() {
+        // Direct evidence for the first blocker that ruled out carrying a
+        // byte-offset table through `Attrlist::parse`, checked against this
+        // method's own `source_text()`
+        // rather than only a full document's final rendered HTML (as
+        // `tests/sentinels.rs`'s
+        // `an_attrlist_level_reference_expansion_moves_a_placeholder_in_the_tokened_text`
+        // does) — so a future change to how this substitution works cannot
+        // silently stop supporting the claim while rendering still happens to
+        // come out right.
+        //
+        // `tokened_bracket`/`tokened_text` would write
+        // `MASKED_PIECE_PLACEHOLDER` at byte 17 of
+        // `alt={name},title=<placeholder>` — right after `title=`. This
+        // method's own attribute-reference substitution
+        // expands `{name}` before splitting entries — unconditional whenever
+        // the text holds both a `{` and a `}` — so the placeholder the parsed
+        // entries actually see has moved by however much longer the expanded
+        // `alt` value is than the reference that named it.
+        use crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER;
+
+        let p = Parser::default().with_intrinsic_attribute(
+            "name",
+            "a-much-longer-value",
+            ModificationContext::Anywhere,
+        );
+
+        let source = format!("alt={{name}},title={MASKED_PIECE_PLACEHOLDER}");
+        let written_offset = source.find(MASKED_PIECE_PLACEHOLDER).unwrap();
+        assert_eq!(written_offset, 17);
+
+        let attrlist = crate::attributes::Attrlist::parse(
+            crate::Span::new(&source),
+            &p,
+            AttrlistContext::Inline,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        let split_offset = attrlist
+            .source_text()
+            .find(MASKED_PIECE_PLACEHOLDER)
+            .unwrap();
+
+        assert_eq!(
+            split_offset,
+            30,
+            "the substitution's own extra length must have moved the placeholder: {:?}",
+            attrlist.source_text()
+        );
+    }
+
+    #[test]
+    fn a_restore_copies_an_unpaired_escape_introducer_through() {
+        // The restore walk's decode half is **total** over arbitrary input:
+        // an escape introducer followed by a byte that is not one of the
+        // three tags this crate writes is copied through with the bytes after
+        // it, rather than eating one as a tag (see `escaped_literal`), and
+        // the genuine placeholder further along still restores.
+        //
+        // Both points at which bytes enter a tokened text escape now — the
+        // tokener's own copy, and the splice inside `Attrlist::parse_tokened`
+        // — so the pipeline itself no longer produces an unpaired introducer.
+        // That is exactly why this is pinned here, over a hand-written
+        // tokened text, rather than through a document: totality is what lets
+        // every consumer run the unescape unconditionally, and it should not
+        // quietly stop holding just because nothing upstream exercises it.
+        use crate::attributes::element_attribute::{MASKED_PIECE_ESCAPE, MASKED_PIECE_PLACEHOLDER};
+
+        let p = Parser::default();
+        let source = format!("alt=p{MASKED_PIECE_ESCAPE}zq,title={MASKED_PIECE_PLACEHOLDER}");
+
+        let attrlist = crate::attributes::Attrlist::parse_tokened(crate::Span::new(&source), &p)
+            .unwrap_if_no_warnings()
+            .item
+            .into_owned_restoring(crate::Span::new("whatever"), &["real"]);
+
+        assert_eq!(
+            attrlist.named_attribute("alt").map(|attr| attr.value()),
+            Some(format!("p{MASKED_PIECE_ESCAPE}zq").as_str())
+        );
+
+        assert_eq!(
+            attrlist.named_attribute("title").map(|attr| attr.value()),
+            Some("real")
+        );
+    }
+
+    #[test]
+    fn a_restore_copies_an_occurrence_past_the_end_of_bodies_through() {
+        // The restore walk fails **closed** when it finds more placeholder
+        // occurrences than the caller supplied bodies for: the surplus
+        // occurrence is copied through verbatim rather than panicking or
+        // taking a later occurrence's body, and every occurrence the caller
+        // *did* supply a body for still restores.
+        //
+        // No caller can produce this — each tokens exactly as many pieces as
+        // it supplies bodies for, and since the tokened parse's own
+        // attribute-reference splice is escaped
+        // (`SplicedValueEscaping::MaskedPieceBytes`) an expansion can no
+        // longer add an occurrence behind the tokener's back either, which is
+        // what used to reach this arm. It is pinned directly instead, so a
+        // caller that someday breaks the count is caught by this contract
+        // rather than by a corrupted neighbouring restore.
+        use crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER;
+
+        let p = Parser::default();
+        let source = format!("alt={MASKED_PIECE_PLACEHOLDER},title={MASKED_PIECE_PLACEHOLDER}");
+
+        // Two occurrences, one body.
+        let attrlist = crate::attributes::Attrlist::parse_tokened(crate::Span::new(&source), &p)
+            .unwrap_if_no_warnings()
+            .item
+            .into_owned_restoring(crate::Span::new("whatever"), &["real"]);
+
+        assert_eq!(
+            attrlist.named_attribute("alt").map(|attr| attr.value()),
+            Some("real")
+        );
+
+        assert_eq!(
+            attrlist.named_attribute("title").map(|attr| attr.value()),
+            Some(MASKED_PIECE_PLACEHOLDER)
+        );
+    }
+
+    #[test]
+    fn token_offset_helpers_count_placeholders_before_the_target_attribute() {
+        // Two masked pieces (each one `MASKED_PIECE_PLACEHOLDER` occurrence,
+        // as `tokened_bracket`/`tokened_text` would leave it before a
+        // restore): one inside a named `role=` attribute, first in this
+        // list's own parse order, and one inside the third (positional)
+        // entry. A caller restoring the third entry's own value against a
+        // *slice* of a global body/node list has to start past the role's
+        // own occurrence, not at the whole list's first one — this is the
+        // scenario the two `_token_offset` accessors exist for.
+        use crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER;
+
+        let source = format!("role={MASKED_PIECE_PLACEHOLDER},x,{MASKED_PIECE_PLACEHOLDER}");
+        let p = Parser::default();
+        let attrlist = crate::attributes::Attrlist::parse(
+            crate::Span::new(&source),
+            &p,
+            AttrlistContext::Inline,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        // Nothing precedes `role=` itself.
+        assert_eq!(attrlist.named_attribute_token_offset("role"), Some(0));
+
+        // The third entry (positional index 3) is the *third* attribute in
+        // vec order (role, then the blank `x`... no, `x` is itself
+        // positional index 2) — one placeholder (role's own) precedes it.
+        assert_eq!(attrlist.nth_attribute_token_offset(3), Some(1));
+
+        // A name with no matching attribute finds nothing to offset.
+        assert_eq!(attrlist.named_attribute_token_offset("nope"), None);
+        assert_eq!(attrlist.nth_attribute_token_offset(99), None);
+    }
+
+    #[test]
+    fn roles_with_token_offset_pairs_each_role_with_its_own_source_attributes_offset() {
+        // A role from the first positional's own shorthand items and one
+        // from a named `role=` attribute are two different attributes, and
+        // `roles()` merges them into one flat list with no way back to
+        // either source — which is exactly why a restoring caller
+        // (`untranslated_value`) needs the offset alongside each role rather
+        // than one shared starting point.
+        use crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER;
+
+        let source =
+            format!("{MASKED_PIECE_PLACEHOLDER}.shorthand,role={MASKED_PIECE_PLACEHOLDER}");
+        let p = Parser::default();
+        let attrlist = crate::attributes::Attrlist::parse(
+            crate::Span::new(&source),
+            &p,
+            AttrlistContext::Inline,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        let roles = attrlist.roles_with_token_offset();
+
+        assert_eq!(
+            roles,
+            vec![("shorthand", 0), (MASKED_PIECE_PLACEHOLDER, 1)],
+            "the shorthand role's own attribute is first, so nothing precedes it \
+             (offset 0); the named `role=` attribute — still unrestored, so its \
+             value is the placeholder itself — is the second attribute, past the \
+             shorthand's own one placeholder occurrence (offset 1)"
+        );
+    }
+
+    #[test]
+    fn roles_with_token_offset_advances_past_each_earlier_role_in_the_same_attribute() {
+        // Two space-separated roles inside the *same* `role=` attribute
+        // (`role=++a++ ++b++`), each carrying its own placeholder — a single
+        // attribute, not two, so `named_attribute_token_offset` gives both
+        // roles the same *base*, and the second role's own offset has to
+        // additionally skip past the first role's own one occurrence, not
+        // reuse the base as if only one role were there (Greptile
+        // https://github.com/asciidoc-rs/asciidoc-parser/pull/1349#discussion_r3890749214).
+        use crate::attributes::element_attribute::MASKED_PIECE_PLACEHOLDER;
+
+        let source = format!("role={MASKED_PIECE_PLACEHOLDER} {MASKED_PIECE_PLACEHOLDER}");
+        let p = Parser::default();
+        let attrlist = crate::attributes::Attrlist::parse(
+            crate::Span::new(&source),
+            &p,
+            AttrlistContext::Inline,
+        )
+        .unwrap_if_no_warnings()
+        .item;
+
+        assert_eq!(
+            attrlist.roles_with_token_offset(),
+            vec![(MASKED_PIECE_PLACEHOLDER, 0), (MASKED_PIECE_PLACEHOLDER, 1),],
+            "the first role's own occurrence is offset 0; the second role's own \
+             occurrence must skip past it rather than reusing offset 0"
+        );
     }
 
     #[test]
@@ -2589,6 +3100,35 @@ mod tests {
             .unwrap_if_no_warnings();
 
             assert!(mi.item.quoted_text_fallback_role().is_none());
+        }
+
+        #[test]
+        fn an_owned_list_keeps_the_text_it_was_parsed_from() {
+            let p = Parser::default();
+
+            // `into_owned` re-tags a list parsed from a temporary with a
+            // *coarser* source span — the inline AST builder's case, where the
+            // attrlist text is the escaped or attribute-expanded bytes of a
+            // match string and the span is only a location tag.
+            // This is the one accessor that reads the list's own text rather
+            // than a parsed attribute, so it reads the kept copy: recovering
+            // the raw span's `'a<b'` here would drop the escaping the string
+            // pipeline's own rendered `class` carries.
+            let escaped = "'a&lt;b'";
+
+            let owned = crate::attributes::Attrlist::parse(
+                crate::Span::new(escaped),
+                &p,
+                AttrlistContext::Inline,
+            )
+            .unwrap_if_no_warnings()
+            .item
+            .into_owned(crate::Span::new("'a<b'"));
+
+            assert_eq!(owned.quoted_text_fallback_role().unwrap(), escaped);
+
+            // The location tag is the span it was re-tagged with, unchanged.
+            assert_eq!(owned.span().data(), "'a<b'");
         }
 
         #[test]

@@ -7,6 +7,7 @@ use crate::{
     },
     content::Content,
     document::InterpretedValue,
+    inlines::InlineNode,
     internal::debug::DebugSliceReference,
     span::MatchedItem,
     strings::CowStr,
@@ -62,7 +63,8 @@ impl<'src> AdmonitionBlock<'src> {
     /// This narrow seam exists for the document-order title resolution pass
     /// (see `document::title_refs`), which installs the re-rendered title
     /// after resolving any cross-references embedded in it. All other access
-    /// goes through the read-only [`IsBlock::title`] accessor.
+    /// goes through the read-only [`IsBlock::title`]/[`IsBlock::title_content`]
+    /// accessors.
     pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         self.title.as_mut()
     }
@@ -373,8 +375,12 @@ impl<'src> IsBlock<'src> for AdmonitionBlock<'src> {
         Some(self.variant.style())
     }
 
-    fn rendered_content(&'src self) -> Option<&'src str> {
-        self.content.as_ref().map(|content| content.rendered())
+    fn rendered_html_content(&'src self) -> Option<&'src str> {
+        self.content.as_ref().map(|content| content.rendered_html())
+    }
+
+    fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
+        self.content.as_ref().map(|content| content.inlines())
     }
 
     fn child_blocks_mut(&mut self) -> &mut [Block<'src>] {
@@ -391,6 +397,10 @@ impl<'src> IsBlock<'src> for AdmonitionBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_ref().map(Content::rendered_str)
+    }
+
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
     }
 
     fn anchor(&'src self) -> Option<Span<'src>> {
@@ -439,7 +449,7 @@ mod tests {
     use std::ops::Deref;
 
     use crate::{
-        blocks::{AdmonitionVariant, Block, ContentModel, IsBlock},
+        blocks::{AdmonitionBlock, AdmonitionVariant, Block, ContentModel, IsBlock},
         tests::prelude::*,
     };
 
@@ -451,7 +461,7 @@ mod tests {
             .item
     }
 
-    fn as_admonition<'a>(block: &'a Block<'a>) -> &'a crate::blocks::AdmonitionBlock<'a> {
+    fn as_admonition<'a>(block: &'a Block<'a>) -> &'a AdmonitionBlock<'a> {
         match block {
             Block::Admonition(admonition) => admonition,
 
@@ -564,8 +574,11 @@ mod tests {
         assert_eq!(admonition.label(), "Note");
         assert!(!admonition.icons_font());
         assert_eq!(admonition.content_model(), ContentModel::Simple);
-        assert_eq!(admonition.content().unwrap().rendered(), "This is a note.");
-        assert_eq!(admonition.rendered_content(), Some("This is a note."));
+        assert_eq!(
+            admonition.content().unwrap().rendered_html(),
+            "This is a note."
+        );
+        assert_eq!(admonition.rendered_html_content(), Some("This is a note."));
         assert_eq!(admonition.raw_context().deref(), "admonition");
         assert_eq!(admonition.resolved_context().deref(), "admonition");
         assert_eq!(admonition.declared_style(), Some("NOTE"));
@@ -595,7 +608,7 @@ mod tests {
         let block = parse_one("NOTE: first line\nsecond line");
         let admonition = as_admonition(&block);
         assert_eq!(
-            admonition.content().unwrap().rendered(),
+            admonition.content().unwrap().rendered_html(),
             "first line\nsecond line"
         );
     }
@@ -606,7 +619,7 @@ mod tests {
         let admonition = as_admonition(&block);
         assert_eq!(admonition.variant(), AdmonitionVariant::Note);
         assert_eq!(
-            admonition.content().unwrap().rendered(),
+            admonition.content().unwrap().rendered_html(),
             "indented with a tab"
         );
     }
@@ -644,7 +657,7 @@ mod tests {
         assert_eq!(admonition.variant(), AdmonitionVariant::Note);
         assert_eq!(admonition.content_model(), ContentModel::Compound);
         assert!(admonition.content().is_none());
-        assert!(admonition.rendered_content().is_none());
+        assert!(admonition.rendered_html_content().is_none());
         assert_eq!(admonition.child_blocks().count(), 1);
     }
 
@@ -681,7 +694,7 @@ mod tests {
         assert_eq!(admonition.variant(), AdmonitionVariant::Tip);
         assert_eq!(admonition.content_model(), ContentModel::Simple);
         assert_eq!(
-            admonition.content().unwrap().rendered(),
+            admonition.content().unwrap().rendered_html(),
             "A single paragraph."
         );
     }
@@ -762,7 +775,7 @@ mod tests {
         // (rather than calling through the unwrapped `AdmonitionBlock`).
         let simple = parse_one("NOTE: text");
         assert_eq!(simple.content_model(), ContentModel::Simple);
-        assert_eq!(simple.rendered_content(), Some("text"));
+        assert_eq!(simple.rendered_html_content(), Some("text"));
         assert_eq!(simple.raw_context().deref(), "admonition");
         assert_eq!(simple.declared_style(), Some("NOTE"));
         assert!(simple.title_source().is_none());

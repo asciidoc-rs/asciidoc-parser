@@ -39,7 +39,7 @@
 //!
 //! None of that lives in this crate. `asciidoc-parser` is a parser: it exposes
 //! HTML5 *inline* rendering through the
-//! [`InlineSubstitutionRenderer`](crate::parser::InlineSubstitutionRenderer)
+//! [`InlineRenderer`](crate::parser::InlineRenderer)
 //! trait, and — as the crate README states — full document conversion, other
 //! backends, template engines, and pluggable converters are the responsibility
 //! of downstream crates, not this one. Extensions (custom block / macro / and,

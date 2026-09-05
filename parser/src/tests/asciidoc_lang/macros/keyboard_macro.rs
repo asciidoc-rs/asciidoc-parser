@@ -34,7 +34,7 @@ mod keyboard_macro_syntax {
                     if let Some(cell) = row.cells().first()
                         && let TableCellContent::Simple(content) = cell.content()
                     {
-                        out.push(content.rendered().to_string());
+                        out.push(content.rendered_html().to_string());
                     }
                 }
             }

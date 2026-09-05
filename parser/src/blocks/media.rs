@@ -77,7 +77,8 @@ impl<'src> MediaBlock<'src> {
     /// This narrow seam exists for the document-order title resolution pass
     /// (see `document::title_refs`), which installs the re-rendered title
     /// after resolving any cross-references embedded in it. All other access
-    /// goes through the read-only [`IsBlock::title`] accessor.
+    /// goes through the read-only [`IsBlock::title`]/[`IsBlock::title_content`]
+    /// accessors.
     pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         self.title.as_mut()
     }
@@ -342,6 +343,10 @@ impl<'src> IsBlock<'src> for MediaBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_ref().map(Content::rendered_str)
+    }
+
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
     }
 
     fn caption(&self) -> Option<&str> {
@@ -971,6 +976,26 @@ mod tests {
                 warnings[0].warning,
                 WarningType::SkippingReferenceToMissingAttribute("missing".to_string())
             );
+        }
+
+        #[test]
+        fn warn_points_at_the_precise_reference_in_the_target() {
+            // A macro target is substituted over its *own* source text, so a
+            // match's offsets are source offsets and the warning names the
+            // exact reference rather than the whole target (issue #564; see
+            // `AttributeReplacer::over_its_own_source`).
+            let source = "image::a{missing}b.png[]";
+            let mut p = parser_with_mode("warn");
+            resolve(source, &mut p).unwrap();
+
+            let warnings = p.take_substitution_warnings();
+            assert_eq!(warnings.len(), 1);
+
+            let located = source
+                .get(warnings[0].offset..warnings[0].offset + warnings[0].len)
+                .unwrap();
+
+            assert_eq!(located, "{missing}");
         }
 
         #[test]

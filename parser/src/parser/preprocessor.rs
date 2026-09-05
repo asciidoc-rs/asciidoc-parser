@@ -3651,7 +3651,7 @@ mod tests {
 
         let rendered: Vec<_> = doc
             .child_blocks()
-            .filter_map(|b| b.rendered_content())
+            .filter_map(|b| b.rendered_html_content())
             .collect();
 
         assert_eq!(rendered, vec!["Value: 1."]);

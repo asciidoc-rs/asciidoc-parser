@@ -164,7 +164,7 @@ fn extname_should_return_whether_path_contains_an_extname() {
             panic!("expected a simple block");
         };
 
-        block.content().rendered().to_string()
+        block.content().rendered_html().to_string()
     }
 
     // `assert Asciidoctor::Helpers.extname?('document.adoc')`: has an

@@ -51,7 +51,7 @@ The names of those substitution steps and groups are as follows:
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This & _that_ and icon:github[] +\nanother line with a{sp}space there ..."
         );
     }
@@ -76,7 +76,7 @@ The names of those substitution steps and groups are as follows:
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This &amp; <em>that</em> and <span class=\"icon\">[github&#93;</span><br>\nanother line with a space there &#8230;&#8203;"
         );
     }
@@ -101,7 +101,7 @@ The names of those substitution steps and groups are as follows:
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This &amp; _that_ and icon:github[] +\nanother line with a{sp}space there ..."
         );
     }
@@ -127,7 +127,7 @@ For source blocks, this substitution step enables syntax highlighting as well.
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This &amp; _that_ and icon:github[] +\nanother line with a{sp}space there ..."
         );
     }
@@ -154,7 +154,7 @@ For source blocks, this substitution step enables syntax highlighting as well.
         // The verbatim group applies only special characters and callouts; the
         // input has no callout markers, so only `&` is replaced.
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This &amp; _that_ and icon:github[] +\nanother line with a{sp}space there ..."
         );
     }
@@ -179,7 +179,7 @@ For source blocks, this substitution step enables syntax highlighting as well.
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This & <em>that</em> and icon:github[] +\nanother line with a{sp}space there ..."
         );
     }
@@ -204,7 +204,7 @@ For source blocks, this substitution step enables syntax highlighting as well.
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This & _that_ and icon:github[] +\nanother line with a space there ..."
         );
     }
@@ -230,7 +230,7 @@ The output of `replacements` may depend on whether the `specialcharacters` subst
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This &#169; _that_ and icon:github[] +\nanother line with a{sp}space there &#8230;&#8203;"
         );
     }
@@ -255,7 +255,7 @@ The output of `replacements` may depend on whether the `specialcharacters` subst
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This &#169; _that_ and <span class=\"icon\">[github&#93;</span> +\nanother line with a{sp}space there ..."
         );
     }
@@ -280,7 +280,7 @@ The output of `replacements` may depend on whether the `specialcharacters` subst
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This &#169; _that_ and icon:github[]<br>\nanother line with a{sp}space there ..."
         );
     }
@@ -307,7 +307,7 @@ The value also specifies the order in which the substitutions are applied.
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This &amp;#169; _that_ and <span class=\"icon\">[github&#93;</span> +\nanother line with a{sp}space there ..."
         );
 
@@ -322,7 +322,7 @@ The value also specifies the order in which the substitutions are applied.
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This &#169; <em>that</em> and icon:github[]<br>\nanother line with a space there &#8230;&#8203;"
         );
     }
@@ -354,7 +354,7 @@ It can only be applied to a leaf block, which is any block that cannot have chil
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "This &#169; <em>that</em> and <span class=\"icon\"><img src=\"./images/icons/github.png\" alt=\"github\"></span><br>\nanother line with a space there &#8230;&#8203;"
         );
     }
@@ -413,7 +413,7 @@ include::example$subs.adoc[tag=subs-out]
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "System.out.println(\"Hello <strong>&lt;name&gt;</strong>\")"
         );
     }
@@ -448,7 +448,7 @@ pass:c,q[System.out.println("Hello *<name>*");] <1>
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "System.out.println(\"No bold *here*\");\nSystem.out.println(\"Hello <strong>&lt;name&gt;</strong>\");"
         );
     }
@@ -504,7 +504,7 @@ Prepends the substitution to the default list.
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "System.out.println(\"Hello *&lt;name&gt;*\")"
         );
     }
@@ -530,7 +530,7 @@ Appends the substitution to the default list.
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "System.out.println(\"Hello *&lt;name&gt;*\")"
         );
     }
@@ -556,7 +556,7 @@ Removes the substitution from the default list.
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "System.out.println(\"Hello <name>\")"
         );
     }
@@ -587,7 +587,7 @@ include::example$subs.adoc[tag=subs-add]
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "&lt;version&gt;1.42&lt;/version&gt;"
         );
     }
@@ -631,7 +631,7 @@ include::example$subs.adoc[tag=subs-sub]
         // characters, so the lone `<1>` is rendered literally rather than as a
         // callout number.
         assert_eq!(
-            block.content().rendered(),
+            block.content().rendered_html(),
             "&lt;1&gt;\n  content inside \"1\" tag\n&lt;/1&gt;"
         );
     }
@@ -678,7 +678,7 @@ In the above example, the `attributes` substitution step is added to the beginni
         // (appended) converts `(C)`, and `callouts` (removed) leaves the lone
         // `<1>` literal.
         assert_eq!(
-            block.content().rendered(),
+            block.content().rendered_html(),
             "&lt;version&gt;1.0&lt;/version&gt;\n&lt;copyright&gt;&#169; ACME&lt;/copyright&gt;\n&lt;1&gt;\n  content inside \"1\" tag\n&lt;/1&gt;"
         );
     }

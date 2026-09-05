@@ -9,7 +9,8 @@ use crate::{
     },
     content::{Content, SubstitutionGroup, substitute_attributes_in_reftext},
     document::{Attribute, InterpretedValue, RefType},
-    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, XrefSignifier},
+    inlines::InlineNode,
+    parser::{InlineRenderer, ReferenceResolver, ReferenceWarnings, XrefSignifier},
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -961,8 +962,9 @@ impl<'src> Block<'src> {
     pub(crate) fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         warnings: &mut ReferenceWarnings<'src>,
+        parser: &Parser,
     ) {
         // A section is not resolved here: its resolvable content is its
         // heading, which `content_mut` deliberately does not expose (see
@@ -971,24 +973,24 @@ impl<'src> Block<'src> {
         // cross-references *between* titles (forward and circular) — something
         // per-content resolution cannot see.
         if let Some(content) = self.content_mut() {
-            content.resolve_references(resolver, renderer, warnings);
+            content.resolve_references(resolver, renderer, warnings, parser);
         }
 
         // Tables hold their resolvable content in cells rather than in a single
         // `content_mut()` value, so they are resolved explicitly here.
         if let Self::Table(table) = self {
-            table.resolve_references(resolver, renderer, warnings);
+            table.resolve_references(resolver, renderer, warnings, parser);
         }
 
         // A Markdown-style blockquote holds its nested blocks in its own owned
         // source, which the generic `child_blocks_mut()` walk below does not
         // reach, so they are resolved explicitly here.
         if let Self::Quote(quote) = self {
-            quote.resolve_references(resolver, renderer, warnings);
+            quote.resolve_references(resolver, renderer, warnings, parser);
         }
 
         for child in self.child_blocks_mut() {
-            child.resolve_references(resolver, renderer, warnings);
+            child.resolve_references(resolver, renderer, warnings, parser);
         }
     }
 
@@ -1003,6 +1005,11 @@ impl<'src> Block<'src> {
     pub(crate) fn block_title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         match self {
             Self::Simple(b) => b.title_content_mut(),
+            // A section's `.Title` decoration, which only a *discrete* heading
+            // keeps (a non-discrete section's is carried into its first block);
+            // distinct from the section heading, which the title pass reaches
+            // through its own `section_title_*` accessors.
+            Self::Section(b) => b.title_content_mut(),
             Self::Media(b) => b.title_content_mut(),
             Self::List(b) => b.title_content_mut(),
             Self::RawDelimited(b) => b.title_content_mut(),
@@ -1075,22 +1082,41 @@ impl<'src> IsBlock<'src> for Block<'src> {
         }
     }
 
-    fn rendered_content(&'src self) -> Option<&'src str> {
+    fn rendered_html_content(&'src self) -> Option<&'src str> {
         match self {
-            Self::Simple(b) => b.rendered_content(),
-            Self::Media(b) => b.rendered_content(),
-            Self::Section(b) => b.rendered_content(),
-            Self::List(b) => b.rendered_content(),
-            Self::ListItem(b) => b.rendered_content(),
-            Self::RawDelimited(b) => b.rendered_content(),
-            Self::CompoundDelimited(b) => b.rendered_content(),
-            Self::Admonition(b) => b.rendered_content(),
-            Self::Quote(b) => b.rendered_content(),
-            Self::Table(b) => b.rendered_content(),
-            Self::Preamble(b) => b.rendered_content(),
-            Self::Break(b) => b.rendered_content(),
-            Self::Toc(b) => b.rendered_content(),
-            Self::DocumentAttribute(b) => b.rendered_content(),
+            Self::Simple(b) => b.rendered_html_content(),
+            Self::Media(b) => b.rendered_html_content(),
+            Self::Section(b) => b.rendered_html_content(),
+            Self::List(b) => b.rendered_html_content(),
+            Self::ListItem(b) => b.rendered_html_content(),
+            Self::RawDelimited(b) => b.rendered_html_content(),
+            Self::CompoundDelimited(b) => b.rendered_html_content(),
+            Self::Admonition(b) => b.rendered_html_content(),
+            Self::Quote(b) => b.rendered_html_content(),
+            Self::Table(b) => b.rendered_html_content(),
+            Self::Preamble(b) => b.rendered_html_content(),
+            Self::Break(b) => b.rendered_html_content(),
+            Self::Toc(b) => b.rendered_html_content(),
+            Self::DocumentAttribute(b) => b.rendered_html_content(),
+        }
+    }
+
+    fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
+        match self {
+            Self::Simple(b) => b.inlines(),
+            Self::Media(b) => b.inlines(),
+            Self::Section(b) => b.inlines(),
+            Self::List(b) => b.inlines(),
+            Self::ListItem(b) => b.inlines(),
+            Self::RawDelimited(b) => b.inlines(),
+            Self::CompoundDelimited(b) => b.inlines(),
+            Self::Admonition(b) => b.inlines(),
+            Self::Quote(b) => b.inlines(),
+            Self::Table(b) => b.inlines(),
+            Self::Preamble(b) => b.inlines(),
+            Self::Break(b) => b.inlines(),
+            Self::Toc(b) => b.inlines(),
+            Self::DocumentAttribute(b) => b.inlines(),
         }
     }
 
@@ -1186,6 +1212,25 @@ impl<'src> IsBlock<'src> for Block<'src> {
             Self::Break(b) => b.title(),
             Self::Toc(b) => b.title(),
             Self::DocumentAttribute(b) => b.title(),
+        }
+    }
+
+    fn title_content(&self) -> Option<&Content<'src>> {
+        match self {
+            Self::Simple(b) => b.title_content(),
+            Self::Media(b) => b.title_content(),
+            Self::Section(b) => b.title_content(),
+            Self::List(b) => b.title_content(),
+            Self::ListItem(b) => b.title_content(),
+            Self::RawDelimited(b) => b.title_content(),
+            Self::CompoundDelimited(b) => b.title_content(),
+            Self::Admonition(b) => b.title_content(),
+            Self::Quote(b) => b.title_content(),
+            Self::Table(b) => b.title_content(),
+            Self::Preamble(b) => b.title_content(),
+            Self::Break(b) => b.title_content(),
+            Self::Toc(b) => b.title_content(),
+            Self::DocumentAttribute(b) => b.title_content(),
         }
     }
 

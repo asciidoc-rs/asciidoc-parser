@@ -12,8 +12,8 @@ use crate::{
     content::{Content, SubstitutionGroup},
     document::{Footnote, InterpretedValue, TocConfig, TocMode},
     parser::{
-        AttributeValue, InlineSubstitutionRenderer, ModificationContext, ReferenceResolver,
-        ReferenceWarnings, ResolvedAttributes, SourceLine, built_in_attr, built_in_attrs_iter,
+        AttributeValue, InlineRenderer, ModificationContext, ReferenceResolver, ReferenceWarnings,
+        ResolvedAttributes, SourceLine, built_in_attr, built_in_attrs_iter,
         preprocessor::preprocess_with_initial_file_name,
     },
     span::MatchedItem,
@@ -174,7 +174,8 @@ impl<'src> TableBlock<'src> {
     /// This narrow seam exists for the document-order title resolution pass
     /// (see `document::title_refs`), which installs the re-rendered title
     /// after resolving any cross-references embedded in it. All other access
-    /// goes through the read-only [`IsBlock::title`] accessor.
+    /// goes through the read-only [`IsBlock::title`]/[`IsBlock::title_content`]
+    /// accessors.
     pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         self.title.as_mut()
     }
@@ -550,8 +551,9 @@ impl<'src> TableBlock<'src> {
     pub(crate) fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         warnings: &mut ReferenceWarnings<'src>,
+        parser: &Parser,
     ) {
         let rows = self
             .header_row
@@ -561,7 +563,7 @@ impl<'src> TableBlock<'src> {
 
         for row in rows {
             for cell in row.cells.iter_mut() {
-                cell.resolve_references(resolver, renderer, warnings);
+                cell.resolve_references(resolver, renderer, warnings, parser);
             }
         }
     }
@@ -582,6 +584,10 @@ impl<'src> IsBlock<'src> for TableBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_ref().map(Content::rendered_str)
+    }
+
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
     }
 
     // These forward to the inherent `caption()`/`number()` (the documented
@@ -2098,7 +2104,7 @@ fn parse_asciidoc_cell_body<'src>(
         title_source.map(|span| {
             let mut content = Content::from(span);
             SubstitutionGroup::Header.apply(&mut content, parser, None);
-            content.rendered().to_string()
+            content.rendered_html().to_string()
         })
     } else {
         None
@@ -2348,17 +2354,18 @@ impl<'src> TableCell<'src> {
     fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         warnings: &mut ReferenceWarnings<'src>,
+        parser: &Parser,
     ) {
         let source = self.source;
 
         match &mut self.content {
             TableCellContent::Simple(content) => {
-                content.resolve_references(resolver, renderer, warnings);
+                content.resolve_references(resolver, renderer, warnings, parser);
             }
             TableCellContent::AsciiDoc(cell) => {
-                cell.resolve_references(resolver, renderer, warnings, source);
+                cell.resolve_references(resolver, renderer, warnings, source, parser);
             }
         }
     }
@@ -2558,23 +2565,37 @@ impl<'src> AsciiDocCell<'src> {
     fn resolve_references(
         &mut self,
         resolver: &dyn ReferenceResolver,
-        renderer: &dyn InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         warnings: &mut ReferenceWarnings<'src>,
         source: Span<'src>,
+        parser: &Parser,
     ) {
         match self {
             Self::Borrowed(cell) => {
+                // This branch resolves into the *enclosing* accumulator, so the
+                // document's own folded footnote renderings are set aside first
+                // and restored afterwards. A cell keeps a footnote list of its
+                // own and footnote indices restart per list, so a cell's
+                // footnote `1` must never be installed onto the document's
+                // footnote `1` — see `ReferenceWarnings::footnote_texts`.
+                let enclosing = warnings.take_footnote_texts();
+
                 for block in &mut cell.blocks {
-                    block.resolve_references(resolver, renderer, warnings);
+                    block.resolve_references(resolver, renderer, warnings, parser);
                 }
+
+                let mut folded = crate::document::folds_by_index(warnings.take_footnote_texts());
 
                 // A cell footnote records no document location (it is defined
                 // in an owned sub-source), so resolution falls
                 // back to `source`, the cell's span, for any
                 // unresolved-reference warning.
                 for footnote in &mut cell.footnotes {
-                    footnote.resolve_references(resolver, renderer, warnings, source);
+                    let mine = folded.remove(&footnote.index);
+                    footnote.resolve_references(resolver, renderer, warnings, source, mine);
                 }
+
+                warnings.footnote_texts = enclosing;
             }
 
             // The owned store is shared behind an `Arc`, but references are
@@ -2590,7 +2611,12 @@ impl<'src> AsciiDocCell<'src> {
                         let mut owned_warnings = ReferenceWarnings::default();
 
                         for block in &mut dependent.blocks {
-                            block.resolve_references(resolver, renderer, &mut owned_warnings);
+                            block.resolve_references(
+                                resolver,
+                                renderer,
+                                &mut owned_warnings,
+                                parser,
+                            );
                         }
 
                         // A cell footnote records no document location, so its
@@ -2599,12 +2625,22 @@ impl<'src> AsciiDocCell<'src> {
                         // are re-homed to the cell's span
                         // in the document below regardless.
                         let owned_root = Span::new(owned_source);
+
+                        // Consumed here and carried no further: this cell's
+                        // blocks registered their footnotes on the cell's own
+                        // list, not the document's, and `rehome_into` leaves
+                        // these behind for exactly that reason.
+                        let mut folded =
+                            crate::document::folds_by_index(owned_warnings.take_footnote_texts());
+
                         for footnote in &mut dependent.footnotes {
+                            let mine = folded.remove(&footnote.index);
                             footnote.resolve_references(
                                 resolver,
                                 renderer,
                                 &mut owned_warnings,
                                 owned_root,
+                                mine,
                             );
                         }
 
@@ -3303,10 +3339,10 @@ mod tests {
     };
     use crate::{
         Span,
-        content::FootnoteDeferred,
+        content::{FootnoteDeferred, XrefTemplatePiece},
         document::Footnote,
         parser::{
-            HtmlSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
+            HtmlInlineRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
             ResolvedReference, SourceLine,
         },
     };
@@ -3399,7 +3435,7 @@ mod tests {
                     id: None,
                     text: "UNRESOLVED".to_string(),
                     deferred: Some(Box::new(FootnoteDeferred::new(
-                        "RESOLVED".to_string(),
+                        vec![XrefTemplatePiece::Literal("RESOLVED".to_string())],
                         vec![],
                     ))),
                     location: None,
@@ -3414,9 +3450,10 @@ mod tests {
 
         cell.resolve_references(
             &NoopResolver,
-            &HtmlSubstitutionRenderer {},
+            &HtmlInlineRenderer {},
             &mut warnings,
             Span::new(""),
+            &crate::Parser::default(),
         );
 
         // Resolution was skipped silently: no warnings, and the two references

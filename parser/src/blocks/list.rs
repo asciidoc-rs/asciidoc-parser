@@ -49,7 +49,8 @@ impl<'src> ListBlock<'src> {
     /// This narrow seam exists for the document-order title resolution pass
     /// (see `document::title_refs`), which installs the re-rendered title
     /// after resolving any cross-references embedded in it. All other access
-    /// goes through the read-only [`IsBlock::title`] accessor.
+    /// goes through the read-only [`IsBlock::title`]/[`IsBlock::title_content`]
+    /// accessors.
     pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         self.title.as_mut()
     }
@@ -463,6 +464,10 @@ impl<'src> IsBlock<'src> for ListBlock<'src> {
         self.title.as_ref().map(Content::rendered_str)
     }
 
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
+    }
+
     fn anchor(&'src self) -> Option<Span<'src>> {
         self.anchor
     }
@@ -812,11 +817,19 @@ mod tests {
         assert_eq!(items.len(), 2);
 
         assert_eq!(
-            items[0].child_blocks().next().unwrap().rendered_content(),
+            items[0]
+                .child_blocks()
+                .next()
+                .unwrap()
+                .rendered_html_content(),
             Some("First")
         );
         assert_eq!(
-            items[1].child_blocks().next().unwrap().rendered_content(),
+            items[1]
+                .child_blocks()
+                .next()
+                .unwrap()
+                .rendered_html_content(),
             Some("Second")
         );
 
@@ -1532,7 +1545,7 @@ mod tests {
         assert!(matches!(mi.item, crate::blocks::Block::List(_)));
 
         assert_eq!(mi.item.content_model(), ContentModel::Compound);
-        assert!(mi.item.rendered_content().is_none());
+        assert!(mi.item.rendered_html_content().is_none());
         assert_eq!(mi.item.raw_context().as_ref(), "list");
         assert_eq!(mi.item.child_blocks().count(), 1);
         assert!(mi.item.title_source().is_none());
@@ -1627,10 +1640,13 @@ mod tests {
     }
 
     mod has_empty_principal_text {
-        use crate::blocks::{Block, FindBlocks};
+        use crate::{
+            Document,
+            blocks::{Block, FindBlocks, ListItem},
+        };
 
         /// Returns the child list items of the first (list) block in `doc`.
-        fn items<'a>(doc: &'a crate::Document<'a>) -> Vec<&'a crate::blocks::ListItem<'a>> {
+        fn items<'a>(doc: &'a Document<'a>) -> Vec<&'a ListItem<'a>> {
             let Some(Block::List(list)) = doc.child_blocks().next() else {
                 panic!("expected a list block");
             };

@@ -1,17 +1,13 @@
-use std::{borrow::Cow, ops::Range, sync::LazyLock};
+use std::{borrow::Cow, sync::LazyLock};
 
-use regex::{Captures, Regex, RegexBuilder, Replacer};
+use regex::{Captures, Regex, Replacer};
 
 use crate::{
     Parser, Span,
-    attributes::{Attrlist, AttrlistContext},
-    content::{Content, escape_sentinels, unescape_sentinels},
-    document::{InterpretedValue, RefType},
-    internal::{LookaheadReplacer, LookaheadResult, replace_with_lookahead},
-    parser::{
-        CalloutGuard, CalloutRenderParams, CharacterReplacementType, InlineSubstitutionRenderer,
-        QuoteScope, QuoteType, SpecialCharacter, attribute_lookup_name,
-    },
+    attributes::element_attribute::{SplicedValueEscaping, escape_masked_piece_bytes},
+    content::Content,
+    document::InterpretedValue,
+    parser::{InlineRenderer, SpecialCharacter, attribute_lookup_name},
     strings::CowStr,
     warnings::WarningType,
 };
@@ -49,40 +45,19 @@ pub enum SubstitutionStep {
     Callouts,
 }
 
-impl SubstitutionStep {
-    pub(crate) fn apply(
-        &self,
-        content: &mut Content<'_>,
-        parser: &Parser,
-        attrlist: Option<&Attrlist<'_>>,
-    ) {
-        match self {
-            Self::SpecialCharacters => {
-                apply_special_characters(content, &*parser.renderer);
-            }
-            Self::Quotes => {
-                apply_quotes(content, parser);
-            }
-            Self::AttributeReferences => {
-                apply_attributes(content, parser);
-            }
-            Self::CharacterReplacements => {
-                apply_character_replacements(content, &*parser.renderer);
-            }
-            Self::Macros => {
-                super::macros::apply_macros(content, parser);
-            }
-            Self::PostReplacement => {
-                apply_post_replacements(content, parser, attrlist);
-            }
-            Self::Callouts => {
-                apply_callouts(content, parser, attrlist);
-            }
-        }
-    }
-}
-
-fn apply_special_characters(content: &mut Content<'_>, renderer: &dyn InlineSubstitutionRenderer) {
+/// Runs the special-characters substitution directly over `content.rendered`,
+/// escaping `<`, `>`, and `&`.
+///
+/// This is the narrow, non-tree entry point for a caller that has a bare
+/// string fragment rather than real inline content to substitute — an
+/// author-line piece, for instance — and wants exactly this one step's output
+/// with no tree built. Every other step is a node transducer in
+/// [`inline_builder`](crate::content::inline_builder), reached through
+/// [`SubstitutionGroup::apply`](super::SubstitutionGroup); special characters
+/// and [`apply_attributes`] are the only two steps with a standalone
+/// string-based implementation left, because they're the only two a caller
+/// still needs this way.
+pub(crate) fn apply_special_characters(content: &mut Content<'_>, renderer: &dyn InlineRenderer) {
     if !content.rendered.contains(['<', '>', '&']) {
         return;
     }
@@ -109,7 +84,7 @@ static SPECIAL_CHARS: LazyLock<Regex> = LazyLock::new(|| {
 
 #[derive(Debug)]
 struct SpecialCharacterReplacer<'r> {
-    renderer: &'r dyn InlineSubstitutionRenderer,
+    renderer: &'r dyn InlineRenderer,
 }
 
 impl Replacer for SpecialCharacterReplacer<'_> {
@@ -135,383 +110,7 @@ impl Replacer for SpecialCharacterReplacer<'_> {
     }
 }
 
-static QUOTED_TEXT_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
-    #[allow(clippy::unwrap_used)]
-    Regex::new("[*_`#^~]").unwrap()
-});
-
-struct QuoteSub {
-    type_: QuoteType,
-    scope: QuoteScope,
-    pattern: Regex,
-}
-
-// Adapted from QUOTE_SUBS in Ruby Asciidoctor implementation,
-// found in https://github.com/asciidoctor/asciidoctor/blob/main/lib/asciidoctor.rb#L440.
-//
-// Translation notes:
-// * The `\m` modifier on Ruby regex means the `.` pattern *can* match a new
-//   line. We use the `.dot_matches_new_line(true)` option on `RegexBuilder` to
-//   implement this instead.
-// * The `(?!#{CG_WORD})` look-ahead syntax is not available in Rust regex. It
-//   looks like the `\b{end-half}` pattern can take its place. (This pattern
-//   requires that a non-word character or end of haystack follow the match
-//   point.)
-// * `#{CC_ALL}` just means any character (`.`).
-// * Replace `#{QuoteAttributeListRxt}` with `\\[([^\\[\\]]+)\\]`. (This seems
-//   preferable to having yet another level of backslash escaping.)
-//
-// Notes from the original Ruby implementation:
-// * Unconstrained quotes can appear anywhere.
-// * Constrained quotes must be bordered by non-word characters.
-// * NOTE: These substitutions are processed in the order they appear here and
-//   the order in which they are replaced is important.
-static QUOTE_SUBS: LazyLock<Vec<QuoteSub>> = LazyLock::new(|| {
-    vec![
-        QuoteSub {
-            // **strong**
-            type_: QuoteType::Strong,
-            scope: QuoteScope::Unconstrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(r#"\\?(?:\[([^\[\]]+)\])?\*\*(.+?)\*\*"#)
-                .dot_matches_new_line(true)
-                .build()
-                .unwrap(),
-        },
-        QuoteSub {
-            // *strong*
-            type_: QuoteType::Strong,
-            scope: QuoteScope::Constrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(
-                r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?\*(\S|\S.*?\S)\*\b{end-half}"#,
-            )
-            .dot_matches_new_line(true)
-            .build()
-            .unwrap(),
-        },
-        QuoteSub {
-            // "`double-quoted`"
-            type_: QuoteType::DoubleQuote,
-            scope: QuoteScope::Constrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(
-                r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?"`(\S|\S.*?\S)`"\b{end-half}"#,
-            )
-            .dot_matches_new_line(true)
-            .build()
-            .unwrap(),
-        },
-        QuoteSub {
-            // '`single-quoted`'
-            type_: QuoteType::SingleQuote,
-            scope: QuoteScope::Constrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(
-                r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?'`(\S|\S.*?\S)`'\b{end-half}"#,
-            )
-            .dot_matches_new_line(true)
-            .build()
-            .unwrap(),
-        },
-        QuoteSub {
-            // ``monospaced``
-            type_: QuoteType::Monospaced,
-            scope: QuoteScope::Unconstrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(r#"\\?(?:\[([^\[\]]+)\])?``(.+?)``"#)
-                .dot_matches_new_line(true)
-                .build()
-                .unwrap(),
-        },
-        QuoteSub {
-            // `monospaced`
-            type_: QuoteType::Monospaced,
-            scope: QuoteScope::Constrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(
-                r#"(^|[^\w&;:"'`}])(?:\[([^\[\]]+)\])?`(\S|\S.*?\S)`\b{end-half}"#,
-                // NB: We don't have look-ahead in Rust Regex, so we might miss some edge cases
-                // because Ruby's version matches `(?![#{CC_WORD}"'`])` which is slightly more
-                // detailed than our `\b{end-half}`.
-            )
-            .dot_matches_new_line(true)
-            .build()
-            .unwrap(),
-        },
-        QuoteSub {
-            // __emphasis__
-            type_: QuoteType::Emphasis,
-            scope: QuoteScope::Unconstrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(r#"\\?(?:\[([^\[\]]+)\])?__(.+?)__"#)
-                .dot_matches_new_line(true)
-                .build()
-                .unwrap(),
-        },
-        QuoteSub {
-            // _emphasis_
-            type_: QuoteType::Emphasis,
-            scope: QuoteScope::Constrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(
-                r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?_(\S|\S.*?\S)_\b{end-half}"#,
-            )
-            .dot_matches_new_line(true)
-            .build()
-            .unwrap(),
-        },
-        QuoteSub {
-            // ##mark##
-            type_: QuoteType::Mark,
-            scope: QuoteScope::Unconstrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(r#"\\?(?:\[([^\[\]]+)\])?##(.+?)##"#)
-                .dot_matches_new_line(true)
-                .build()
-                .unwrap(),
-        },
-        QuoteSub {
-            // #mark#
-            type_: QuoteType::Mark,
-            scope: QuoteScope::Constrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: RegexBuilder::new(
-                r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?#(\S|\S.*?\S)#\b{end-half}"#,
-            )
-            .dot_matches_new_line(true)
-            .build()
-            .unwrap(),
-        },
-        QuoteSub {
-            // ^superscript^
-            type_: QuoteType::Superscript,
-            scope: QuoteScope::Unconstrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?(?:\[([^\[\]]+)\])?\^(\S+?)\^"#).unwrap(),
-        },
-        QuoteSub {
-            // ~subscript~
-            type_: QuoteType::Subscript,
-            scope: QuoteScope::Unconstrained,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?(?:\[([^\[\]]+)\])?~(\S+?)~"#).unwrap(),
-        },
-    ]
-});
-
-#[derive(Debug)]
-struct QuoteReplacer<'r> {
-    type_: QuoteType,
-    scope: QuoteScope,
-    parser: &'r Parser,
-}
-
-impl LookaheadReplacer for QuoteReplacer<'_> {
-    fn replace_append(
-        &mut self,
-        caps: &Captures<'_>,
-        dest: &mut String,
-        after: &str,
-    ) -> LookaheadResult {
-        // Adapted from Asciidoctor#convert_quoted_text, found in
-        // https://github.com/asciidoctor/asciidoctor/blob/main/lib/asciidoctor/substitutors.rb#L1419-L1445.
-
-        // The regex crate doesn't have a sophisticated lookahead mode, so we
-        // patch it up here.
-
-        if self.type_ == QuoteType::Monospaced
-            && self.scope == QuoteScope::Constrained
-            && after.starts_with(['"', '\'', '`'])
-        {
-            // The leading boundary group `[^\w&;:"'`}]` matches any non-word
-            // Unicode scalar, so it can be a multi-byte character. Skip the
-            // full width of that leading character rather than
-            // assuming one byte; otherwise the slice below (and the
-            // matching offset in `SkipAheadAndRetry`) would land
-            // inside the character and panic.
-            let skip_ahead = if caps[0].starts_with('\\') {
-                // Escape case: skip the backslash plus the following byte,
-                // which is always an ASCII `[` or `` ` ``.
-                2
-            } else {
-                caps[0].chars().next().map_or(1, char::len_utf8)
-            };
-
-            dest.push_str(&caps[0][0..skip_ahead]);
-            return LookaheadResult::SkipAheadAndRetry(skip_ahead);
-        }
-
-        let unescaped_attrs: Option<String> = if caps[0].starts_with('\\') {
-            let maybe_attrs = caps.get(2).map(|a| a.as_str());
-            if self.scope == QuoteScope::Constrained && maybe_attrs.is_some() {
-                Some(format!(
-                    "[{attrs}]",
-                    attrs = maybe_attrs.unwrap_or_default()
-                ))
-            } else {
-                dest.push_str(&caps[0][1..]);
-                return LookaheadResult::Continue;
-            }
-        } else {
-            None
-        };
-
-        match self.scope {
-            QuoteScope::Constrained => {
-                if let Some(attrs) = unescaped_attrs {
-                    dest.push_str(&attrs);
-                    self.parser.renderer.render_quoted_substitution(
-                        self.type_, self.scope, None, None, &caps[3], dest,
-                    );
-                } else {
-                    let (attrlist, type_): (Option<Attrlist<'_>>, QuoteType) =
-                        if let Some(attrlist) = caps.get(2) {
-                            let type_ = if self.type_ == QuoteType::Mark {
-                                QuoteType::Unquoted
-                            } else {
-                                self.type_
-                            };
-
-                            (
-                                Some(
-                                    Attrlist::parse(
-                                        crate::Span::new(attrlist.as_str()),
-                                        self.parser,
-                                        AttrlistContext::Inline,
-                                    )
-                                    .item
-                                    .item,
-                                ),
-                                type_,
-                            )
-                        } else {
-                            (None, self.type_)
-                        };
-
-                    if let Some(prefix) = caps.get(1) {
-                        dest.push_str(prefix.as_str());
-                    }
-
-                    let id = attrlist
-                        .as_ref()
-                        .and_then(|a| a.id().map(|s| s.to_string()));
-
-                    // Assigning an ID to inline quoted text (e.g.,
-                    // `[#free_the_world]#free the world#`) makes that phrase
-                    // referenceable, so register it in the catalog. A duplicate
-                    // ID here is non-fatal (first registration wins). The ID is
-                    // read out of escaped text, and the catalog holds the
-                    // document's own (see `escape_sentinels`), so it leaves
-                    // escaped form on the way in.
-                    if let Some(id) = &id {
-                        let _ = self.parser.register_ref(
-                            &unescape_sentinels(id),
-                            None,
-                            RefType::Anchor,
-                        );
-                    }
-
-                    self.parser.renderer.render_quoted_substitution(
-                        type_, self.scope, attrlist, id, &caps[3], dest,
-                    );
-                }
-            }
-
-            QuoteScope::Unconstrained => {
-                let (attrlist, type_): (Option<Attrlist<'_>>, QuoteType) =
-                    if let Some(attrlist) = caps.get(1) {
-                        let type_ = if self.type_ == QuoteType::Mark {
-                            QuoteType::Unquoted
-                        } else {
-                            self.type_
-                        };
-
-                        (
-                            Some(
-                                Attrlist::parse(
-                                    crate::Span::new(attrlist.as_str()),
-                                    self.parser,
-                                    AttrlistContext::Inline,
-                                )
-                                .item
-                                .item,
-                            ),
-                            type_,
-                        )
-                    } else {
-                        (None, self.type_)
-                    };
-
-                let id = attrlist
-                    .as_ref()
-                    .and_then(|a| a.id().map(|s| s.to_string()));
-
-                // Assigning an ID to inline quoted text (e.g.,
-                // `[#free_the_world]#free the world#`) makes that phrase
-                // referenceable, so register it in the catalog. A duplicate ID
-                // here is non-fatal (first registration wins). The ID leaves
-                // escaped form on the way in, as above.
-                if let Some(id) = &id {
-                    let _ =
-                        self.parser
-                            .register_ref(&unescape_sentinels(id), None, RefType::Anchor);
-                }
-
-                self.parser
-                    .renderer
-                    .render_quoted_substitution(type_, self.scope, attrlist, id, &caps[2], dest);
-            }
-        }
-
-        LookaheadResult::Continue
-    }
-}
-
-fn apply_quotes(content: &mut Content<'_>, parser: &Parser) {
-    if !QUOTED_TEXT_SNIFF.is_match(content.rendered.as_ref()) {
-        return;
-    }
-
-    // Start borrowed: the sniff above only proves a quote-like character is
-    // present, not that any pattern actually matches, so seeding an owned
-    // working buffer up front would allocate even when nothing is rewritten
-    // (a false-positive sniff). `owned` is materialized only once a pattern
-    // first produces `Cow::Owned`, and reused thereafter.
-    let mut owned: Option<String> = None;
-
-    for sub in &*QUOTE_SUBS {
-        let replacer = QuoteReplacer {
-            type_: sub.type_,
-            scope: sub.scope,
-            parser,
-        };
-
-        let replaced = {
-            let haystack = owned
-                .as_deref()
-                .unwrap_or_else(|| content.rendered.as_ref());
-
-            match replace_with_lookahead(&sub.pattern, haystack, replacer) {
-                Cow::Owned(new_result) => Some(new_result),
-
-                // A borrowed result means this pattern did not match, so no need
-                // to pay for a new string allocation.
-                Cow::Borrowed(_) => None,
-            }
-        };
-
-        if let Some(new_result) = replaced {
-            owned = Some(new_result);
-        }
-    }
-
-    if let Some(rendered) = owned {
-        content.rendered = rendered.into();
-    }
-}
-
-static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static ATTRIBUTE_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     // Either a `counter`/`counter2` directive (group 2) with its `name[:seed]`
     // expression (group 3), or a plain attribute name (group 4). This mirrors
     // the `counter2?:` branch of Asciidoctor's `AttributeReferenceRx`.
@@ -579,45 +178,24 @@ impl AttributeMissing {
 /// therefore has no constant delta back to the original source `Span`, so a
 /// warning cannot simply slice `content.original()` at the rendered offset.
 ///
-/// Three approaches were considered (see issue #564):
+/// The positional per-line correlation this once carried to recover a precise
+/// span from a rendered offset is **retired**: block
+/// content is substituted by the single-pass builder now, which recognizes
+/// each reference against `'src` and hands its own node span to
+/// [`record_builder_diagnostic`](crate::Parser) — the honest answer the
+/// correlation only approximated.
 ///
-/// 1. **Thread a source-offset map through every substitution step.** Fully
-///    general, but adds offset-tracking state to `Content` and every mutating
-///    step — a large surface and regression risk disproportionate to a
-///    diagnostic-only refinement.
-/// 2. **Scan the whole original source positionally.** Pair the *k*-th
-///    reference found in `rendered` with the *k*-th `{name}` in
-///    `content.original()`. Simple, but the raw source still contains `{name}`
-///    tokens that never reach substitution — inside removed comment lines and
-///    inside passthroughs — so the pairing drifts out of alignment.
-/// 3. **Per-line positional correlation (chosen).** Anchor each rendered line
-///    to the source `Span` of the line it came from (retained at construction,
-///    see [`Content::from_filtered_lines`]), then pair the *k*-th reference on
-///    the rendered line with the *k*-th `{name}` in that source line.
+/// What is left is the two shapes this replacer still serves, and neither
+/// needs it:
 ///
-/// Approach 3 works because the two length-changing steps that run before
-/// attributes (special characters, quotes) neither add, remove, nor reorder
-/// `{…}`-shaped tokens and never introduce or remove a newline, so a rendered
-/// line and its source line carry the same reference tokens in the same order.
-/// Anchoring per line (rather than per block) sidesteps the
-/// removed-comment-line drift of approach 2 for free.
-///
-/// # Graceful degradation
-///
-/// The correlation is best-effort. When a precise span can't be trusted it
-/// falls back to [`fallback_source`](Self::fallback_source) (the whole-content
-/// span, i.e. the pre-#564 behavior):
-///
-/// - No source line is available ([`source_line`](Self::source_line) is
-///   `None`), e.g. for content not built line-by-line from source.
-/// - The retained line count no longer matches the rendered line count, e.g. a
-///   multi-line passthrough collapsed lines during extraction. The caller
-///   detects this and withholds the source line.
-/// - The *k*-th source-line match's text does not equal the rendered match,
-///   e.g. an inline passthrough on the same line masked an earlier reference
-///   and shifted the count. The [text check](Self::warning_source) catches the
-///   mismatch and degrades to the fallback rather than pointing at the wrong
-///   token.
+/// - A haystack that **is** its own source text, which is the macro-target path
+///   ([`substitute_attributes_in_macro_target`]): a match's own offsets are
+///   source offsets, so the span is sliced directly (see
+///   [`over_its_own_source`](Self::over_its_own_source)).
+/// - A haystack rendered from somewhere else — an author line, a docinfo file,
+///   a `Custom` group applied to a caller's string — where no source mapping
+///   exists to recover and the warning names
+///   [`fallback_source`](Self::fallback_source).
 #[derive(Debug)]
 struct AttributeReplacer<'p> {
     parser: &'p Parser,
@@ -631,23 +209,11 @@ struct AttributeReplacer<'p> {
     /// docs.
     fallback_source: Span<'p>,
 
-    /// Source `Span` of the line currently being processed, when known. Every
-    /// attribute reference on this line is located by slicing a subrange of
-    /// this span. `None` disables precise location (the warning uses
-    /// [`fallback_source`](Self::fallback_source)).
-    source_line: Option<Span<'p>>,
-
-    /// Byte ranges (into [`source_line`](Self::source_line)'s data) of every
-    /// `ATTRIBUTE_REFERENCE` match on the source line, in order. Populated only
-    /// in the diagnostic-recording modes ([`AttributeMissing::Warn`] and
-    /// [`AttributeMissing::DropLine`]) and only when `source_line` is set.
-    source_matches: Vec<Range<usize>>,
-
-    /// Index of the next reference to be processed on this line, into
-    /// [`source_matches`](Self::source_matches). The regex driver calls
-    /// [`replace_append`](Replacer::replace_append) once per match, left to
-    /// right, so this stays in step with the rendered matches.
-    match_index: usize,
+    /// Whether the haystack being replaced is exactly
+    /// [`fallback_source`](Self::fallback_source)'s own text, so a match's
+    /// offsets are source offsets and a warning can name the precise
+    /// reference. See [`over_its_own_source`](Self::over_its_own_source).
+    haystack_is_source: bool,
 
     /// Set to `true` when a (non-escaped) reference to a missing attribute is
     /// dropped, under either [`AttributeMissing::Drop`] or
@@ -656,87 +222,105 @@ struct AttributeReplacer<'p> {
     /// empty in `drop` mode (Asciidoctor's `reject_if_empty`).
     missing_on_line: bool,
 
-    /// Whether a substituted attribute value should have its reserved sentinel
-    /// codepoints escaped on the way in. Set only when replacing references in
-    /// content being substituted, which is held in escaped form (see
-    /// [`escape_sentinels`]).
-    escape_sentinels: bool,
+    /// Whether a resolved value is escaped as it is spliced, because the
+    /// haystack is **tokened** macro-bracket text. See
+    /// [`SplicedValueEscaping`], and [`replace_append`](Self::replace_append)
+    /// for why a resolved value is the only thing here that needs it.
+    escaping: SplicedValueEscaping,
 }
 
 impl<'p> AttributeReplacer<'p> {
-    /// Builds the replacer for one line, precomputing the source-match ranges
-    /// used to locate `warn` warnings precisely.
-    ///
-    /// `source_line` is the source span the line was rendered from, or `None`
-    /// when no precise mapping is available. `fallback_source` is the coarse
-    /// span used when a precise location cannot be recovered.
+    /// Builds the replacer over a haystack rendered from somewhere other than
+    /// `fallback_source` itself, so a recorded warning names that coarse span.
     fn new(
         parser: &'p Parser,
         mode: AttributeMissing,
         fallback_source: Span<'p>,
-        source_line: Option<Span<'p>>,
+        escaping: SplicedValueEscaping,
     ) -> Self {
-        // The per-reference ranges are only consulted when a warning may be
-        // recorded — `warn` mode, and `drop-line` mode (which records a
-        // diagnostic for each dropped reference) — so skip the extra scan
-        // otherwise.
-        let source_matches = match (mode, source_line) {
-            (AttributeMissing::Warn | AttributeMissing::DropLine, Some(line)) => {
-                ATTRIBUTE_REFERENCE
-                    .find_iter(line.data())
-                    .map(|m| m.range())
-                    .collect()
-            }
-            _ => Vec::new(),
-        };
-
         Self {
             parser,
             mode,
             fallback_source,
-            source_line,
-            source_matches,
-            match_index: 0,
+            haystack_is_source: false,
             missing_on_line: false,
-            escape_sentinels: false,
+            escaping,
         }
     }
 
-    /// Escapes the reserved sentinel codepoints of every attribute value this
-    /// replacer splices in, for the content path (see the field docs).
-    fn escaping_sentinels(mut self) -> Self {
-        self.escape_sentinels = true;
+    /// Marks that the haystack being replaced **is** `fallback_source`'s own
+    /// text, which lets a warning name the exact reference rather than the
+    /// whole span: the match offsets the regex reports are source offsets.
+    fn over_its_own_source(mut self) -> Self {
+        self.haystack_is_source = true;
         self
     }
 
-    /// Returns the source span to attribute a recorded warning to for the
-    /// reference at `index` on this line, whose matched text (including any
-    /// escape backslash) is `matched`.
+    /// Records this step's `attribute-missing` diagnostic — unless the
+    /// single-pass builder is going to record it instead.
     ///
-    /// Falls back to [`fallback_source`](Self::fallback_source) unless a
-    /// retained source-line match at `index` exists *and* its text equals
-    /// `matched` — the text check guards against a correlation that has
-    /// drifted (see the type-level docs).
-    fn warning_source(&self, index: usize, matched: &str) -> Span<'p> {
-        if let Some(line) = self.source_line
-            && let Some(range) = self.source_matches.get(index)
-            && line.data().get(range.clone()) == Some(matched)
-        {
-            return line.slice(range.clone());
+    /// One of the recognition diagnostics the tree-walk replay cannot carry:
+    /// a dropped or warned-about reference leaves no node to hang a
+    /// diagnostic on, so the builder records
+    /// it at its own recognition site (see
+    /// [`apply_attribute_references`](crate::content::inline_builder)) and it
+    /// is carried onto the real parser afterwards. A direct
+    /// [`SubstitutionStep::AttributeReferences`] call never runs inside a
+    /// build, so this copy diagnoses unconditionally — which is what lets this
+    /// step go on being tested in isolation.
+    fn record_missing_reference(&self, caps: &Captures<'_>, attr_name: &str) {
+        self.parser.record_substitution_warning(
+            self.warning_source(caps),
+            WarningType::SkippingReferenceToMissingAttribute(attr_name.to_string()),
+        );
+    }
+
+    /// The bytes a **resolved** reference's `value` contributes to the output.
+    ///
+    /// This is the one thing
+    /// [`replace_append`](Replacer::replace_append) writes that did not come
+    /// out of the haystack, so it is the one thing that has to be escaped for
+    /// a **tokened** haystack to go on holding no reserved codepoint the
+    /// tokener did not write. See [`SplicedValueEscaping`].
+    fn spliced<'v>(&self, value: &'v str) -> Cow<'v, str> {
+        match self.escaping {
+            SplicedValueEscaping::Verbatim => Cow::Borrowed(value),
+
+            // A document attribute's value is document text — it never holds
+            // a placeholder a tokener wrote — so escaping it is unambiguous,
+            // and the consumer's own unescape on the way out hands the
+            // document its bytes back.
+            SplicedValueEscaping::MaskedPieceBytes => escape_masked_piece_bytes(value),
+        }
+    }
+
+    /// The source span to attribute a recorded warning to: the offending
+    /// reference itself where the haystack is its own source, and the coarse
+    /// [`fallback_source`](Self::fallback_source) otherwise.
+    fn warning_source(&self, caps: &Captures<'_>) -> Span<'p> {
+        if !self.haystack_is_source {
+            return self.fallback_source;
         }
 
-        self.fallback_source
+        // `unwrap` on group 0 is safe: a capture always has an overall match.
+        #[allow(clippy::unwrap_used)]
+        let range = caps.get(0).unwrap().range();
+
+        self.fallback_source.slice(range)
     }
 }
 
 impl Replacer for AttributeReplacer<'_> {
+    /// Everything written here comes out of the haystack itself — the escaped
+    /// spelling of a reference, the literal `{name}` a missing reference keeps
+    /// — except the one thing that does not: the **resolved value** of a
+    /// reference that did resolve. Under
+    /// [`SplicedValueEscaping::MaskedPieceBytes`] that is the one write that
+    /// escapes, which is exactly what a tokened haystack needs and all it
+    /// needs: a [`Replacer`] only ever writes replacement text, never touching
+    /// the bytes around a match, so the tokener's own already-escaped copy is
+    /// left alone and nothing is escaped twice.
     fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        // Consume this reference's position in the line so the next call lines
-        // up with the next source-line match, regardless of which
-        // branch handles it.
-        let match_index = self.match_index;
-        self.match_index += 1;
-
         // A backslash immediately before the opening brace (`\{name}`) or
         // before the closing brace (`{name\}`) — or both, as in
         // `\{name\}` — escapes the reference: it is emitted literally
@@ -774,11 +358,32 @@ impl Replacer for AttributeReplacer<'_> {
             let name = parts.next().unwrap_or_default();
             let seed = parts.next();
 
-            let value = self.parser.counter(name, seed);
+            let (value, from_persisted_state) =
+                self.parser.counter_reporting_provenance(name, seed);
 
             // `counter` displays the new value; `counter2` advances silently.
             if directive.as_str() == "counter" {
-                dest.push_str(&value);
+                if from_persisted_state {
+                    // Advanced from the counter's own persisted state — a
+                    // prior counter value, or a plain document attribute of
+                    // the same name — rather than derived from this call's
+                    // own `seed`. Persisted state was never escaped for
+                    // *this* haystack (it may have entered as an ordinary
+                    // document attribute, or from an earlier, unrelated
+                    // reference elsewhere in the document), so it needs
+                    // exactly the same escape a resolved reference's value
+                    // does. See [`Parser::counter_reporting_provenance`].
+                    dest.push_str(&self.spliced(&value));
+                } else {
+                    // Fresh from `seed` (or the `"1"` default): a slice of
+                    // this call's own haystack, already escaped where it
+                    // came from a tokener and free to hold a genuine
+                    // placeholder the tokener wrote between the braces
+                    // (`{counter:a++x++}`). Escaping it here would both
+                    // double-escape an escape the tokener already wrote and
+                    // hide an occurrence the restore walk holds a body for.
+                    dest.push_str(&value);
+                }
             }
             return;
         }
@@ -817,17 +422,11 @@ impl Replacer for AttributeReplacer<'_> {
                     // attribute") for each reference that triggers a drop, so
                     // record the matching diagnostic here.
                     self.missing_on_line = true;
-                    self.parser.record_substitution_warning(
-                        self.warning_source(match_index, &caps[0]),
-                        WarningType::SkippingReferenceToMissingAttribute(attr_name.to_string()),
-                    );
+                    self.record_missing_reference(caps, attr_name);
                 }
                 AttributeMissing::Warn => {
                     dest.push_str(&caps[0]);
-                    self.parser.record_substitution_warning(
-                        self.warning_source(match_index, &caps[0]),
-                        WarningType::SkippingReferenceToMissingAttribute(attr_name.to_string()),
-                    );
+                    self.record_missing_reference(caps, attr_name);
                 }
             }
             return;
@@ -836,17 +435,7 @@ impl Replacer for AttributeReplacer<'_> {
         // A value-less `Set` attribute (e.g. `:foo:` with no `=value`)
         // substitutes to an empty string, matching Asciidoctor.
         if let InterpretedValue::Value(value) = value {
-            // An attribute's value is stored as the document wrote it, so a
-            // reserved sentinel codepoint in it enters the text being
-            // substituted unescaped unless it is escaped here (see
-            // `escape_sentinels`). Only the content path asks for this: a value
-            // spliced into a macro target or an attribute list is not part of
-            // the escaped text and is restored by no one.
-            if self.escape_sentinels {
-                dest.push_str(&escape_sentinels(value.as_ref()));
-            } else {
-                dest.push_str(value.as_ref());
-            }
+            dest.push_str(&self.spliced(value.as_ref()));
         }
     }
 }
@@ -864,28 +453,25 @@ fn drop_emptied_line(replaced: &str) -> bool {
     replaced.strip_suffix('\r').unwrap_or(replaced).is_empty()
 }
 
-fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
+/// Runs the attribute-references substitution over `content`, escaping each
+/// value it splices as `escaping` says to.
+///
+/// Reached through [`SubstitutionStep::AttributeReferences`] — always
+/// [`SplicedValueEscaping::Verbatim`] — by everything except the one caller
+/// that needs otherwise:
+/// [`Attrlist::parse_tokened`](crate::attributes::Attrlist), whose haystack is
+/// already-tokened macro-bracket text and which calls this directly.
+pub(crate) fn apply_attributes(
+    content: &mut Content<'_>,
+    parser: &Parser,
+    escaping: SplicedValueEscaping,
+) {
     if !content.rendered.contains('{') {
         return;
     }
 
     let mode = AttributeMissing::from_parser(parser);
     let source = content.original();
-
-    // In the modes that record a diagnostic (`warn` and `drop-line`), anchor
-    // each rendered line to the source `Span` it came from so the warning can
-    // name the precise offset of the offending reference (see
-    // `AttributeReplacer`). The retained line spans are only trustworthy when
-    // they still line up one-to-one with the rendered lines; a mismatch (e.g. a
-    // multi-line passthrough that collapsed lines during extraction) withholds
-    // them, falling back to the coarse whole-content span.
-    let source_lines = if mode == AttributeMissing::Warn || mode == AttributeMissing::DropLine {
-        content
-            .source_lines()
-            .filter(|lines| lines.len() == content.rendered.split('\n').count())
-    } else {
-        None
-    };
 
     // Attribute references are replaced line by line so that, in `drop-line`
     // mode, an individual line carrying a missing reference can be removed
@@ -896,7 +482,7 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
     let mut changed = false;
     let mut wrote_line = false;
 
-    for (index, line) in content.rendered.split('\n').enumerate() {
+    for line in content.rendered.split('\n') {
         if !line.contains('{') {
             if wrote_line {
                 out.push('\n');
@@ -906,12 +492,7 @@ fn apply_attributes(content: &mut Content<'_>, parser: &Parser) {
             continue;
         }
 
-        // `index` enumerates the same split whose count the guard above matched
-        // against `source_lines.len()`, so the entry is always present; `.get`
-        // keeps the access panic-free regardless.
-        let source_line = source_lines.and_then(|lines| lines.get(index).copied());
-        let mut replacer =
-            AttributeReplacer::new(parser, mode, source, source_line).escaping_sentinels();
+        let mut replacer = AttributeReplacer::new(parser, mode, source, escaping);
 
         let replaced = ATTRIBUTE_REFERENCE.replace_all(line, replacer.by_ref());
 
@@ -970,9 +551,12 @@ pub(crate) fn substitute_attributes_in_macro_target<'src>(
 
     let mode = AttributeMissing::from_parser(parser);
 
-    // The target is a single source-backed line, so it doubles as both the
-    // precise per-reference anchor and the coarse fallback.
-    let mut replacer = AttributeReplacer::new(parser, mode, target, Some(target));
+    // The haystack is the target's own text, so a match's offsets are source
+    // offsets and a warning names the exact reference. A macro *target* is
+    // never tokened — it is the source between the `::` and the `[` — so a
+    // resolved value is spliced verbatim.
+    let mut replacer = AttributeReplacer::new(parser, mode, target, SplicedValueEscaping::Verbatim)
+        .over_its_own_source();
 
     let replaced = ATTRIBUTE_REFERENCE.replace_all(text, replacer.by_ref());
 
@@ -981,71 +565,6 @@ pub(crate) fn substitute_attributes_in_macro_target<'src>(
     }
 
     Some(replaced.into())
-}
-
-/// Applies the attribute-references substitution to free-standing text (such as
-/// the content of a [docinfo file]), honoring the [`attribute-missing`]
-/// document attribute, and returns the substituted result.
-///
-/// Unlike [`apply_attributes`], this operates on owned text that is not part of
-/// the document source. Substitution is performed line by line so that, in
-/// `drop-line` mode, an individual line carrying a missing reference can be
-/// removed without disturbing the lines around it.
-///
-/// Any `warn`-mode warnings it records on `parser` refer to offsets within
-/// `text` (not the document source); callers that do not want such warnings
-/// surfaced should discard them via
-/// [`Parser::truncate_substitution_warnings`](crate::Parser).
-///
-/// [docinfo file]: https://docs.asciidoctor.org/asciidoc/latest/docinfo/
-/// [`attribute-missing`]: https://docs.asciidoctor.org/asciidoc/latest/attributes/unresolved-references/#missing
-pub(crate) fn substitute_attributes_in_text(text: &str, parser: &Parser) -> String {
-    if !text.contains('{') {
-        return text.to_string();
-    }
-
-    let mode = AttributeMissing::from_parser(parser);
-    let source = Span::new(text);
-
-    let mut out = String::with_capacity(text.len());
-    let mut wrote_line = false;
-
-    for line in text.split('\n') {
-        if !line.contains('{') {
-            if wrote_line {
-                out.push('\n');
-            }
-            out.push_str(line);
-            wrote_line = true;
-            continue;
-        }
-
-        // This text is not backed by the document source (offsets refer into
-        // `text`, and callers discard these warnings), so no precise per-line
-        // anchor is supplied: warnings fall back to the whole-text span.
-        let mut replacer = AttributeReplacer::new(parser, mode, source, None);
-
-        let replaced = ATTRIBUTE_REFERENCE.replace_all(line, replacer.by_ref());
-
-        if replacer.missing_on_line
-            && (mode == AttributeMissing::DropLine
-                || (mode == AttributeMissing::Drop && drop_emptied_line(&replaced)))
-        {
-            // Drop the entire line, including its line break: unconditionally
-            // in `drop-line` mode, or in `drop` mode when the dropped
-            // reference was all the line contained (Asciidoctor's
-            // `reject_if_empty`).
-            continue;
-        }
-
-        if wrote_line {
-            out.push('\n');
-        }
-        out.push_str(&replaced);
-        wrote_line = true;
-    }
-
-    out
 }
 
 /// Substitutes attribute references in a block anchor's reftext
@@ -1067,490 +586,8 @@ pub(crate) fn substitute_attributes_in_reftext<'src>(
     }
 
     let mut content = Content::from(reftext);
-    SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+    apply_attributes(&mut content, parser, SplicedValueEscaping::Verbatim);
     CowStr::from(content.rendered.to_string())
-}
-
-fn apply_character_replacements(
-    content: &mut Content<'_>,
-    renderer: &dyn InlineSubstitutionRenderer,
-) {
-    if !REPLACEABLE_TEXT_SNIFF.is_match(content.rendered.as_ref()) {
-        return;
-    }
-
-    // Start borrowed: the sniff above only proves a replaceable character is
-    // present, not that any pattern actually matches, so seeding an owned
-    // working buffer up front would allocate even when nothing is rewritten
-    // (a false-positive sniff). `owned` is materialized only once a pattern
-    // first produces `Cow::Owned`, and reused thereafter.
-    let mut owned: Option<String> = None;
-
-    for repl in &*REPLACEMENTS {
-        let replacer = CharacterReplacer {
-            type_: repl.type_.clone(),
-            renderer,
-        };
-
-        let replaced = {
-            let haystack = owned
-                .as_deref()
-                .unwrap_or_else(|| content.rendered.as_ref());
-
-            match repl.pattern.replace_all(haystack, replacer) {
-                Cow::Owned(new_result) => Some(new_result),
-
-                // A borrowed result means this pattern did not match, so no need
-                // to pay for a new string allocation.
-                Cow::Borrowed(_) => None,
-            }
-        };
-
-        if let Some(new_result) = replaced {
-            owned = Some(new_result);
-        }
-    }
-
-    if let Some(rendered) = owned {
-        content.rendered = rendered.into();
-    }
-}
-
-struct CharacterReplacement {
-    type_: CharacterReplacementType,
-    pattern: Regex,
-}
-
-static REPLACEABLE_TEXT_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
-    #[allow(clippy::unwrap_used)]
-    Regex::new(r#"[&']|--|\.\.\.|\([CRT]M?\)"#).unwrap()
-});
-
-// Adapted from REPLACEMENTS in Ruby Asciidoctor implementation,
-// found in https://github.com/asciidoctor/asciidoctor/blob/main/lib/asciidoctor.rb#L490.
-//
-// * NOTE: These substitutions are processed in the order they appear here and
-//   the order in which they are replaced is important.
-static REPLACEMENTS: LazyLock<Vec<CharacterReplacement>> = LazyLock::new(|| {
-    vec![
-        CharacterReplacement {
-            // Copyright `(C)`
-            type_: CharacterReplacementType::Copyright,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?\(C\)"#).unwrap(),
-        },
-        CharacterReplacement {
-            // Registered `(R)`
-            type_: CharacterReplacementType::Registered,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?\(R\)"#).unwrap(),
-        },
-        CharacterReplacement {
-            // Trademark `(TM)`
-            type_: CharacterReplacementType::Trademark,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?\(TM\)"#).unwrap(),
-        },
-        CharacterReplacement {
-            // Em dash surrounded by spaces ` -- `
-            type_: CharacterReplacementType::EmDashSurroundedBySpaces,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"(?: |\n|^|\\)--(?: |\n|$)"#).unwrap(),
-        },
-        CharacterReplacement {
-            // Em dash without spaces `--`
-            type_: CharacterReplacementType::EmDashWithoutSpace,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"(\w)\\?--\b{start-half}"#).unwrap(),
-        },
-        CharacterReplacement {
-            // Ellipsis `...`
-            type_: CharacterReplacementType::Ellipsis,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?\.\.\."#).unwrap(),
-        },
-        CharacterReplacement {
-            // Right single quote `\`'`
-            type_: CharacterReplacementType::TypographicApostrophe,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?`'"#).unwrap(),
-        },
-        CharacterReplacement {
-            // Apostrophe (inside a word)
-            type_: CharacterReplacementType::TypographicApostrophe,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"([[:alnum:]])\\?'([[:alpha:]])"#).unwrap(),
-        },
-        CharacterReplacement {
-            // Right arrow `->`
-            type_: CharacterReplacementType::SingleRightArrow,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?-&gt;"#).unwrap(),
-        },
-        CharacterReplacement {
-            // Right double arrow `=>`
-            type_: CharacterReplacementType::DoubleRightArrow,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?=&gt;"#).unwrap(),
-        },
-        CharacterReplacement {
-            // Left arrow `<-`
-            type_: CharacterReplacementType::SingleLeftArrow,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?&lt;-"#).unwrap(),
-        },
-        CharacterReplacement {
-            // Left double arrow `<=`
-            type_: CharacterReplacementType::DoubleLeftArrow,
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?&lt;="#).unwrap(),
-        },
-        CharacterReplacement {
-            // Restore entities
-            type_: CharacterReplacementType::CharacterReference("".to_owned()),
-            #[allow(clippy::unwrap_used)]
-            pattern: Regex::new(r#"\\?&amp;((?:[a-zA-Z][a-zA-Z]+\d{0,2}|#\d\d\d{0,4}|#x[\da-fA-F][\da-fA-F][\da-fA-F]{0,3}));"#).unwrap(),
-        },
-    ]
-});
-
-#[derive(Debug)]
-struct CharacterReplacer<'r> {
-    type_: CharacterReplacementType,
-    renderer: &'r dyn InlineSubstitutionRenderer,
-}
-
-impl Replacer for CharacterReplacer<'_> {
-    fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        if caps[0].contains('\\') {
-            // We have to replace since we aren't sure the backslash is the
-            // first char.
-            let unescaped = &caps[0].replace("\\", "");
-            dest.push_str(unescaped);
-            return;
-        }
-
-        match self.type_ {
-            CharacterReplacementType::Copyright
-            | CharacterReplacementType::Registered
-            | CharacterReplacementType::Trademark
-            | CharacterReplacementType::EmDashSurroundedBySpaces
-            | CharacterReplacementType::Ellipsis
-            | CharacterReplacementType::SingleLeftArrow
-            | CharacterReplacementType::DoubleLeftArrow
-            | CharacterReplacementType::SingleRightArrow
-            | CharacterReplacementType::DoubleRightArrow => {
-                self.renderer
-                    .render_character_replacement(self.type_.clone(), dest);
-            }
-
-            CharacterReplacementType::EmDashWithoutSpace => {
-                dest.push_str(&caps[1]);
-                self.renderer.render_character_replacement(
-                    CharacterReplacementType::EmDashWithoutSpace,
-                    dest,
-                );
-            }
-
-            CharacterReplacementType::TypographicApostrophe => {
-                if let Some(before) = caps.get(1) {
-                    dest.push_str(before.as_str());
-                }
-
-                self.renderer.render_character_replacement(
-                    CharacterReplacementType::TypographicApostrophe,
-                    dest,
-                );
-
-                if let Some(after) = caps.get(2) {
-                    dest.push_str(after.as_str());
-                }
-            }
-
-            CharacterReplacementType::CharacterReference(_) => {
-                self.renderer.render_character_replacement(
-                    CharacterReplacementType::CharacterReference(caps[1].to_string()),
-                    dest,
-                );
-            }
-        }
-    }
-}
-
-fn apply_post_replacements(
-    content: &mut Content<'_>,
-    parser: &Parser,
-    attrlist: Option<&Attrlist<'_>>,
-) {
-    if parser.is_attribute_set("hardbreaks-option")
-        || attrlist.is_some_and(|attrlist| attrlist.has_option("hardbreaks"))
-    {
-        let text = content.rendered.as_ref();
-        if !text.contains('\n') {
-            return;
-        }
-
-        let mut lines: Vec<&str> = content.rendered.as_ref().lines().collect();
-        let last = lines.pop().unwrap_or_default();
-
-        let mut lines: Vec<String> = lines
-            .iter()
-            .map(|line| {
-                let line = if line.ends_with(" +") {
-                    &line[0..line.len() - 2]
-                } else {
-                    *line
-                };
-
-                let mut line = line.to_owned();
-                parser.renderer.render_line_break(&mut line);
-                line
-            })
-            .collect();
-
-        lines.push(last.to_owned());
-
-        let new_result = lines.join("\n");
-        content.rendered = new_result.into();
-    } else {
-        let rendered = content.rendered.as_ref();
-
-        // A hard line break is a ` +` at the end of a line. Because the
-        // `HARD_LINE_BREAK` regex anchors on `$` in multiline mode — which
-        // matches at the end of the haystack as well as before each `\n` — the
-        // final line of the content is eligible too, even when it is not
-        // followed by a newline (e.g. a one-line paragraph, a block title, or a
-        // section title ending in ` +`). So the cheap pre-check requires only a
-        // `+`, not also a `\n`.
-        if !rendered.contains('+') {
-            return;
-        }
-
-        let replacer = PostReplacementReplacer(&*parser.renderer);
-
-        if let Cow::Owned(new_result) = HARD_LINE_BREAK.replace_all(rendered, replacer) {
-            content.rendered = new_result.into();
-        }
-    }
-}
-
-#[derive(Debug)]
-struct PostReplacementReplacer<'r>(&'r dyn InlineSubstitutionRenderer);
-
-impl Replacer for PostReplacementReplacer<'_> {
-    fn replace_append(&mut self, caps: &Captures<'_>, dest: &mut String) {
-        dest.push_str(&caps[1]);
-        self.0.render_line_break(dest);
-    }
-}
-
-static HARD_LINE_BREAK: LazyLock<Regex> = LazyLock::new(|| {
-    #[allow(clippy::unwrap_used)]
-    Regex::new(r#"(?m)^(.*) \+$"#).unwrap()
-});
-
-/// Processes [callouts] in literal, listing, and source blocks.
-///
-/// Callout numbers (`<1>`, `<.>`, or `<!--1-->` for XML) that appear at the end
-/// of a line are replaced with the renderer's callout markup. Callouts may be
-/// tucked behind a line comment (`//`, `#`, `--`, or `;;` by default, or a
-/// custom prefix specified by the `line-comment` attribute), and a callout may
-/// be escaped with a leading backslash to render it literally.
-///
-/// This substitution runs after [special characters] have been replaced, so the
-/// angle brackets that delimit a callout appear in `content.rendered` as
-/// `&lt;` and `&gt;`. This mirrors Asciidoctor's `sub_callouts` /
-/// `CalloutSourceRx`.
-///
-/// [callouts]: https://docs.asciidoctor.org/asciidoc/latest/verbatim/callouts/
-/// [special characters]: https://docs.asciidoctor.org/asciidoc/latest/subs/special-characters/
-fn apply_callouts(content: &mut Content<'_>, parser: &Parser, attrlist: Option<&Attrlist<'_>>) {
-    // A callout's opening bracket is always rendered as `&lt;` by the special
-    // characters substitution, so we can cheaply skip content without any.
-    if !content.rendered.contains("&lt;") {
-        return;
-    }
-
-    // The `line-comment` attribute (block-level, falling back to
-    // document-level) customizes or disables line-comment recognition:
-    //
-    // * absent -> default prefixes (`//`, `#`, `--`, `;;`) and XML callouts are
-    //   recognized.
-    // * present (custom) -> only the given prefix is recognized; XML callouts
-    //   are not.
-    // * present but empty -> no line-comment prefix is recognized; XML callouts
-    //   are not.
-    let line_comment: Option<String> = attrlist
-        .and_then(|a| a.named_attribute("line-comment"))
-        .map(|a| a.value().to_string())
-        .or_else(|| {
-            if parser.has_attribute("line-comment") {
-                Some(
-                    parser
-                        .attribute_value("line-comment")
-                        .as_maybe_str()
-                        .unwrap_or("")
-                        .to_string(),
-                )
-            } else {
-                None
-            }
-        });
-
-    let (callout_rx, tail_rx) = build_callout_regexes(line_comment.as_deref());
-
-    let replacer = CalloutReplacer {
-        renderer: &*parser.renderer,
-        parser,
-        autonum: 0,
-        tail: tail_rx,
-    };
-
-    if let Cow::Owned(new_result) =
-        replace_with_lookahead(&callout_rx, content.rendered.as_ref(), replacer)
-    {
-        content.rendered = new_result.into();
-    }
-}
-
-/// Callout regex for the default `line-comment` mode: recognizes the common
-/// line-comment prefixes and XML callouts.
-static DEFAULT_CALLOUT_RX: LazyLock<Regex> = LazyLock::new(|| {
-    #[allow(clippy::unwrap_used)]
-    Regex::new(
-        r"(?P<prefix>(?://|#|--|;;) ?)?(?P<esc>\\)?(?:&lt;!--(?P<xnum>\d+|\.)--&gt;|&lt;(?P<num>\d+|\.)&gt;)",
-    )
-    .unwrap()
-});
-
-/// Trailing-position lookahead regex for the default `line-comment` mode.
-static DEFAULT_CALLOUT_TAIL_RX: LazyLock<Regex> = LazyLock::new(|| {
-    #[allow(clippy::unwrap_used)]
-    Regex::new(r"^(?: ?\\?(?:&lt;!--(?:\d+|\.)--&gt;|&lt;(?:\d+|\.)&gt;))*(?:\n|$)").unwrap()
-});
-
-/// Trailing-position lookahead regex for a custom or empty `line-comment` mode
-/// (no XML callout form).
-static CUSTOM_CALLOUT_TAIL_RX: LazyLock<Regex> = LazyLock::new(|| {
-    #[allow(clippy::unwrap_used)]
-    Regex::new(r"^(?: ?\\?&lt;(?:\d+|\.)&gt;)*(?:\n|$)").unwrap()
-});
-
-/// Builds the `(callout, tail)` regex pair for the given `line-comment` mode.
-///
-/// The `callout` regex matches a single callout token (with the optional
-/// line-comment prefix and escape that may precede it). The `tail` regex is
-/// used to emulate Asciidoctor's trailing-position lookahead: a matched callout
-/// is only honored when the remainder of its line consists solely of further
-/// callouts. Rust's regex engine supports neither lookahead nor backreferences,
-/// so the lookahead is applied manually against the post-match text.
-///
-/// The default-mode regexes and both tail regexes are constant, so they are
-/// built once. Only a custom (non-empty) prefix requires building a regex from
-/// the attribute value, which is borrowed otherwise.
-fn build_callout_regexes(line_comment: Option<&str>) -> (Cow<'static, Regex>, &'static Regex) {
-    match line_comment {
-        // Default: recognize the common line-comment prefixes and XML callouts.
-        None => (Cow::Borrowed(&DEFAULT_CALLOUT_RX), &DEFAULT_CALLOUT_TAIL_RX),
-
-        // A custom or empty `line-comment`: only the bare (non-XML) callout form
-        // is recognized, optionally behind the custom prefix.
-        Some(prefix) => {
-            let prefix_pattern = if prefix.is_empty() {
-                String::new()
-            } else {
-                format!(r"(?P<prefix>{} ?)?", regex::escape(prefix))
-            };
-
-            #[allow(clippy::unwrap_used)]
-            let callout = Regex::new(&format!(
-                r"{prefix_pattern}(?P<esc>\\)?&lt;(?P<num>\d+|\.)&gt;"
-            ))
-            .unwrap();
-
-            (Cow::Owned(callout), &CUSTOM_CALLOUT_TAIL_RX)
-        }
-    }
-}
-
-/// Replacer that renders each trailing callout token, emulating Asciidoctor's
-/// `sub_callouts`.
-struct CalloutReplacer<'r> {
-    renderer: &'r dyn InlineSubstitutionRenderer,
-    parser: &'r Parser,
-
-    /// Running counter for automatically-numbered (`<.>`) callouts, scoped to a
-    /// single block.
-    autonum: u32,
-
-    /// Trailing-position lookahead regex (see [`build_callout_regexes`]).
-    tail: &'r Regex,
-}
-
-impl LookaheadReplacer for CalloutReplacer<'_> {
-    fn replace_append(
-        &mut self,
-        caps: &Captures<'_>,
-        dest: &mut String,
-        after: &str,
-    ) -> LookaheadResult {
-        // Honor the trailing-position requirement: a callout is only recognized
-        // when nothing but further callouts follows it on the line.
-        if !self.tail.is_match(after) {
-            dest.push_str(&caps[0]);
-            return LookaheadResult::Continue;
-        }
-
-        // Honor the escape: emit the matched text with the escaping backslash
-        // removed so the callout renders literally.
-        if caps.name("esc").is_some() {
-            dest.push_str(&caps[0].replacen('\\', "", 1));
-            return LookaheadResult::Continue;
-        }
-
-        let (number_raw, is_xml) = if let Some(xnum) = caps.name("xnum") {
-            (xnum.as_str(), true)
-        } else {
-            // The regex guarantees one of `xnum` or `num` is present.
-            #[allow(clippy::unwrap_used)]
-            (caps.name("num").unwrap().as_str(), false)
-        };
-
-        let number = if number_raw == "." {
-            self.autonum += 1;
-            self.autonum.to_string()
-        } else {
-            number_raw.to_string()
-        };
-
-        // Register this callout so the callout list that annotates this block
-        // can be validated against the callouts it references.
-        if let Ok(n) = number.parse::<u32>() {
-            self.parser.register_callout(n);
-        }
-
-        // Mirror Asciidoctor's guard resolution: a captured line-comment prefix
-        // takes precedence; otherwise an XML callout uses the XML guard;
-        // failing both, there is no guard.
-        let guard = match caps.name("prefix") {
-            Some(prefix) => CalloutGuard::LineComment(prefix.as_str()),
-            None if is_xml => CalloutGuard::Xml,
-            None => CalloutGuard::LineComment(""),
-        };
-
-        let context = self.parser.render_context();
-
-        self.renderer.render_callout(
-            &CalloutRenderParams {
-                number: &number,
-                guard,
-                context: &context,
-            },
-            dest,
-        );
-
-        LookaheadResult::Continue
-    }
 }
 
 #[cfg(test)]
@@ -1559,7 +596,7 @@ mod tests {
 
     mod special_characters {
         use crate::{
-            content::{Content, SubstitutionStep},
+            content::{Content, apply_special_characters},
             strings::CowStr,
             tests::prelude::*,
         };
@@ -1568,7 +605,7 @@ mod tests {
         fn empty() {
             let mut content = Content::from(crate::Span::default());
             let p = Parser::default();
-            SubstitutionStep::SpecialCharacters.apply(&mut content, &p, None);
+            apply_special_characters(&mut content, &*p.renderer);
             assert!(content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed(""));
         }
@@ -1577,7 +614,7 @@ mod tests {
         fn basic_non_empty_span() {
             let mut content = Content::from(crate::Span::new("blah"));
             let p = Parser::default();
-            SubstitutionStep::SpecialCharacters.apply(&mut content, &p, None);
+            apply_special_characters(&mut content, &*p.renderer);
             assert!(!content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed("blah"));
         }
@@ -1586,7 +623,7 @@ mod tests {
         fn match_lt_and_gt() {
             let mut content = Content::from(crate::Span::new("bl<ah>"));
             let p = Parser::default();
-            SubstitutionStep::SpecialCharacters.apply(&mut content, &p, None);
+            apply_special_characters(&mut content, &*p.renderer);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1598,7 +635,7 @@ mod tests {
         fn match_amp() {
             let mut content = Content::from(crate::Span::new("bl<a&h>"));
             let p = Parser::default();
-            SubstitutionStep::SpecialCharacters.apply(&mut content, &p, None);
+            apply_special_characters(&mut content, &*p.renderer);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1618,7 +655,7 @@ mod tests {
         fn empty() {
             let mut content = Content::from(crate::Span::default());
             let p = Parser::default();
-            SubstitutionStep::Quotes.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
             assert!(content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed(""));
         }
@@ -1627,7 +664,7 @@ mod tests {
         fn basic_non_empty_span() {
             let mut content = Content::from(crate::Span::new("blah"));
             let p = Parser::default();
-            SubstitutionStep::Quotes.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
             assert!(!content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed("blah"));
         }
@@ -1636,7 +673,7 @@ mod tests {
         fn ignore_lt_and_gt() {
             let mut content = Content::from(crate::Span::new("bl<ah>"));
             let p = Parser::default();
-            SubstitutionStep::Quotes.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1648,7 +685,7 @@ mod tests {
         fn strong_word() {
             let mut content = Content::from(crate::Span::new("One *word* is strong."));
             let p = Parser::default();
-            SubstitutionStep::Quotes.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1664,7 +701,7 @@ mod tests {
         fn marked_string_with_id() {
             let mut content = Content::from(crate::Span::new(r#"[#id]#a few words#"#));
             let p = Parser::default();
-            SubstitutionStep::Quotes.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1683,7 +720,7 @@ mod tests {
                 doc.child_blocks()
                     .next()
                     .unwrap()
-                    .rendered_content()
+                    .rendered_html_content()
                     .unwrap(),
                 r#"<span id="the_id">marked text</span>"#
             );
@@ -1704,7 +741,11 @@ mod tests {
                 let p = Parser::default();
 
                 // Must not panic on the multi-byte leading character.
-                SubstitutionStep::Quotes.apply(&mut content, &p, None);
+                SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(
+                    &mut content,
+                    &p,
+                    None,
+                );
 
                 assert!(content.rendered.starts_with(leading));
             }
@@ -1719,7 +760,7 @@ mod tests {
             let mut content = Content::from(crate::Span::new(r"\`code``"));
             let p = Parser::default();
 
-            SubstitutionStep::Quotes.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Quotes]).apply(&mut content, &p, None);
 
             assert_eq!(
                 content.rendered,
@@ -1730,7 +771,8 @@ mod tests {
 
     mod attribute_references {
         use crate::{
-            content::{Content, SubstitutionStep},
+            attributes::element_attribute::SplicedValueEscaping,
+            content::{Content, apply_attributes},
             strings::CowStr,
             tests::prelude::*,
         };
@@ -1739,7 +781,7 @@ mod tests {
         fn empty() {
             let mut content = Content::from(crate::Span::default());
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert!(content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed(""));
         }
@@ -1748,7 +790,7 @@ mod tests {
         fn basic_non_empty_span() {
             let mut content = Content::from(crate::Span::new("blah"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert!(!content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed("blah"));
         }
@@ -1757,7 +799,7 @@ mod tests {
         fn ignore_non_match() {
             let mut content = Content::from(crate::Span::new("bl{ah}"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1772,7 +814,7 @@ mod tests {
             // matching Asciidoctor (see issue #667).
             let mut content = Content::from(crate::Span::new("bl\\{ah}"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1784,7 +826,7 @@ mod tests {
         fn replace_sp_match() {
             let mut content = Content::from(crate::Span::new("bl{sp}ah"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1796,7 +838,7 @@ mod tests {
         fn ignore_escaped_sp_match() {
             let mut content = Content::from(crate::Span::new("bl\\{sp}ah"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert!(!content.is_empty());
             assert_eq!(
                 content.rendered,
@@ -1808,7 +850,7 @@ mod tests {
         fn counter_directive_displays_and_advances() {
             let mut content = Content::from(crate::Span::new("{counter:n}-{counter:n}"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert_eq!(
                 content.rendered,
                 CowStr::Boxed("1-2".to_string().into_boxed_str())
@@ -1819,7 +861,7 @@ mod tests {
         fn counter2_directive_advances_silently() {
             let mut content = Content::from(crate::Span::new("{counter2:n}{counter:n}"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert_eq!(
                 content.rendered,
                 CowStr::Boxed("2".to_string().into_boxed_str())
@@ -1830,7 +872,7 @@ mod tests {
         fn escaped_counter_directive_is_literal_and_does_not_advance() {
             let mut content = Content::from(crate::Span::new("\\{counter:n} {counter:n}"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert_eq!(
                 content.rendered,
                 CowStr::Boxed("{counter:n} 1".to_string().into_boxed_str())
@@ -1850,7 +892,7 @@ mod tests {
             );
 
             let mut content = Content::from(crate::Span::new("\\{group-id\\}"));
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert_eq!(
                 content.rendered,
                 CowStr::Boxed("{group-id}".to_string().into_boxed_str())
@@ -1869,7 +911,7 @@ mod tests {
             );
 
             let mut content = Content::from(crate::Span::new("{group-id\\}"));
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert_eq!(
                 content.rendered,
                 CowStr::Boxed("{group-id}".to_string().into_boxed_str())
@@ -1884,7 +926,7 @@ mod tests {
             // counter, so the following unescaped reference is `1`.
             let mut content = Content::from(crate::Span::new("{counter:n\\} {counter:n}"));
             let p = Parser::default();
-            SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+            apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
             assert_eq!(
                 content.rendered,
                 CowStr::Boxed("{counter:n} 1".to_string().into_boxed_str())
@@ -1896,7 +938,8 @@ mod tests {
 
             use crate::{
                 Span,
-                content::{Content, SubstitutionGroup, SubstitutionStep},
+                attributes::element_attribute::SplicedValueEscaping,
+                content::{Content, SubstitutionGroup, apply_attributes},
                 parser::ModificationContext,
                 tests::prelude::*,
                 warnings::WarningType,
@@ -1912,29 +955,8 @@ mod tests {
 
             fn render(text: &str, parser: &Parser) -> String {
                 let mut content = Content::from(crate::Span::new(text));
-                SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+                apply_attributes(&mut content, parser, SplicedValueEscaping::Verbatim);
                 content.rendered.to_string()
-            }
-
-            /// Builds a `Content` that carries the per-line source spans (as a
-            /// real block would), so the precise `warn`-location correlation is
-            /// exercised. Each line's span is a subrange of the root, mirroring
-            /// what block construction retains via
-            /// [`Content::from_filtered_lines`].
-            fn content_with_source_lines(text: &'static str) -> Content<'static> {
-                let root = Span::new(text);
-                let lines: Vec<&str> = text.split('\n').collect();
-
-                let mut spans = Vec::with_capacity(lines.len());
-                let mut offset = 0;
-                for line in &lines {
-                    spans.push(root.slice(offset..offset + line.len()));
-
-                    // Advance past the line and the '\n' that split consumed.
-                    offset += line.len() + 1;
-                }
-
-                Content::from_filtered_lines(root, &lines, spans)
             }
 
             /// Asserts that `warning`'s recorded offset/length select exactly
@@ -2106,8 +1128,8 @@ mod tests {
                 // line.
                 let p = parser_with_mode("drop-line");
                 let text = "first {alpha} line\nsecond {beta} line";
-                let mut content = content_with_source_lines(text);
-                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+                let mut content = Content::from(Span::new(text));
+                SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 2);
@@ -2116,106 +1138,20 @@ mod tests {
             }
 
             #[test]
-            fn drop_line_falls_back_to_whole_span_without_source_lines() {
-                // `Content::from` retains no per-line spans, so the drop-line
-                // diagnostic degrades to the whole-content span rather than
+            fn drop_line_falls_back_to_whole_span_on_a_direct_step_call() {
+                // A direct step call substitutes a haystack rendered from
+                // somewhere other than its own source, so the drop-line
+                // diagnostic names the whole-content span rather than
                 // misreporting a location.
                 let p = parser_with_mode("drop-line");
                 let text = "x {foo} y";
                 let mut content = Content::from(Span::new(text));
-                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+                apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 1);
                 assert_eq!(warnings[0].offset, 0);
                 assert_eq!(warnings[0].len, text.len());
-            }
-
-            /// Exercises the free-standing text path (used for docinfo file
-            /// content), which applies the same `attribute-missing` handling as
-            /// [`render`] but through [`substitute_attributes_in_text`] rather
-            /// than the block substitution pipeline.
-            mod free_standing_text {
-                use super::parser_with_mode;
-                use crate::content::substitution_step::substitute_attributes_in_text;
-
-                #[test]
-                fn drop_removes_line_that_only_contained_the_reference() {
-                    let p = parser_with_mode("drop");
-                    assert_eq!(
-                        substitute_attributes_in_text("Line 1\n{missing}\nLine 2", &p),
-                        "Line 1\nLine 2"
-                    );
-                }
-
-                #[test]
-                fn drop_keeps_a_line_the_reference_did_not_empty() {
-                    let p = parser_with_mode("drop");
-                    assert_eq!(
-                        substitute_attributes_in_text("Line 1\ntext {missing}\nLine 2", &p),
-                        "Line 1\ntext \nLine 2"
-                    );
-                }
-
-                #[test]
-                fn drop_keeps_a_line_emptied_by_a_resolvable_reference() {
-                    let p = parser_with_mode("drop");
-                    assert_eq!(
-                        substitute_attributes_in_text("Line 1\n{empty}\nLine 2", &p),
-                        "Line 1\n\nLine 2"
-                    );
-                }
-
-                #[test]
-                fn drop_line_removes_the_whole_line() {
-                    let p = parser_with_mode("drop-line");
-                    assert_eq!(
-                        substitute_attributes_in_text("Line 1\n{missing} tail\nLine 2", &p),
-                        "Line 1\nLine 2"
-                    );
-                }
-
-                #[test]
-                fn drop_line_records_a_warning() {
-                    // The diagnostic is recorded on the parser even on the
-                    // free-standing text path; a docinfo caller separately
-                    // discards it via `truncate_substitution_warnings`.
-                    use crate::warnings::WarningType;
-
-                    let p = parser_with_mode("drop-line");
-                    assert_eq!(
-                        substitute_attributes_in_text("Line 1\n{missing} tail\nLine 2", &p),
-                        "Line 1\nLine 2"
-                    );
-
-                    let warnings = p.take_substitution_warnings();
-                    assert_eq!(warnings.len(), 1);
-                    assert_eq!(
-                        warnings[0].warning,
-                        WarningType::SkippingReferenceToMissingAttribute("missing".to_string())
-                    );
-                }
-
-                #[test]
-                fn drop_removes_a_crlf_reference_only_line() {
-                    // The `\r` left by a CRLF terminator does not keep the line
-                    // from counting as emptied by the dropped reference, so the
-                    // whole `\r\n` line is removed.
-                    let p = parser_with_mode("drop");
-                    assert_eq!(
-                        substitute_attributes_in_text("Line 1\r\n{missing}\r\nLine 2", &p),
-                        "Line 1\r\nLine 2"
-                    );
-                }
-
-                #[test]
-                fn drop_keeps_a_crlf_line_the_reference_did_not_empty() {
-                    let p = parser_with_mode("drop");
-                    assert_eq!(
-                        substitute_attributes_in_text("Line 1\r\ntext {missing}\r\nLine 2", &p),
-                        "Line 1\r\ntext \r\nLine 2"
-                    );
-                }
             }
 
             #[test]
@@ -2252,18 +1188,20 @@ mod tests {
                 assert!(p.take_substitution_warnings().is_empty());
             }
 
-            // The tests below use `content_with_source_lines` so the precise
-            // per-reference `warn` location (issue #564) is exercised; the
-            // `render`-based tests above go through `Content::from`, which
-            // retains no source lines and so falls back to the whole-content
-            // span.
+            // The tests below drive `SubstitutionGroup::Normal` — the
+            // production seam — so the precise per-reference `warn` location
+            // is exercised where it is actually produced: the
+            // single-pass builder recognizes each reference against `'src` and
+            // records its own node span. The `render`-based tests above call
+            // the string step directly, which has no source mapping to recover
+            // and so names the whole-content span.
 
             #[test]
             fn warn_points_at_the_precise_reference() {
                 let p = parser_with_mode("warn");
                 let text = "Hello, {name}!";
-                let mut content = content_with_source_lines(text);
-                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+                let mut content = Content::from(Span::new(text));
+                SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 1);
@@ -2274,8 +1212,8 @@ mod tests {
             fn warn_locates_multiple_references_on_one_line() {
                 let p = parser_with_mode("warn");
                 let text = "a {x} b {y} c";
-                let mut content = content_with_source_lines(text);
-                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+                let mut content = Content::from(Span::new(text));
+                SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 2);
@@ -2288,13 +1226,14 @@ mod tests {
 
             #[test]
             fn warn_locates_references_across_multiple_lines() {
-                // The acceptance case from issue #564: several distinct
-                // references on different lines of one block, each pointed at
-                // individually rather than at the shared whole-block span.
+                // The acceptance case for precise per-reference warning
+                // locations: several distinct references on different lines
+                // of one block, each pointed at individually rather than at
+                // the shared whole-block span.
                 let p = parser_with_mode("warn");
                 let text = "first {alpha} line\nsecond {beta} line\nthird {gamma} line";
-                let mut content = content_with_source_lines(text);
-                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+                let mut content = Content::from(Span::new(text));
+                SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 3);
@@ -2307,8 +1246,8 @@ mod tests {
             fn warn_distinguishes_repeated_reference_occurrences() {
                 let p = parser_with_mode("warn");
                 let text = "{dup} and again {dup}";
-                let mut content = content_with_source_lines(text);
-                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+                let mut content = Content::from(Span::new(text));
+                SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 2);
@@ -2329,11 +1268,11 @@ mod tests {
                 // reference's *original* source offset.
                 let p = parser_with_mode("warn");
                 let text = "a < b {foo} c";
-                let mut content = content_with_source_lines(text);
+                let mut content = Content::from(Span::new(text));
                 SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
                 // Sanity check that the earlier step really did shift offsets.
-                assert!(content.rendered().contains("&lt;"));
+                assert!(content.rendered_html().contains("&lt;"));
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 1);
@@ -2347,10 +1286,10 @@ mod tests {
                 // `*bold*` in markup ahead of the attributes step.
                 let p = parser_with_mode("warn");
                 let text = "*bold* {foo}";
-                let mut content = content_with_source_lines(text);
+                let mut content = Content::from(Span::new(text));
                 SubstitutionGroup::Normal.apply(&mut content, &p, None);
 
-                assert!(content.rendered().contains("<strong>"));
+                assert!(content.rendered_html().contains("<strong>"));
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 1);
@@ -2359,14 +1298,14 @@ mod tests {
             }
 
             #[test]
-            fn warn_falls_back_to_whole_span_without_source_lines() {
-                // `Content::from` retains no per-line spans, so the warning
-                // degrades to the whole-content span (the pre-#564 behavior)
-                // rather than misreporting a location.
+            fn warn_falls_back_to_whole_span_on_a_direct_step_call() {
+                // A direct step call has no source mapping to recover, so the
+                // warning degrades to the whole-content span rather than
+                // misreporting a location.
                 let p = parser_with_mode("warn");
                 let text = "x {foo} y";
                 let mut content = Content::from(Span::new(text));
-                SubstitutionStep::AttributeReferences.apply(&mut content, &p, None);
+                apply_attributes(&mut content, &p, SplicedValueEscaping::Verbatim);
 
                 let warnings = p.take_substitution_warnings();
                 assert_eq!(warnings.len(), 1);
@@ -2392,7 +1331,11 @@ mod tests {
 
             // `Content::from` copies the source verbatim into `rendered`, which
             // is exactly the post-special-characters state we want to exercise.
-            SubstitutionStep::Callouts.apply(&mut content, parser, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Callouts]).apply(
+                &mut content,
+                parser,
+                None,
+            );
             content.rendered.to_string()
         }
 
@@ -2400,7 +1343,11 @@ mod tests {
         fn empty() {
             let mut content = Content::from(crate::Span::default());
             let p = Parser::default();
-            SubstitutionStep::Callouts.apply(&mut content, &p, None);
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Callouts]).apply(
+                &mut content,
+                &p,
+                None,
+            );
             assert!(content.is_empty());
             assert_eq!(content.rendered, CowStr::Borrowed(""));
         }
@@ -2537,7 +1484,11 @@ mod tests {
             .item
             .item;
             let p = Parser::default();
-            SubstitutionStep::Callouts.apply(&mut content, &p, Some(&attrlist));
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Callouts]).apply(
+                &mut content,
+                &p,
+                Some(&attrlist),
+            );
             assert_eq!(
                 content.rendered.to_string(),
                 r#"hello() -> % <b class="conum">(1)</b>"#
@@ -2557,7 +1508,11 @@ mod tests {
             .item
             .item;
             let p = Parser::default();
-            SubstitutionStep::Callouts.apply(&mut content, &p, Some(&attrlist));
+            SubstitutionGroup::Custom(vec![SubstitutionStep::Callouts]).apply(
+                &mut content,
+                &p,
+                Some(&attrlist),
+            );
             assert_eq!(
                 content.rendered.to_string(),
                 r#"-- <b class="conum">(1)</b>"#

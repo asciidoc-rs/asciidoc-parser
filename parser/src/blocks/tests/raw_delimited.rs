@@ -252,7 +252,7 @@ mod comment {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Raw);
-        assert_eq!(mi.item.rendered_content(), Some(""));
+        assert_eq!(mi.item.rendered_html_content(), Some(""));
         assert_eq!(mi.item.raw_context().as_ref(), "comment");
         assert_eq!(mi.item.resolved_context().as_ref(), "comment");
         assert!(mi.item.declared_style().is_none());
@@ -315,7 +315,7 @@ mod comment {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Raw);
-        assert_eq!(mi.item.rendered_content(), Some("line1  \nline2"));
+        assert_eq!(mi.item.rendered_html_content(), Some("line1  \nline2"));
         assert_eq!(mi.item.raw_context().as_ref(), "comment");
         assert_eq!(mi.item.resolved_context().as_ref(), "comment");
         assert!(mi.item.declared_style().is_none());
@@ -385,7 +385,7 @@ mod comment {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Raw);
-        assert_eq!(mi.item.rendered_content(), Some("line1  \nline2"));
+        assert_eq!(mi.item.rendered_html_content(), Some("line1  \nline2"));
         assert_eq!(mi.item.raw_context().as_ref(), "comment");
         assert_eq!(mi.item.resolved_context().as_ref(), "comment");
         assert!(mi.item.declared_style().is_none());
@@ -443,7 +443,10 @@ mod comment {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Raw);
-        assert_eq!(mi.item.rendered_content(), Some("line1  \n/////\nline2"));
+        assert_eq!(
+            mi.item.rendered_html_content(),
+            Some("line1  \n/////\nline2")
+        );
         assert_eq!(mi.item.raw_context().as_ref(), "comment");
         assert_eq!(mi.item.resolved_context().as_ref(), "comment");
         assert!(mi.item.declared_style().is_none());
@@ -505,7 +508,7 @@ mod listing {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Verbatim);
-        assert_eq!(mi.item.rendered_content(), Some(""));
+        assert_eq!(mi.item.rendered_html_content(), Some(""));
         assert_eq!(mi.item.raw_context().as_ref(), "listing");
         assert_eq!(mi.item.resolved_context().as_ref(), "listing");
         assert!(mi.item.declared_style().is_none());
@@ -563,7 +566,7 @@ mod listing {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Verbatim);
-        assert_eq!(mi.item.rendered_content(), Some("line1  \nline2"));
+        assert_eq!(mi.item.rendered_html_content(), Some("line1  \nline2"));
         assert_eq!(mi.item.raw_context().as_ref(), "listing");
         assert_eq!(mi.item.resolved_context().as_ref(), "listing");
         assert!(mi.item.declared_style().is_none());
@@ -637,7 +640,7 @@ mod listing {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Verbatim);
-        assert_eq!(mi.item.rendered_content(), Some("line1  \nline2"));
+        assert_eq!(mi.item.rendered_html_content(), Some("line1  \nline2"));
         assert_eq!(mi.item.raw_context().as_ref(), "listing");
         assert_eq!(mi.item.resolved_context().as_ref(), "listing");
         assert!(mi.item.declared_style().is_none());
@@ -718,7 +721,10 @@ mod listing {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Verbatim);
-        assert_eq!(mi.item.rendered_content(), Some("line1  \n----/\nline2"));
+        assert_eq!(
+            mi.item.rendered_html_content(),
+            Some("line1  \n----/\nline2")
+        );
         assert_eq!(mi.item.raw_context().as_ref(), "listing");
         assert_eq!(mi.item.resolved_context().as_ref(), "listing");
         assert!(mi.item.declared_style().is_none());
@@ -793,7 +799,7 @@ mod fenced {
         // A fenced code block resolves to the same context and content model as
         // a `----` listing block.
         assert_eq!(mi.item.content_model(), ContentModel::Verbatim);
-        assert_eq!(mi.item.rendered_content(), Some(""));
+        assert_eq!(mi.item.rendered_html_content(), Some(""));
         assert_eq!(mi.item.raw_context().as_ref(), "listing");
         assert_eq!(mi.item.resolved_context().as_ref(), "listing");
         assert!(mi.item.declared_style().is_none());
@@ -841,7 +847,7 @@ mod fenced {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Verbatim);
-        assert_eq!(mi.item.rendered_content(), Some("line1  \nline2"));
+        assert_eq!(mi.item.rendered_html_content(), Some("line1  \nline2"));
         assert_eq!(mi.item.raw_context().as_ref(), "listing");
         assert_eq!(mi.item.resolved_context().as_ref(), "listing");
         assert_eq!(mi.item.substitution_group(), SubstitutionGroup::Verbatim);
@@ -875,7 +881,7 @@ mod fenced {
         assert_eq!(mi.item.raw_context().as_ref(), "listing");
         assert_eq!(mi.item.resolved_context().as_ref(), "listing");
         assert_eq!(mi.item.declared_style(), Some("source"));
-        assert_eq!(mi.item.rendered_content(), Some("puts 'hi'"));
+        assert_eq!(mi.item.rendered_html_content(), Some("puts 'hi'"));
     }
 
     #[test]
@@ -950,7 +956,7 @@ mod fenced {
         assert_eq!(mi.item.raw_context().as_ref(), "listing");
         assert_eq!(mi.item.resolved_context().as_ref(), "listing");
         assert_eq!(mi.item.declared_style(), Some("source"));
-        assert_eq!(mi.item.rendered_content(), Some("puts 'hi'"));
+        assert_eq!(mi.item.rendered_html_content(), Some("puts 'hi'"));
 
         assert_eq!(
             mi.item
@@ -975,7 +981,7 @@ mod fenced {
 
         assert_eq!(mi.item.resolved_context().as_ref(), "listing");
         assert_eq!(mi.item.declared_style(), Some("source"));
-        assert_eq!(mi.item.rendered_content(), Some("let x = 1;"));
+        assert_eq!(mi.item.rendered_html_content(), Some("let x = 1;"));
 
         assert_eq!(
             mi.item
@@ -1002,7 +1008,7 @@ mod fenced {
 
         assert_eq!(mi.item.resolved_context().as_ref(), "listing");
         assert_eq!(mi.item.declared_style(), Some("source"));
-        assert_eq!(mi.item.rendered_content(), Some("print('hi')"));
+        assert_eq!(mi.item.rendered_html_content(), Some("print('hi')"));
 
         assert_eq!(
             mi.item
@@ -1025,7 +1031,7 @@ mod fenced {
 
         assert_eq!(mi.item.raw_context().as_ref(), "listing");
         assert_eq!(mi.item.declared_style(), Some("source"));
-        assert_eq!(mi.item.rendered_content(), Some("puts 'hi'"));
+        assert_eq!(mi.item.rendered_html_content(), Some("puts 'hi'"));
 
         assert_eq!(
             maw.warnings,
@@ -1068,7 +1074,7 @@ mod fenced {
 
         assert_eq!(mi.item.raw_context().as_ref(), "listing");
         assert_eq!(mi.item.content_model(), ContentModel::Verbatim);
-        assert_eq!(mi.item.rendered_content(), Some("source code"));
+        assert_eq!(mi.item.rendered_html_content(), Some("source code"));
 
         assert_eq!(
             maw.warnings,
@@ -1113,7 +1119,7 @@ mod fenced {
         let mi = maw.item.unwrap().clone();
 
         assert_eq!(mi.item.raw_context().as_ref(), "listing");
-        assert_eq!(mi.item.rendered_content(), Some("source code\n````"));
+        assert_eq!(mi.item.rendered_html_content(), Some("source code\n````"));
         assert_eq!(
             maw.warnings,
             vec![Warning {
@@ -1172,7 +1178,7 @@ mod pass {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Raw);
-        assert_eq!(mi.item.rendered_content(), Some(""));
+        assert_eq!(mi.item.rendered_html_content(), Some(""));
         assert_eq!(mi.item.raw_context().as_ref(), "pass");
         assert_eq!(mi.item.resolved_context().as_ref(), "pass");
         assert!(mi.item.declared_style().is_none());
@@ -1241,7 +1247,7 @@ mod pass {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Raw);
-        assert_eq!(mi.item.rendered_content(), Some("line1  \nline2"));
+        assert_eq!(mi.item.rendered_html_content(), Some("line1  \nline2"));
         assert_eq!(mi.item.raw_context().as_ref(), "pass");
         assert_eq!(mi.item.resolved_context().as_ref(), "pass");
         assert!(mi.item.declared_style().is_none());
@@ -1315,7 +1321,7 @@ mod pass {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Raw);
-        assert_eq!(mi.item.rendered_content(), Some("line1  \nline2"));
+        assert_eq!(mi.item.rendered_html_content(), Some("line1  \nline2"));
         assert_eq!(mi.item.raw_context().as_ref(), "pass");
         assert_eq!(mi.item.resolved_context().as_ref(), "pass");
         assert!(mi.item.declared_style().is_none());
@@ -1396,7 +1402,10 @@ mod pass {
         );
 
         assert_eq!(mi.item.content_model(), ContentModel::Raw);
-        assert_eq!(mi.item.rendered_content(), Some("line1  \n++++/\nline2"));
+        assert_eq!(
+            mi.item.rendered_html_content(),
+            Some("line1  \n++++/\nline2")
+        );
         assert_eq!(mi.item.raw_context().as_ref(), "pass");
         assert_eq!(mi.item.resolved_context().as_ref(), "pass");
         assert!(mi.item.declared_style().is_none());

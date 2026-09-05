@@ -32,7 +32,7 @@ The line break character, `{plus}`, is replaced when the `post_replacements` sub
         panic!("Unexpected block type: {block1:?}");
     };
 
-    assert_eq!(sb1.content().rendered(), "first line<br>\nsecond line");
+    assert_eq!(sb1.content().rendered_html(), "first line<br>\nsecond line");
 }
 
 mod default_post_replacements_substitution {
@@ -84,7 +84,7 @@ mod default_post_replacements_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "Write your docs in text, +\nAsciiDoc makes it easy, +\nNow get back to work!"
         );
 
@@ -103,7 +103,7 @@ mod default_post_replacements_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "Write your docs in text,<br>\nAsciiDoc makes it easy,<br>\nNow get back to work!"
         );
     }
@@ -125,7 +125,7 @@ mod default_post_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc +\ndef");
+        assert_eq!(block1.content().rendered_html(), "abc +\ndef");
     }
 
     #[test]
@@ -153,7 +153,7 @@ mod default_post_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc<br>\ndef");
+        assert_eq!(block1.content().rendered_html(), "abc<br>\ndef");
     }
 
     #[test]
@@ -202,7 +202,7 @@ mod default_post_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc +\ndef");
+        assert_eq!(block1.content().rendered_html(), "abc +\ndef");
     }
 
     #[test]
@@ -224,7 +224,7 @@ mod default_post_replacements_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "Click <span class=\"image\"><img src=\"pause.png\" alt=\"pause\" title=\"Pause {abc<br>\ndef} Resume\"></span> when you need a break."
         );
     }
@@ -248,7 +248,7 @@ mod default_post_replacements_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "Click *Pause* +\n and Resume when you need a break."
         );
     }
@@ -278,7 +278,7 @@ mod default_post_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc<br>\ndef");
+        assert_eq!(block1.content().rendered_html(), "abc<br>\ndef");
     }
 
     #[test]
@@ -298,7 +298,7 @@ mod default_post_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc<br>\ndef");
+        assert_eq!(block1.content().rendered_html(), "abc<br>\ndef");
 
         // A trailing ` +` on the *final* line of a paragraph — with no newline
         // following it — is also converted to a line break, matching
@@ -312,7 +312,7 @@ mod default_post_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "only<br>");
+        assert_eq!(block1.content().rendered_html(), "only<br>");
     }
 
     #[test]
@@ -332,7 +332,7 @@ mod default_post_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc +\ndef");
+        assert_eq!(block1.content().rendered_html(), "abc +\ndef");
     }
 
     #[test]
@@ -360,7 +360,7 @@ mod default_post_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc<br>\ndef");
+        assert_eq!(block1.content().rendered_html(), "abc<br>\ndef");
     }
 
     #[test]
@@ -388,7 +388,7 @@ mod default_post_replacements_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc<br>\ndef");
+        assert_eq!(block1.content().rendered_html(), "abc<br>\ndef");
     }
 
     #[test]
@@ -413,12 +413,12 @@ mod default_post_replacements_substitution {
         let crate::blocks::TableCellContent::Simple(default_cell) = cells[0].content() else {
             panic!("expected simple cell content");
         };
-        assert_eq!(default_cell.rendered(), "abc<br>\ndef");
+        assert_eq!(default_cell.rendered_html(), "abc<br>\ndef");
 
         let crate::blocks::TableCellContent::Simple(literal_cell) = cells[1].content() else {
             panic!("expected simple cell content");
         };
-        assert_eq!(literal_cell.rendered(), "abc +\nghi");
+        assert_eq!(literal_cell.rendered_html(), "abc +\nghi");
     }
 
     #[test]
@@ -499,7 +499,7 @@ For blocks, the step's name, `post_replacements`, can be assigned to the xref:ap
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc *bold*<br>\ndef");
+        assert_eq!(block1.content().rendered_html(), "abc *bold*<br>\ndef");
     }
 
     #[test]
@@ -519,7 +519,7 @@ For inline elements, the built-in values `p` or `post_replacements` can be appli
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "abc<br>\n *bold* and then &#8230;&#8203;"
         );
     }

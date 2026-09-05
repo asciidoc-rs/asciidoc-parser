@@ -245,7 +245,7 @@ impl Docinfo {
                 let catalog = parser.catalog();
                 let resolver = CatalogResolver::new(&catalog);
                 let mut ref_warnings = ReferenceWarnings::default();
-                content.resolve_references(&resolver, &*parser.renderer, &mut ref_warnings);
+                content.resolve_references(&resolver, &*parser.renderer, &mut ref_warnings, parser);
             }
 
             let substituted = content.rendered_owned();

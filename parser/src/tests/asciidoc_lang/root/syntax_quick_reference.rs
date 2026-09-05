@@ -1293,14 +1293,14 @@ include::verbatim:example$source.adoc[tag=src-para]
     let Some(Block::RawDelimited(b)) = doc.child_blocks().next() else {
         panic!("expected a raw delimited block");
     };
-    assert!(b.content().rendered().contains("*not bold*"));
+    assert!(b.content().rendered_html().contains("*not bold*"));
 
     // A source block parses as a listing-context raw delimited block.
     let doc = Parser::default().parse("[source,ruby]\n----\nputs 'hi'\n----");
     let Some(Block::RawDelimited(b)) = doc.child_blocks().next() else {
         panic!("expected a raw delimited block");
     };
-    assert!(b.content().rendered().contains("puts 'hi'"));
+    assert!(b.content().rendered_html().contains("puts 'hi'"));
 
     // Source callouts render conums.
     let doc = Parser::default()
@@ -1524,7 +1524,7 @@ include::verbatim:example$listing.adoc[tag=subs-out]
     let Some(Block::RawDelimited(b)) = doc.child_blocks().next() else {
         panic!("expected a raw delimited block");
     };
-    assert!(b.content().rendered().contains("<b>raw</b>"));
+    assert!(b.content().rendered_html().contains("<b>raw</b>"));
 
     // A blockquote with attribution and citation.
     let doc = Parser::default().parse(
@@ -2235,7 +2235,7 @@ include::verbatim:example$source.adoc[tag=fence]
             .map(|a| a.value()),
         Some("ruby")
     );
-    assert!(b.content().rendered().contains("puts 'hi'"));
+    assert!(b.content().rendered_html().contains("puts 'hi'"));
 
     verifies!(
         r#"
@@ -2369,5 +2369,5 @@ Line breaks within a paragraph are not displayed.
         panic!("expected a raw delimited (listing) block");
     };
     assert_eq!(b.resolved_context().as_ref(), "listing");
-    assert!(b.content().rendered().contains("puts 'hi'"));
+    assert!(b.content().rendered_html().contains("puts 'hi'"));
 }

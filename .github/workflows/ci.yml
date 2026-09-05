@@ -9,7 +9,8 @@ on:
       - synchronize
       - labeled
   push:
-    branches: main
+    branches:
+      - main
 
 # Every job below is gated on the same condition: run automatically for
 # pushes, for pull requests whose head branch lives in this repository

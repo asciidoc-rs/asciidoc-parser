@@ -1,8 +1,10 @@
 use crate::{
     HasSpan, Parser,
     attributes::Attrlist,
-    content::{Content, Passthroughs, SubstitutionStep},
-    warnings::WarningType,
+    content::{Content, Passthrough, SubstitutionStep},
+    document::RefType,
+    inlines::InlineNode,
+    warnings::{Warning, WarningType},
 };
 
 /// Each block and inline element has a default substitution group that is
@@ -220,70 +222,301 @@ impl SubstitutionGroup {
         (Self::Custom(deduped), invalid)
     }
 
-    pub(crate) fn apply(
+    /// Runs this group's substitution over `content`, making it reflect
+    /// having gone through an **authoritative** substitution pass.
+    ///
+    /// The tree itself comes from one call to
+    /// [`inline_builder::build_for_group`](crate::content::inline_builder::build_for_group)
+    /// — this method does no recognition of its own. What it does beyond that
+    /// one build is everything a real pass over a `Content` needs and a bare
+    /// tree build does not:
+    ///
+    /// - discards the *incidental* diagnostics a build can produce (e.g. an
+    ///   `Attrlist` parsed out of a match string) while keeping the deliberate
+    ///   recognition diagnostics;
+    /// - derives `content.rendered` by folding the finished tree
+    ///   ([`Content::rendered_html`](crate::content::Content::rendered_html)'s
+    ///   own fold, run once here);
+    /// - replays every macro family's and the callouts step's registration side
+    ///   effects (catalog entries, warnings) from the finished tree, **exactly
+    ///   once** — see `apply_macro_side_effects` /
+    ///   `apply_callout_side_effects`;
+    /// - derives and stores the deferred cross-reference segments
+    ///   ([`Content::set_tree_xrefs`](crate::content::Content::set_tree_xrefs));
+    /// - stores the tree, the extracted passthroughs, and a snapshot of the
+    ///   document attributes back onto `content` for later re-folding.
+    ///
+    /// Because registration is stateful, `build_for_group` is deliberately
+    /// *not* the place any of this lives: many other call sites (rebuilding
+    /// an attribute value's tree fragment, a passthrough's own body, a
+    /// footnote's macros-only rebuild, …) want just the tree, and would
+    /// double-register catalog entries and warnings if this method's side
+    /// effects ran on every such build. Those callers reach
+    /// `build_for_group` directly and stay unregistered fragments; this
+    /// method is the one caller that turns a build into the real thing.
+    pub(crate) fn apply<'src>(
         &self,
-        content: &mut Content<'_>,
+        content: &mut Content<'src>,
         parser: &Parser,
-        attrlist: Option<&Attrlist>,
+        attrlist: Option<&Attrlist<'src>>,
     ) {
-        self.apply_keeping_sentinels_escaped(content, parser, attrlist);
-
-        // Hand back the document's own text: the sentinel codepoints escaped on
-        // the way in (see `Content::escape_sentinels`) are restored now that
-        // every pass that reads them has run.
-        content.unescape_sentinels();
+        self.apply_inner(content, parser, attrlist, None);
     }
 
-    /// Applies this substitution group, leaving the result in the *escaped*
-    /// sentinel form (see
-    /// [`escape_sentinels`](crate::content::escape_sentinels)).
+    /// [`apply`](Self::apply) for a description-list **term**, which is the one
+    /// content with a registration rule of its own: a leading `[[id]]` /
+    /// `[[id,reftext]]` at the very start of the term is registered with the
+    /// **rest of the term** as its default reference text, so `[[cpu]]CPU::`
+    /// makes `<<cpu>>` display *CPU*.
     ///
-    /// Only the section-title path wants this: it has one more sentinel-reading
-    /// pass to run (excising the footnote markers from the reference text and
-    /// auto-generated ID) before the text is user-facing, and that pass must
-    /// not see a document's own copy of a marker sentinel. It calls
-    /// [`Content::unescape_sentinels`] itself once that pass is done. Every
-    /// other caller wants [`apply`](Self::apply).
-    pub(crate) fn apply_keeping_sentinels_escaped(
+    /// That rule cannot live in
+    /// [`apply_ref_side_effects`](crate::content::inline_builder): a leading
+    /// anchor is only special because of where it sits in a *term*, which is a
+    /// fact about the caller, not about the node. So the term passes its
+    /// warnings list here, the rule runs between the tree build and the replay
+    /// — the one point where the tree exists and nothing has registered from it
+    /// yet — and the replay is then told the anchor is already registered, so
+    /// it does not raise a second duplicate-id warning for it.
+    pub(crate) fn apply_to_description_list_term<'src>(
         &self,
-        content: &mut Content<'_>,
+        content: &mut Content<'src>,
         parser: &Parser,
-        attrlist: Option<&Attrlist>,
+        warnings: &mut Vec<Warning<'src>>,
     ) {
-        // The substitution steps below mark their work in-band, with sentinel
-        // codepoints spliced into the same string as the document's text. A
-        // document can type those codepoints itself, so its own copies are
-        // escaped out of the way first; otherwise they are read back as the
-        // parser's own control sequences (forging, for instance, a second
-        // cross-reference into the output).
-        content.escape_sentinels();
+        self.apply_inner(content, parser, None, Some(warnings));
+    }
 
-        let steps = self.steps();
+    fn apply_inner<'src>(
+        &self,
+        content: &mut Content<'src>,
+        parser: &Parser,
+        attrlist: Option<&Attrlist<'src>>,
+        term_warnings: Option<&mut Vec<Warning<'src>>>,
+    ) {
+        // The pre-substitution value the build is seeded from.
+        //
+        // Unconditional: every parse builds the tree, and nothing re-enters
+        // this seam during a build — a passthrough carrying its own
+        // substitution list was the only caller that ever did, and
+        // `passthrough_text` builds and folds its body's own tree directly
+        // through `build_for_group`. The seam is single-pass: nothing else
+        // computes a rendered string here. Every differential corpus reads
+        // its golden from the frozen recordings in `parser/snapshots/`
+        // instead (see `inline_builder::snapshot` and that directory's
+        // README for why).
+        let value = content.rendered.clone();
 
-        let passthroughs: Option<Passthroughs> =
-            if steps.contains(&SubstitutionStep::Macros) || self == &Self::Header {
-                Some(Passthroughs::extract_from(content, parser))
-            } else {
-                None
-            };
+        {
+            // Where this build's own diagnostics start — see
+            // `Parser::drain_builder_diagnostics_since` for why a mark rather
+            // than the whole buffer.
+            let diagnostics_before_build = parser.builder_diagnostics_len();
 
-        for step in steps {
-            step.apply(content, parser, attrlist);
+            // And where the *substitution* warning buffer stands, so anything
+            // the build records into it can be discarded below.
+            //
+            // The build's deliberate diagnostics go through
+            // `record_builder_diagnostic`, never here. What reaches this buffer
+            // during a build is incidental: an `Attrlist` parsed out of a match
+            // string records its own `attribute-missing` warning at an offset
+            // into that string, which is not a position in the document source
+            // — `['{missing}']++x++` is the shape, and surfacing it would
+            // anchor a warning nowhere. It is discarded below, using
+            // the same `substitution_warnings_len`/`truncate` idiom every other
+            // owned-source substitution in the crate uses.
+            let warnings_before_build = parser.substitution_warnings_len();
+
+            let tree = crate::content::inline_builder::build_for_group(
+                self,
+                value,
+                content.original(),
+                parser,
+                attrlist,
+            );
+
+            // Everything this build recorded into the substitution-warning
+            // buffer is incidental (see `warnings_before_build`), and all of it
+            // is discarded.
+            parser.truncate_substitution_warnings(warnings_before_build);
+
+            // The recognition **diagnostics** a construct's recognition itself
+            // raises, kept separately from the incidental buffer just
+            // discarded above.
+            //
+            // A registration has a node to hang on, so it is replayed from the
+            // tree below. These five do not: `attribute-missing` drops a
+            // reference and leaves nothing behind, a `link:` macro with a
+            // dangerous scheme stays literal, and an invalid substitution name
+            // in a `pass:`/`stem:` list is simply skipped. So they are recorded
+            // where they are *recognized* and carried across here — which is
+            // what `Parser::record_builder_diagnostic` and
+            // `push_substitution_warnings` are for. The builder's own buffer is
+            // used rather than the parser's warning buffer for the reason that
+            // is load-bearing: a warning the build
+            // records merely *incidentally* (an `Attrlist` parse over a match
+            // string) must not be swept up with them.
+            //
+            // Before `apply_macro_side_effects`, deliberately: recognition
+            // raises these ahead of the registrations the replay performs, and
+            // that relative order is what `inline_builder_side_effect_parity`
+            // compares.
+            parser.push_substitution_warnings(
+                parser.drain_builder_diagnostics_since(diagnostics_before_build),
+            );
+
+            // The deferred cross-references are the **tree's**: the two walks
+            // below read them off the tree, already partitioned into the
+            // block-level ones and the ones this content's footnotes carry —
+            // rather than a flat list that has to be split by asking which
+            // placeholder survived. See `Content::set_tree_xrefs`.
+            //
+            // The fold below reads `content.deferred_parts()` for nothing, so
+            // the order of these two is a matter of reading rather than of
+            // correctness; deriving first keeps `rendered` and `deferred`
+            // describing the same tree at every point in this function.
+            let render_context = parser.render_context();
+
+            content.set_tree_xrefs(&tree, &*parser.renderer, &render_context);
+
+            // The tree is **authoritative** for the rendered string: what
+            // `rendered_html()` returns is a fold of it.
+            //
+            // Unconditional, including for content carrying a deferred
+            // cross-reference. Such a content's rendering is taken *again* at
+            // the end of resolution (`Content::refold`), once the destinations
+            // are known; what it holds until then is the fold of an unresolved
+            // tree, which is the same unresolved-fallback answer the template
+            // gave and is the honest one for a document that has not settled
+            // its references yet.
+            let folded = crate::content::inline_builder::fold_html(
+                &tree,
+                &*parser.renderer,
+                &render_context,
+            );
+
+            content.rendered = crate::strings::CowStr::from(folded);
+
+            // Every macro family's recognition side effect, replayed from the
+            // finished tree. This runs here, after the whole
+            // pipeline rather than during the macros step itself, which keeps
+            // side effects in document order across contents and in the
+            // crate's own family-pass order within one (see
+            // `apply_macro_side_effects`).
+            //
+            // A description-list term's own leading-anchor rule runs first,
+            // between the build and the replay — see
+            // `apply_to_description_list_term`. Every other content passes
+            // `false`: it has no anchor registered ahead of the replay.
+            let leading_anchor_registered = term_warnings.is_some_and(|warnings| {
+                Self::register_term_leading_anchor(&tree, parser, content, warnings)
+            });
+
+            crate::content::inline_builder::apply_macro_side_effects(
+                &tree,
+                parser,
+                content.original(),
+                leading_anchor_registered,
+            );
+
+            // The callouts step's own registration, replayed the same way. It
+            // is not a macro family — callouts are recognized in verbatim
+            // content, where the macros step does not run at all — so it is a
+            // sibling call rather than part of the composition above.
+            crate::content::inline_builder::apply_callout_side_effects(&tree, parser);
+
+            // `Content::passthroughs()` is a **view over the tree**. The
+            // extraction pass builds its own list to index into while
+            // restoring, but that list is private to
+            // this one pipeline run, and what a caller observes is read back
+            // off the tree in document order. See `Passthrough::from_tree`.
+            content.set_passthroughs(Passthrough::from_tree(&tree));
+
+            content.set_inlines(tree);
+
+            // A fold running later than this parse needs the document
+            // attributes this content was written under, which by then the
+            // parse has moved on from (`:imagesdir:`, `:icons:` and
+            // `:data-uri:` all rebind for everything after them). Retain them
+            // here, where "now" is still this point in the document.
+            //
+            // Retained for **every** content, not just the ones the crate
+            // itself re-renders (a deferred cross-reference, via
+            // `Content::refold`; a defined footnote, via
+            // `Content::collect_folded_footnotes`). `Content::render_with` is
+            // public and folds *any* content through a caller's renderer, so
+            // narrowing this would make that API silently wrong — and wrong
+            // only for the documents that rebind an attribute mid-flight,
+            // which is the least forgivable shape for a bug to take. The
+            // snapshot is `Arc`-shared internally, so retaining one allocates
+            // nothing beyond its box.
+            content.set_render_attributes(parser.snapshot_attributes());
+        }
+    }
+
+    /// Registers a description-list term's leading inline anchor, from the
+    /// term's own tree, and answers whether it did.
+    ///
+    /// The rule mirrors what the term used to read out of its half-substituted
+    /// string with a regex: the anchor must be the term's **first** node and
+    /// must start at the term's own first byte, and its reference text is its
+    /// own `[[id,reftext]]` text when it has one, or else the **rest of the
+    /// term**, trimmed.
+    ///
+    /// Reading "the rest of the term" from the tree rather than from that
+    /// string is one deliberate difference. The regex ran *before* the macros
+    /// step, so a term whose remainder held a macro registered the macro's
+    /// **source** as its reference text (`[[x]]image:a.png[]Term` registered
+    /// `image:a.png[]Term`); the fold of the same nodes gives the rendering
+    /// instead, which is what every other reference text on this branch is.
+    ///
+    /// Being the tree's **first** node is the whole of "at the start of the
+    /// term": that is what the regex's `^` anchor said, and the two agree
+    /// because a term's own source begins at its first non-space character.
+    /// There is deliberately no second test of the node's byte offset, and no
+    /// [`is_bibliography`](crate::inlines::Anchor) check either — a
+    /// bibliography anchor registers under its own
+    /// [`RefType`] from its own earlier pass, but it cannot lead a term in the
+    /// first place, since a bibliography list item's principal text is never
+    /// parsed as one. Both would be branches no input can take.
+    fn register_term_leading_anchor<'src>(
+        tree: &[InlineNode<'src>],
+        parser: &Parser,
+        content: &Content<'src>,
+        warnings: &mut Vec<Warning<'src>>,
+    ) -> bool {
+        let Some(InlineNode::Anchor(anchor)) = tree.first() else {
+            return false;
+        };
+
+        let reftext = match &anchor.reftext {
+            Some(reftext) => Some(crate::content::inline_builder::fold_html(
+                reftext,
+                parser.renderer.as_ref(),
+                &parser.render_context(),
+            )),
+
+            None => {
+                let rest = crate::content::inline_builder::fold_html(
+                    tree.get(1..).unwrap_or_default(),
+                    parser.renderer.as_ref(),
+                    &parser.render_context(),
+                );
+
+                Some(rest.trim().to_string())
+            }
+        };
+
+        if parser
+            .register_ref(&anchor.id, reftext.as_deref(), RefType::Anchor)
+            .is_err()
+        {
+            warnings.push(Warning::new(
+                content.original(),
+                WarningType::DuplicateId(anchor.id.to_string()),
+            ));
         }
 
-        if let Some(passthroughs) = passthroughs {
-            passthroughs.restore_to(content, parser);
-
-            // Retain the extracted passthroughs on the content so they remain
-            // observable after restore (see `Content::passthroughs`).
-            content.set_passthroughs(passthroughs.0);
-        }
-
-        // Capture any deferred cross-references as a placeholder template and
-        // render the unresolved fallback, so `rendered()` is clean even before
-        // references are resolved. This is a no-op when no cross-references
-        // were found.
-        content.finalize_deferred(&*parser.renderer);
+        true
     }
 
     /// Applies any block style masquerade and `subs` attribute override from
@@ -354,7 +587,7 @@ impl SubstitutionGroup {
     /// [`Normal`](Self::Normal) or [`Verbatim`](Self::Verbatim)) expands to its
     /// fixed step sequence, and a [`Custom`](Self::Custom) group returns its
     /// own steps. Useful for inspecting the substitutions in effect for a
-    /// block or an extracted [`Passthrough`](crate::content::Passthrough).
+    /// block or an extracted [`Passthrough`].
     pub fn steps(&self) -> &[SubstitutionStep] {
         match self {
             Self::Normal | Self::Title => NORMAL_STEPS,
@@ -1099,7 +1332,7 @@ mod tests {
 
             let block = doc.child_blocks().next().unwrap();
             assert_eq!(
-                block.rendered_content(),
+                block.rendered_html_content(),
                 Some("abc <strong>bold</strong> &\ndef")
             );
 
@@ -1119,7 +1352,7 @@ mod tests {
             let doc = p.parse("[subs=\",\"]\n....\ncontent <here>\n....");
 
             let block = doc.child_blocks().next().unwrap();
-            assert_eq!(block.rendered_content(), Some("content <here>"));
+            assert_eq!(block.rendered_html_content(), Some("content <here>"));
 
             assert_eq!(doc.warnings().count(), 0);
         }

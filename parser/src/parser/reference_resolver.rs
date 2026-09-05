@@ -212,6 +212,35 @@ pub(crate) struct ReferenceWarnings<'src> {
 
     /// The same warnings, anchored to the source they were found in.
     pub(crate) doc: Vec<Warning<'src>>,
+
+    /// Each defining footnote's rendering, **folded from its own subtree**,
+    /// as `(footnote index, rendered text)` — the tree's answer to the
+    /// question the catalog entry's placeholder template used to answer.
+    ///
+    /// It rides on this accumulator rather than on a walker of its own for a
+    /// specific reason: this struct is already threaded through *exactly* the
+    /// traversal that reaches every [`Content`](crate::content::Content),
+    /// including the two privately-owned sub-parses a generic
+    /// `child_blocks_mut()` walk misses — a Markdown-style blockquote's blocks
+    /// and an AsciiDoc table cell's. A parallel walker would have to
+    /// rediscover both, and a walker that missed one would silently leave the
+    /// affected footnotes rendering from a template while every other footnote
+    /// folded. (Measured while scoping this step: a first-cut walker that
+    /// omitted the blockquote case reported exactly one unreachable footnote
+    /// across the whole suite — small enough to look like a boundary and
+    /// mistake for one.)
+    ///
+    /// **Crossing an owned sub-parse is not automatic**, and must not be:
+    /// [`rehome_into`](Self::rehome_into) deliberately leaves this field
+    /// behind, because whether these entries belong to the enclosing catalog
+    /// depends on the sub-parse. A Markdown-style blockquote's blocks register
+    /// their footnotes on the *document's* catalog, so its site carries them
+    /// out explicitly; an AsciiDoc table cell keeps a footnote list of its
+    /// own, so its site installs them there and carries nothing out. Carrying
+    /// a cell's entries outward would not merely waste them — footnote indices
+    /// restart per catalog, so a cell's footnote `1` would overwrite the
+    /// document's footnote `1`.
+    pub(crate) footnote_texts: Vec<(String, String)>,
 }
 
 impl<'src> ReferenceWarnings<'src> {
@@ -236,6 +265,12 @@ impl<'src> ReferenceWarnings<'src> {
     /// Those blocks borrow their own owned source, so their spans cannot be
     /// named in the enclosing document. Each document warning is re-anchored to
     /// `anchor`, the enclosing element's span in the document.
+    ///
+    /// [`footnote_texts`](Self::footnote_texts) is **not** carried across —
+    /// see that field for why the choice belongs to each sub-parse rather than
+    /// here. Take them with
+    /// [`take_footnote_texts`](Self::take_footnote_texts) first if this
+    /// sub-parse shares the enclosing catalog.
     pub(crate) fn rehome_into<'outer>(
         self,
         dest: &mut ReferenceWarnings<'outer>,
@@ -248,6 +283,17 @@ impl<'src> ReferenceWarnings<'src> {
                 .into_iter()
                 .map(|warning| Warning::with_origin(anchor, warning.warning, warning.origin)),
         );
+    }
+
+    /// Takes the folded footnote renderings gathered so far, leaving the
+    /// accumulator's own list empty.
+    ///
+    /// Used at the two ends of a footnote's journey: an owned sub-parse that
+    /// shares the enclosing catalog hands its entries outward with this before
+    /// [`rehome_into`](Self::rehome_into), and each resolution pass drains it
+    /// to install the entries into the catalog it owns.
+    pub(crate) fn take_footnote_texts(&mut self) -> Vec<(String, String)> {
+        std::mem::take(&mut self.footnote_texts)
     }
 }
 

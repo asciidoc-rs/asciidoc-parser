@@ -29,7 +29,7 @@ pub(crate) use crate::{
 pub(crate) fn rendered_paragraphs(doc: &crate::Document<'_>) -> Vec<String> {
     fn walk(block: &crate::blocks::Block<'_>, out: &mut Vec<String>) {
         if let crate::blocks::Block::Simple(simple) = block {
-            out.push(simple.content().rendered().to_string());
+            out.push(simple.content().rendered_html().to_string());
         }
         for child in block.child_blocks() {
             walk(child, out);

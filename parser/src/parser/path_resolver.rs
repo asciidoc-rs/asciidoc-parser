@@ -14,7 +14,7 @@ use regex::Regex;
 /// This is one of the crate's extensibility seams, alongside
 /// [`IncludeFileHandler`], [`ImageFileHandler`], [`SvgFileHandler`],
 /// [`DocinfoFileHandler`], [`ReferenceResolver`], and
-/// [`InlineSubstitutionRenderer`]. A host that needs custom path or URL
+/// [`InlineRenderer`]. A host that needs custom path or URL
 /// rewriting — a virtual filesystem, a content root, URL slugs (as an
 /// Antora- or Zola-style site generator might) — can supply its own
 /// implementation via [`Parser::with_path_resolver`]. The default
@@ -26,7 +26,7 @@ use regex::Regex;
 /// [`SvgFileHandler`]: crate::parser::SvgFileHandler
 /// [`DocinfoFileHandler`]: crate::parser::DocinfoFileHandler
 /// [`ReferenceResolver`]: crate::parser::ReferenceResolver
-/// [`InlineSubstitutionRenderer`]: crate::parser::InlineSubstitutionRenderer
+/// [`InlineRenderer`]: crate::parser::InlineRenderer
 /// [`Parser::with_path_resolver`]: crate::Parser::with_path_resolver
 pub trait PathResolver: Debug {
     /// Resolve a web path from the target and start paths.

@@ -845,16 +845,16 @@ pub(crate) fn matches_author_pattern(source: &str) -> bool {
 /// references in the literal text are preserved (see
 /// [`apply_author_special_characters`]).
 fn apply_author_subs(source: &str, parser: &Parser) -> String {
-    use crate::content::SubstitutionStep;
+    use crate::{attributes::element_attribute::SplicedValueEscaping, content::apply_attributes};
 
     let with_special_characters = apply_author_special_characters(source, parser);
 
     let span = Span::new(&with_special_characters);
     let mut content = Content::from(span);
 
-    SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+    apply_attributes(&mut content, parser, SplicedValueEscaping::Verbatim);
 
-    content.rendered().to_string()
+    content.rendered_html().to_string()
 }
 
 /// Resolve attribute references in `source` *without* applying the special-
@@ -871,18 +871,18 @@ fn apply_author_subs(source: &str, parser: &Parser) -> String {
 /// this second, raw-value pass discards the warnings it would otherwise
 /// duplicate.
 fn resolve_attribute_references(source: &str, parser: &Parser) -> String {
-    use crate::content::SubstitutionStep;
+    use crate::{attributes::element_attribute::SplicedValueEscaping, content::apply_attributes};
 
     let warnings_before = parser.substitution_warnings_len();
 
     let span = Span::new(source);
     let mut content = Content::from(span);
 
-    SubstitutionStep::AttributeReferences.apply(&mut content, parser, None);
+    apply_attributes(&mut content, parser, SplicedValueEscaping::Verbatim);
 
     parser.truncate_substitution_warnings(warnings_before);
 
-    content.rendered().to_string()
+    content.rendered_html().to_string()
 }
 
 /// Apply the special-characters substitution to `source`, escaping every
@@ -909,6 +909,8 @@ fn apply_author_special_characters(source: &str, parser: &Parser) -> String {
 /// Run the special-characters substitution step over `source`, escaping `<`,
 /// `>`, and `&`.
 fn escape_special_characters(source: &str, parser: &Parser) -> String {
+    use crate::content::apply_special_characters;
+
     if source.is_empty() {
         return String::new();
     }
@@ -916,9 +918,9 @@ fn escape_special_characters(source: &str, parser: &Parser) -> String {
     let span = Span::new(source);
     let mut content = Content::from(span);
 
-    crate::content::SubstitutionStep::SpecialCharacters.apply(&mut content, parser, None);
+    apply_special_characters(&mut content, &*parser.renderer);
 
-    content.rendered().to_string()
+    content.rendered_html().to_string()
 }
 
 /// Matches a numeric HTML character reference — decimal (`&#174;`) or
@@ -1043,6 +1045,41 @@ mod tests {
             assert_eq!(a.raw_middlename(), None);
             assert_eq!(a.lastname(), None);
             assert_eq!(a.raw_lastname(), None);
+        }
+
+        #[test]
+        fn raw_components_fall_back_when_they_disagree_about_a_trailing_email() {
+            // The implicit-author-line counterpart of
+            // `names_only_email_split_stays_aligned_between_raw_and_rendered`.
+            // Escaping the literal brackets makes the rendered expansion
+            // (`Jane Smith &lt;Third&gt;`) match the author pattern as three
+            // *names*, while the raw expansion (`Jane Smith <Third>`) matches
+            // it as two names plus an `<email>`. The two disagree
+            // about whether a trailing email is present, so the raw
+            // components fall back to the rendered ones rather than
+            // storing a differently-shaped split.
+            let src = concat!(
+                ":first-name: Jane\n",
+                "= Doc\n",
+                "{first-name} Smith <Third>\n\n",
+                "body\n",
+            );
+
+            let a = only_author(src);
+
+            assert_eq!(a.name(), "Jane Smith &lt;Third&gt;");
+            assert_eq!(a.email(), None);
+            assert_eq!(a.lastname(), Some("&lt;Third&gt;"));
+
+            // The fallback: every raw component equals its rendered
+            // counterpart, brackets escaped and all, rather than
+            // the `Jane Smith` + `<Third>`-as-email split the raw
+            // expansion would have yielded on its own.
+            assert_eq!(a.raw_name(), "Jane Smith &lt;Third&gt;");
+            assert_eq!(a.raw_firstname(), "Jane");
+            assert_eq!(a.raw_middlename(), Some("Smith"));
+            assert_eq!(a.raw_lastname(), Some("&lt;Third&gt;"));
+            assert_eq!(a.raw_email(), None);
         }
 
         #[test]

@@ -23,6 +23,8 @@ pub mod content;
 pub mod document;
 pub use document::Document;
 
+pub mod inlines;
+
 pub(crate) mod internal;
 
 pub mod parser;

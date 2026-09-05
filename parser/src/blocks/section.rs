@@ -10,12 +10,13 @@ use crate::{
         parse_utils::parse_blocks_until,
     },
     content::{
-        Content, SubstitutionGroup, XrefSegment, strip_footnote_marker_spans,
-        substitute_attributes_in_reftext, unescape_sentinels,
+        Content, DeferredParts, SubstitutionGroup, inline_builder::fold_reference_text,
+        substitute_attributes_in_reftext,
     },
     document::{InterpretedValue, RefType},
+    inlines::InlineNode,
     internal::debug::DebugSliceReference,
-    parser::XrefSignifier,
+    parser::{ResolvedAttributes, ResolvedReference, XrefSignifier},
     span::MatchedItem,
     strings::CowStr,
     warnings::{Warning, WarningType},
@@ -257,37 +258,25 @@ impl<'src> SectionBlock<'src> {
         //
         // A footnote in the title is a real, document-order footnote, but its
         // marker must not leak into the section's reference text (an xref's
-        // link text) or auto-generated ID. Marking the title's footnote
-        // markers with sentinels lets those be excised below from a
-        // single render — no second substitution pass, so counters and
-        // attribute-expanded footnotes are processed exactly once.
-        //
-        // The title is substituted in the escaped sentinel form (see
-        // `escape_sentinels`) and left there, so that the marker excision below
-        // reads only the markers this substitution wrote — never a copy of a
-        // marker sentinel the document itself typed.
+        // link text) or auto-generated ID. The title's tree is what
+        // answers that: a footnote is a node, so the heading's own
+        // rendering and its footnote-free reference text are two folds
+        // of one tree ([`fold_reference_text`]), and "which regions
+        // were footnote markers" is a question about node kinds rather
+        // than about bytes. Still a single substitution pass, so
+        // counters and attribute-expanded footnotes are
+        // processed exactly once — which is what the sentinel pair this
+        // replaces used to buy.
         let mut section_title = Content::from(title_span);
-        parser.mark_footnote_spans.set(true);
-        SubstitutionGroup::Title.apply_keeping_sentinels_escaped(
-            &mut section_title,
-            parser,
-            metadata.attrlist.as_ref(),
-        );
-        parser.mark_footnote_spans.set(false);
+        SubstitutionGroup::Title.apply(&mut section_title, parser, metadata.attrlist.as_ref());
 
         // The footnote-free rendering of the title, for the reference text and
-        // auto-generated ID; a no-op string copy when the title had no
-        // footnote.
-        let title_reftext =
-            unescape_sentinels(&strip_footnote_marker_spans(section_title.rendered())).into_owned();
-
-        // Strip the now-consumed sentinels from the title itself, keeping the
-        // footnote marker so the heading still renders it.
-        section_title.remove_footnote_marker_sentinels();
-
-        // Every sentinel-reading pass over the title has now run, so the
-        // document's own sentinel codepoints can be restored.
-        section_title.unescape_sentinels();
+        // auto-generated ID.
+        let title_reftext = fold_reference_text(
+            section_title.inlines(),
+            &*parser.renderer,
+            &parser.render_context(),
+        );
 
         // A section carrying the `bibliography` style implicitly adds that
         // style to each top-level unordered list in its body (see the
@@ -335,8 +324,13 @@ impl<'src> SectionBlock<'src> {
         if !discrete && let Some(title) = metadata.title.as_ref() {
             // The carried title travels as an owned snapshot, keeping any
             // deferred cross-references so an embedded `<<id>>` still resolves
-            // for the claiming block once the catalog is complete.
-            parser.pending_block_title = Some(title.to_owned_title());
+            // for the claiming block once the catalog is complete. The snapshot
+            // is taken here, while the title's inline tree is still alive: its
+            // placeholder template is synthesized from that tree (see
+            // `Content::to_owned_title`), which the restored content — whose
+            // nodes cannot cross this hop — renders from.
+            let owned_title = title.to_owned_title(parser);
+            parser.pending_block_title = Some(owned_title);
         }
 
         let mut maw_blocks = parse_blocks_until(
@@ -495,7 +489,7 @@ impl<'src> SectionBlock<'src> {
     /// Return the processed section title after substitutions have been
     /// applied.
     pub fn section_title(&'src self) -> &'src str {
-        self.section_title.rendered()
+        self.section_title.rendered_html()
     }
 
     /// Return the type of this section (normal or appendix).
@@ -516,14 +510,14 @@ impl<'src> SectionBlock<'src> {
         self.section_number.as_ref()
     }
 
-    /// Returns the section title's deferred cross-reference template and
-    /// segments, if the title contains any cross-references.
+    /// Returns the section title's deferred cross-references, if the title
+    /// contains any.
     ///
     /// Used by the document-order title resolution pass (see
     /// [`Document::resolve_references`]).
     ///
     /// [`Document::resolve_references`]: crate::Document::resolve_references
-    pub(crate) fn section_title_deferred_parts(&self) -> Option<(&str, &[XrefSegment])> {
+    pub(crate) fn section_title_deferred_parts(&self) -> Option<DeferredParts<'_>> {
         self.section_title.deferred_parts()
     }
 
@@ -532,6 +526,65 @@ impl<'src> SectionBlock<'src> {
     /// with cross-title coordination.
     pub(crate) fn set_section_title_rendered(&mut self, rendered: String) {
         self.section_title.set_rendered(rendered);
+    }
+
+    /// Mirrors the section title's resolved cross-reference destinations —
+    /// computed by the document-order title resolution pass — into the title's
+    /// inline tree, so a caller that walks the title's
+    /// [`inlines`](Content::inlines) sees the same destinations
+    /// [`set_section_title_rendered`](Self::set_section_title_rendered)
+    /// installed in the rendered string. A no-op when no inline tree was built.
+    pub(crate) fn mirror_section_title_tree_xrefs(
+        &mut self,
+        block_ordered: &[Option<ResolvedReference>],
+        footnote_ordered: &[Option<ResolvedReference>],
+    ) {
+        self.section_title
+            .mirror_tree_xref_resolution(block_ordered, footnote_ordered);
+    }
+
+    /// Returns the section title's inline tree — the tree the document-order
+    /// title pass folds to render this heading, and which that pass then
+    /// mirrors its resolved destinations into.
+    pub(crate) fn section_title_inlines(&self) -> &[InlineNode<'src>] {
+        self.section_title.inlines()
+    }
+
+    /// Returns the section title's [`Content`] itself, for a caller that needs
+    /// more of it than [`section_title_inlines`](Self::section_title_inlines)
+    /// and [`section_title_render_attributes`](Self::section_title_render_attributes)
+    /// expose — the deferred cross-reference segments a heading carries, which
+    /// the document-order title pass resolves.
+    ///
+    /// No longer test-only: that pass folds a heading's own defining footnotes
+    /// through [`Content::collect_own_folded_footnotes`], which wants the
+    /// content rather than the two halves, so that both passes which collect
+    /// folds ask for them the same way.
+    pub(crate) fn section_title_content(&self) -> &Content<'src> {
+        &self.section_title
+    }
+
+    /// Returns the section's `.Title` decoration as a mutable [`Content`], if
+    /// it has one — a **discrete heading** keeps its own (see
+    /// [`parse`](Self::parse)'s carried-title hop, which every non-discrete
+    /// section takes instead).
+    ///
+    /// The same narrow seam every other titled block exposes, and for the same
+    /// caller: the document-order title resolution pass
+    /// (`document::title_refs`), which installs the re-rendered title after
+    /// resolving any cross-references embedded in it. Distinct from the
+    /// section *heading*, which that pass reaches through
+    /// [`section_title_content`](Self::section_title_content).
+    pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
+        self.title.as_mut()
+    }
+
+    /// The document attributes in force where this heading was written, when
+    /// they were retained — the order-dependent half of the render context a
+    /// fold of the tree above needs. See
+    /// [`Content::render_attributes`](crate::content::Content).
+    pub(crate) fn section_title_render_attributes(&self) -> Option<&ResolvedAttributes> {
+        self.section_title.render_attributes()
     }
 
     /// Returns the ID under which this section is registered in the catalog, if
@@ -634,6 +687,10 @@ impl<'src> IsBlock<'src> for SectionBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_ref().map(Content::rendered_str)
+    }
+
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
     }
 
     fn anchor(&'src self) -> Option<Span<'src>> {
@@ -4022,7 +4079,7 @@ mod tests {
             let Some(Block::Simple(paragraph)) = section.child_blocks().next() else {
                 panic!("expected a simple block");
             };
-            assert_eq!(paragraph.content().rendered(), "Letter A.");
+            assert_eq!(paragraph.content().rendered_html(), "Letter A.");
         }
     }
 

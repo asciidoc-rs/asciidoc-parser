@@ -23,20 +23,57 @@
 use std::collections::HashMap;
 
 use crate::{
-    HasSpan, Span,
+    HasSpan, Parser, Span,
     blocks::{Block, IsBlock},
-    content::{XrefSegment, render_xref_template, unescape_sentinels},
+    content::{
+        XrefSegment, XrefTemplatePiece, fold_resolved_title, render_xref_template,
+        resolved_destinations,
+    },
     document::Catalog,
-    parser::{InlineSubstitutionRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext},
+    inlines::InlineNode,
+    parser::{
+        InlineRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
+        ResolvedAttributes, ResolvedReference,
+    },
 };
+
+/// The resolved outcome of one title: its final rendering, plus the resolved
+/// destinations of its cross-references in placeholder order.
+///
+/// The rendering is installed into the title's rendered string; the
+/// `block_ordered` / `footnote_ordered` destinations are mirrored into the
+/// title's inline tree (see [`Content::mirror_tree_xref_resolution`]), so both
+/// views of the title agree.
+///
+/// [`Content::mirror_tree_xref_resolution`]: crate::content::Content::mirror_tree_xref_resolution
+struct Resolution {
+    /// The title's final rendered form, with cross-title references
+    /// coordinated.
+    rendered: String,
+
+    /// The resolved destination of each title-level cross-reference, in
+    /// document order, ready for mirroring into the title tree.
+    block_ordered: Vec<Option<ResolvedReference>>,
+
+    /// The resolved destination of each cross-reference embedded in a footnote
+    /// the title carries, in segment order, ready for
+    /// mirroring into the title tree's footnote subtrees.
+    footnote_ordered: Vec<Option<ResolvedReference>>,
+}
 
 /// One title carrying cross-references, captured for the resolution pass.
 struct TitleNode<'src> {
-    /// The placeholder-bearing template captured when the title was finalized.
-    template: String,
+    /// The title's **block-level** cross-references, in the document order its
+    /// own inline tree holds them.
+    block: Vec<XrefSegment>,
 
-    /// The title's cross-references, in placeholder order.
-    xrefs: Vec<XrefSegment>,
+    /// The cross-references the title's footnotes carry.
+    footnote: Vec<XrefSegment>,
+
+    /// The deferred template, which a title renders from when it cannot
+    /// fold: one whose nodes did not survive the `'src`-erasing hop a carried
+    /// block title travels on (see `carried_title_template`).
+    template: Vec<XrefTemplatePiece>,
 
     /// The ID under which other cross-references reach this title's reference
     /// text — present only when the title *is* the target's reference text (no
@@ -47,6 +84,18 @@ struct TitleNode<'src> {
 
     /// The title's source span, for anchoring an unresolved-reference warning.
     source: Span<'src>,
+
+    /// A copy of the title's inline tree, which the pass folds to produce
+    /// `rendered` — see [`fold_resolved_title`] for why it is a copy.
+    inlines: Vec<InlineNode<'src>>,
+
+    /// The document attributes in force where this title was written, retained
+    /// on its content because a fold running later than its parse cannot read
+    /// them from the parser.
+    ///
+    /// `None` leaves the title on the template path, as it does everywhere
+    /// else.
+    render_attributes: Option<ResolvedAttributes>,
 }
 
 /// Resolves the cross-references embedded in every section heading and block
@@ -61,8 +110,9 @@ pub(crate) fn resolve_title_references<'src>(
     blocks: &mut [Block<'src>],
     catalog: &Catalog,
     resolver: &dyn ReferenceResolver,
-    renderer: &dyn InlineSubstitutionRenderer,
+    renderer: &dyn InlineRenderer,
     warnings: &mut ReferenceWarnings<'src>,
+    parser: &Parser,
 ) {
     let mut nodes: Vec<TitleNode<'src>> = Vec::new();
     collect(blocks, &mut nodes);
@@ -82,7 +132,7 @@ pub(crate) fn resolve_title_references<'src>(
         }
     }
 
-    let mut memo: Vec<Option<String>> = vec![None; nodes.len()];
+    let mut memo: Vec<Option<Resolution>> = (0..nodes.len()).map(|_| None).collect();
     let mut in_progress: Vec<bool> = vec![false; nodes.len()];
 
     for (index, node) in nodes.iter().enumerate() {
@@ -96,11 +146,12 @@ pub(crate) fn resolve_title_references<'src>(
             &mut memo,
             &mut in_progress,
             warnings,
+            parser,
         );
     }
 
     let mut index = 0;
-    write_back(blocks, &memo, &mut index);
+    write_back(blocks, &memo, &mut index, renderer, warnings, parser);
 }
 
 /// Walks `blocks` in document order, collecting each section heading and block
@@ -109,39 +160,57 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
     for block in blocks.iter_mut() {
         if let Block::Section(section) = block {
             // A section's resolvable title is its heading.
-            if let Some((template, xrefs)) = section.section_title_deferred_parts() {
+            if let Some(deferred) = section.section_title_deferred_parts() {
                 let map_id = if section.has_explicit_reftext() {
                     None
                 } else {
                     section.reference_id()
                 };
 
+                let block = deferred.block.to_vec();
+                let footnote = deferred.footnote.to_vec();
+                let template = deferred.template.to_vec();
+
                 nodes.push(TitleNode {
-                    template: template.to_string(),
-                    xrefs: xrefs.to_vec(),
+                    block,
+                    footnote,
+                    template,
                     map_id,
                     source: section.section_title_source(),
+                    inlines: section.section_title_inlines().to_vec(),
+                    render_attributes: section.section_title_render_attributes().cloned(),
                 });
             }
-        } else {
-            // A non-section block's `.Title` decoration. A block title is not
-            // treated as a recomputable reference target (`map_id` is `None`):
-            // its own cross-references are resolved, but a reference *to* the
-            // block still uses the block's parse-time reference text.
-            //
-            // The span is taken before the title borrow: `block` stays
-            // mutably borrowed while the template is in scope.
+        }
+
+        // A block's `.Title` decoration — a *discrete* heading's included,
+        // which is the one section kind that keeps its own (a non-discrete
+        // section's is carried into its first block; its heading was collected
+        // above). A block title is not treated as a recomputable reference
+        // target (`map_id` is `None`): its own cross-references are resolved,
+        // but a reference *to* the block still uses the block's parse-time
+        // reference text.
+        //
+        // The span is taken before the title borrow: `block` stays mutably
+        // borrowed while the template is in scope.
+        {
             let source = block.span();
 
-            if let Some((template, xrefs)) = block
-                .block_title_content_mut()
-                .and_then(|title| title.deferred_parts())
+            if let Some(title) = block.block_title_content_mut()
+                && let Some(deferred) = title.deferred_parts()
             {
+                let block = deferred.block.to_vec();
+                let footnote = deferred.footnote.to_vec();
+                let template = deferred.template.to_vec();
+
                 nodes.push(TitleNode {
-                    template: template.to_string(),
-                    xrefs: xrefs.to_vec(),
+                    block,
+                    footnote,
+                    template,
                     map_id: None,
                     source,
+                    inlines: title.inlines().to_vec(),
+                    render_attributes: title.render_attributes().cloned(),
                 });
             }
         }
@@ -150,27 +219,71 @@ fn collect<'src>(blocks: &mut [Block<'src>], nodes: &mut Vec<TitleNode<'src>>) {
     }
 }
 
-/// Installs the computed rendering for each collected title, walking `blocks`
-/// in the same document order as [`collect`] so `index` stays aligned.
-fn write_back<'src>(blocks: &mut [Block<'src>], memo: &[Option<String>], index: &mut usize) {
+/// Installs each collected title's computed resolution, walking `blocks` in the
+/// same document order as [`collect`] so `index` stays aligned. For every title
+/// this installs both views the resolution carries: the coordinated rendered
+/// string, and — mirrored into the title's inline tree — the resolved
+/// destinations of its cross-references.
+fn write_back<'src>(
+    blocks: &mut [Block<'src>],
+    memo: &[Option<Resolution>],
+    index: &mut usize,
+    renderer: &dyn InlineRenderer,
+    warnings: &mut ReferenceWarnings<'src>,
+    parser: &Parser,
+) {
     for block in blocks.iter_mut() {
-        if let Block::Section(section) = block {
-            if section.section_title_deferred_parts().is_some() {
-                if let Some(rendered) = memo.get(*index).and_then(Option::as_ref) {
-                    section.set_section_title_rendered(rendered.clone());
-                }
-                *index += 1;
-            }
-        } else if let Some(title) = block.block_title_content_mut()
-            && title.deferred_parts().is_some()
+        if let Block::Section(section) = block
+            && section.section_title_deferred_parts().is_some()
         {
-            if let Some(rendered) = memo.get(*index).and_then(Option::as_ref) {
-                title.set_rendered(rendered.clone());
+            if let Some(resolution) = memo.get(*index).and_then(Option::as_ref) {
+                section.set_section_title_rendered(resolution.rendered.clone());
+                section.mirror_section_title_tree_xrefs(
+                    &resolution.block_ordered,
+                    &resolution.footnote_ordered,
+                );
+
+                // **After** the mirror, not before: a footnote defined in
+                // this heading is folded from the heading's own subtree, and
+                // that subtree only carries the destinations just resolved
+                // once `mirror_section_title_tree_xrefs` has installed them.
+                // The fold `compute` took above cannot serve — it ran on a
+                // *clone* holding only the block-level list, because the real
+                // tree is not reachable while the pass is still computing.
+                section
+                    .section_title_content()
+                    .collect_own_folded_footnotes(renderer, parser, warnings);
             }
             *index += 1;
         }
 
-        write_back(block.child_blocks_mut(), memo, index);
+        // The block-title decoration's write-back — the same order [`collect`]
+        // pushed them in: a section's heading first, then any block's own
+        // `.Title`, a discrete heading's included.
+        if let Some(title) = block.block_title_content_mut()
+            && title.deferred_parts().is_some()
+        {
+            if let Some(resolution) = memo.get(*index).and_then(Option::as_ref) {
+                title.set_rendered(resolution.rendered.clone());
+                title.mirror_tree_xref_resolution(
+                    &resolution.block_ordered,
+                    &resolution.footnote_ordered,
+                );
+
+                // After the mirror, for the reason given in the section arm.
+                title.collect_own_folded_footnotes(renderer, parser, warnings);
+            }
+            *index += 1;
+        }
+
+        write_back(
+            block.child_blocks_mut(),
+            memo,
+            index,
+            renderer,
+            warnings,
+            parser,
+        );
     }
 }
 
@@ -189,28 +302,34 @@ fn compute<'src>(
     id_to_node: &HashMap<&str, (usize, &TitleNode<'src>)>,
     catalog: &Catalog,
     resolver: &dyn ReferenceResolver,
-    renderer: &dyn InlineSubstitutionRenderer,
-    memo: &mut [Option<String>],
+    renderer: &dyn InlineRenderer,
+    memo: &mut [Option<Resolution>],
     in_progress: &mut [bool],
     warnings: &mut ReferenceWarnings<'src>,
+    parser: &Parser,
 ) -> String {
-    if let Some(Some(rendered)) = memo.get(index) {
-        return rendered.clone();
+    if let Some(Some(resolution)) = memo.get(index) {
+        return resolution.rendered.clone();
     }
 
     if let Some(flag) = in_progress.get_mut(index) {
         *flag = true;
     }
 
-    let mut xrefs = node.xrefs.clone();
+    let mut block = node.block.clone();
+    let mut footnote = node.footnote.clone();
 
-    for xref in xrefs.iter_mut() {
-        // The catalog holds the document's own text, so a target leaves escaped
-        // form to be matched against it (see `Content::resolve_references`).
-        let target = unescape_sentinels(&xref.target);
-
+    // The block-level and footnote-embedded references are resolved by the same
+    // rules here — including the local-title recursion below — where
+    // `Content::resolve_references` reports only the block-level ones. That
+    // difference is pre-existing: a title reports every unresolved target it
+    // carries, wherever in the title it sits.
+    for xref in block.iter_mut().chain(footnote.iter_mut()) {
+        // The catalog holds the document's own text, which is exactly what a
+        // tree-read segment's target carries — same as
+        // `Content::resolve_references`.
         let mut resolved = resolver.resolve(&ResolutionContext {
-            target: &target,
+            target: &xref.target,
             provided_text: xref.provided_text.as_deref(),
             derived: xref.derived.as_ref(),
         });
@@ -234,7 +353,7 @@ fn compute<'src>(
         // correct.
         if !has_explicit_text
             && let Some(reference) = resolved.as_mut()
-            && let Some(target_id) = lookup_id(catalog, &target)
+            && let Some(target_id) = lookup_id(catalog, &xref.target)
             && let Some(&(target_index, target_node)) = id_to_node.get(target_id.as_str())
             && reference.href.strip_prefix('#') == Some(target_id.as_str())
         {
@@ -265,6 +384,7 @@ fn compute<'src>(
                         memo,
                         in_progress,
                         warnings,
+                        parser,
                     ))
                 };
             }
@@ -273,19 +393,47 @@ fn compute<'src>(
         // A target that resolved to nothing — and did not carry its own derived
         // destination — is an unresolved reference, reported against the title.
         if resolved.is_none() && xref.derived.is_none() {
-            warnings.unresolved(&target, node.source);
+            warnings.unresolved(&xref.target, node.source);
         }
 
         xref.resolved = resolved;
     }
 
-    let rendered = render_xref_template(&node.template, &xrefs, renderer);
+    // The resolved destinations, in the document order the title's own tree
+    // holds its cross-reference nodes in — which is the order the two lists
+    // were read off that tree in, so they line up one-to-one when mirrored
+    // (see `write_back`). These are the very segments the rendering below is
+    // computed from, so the tree cannot disagree with the string.
+    let block_ordered = resolved_destinations(&block);
+    let footnote_ordered = resolved_destinations(&footnote);
+
+    // The title's rendering is a **fold of its tree**, with the destinations
+    // just resolved installed into it — the same answer `Content::refold` gives
+    // a deferred paragraph, reached here rather than after the pass because
+    // this string is also what a reference *to* this title splices in as its
+    // link text. Rendering the template as well, and keeping only one, would
+    // put every deferred title through a host renderer twice.
+    //
+    // The template is the fallback for a title with no tree to fold: a block
+    // title carried across a section heading, whose inline nodes cannot cross
+    // the `'src`-erasing hop it travels on. Every other title folds.
+    let rendered = node
+        .render_attributes
+        .as_ref()
+        .and_then(|attributes| {
+            fold_resolved_title(&node.inlines, &block_ordered, attributes, renderer, parser)
+        })
+        .unwrap_or_else(|| render_xref_template(&node.template, &block, renderer));
 
     if let Some(flag) = in_progress.get_mut(index) {
         *flag = false;
     }
     if let Some(slot) = memo.get_mut(index) {
-        *slot = Some(rendered.clone());
+        *slot = Some(Resolution {
+            rendered: rendered.clone(),
+            block_ordered,
+            footnote_ordered,
+        });
     }
     rendered
 }

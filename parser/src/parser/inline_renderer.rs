@@ -4,18 +4,26 @@ use regex::Regex;
 
 use crate::{
     attributes::Attrlist,
+    inlines::{Callout, CalloutGuard, Footnote, Image, IndexTerm, Ref},
     parser::{
         DerivedReference, RenderContext, ResolvedReference, SafeMode, XrefSignifier, XrefStyle,
     },
+    strings::CowStr,
 };
 
-/// An implementation of `InlineSubstitutionRenderer` is used when converting
-/// the basic raw text of a simple block to the format which will ultimately be
-/// presented in the final converted output.
+/// An implementation of `InlineRenderer` converts the inline content of a
+/// block into the format which will ultimately be presented in the final
+/// converted output.
 ///
-/// An implementation is provided for HTML output
-/// ([`HtmlSubstitutionRenderer`]); alternative implementations (not provided in
-/// this crate) could support other output formats.
+/// An implementation is provided for HTML output ([`HtmlInlineRenderer`]);
+/// alternative implementations (not provided in this crate) could support
+/// other output formats.
+///
+/// The trait is the crate's **inline** seam and nothing more: every method
+/// renders (or resolves a URI for) one inline construct. Assembling those
+/// renderings into blocks and into a document is the caller's job — see
+/// [`Content::render_with`](crate::content::Content::render_with), which folds
+/// one content's inline tree through an implementation of this trait.
 ///
 /// ## Overriding only what differs
 ///
@@ -46,7 +54,7 @@ use crate::{
 /// [`path_resolver`](RenderContext::path_resolver). The identically-named
 /// [`Parser`](crate::Parser) accessors answer the same question for a caller
 /// that holds the parser, which a renderer does not.
-pub trait InlineSubstitutionRenderer: Debug {
+pub trait InlineRenderer: Debug {
     /// Renders the substitution for a special character.
     ///
     /// The renderer should write the appropriate rendering to `dest`.
@@ -54,21 +62,23 @@ pub trait InlineSubstitutionRenderer: Debug {
         DEFAULT_HTML_RENDERER.render_special_character(type_, dest);
     }
 
-    /// Renders the content of a [quote substitution].
+    /// Renders a formatted span — a [`Styled`] node, which is what the
+    /// [quotes substitution] recognizes.
     ///
     /// The renderer should write the appropriate rendering to `dest`.
     ///
-    /// [quote substitution]: https://docs.asciidoctor.org/asciidoc/latest/subs/quotes/
-    fn render_quoted_substitution(
+    /// [`Styled`]: crate::inlines::Styled
+    /// [quotes substitution]: https://docs.asciidoctor.org/asciidoc/latest/subs/quotes/
+    fn render_styled(
         &self,
         type_: QuoteType,
         scope: QuoteScope,
-        attrlist: Option<Attrlist<'_>>,
+        attrlist: &Attrlist<'_>,
         id: Option<String>,
         body: &str,
         dest: &mut String,
     ) {
-        DEFAULT_HTML_RENDERER.render_quoted_substitution(type_, scope, attrlist, id, body, dest);
+        DEFAULT_HTML_RENDERER.render_styled(type_, scope, attrlist, id, body, dest);
     }
 
     /// Renders the content of a [character replacement].
@@ -96,8 +106,8 @@ pub trait InlineSubstitutionRenderer: Debug {
     ///
     /// The renderer should write an appropriate rendering of the specified
     /// image to `dest`.
-    fn render_image(&self, params: &ImageRenderParams, dest: &mut String) {
-        DEFAULT_HTML_RENDERER.render_image(params, dest);
+    fn render_image(&self, image: &Image<'_>, context: &RenderContext, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_image(image, context, dest);
     }
 
     /// Construct a URI reference or data URI to the target image.
@@ -140,8 +150,8 @@ pub trait InlineSubstitutionRenderer: Debug {
     ///
     /// The renderer should write an appropriate rendering of the specified
     /// icon to `dest`.
-    fn render_icon(&self, params: &IconRenderParams, dest: &mut String) {
-        DEFAULT_HTML_RENDERER.render_icon(params, dest);
+    fn render_icon(&self, icon: &Image<'_>, context: &RenderContext, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_icon(icon, context, dest);
     }
 
     /// Construct a reference or data URI to an icon image for the specified
@@ -180,8 +190,8 @@ pub trait InlineSubstitutionRenderer: Debug {
     ///
     /// The renderer should write an appropriate rendering of the specified
     /// link, to `dest`.
-    fn render_link(&self, params: &LinkRenderParams, dest: &mut String) {
-        DEFAULT_HTML_RENDERER.render_link(params, dest);
+    fn render_link(&self, link: &Ref<'_>, link_text: &str, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_link(link, link_text, dest);
     }
 
     /// Renders an anchor.
@@ -204,31 +214,61 @@ pub trait InlineSubstitutionRenderer: Debug {
 
     /// Renders a [callout] number that annotates a line in a verbatim block.
     ///
-    /// The renderer should write an appropriate rendering of the callout number
-    /// to `dest`. The rendering typically depends on whether font-based or
-    /// image-based icons are enabled (via the `icons` document attribute).
+    /// The renderer should write an appropriate rendering of the callout's
+    /// [`number`](crate::inlines::Callout::number) to `dest`. The rendering
+    /// typically depends on whether font-based or image-based icons are
+    /// enabled (via the `icons` document attribute, read off `context`); when
+    /// they are not, the node's [`guard`](crate::inlines::Callout::guard) says
+    /// which comment characters hid the callout in the raw source and should
+    /// be preserved around it.
     ///
     /// [callout]: https://docs.asciidoctor.org/asciidoc/latest/verbatim/callouts/
-    fn render_callout(&self, params: &CalloutRenderParams, dest: &mut String) {
-        DEFAULT_HTML_RENDERER.render_callout(params, dest);
+    fn render_callout(&self, callout: &Callout<'_>, context: &RenderContext, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_callout(callout, context, dest);
     }
 
     /// Renders an [index term].
     ///
-    /// A *flow* (visible) index term ([`IndexTermRenderParams::visible_term`]
-    /// is `Some`) appears in the flow of text, so the renderer should write
-    /// the term text to `dest`. A *concealed* index term ([`visible_term`]
-    /// is `None`) does not appear in the rendered text, so the renderer
-    /// should typically write nothing.
+    /// A *flow* (visible) index term (`visible_term` is `Some`) appears in the
+    /// flow of text, so the renderer should write that text to `dest`. A
+    /// *concealed* index term (`visible_term` is `None`) does not appear in
+    /// the rendered text, so the renderer should typically write nothing.
+    ///
+    /// `visible_term` is the term's shown text *rendered* — the fold of
+    /// [`IndexTerm::children`](crate::inlines::IndexTerm), which is why it
+    /// arrives alongside the node rather than on it.
     ///
     /// Note that the built-in HTML5 converter never builds an index catalog;
     /// index terms only contribute markup in output formats (such as DocBook or
     /// PDF) that generate an index.
     ///
+    /// # What the node can and cannot tell you yet
+    ///
+    /// The node is passed so that a backend which *does* build an index has
+    /// somewhere to read the term from. Be aware of what it currently holds:
+    /// for a **flow** term, [`terms`](crate::inlines::IndexTerm) is the shown
+    /// term as a single already-substituted string (empty when the shown text
+    /// contains markup only the fold can produce, such as `((*tiger*))`); for
+    /// a **concealed** term it is **empty**, along with `children` — the
+    /// builder does not reconstruct a concealed term's argument, because
+    /// nothing in it reaches the flow.
+    ///
+    /// So an index-building backend cannot yet get the authored
+    /// primary/secondary/tertiary levels out of a concealed
+    /// `indexterm:[p, s, t]` or `(((p, s, t)))`, which are exactly the terms
+    /// that exist only to build an index. Populating them is a change to what
+    /// the builder records, not to this seam, and the field is marked
+    /// provisional for that reason (see
+    /// [`IndexTerm`]'s own Phase-0 note).
+    ///
     /// [index term]: https://docs.asciidoctor.org/asciidoc/latest/sections/user-index/
-    /// [`visible_term`]: IndexTermRenderParams::visible_term
-    fn render_index_term(&self, params: &IndexTermRenderParams, dest: &mut String) {
-        DEFAULT_HTML_RENDERER.render_index_term(params, dest);
+    fn render_index_term(
+        &self,
+        index_term: &IndexTerm<'_>,
+        visible_term: Option<&str>,
+        dest: &mut String,
+    ) {
+        DEFAULT_HTML_RENDERER.render_index_term(index_term, visible_term, dest);
     }
 
     /// Renders a [button] UI macro (`btn:[label]`).
@@ -243,24 +283,39 @@ pub trait InlineSubstitutionRenderer: Debug {
 
     /// Renders a [keyboard] UI macro (`kbd:[keys]`).
     ///
-    /// `keys` holds one entry per key in the shortcut. A single-element slice
-    /// is a lone key; multiple entries form a key sequence. The renderer
-    /// should write an appropriate rendering (e.g. a lone `<kbd>` element,
-    /// or a `<span class="keyseq">` wrapping several `<kbd>` elements) to
-    /// `dest`.
+    /// `keys` holds one entry per key in the shortcut, exactly as
+    /// [`UiKind::Keyboard`](crate::inlines::UiKind) carries them. A
+    /// single-element slice is a lone key; multiple entries form a key
+    /// sequence. The renderer should write an appropriate rendering (e.g. a
+    /// lone `<kbd>` element, or a `<span class="keyseq">` wrapping several
+    /// `<kbd>` elements) to `dest`.
     ///
     /// [keyboard]: https://docs.asciidoctor.org/asciidoc/latest/macros/keyboard-macro/
-    fn render_keyboard(&self, keys: &[String], dest: &mut String) {
+    fn render_keyboard(&self, keys: &[CowStr<'_>], dest: &mut String) {
         DEFAULT_HTML_RENDERER.render_keyboard(keys, dest);
     }
 
     /// Renders a [menu] UI macro (`menu:menu[submenu > … > item]`).
     ///
+    /// The arguments are [`UiKind::Menu`](crate::inlines::UiKind)'s own
+    /// fields: `menu` is the top-level name, `submenus` holds zero or more
+    /// intermediate names outermost-first, and `menuitem` is the final item
+    /// (`None` renders a bare menu reference such as `menu:File[]`).
+    /// `context` is where the renderer reads the `icons` document attribute
+    /// to choose the caret between menu levels.
+    ///
     /// The renderer should write an appropriate rendering to `dest`.
     ///
     /// [menu]: https://docs.asciidoctor.org/asciidoc/latest/macros/ui-macros/
-    fn render_menu(&self, params: &MenuRenderParams, dest: &mut String) {
-        DEFAULT_HTML_RENDERER.render_menu(params, dest);
+    fn render_menu(
+        &self,
+        menu: &str,
+        submenus: &[CowStr<'_>],
+        menuitem: Option<&str>,
+        context: &RenderContext,
+        dest: &mut String,
+    ) {
+        DEFAULT_HTML_RENDERER.render_menu(menu, submenus, menuitem, context, dest);
     }
 
     /// Renders the inline reference produced by a [`footnote`] macro.
@@ -269,18 +324,31 @@ pub trait InlineSubstitutionRenderer: Debug {
     /// document's footnote list); this method renders only the superscript
     /// marker that appears in the flow of text and links to the footnote.
     ///
-    /// See [`FootnoteRenderParams`] for the three cases the renderer must
-    /// handle (a defining occurrence, a reference to an earlier footnote, and
-    /// an unresolved reference).
+    /// There are three cases the renderer must distinguish, all readable off
+    /// the node:
+    ///
+    /// * A *defining* occurrence ([`is_reference`] is `false`): the footnote
+    ///   introduces new text. It always carries its
+    ///   [`number`](crate::inlines::Footnote::number), and when it was given an
+    ///   [`id`](crate::inlines::Footnote::id) the marker takes an anchor of its
+    ///   own.
+    /// * A *reference* to an earlier footnote ([`is_reference`] is `true`,
+    ///   `number` is `Some`): a later occurrence (`footnote:id[]`) reusing an
+    ///   existing footnote's number, with no anchor of its own.
+    /// * An *unresolved* reference ([`is_reference`] is `true`, `number` is
+    ///   `None`): the ID was never defined, and the renderer should emit a
+    ///   visible error marker built from the node's own `id`.
+    ///
+    /// [`is_reference`]: crate::inlines::Footnote::is_reference
     ///
     /// [`footnote`]: https://docs.asciidoctor.org/asciidoc/latest/macros/footnote/
-    fn render_footnote(&self, params: &FootnoteRenderParams, dest: &mut String) {
-        DEFAULT_HTML_RENDERER.render_footnote(params, dest);
+    fn render_footnote(&self, footnote: &Footnote<'_>, dest: &mut String) {
+        DEFAULT_HTML_RENDERER.render_footnote(footnote, dest);
     }
 }
 
 /// Specifies which special character is being replaced in a call to
-/// [`InlineSubstitutionRenderer::render_special_character`].
+/// [`InlineRenderer::render_special_character`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SpecialCharacter {
     /// Replace `<` character.
@@ -385,112 +453,6 @@ pub enum CharacterReplacementType {
     CharacterReference(String),
 }
 
-/// Provides parsed parameters for an image to be rendered.
-#[derive(Clone, Debug)]
-pub struct ImageRenderParams<'a> {
-    /// Target (the reference to the image).
-    pub target: &'a str,
-
-    /// Alt text (either explicitly set or defaulted).
-    pub alt: String,
-
-    /// Width. The data type is not checked; this may be any string.
-    pub width: Option<&'a str>,
-
-    /// Height. The data type is not checked; this may be any string.
-    pub height: Option<&'a str>,
-
-    /// Attribute list.
-    pub attrlist: &'a Attrlist<'a>,
-
-    /// The document state as of the point in the document this element came
-    /// from — where a renderer finds document settings such as an image
-    /// directory. See [`RenderContext`].
-    pub context: &'a RenderContext,
-}
-
-/// Provides parsed parameters for an icon to be rendered.
-#[derive(Clone, Debug)]
-pub struct IconRenderParams<'a> {
-    /// Target (the reference to the image).
-    pub target: &'a str,
-
-    /// Alt text (either explicitly set or defaulted).
-    pub alt: String,
-
-    /// Size. The data type is not checked; this may be any string.
-    pub size: Option<&'a str>,
-
-    /// Attribute list.
-    pub attrlist: &'a Attrlist<'a>,
-
-    /// The document state as of the point in the document this element came
-    /// from — where a renderer finds document settings such as an image
-    /// directory. See [`RenderContext`].
-    pub context: &'a RenderContext,
-}
-
-/// Provides parsed parameters for an icon to be rendered.
-#[derive(Clone, Debug)]
-pub struct LinkRenderParams<'a> {
-    /// Target (the target of this link).
-    pub target: String,
-
-    /// Link text.
-    pub link_text: String,
-
-    /// Roles (CSS classes) for this link not specified in the attrlist.
-    pub extra_roles: Vec<&'a str>,
-
-    /// Target window selection (passed through to `window` function in HTML).
-    pub window: Option<&'a str>,
-
-    /// Attribute list.
-    pub attrlist: &'a Attrlist<'a>,
-
-    /// The document state as of the point in the document this element came
-    /// from — where a renderer finds document settings such as an image
-    /// directory. See [`RenderContext`].
-    pub context: &'a RenderContext,
-}
-
-/// Provides parameters for rendering a [callout] number.
-///
-/// [callout]: https://docs.asciidoctor.org/asciidoc/latest/verbatim/callouts/
-#[derive(Clone, Debug)]
-pub struct CalloutRenderParams<'a> {
-    /// The callout number to display. For automatically-numbered callouts
-    /// (`<.>`), this is the resolved sequential number.
-    pub number: &'a str,
-
-    /// The guard surrounding the callout in the source. This controls whether
-    /// (and how) the line-comment or XML-comment characters that hide the
-    /// callout in the raw source are preserved in the output when icons are not
-    /// enabled.
-    pub guard: CalloutGuard<'a>,
-
-    /// The document state as of the point in the document this callout came
-    /// from. The renderer reads the `icons`, `iconsdir`, and `icontype`
-    /// document attributes from it to decide how to render the callout. See
-    /// [`RenderContext`].
-    pub context: &'a RenderContext,
-}
-
-/// Describes the characters that guard (hide) a callout number in verbatim
-/// source.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum CalloutGuard<'a> {
-    /// A line-comment (or absent) guard. Holds the line-comment prefix that
-    /// precedes the callout in the source (e.g. `# `), or an empty string when
-    /// the callout is not tucked behind a line comment. When icons are not
-    /// enabled, the prefix is preserved ahead of the rendered callout number.
-    LineComment(&'a str),
-
-    /// An XML comment guard (`<!--N-->`). When icons are not enabled, the XML
-    /// comment delimiters are preserved around the rendered callout number.
-    Xml,
-}
-
 /// Provides parameters for rendering a cross-reference.
 #[derive(Clone, Debug)]
 pub struct XrefRenderParams<'a> {
@@ -528,86 +490,33 @@ pub struct XrefRenderParams<'a> {
     pub resolved: Option<&'a ResolvedReference>,
 }
 
-/// Provides parameters for rendering an [index term].
+/// Joins a slice of [`CowStr`]s with `sep`.
 ///
-/// [index term]: https://docs.asciidoctor.org/asciidoc/latest/sections/user-index/
-#[derive(Clone, Debug)]
-pub struct IndexTermRenderParams<'a> {
-    /// For a *flow* (visible) index term (`((term))` or `indexterm2:[term]`),
-    /// the already-substituted primary term text to display in the flow of
-    /// text. `None` for a *concealed* index term (`(((p, s, t)))` or
-    /// `indexterm:[p, s, t]`), which produces no visible output.
-    pub visible_term: Option<&'a str>,
+/// The node fields this renderer receives (a keyboard macro's keys, a menu's
+/// submenu path) are `CowStr` slices rather than `String` ones, so that the
+/// fold hands them over exactly as the node holds them instead of
+/// materializing a `Vec<String>` for every such node. `[T]::join` needs
+/// `Borrow<str>`, which `CowStr` does not implement, so the borrow is taken
+/// explicitly here.
+fn join_cow_strs(parts: &[CowStr<'_>], sep: &str) -> String {
+    parts
+        .iter()
+        .map(CowStr::as_ref)
+        .collect::<Vec<&str>>()
+        .join(sep)
 }
 
-/// Provides parameters for rendering a [menu] UI macro.
-///
-/// [menu]: https://docs.asciidoctor.org/asciidoc/latest/macros/ui-macros/
-#[derive(Clone, Debug)]
-pub struct MenuRenderParams<'a> {
-    /// The top-level menu name.
-    pub menu: &'a str,
-
-    /// Zero or more intermediate submenu names, in order from outermost to
-    /// innermost.
-    pub submenus: &'a [String],
-
-    /// The final menu item, if any. `None` renders a bare menu reference (a
-    /// `menu:File[]` with no items).
-    pub menuitem: Option<&'a str>,
-
-    /// The document state as of the point in the document this menu reference
-    /// came from, used to read the `icons` document attribute when choosing
-    /// how to render the caret between menu levels. See [`RenderContext`].
-    pub context: &'a RenderContext,
-}
-
-/// Provides parameters for rendering the inline marker of a [`footnote`] macro.
-///
-/// There are three cases the renderer must distinguish:
-///
-/// * A *defining* occurrence (`index` is `Some`, `is_reference` is `false`):
-///   the footnote introduces new text. The marker carries the footnote number
-///   and, when the footnote was given an ID, an `id` of its own.
-/// * A *reference* to an earlier footnote (`index` is `Some`, `is_reference` is
-///   `true`): a later occurrence (`footnote:id[]`) that reuses an existing
-///   footnote's number.
-/// * An *unresolved* reference (`index` is `None`, `is_reference` is `true`): a
-///   reference whose ID was never defined; the renderer emits a visible error
-///   marker built from [`text`](Self::text).
-///
-/// [`footnote`]: https://docs.asciidoctor.org/asciidoc/latest/macros/footnote/
-#[derive(Clone, Debug)]
-pub struct FootnoteRenderParams<'a> {
-    /// The footnote's number, or `None` for an unresolved reference. Normally a
-    /// consecutive integer, but the `footnote-number` counter honors any seed
-    /// the document sets, so it is passed through as text.
-    pub index: Option<&'a str>,
-
-    /// The footnote's own ID, used only on a defining occurrence to produce the
-    /// `id="_footnote_<id>"` attribute on the marker.
-    pub id: Option<&'a str>,
-
-    /// `true` when this occurrence references an existing footnote (or fails to
-    /// resolve one); `false` for the defining occurrence.
-    pub is_reference: bool,
-
-    /// For an unresolved reference, the text to show inside the error marker
-    /// (the unresolved ID). Ignored in the other cases.
-    pub text: &'a str,
-}
-
-/// Implementation of [`InlineSubstitutionRenderer`] that renders substitutions
+/// Implementation of [`InlineRenderer`] that renders substitutions
 /// for common HTML-based applications.
 #[derive(Debug)]
-pub struct HtmlSubstitutionRenderer {}
+pub struct HtmlInlineRenderer {}
 
-/// The shared HTML renderer to which [`InlineSubstitutionRenderer`]'s default
+/// The shared HTML renderer to which [`InlineRenderer`]'s default
 /// method bodies delegate. It is stateless, so a single `const` instance serves
 /// every delegation.
-const DEFAULT_HTML_RENDERER: HtmlSubstitutionRenderer = HtmlSubstitutionRenderer {};
+const DEFAULT_HTML_RENDERER: HtmlInlineRenderer = HtmlInlineRenderer {};
 
-impl HtmlSubstitutionRenderer {
+impl HtmlInlineRenderer {
     /// Resolve an image target to a `src`/`data` reference, honoring a
     /// macro-level `imagesdir` attribute.
     ///
@@ -617,16 +526,132 @@ impl HtmlSubstitutionRenderer {
     /// `imagesdir`. As with the document attribute, an absolute-URL target
     /// ignores the base entirely.
     ///
-    /// [`image_uri`]: InlineSubstitutionRenderer::image_uri
-    fn image_src(&self, target: &str, attrlist: &Attrlist, context: &RenderContext) -> String {
+    /// `restored_target_ranges` names the byte ranges of `target` restored
+    /// from a masked passthrough or STEM expression (see
+    /// [`Image::restored_target_ranges`](crate::inlines::Image)). Resolution
+    /// runs with
+    /// each of them — and each restored range of the macro-level `imagesdir`
+    /// value — replaced by an index-keyed `\u{96}`*n*`\u{97}` token, the
+    /// bodies spliced back into the resolved path afterwards. The sentinel is
+    /// chosen so `web_path` only ever sees an opaque token (no space to
+    /// percent-encode, no backslash to posixify, no `/` or `.` for the
+    /// segment arithmetic to read), and `Passthroughs::restore_to`
+    /// splices the body into the finished `src` — so a fold over restored
+    /// values reproduces the same bytes, identically on every platform.
+    ///
+    /// [`image_uri`]: InlineRenderer::image_uri
+    fn image_src(
+        &self,
+        target: &str,
+        restored_target_ranges: &[std::ops::Range<usize>],
+        attrlist: &Attrlist,
+        context: &RenderContext,
+    ) -> String {
         match attrlist.named_attribute("imagesdir") {
-            Some(imagesdir) => normalize_web_path(target, context, Some(imagesdir.value()), true),
-            None => self.image_uri(target, context, None),
+            Some(imagesdir) => {
+                let dir_ranges = imagesdir.restored_value_ranges();
+
+                if restored_target_ranges.is_empty() && dir_ranges.is_empty() {
+                    return normalize_web_path(target, context, Some(imagesdir.value()), true);
+                }
+
+                // The two masked values flow into one joined path, so their
+                // tokens share one numbering — the directory's first, since
+                // `web_path` prepends the start path and the splice is one
+                // left-to-right pass.
+                let (masked_dir, mut bodies) =
+                    mask_restored_ranges(imagesdir.value(), dir_ranges, 0);
+
+                let (masked_target, target_bodies) =
+                    mask_restored_ranges(target, restored_target_ranges, bodies.len());
+
+                bodies.extend(target_bodies);
+
+                splice_restored_bodies(
+                    &normalize_web_path(&masked_target, context, Some(&masked_dir), true),
+                    &bodies,
+                )
+            }
+
+            None => {
+                if restored_target_ranges.is_empty() {
+                    return self.image_uri(target, context, None);
+                }
+
+                let (masked_target, bodies) =
+                    mask_restored_ranges(target, restored_target_ranges, 0);
+
+                splice_restored_bodies(&self.image_uri(&masked_target, context, None), &bodies)
+            }
         }
     }
 }
 
-impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
+/// Replaces each of `ranges` — ascending, non-overlapping byte ranges of
+/// `value` — with an index-keyed `\u{96}`*n*`\u{97}` token, numbered from
+/// `first_index`, returning the masked text alongside the bodies the tokens
+/// stand for.
+///
+/// The token is an opaque run carrying no space, separator, or dot — the
+/// shape `web_path` resolves cleanly — so [`splice_restored_bodies`] then
+/// restores each body exactly where `Passthroughs::restore_to` splices its
+/// own. A range that does not fall on
+/// `value`'s character boundaries (no caller produces one) is skipped rather
+/// than split.
+fn mask_restored_ranges<'v>(
+    value: &'v str,
+    ranges: &[std::ops::Range<usize>],
+    first_index: usize,
+) -> (String, Vec<&'v str>) {
+    let mut masked = String::with_capacity(value.len());
+    let mut bodies: Vec<&'v str> = Vec::with_capacity(ranges.len());
+    let mut cursor = 0usize;
+
+    for range in ranges {
+        let Some(body) = value.get(range.start..range.end) else {
+            continue;
+        };
+
+        masked.push_str(value.get(cursor..range.start).unwrap_or_default());
+        masked.push_str(&format!("\u{96}{n}\u{97}", n = first_index + bodies.len()));
+        bodies.push(body);
+        cursor = range.end;
+    }
+
+    masked.push_str(value.get(cursor..).unwrap_or_default());
+
+    (masked, bodies)
+}
+
+/// Splices each of `bodies` over its own index-keyed `\u{96}`*n*`\u{97}`
+/// token in `resolved`, one left-to-right pass, and returns the result.
+///
+/// Index-keyed exactly as
+/// `Passthroughs::restore_to` is:
+/// each token is sought only in the bytes after the previous splice, so a body
+/// that itself carries sentinel-shaped bytes is never re-matched as a later
+/// token, and a token the resolution dropped (a segment its `..` arithmetic
+/// consumed) is simply not found — the ones after it still restore, keyed by
+/// their own index.
+fn splice_restored_bodies(resolved: &str, bodies: &[&str]) -> String {
+    let mut out = String::with_capacity(resolved.len());
+    let mut rest = resolved;
+
+    for (n, body) in bodies.iter().enumerate() {
+        let token = format!("\u{96}{n}\u{97}");
+
+        if let Some(pos) = rest.find(&token) {
+            out.push_str(rest.get(..pos).unwrap_or_default());
+            out.push_str(body);
+            rest = rest.get(pos + token.len()..).unwrap_or_default();
+        }
+    }
+
+    out.push_str(rest);
+    out
+}
+
+impl InlineRenderer for HtmlInlineRenderer {
     fn render_special_character(&self, type_: SpecialCharacter, dest: &mut String) {
         match type_ {
             SpecialCharacter::Lt => {
@@ -641,20 +666,19 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         }
     }
 
-    fn render_quoted_substitution(
+    fn render_styled(
         &self,
         type_: QuoteType,
         _scope: QuoteScope,
-        attrlist: Option<Attrlist<'_>>,
+        attrlist: &Attrlist<'_>,
         mut id: Option<String>,
         body: &str,
         dest: &mut String,
     ) {
-        let mut roles: Vec<&str> = attrlist.as_ref().map(|a| a.roles()).unwrap_or_default();
+        let mut roles: Vec<&str> = attrlist.roles();
 
         if let Some(block_style) = attrlist
-            .as_ref()
-            .and_then(|a| a.nth_attribute(1))
+            .nth_attribute(1)
             .and_then(|attr1| attr1.block_style())
         {
             roles.insert(0, block_style);
@@ -662,8 +686,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
         if id.is_none() {
             id = attrlist
-                .as_ref()
-                .and_then(|a| a.nth_attribute(1))
+                .nth_attribute(1)
                 .and_then(|attr1| attr1.id())
                 .map(|id| id.to_owned())
         }
@@ -675,16 +698,14 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         // than dropping the role.
         if roles.is_empty()
             && id.is_none()
-            && let Some(role) = attrlist
-                .as_ref()
-                .and_then(|a| a.quoted_text_fallback_role())
+            && let Some(role) = attrlist.quoted_text_fallback_role()
         {
             roles.push(role);
         }
 
         match type_ {
             QuoteType::Strong => {
-                wrap_body_in_html_tag(attrlist.as_ref(), "strong", id, roles, body, dest);
+                wrap_body_in_html_tag("strong", id, roles, body, dest);
             }
 
             QuoteType::DoubleQuote => {
@@ -700,34 +721,34 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             }
 
             QuoteType::Monospaced => {
-                wrap_body_in_html_tag(attrlist.as_ref(), "code", id, roles, body, dest);
+                wrap_body_in_html_tag("code", id, roles, body, dest);
             }
 
             QuoteType::Emphasis => {
-                wrap_body_in_html_tag(attrlist.as_ref(), "em", id, roles, body, dest);
+                wrap_body_in_html_tag("em", id, roles, body, dest);
             }
 
             QuoteType::Mark => {
                 if roles.is_empty() && id.is_none() {
-                    wrap_body_in_html_tag(attrlist.as_ref(), "mark", id, roles, body, dest);
+                    wrap_body_in_html_tag("mark", id, roles, body, dest);
                 } else {
-                    wrap_body_in_html_tag(attrlist.as_ref(), "span", id, roles, body, dest);
+                    wrap_body_in_html_tag("span", id, roles, body, dest);
                 }
             }
 
             QuoteType::Superscript => {
-                wrap_body_in_html_tag(attrlist.as_ref(), "sup", id, roles, body, dest);
+                wrap_body_in_html_tag("sup", id, roles, body, dest);
             }
 
             QuoteType::Subscript => {
-                wrap_body_in_html_tag(attrlist.as_ref(), "sub", id, roles, body, dest);
+                wrap_body_in_html_tag("sub", id, roles, body, dest);
             }
 
             QuoteType::Unquoted => {
                 if roles.is_empty() && id.is_none() {
                     dest.push_str(body);
                 } else {
-                    wrap_body_in_html_tag(attrlist.as_ref(), "span", id, roles, body, dest);
+                    wrap_body_in_html_tag("span", id, roles, body, dest);
                 }
             }
 
@@ -803,9 +824,13 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         dest.push_str("<br>");
     }
 
-    fn render_image(&self, params: &ImageRenderParams, dest: &mut String) {
-        let src = self.image_src(params.target, params.attrlist, params.context);
-        let alt_encoded = encode_attribute_value(params.alt.clone());
+    fn render_image(&self, image: &Image<'_>, context: &RenderContext, dest: &mut String) {
+        let attrlist = &image.attrs;
+        let target = image.target.as_ref();
+        let alt = image.alt.as_deref().unwrap_or_default();
+
+        let src = self.image_src(target, &image.restored_target_ranges, attrlist, context);
+        let alt_encoded = encode_attribute_value(alt.to_owned());
 
         // The dimension attributes (width, height, and title) are shared by the
         // plain `<img>`, the interactive `<object>`, and the `<object>`'s image
@@ -813,29 +838,28 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         // concatenate cleanly after `src`/`alt` (or the `data` attribute).
         let mut dimension_attrs = String::new();
 
-        if let Some(width) = params.width {
+        if let Some(width) = image.width.as_deref() {
             dimension_attrs.push_str(&format!(
                 r#" width="{width}""#,
                 width = encode_attribute_value(width.to_owned())
             ));
         }
 
-        if let Some(height) = params.height {
+        if let Some(height) = image.height.as_deref() {
             dimension_attrs.push_str(&format!(
                 r#" height="{height}""#,
                 height = encode_attribute_value(height.to_owned())
             ));
         }
 
-        if let Some(title) = params.attrlist.named_attribute("title") {
+        if let Some(title) = attrlist.named_attribute("title") {
             dimension_attrs.push_str(&format!(
                 r#" title="{title}""#,
                 title = encode_attribute_value(title.value().to_owned())
             ));
         }
 
-        let format = params
-            .attrlist
+        let format = attrlist
             .named_attribute("format")
             .map(|format| format.value());
 
@@ -843,36 +867,49 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         // (they embed file contents or a live `<object>`), so they only take
         // effect below the `Secure` safe mode. In `Secure` mode an SVG image
         // renders as an ordinary `<img>`, matching Ruby Asciidoctor.
-        let svg_active = (format == Some("svg") || params.target.contains(".svg"))
-            && params.context.safe_mode() < SafeMode::Secure;
+        let svg_active = (format == Some("svg") || target.contains(".svg"))
+            && context.safe_mode() < SafeMode::Secure;
 
         // An inline SVG is embedded verbatim and has no meaningful `src`, so a
         // `link=self` on it is left as the literal `self` rather than resolved
         // to a URI (see `render_icon_or_image`). Every other image form does
         // have a `src` (a data URI or web path) that `link=self` resolves to.
-        let inline_svg = svg_active && params.attrlist.has_option("inline");
+        let inline_svg = svg_active && attrlist.has_option("inline");
 
         let img = if inline_svg {
             // Embed the SVG contents directly. When the contents cannot be read
             // (no handler is registered, or it cannot find the file), fall back
             // to the alt text, mirroring Ruby Asciidoctor.
-            read_svg_contents(&src, params.width, params.height, params.context)
-                .unwrap_or_else(|| format!(r#"<span class="alt">{alt}</span>"#, alt = params.alt))
-        } else if svg_active && params.attrlist.has_option("interactive") {
+            read_svg_contents(
+                &src,
+                image.width.as_deref(),
+                image.height.as_deref(),
+                context,
+            )
+            .unwrap_or_else(|| format!(r#"<span class="alt">{alt}</span>"#, alt = alt))
+        } else if svg_active && attrlist.has_option("interactive") {
             // Render an interactive SVG as an `<object>` element so its
             // embedded scripting and links remain live. A
             // `fallback` image (or, failing that, the alt text) is
             // nested inside for user agents that can't display the
             // object.
-            let fallback = if let Some(fallback) = params.attrlist.named_attribute("fallback") {
-                let fallback_src =
-                    self.image_src(fallback.value(), params.attrlist, params.context);
+            let fallback = if let Some(fallback) = attrlist.named_attribute("fallback") {
+                // A `fallback=` value restored from a masked construct
+                // resolves over its restored ranges masked, exactly as the
+                // target does — the one other value this renderer runs
+                // through `web_path`.
+                let fallback_src = self.image_src(
+                    fallback.value(),
+                    fallback.restored_value_ranges(),
+                    attrlist,
+                    context,
+                );
                 format!(
                     r#"<img src="{fallback_src}" alt="{alt_encoded}"{dimension_attrs}>"#,
                     fallback_src = encode_attribute_value(fallback_src)
                 )
             } else {
-                format!(r#"<span class="alt">{alt}</span>"#, alt = params.alt)
+                format!(r#"<span class="alt">{alt}</span>"#, alt = alt)
             };
 
             format!(
@@ -892,10 +929,10 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         // embedded), so a `link=self` resolving to it is author-supplied and
         // subject to the stricter SVG-data-URI check; a plain path target is
         // resolved to a web path or a trusted embedded `data-uri`.
-        let self_href_from_uri_target = is_uri_ish(params.target);
+        let self_href_from_uri_target = is_uri_ish(target);
 
         render_icon_or_image(
-            params.attrlist,
+            attrlist,
             &img,
             "image",
             link_self_href,
@@ -946,11 +983,27 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         normalized
     }
 
-    fn render_icon(&self, params: &IconRenderParams, dest: &mut String) {
-        let src = self.icon_uri(params.target, params.attrlist, params.context);
+    fn render_icon(&self, icon: &Image<'_>, context: &RenderContext, dest: &mut String) {
+        let attrlist = &icon.attrs;
+        let target = icon.target.as_ref();
+        let alt = icon.alt.as_deref().unwrap_or_default();
 
-        let img = if params.context.is_attribute_set("icons") {
-            let icons = params.context.attribute_value("icons");
+        // As in `render_image`, a target restored from a masked construct
+        // resolves with its restored ranges masked — the whole `icon_uri`
+        // computation included, since its extension probe (`has_extname`)
+        // must read the same opaque, dot-free sentinel bytes `web_path`'s own
+        // probe does — and the bodies splice back in afterwards.
+        let src = if icon.restored_target_ranges.is_empty() {
+            self.icon_uri(target, attrlist, context)
+        } else {
+            let (masked_target, bodies) =
+                mask_restored_ranges(target, &icon.restored_target_ranges, 0);
+
+            splice_restored_bodies(&self.icon_uri(&masked_target, attrlist, context), &bodies)
+        };
+
+        let img = if context.is_attribute_set("icons") {
+            let icons = context.attribute_value("icons");
             if let Some(icons) = icons.as_maybe_str()
                 && icons == "font"
             {
@@ -965,23 +1018,23 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                     "fa".to_owned(),
                     format!(
                         "fa-{target}",
-                        target = encode_attribute_value(params.target.to_owned())
+                        target = encode_attribute_value(target.to_owned())
                     ),
                 ];
 
-                if let Some(size) = params.attrlist.named_or_positional_attribute("size", 1) {
+                if let Some(size) = attrlist.named_or_positional_attribute("size", 1) {
                     i_class_attrs.push(format!(
                         "fa-{size}",
                         size = encode_attribute_value(size.value().to_owned())
                     ));
                 }
 
-                if let Some(flip) = params.attrlist.named_attribute("flip") {
+                if let Some(flip) = attrlist.named_attribute("flip") {
                     i_class_attrs.push(format!(
                         "fa-flip-{flip}",
                         flip = encode_attribute_value(flip.value().to_owned())
                     ));
-                } else if let Some(rotate) = params.attrlist.named_attribute("rotate") {
+                } else if let Some(rotate) = attrlist.named_attribute("rotate") {
                     i_class_attrs.push(format!(
                         "fa-rotate-{rotate}",
                         rotate = encode_attribute_value(rotate.value().to_owned())
@@ -991,7 +1044,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                 format!(
                     r##"<i class="{i_class_attr_val}"{title_attr}></i>"##,
                     i_class_attr_val = i_class_attrs.join(" "),
-                    title_attr = if let Some(title) = params.attrlist.named_attribute("title") {
+                    title_attr = if let Some(title) = attrlist.named_attribute("title") {
                         format!(
                             r#" title="{title}""#,
                             title = encode_attribute_value(title.value().to_owned())
@@ -1005,25 +1058,25 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                     format!(r#"src="{src}""#, src = encode_attribute_value(src.clone())),
                     format!(
                         r#"alt="{alt}""#,
-                        alt = encode_attribute_value(params.alt.to_string())
+                        alt = encode_attribute_value(alt.to_string())
                     ),
                 ];
 
-                if let Some(width) = params.attrlist.named_attribute("width") {
+                if let Some(width) = attrlist.named_attribute("width") {
                     attrs.push(format!(
                         r#"width="{width}""#,
                         width = encode_attribute_value(width.value().to_owned())
                     ));
                 }
 
-                if let Some(height) = params.attrlist.named_attribute("height") {
+                if let Some(height) = attrlist.named_attribute("height") {
                     attrs.push(format!(
                         r#"height="{height}""#,
                         height = encode_attribute_value(height.value().to_owned())
                     ));
                 }
 
-                if let Some(title) = params.attrlist.named_attribute("title") {
+                if let Some(title) = attrlist.named_attribute("title") {
                     attrs.push(format!(
                         r#"title="{title}""#,
                         title = encode_attribute_value(title.value().to_owned())
@@ -1037,15 +1090,15 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
                 )
             }
         } else {
-            format!("[{alt}&#93;", alt = params.alt)
+            format!("[{alt}&#93;", alt = alt)
         };
 
         // `src` is only a real image URI in the image-icon branch (icons
         // enabled and not font-based); the font (`<i>`) and text
         // (`[alt]`) branches have no `src`, so a `link=self` on them
         // stays literal (see `render_icon_or_image`).
-        let link_self_href = if params.context.is_attribute_set("icons")
-            && params.context.attribute_value("icons").as_maybe_str() != Some("font")
+        let link_self_href = if context.is_attribute_set("icons")
+            && context.attribute_value("icons").as_maybe_str() != Some("font")
         {
             Some(src.as_str())
         } else {
@@ -1055,10 +1108,10 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         // As in `render_image`: a URI-ish target passes through to the icon
         // `src` verbatim, so a `link=self` resolving to it is author-supplied
         // and gets the stricter SVG-data-URI check.
-        let self_href_from_uri_target = is_uri_ish(params.target);
+        let self_href_from_uri_target = is_uri_ish(target);
 
         render_icon_or_image(
-            params.attrlist,
+            attrlist,
             &img,
             "icon",
             link_self_href,
@@ -1067,11 +1120,15 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         );
     }
 
-    fn render_link(&self, params: &LinkRenderParams, dest: &mut String) {
-        let id = params.attrlist.id();
+    fn render_link(&self, link: &Ref<'_>, link_text: &str, dest: &mut String) {
+        let attrlist = &link.attrs;
+        let id = attrlist.id();
 
-        let mut roles = params.extra_roles.clone();
-        let mut attrlist_roles = params.attrlist.roles().clone();
+        // The node's own roles (the `bare` class an auto-recognized URL picks
+        // up) come first, then whatever the display text's attribute list
+        // spelled out.
+        let mut roles: Vec<&str> = link.roles.iter().map(CowStr::as_ref).collect();
+        let mut attrlist_roles = attrlist.roles().clone();
         roles.append(&mut attrlist_roles);
 
         let link = format!(
@@ -1082,21 +1139,32 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             // and let an author inject further attributes (e.g. an event
             // handler), so escape the quote delimiter here — mirroring the
             // image `alt`/`title` handling.
-            target = encode_attribute_value(params.target.clone()),
+            target = encode_attribute_value(link.target.to_string()),
+            // The `id` and each role are author-supplied for the same reason
+            // the `target` is, and reach this attribute by the same route, so
+            // they take the same escape — as `render_xref`'s own roles and the
+            // icon branch's `class` fragments already do.
             id = if let Some(id) = id {
-                format!(r#" id="{id}""#)
+                format!(r#" id="{id}""#, id = encode_attribute_value(id.to_owned()))
             } else {
                 "".to_owned()
             },
             class = if roles.is_empty() {
                 "".to_owned()
             } else {
-                format!(r#" class="{roles}""#, roles = roles.join(" "))
+                format!(
+                    r#" class="{roles}""#,
+                    roles = roles
+                        .iter()
+                        .map(|role| encode_attribute_value((*role).to_owned()))
+                        .collect::<Vec<String>>()
+                        .join(" ")
+                )
             },
             // Mirrors Asciidoctor's HTML5 converter: `title="#{node.attr 'title'}"`
             // is emitted (after the class) when the link carries a `title`
             // attribute.
-            title = if let Some(title) = params.attrlist.named_attribute("title") {
+            title = if let Some(title) = attrlist.named_attribute("title") {
                 format!(
                     r#" title="{title}""#,
                     title = encode_attribute_value(title.value().to_owned())
@@ -1104,8 +1172,8 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             } else {
                 "".to_owned()
             },
-            link_constraint_attrs = link_constraint_attrs(params.attrlist, params.window),
-            link_text = params.link_text,
+            link_constraint_attrs = link_constraint_attrs(attrlist, link.window.as_deref()),
+            link_text = link_text,
         );
 
         dest.push_str(&link);
@@ -1203,9 +1271,8 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         }
     }
 
-    fn render_callout(&self, params: &CalloutRenderParams, dest: &mut String) {
-        let n = params.number;
-        let context = params.context;
+    fn render_callout(&self, callout: &Callout<'_>, context: &RenderContext, dest: &mut String) {
+        let n = callout.number.as_ref();
 
         if context.attribute_value("icons").as_maybe_str() == Some("font") {
             dest.push_str(&format!(
@@ -1223,24 +1290,32 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 
             dest.push_str(&format!(r#"<img src="{src}" alt="{n}">"#));
         } else {
-            match params.guard {
+            match &callout.guard {
                 CalloutGuard::Xml => {
                     dest.push_str(&format!(r#"&lt;!--<b class="conum">({n})</b>--&gt;"#));
                 }
 
                 CalloutGuard::LineComment(prefix) => {
-                    dest.push_str(prefix);
+                    dest.push_str(prefix.as_ref());
                     dest.push_str(&format!(r#"<b class="conum">({n})</b>"#));
                 }
             }
         }
     }
 
-    fn render_index_term(&self, params: &IndexTermRenderParams, dest: &mut String) {
+    fn render_index_term(
+        &self,
+        _index_term: &IndexTerm<'_>,
+        visible_term: Option<&str>,
+        dest: &mut String,
+    ) {
         // The HTML5 converter does not generate an index, so a concealed index
         // term produces no output and a flow index term renders only its
-        // (already-substituted) visible term text.
-        if let Some(term) = params.visible_term {
+        // visible term text. The node itself is unused *here* — it is passed
+        // so that a backend which does build an index has somewhere to read
+        // the term from; see the trait method's own docs for what that node
+        // does and does not carry today.
+        if let Some(term) = visible_term {
             dest.push_str(term);
         }
     }
@@ -1249,7 +1324,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
         dest.push_str(&format!(r#"<b class="button">{text}</b>"#));
     }
 
-    fn render_keyboard(&self, keys: &[String], dest: &mut String) {
+    fn render_keyboard(&self, keys: &[CowStr<'_>], dest: &mut String) {
         if let [key] = keys {
             dest.push_str(&format!("<kbd>{key}</kbd>"));
         } else {
@@ -1259,22 +1334,27 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             // split, not how the sequence is displayed.
             dest.push_str(&format!(
                 r#"<span class="keyseq"><kbd>{keys}</kbd></span>"#,
-                keys = keys.join("</kbd>+<kbd>")
+                keys = join_cow_strs(keys, "</kbd>+<kbd>")
             ));
         }
     }
 
-    fn render_menu(&self, params: &MenuRenderParams, dest: &mut String) {
-        let caret = if params.context.attribute_value("icons").as_maybe_str() == Some("font") {
+    fn render_menu(
+        &self,
+        menu: &str,
+        submenus: &[CowStr<'_>],
+        menuitem: Option<&str>,
+        context: &RenderContext,
+        dest: &mut String,
+    ) {
+        let caret = if context.attribute_value("icons").as_maybe_str() == Some("font") {
             r#"&#160;<i class="fa fa-angle-right caret"></i> "#
         } else {
             r#"&#160;<b class="caret">&#8250;</b> "#
         };
 
-        let menu = params.menu;
-
-        if params.submenus.is_empty() {
-            if let Some(menuitem) = params.menuitem {
+        if submenus.is_empty() {
+            if let Some(menuitem) = menuitem {
                 dest.push_str(&format!(
                     r#"<span class="menuseq"><b class="menu">{menu}</b>{caret}<b class="menuitem">{menuitem}</b></span>"#
                 ));
@@ -1285,15 +1365,31 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             let submenu_joiner = format!(r#"</b>{caret}<b class="submenu">"#);
             dest.push_str(&format!(
                 r#"<span class="menuseq"><b class="menu">{menu}</b>{caret}<b class="submenu">{submenus}</b>{caret}<b class="menuitem">{menuitem}</b></span>"#,
-                submenus = params.submenus.join(&submenu_joiner),
-                menuitem = params.menuitem.unwrap_or_default(),
+                submenus = join_cow_strs(submenus, &submenu_joiner),
+                menuitem = menuitem.unwrap_or_default(),
             ));
         }
     }
 
-    fn render_footnote(&self, params: &FootnoteRenderParams, dest: &mut String) {
-        match params.index {
-            Some(index) if params.is_reference => {
+    fn render_footnote(&self, footnote: &Footnote<'_>, dest: &mut String) {
+        // The three cases `render_footnote`'s own documentation names, read
+        // off the node. A defining occurrence always carries its number (see
+        // `build_footnote_node`) and folds its own id into the marker's
+        // anchor; a reference either reuses an existing footnote's number —
+        // never folding an id, matching the string replacer, which rendered a
+        // reference's id attribute only for the *defining* occurrence — or,
+        // unresolved, displays its own id in an error marker.
+        let (index, id, text): (Option<&str>, Option<&str>, &str) = if footnote.is_reference {
+            match footnote.number.as_deref() {
+                Some(number) => (Some(number), None, ""),
+                None => (None, None, footnote.id.as_deref().unwrap_or("")),
+            }
+        } else {
+            (footnote.number.as_deref(), footnote.id.as_deref(), "")
+        };
+
+        match index {
+            Some(index) if footnote.is_reference => {
                 // A reference to an already-defined footnote reuses its number
                 // but gets no anchor of its own.
                 dest.push_str(&format!(
@@ -1304,8 +1400,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             Some(index) => {
                 // A defining occurrence. When the footnote carries an ID, the
                 // marker is given a matching anchor so it can be linked to.
-                let id_attr = params
-                    .id
+                let id_attr = id
                     .map(|id| format!(r#" id="_footnote_{id}""#))
                     .unwrap_or_default();
 
@@ -1317,8 +1412,7 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
             None => {
                 // An unresolved reference: the ID was never defined.
                 dest.push_str(&format!(
-                    r#"<sup class="footnoteref red" title="Unresolved footnote reference.">[{text}]</sup>"#,
-                    text = params.text
+                    r#"<sup class="footnoteref red" title="Unresolved footnote reference.">[{text}]</sup>"#
                 ));
             }
         }
@@ -1338,17 +1432,20 @@ impl InlineSubstitutionRenderer for HtmlSubstitutionRenderer {
 /// deliberately leaves them unescaped for a passthrough attribute list, so
 /// re-escaping here would double-escape the former and diverge on the latter.
 fn push_attribute_value(dest: &mut String, value: &str) {
-    for ch in value.chars() {
-        if ch == '"' {
-            dest.push_str("&quot;");
-        } else {
-            dest.push(ch);
-        }
+    // The overwhelmingly common value carries no `"` at all and is appended
+    // as one block copy; only a value that does pays the per-segment walk.
+    let mut rest = value;
+
+    while let Some(quote) = rest.find('"') {
+        dest.push_str(rest.get(..quote).unwrap_or_default());
+        dest.push_str("&quot;");
+        rest = rest.get(quote + 1..).unwrap_or_default();
     }
+
+    dest.push_str(rest);
 }
 
 fn wrap_body_in_html_tag(
-    _attrlist: Option<&Attrlist<'_>>,
     tag: &'static str,
     id: Option<String>,
     roles: Vec<&str>,
@@ -1443,7 +1540,19 @@ fn render_icon_or_image(
     roles.insert(0, type_);
 
     dest.push_str(r#"<span class=""#);
-    dest.push_str(&roles.join(" "));
+
+    // The wrapper's own `type_` is a literal, but every other role here — an
+    // attribute-list role, and a `float=` value — is author-supplied and takes
+    // the same quote escape the `href` above and the icon branch's own `class`
+    // fragments take.
+    dest.push_str(
+        &roles
+            .iter()
+            .map(|role| encode_attribute_value((*role).to_owned()))
+            .collect::<Vec<String>>()
+            .join(" "),
+    );
+
     dest.push_str(r#"">"#);
     dest.push_str(&img);
     dest.push_str("</span>");
@@ -1824,7 +1933,15 @@ fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&str>) -> Strin
             "".to_string()
         };
 
-        format!(r#" target="{window}"{rel_noopener}"#)
+        // The `window` is author-supplied (a `window=` attribute, or the `^`
+        // suffix's hard-coded `_blank`), so the quote delimiter is escaped
+        // here for the same reason the `href` and `title` escape it. The
+        // `_blank` comparison above reads the value as written, before the
+        // escape, so a `rel="noopener"` decision is unaffected.
+        format!(
+            r#" target="{window}"{rel_noopener}"#,
+            window = encode_attribute_value(window.to_owned())
+        )
     } else if let Some(rel) = rel {
         format!(r#" rel="{rel}""#)
     } else {
@@ -1834,7 +1951,50 @@ fn link_constraint_attrs(attrlist: &Attrlist<'_>, window: Option<&str>) -> Strin
 
 #[cfg(test)]
 mod tests {
-    use super::{data_uri_mimetype, drop_anchor_tags, encode_html_attribute, extname, has_extname};
+    use super::{
+        HtmlInlineRenderer, InlineRenderer, QuoteScope, QuoteType, data_uri_mimetype,
+        drop_anchor_tags, encode_html_attribute, extname, has_extname,
+    };
+    use crate::{Span, attributes::Attrlist};
+
+    #[test]
+    fn a_mark_carrying_an_id_or_a_role_renders_as_a_span() {
+        // Asciidoctor renders `#text#` as `<mark>`, but a *styled* one — given
+        // an id or a role — as a `<span>` instead. The builder reaches the same
+        // outcome one step earlier, by classifying a `#…#` that carries an
+        // attribute list as `Unquoted` rather than `Mark` (see
+        // `style_variant_of`), so no parse ever hands this method a `Mark` with
+        // either. That does not make the rule dead: `render_styled` is public,
+        // and a caller folding a node it built itself can present exactly that
+        // combination — so the reference backend has to answer for it, and this
+        // pins the answer.
+        let renderer = HtmlInlineRenderer {};
+        let attrlist = Attrlist::empty(Span::new(""));
+
+        let mut dest = String::new();
+        renderer.render_styled(
+            QuoteType::Mark,
+            QuoteScope::Constrained,
+            &attrlist,
+            Some("anchor".to_owned()),
+            "text",
+            &mut dest,
+        );
+        assert_eq!(dest, r#"<span id="anchor">text</span>"#);
+
+        // With neither an id nor a role it is a plain `<mark>`, which is the
+        // branch every parsed `#text#` takes.
+        let mut dest = String::new();
+        renderer.render_styled(
+            QuoteType::Mark,
+            QuoteScope::Constrained,
+            &attrlist,
+            None,
+            "text",
+            &mut dest,
+        );
+        assert_eq!(dest, "<mark>text</mark>");
+    }
 
     #[test]
     fn extname_extracts_final_segment_extension() {

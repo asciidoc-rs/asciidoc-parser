@@ -159,7 +159,7 @@ include::example$quote.adoc[tag=para2]
     assert_eq!(quote.attribution(), Some("Captain James T. Kirk"));
     assert_eq!(quote.citetitle(), Some("Star Trek IV: The Voyage Home"));
     assert_eq!(
-        quote.content().unwrap().rendered(),
+        quote.content().unwrap().rendered_html(),
         "Everybody remember where we parked."
     );
 }

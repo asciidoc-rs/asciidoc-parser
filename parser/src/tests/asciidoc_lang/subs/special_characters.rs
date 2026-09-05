@@ -39,7 +39,7 @@ The special characters substitution step searches for three characters (`<`, `>`
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "Replace this &lt; with lt");
+        assert_eq!(sb1.content().rendered_html(), "Replace this &lt; with lt");
     }
 
     #[test]
@@ -58,7 +58,7 @@ The special characters substitution step searches for three characters (`<`, `>`
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "Replace this &gt; with gt");
+        assert_eq!(sb1.content().rendered_html(), "Replace this &gt; with gt");
     }
 
     #[test]
@@ -78,7 +78,10 @@ The special characters substitution step searches for three characters (`<`, `>`
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "Replace this &amp; with amp");
+        assert_eq!(
+            block1.content().rendered_html(),
+            "Replace this &amp; with amp"
+        );
     }
 }
 
@@ -116,7 +119,7 @@ mod default_special_characters_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(sb1.content().rendered(), "Goodbye &lt; hello");
+        assert_eq!(sb1.content().rendered_html(), "Goodbye &lt; hello");
     }
 
     #[test]
@@ -136,7 +139,7 @@ mod default_special_characters_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc < def");
+        assert_eq!(block1.content().rendered_html(), "abc < def");
     }
 
     #[test]
@@ -164,7 +167,7 @@ mod default_special_characters_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "Hello &amp; goodbye.");
+        assert_eq!(block1.content().rendered_html(), "Hello &amp; goodbye.");
     }
 
     #[test]
@@ -199,7 +202,7 @@ mod default_special_characters_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "foo &gt; bar");
+        assert_eq!(block1.content().rendered_html(), "foo &gt; bar");
     }
 
     #[test]
@@ -220,7 +223,7 @@ mod default_special_characters_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"Click <span class="image"><img src="pause.png" alt="pause" title="Pause &amp; Resume"></span> when you need a break."#
         );
     }
@@ -243,7 +246,7 @@ mod default_special_characters_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"Click Pause & Resume when you need a break."#
         );
     }
@@ -273,7 +276,7 @@ mod default_special_characters_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "Opened &amp; closed!");
+        assert_eq!(block1.content().rendered_html(), "Opened &amp; closed!");
     }
 
     #[test]
@@ -294,7 +297,7 @@ mod default_special_characters_substitution {
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             r#"This is a &lt;paragraph&gt;."#
         );
     }
@@ -316,7 +319,7 @@ mod default_special_characters_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "foo > bar");
+        assert_eq!(block1.content().rendered_html(), "foo > bar");
     }
 
     #[test]
@@ -344,7 +347,7 @@ mod default_special_characters_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "This &amp; that");
+        assert_eq!(block1.content().rendered_html(), "This &amp; that");
     }
 
     #[test]
@@ -372,7 +375,7 @@ mod default_special_characters_substitution {
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "Stuff &gt; nonsense");
+        assert_eq!(block1.content().rendered_html(), "Stuff &gt; nonsense");
     }
 
     #[test]
@@ -398,12 +401,12 @@ mod default_special_characters_substitution {
         let crate::blocks::TableCellContent::Simple(default_cell) = cells[0].content() else {
             panic!("expected simple cell content");
         };
-        assert_eq!(default_cell.rendered(), "a &gt; b");
+        assert_eq!(default_cell.rendered_html(), "a &gt; b");
 
         let crate::blocks::TableCellContent::Simple(literal_cell) = cells[1].content() else {
             panic!("expected simple cell content");
         };
-        assert_eq!(literal_cell.rendered(), "c &gt; d");
+        assert_eq!(literal_cell.rendered_html(), "c &gt; d");
     }
 
     #[test]
@@ -455,7 +458,7 @@ For blocks, the step's name, `specialchars`, can be assigned to the xref:apply-s
             panic!("Unexpected block type: {block1:?}");
         };
 
-        assert_eq!(block1.content().rendered(), "abc&lt;lt{sp}space");
+        assert_eq!(block1.content().rendered_html(), "abc&lt;lt{sp}space");
     }
 
     #[test]
@@ -476,7 +479,7 @@ For inline elements, the built-in values `c` or `specialchars` can be applied to
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "abc&lt;lt{sp}space and then &#8230;&#8203;"
         );
     }
@@ -508,7 +511,7 @@ For example, on the command line, type `+-a toc-title="Sections, Tables \&amp; F
         };
 
         assert_eq!(
-            block1.content().rendered(),
+            block1.content().rendered_html(),
             "The value of toc-title is Sections, Tables & Figures."
         );
     }

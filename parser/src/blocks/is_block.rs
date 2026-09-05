@@ -5,6 +5,7 @@ use crate::{
     attributes::Attrlist,
     blocks::{Block, is_built_in_context},
     content::{Content, SubstitutionGroup},
+    inlines::InlineNode,
     strings::CowStr,
 };
 
@@ -32,7 +33,24 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
     ///
     /// This content will contain the text _after_ substitutions have been
     /// applied.
-    fn rendered_content(&'src self) -> Option<&'src str> {
+    fn rendered_html_content(&'src self) -> Option<&'src str> {
+        None
+    }
+
+    /// Returns the inline AST for this block's content, if any: the structured,
+    /// read-only representation of its inline nodes.
+    ///
+    /// This is the structured counterpart of
+    /// [`rendered_html_content`](Self::rendered_html_content) — the same blocks
+    /// carry each — so a block with no directly-contained content returns
+    /// `None` here too.
+    ///
+    /// Every parse builds the tree, so `Some(&[])` here means a
+    /// content-bearing block whose content is *empty* — still distinct from the
+    /// `None` a block with no directly-contained content returns.
+    /// See [`Content::inlines`](crate::content::Content::inlines) for the
+    /// tree's guarantees.
+    fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
         None
     }
 
@@ -316,6 +334,18 @@ pub trait IsBlock<'src>: Debug + Eq + PartialEq {
 
     /// Returns the rendered title for this block, if present.
     fn title(&self) -> Option<&str>;
+
+    /// Returns this block's title as the structured, read-only [`Content`]
+    /// [`title`](Self::title) renders to a string, if the block has one.
+    ///
+    /// This is the structured counterpart of [`title`](Self::title) — the
+    /// same blocks carry each — for a caller that wants the title's own
+    /// inline tree (nesting, node kinds, per-node spans) rather than its
+    /// rendered HTML. The default returns `None`; block types that carry a
+    /// `.Title` decoration or a heading override it.
+    fn title_content(&self) -> Option<&Content<'src>> {
+        None
+    }
 
     /// Returns the caption prefix for this block, if it has one.
     ///

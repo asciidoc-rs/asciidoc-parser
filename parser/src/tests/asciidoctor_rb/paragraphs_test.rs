@@ -3050,7 +3050,7 @@ mod quote {
         let doc = Parser::default().parse("[verse]\n_GET /groups/link:#group-id[\\{group-id\\}]_");
         let block = doc.child_blocks().next().unwrap();
         assert_eq!(
-            block.rendered_content(),
+            block.rendered_html_content(),
             Some("<em>GET /groups/<a href=\"#group-id\">{group-id}</a></em>")
         );
     }
@@ -3403,7 +3403,7 @@ mod special {
             // <p>` wrapper.
             let first = doc.child_blocks().next().unwrap();
             assert_eq!(
-                first.rendered_content(),
+                first.rendered_html_content(),
                 Some(
                     "<a href=\"http://asciidoc.org\">AsciiDoc</a> is a <em>lightweight</em> markup language&#8230;&#8203;"
                 )
@@ -3511,7 +3511,7 @@ mod special {
         // distinguishes the candidate from the compound-preamble
         // case above.
         #[test]
-        fn titled_paragraph_without_section_is_rendered() {
+        fn titled_paragraph_without_section_is_rendered_html() {
             let doc = Parser::default()
                 .with_intrinsic_attribute("doctype", "inline", ModificationContext::Anywhere)
                 .parse("= Title\n\nfirst paragraph");
@@ -3562,7 +3562,7 @@ mod custom {
         // as an ordinary paragraph.
         let block = doc.child_blocks().next().unwrap();
         assert_eq!(block.declared_style(), Some("foo"));
-        assert_eq!(block.rendered_content(), Some("bar"));
+        assert_eq!(block.rendered_html_content(), Some("bar"));
 
         // Asciidoctor asserts no messages at its *default* (WARN) severity.
         // This crate surfaces the unknown style as a

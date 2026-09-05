@@ -241,7 +241,7 @@ mod caption_and_number {
             .find(|b| b.declared_style() == Some("literal"))
             .unwrap();
 
-        assert_eq!(literal.rendered_content(), Some("literal text"));
+        assert_eq!(literal.rendered_html_content(), Some("literal text"));
         assert!(literal.caption().is_none());
         assert!(literal.number().is_none());
     }
@@ -401,7 +401,7 @@ mod error_cases {
         let blocks: Vec<_> = doc.child_blocks().collect();
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].roles(), vec!["myrole"]);
-        assert_eq!(blocks[0].rendered_content(), Some("def"));
+        assert_eq!(blocks[0].rendered_html_content(), Some("def"));
         assert!(doc.warnings().next().is_none());
     }
 
@@ -414,7 +414,7 @@ mod error_cases {
         let blocks: Vec<_> = doc.child_blocks().collect();
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].title(), Some("My Title"));
-        assert_eq!(blocks[0].rendered_content(), Some("def"));
+        assert_eq!(blocks[0].rendered_html_content(), Some("def"));
         assert!(doc.warnings().next().is_none());
     }
 

@@ -32,7 +32,7 @@ fn row_text(row: &crate::blocks::TableRow<'_>) -> Vec<String> {
     row.cells()
         .iter()
         .map(|cell| match cell.content() {
-            TableCellContent::Simple(content) => content.rendered().to_string(),
+            TableCellContent::Simple(content) => content.rendered_html().to_string(),
             TableCellContent::AsciiDoc(_) => panic!("expected simple cell content"),
         })
         .collect()
@@ -256,7 +256,7 @@ fn block_level_accessors() {
     assert_eq!(block.content_model(), ContentModel::Table);
     assert_eq!(block.raw_context().as_ref(), "table");
     assert_eq!(block.resolved_context().as_ref(), "table");
-    assert!(block.rendered_content().is_none());
+    assert!(block.rendered_html_content().is_none());
     assert_eq!(block.child_blocks().count(), 0);
     assert!(block.declared_style().is_none());
     assert!(block.id().is_none());
@@ -584,7 +584,7 @@ fn literal_column_processes_content_verbatim() {
 
     match table.body_rows()[0].cells()[0].content() {
         TableCellContent::Simple(content) => {
-            assert_eq!(content.rendered(), "lit *z* and &lt;x&gt;");
+            assert_eq!(content.rendered_html(), "lit *z* and &lt;x&gt;");
         }
         TableCellContent::AsciiDoc(_) => panic!("expected simple cell content"),
     }
@@ -682,7 +682,7 @@ fn asciidoc_cell_resolves_references_in_nested_blocks() {
         TableCellContent::Simple(_) => panic!("expected AsciiDoc cell content"),
     };
 
-    let rendered = blocks[0].rendered_content().unwrap();
+    let rendered = blocks[0].rendered_html_content().unwrap();
     assert!(
         rendered.contains("href=\"#target\""),
         "xref was not resolved: {rendered}"
@@ -716,7 +716,7 @@ fn asciidoc_cell_attributes_are_scoped_to_the_cell() {
     // attribute resolve.
     let rendered: String = blocks
         .iter()
-        .filter_map(|block| block.rendered_content())
+        .filter_map(|block| block.rendered_html_content())
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
@@ -939,7 +939,7 @@ fn asciidoc_cell_text(table: &TableBlock<'_>, row: usize, col: usize) -> String 
         TableCellContent::AsciiDoc(cell) => cell
             .blocks()
             .iter()
-            .filter_map(|block| block.rendered_content())
+            .filter_map(|block| block.rendered_html_content())
             .collect::<Vec<_>>()
             .join("\n"),
         TableCellContent::Simple(_) => panic!("expected AsciiDoc cell content"),

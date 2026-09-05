@@ -562,7 +562,7 @@ impl ToVirtualDom for Document<'_> {
             InterpretedValue::Value(ref v) if v == "inline"
         ) {
             if let Some(rendered) =
-                first_inline_candidate(self.child_blocks()).and_then(|b| b.rendered_content())
+                first_inline_candidate(self.child_blocks()).and_then(|b| b.rendered_html_content())
             {
                 node.children.extend(parse_html_content(rendered));
             }
@@ -771,8 +771,8 @@ impl ToVirtualDom for Block<'_> {
                     || simple.declared_style() == Some("literal")
                     || simple.declared_style() == Some("verse")
                 {
-                    let pre_node =
-                        VirtualNode::new("pre").with_text(simple.content().rendered().to_string());
+                    let pre_node = VirtualNode::new("pre")
+                        .with_text(simple.content().rendered_html().to_string());
                     node = node.with_child(pre_node);
                 }
                 node
@@ -855,7 +855,7 @@ fn simple_block_to_node<'a>(block: &'a SimpleBlock<'a>) -> VirtualNode {
 
     // Extract text content for paragraphs (only for <p> tags).
     if tag == "p" {
-        node = node.with_html_content(block.content().rendered().to_string());
+        node = node.with_html_content(block.content().rendered_html().to_string());
     }
 
     node
@@ -955,7 +955,7 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
 
                         let td_term = VirtualNode::new("td")
                             .with_class("hdlist1")
-                            .with_html_content(term.rendered().to_string());
+                            .with_html_content(term.rendered_html().to_string());
                         tr_node.children.push(td_term);
 
                         let mut td_def = VirtualNode::new("td").with_class("hdlist2");
@@ -978,7 +978,7 @@ fn list_block_to_node<'a>(list: &'a ListBlock<'a>) -> VirtualNode {
                         }
 
                         // Set the term text.
-                        dt_node = dt_node.with_html_content(term.rendered().to_string());
+                        dt_node = dt_node.with_html_content(term.rendered_html().to_string());
                         list_element.children.push(dt_node);
 
                         // Create dd node for the definition, but only if the
@@ -1164,7 +1164,7 @@ fn colist_icon_table_to_node<'a>(list: &'a ListBlock<'a>, icons: IconsMode) -> V
         if let Some(text) = item
             .child_blocks()
             .next()
-            .and_then(|b| b.rendered_content())
+            .and_then(|b| b.rendered_html_content())
         {
             text_cell = text_cell.with_html_content(text);
         }
@@ -1620,7 +1620,7 @@ fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
 
             // Add the block's rendered content to the code element, parsing any
             // inline HTML (e.g. callout conums) into child nodes.
-            if let Some(content) = raw.rendered_content() {
+            if let Some(content) = raw.rendered_html_content() {
                 code = code.with_html_content(content);
             }
 
@@ -1628,7 +1628,7 @@ fn raw_delimited_to_node<'a>(raw: &'a RawDelimitedBlock<'a>) -> VirtualNode {
             node.children.push(pre);
         } else {
             let mut pre = VirtualNode::new("pre");
-            if let Some(content) = raw.rendered_content() {
+            if let Some(content) = raw.rendered_html_content() {
                 pre = pre.with_html_content(content);
             }
             node.children.push(pre);
@@ -1709,7 +1709,7 @@ fn open_paragraph_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
     }
 
     let mut content = VirtualNode::new("div").with_class("content");
-    if let Some(rendered) = block.rendered_content() {
+    if let Some(rendered) = block.rendered_html_content() {
         content = content.with_html_content(rendered);
     }
     node.children.push(content);
@@ -1766,7 +1766,7 @@ fn abstract_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
         // An abstract paragraph holds inline content, rendered directly inside
         // the blockquote without a wrapping paragraph.
         _ => {
-            if let Some(rendered) = block.rendered_content() {
+            if let Some(rendered) = block.rendered_html_content() {
                 blockquote = blockquote.with_html_content(rendered);
             }
         }
@@ -1837,7 +1837,7 @@ fn collapsible_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
         // the content wrapper without a wrapping paragraph (matching
         // Asciidoctor's output for the example paragraph style).
         _ => {
-            if let Some(rendered) = block.rendered_content() {
+            if let Some(rendered) = block.rendered_html_content() {
                 content = content.with_html_content(rendered);
             }
         }
@@ -1906,7 +1906,7 @@ fn sidebar_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
         // content wrapper without a wrapping paragraph (matching Asciidoctor's
         // output for the sidebar paragraph style).
         _ => {
-            if let Some(rendered) = block.rendered_content() {
+            if let Some(rendered) = block.rendered_html_content() {
                 content = content.with_html_content(rendered);
             }
         }
@@ -1990,7 +1990,7 @@ fn example_to_node<'a>(block: &'a Block<'a>) -> VirtualNode {
         // An example paragraph holds inline content, rendered directly inside the
         // content wrapper without a wrapping paragraph.
         _ => {
-            if let Some(rendered) = block.rendered_content() {
+            if let Some(rendered) = block.rendered_html_content() {
                 content = content.with_html_content(rendered);
             }
         }
@@ -2056,7 +2056,7 @@ fn admonition_to_node<'a>(admonition: &'a AdmonitionBlock<'a>) -> VirtualNode {
         // paragraph), matching Asciidoctor's HTML output.
         _ => {
             if let Some(content) = admonition.content() {
-                let rendered = content.rendered();
+                let rendered = content.rendered_html();
                 if rendered.contains('<') {
                     content_cell.children.extend(parse_html_content(rendered));
                 } else {
@@ -2098,7 +2098,7 @@ fn quote_to_node<'a>(quote: &'a QuoteBlock<'a>) -> VirtualNode {
         QuoteType::Verse => {
             let rendered = quote
                 .content()
-                .map(|c| c.rendered().to_string())
+                .map(|c| c.rendered_html().to_string())
                 .unwrap_or_default();
             node.children.push(
                 VirtualNode::new("pre")
@@ -2128,7 +2128,7 @@ fn quote_to_node<'a>(quote: &'a QuoteBlock<'a>) -> VirtualNode {
 
                 _ => {
                     if let Some(content) = quote.content() {
-                        let rendered = content.rendered();
+                        let rendered = content.rendered_html();
                         if rendered.contains('<') {
                             blockquote.children.extend(parse_html_content(rendered));
                         } else {
@@ -2330,7 +2330,7 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
 
         match cell.content() {
             TableCellContent::Simple(content) => {
-                let rendered = content.rendered().to_string();
+                let rendered = content.rendered_html().to_string();
 
                 match cell.style() {
                     // A literal cell renders its content verbatim inside a
@@ -2375,9 +2375,10 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
                         // Asciidoctor (the parser stores them as one cell with
                         // embedded blank lines).
                         None => {
-                            for para in
-                                split_cell_paragraphs(content.original().data(), content.rendered())
-                            {
+                            for para in split_cell_paragraphs(
+                                content.original().data(),
+                                content.rendered_html(),
+                            ) {
                                 cell_node.children.push(
                                     VirtualNode::new("p")
                                         .with_class("tableblock")
@@ -2449,7 +2450,7 @@ fn table_row_to_node(row: &TableRow<'_>, header_row: bool, wrap_in_paragraph: bo
                     // content, without the `<div class="paragraph"><p>`
                     // wrapper.
                     for block in cell.blocks() {
-                        match block.rendered_content() {
+                        match block.rendered_html_content() {
                             Some(rendered) => {
                                 content.children.extend(parse_html_content(rendered));
                             }

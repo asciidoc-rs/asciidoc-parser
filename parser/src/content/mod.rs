@@ -6,26 +6,26 @@
 mod content;
 pub use content::Content;
 pub(crate) use content::{
-    FOOTNOTE_MARKER_END, FOOTNOTE_MARKER_START, FootnoteDeferred, OwnedTitle,
-    PASSTHROUGH_PLACEHOLDER_END, PASSTHROUGH_PLACEHOLDER_START, XrefSegment, escape_sentinels,
-    rehome_xref_placeholders, render_xref_template, sanitize_title, strip_footnote_marker_spans,
-    unescape_sentinels,
+    DeferredParts, FootnoteDeferred, OwnedTitle, XrefSegment, XrefTemplatePiece,
+    fold_resolved_title, render_xref_template, resolved_destinations, sanitize_title,
 };
+use content::{render_xref_segment, xref_segment_from_node};
 
-mod macros;
-pub(crate) use macros::apply_macros_with_leading_anchor_registered;
+pub(crate) mod inline_builder;
 
 mod xref_target;
 
 pub(crate) mod passthroughs;
 pub use passthroughs::Passthrough;
-pub(crate) use passthroughs::Passthroughs;
+use passthroughs::{INLINE_PASS, INLINE_PASS_MACRO, INLINE_STEM_MACRO, stem_notation};
 
 mod substitution_group;
 pub use substitution_group::SubstitutionGroup;
 
 mod substitution_step;
+use substitution_step::ATTRIBUTE_REFERENCE;
 pub use substitution_step::SubstitutionStep;
 pub(crate) use substitution_step::{
-    AttributeMissing, substitute_attributes_in_macro_target, substitute_attributes_in_reftext,
+    AttributeMissing, apply_attributes, apply_special_characters,
+    substitute_attributes_in_macro_target, substitute_attributes_in_reftext,
 };

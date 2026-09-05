@@ -1,6 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
 
-use crate::{content::FootnoteDeferred, internal::debug::DebugHashMapFrom, parser::XrefSignifier};
+use crate::{
+    content::FootnoteDeferred,
+    internal::debug::DebugHashMapFrom,
+    parser::{InlineRenderer, XrefSignifier},
+};
 
 /// Document catalog for tracking referenceable elements.
 ///
@@ -390,12 +394,43 @@ impl Footnote {
     /// `document_source` span.
     ///
     /// A footnote with no cross-references is left untouched.
+    ///
+    /// `folded` is the **tree's** rendering of this footnote, folded from the
+    /// defining occurrence's own subtree by the content that holds it (see
+    /// `Content::collect_folded_footnotes`) and handed here by the resolution
+    /// sweep. When it is present it *is* the rendering, and the placeholder
+    /// template is not rendered at all.
+    ///
+    /// Exactly one of the two runs, mirroring the same choice
+    /// `Content::resolve_references` makes between folding its tree and
+    /// rendering its template — and for the same reason, which is not
+    /// efficiency: a renderer is a host-supplied trait object, so a stateful
+    /// one would see every callback for this footnote twice if both ran and one
+    /// answer were discarded.
+    ///
+    /// `None` is the template path. It used to have a live class of footnote
+    /// behind it — one defined in a **section heading**, whose content was
+    /// resolved by the document-order title pass rather than by
+    /// `Content::resolve_references` and so went unfolded here — but the
+    /// title pass now collects its own folds too (see
+    /// `title_refs::write_back`'s `collect_own_folded_footnotes` calls), and
+    /// an instrumented run of the whole suite (5,477 tests,
+    /// `--test-threads=1`) found `folded: None` reached exactly once: this
+    /// module's own
+    /// `a_footnote_folds_when_given_one_and_renders_its_template_otherwise`,
+    /// which builds a bare `Footnote` by hand precisely to exercise this arm.
+    /// No production parse takes it. It is kept regardless — a footnote
+    /// whose defining content retained no render attributes would still land
+    /// here, and rendering its template is the honest answer to that, better
+    /// than leaving the parse-time fallback standing as though resolution
+    /// had never run.
     pub(crate) fn resolve_references<'src>(
         &mut self,
         resolver: &dyn crate::parser::ReferenceResolver,
-        renderer: &dyn crate::parser::InlineSubstitutionRenderer,
+        renderer: &dyn InlineRenderer,
         warnings: &mut crate::parser::ReferenceWarnings<'src>,
         document_source: crate::Span<'src>,
+        folded: Option<String>,
     ) {
         if let Some(deferred) = self.deferred.as_mut() {
             let source = match self.location {
@@ -403,9 +438,23 @@ impl Footnote {
                 None => document_source,
             };
             deferred.resolve(resolver, warnings, source);
-            self.text = deferred.render(renderer);
+
+            self.text = match folded {
+                Some(folded) => folded,
+                None => deferred.render(renderer),
+            };
         }
     }
+}
+
+/// Indexes folded footnote renderings by footnote index, for a resolution pass
+/// about to install them.
+///
+/// The pass collects `(index, text)` pairs from every content it walks (see
+/// `ReferenceWarnings::footnote_texts`) and then needs them keyed, because it
+/// installs while iterating footnotes rather than while iterating contents.
+pub(crate) fn folds_by_index(texts: Vec<(String, String)>) -> BTreeMap<String, String> {
+    texts.into_iter().collect()
 }
 
 impl std::fmt::Debug for Footnote {
@@ -525,6 +574,78 @@ mod tests {
     #![allow(clippy::indexing_slicing, clippy::unwrap_used)]
 
     use super::*;
+
+    /// Both arms of the fold-or-template choice in
+    /// [`Footnote::resolve_references`], pinned directly.
+    ///
+    /// The fold arm is what every footnote in the crate takes — measured, 55 of
+    /// 55 across the suite once the document-order title pass began collecting
+    /// folds too. That leaves the template arm with no *parse* that reaches it,
+    /// which is exactly why it is worth a unit test rather than a deletion: it
+    /// is unreachable by measurement, not by construction. A footnote whose
+    /// defining content retained no render attributes would still land here,
+    /// and rendering its template is the honest answer to that — better than
+    /// leaving the parse-time fallback standing as though resolution had never
+    /// run.
+    ///
+    /// An empty cross-reference list keeps the subject to the choice itself:
+    /// `resolve` has nothing to do, so what `text` ends up holding is decided
+    /// by the arm and nothing else.
+    #[test]
+    fn a_footnote_folds_when_given_one_and_renders_its_template_otherwise() {
+        use crate::{
+            Span,
+            content::{FootnoteDeferred, XrefTemplatePiece},
+            parser::{CatalogResolver, HtmlInlineRenderer, ReferenceWarnings},
+        };
+
+        fn footnote() -> Footnote {
+            Footnote {
+                index: "1".to_string(),
+                id: None,
+                text: "the parse-time fallback".to_string(),
+                deferred: Some(Box::new(FootnoteDeferred::new(
+                    vec![XrefTemplatePiece::Literal("the template".to_string())],
+                    vec![],
+                ))),
+                location: None,
+            }
+        }
+
+        let renderer = HtmlInlineRenderer {};
+        let source = Span::new("irrelevant");
+
+        // The crate's own resolver over an empty catalog, rather than a stub:
+        // the empty cross-reference list below means it is never consulted, and
+        // a stub written for that would be dead code of this test's own making.
+        let catalog = Catalog::new();
+        let resolver = CatalogResolver::new(&catalog);
+
+        let mut folded = footnote();
+        let mut warnings = ReferenceWarnings::default();
+        folded.resolve_references(
+            &resolver,
+            &renderer,
+            &mut warnings,
+            source,
+            Some("the tree's fold".to_string()),
+        );
+
+        assert_eq!(
+            folded.text, "the tree's fold",
+            "a footnote handed the tree's answer must render that, not its template"
+        );
+
+        let mut templated = footnote();
+        let mut warnings = ReferenceWarnings::default();
+        templated.resolve_references(&resolver, &renderer, &mut warnings, source, None);
+
+        assert_eq!(
+            templated.text, "the template",
+            "a footnote no pass folded must fall back to its placeholder template, \
+             not keep the parse-time text"
+        );
+    }
 
     #[test]
     fn new_catalog_is_empty() {

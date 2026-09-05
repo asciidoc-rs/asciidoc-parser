@@ -23,7 +23,7 @@ fn parse_table(source: &str) -> crate::blocks::TableBlock<'_> {
 /// panicking if the cell holds AsciiDoc block content.
 fn simple_text(cell: &crate::blocks::TableCell<'_>) -> String {
     match cell.content() {
-        TableCellContent::Simple(content) => content.rendered().to_string(),
+        TableCellContent::Simple(content) => content.rendered_html().to_string(),
         TableCellContent::AsciiDoc(_) => panic!("expected simple cell content"),
     }
 }

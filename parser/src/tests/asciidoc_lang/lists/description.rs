@@ -2441,7 +2441,7 @@ fn ordered_list_nests_under_second_level_term() {
         ));
 
         assert_eq!(
-            li.child_blocks().next().unwrap().rendered_content(),
+            li.child_blocks().next().unwrap().rendered_html_content(),
             Some(expected)
         );
     }
@@ -2500,7 +2500,7 @@ fn term_rendered(block: &crate::blocks::Block<'_>) -> String {
     };
 
     match item.list_item_marker() {
-        crate::blocks::ListItemMarker::DefinedTerm { term, .. } => term.rendered().to_string(),
+        crate::blocks::ListItemMarker::DefinedTerm { term, .. } => term.rendered_html().to_string(),
         other => panic!("expected a defined-term marker, got {other:#?}"),
     }
 }

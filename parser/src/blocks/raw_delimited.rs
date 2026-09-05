@@ -5,6 +5,7 @@ use crate::{
         ChildBlocks, ContentModel, IsBlock, caption::assign_block_caption, metadata::BlockMetadata,
     },
     content::{Content, SubstitutionGroup},
+    inlines::InlineNode,
     span::MatchedItem,
     strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
@@ -72,7 +73,8 @@ impl<'src> RawDelimitedBlock<'src> {
     /// This narrow seam exists for the document-order title resolution pass
     /// (see `document::title_refs`), which installs the re-rendered title
     /// after resolving any cross-references embedded in it. All other access
-    /// goes through the read-only [`IsBlock::title`] accessor.
+    /// goes through the read-only [`IsBlock::title`]/[`IsBlock::title_content`]
+    /// accessors.
     pub(crate) fn title_content_mut(&mut self) -> Option<&mut Content<'src>> {
         self.title.as_mut()
     }
@@ -400,8 +402,12 @@ impl<'src> IsBlock<'src> for RawDelimitedBlock<'src> {
         Some(&mut self.content)
     }
 
-    fn rendered_content(&self) -> Option<&str> {
-        Some(self.content.rendered())
+    fn rendered_html_content(&self) -> Option<&str> {
+        Some(self.content.rendered_html())
+    }
+
+    fn inlines(&'src self) -> Option<&'src [InlineNode<'src>]> {
+        Some(self.content.inlines())
     }
 
     fn raw_context(&self) -> CowStr<'src> {
@@ -414,6 +420,10 @@ impl<'src> IsBlock<'src> for RawDelimitedBlock<'src> {
 
     fn title(&self) -> Option<&str> {
         self.title.as_ref().map(Content::rendered_str)
+    }
+
+    fn title_content(&self) -> Option<&Content<'src>> {
+        self.title.as_ref()
     }
 
     fn caption(&self) -> Option<&str> {
@@ -776,7 +786,7 @@ mod tests {
             );
 
             assert_eq!(mi.item.content_model(), ContentModel::Raw);
-            assert_eq!(mi.item.rendered_content().unwrap(), "");
+            assert_eq!(mi.item.rendered_html_content().unwrap(), "");
             assert_eq!(mi.item.raw_context().as_ref(), "comment");
             assert_eq!(mi.item.resolved_context().as_ref(), "comment");
             assert!(mi.item.declared_style().is_none());
@@ -836,7 +846,7 @@ mod tests {
             );
 
             assert_eq!(mi.item.content_model(), ContentModel::Raw);
-            assert_eq!(mi.item.rendered_content().unwrap(), "line1  \nline2");
+            assert_eq!(mi.item.rendered_html_content().unwrap(), "line1  \nline2");
             assert_eq!(mi.item.raw_context().as_ref(), "comment");
             assert_eq!(mi.item.resolved_context().as_ref(), "comment");
             assert!(mi.item.declared_style().is_none());
@@ -1633,7 +1643,7 @@ mod tests {
             assert_eq!(block.raw_context().as_ref(), "stem");
             assert_eq!(block.resolved_context().as_ref(), "stem");
             assert_eq!(block.declared_style(), Some("stem"));
-            assert_eq!(block.rendered_content(), Some("a &lt; b"));
+            assert_eq!(block.rendered_html_content(), Some("a &lt; b"));
             assert_eq!(block.substitution_group(), SubstitutionGroup::Stem);
             assert!(doc.warnings().next().is_none());
         }
@@ -1645,7 +1655,7 @@ mod tests {
 
             assert_eq!(block.raw_context().as_ref(), "stem");
             assert_eq!(block.declared_style(), Some("asciimath"));
-            assert_eq!(block.rendered_content(), Some("x^2"));
+            assert_eq!(block.rendered_html_content(), Some("x^2"));
         }
 
         #[test]
@@ -1655,7 +1665,7 @@ mod tests {
 
             assert_eq!(block.raw_context().as_ref(), "stem");
             assert_eq!(block.declared_style(), Some("latexmath"));
-            assert_eq!(block.rendered_content(), Some(r"C = \alpha"));
+            assert_eq!(block.rendered_html_content(), Some(r"C = \alpha"));
         }
 
         /// Without a STEM style, a `++++` block remains a `pass` block with no
@@ -1666,7 +1676,7 @@ mod tests {
             let block = doc.child_blocks().next().unwrap();
 
             assert_eq!(block.raw_context().as_ref(), "pass");
-            assert_eq!(block.rendered_content(), Some("a < b"));
+            assert_eq!(block.rendered_html_content(), Some("a < b"));
             assert_eq!(block.substitution_group(), SubstitutionGroup::Pass);
         }
 
@@ -1678,7 +1688,7 @@ mod tests {
             let block = doc.child_blocks().next().unwrap();
 
             assert_eq!(block.raw_context().as_ref(), "stem");
-            assert_eq!(block.rendered_content(), Some("a < b"));
+            assert_eq!(block.rendered_html_content(), Some("a < b"));
             assert_eq!(block.substitution_group(), SubstitutionGroup::None);
         }
     }

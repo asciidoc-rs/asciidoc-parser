@@ -1333,7 +1333,7 @@ fn apply_title_subs(source: &str, parser: &Parser) -> String {
     let mut content = Content::from(span);
     SubstitutionGroup::Title.apply(&mut content, parser, None);
 
-    content.rendered().to_string()
+    content.rendered_html().to_string()
 }
 
 impl std::fmt::Debug for Header<'_> {

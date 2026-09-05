@@ -37,7 +37,7 @@ fn body_texts(table: &crate::blocks::TableBlock<'_>) -> Vec<Vec<String>> {
                 .iter()
                 .map(|cell| match cell.content() {
                     crate::blocks::TableCellContent::Simple(content) => {
-                        content.rendered().to_string()
+                        content.rendered_html().to_string()
                     }
                     crate::blocks::TableCellContent::AsciiDoc(_) => {
                         panic!("expected simple cell content")

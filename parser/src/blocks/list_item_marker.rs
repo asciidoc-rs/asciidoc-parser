@@ -4,13 +4,26 @@ use regex::Regex;
 
 use crate::{
     HasSpan, Parser, Span,
-    content::{
-        Content, Passthroughs, SubstitutionStep, apply_macros_with_leading_anchor_registered,
-    },
-    document::RefType,
+    attributes::element_attribute::SplicedValueEscaping,
+    content::{Content, SubstitutionGroup, SubstitutionStep, apply_attributes},
     span::MatchedItem,
-    warnings::{Warning, WarningType},
+    warnings::Warning,
 };
+
+/// The substitution group a description-list **term** takes: the `normal`
+/// group's own order, minus the attribute-references step that already ran
+/// during parsing (so `{blank}` and friends were resolved before the marker
+/// was recognized). Asciidoctor substitutes a term with `normal` too; this
+/// spelling is the same list with the one already-applied step removed.
+static TERM_SUBSTITUTIONS: LazyLock<SubstitutionGroup> = LazyLock::new(|| {
+    SubstitutionGroup::Custom(vec![
+        SubstitutionStep::SpecialCharacters,
+        SubstitutionStep::Quotes,
+        SubstitutionStep::CharacterReplacements,
+        SubstitutionStep::Macros,
+        SubstitutionStep::PostReplacement,
+    ])
+});
 
 /// A list item is signaled by one of several designated marker sequences.
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -65,7 +78,9 @@ impl<'src> ListItemMarker<'src> {
         // does the same for every marker kind), so both marker regexes see the
         // same input.
         let source = source.discard_whitespace();
-        LIST_ITEM_MARKER.is_match(source.data()) || CALLOUT_LIST_MARKER.is_match(source.data())
+
+        (may_be_list_item_marker(source.data()) && LIST_ITEM_MARKER.is_match(source.data()))
+            || (may_be_callout_marker(source.data()) && CALLOUT_LIST_MARKER.is_match(source.data()))
     }
 
     pub(crate) fn parse(source: Span<'src>, parser: &Parser) -> Option<MatchedItem<'src, Self>> {
@@ -73,7 +88,9 @@ impl<'src> ListItemMarker<'src> {
 
         // A callout list marker (`<1>` or `<.>`) is not matched by
         // `LIST_ITEM_MARKER`, so it is checked first.
-        if let Some(captures) = CALLOUT_LIST_MARKER.captures(source.data()) {
+        if may_be_callout_marker(source.data())
+            && let Some(captures) = CALLOUT_LIST_MARKER.captures(source.data())
+        {
             let marker = source.slice(0..captures[1].len());
             let after = source.slice_from(captures[1].len()..).discard_whitespace();
 
@@ -83,7 +100,9 @@ impl<'src> ListItemMarker<'src> {
             });
         }
 
-        if let Some(captures) = LIST_ITEM_MARKER.captures(source.data()) {
+        if may_be_list_item_marker(source.data())
+            && let Some(captures) = LIST_ITEM_MARKER.captures(source.data())
+        {
             let marker = source.slice(0..captures[1].len());
             let marker_str = marker.data();
             let after = source.slice_from(captures[1].len()..).discard_whitespace();
@@ -135,51 +154,58 @@ impl<'src> ListItemMarker<'src> {
                 return None;
             };
 
-            Some(MatchedItem { item, after })
-        } else {
-            // Don't match description list markers in comment lines.
-            // Comment lines start with // but not /// (which is a valid term).
-            let source_data = source.data();
-            if source_data.starts_with("//") && !source_data.starts_with("///") {
-                return None;
-            }
-
-            let captures = DESCRIPTION_LIST_MARKER.captures(source_data)?;
-
-            // With multi-line mode enabled, ^ can match at any line start.
-            // We only accept matches that start at the beginning of the source.
-            let full_match = captures.get(0)?;
-            if full_match.start() != 0 {
-                return None;
-            }
-
-            let after = source.slice_from(full_match.end()..).discard_whitespace();
-
-            let source = source
-                .slice_to(..full_match.end())
-                .trim_trailing_whitespace();
-
-            let term_len = captures[1].len();
-            let term = source.slice(0..term_len);
-            let mut term: Content<'src> = term.into();
-
-            // Apply attribute substitution to the term so that attribute
-            // references like `{blank}` are resolved before
-            // determining if this is a valid definition list
-            // marker.
-            SubstitutionStep::AttributeReferences.apply(&mut term, parser, None);
-
-            let marker = source.slice_from(term_len..);
-
-            Some(MatchedItem {
-                item: Self::DefinedTerm {
-                    term,
-                    marker,
-                    source,
-                },
-                after,
-            })
+            return Some(MatchedItem { item, after });
         }
+
+        // Don't match description list markers in comment lines.
+        // Comment lines start with // but not /// (which is a valid term).
+        let source_data = source.data();
+        if source_data.starts_with("//") && !source_data.starts_with("///") {
+            return None;
+        }
+
+        // The gate spares the engine both the scan that ends in a
+        // rejected non-zero-offset match and — on the common
+        // marker-free line — the whole search.
+        if !first_line_may_hold_dlist_marker(source_data) {
+            return None;
+        }
+
+        let captures = DESCRIPTION_LIST_MARKER.captures(source_data)?;
+
+        // With multi-line mode enabled, ^ can match at any line start.
+        // We only accept matches that start at the beginning of the source.
+        let full_match = captures.get(0)?;
+        if full_match.start() != 0 {
+            return None;
+        }
+
+        let after = source.slice_from(full_match.end()..).discard_whitespace();
+
+        let source = source
+            .slice_to(..full_match.end())
+            .trim_trailing_whitespace();
+
+        let term_len = captures[1].len();
+        let term = source.slice(0..term_len);
+        let mut term: Content<'src> = term.into();
+
+        // Apply attribute substitution to the term so that attribute
+        // references like `{blank}` are resolved before
+        // determining if this is a valid definition list
+        // marker.
+        apply_attributes(&mut term, parser, SplicedValueEscaping::Verbatim);
+
+        let marker = source.slice_from(term_len..);
+
+        Some(MatchedItem {
+            item: Self::DefinedTerm {
+                term,
+                marker,
+                source,
+            },
+            after,
+        })
     }
 
     /// Apply the term's inline substitutions and register any leading inline
@@ -208,57 +234,15 @@ impl<'src> ListItemMarker<'src> {
             return;
         };
 
-        // A description-list term is substituted with the `normal` group. The
-        // attribute-references step already ran during parsing (so the marker
-        // could be recognized), so the remaining steps run here. Passthrough
-        // spans are extracted first and restored last so their payloads are
-        // shielded from the intervening substitutions, mirroring the structure
-        // of `SubstitutionGroup::apply` for the normal group.
-        let passthroughs = Passthroughs::extract_from(term, parser);
-
-        SubstitutionStep::SpecialCharacters.apply(term, parser, None);
-        SubstitutionStep::Quotes.apply(term, parser, None);
-        SubstitutionStep::CharacterReplacements.apply(term, parser, None);
-
-        // A leading inline anchor (`[[id]]` or `[[id,reftext]]`) at the start
-        // of the term is registered in the catalog before the macros
-        // step renders it, so that only its own duplicate-registration
-        // warning is suppressed during that pass. Any other term goes
-        // straight through the macros step.
-        if term.rendered().starts_with("[[") {
-            if let Some(captures) = LEADING_INLINE_ANCHOR.captures(term.rendered()) {
-                let id = &captures[1];
-
-                // If reftext is provided, use it. Otherwise, use the text after
-                // the anchor as the default reftext.
-                let reftext = captures.get(2).map(|m| m.as_str().to_string()).or_else(|| {
-                    // Use the text after the anchor as default reftext.
-                    captures.get(3).map(|m| m.as_str().trim().to_string())
-                });
-
-                // Register the anchor in the catalog.
-                if let Err(_duplicate_error) =
-                    parser.register_ref(id, reftext.as_deref(), RefType::Anchor)
-                {
-                    warnings.push(Warning::new(
-                        term.original(),
-                        WarningType::DuplicateId(id.to_string()),
-                    ));
-                }
-            }
-
-            apply_macros_with_leading_anchor_registered(term, parser);
-        } else {
-            SubstitutionStep::Macros.apply(term, parser, None);
-        }
-
-        SubstitutionStep::PostReplacement.apply(term, parser, None);
-
-        // Restore the extracted passthroughs and finalize any deferred
-        // cross-references, matching the tail of `SubstitutionGroup::apply`.
-        passthroughs.restore_to(term, parser);
-        term.set_passthroughs(passthroughs.0);
-        term.finalize_deferred(&*parser.renderer);
+        // A description-list term is substituted with the `normal` group, in
+        // that group's own order minus its attribute-references step, which
+        // already ran during parsing so the marker could be recognized at all.
+        // Running it through `SubstitutionGroup::apply` rather than the steps
+        // directly is what gives the term a **tree**: the seed, the
+        // authoritative fold, and the replay of every recognition side effect
+        // come with it, so a term no longer registers from the string
+        // pipeline (this was the last content that did).
+        TERM_SUBSTITUTIONS.apply_to_description_list_term(term, parser, warnings);
     }
 
     /// Return a mutable reference to the term content of a description-list
@@ -494,10 +478,80 @@ impl std::fmt::Debug for ListItemMarker<'_> {
     }
 }
 
+/// The bytes that can spell a Roman-numeral list marker, either case.
+const ROMAN_NUMERAL_BYTES: &[u8] = b"ivxlcdmIVXLCDM";
+
+/// A byte-level gate over [`CALLOUT_LIST_MARKER`]: every callout marker opens
+/// with `<`, so a line that doesn't cannot match — and almost no ordinary
+/// line starts with one.
+fn may_be_callout_marker(s: &str) -> bool {
+    s.as_bytes().first() == Some(&b'<')
+}
+
+/// A byte-level gate over [`LIST_ITEM_MARKER`], reading at most the first two
+/// bytes: every alternative the pattern can match opens with one of a small
+/// byte class, and its second byte is constrained enough to reject nearly
+/// every ordinary prose line — whose first word continues with a second
+/// letter — before the regex engine is consulted. The gate only ever errs
+/// toward `true` (a mixed-case Roman run, a long asterisk run with no
+/// trailing space); `a_gated_line_never_matches_its_marker_regex` pins that
+/// no line it rejects is one the regex would have matched.
+fn may_be_list_item_marker(s: &str) -> bool {
+    let bytes = s.as_bytes();
+
+    let Some(&first) = bytes.first() else {
+        return false;
+    };
+
+    let second = bytes.get(1).copied();
+
+    match first {
+        // `-` is a single hyphen; its required whitespace follows directly.
+        b'-' => matches!(second, Some(b' ' | b'\t')),
+
+        // A `*`/`.` run continues, or ends at its required whitespace.
+        b'*' => matches!(second, Some(b' ' | b'\t' | b'*')),
+        b'.' => matches!(second, Some(b' ' | b'\t' | b'.')),
+
+        // `\d+\.`: more digits, or the closing dot.
+        b'0'..=b'9' => matches!(second, Some(b'.' | b'0'..=b'9')),
+
+        // A letter opens `[a-zA-Z]\.` or a Roman-numeral run — anything
+        // else, every ordinary word included, is rejected here.
+        first if first.is_ascii_alphabetic() => match second {
+            Some(b'.') => true,
+            Some(b')') => ROMAN_NUMERAL_BYTES.contains(&first),
+            Some(second) => {
+                ROMAN_NUMERAL_BYTES.contains(&first) && ROMAN_NUMERAL_BYTES.contains(&second)
+            }
+            None => false,
+        },
+
+        // `•` (U+2022) opens with this byte; the rare full check stays the
+        // regex's.
+        0xe2 => true,
+
+        _ => false,
+    }
+}
+
+/// A byte-level gate over [`DESCRIPTION_LIST_MARKER`]: the only match `parse`
+/// accepts starts at offset zero, and since the term's `.` cannot cross a
+/// newline, the term and its `::`/`;;` delimiter both sit on the first line —
+/// so a first line carrying neither delimiter cannot produce an accepted
+/// match. (The multiline pattern could still match on a *later* line, but
+/// `parse` has always rejected those; the gate also spares the engine that
+/// scan-ahead.)
+fn first_line_may_hold_dlist_marker(s: &str) -> bool {
+    let line = s.split('\n').next().unwrap_or(s);
+
+    line.contains("::") || line.contains(";;")
+}
+
 static LIST_ITEM_MARKER: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::unwrap_used)]
     Regex::new(
-        r#"(?x)    
+        r#"(?x)
             ^(                      # Capture group for list marker
                 -                       # Hyphen (unordered list)
                 |\*+                    # One or more asterisks (unordered list, up to 5 levels)
@@ -541,29 +595,6 @@ static DESCRIPTION_LIST_MARKER: LazyLock<Regex> = LazyLock::new(|| {
             )
             (?::::?:?|;;)           # Delimiter: ::, :::, ::::, or ;;
             (?:$|[\ \t])            # End of line or whitespace after marker
-        "#,
-    )
-    .unwrap()
-});
-
-/// Matches a leading inline anchor at the start of text.
-///
-/// Captures:
-/// - Group 1: The anchor ID
-/// - Group 2: Optional reftext (after comma)
-/// - Group 3: Text after the anchor (used as default reftext if group 2 is
-///   absent)
-static LEADING_INLINE_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
-    #[allow(clippy::unwrap_used)]
-    Regex::new(
-        r#"(?x)
-            ^                           # Start of string
-            \[\[                        # Opening [[
-            ([\p{Alphabetic}_:]         # (1) Anchor ID: first char must be letter, _, or :
-             [\p{Alphabetic}\p{Nd}_\-:.]*)  # Rest of ID: letters, digits, _, -, :, .
-            (?:,\s*([^\]]+))?           # (2) Optional reftext after comma
-            \]\]                        # Closing ]]
-            (.*)                        # (3) Text after the anchor
         "#,
     )
     .unwrap()
@@ -682,8 +713,111 @@ mod tests {
         assert!(warnings.is_empty());
 
         match &item {
-            crate::blocks::ListItemMarker::DefinedTerm { term, .. } => term.rendered().to_string(),
+            crate::blocks::ListItemMarker::DefinedTerm { term, .. } => {
+                term.rendered_html().to_string()
+            }
             other => panic!("expected a defined-term marker, got {other:#?}"),
+        }
+    }
+
+    #[test]
+    fn a_gated_line_never_matches_its_marker_regex() {
+        // The byte gates in front of the marker regexes may only ever err
+        // toward running the regex: a line a gate rejects must be one its
+        // regex rejects too (for the description-list gate: one whose match
+        // `parse` would reject anyway, an accepted match starting at offset
+        // zero on the first line). The corpus walks every gate branch from
+        // both sides — each first-byte class with an accepting and a
+        // rejecting second byte, and the gate-true-but-regex-false shapes
+        // the gates deliberately leave to the engine.
+        use super::{
+            CALLOUT_LIST_MARKER, DESCRIPTION_LIST_MARKER, LIST_ITEM_MARKER,
+            first_line_may_hold_dlist_marker, may_be_callout_marker, may_be_list_item_marker,
+        };
+
+        let lines = [
+            "",
+            // Hyphen.
+            "- item",
+            "-\titem",
+            "-item",
+            "-",
+            // Asterisk runs.
+            "* item",
+            "** item",
+            "*item",
+            "*",
+            "**no-space",
+            // Dot runs.
+            ". item",
+            ".. item",
+            ".item",
+            ".",
+            // Bullet (and another codepoint sharing its first byte).
+            "\u{2022} item",
+            "\u{2022}item",
+            "\u{2014} not a bullet",
+            // Arabic numerals.
+            "9. item",
+            "99. item",
+            "9x",
+            "9",
+            "99",
+            // Alpha lists.
+            "a. item",
+            "Z. item",
+            "a) item",
+            "a",
+            // Roman numerals, both cases — and a mixed-case run only the
+            // regex rejects.
+            "i) item",
+            "xiv) item",
+            "IX) item",
+            "iV) item",
+            "ix item",
+            // Ordinary prose.
+            "The renderer walks the tree",
+            "it",
+            "词 leading multibyte",
+            // Callouts.
+            "<1> item",
+            "<.> item",
+            "<1>no-space",
+            "x<1>",
+            // Description lists.
+            "term:: definition",
+            "term;; definition",
+            "term::",
+            "no delimiter here",
+            "//term:: in a comment",
+            "later\nterm:: definition",
+        ];
+
+        for line in lines {
+            if !may_be_list_item_marker(line) {
+                assert!(
+                    !LIST_ITEM_MARKER.is_match(line),
+                    "gate rejected {line:?}, which the list-item regex matches"
+                );
+            }
+
+            if !may_be_callout_marker(line) {
+                assert!(
+                    !CALLOUT_LIST_MARKER.is_match(line),
+                    "gate rejected {line:?}, which the callout regex matches"
+                );
+            }
+
+            if !first_line_may_hold_dlist_marker(line) {
+                assert!(
+                    DESCRIPTION_LIST_MARKER
+                        .captures(line)
+                        .and_then(|caps| caps.get(0))
+                        .is_none_or(|whole| whole.start() != 0),
+                    "gate rejected {line:?}, whose description-list match \
+                     `parse` would accept"
+                );
+            }
         }
     }
 

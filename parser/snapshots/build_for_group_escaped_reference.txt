@@ -1,0 +1,5 @@
+"<<target,a \\{name} b>>"	"<a href=\"#target\">a {name} b</a>"
+"http://google.com[\\{name}]"	"<a href=\"http://google.com\">{name}</a>"
+"link:index.html[\\{name}]"	"<a href=\"index.html\">{name}</a>"
+"mailto:team@example.org[\\{name}]"	"<a href=\"mailto:team@example.org\">{name}</a>"
+"xref:target[\\{name}]"	"<a href=\"#target\">{name}</a>"

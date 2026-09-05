@@ -13,7 +13,7 @@ use crate::{
     Document, Parser,
     blocks::{Block, FindBlocks, SimpleBlock},
     parser::{
-        CatalogResolver, HtmlSubstitutionRenderer, ReferenceResolver, ResolutionContext,
+        CatalogResolver, HtmlInlineRenderer, ReferenceResolver, ResolutionContext,
         ResolvedReference, XrefSignifier,
     },
 };
@@ -36,7 +36,7 @@ fn first_simple<'a>(doc: &'a Document<'a>) -> &'a SimpleBlock<'a> {
 
 /// Returns the rendered text of the first paragraph in `doc`.
 fn first_paragraph<'a>(doc: &'a Document<'a>) -> &'a str {
-    first_simple(doc).content().rendered()
+    first_simple(doc).content().rendered_html()
 }
 
 /// Returns the first `SectionBlock` found in document order (recursing into
@@ -73,7 +73,7 @@ fn backward_reference_resolves() {
     fn collect<'a>(blocks: impl Iterator<Item = &'a Block<'a>>, out: &mut Vec<String>) {
         for block in blocks {
             if let Block::Simple(simple) = block {
-                out.push(simple.content().rendered().to_string());
+                out.push(simple.content().rendered_html().to_string());
             }
             collect(block.child_blocks(), out);
         }
@@ -300,7 +300,7 @@ fn footnote_in_heading_does_not_advance_a_counter_twice() {
     fn collect<'a>(blocks: impl Iterator<Item = &'a Block<'a>>, out: &mut Vec<String>) {
         for block in blocks {
             if let Block::Simple(simple) = block {
-                out.push(simple.content().rendered().to_string());
+                out.push(simple.content().rendered_html().to_string());
             }
             collect(block.child_blocks(), out);
         }
@@ -317,14 +317,15 @@ fn footnote_in_heading_does_not_advance_a_counter_twice() {
 fn unresolved_reference_falls_back_and_warns() {
     // Parse without resolving, then resolve against the document's own catalog
     // (cloned so it does not alias the `&mut doc` borrow).
-    let mut doc = Parser::default().parse_deferred("See <<nope>>.\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred("See <<nope>>.\n");
 
     // Before resolution, the reference is pending.
     assert!(first_simple(&doc).content().has_unresolved_refs());
 
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
 
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].target, "nope");
@@ -351,7 +352,8 @@ fn xrefstyle_survives_deferred_resolution() {
 
     // Parse without resolving: the target section is parsed *after* the
     // reference, so it is still pending and renders the unresolved fallback.
-    let mut doc = Parser::default().parse_deferred(src);
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred(src);
     assert!(first_simple(&doc).content().has_unresolved_refs());
     assert_eq!(
         first_paragraph(&doc),
@@ -363,7 +365,7 @@ fn xrefstyle_survives_deferred_resolution() {
     // for the target.
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
     assert!(warnings.is_empty());
     assert_eq!(
         first_paragraph(&doc),
@@ -377,7 +379,8 @@ fn host_resolver_can_attach_signifier() {
     // from a catalog `RefEntry`) can still opt a target into `full`/`short`
     // formatting by attaching a signifier with `with_signifier`. The style
     // still comes from the referencing document.
-    let mut doc = Parser::default().parse_deferred(":xrefstyle: full\n\nSee <<install>>.\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred(":xrefstyle: full\n\nSee <<install>>.\n");
 
     let resolver = CrossDocResolver {
         index: HashMap::from([(
@@ -393,7 +396,7 @@ fn host_resolver_can_attach_signifier() {
         )]),
     };
 
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
     assert!(warnings.is_empty());
     assert_eq!(
         first_paragraph(&doc),
@@ -406,9 +409,9 @@ fn reference_to_this_document_by_name_resolves_within_it() {
     // A target that names the document being parsed is a reference *into* this
     // document after all, so its fragment resolves against this document's own
     // catalog — even though the target was written in inter-document form.
-    let mut doc = Parser::default()
-        .with_primary_file_name("guide.adoc")
-        .parse_deferred("See <<guide.adoc#install>>.\n\n[#install]\n== Installation\n");
+    let mut parser = Parser::default().with_primary_file_name("guide.adoc");
+    let mut doc =
+        parser.parse_deferred("See <<guide.adoc#install>>.\n\n[#install]\n== Installation\n");
 
     // The fragment names a section parsed after the reference, so it is pending
     // until resolution, exactly like a plain forward reference.
@@ -416,7 +419,7 @@ fn reference_to_this_document_by_name_resolves_within_it() {
 
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
 
     assert!(warnings.is_empty());
 
@@ -433,19 +436,19 @@ fn reference_to_this_document_by_explicit_docname_attribute_resolves_within_it()
     // Asciidoctor treats `doc.attributes['docname']` as the single source
     // of truth for the self-reference match, so an API-provided `docname`
     // must be honored too.
-    let mut doc = Parser::default()
-        .with_intrinsic_attribute(
-            "docname",
-            "guide",
-            crate::parser::ModificationContext::ApiOnly,
-        )
-        .parse_deferred("See <<guide.adoc#install>>.\n\n[#install]\n== Installation\n");
+    let mut parser = Parser::default().with_intrinsic_attribute(
+        "docname",
+        "guide",
+        crate::parser::ModificationContext::ApiOnly,
+    );
+    let mut doc =
+        parser.parse_deferred("See <<guide.adoc#install>>.\n\n[#install]\n== Installation\n");
 
     assert!(first_simple(&doc).content().has_unresolved_refs());
 
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
 
     assert!(warnings.is_empty());
 
@@ -533,7 +536,8 @@ fn host_resolver_can_override_a_derived_destination() {
     // only a default: it is offered to the resolver (as
     // `ResolutionContext::derived`) rather than imposed, so a host that
     // resolves targets across a corpus can answer with its own.
-    let mut doc = Parser::default().parse_deferred("See <<tigers#about,About Tigers>>.\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred("See <<tigers#about,About Tigers>>.\n");
 
     // Until a resolver has run, the derived destination is what renders.
     assert_eq!(
@@ -542,7 +546,7 @@ fn host_resolver_can_override_a_derived_destination() {
     );
 
     let resolver = DerivedRewritingResolver;
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
 
     assert!(warnings.is_empty());
 
@@ -557,11 +561,12 @@ fn derived_destination_stands_when_the_resolver_declines() {
     // A resolver that returns `None` for a target that names another document
     // leaves the derived destination in place, and — unlike a target it could
     // not resolve — that is not reported as an unresolved reference.
-    let mut doc = Parser::default().parse_deferred("See <<tigers#about>> and <<nope>>.\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred("See <<tigers#about>> and <<nope>>.\n");
 
     let catalog = doc.catalog().clone();
     let resolver = CatalogResolver::new(&catalog);
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
 
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].target, "nope");
@@ -619,7 +624,7 @@ fn cross_document_resolution() {
     // Document A still has the pending reference until we resolve it.
     assert!(first_simple(&doc_a).content().has_unresolved_refs());
 
-    let warnings = doc_a.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc_a.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
     assert!(warnings.is_empty());
 
     assert_eq!(
@@ -655,7 +660,7 @@ fn xrefstyle_carries_across_documents() {
     }
     let resolver = CrossDocResolver { index };
 
-    let warnings = doc_a.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc_a.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
     assert!(warnings.is_empty());
     assert_eq!(
         first_paragraph(&doc_a),
@@ -667,7 +672,8 @@ fn xrefstyle_carries_across_documents() {
 fn resolution_is_repeatable() {
     // Resolving twice against different resolvers yields the second result —
     // resolution is non-destructive.
-    let mut doc = Parser::default().parse_deferred("See <<topic>>.\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred("See <<topic>>.\n");
 
     let first = CrossDocResolver {
         index: HashMap::from([(
@@ -675,7 +681,7 @@ fn resolution_is_repeatable() {
             ResolvedReference::new("first.html#topic".to_string(), Some("First".to_string())),
         )]),
     };
-    doc.resolve_references(&first, &HtmlSubstitutionRenderer {});
+    doc.resolve_references(&first, &HtmlInlineRenderer {}, &parser);
     assert_eq!(
         first_paragraph(&doc),
         "See <a href=\"first.html#topic\">First</a>."
@@ -687,7 +693,7 @@ fn resolution_is_repeatable() {
             ResolvedReference::new("second.html#topic".to_string(), Some("Second".to_string())),
         )]),
     };
-    doc.resolve_references(&second, &HtmlSubstitutionRenderer {});
+    doc.resolve_references(&second, &HtmlInlineRenderer {}, &parser);
     assert_eq!(
         first_paragraph(&doc),
         "See <a href=\"second.html#topic\">Second</a>."
@@ -700,7 +706,8 @@ fn re_resolution_is_a_full_independent_sweep() {
     // resolver that no longer knows a target re-reports it as unresolved and
     // reverts the rendering to the fallback, even though an earlier pass had
     // resolved it.
-    let mut doc = Parser::default().parse_deferred("See <<topic>>.\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred("See <<topic>>.\n");
 
     let knows_topic = CrossDocResolver {
         index: HashMap::from([(
@@ -708,7 +715,7 @@ fn re_resolution_is_a_full_independent_sweep() {
             ResolvedReference::new("first.html#topic".to_string(), Some("Topic".to_string())),
         )]),
     };
-    let warnings = doc.resolve_references(&knows_topic, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&knows_topic, &HtmlInlineRenderer {}, &parser);
     assert!(warnings.is_empty());
     assert_eq!(
         first_paragraph(&doc),
@@ -720,7 +727,7 @@ fn re_resolution_is_a_full_independent_sweep() {
     let knows_nothing = CrossDocResolver {
         index: HashMap::new(),
     };
-    let warnings = doc.resolve_references(&knows_nothing, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&knows_nothing, &HtmlInlineRenderer {}, &parser);
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].target, "topic");
     assert_eq!(first_paragraph(&doc), "See <a href=\"#topic\">[topic]</a>.");
@@ -731,8 +738,8 @@ fn footnote_cross_references_resolve_via_host_resolver() {
     // Cross-references inside a footnote are resolved through a host-supplied
     // resolver too (the multi-document path), and an unresolved one falls back
     // and is reported.
-    let mut doc =
-        Parser::default().parse_deferred("Text.footnote:[See <<topic>> and <<missing>>.]\n");
+    let mut parser = Parser::default();
+    let mut doc = parser.parse_deferred("Text.footnote:[See <<topic>> and <<missing>>.]\n");
 
     let resolver = CrossDocResolver {
         index: HashMap::from([(
@@ -740,7 +747,7 @@ fn footnote_cross_references_resolve_via_host_resolver() {
             ResolvedReference::new("other.html#topic".to_string(), Some("Topic".to_string())),
         )]),
     };
-    let warnings = doc.resolve_references(&resolver, &HtmlSubstitutionRenderer {});
+    let warnings = doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
 
     assert_eq!(
         doc.catalog().footnotes()[0].text,
@@ -1355,6 +1362,159 @@ mod xrefs_in_titles {
     }
 
     #[test]
+    fn two_references_in_a_carried_title_resolve_in_order() {
+        // The carried title's deferred template is synthesized from its own
+        // inline tree at the hop (see `Content::to_owned_title`), so the
+        // template's `Xref` pieces and the segment list are built in one walk
+        // and must line up: the first reference takes the first segment's
+        // destination, the second the second's.
+        let doc = Parser::default()
+            .parse(".See <<goal>> then <<par>>\n== Section\n\n[[par]]para\n\n[#goal]\n== Goal");
+
+        let section = crate::tests::prelude::first_section(&doc);
+        let para = section
+            .child_blocks()
+            .next()
+            .expect("expected the section's first child block");
+
+        assert_eq!(
+            para.title(),
+            Some(r##"See <a href="#goal">Goal</a> then <a href="#par">[par]</a>"##)
+        );
+    }
+
+    #[test]
+    fn a_title_restashed_past_an_empty_section_keeps_its_template() {
+        // A carried title that finds its section empty is re-stashed by the
+        // sibling section that follows, for that section's own first block. The
+        // re-stash runs `to_owned_title` on the *restored* content — inline
+        // nodes already dropped — so it must keep the template the first hop
+        // synthesized rather than synthesize from the empty tree, or the
+        // reference would be lost.
+        let doc = Parser::default().parse(".See <<goal>>\n== Empty\n\n[#goal]\n== Goal\n\npara");
+
+        let sections: Vec<_> = doc
+            .child_blocks()
+            .filter_map(|block| {
+                if let crate::blocks::Block::Section(section) = block {
+                    Some(section)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let para = sections[1]
+            .child_blocks()
+            .next()
+            .expect("expected the second section's first child block");
+
+        assert_eq!(para.title(), Some(r##"See <a href="#goal">Goal</a>"##));
+    }
+
+    #[test]
+    fn a_reference_nested_in_a_span_of_a_carried_title_stays_its_fallback() {
+        // A documented boundary of the tree-synthesized carried-title template
+        // (see `carried_title_template`): the synthesis reads the tree's
+        // top-level nodes, so a cross-reference *nested* inside another
+        // construct — here a styled span — folds with its enclosing node into
+        // a literal piece rather than contributing a splice. It is baked as
+        // its unresolved fallback (the derived `#goal` destination with the
+        // bracketed text) instead of splicing the target's reference text, and
+        // — having no segment — an unresolvable one is not reported either.
+        //
+        // The string pipeline's template did splice these (its placeholders sat
+        // inside the rendered markup), so this narrows behavior for a shape no
+        // golden source exercises: nothing survives the `'src`-erasing hop to
+        // do better. If the synthesis ever learns nested placeholders, this
+        // fixture moves up to the resolved reading `See <strong>x
+        // <a href="#goal">Goal</a></strong> done`.
+        let doc = Parser::default()
+            .parse(".See *x <<goal>>* done\n== Section\n\npara\n\n[#goal]\n== Goal");
+
+        let section = crate::tests::prelude::first_section(&doc);
+        let para = section
+            .child_blocks()
+            .next()
+            .expect("expected the section's first child block");
+
+        assert_eq!(
+            para.title(),
+            Some(r##"See <strong>x <a href="#goal">[goal]</a></strong> done"##)
+        );
+
+        // The complement: an unresolvable nested target raises no warning,
+        // because the synthesis captured no segment for it.
+        let doc = Parser::default().parse(".See *x <<nowhere>>* done\n== Section\n\npara");
+
+        assert_eq!(doc.warnings().count(), 0);
+    }
+
+    #[test]
+    fn a_reference_nested_in_a_span_of_a_footnote_stays_its_fallback() {
+        // The footnote analog of the carried-title boundary above (see
+        // `fold_deferring_xrefs`'s own docs): the deferring fold walks a
+        // footnote's own children at the top level only, so a
+        // cross-reference *nested* inside another construct — here a styled
+        // span — folds with its enclosing node into one literal template
+        // piece rather than contributing its own splice, and is baked as its
+        // unresolved fallback rather than the target's (eventual) resolved
+        // reference text.
+        //
+        // This is checked at *registration* time (`parse_deferred`, before
+        // any reference is resolved), which is the only moment the template
+        // narrowing is observable at all: every production footnote goes on
+        // to fold from its own **tree** once resolution runs
+        // (`Content::collect_own_folded_footnotes`), and the tree's nested
+        // reference *does* pick up its resolved destination there (mirrored
+        // onto the node by the enclosing content's own resolution pass,
+        // independently of `FootnoteDeferred`) — see the complementary
+        // `a_reference_nested_in_a_footnote_resolves_once_the_document_does`.
+        let mut parser = Parser::default();
+        let doc =
+            parser.parse_deferred("See footnote:[x *<<goal>>* done] here.\n\n[#goal]\n== Goal");
+
+        assert_eq!(
+            doc.catalog().footnotes()[0].text,
+            r##"x <strong><a href="#goal">[goal]</a></strong> done"##
+        );
+    }
+
+    #[test]
+    fn a_reference_nested_in_a_footnote_resolves_once_the_document_does() {
+        // The complement of the fixture above: `FootnoteDeferred`'s own
+        // narrowed template only governs the *registration-time* fallback.
+        // Once the document is resolved, this footnote's `text` is folded
+        // fresh from its own tree (`Content::collect_own_folded_footnotes`),
+        // whose nested reference node was mirrored to its resolved
+        // destination by the enclosing content's own resolution pass — so
+        // the nested reference *does* end up resolved in the end, unlike the
+        // carried-title case, which has no tree left to re-fold from at all.
+        let doc =
+            Parser::default().parse("See footnote:[x *<<goal>>* done] here.\n\n[#goal]\n== Goal");
+
+        assert_eq!(
+            doc.catalog().footnotes()[0].text,
+            r##"x <strong><a href="#goal">Goal</a></strong> done"##
+        );
+    }
+
+    #[test]
+    fn an_unresolvable_reference_nested_in_a_footnote_is_still_warned_about() {
+        // Unlike the carried title's own nested-reference narrowing above
+        // (which captures no segment at all for a nested reference, so an
+        // unresolvable one raises no warning), a footnote's nested reference
+        // keeps its segment: `FootnoteDeferred`'s own `xrefs` records every
+        // cross-reference the footnote's text carries, not only the ones its
+        // `template` can splice — see that type's own docs — so it is still
+        // resolved, and still warned about when unresolvable, exactly as a
+        // top-level one would be.
+        let doc = Parser::default().parse("See footnote:[x *<<nowhere>>* done] here.\n");
+
+        assert_eq!(doc.warnings().count(), 1);
+    }
+
+    #[test]
     fn resolver_chosen_text_wins_over_the_local_title() {
         // A caller-supplied resolver may resolve a target to its local `#id`
         // destination while choosing its own display text (e.g. a curated
@@ -1376,11 +1536,14 @@ mod xrefs_in_titles {
             }
         }
 
-        let mut doc = Parser::default().parse_deferred("== See <<b>>\n\n[#b]\n== B <<missing>>");
+        let mut parser = Parser::default();
+
+        let mut doc = parser.parse_deferred("== See <<b>>\n\n[#b]\n== B <<missing>>");
 
         doc.resolve_references(
             &BespokeResolver,
-            &crate::parser::HtmlSubstitutionRenderer {},
+            &crate::parser::HtmlInlineRenderer {},
+            &Parser::default(),
         );
 
         let sections: Vec<_> = doc
@@ -1417,10 +1580,15 @@ mod xrefs_in_titles {
             }
         }
 
-        let mut doc = Parser::default().parse_deferred("== See <<b>>\n\n[#b]\n== B <<c>>");
+        let mut parser = Parser::default();
 
-        let warnings =
-            doc.resolve_references(&KnowsNothing, &crate::parser::HtmlSubstitutionRenderer {});
+        let mut doc = parser.parse_deferred("== See <<b>>\n\n[#b]\n== B <<c>>");
+
+        let warnings = doc.resolve_references(
+            &KnowsNothing,
+            &crate::parser::HtmlInlineRenderer {},
+            &parser,
+        );
 
         let sections: Vec<_> = doc
             .child_blocks()
@@ -1477,7 +1645,8 @@ mod xrefs_in_titles {
 
         doc.resolve_references(
             &ExternalResolver,
-            &crate::parser::HtmlSubstitutionRenderer {},
+            &crate::parser::HtmlInlineRenderer {},
+            &Parser::default(),
         );
 
         let sections: Vec<_> = doc
@@ -1497,6 +1666,26 @@ mod xrefs_in_titles {
         assert_eq!(
             sections[0].section_title(),
             r##"See <a href="other.html#b">B [c]</a>"##
+        );
+    }
+
+    #[test]
+    fn a_discrete_headings_own_title_resolves_its_xref() {
+        // A discrete heading is the one section kind that *keeps* its `.Title`
+        // decoration (a non-discrete section's is carried into its first
+        // block), and its title's cross-references resolve like any other
+        // block title's: the reference text below is the target section's
+        // title, not the unresolved `[real]` fallback.
+        let doc = Parser::default().parse(
+            ".See <<real>> here\n[discrete]\n== Discrete heading\n\nbody\n\n[[real]]\n== Real Section\n",
+        );
+
+        let block = doc.child_blocks().next().unwrap();
+        assert_eq!(block.raw_context().as_ref(), "floating_title");
+
+        assert_eq!(
+            block.title().unwrap(),
+            r##"See <a href="#real">Real Section</a> here"##
         );
     }
 }
