@@ -1,5 +1,9 @@
 //! The macros substitution step, split by macro family.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 pub(super) mod anchors;
 pub(super) mod image;
 mod indexterm;
@@ -15,6 +19,7 @@ use ui::{kbd_btn_macros_level, menu_macros_level};
 use xref::xref_macros_level;
 
 use super::{
+    ENTITY_NAME,
     quotes::{
         LevelContext, Piece, TakenNodes, build_match_string, charref_entity, emit_range,
         emit_range_from, single_text_value, source_slice, special_entity, text_slice,
@@ -26,10 +31,27 @@ use crate::{
     attributes::element_attribute::{
         MASKED_PIECE_PLACEHOLDER, escape_masked_piece_bytes, unescape_masked_piece_bytes,
     },
-    content::restored_entity_pattern,
     inlines::{CharRef, InlineNode},
     strings::CowStr,
 };
+
+/// A **restored** entity reference (`&copy;`, `&#8217;`) as it appears once
+/// the character-replacements step's restore-entities rule has un-escaped
+/// it — that is, the same class that rule matches, minus the `&amp;`
+/// escaping its `&` had before the rule ran.
+///
+/// Needed here to find such an entity inside a value this module computed
+/// off an already-escaped string, so the entity becomes its own
+/// [`CharRef`](crate::inlines::InlineNode::CharRef)`::Entity` child rather
+/// than text a fold would escape a second time.
+fn restored_entity_pattern() -> &'static Regex {
+    &RESTORED_ENTITY
+}
+
+static RESTORED_ENTITY: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(&format!(r#"^&{ENTITY_NAME};"#)).unwrap()
+});
 
 /// Whether the escaping step has already run by the time the macros step reads
 /// a value off the level's match string.

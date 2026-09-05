@@ -1,6 +1,8 @@
 //! The quoted-text substitution step.
 
-use std::{borrow::Cow, ops::Range};
+use std::{borrow::Cow, ops::Range, sync::LazyLock};
+
+use regex::Regex;
 
 use super::{
     macros::image::{range_has_no_opaque_piece, range_is_verbatim},
@@ -9,11 +11,171 @@ use super::{
 use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
-    content::{QuoteSub, maybe_has_replacements, quote_subs},
     inlines::{CharRef, InlineNode, RawForm, RawOrigin, SpanForm, StyleVariant, Styled},
     parser::{HtmlInlineRenderer, InlineRenderer, QuoteScope, QuoteType},
     strings::CowStr,
 };
+
+/// One quoted-text recognition rule: a [`QuoteType`]/[`QuoteScope`] pairing and
+/// the pattern that recognizes it.
+///
+/// The pattern is compiled through `regex-automata`'s meta engine rather than
+/// the `regex` crate's own wrapper of it, because the recognition sink's
+/// candidate scan needs the one thing the wrapper does not expose: an
+/// **anchored** search at an arbitrary offset (see [`find_matches`] below).
+/// The syntax and match semantics are the `regex` crate's own — the wrapper is
+/// a thin layer over this very engine. [`source`](Self::source) keeps the
+/// pattern's text so the differential pin in this module's own tests can
+/// compile the reference `regex::Regex` these matchers replaced and compare
+/// the two match-for-match.
+pub(crate) struct QuoteSub {
+    pub(crate) type_: QuoteType,
+    pub(crate) scope: QuoteScope,
+    pub(crate) pattern: regex_automata::meta::Regex,
+    /// Read only by the differential pin in this module's own tests; the
+    /// production matcher is [`pattern`](Self::pattern).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) source: &'static str,
+}
+
+/// Builds one [`QuoteSub`], compiling `source` with the same
+/// `dot_matches_new_line` semantics `RegexBuilder` gave every quote pattern.
+/// (The superscript and subscript patterns were built without the flag, but
+/// neither contains a `.` metacharacter, so the flag is inert for them and
+/// one shared configuration serves all twelve.)
+fn quote_sub(type_: QuoteType, scope: QuoteScope, source: &'static str) -> QuoteSub {
+    #[allow(clippy::unwrap_used)]
+    let pattern = regex_automata::meta::Regex::builder()
+        .syntax(regex_automata::util::syntax::Config::new().dot_matches_new_line(true))
+        .build(source)
+        .unwrap();
+
+    QuoteSub {
+        type_,
+        scope,
+        pattern,
+        source,
+    }
+}
+
+/// The ordered quoted-text recognition rules. The order is significant: it
+/// encodes Asciidoctor's precedence (see [`QUOTE_SUBS`]).
+pub(crate) fn quote_subs() -> &'static [QuoteSub] {
+    &QUOTE_SUBS
+}
+
+// Adapted from QUOTE_SUBS in Ruby Asciidoctor implementation,
+// found in https://github.com/asciidoctor/asciidoctor/blob/main/lib/asciidoctor.rb#L440.
+//
+// Translation notes:
+// * The `\m` modifier on Ruby regex means the `.` pattern *can* match a new
+//   line. We use the `.dot_matches_new_line(true)` option on `RegexBuilder` to
+//   implement this instead.
+// * The `(?!#{CG_WORD})` look-ahead syntax is not available in Rust regex. It
+//   looks like the `\b{end-half}` pattern can take its place. (This pattern
+//   requires that a non-word character or end of haystack follow the match
+//   point.)
+// * `#{CC_ALL}` just means any character (`.`).
+// * Replace `#{QuoteAttributeListRxt}` with `\\[([^\\[\\]]+)\\]`. (This seems
+//   preferable to having yet another level of backslash escaping.)
+//
+// Notes from the original Ruby implementation:
+// * Unconstrained quotes can appear anywhere.
+// * Constrained quotes must be bordered by non-word characters.
+// * NOTE: These substitutions are processed in the order they appear here and
+//   the order in which they are replaced is important.
+static QUOTE_SUBS: LazyLock<Vec<QuoteSub>> = LazyLock::new(|| {
+    vec![
+        // **strong**
+        quote_sub(
+            QuoteType::Strong,
+            QuoteScope::Unconstrained,
+            r#"\\?(?:\[([^\[\]]+)\])?\*\*(.+?)\*\*"#,
+        ),
+        // *strong*
+        quote_sub(
+            QuoteType::Strong,
+            QuoteScope::Constrained,
+            r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?\*(\S|\S.*?\S)\*\b{end-half}"#,
+        ),
+        // "`double-quoted`"
+        quote_sub(
+            QuoteType::DoubleQuote,
+            QuoteScope::Constrained,
+            r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?"`(\S|\S.*?\S)`"\b{end-half}"#,
+        ),
+        // '`single-quoted`'
+        quote_sub(
+            QuoteType::SingleQuote,
+            QuoteScope::Constrained,
+            r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?'`(\S|\S.*?\S)`'\b{end-half}"#,
+        ),
+        // ``monospaced``
+        quote_sub(
+            QuoteType::Monospaced,
+            QuoteScope::Unconstrained,
+            r#"\\?(?:\[([^\[\]]+)\])?``(.+?)``"#,
+        ),
+        // `monospaced`
+        //
+        // NB: We don't have look-ahead in Rust Regex, so we might miss some
+        // edge cases because Ruby's version matches `(?![#{CC_WORD}"'`])`
+        // which is slightly more detailed than our `\b{end-half}`.
+        quote_sub(
+            QuoteType::Monospaced,
+            QuoteScope::Constrained,
+            r#"(^|[^\w&;:"'`}])(?:\[([^\[\]]+)\])?`(\S|\S.*?\S)`\b{end-half}"#,
+        ),
+        // __emphasis__
+        quote_sub(
+            QuoteType::Emphasis,
+            QuoteScope::Unconstrained,
+            r#"\\?(?:\[([^\[\]]+)\])?__(.+?)__"#,
+        ),
+        // _emphasis_
+        quote_sub(
+            QuoteType::Emphasis,
+            QuoteScope::Constrained,
+            r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?_(\S|\S.*?\S)_\b{end-half}"#,
+        ),
+        // ##mark##
+        quote_sub(
+            QuoteType::Mark,
+            QuoteScope::Unconstrained,
+            r#"\\?(?:\[([^\[\]]+)\])?##(.+?)##"#,
+        ),
+        // #mark#
+        quote_sub(
+            QuoteType::Mark,
+            QuoteScope::Constrained,
+            r#"(^|[^\w&;:}])(?:\[([^\[\]]+)\])?#(\S|\S.*?\S)#\b{end-half}"#,
+        ),
+        // ^superscript^
+        quote_sub(
+            QuoteType::Superscript,
+            QuoteScope::Unconstrained,
+            r#"\\?(?:\[([^\[\]]+)\])?\^(\S+?)\^"#,
+        ),
+        // ~subscript~
+        quote_sub(
+            QuoteType::Subscript,
+            QuoteScope::Unconstrained,
+            r#"\\?(?:\[([^\[\]]+)\])?~(\S+?)~"#,
+        ),
+    ]
+});
+
+/// Reports whether `text` contains any character that could open a
+/// character-replacement construct. A cheap pre-filter that lets a caller
+/// skip the full pattern sweep when nothing replaceable is present.
+pub(crate) fn maybe_has_replacements(text: &str) -> bool {
+    REPLACEABLE_TEXT_SNIFF.is_match(text)
+}
+
+static REPLACEABLE_TEXT_SNIFF: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r#"[&']|--|\.\.\.|\([CRT]M?\)"#).unwrap()
+});
 
 /// A single opaque codepoint standing in for a whole [`Styled`] span (produced
 /// by an earlier sub) while a later sub matches at that span's level. Like the
@@ -5331,8 +5493,7 @@ mod tests {
         // match of every sub across the ambiguity shapes the derivation has
         // to re-decide (the `^`-versus-class choice at position zero, the
         // attrs-greedy backtrack, delimiter-charactered bodies).
-        use super::{derive_groups, derive_via_captures};
-        use crate::content::quote_subs;
+        use super::{derive_groups, derive_via_captures, quote_subs};
 
         let fixtures = [
             "*b*",
@@ -5429,11 +5590,8 @@ mod tests {
         // where neither can, and the answer is to skip the match rather than
         // mis-shape it. A synthetic sub whose body group is optional pins
         // that skip path (and, with it, the fallback's own miss arm).
-        use super::find_matches;
-        use crate::{
-            content::quote_sub,
-            parser::{QuoteScope, QuoteType},
-        };
+        use super::{find_matches, quote_sub};
+        use crate::parser::{QuoteScope, QuoteType};
 
         let synthetic = quote_sub(QuoteType::Strong, QuoteScope::Unconstrained, r"\*\*(x)?y");
 

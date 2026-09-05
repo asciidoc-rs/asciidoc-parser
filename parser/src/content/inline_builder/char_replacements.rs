@@ -1,6 +1,11 @@
 //! The character-replacements substitution step.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use super::{
+    ENTITY_NAME,
     quotes::{
         LevelContext, LevelStrings, Piece, TakenNodes, build_match_string, emit_range_from,
         level_may_have_replacements, source_slice,
@@ -9,11 +14,111 @@ use super::{
 };
 use crate::{
     Span,
-    content::{CharacterReplacement, character_replacements},
     inlines::{CharRef, InlineNode},
     parser::CharacterReplacementType,
     strings::CowStr,
 };
+
+/// One character-replacement recognition rule: a
+/// [`CharacterReplacementType`] and the [`Regex`] that recognizes it.
+struct CharacterReplacement {
+    type_: CharacterReplacementType,
+    pattern: Regex,
+}
+
+/// The ordered character-replacement recognition rules. The order is
+/// significant: it encodes Asciidoctor's precedence (see [`REPLACEMENTS`]).
+fn character_replacements() -> &'static [CharacterReplacement] {
+    &REPLACEMENTS
+}
+
+// Adapted from REPLACEMENTS in Ruby Asciidoctor implementation,
+// found in https://github.com/asciidoctor/asciidoctor/blob/main/lib/asciidoctor.rb#L490.
+//
+// * NOTE: These substitutions are processed in the order they appear here and
+//   the order in which they are replaced is important.
+static REPLACEMENTS: LazyLock<Vec<CharacterReplacement>> = LazyLock::new(|| {
+    vec![
+        CharacterReplacement {
+            // Copyright `(C)`
+            type_: CharacterReplacementType::Copyright,
+            #[allow(clippy::unwrap_used)]
+            pattern: Regex::new(r#"\\?\(C\)"#).unwrap(),
+        },
+        CharacterReplacement {
+            // Registered `(R)`
+            type_: CharacterReplacementType::Registered,
+            #[allow(clippy::unwrap_used)]
+            pattern: Regex::new(r#"\\?\(R\)"#).unwrap(),
+        },
+        CharacterReplacement {
+            // Trademark `(TM)`
+            type_: CharacterReplacementType::Trademark,
+            #[allow(clippy::unwrap_used)]
+            pattern: Regex::new(r#"\\?\(TM\)"#).unwrap(),
+        },
+        CharacterReplacement {
+            // Em dash surrounded by spaces ` -- `
+            type_: CharacterReplacementType::EmDashSurroundedBySpaces,
+            #[allow(clippy::unwrap_used)]
+            pattern: Regex::new(r#"(?: |\n|^|\\)--(?: |\n|$)"#).unwrap(),
+        },
+        CharacterReplacement {
+            // Em dash without spaces `--`
+            type_: CharacterReplacementType::EmDashWithoutSpace,
+            #[allow(clippy::unwrap_used)]
+            pattern: Regex::new(r#"(\w)\\?--\b{start-half}"#).unwrap(),
+        },
+        CharacterReplacement {
+            // Ellipsis `...`
+            type_: CharacterReplacementType::Ellipsis,
+            #[allow(clippy::unwrap_used)]
+            pattern: Regex::new(r#"\\?\.\.\."#).unwrap(),
+        },
+        CharacterReplacement {
+            // Right single quote `\`'`
+            type_: CharacterReplacementType::TypographicApostrophe,
+            #[allow(clippy::unwrap_used)]
+            pattern: Regex::new(r#"\\?`'"#).unwrap(),
+        },
+        CharacterReplacement {
+            // Apostrophe (inside a word)
+            type_: CharacterReplacementType::TypographicApostrophe,
+            #[allow(clippy::unwrap_used)]
+            pattern: Regex::new(r#"([[:alnum:]])\\?'([[:alpha:]])"#).unwrap(),
+        },
+        CharacterReplacement {
+            // Right arrow `->`
+            type_: CharacterReplacementType::SingleRightArrow,
+            #[allow(clippy::unwrap_used)]
+            pattern: Regex::new(r#"\\?-&gt;"#).unwrap(),
+        },
+        CharacterReplacement {
+            // Right double arrow `=>`
+            type_: CharacterReplacementType::DoubleRightArrow,
+            #[allow(clippy::unwrap_used)]
+            pattern: Regex::new(r#"\\?=&gt;"#).unwrap(),
+        },
+        CharacterReplacement {
+            // Left arrow `<-`
+            type_: CharacterReplacementType::SingleLeftArrow,
+            #[allow(clippy::unwrap_used)]
+            pattern: Regex::new(r#"\\?&lt;-"#).unwrap(),
+        },
+        CharacterReplacement {
+            // Left double arrow `<=`
+            type_: CharacterReplacementType::DoubleLeftArrow,
+            #[allow(clippy::unwrap_used)]
+            pattern: Regex::new(r#"\\?&lt;="#).unwrap(),
+        },
+        CharacterReplacement {
+            // Restore entities
+            type_: CharacterReplacementType::CharacterReference("".to_owned()),
+            #[allow(clippy::unwrap_used)]
+            pattern: Regex::new(&format!(r#"\\?&amp;({ENTITY_NAME});"#)).unwrap(),
+        },
+    ]
+});
 
 /// The character-replacements substitution, as a node transducer: each shared
 /// [`character_replacements`] rule is applied to the tree in order (its order
@@ -1182,8 +1287,9 @@ mod tests {
         // over every haystack — written in escaped match-string form, as the
         // rules see it — and the two must agree match for match, including
         // on the escape (`Unescape`) arm only the sequential pass reaches.
-        use super::{find_replacement_matches, reference_find_replacement_matches};
-        use crate::content::character_replacements;
+        use super::{
+            character_replacements, find_replacement_matches, reference_find_replacement_matches,
+        };
 
         let haystacks = [
             // Each rule's own shapes, at edges and mid-string.

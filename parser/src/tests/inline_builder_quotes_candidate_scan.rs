@@ -11,9 +11,8 @@
 //! [`candidate_needle`]: crate::content::inline_builder::candidate_needle
 
 use crate::{
-    content::{
-        inline_builder::{candidate_needle, closing_needle, find_matches, reference_find_matches},
-        quote_subs,
+    content::inline_builder::{
+        candidate_needle, closing_needle, find_matches, quote_subs, reference_find_matches,
     },
     parser::{QuoteScope, QuoteType},
 };

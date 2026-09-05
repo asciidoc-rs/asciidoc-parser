@@ -32,14 +32,9 @@ mod substitution_group;
 pub use substitution_group::SubstitutionGroup;
 
 mod substitution_step;
+use substitution_step::ATTRIBUTE_REFERENCE;
 pub use substitution_step::SubstitutionStep;
-#[cfg(test)]
-use substitution_step::quote_sub;
-use substitution_step::{
-    ATTRIBUTE_REFERENCE, CharacterReplacement, build_callout_regexes, character_replacements,
-    hard_line_break_pattern, restored_entity_pattern,
-};
 pub(crate) use substitution_step::{
-    AttributeMissing, QuoteSub, apply_attributes, apply_special_characters, maybe_has_replacements,
-    quote_subs, substitute_attributes_in_macro_target, substitute_attributes_in_reftext,
+    AttributeMissing, apply_attributes, apply_special_characters,
+    substitute_attributes_in_macro_target, substitute_attributes_in_reftext,
 };

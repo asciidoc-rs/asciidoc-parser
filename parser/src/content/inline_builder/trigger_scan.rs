@@ -55,7 +55,7 @@ pub(crate) const ATTRIBUTE_TRIGGERS: u32 = bit(b'{');
 
 /// The character-replacements step: one byte from each alternative of its own
 /// sniff (`[&']|--|\.\.\.|\([CRT]M?\)` — see
-/// [`maybe_has_replacements`](crate::content::maybe_has_replacements)).
+/// [`maybe_has_replacements`](super::quotes::maybe_has_replacements)).
 pub(crate) const REPLACEMENT_TRIGGERS: u32 =
     bit(b'&') | bit(b'\'') | bit(b'-') | bit(b'.') | bit(b'(');
 

@@ -10,13 +10,10 @@
 //! trigger string whose bytes all fall outside its class would disable the
 //! construct, which is what these catch.
 
-use crate::content::{
-    inline_builder::{
-        ATTRIBUTE_TRIGGERS, MACRO_TRIGGERS, PASSTHROUGH_TRIGGERS, POST_REPLACEMENT_TRIGGERS,
-        QUOTE_TRIGGERS, REPLACEMENT_TRIGGERS, SPECIAL_TRIGGERS, STEM_TRIGGERS,
-        level_may_have_macros, trigger_mask,
-    },
-    maybe_has_replacements,
+use crate::content::inline_builder::{
+    ATTRIBUTE_TRIGGERS, MACRO_TRIGGERS, PASSTHROUGH_TRIGGERS, POST_REPLACEMENT_TRIGGERS,
+    QUOTE_TRIGGERS, REPLACEMENT_TRIGGERS, SPECIAL_TRIGGERS, STEM_TRIGGERS, level_may_have_macros,
+    maybe_has_replacements, trigger_mask,
 };
 
 /// Asserts that every one of `triggers` opens `class`.

@@ -1,14 +1,26 @@
 //! The post-replacements substitution step (hard line breaks).
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use super::{
     quotes::{
         LevelStrings, Piece, build_match_string, emit_range, single_text_value, source_slice,
     },
     special_chars::Masked,
 };
-use crate::{
-    Parser, Span, attributes::Attrlist, content::hard_line_break_pattern, inlines::InlineNode,
-};
+use crate::{Parser, Span, attributes::Attrlist, inlines::InlineNode};
+
+/// The hard-line-break recognition pattern (a line ending in ` +`).
+fn hard_line_break_pattern() -> &'static Regex {
+    &HARD_LINE_BREAK
+}
+
+static HARD_LINE_BREAK: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::unwrap_used)]
+    Regex::new(r#"(?m)^(.*) \+$"#).unwrap()
+});
 
 /// The post-replacement substitution, as a node transducer: a line ending in
 /// ` +` has that ` +` replaced by a [`LineBreak`](InlineNode::LineBreak) leaf,

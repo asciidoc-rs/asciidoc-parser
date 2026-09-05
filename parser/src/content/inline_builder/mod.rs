@@ -81,10 +81,8 @@
 //! - [`apply_character_replacements`] recognizes [character replacements] —
 //!   `(C)`, `--`, `...`, arrows, apostrophes, and restored entities — replacing
 //!   each with a [`CharRef::Replacement`](crate::inlines::CharRef::Replacement)
-//!   or [`CharRef::Entity`](crate::inlines::CharRef::Entity) leaf. It reuses
-//!   the shared
-//!   [`character_replacements`](crate::content::character_replacements) rules
-//!   and, like the string step, matches over the *escaped* text so an arrow
+//!   or [`CharRef::Entity`](crate::inlines::CharRef::Entity) leaf. It matches
+//!   over the *escaped* text, as the retired string step did, so an arrow
 //!   (`-&gt;`) or entity (`&amp;copy;`) can straddle a `Text`/`CharRef`
 //!   boundary.
 //! - [`apply_macros`] recognizes **image and icon macros** (`image:target[…]`,
@@ -436,7 +434,7 @@
 //! corpus pins the cases this covers.
 //!
 //! [`Text`]: InlineNode::Text
-//! [`quote_subs`]: crate::content::quote_subs
+//! [`quote_subs`]: quotes::quote_subs
 
 mod attribute_refs;
 mod callouts;
@@ -471,7 +469,10 @@ use passthrough_step::apply_passthroughs;
 use post_replacements::apply_post_replacements;
 use quotes::apply_quotes;
 #[cfg(test)]
-pub(crate) use quotes::{candidate_needle, closing_needle, find_matches, reference_find_matches};
+pub(crate) use quotes::{
+    candidate_needle, closing_needle, find_matches, maybe_has_replacements, quote_subs,
+    reference_find_matches,
+};
 use special_chars::{
     Masked, apply_special_characters, classify_unescaped_specials, flatten_prior_markup,
     masked_locations,
@@ -490,6 +491,16 @@ use crate::{
     inlines::InlineNode,
     strings::CowStr,
 };
+
+/// The name an entity reference must carry to be recognized as one: a named
+/// entity (`copy`, `hellip`, `frac12`), a decimal numeric reference
+/// (`#8217`), or a hexadecimal one (`#x2014`).
+///
+/// Shared between [`char_replacements`]'s restore-entities rule (which
+/// *produces* a restored entity) and [`macros`]'s own pattern for one already
+/// produced, so the two spellings of the same class cannot drift.
+pub(super) const ENTITY_NAME: &str =
+    r#"(?:[a-zA-Z][a-zA-Z]+\d{0,2}|#\d\d\d{0,4}|#x[\da-fA-F][\da-fA-F][\da-fA-F]{0,3})"#;
 
 /// Builds the inline tree for `source` in a single forward pass.
 ///
