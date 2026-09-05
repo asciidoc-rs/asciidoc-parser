@@ -985,20 +985,19 @@ impl<'src> Content<'src> {
     /// non-destructive, and re-resolvable: each call overwrites the tree's
     /// resolved state from `block_ordered` and `footnote_ordered`.
     ///
-    /// Returns whether the **block-level** correlation ran — i.e. whether the
-    /// tree holds exactly the cross-reference nodes the carried title's own
-    /// template expects a slot for. A `false` means the builder left
-    /// at least one of them unrecognized, so this content's tree is known not
-    /// to describe its rendering; a caller that folds the tree instead of
-    /// rebuilding from that template (see [`refold`](Self::refold)) uses this
-    /// to tell the two apart.
+    /// This method does not report which case applied: a caller that needs to
+    /// tell them apart — because it folds the tree in place of rebuilding
+    /// from the title template, rather than reading it after the fact (see
+    /// [`fold_resolved_title`]) — recomputes the same **block-level** count
+    /// comparison itself rather than being told the answer here.
     ///
-    /// The **footnote** correlation is deliberately not part of that answer: a
-    /// footnote's text is extracted out of this content, so it is not part of
-    /// [`rendered`](Self::rendered) — a fold emits the footnote's *marker* and
-    /// never descends into its subtree (see `fold_footnote`). A footnote-side
-    /// skip therefore leaves the tree's own footnote nodes honestly unresolved
-    /// without making a fold of this content wrong.
+    /// The **footnote** correlation's own skip cannot affect that decision
+    /// either way: a footnote's text is extracted out of this content, so it
+    /// is not part of [`rendered`](Self::rendered) — a fold emits the
+    /// footnote's *marker* and never descends into its subtree (see
+    /// `fold_footnote`). A footnote-side skip therefore leaves the tree's own
+    /// footnote nodes honestly unresolved without making a fold of this
+    /// content wrong.
     pub(crate) fn mirror_tree_xref_resolution(
         &mut self,
         block_ordered: &[Option<ResolvedReference>],
@@ -1051,12 +1050,12 @@ impl<'src> Content<'src> {
 ///
 /// `None` is the same carve-out
 /// [`mirror_tree_xref_resolution`](Content::mirror_tree_xref_resolution)
-/// reports: a tree holding fewer block-level cross-references than were
-/// deferred does not describe this title, so folding it would drop the
-/// construct. The caller renders the template instead — the fallback for a
-/// title with no tree to fold at all (a block title carried across a section
-/// heading, whose inline nodes cannot cross the `'src`-erasing hop it
-/// travels on).
+/// skips its own block-level correlation for: a tree holding fewer
+/// block-level cross-references than were deferred does not describe this
+/// title, so folding it would drop the construct. The caller renders the
+/// template instead — the fallback for a title with no tree to fold at all (a
+/// block title carried across a section heading, whose inline nodes cannot
+/// cross the `'src`-erasing hop it travels on).
 ///
 /// Folding renders the **whole** title, not just its cross-references — every
 /// styled span, image and special character in it — where the template render
