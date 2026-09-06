@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.30.1](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.30.0...v0.30.1)
+_06 September 2026_
+
+### Added
+
+* Replace inline text substitution with a structured inline AST ([#1059](https://github.com/asciidoc-rs/asciidoc-parser/pull/1059))
+
+### Fixed
+
+* Freeze a forward xref in a title when an auto-id section demands it ([#1389](https://github.com/asciidoc-rs/asciidoc-parser/pull/1389))
+* Render a whole-content concealed index-term shorthand as empty ([#1388](https://github.com/asciidoc-rs/asciidoc-parser/pull/1388))
+* Register a document title's anchor/image/link once, not per rebuild ([#1387](https://github.com/asciidoc-rs/asciidoc-parser/pull/1387))
+
 ## [0.30.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.20...v0.30.0)
 _24 August 2026_
 
