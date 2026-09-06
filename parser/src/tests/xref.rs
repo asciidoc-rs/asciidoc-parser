@@ -1199,9 +1199,11 @@ mod included_file_collapses_to_internal_anchor {
 /// title, plus the corners of how a title maps (or does not map) to a
 /// referenceable target.
 mod xrefs_in_titles {
+    use super::DerivedRewritingResolver;
     use crate::{
         Parser,
         blocks::{FindBlocks, IsBlock},
+        parser::{CatalogResolver, HtmlInlineRenderer},
     };
 
     /// Collects `(context, title)` for every titled block in the document, in
@@ -1508,6 +1510,101 @@ mod xrefs_in_titles {
         assert_eq!(sections[0].section_title(), r##"<a href="#b">[b]</a>"##);
         assert_eq!(sections[1].section_title(), r##"<a href="#a">[b]</a>"##);
         assert_eq!(sections[2].section_title(), r##"Ref <a href="#a">[b]</a>"##);
+    }
+
+    /// A manual id that collides with an already-registered one is rejected
+    /// (and warned about) rather than claiming the id — so a later
+    /// auto-id section's demand for that id must still reach the
+    /// *legitimate* owner's title, not the rejected duplicate's. Registering
+    /// the duplicate's own snapshot under the same id (as if it had won the
+    /// id) would silently replace the original's, corrupting both the
+    /// demand's answer and the original's own catalog reference text.
+    #[test]
+    fn a_duplicate_manual_id_does_not_replace_the_original_owners_recomputable_title() {
+        // `b` and `c` are defined *before* either `a` section, so a stray
+        // fold against a still-partial catalog is not what distinguishes
+        // `B` from `C` here — only which of the two `a` titles the demand
+        // actually reaches is.
+        let doc = Parser::default()
+            .parse("[#b]\n== B\n\n[#c]\n== C\n\n[#a]\n== <<b>>\n\n[#a]\n== <<c>>\n\n== <<a>>");
+
+        let sections: Vec<_> = sections(&doc);
+
+        // The demand reaches `a`'s own (first, legitimate) title — `<<b>>`
+        // resolved to `B` — never the duplicate's `<<c>>`.
+        assert_eq!(sections[2].section_title(), r##"<a href="#b">B</a>"##);
+        assert_eq!(sections[4].section_title(), r##"<a href="#a">B</a>"##);
+
+        assert!(
+            doc.warnings()
+                .any(|w| format!("{w:?}").contains("DuplicateId"))
+        );
+    }
+
+    /// A title's cross-document reference (`xref:other.adoc#topic[]`,
+    /// unqualified so it needs the target's own reference text) can only ever
+    /// be resolved by a host resolver supplied later, explicitly, to
+    /// `Document::resolve_references` — never by this crate's own parse-time
+    /// demand, which only ever consults the built-in, same-document
+    /// `CatalogResolver`. Freezing such a title anyway would permanently deny
+    /// that later, independent resolution sweep the chance to do better, so
+    /// it must not freeze even when an auto-id section demands it.
+    #[test]
+    fn a_title_with_a_cross_document_reference_is_never_frozen() {
+        let mut parser = Parser::default();
+        let mut doc = parser.parse_deferred("[#a]\n== <<other.adoc#topic>>\n\n== <<a>>");
+
+        // Resolve once with the built-in resolver (mirroring what `parse()`
+        // would have done automatically) — this is the moment a title with a
+        // same-document forward reference would have frozen, had `a`'s title
+        // been eligible.
+        {
+            let catalog = doc.catalog().clone();
+            let resolver = CatalogResolver::new(&catalog);
+            doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
+        }
+
+        // A *different*, later resolver sweep — exactly the repeatable-
+        // resolution contract `Document::resolve_references` documents —
+        // still changes `a`'s rendering. A frozen title could not do this.
+        let resolver = DerivedRewritingResolver;
+        doc.resolve_references(&resolver, &HtmlInlineRenderer {}, &parser);
+
+        let sections: Vec<_> = sections(&doc);
+        assert_eq!(
+            sections[0].section_title(),
+            r##"<a href="/en/other.html#topic">other.html</a>"##
+        );
+    }
+
+    /// A `Parser` reused across documents must not let one document's frozen
+    /// (or merely recomputable) titles leak into the next: a later document
+    /// can easily reuse the same ids, and its own titles must be resolved
+    /// against *its own* catalog, not contaminated by a different document's
+    /// parse-time state.
+    #[test]
+    fn title_freeze_state_does_not_leak_between_reused_parses() {
+        let mut parser = Parser::default();
+
+        // First document: the auto-id middle section demands (and freezes)
+        // `s1`'s reference text against a catalog that does not yet have
+        // `forward` — the same shape as the issue's own repro.
+        let _doc1 = parser.parse("[#s1]\n== <<forward>>\n\n== <<s1>>\n\n[#forward]\n== Forward");
+
+        // Second document, parsed with the *same* `Parser`: it reuses the id
+        // `s1`, again with an embedded forward reference — but with no
+        // demanding section this time, so nothing should freeze it, and it
+        // should resolve normally, exactly like
+        // `forward_reference_in_title_resolves_without_a_demanding_section`.
+        // A leaked freeze from `_doc1` would instead show the bracketed
+        // fallback here.
+        let doc2 = parser.parse("[#s1]\n== <<forward>>\n\n[#forward]\n== Forward");
+
+        let sections: Vec<_> = sections(&doc2);
+        assert_eq!(
+            sections[0].section_title(),
+            r##"<a href="#forward">Forward</a>"##
+        );
     }
 
     fn sections<'a>(doc: &'a crate::Document<'a>) -> Vec<&'a crate::blocks::SectionBlock<'a>> {

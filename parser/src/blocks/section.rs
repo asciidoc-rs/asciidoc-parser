@@ -321,7 +321,11 @@ impl<'src> SectionBlock<'src> {
             .then_some(recomputable_title.as_ref())
             .flatten()
         {
-            Some(node) => title_freeze::resolve_now(node, parser, &mut HashSet::new()).rendered,
+            Some(node) => {
+                title_freeze::resolve_now(node, parser, &mut HashSet::new())
+                    .0
+                    .rendered
+            }
             None => fold_reference_text(
                 section_title.inlines(),
                 &*parser.renderer,
@@ -443,6 +447,13 @@ impl<'src> SectionBlock<'src> {
             .or_else(|| embedded_reftext.clone())
             .unwrap_or_else(|| CowStr::from(title_reftext.as_str()));
 
+        // Whether a `manual_id` above was actually registered to *this*
+        // section — `false` when `register_ref` rejected it as a duplicate,
+        // in which case the id belongs to whichever section claimed it
+        // first, not this one. `effective_id` below reads this rather than
+        // assuming `manual_id`'s mere presence means ownership.
+        let mut manual_id_registered = false;
+
         let section_id = if sectids && manual_id.is_none() {
             let id = parser.generate_and_register_unique_id(
                 &proposed_base_id,
@@ -457,6 +468,7 @@ impl<'src> SectionBlock<'src> {
             if let Some(manual_id) = manual_id {
                 match parser.register_ref(manual_id, Some(&reftext), RefType::Section) {
                     Ok(()) => {
+                        manual_id_registered = true;
                         if let Some(signifier) = xref_signifier {
                             parser.set_ref_signifier(manual_id, signifier);
                         }
@@ -482,8 +494,15 @@ impl<'src> SectionBlock<'src> {
         // an *embedded* title anchor — everything else `id()`/`reference_id()`
         // read directly from `attrlist`/`anchor` instead (see
         // `reference_id`'s own docs) — so an id supplied *above* the heading
-        // falls back to `manual_id` here.
-        let effective_id = section_id.clone().or_else(|| manual_id.map(str::to_string));
+        // falls back to `manual_id` here, but only when this section actually
+        // won that id: a rejected duplicate must not be treated as this
+        // section's own, or `title_freeze::register_recomputable_title` below
+        // would replace the legitimate owner's snapshot with this section's.
+        let effective_id = section_id.clone().or_else(|| {
+            manual_id_registered
+                .then(|| manual_id.map(str::to_string))
+                .flatten()
+        });
 
         // A section without an explicit reftext is a *recomputable*
         // cross-reference target: another (later) section's own

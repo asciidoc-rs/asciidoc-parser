@@ -782,6 +782,12 @@ impl Parser {
         // heading.
         self.pending_block_title = None;
 
+        // Start each parse with no parse-time title-freeze state: a reused
+        // `Parser` must not let one document's frozen or recomputable titles
+        // (keyed by id, which a later document can easily reuse) leak into
+        // the next. See `document::title_freeze`.
+        self.title_freeze = TitleFreezeState::default();
+
         // Reset counter (and captioned-block) numbering for each new document.
         Arc::make_mut(&mut self.counter_values.borrow_mut()).clear();
         self.locked_counter_values.borrow_mut().clear();

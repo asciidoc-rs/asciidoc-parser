@@ -56,6 +56,22 @@
 //! document is known, by the ordinary post-parse pass — which is also what
 //! ultimately resolves an id-generating section's own title, per the above.
 //!
+//! # A cross-document reference is never frozen
+//!
+//! A demanded title's own resolution is only actually installed as frozen
+//! when it is *safe* to — see [`resolve_now`]'s own docs. A cross-document
+//! target (`xref:other.adoc#topic[]`) can only ever be resolved by a host
+//! supplied later, explicitly, to `Document::resolve_references` — arbitrarily
+//! many times, each an independent sweep, per that method's own contract —
+//! never by this module, which only ever consults the built-in,
+//! same-document [`CatalogResolver`]. Freezing such a title anyway would
+//! permanently bake in today's local-only fallback and deny every later sweep
+//! the chance to do better. So a title reached through a cross-document
+//! segment — its own, or one embedded (transitively) in a title it demands —
+//! is resolved for this one demand and then left exactly as recomputable as
+//! it was, open to a later demand that might find the catalog (or the
+//! resolver) different next time.
+//!
 //! # Only a top-level splice, like a carried block title
 //!
 //! [`Parser`] cannot itself be generic over the source lifetime (see
@@ -146,6 +162,20 @@ impl TitleFreezeState {
     pub(crate) fn frozen_resolution(&self, id: &str) -> Option<&Resolution> {
         self.frozen.get(id)
     }
+
+    /// Whether `id` is a *recomputable* demand target at all — frozen
+    /// already, or still open to a demand — the same question
+    /// `document::title_refs::compute`'s own `id_to_node.get(target_id)`
+    /// asks of the post-parse pass's node list. `false` for a target that
+    /// resolves through the catalog perfectly well but carries no
+    /// cross-reference of its own (so was never registered here at all): its
+    /// catalog reference text is already final, and [`demand`] must not be
+    /// asked about it — asking would (correctly) report "not found" and the
+    /// caller would wrongly read that as "no reference text", discarding a
+    /// perfectly good one.
+    fn is_recomputable(&self, id: &str) -> bool {
+        self.frozen.contains_key(id) || self.recomputable.contains_key(id)
+    }
 }
 
 /// Registers `id`'s own deferred title parts as a potential demand target —
@@ -188,15 +218,34 @@ pub(crate) fn register_recomputable_title(parser: &mut Parser, id: &str, title: 
 /// [`document::title_refs`](super::title_refs)'s own sweep reads back to
 /// report them itself — the one place a warning is safe from being
 /// overwritten by the very sweep it's part of.
+///
+/// The second element of the returned pair says whether this resolution is
+/// safe to [`freeze`](demand): `false` when any segment reached — directly on
+/// `node`, or transitively through a [`demand`]ed target — carries its own
+/// [`DerivedReference`](crate::parser::DerivedReference) (a cross-document-
+/// shaped target, e.g. `xref:other.adoc#topic[]`). A parse only ever consults
+/// the built-in, same-document [`CatalogResolver`] (a host's own resolver, if
+/// any, is supplied later, explicitly, to `Document::resolve_references`,
+/// arbitrarily many times, each an independent sweep); permanently baking in
+/// today's local-only fallback for such a target would deny every later sweep
+/// the chance to resolve it properly, defeating that contract. A target this
+/// walk simply cannot find yet (same-document-shaped, not `derived`, just not
+/// registered) does *not* taint freezability — that is the ordinary, correct
+/// case issue #1110 exists for, and Asciidoctor freezes it too.
 pub(crate) fn resolve_now(
     node: &RecomputableTitle,
     parser: &mut Parser,
     in_progress: &mut HashSet<String>,
-) -> Resolution {
+) -> (Resolution, bool) {
     let mut block = node.block.clone();
     let mut footnote = node.footnote.clone();
+    let mut freezable = true;
 
     for xref in block.iter_mut().chain(footnote.iter_mut()) {
+        if xref.derived.is_some() {
+            freezable = false;
+        }
+
         let mut resolved = {
             let catalog = parser.catalog();
             CatalogResolver::new(&catalog).resolve(&ResolutionContext {
@@ -220,6 +269,7 @@ pub(crate) fn resolve_now(
         if let Some(reference) = resolved.as_mut()
             && let Some(target_id) = target_id.as_deref()
             && reference.href.strip_prefix('#') == Some(target_id)
+            && parser.title_freeze_state().is_recomputable(target_id)
         {
             // Unlike `document::title_refs::compute`, there is no
             // `resolver_chose_text` check here: the only resolver a parse can
@@ -228,7 +278,21 @@ pub(crate) fn resolve_now(
             // `Document::resolve_references` — long after parsing finishes),
             // and `CatalogResolver`'s own text is always read from this same
             // catalog entry, so it can never disagree with it.
-            reference.text = demand(target_id, parser, in_progress);
+            //
+            // `is_recomputable` above guarantees `demand` finds `target_id`
+            // either already frozen or still registered, so the only way it
+            // can still return `None` here is the cycle case — exactly
+            // mirroring `document::title_refs::compute`'s own
+            // `target_in_progress` branch, which is the one other place that
+            // explicitly blanks a reference's text to the bracketed fallback
+            // rather than leaving the catalog's already-good answer alone.
+            reference.text = match demand(target_id, parser, in_progress) {
+                Some((text, target_freezable)) => {
+                    freezable &= target_freezable;
+                    Some(text)
+                }
+                None => None,
+            };
         }
 
         xref.resolved = resolved;
@@ -238,17 +302,20 @@ pub(crate) fn resolve_now(
     let footnote_ordered = resolved_destinations(&footnote);
     let rendered = render_xref_template(&node.template, &block, &*parser.renderer);
 
-    Resolution {
-        rendered,
-        block_ordered,
-        footnote_ordered,
-    }
+    (
+        Resolution {
+            rendered,
+            block_ordered,
+            footnote_ordered,
+        },
+        freezable,
+    )
 }
 
 /// Demands `target_id`'s reference text against the catalog as it currently
-/// stands, freezing it — permanently, for every future reference, including
-/// `target_id`'s own final rendered heading — the first time it is demanded
-/// this way. See the module docs.
+/// stands. When the result is safe to (see [`resolve_now`]'s own docs), it is
+/// frozen — permanently, for every future reference, including `target_id`'s
+/// own final rendered heading. See the module docs.
 ///
 /// Returns `None` when `target_id` does not name a known recomputable title
 /// (not registered yet, or registered with an explicit reftext, in which case
@@ -256,14 +323,17 @@ pub(crate) fn resolve_now(
 /// higher up this same call chain — a cycle, broken exactly as
 /// `document::title_refs::compute` breaks one: the bracketed fallback,
 /// *without* freezing anything (the section is still being computed further
-/// up the stack, which is what freezes it once that frame returns).
+/// up the stack, which is what freezes it once that frame returns). Otherwise
+/// returns the resolved text alongside whether it was frozen, so a caller
+/// folding this text into its *own* title knows whether it, in turn, is still
+/// safe to freeze.
 fn demand(
     target_id: &str,
     parser: &mut Parser,
     in_progress: &mut HashSet<String>,
-) -> Option<String> {
+) -> Option<(String, bool)> {
     if let Some(resolution) = parser.title_freeze_state().frozen_resolution(target_id) {
-        return Some(resolution.rendered.clone());
+        return Some((resolution.rendered.clone(), true));
     }
 
     if !in_progress.insert(target_id.to_string()) {
@@ -279,15 +349,17 @@ fn demand(
 
     in_progress.remove(target_id);
 
-    result.map(|resolution| {
+    result.map(|(resolution, freezable)| {
         let rendered = resolution.rendered.clone();
 
-        parser.set_ref_reftext(target_id, rendered.clone());
-        parser
-            .title_freeze_state_mut()
-            .frozen
-            .insert(target_id.to_string(), resolution);
+        if freezable {
+            parser.set_ref_reftext(target_id, rendered.clone());
+            parser
+                .title_freeze_state_mut()
+                .frozen
+                .insert(target_id.to_string(), resolution);
+        }
 
-        rendered
+        (rendered, freezable)
     })
 }
