@@ -454,7 +454,14 @@ impl<'src> SectionBlock<'src> {
         // assuming `manual_id`'s mere presence means ownership.
         let mut manual_id_registered = false;
 
-        let section_id = if sectids && manual_id.is_none() {
+        // Whether this section auto-generates its own id — reused below to
+        // compute `effective_id`, since which branch actually ran is exactly
+        // what decides whether `section_id` (set unconditionally from
+        // `embedded_id` in the `else` branch, duplicate or not — see that
+        // branch's own comment) is safe to treat as this section's own.
+        let is_auto_generated_id = sectids && manual_id.is_none();
+
+        let section_id = if is_auto_generated_id {
             let id = parser.generate_and_register_unique_id(
                 &proposed_base_id,
                 Some(&reftext),
@@ -498,11 +505,22 @@ impl<'src> SectionBlock<'src> {
         // won that id: a rejected duplicate must not be treated as this
         // section's own, or `title_freeze::register_recomputable_title` below
         // would replace the legitimate owner's snapshot with this section's.
-        let effective_id = section_id.clone().or_else(|| {
+        //
+        // `section_id` itself cannot answer that for the *embedded*-anchor
+        // case: `id()`/`reference_id()` deliberately reads it back
+        // unconditionally, duplicate or not (see the `else` branch above),
+        // the same way `attrlist.id()` reflects a duplicate *attribute* id
+        // regardless of registration. Reusing it here would let exactly the
+        // same rejected duplicate back in, just from the other source — so
+        // this reads `is_auto_generated_id` instead, to know which branch
+        // actually ran, rather than trying to infer ownership from its result.
+        let effective_id = if is_auto_generated_id {
+            section_id.clone()
+        } else {
             manual_id_registered
                 .then(|| manual_id.map(str::to_string))
                 .flatten()
-        });
+        };
 
         // A section without an explicit reftext is a *recomputable*
         // cross-reference target: another (later) section's own

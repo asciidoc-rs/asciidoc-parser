@@ -1541,6 +1541,29 @@ mod xrefs_in_titles {
         );
     }
 
+    /// The same corruption, reached through the *other* source `manual_id`
+    /// can come from: an anchor embedded in the title itself (`== Title
+    /// [[id]]`) rather than an attribute above the heading. `section_id` (the
+    /// struct field) is set from `embedded_id` unconditionally — duplicate or
+    /// not, mirroring how `id()` reads back a duplicate *attribute* id
+    /// unconditionally too — so the id-ownership check must not simply trust
+    /// it.
+    #[test]
+    fn a_duplicate_embedded_anchor_id_does_not_replace_the_original_owners_recomputable_title() {
+        let doc = Parser::default()
+            .parse("[#b]\n== B\n\n[#c]\n== C\n\n[#a]\n== <<b>>\n\n== <<c>> [[a]]\n\n== <<a>>");
+
+        let sections: Vec<_> = sections(&doc);
+
+        assert_eq!(sections[2].section_title(), r##"<a href="#b">B</a>"##);
+        assert_eq!(sections[4].section_title(), r##"<a href="#a">B</a>"##);
+
+        assert!(
+            doc.warnings()
+                .any(|w| format!("{w:?}").contains("DuplicateId"))
+        );
+    }
+
     /// A title's cross-document reference (`xref:other.adoc#topic[]`,
     /// unqualified so it needs the target's own reference text) can only ever
     /// be resolved by a host resolver supplied later, explicitly, to
