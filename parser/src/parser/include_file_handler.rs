@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, rc::Rc};
 
 use crate::{Parser, attributes::Attrlist};
 
@@ -83,6 +83,31 @@ pub trait IncludeFileHandler: Debug {
         attrlist: &Attrlist<'src>,
         parser: &Parser,
     ) -> IncludeResolution;
+}
+
+/// An `Rc<T>` wrapping any `IncludeFileHandler` (including an unsized
+/// `Rc<dyn IncludeFileHandler>`) is itself an `IncludeFileHandler`, delegating
+/// to the wrapped handler.
+///
+/// This lets a caller who already holds a handler behind an `Rc` — for example
+/// to share one handler across several [`Parser`]s, or to store it as a trait
+/// object alongside other state — hand that `Rc` straight to
+/// [`Parser::with_include_file_handler`] without writing a delegating newtype
+/// first, since [`Parser::with_include_file_handler`] requires a `Sized`
+/// argument and there is otherwise no way to satisfy that bound with a trait
+/// object.
+///
+/// [`Parser::with_include_file_handler`]: crate::Parser::with_include_file_handler
+impl<T: IncludeFileHandler + ?Sized> IncludeFileHandler for Rc<T> {
+    fn resolve_target<'src>(
+        &self,
+        source: Option<&str>,
+        target: &str,
+        attrlist: &Attrlist<'src>,
+        parser: &Parser,
+    ) -> IncludeResolution {
+        (**self).resolve_target(source, target, attrlist, parser)
+    }
 }
 
 /// The outcome of an [`IncludeFileHandler::resolve_target`] call: either the
@@ -206,7 +231,10 @@ impl From<&str> for IncludeContent {
 
 #[cfg(test)]
 mod tests {
-    use super::{IncludeContent, IncludeResolution};
+    use std::rc::Rc;
+
+    use super::{IncludeContent, IncludeFileHandler, IncludeResolution};
+    use crate::{Parser, SafeMode, attributes::Attrlist, tests::prelude::rendered_paragraphs};
 
     #[test]
     fn resolution_from_include_content_is_found() {
@@ -240,5 +268,40 @@ mod tests {
         let from_str: IncludeContent = "Content.".into();
         assert_eq!(from_str, IncludeContent::new("Content."));
         assert!(!from_str.encoding_handled());
+    }
+
+    // The blanket `impl<T: IncludeFileHandler + ?Sized> IncludeFileHandler for
+    // Rc<T>` above lets `Rc<dyn IncludeFileHandler>` be handed straight to
+    // `Parser::with_include_file_handler` -- no delegating newtype required.
+    #[test]
+    fn rc_dyn_include_file_handler_resolves_through_the_parser() {
+        #[derive(Debug)]
+        struct Fixed;
+
+        impl IncludeFileHandler for Fixed {
+            fn resolve_target<'src>(
+                &self,
+                _source: Option<&str>,
+                _target: &str,
+                _attrlist: &Attrlist<'src>,
+                _parser: &Parser,
+            ) -> IncludeResolution {
+                IncludeResolution::Found(IncludeContent::new(
+                    "Included via an Rc-wrapped trait object.",
+                ))
+            }
+        }
+
+        let handler: Rc<dyn IncludeFileHandler> = Rc::new(Fixed);
+
+        let doc = Parser::default()
+            .with_safe_mode(SafeMode::Unsafe)
+            .with_include_file_handler(handler)
+            .parse("include::anything.adoc[]");
+
+        assert_eq!(
+            rendered_paragraphs(&doc),
+            vec!["Included via an Rc-wrapped trait object.".to_string()]
+        );
     }
 }
