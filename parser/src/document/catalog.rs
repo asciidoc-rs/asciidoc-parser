@@ -824,6 +824,23 @@ mod tests {
     }
 
     #[test]
+    fn set_reftext_on_an_entry_with_no_previous_reftext_just_installs_it() {
+        // No `previous` reftext at all — the reverse-lookup handoff has
+        // nothing to do, since there was never a stale entry pointing at
+        // `id` to begin with.
+        let mut catalog = Catalog::new();
+        catalog.register_ref("s1", None, RefType::Section).unwrap();
+
+        catalog.set_reftext("s1", "New Text".to_string());
+
+        assert_eq!(
+            catalog.get_ref("s1").unwrap().reftext,
+            Some("New Text".to_string())
+        );
+        assert_eq!(catalog.resolve_id("New Text"), Some("s1".to_string()));
+    }
+
+    #[test]
     fn set_reftext_keeps_a_duplicate_reftexts_original_owner() {
         // Two sections that happen to share a reftext: the reverse lookup
         // keeps pointing at whichever registered first, matching
