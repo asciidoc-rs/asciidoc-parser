@@ -326,6 +326,26 @@ pub(crate) struct OwnedTitle {
     render_attributes: Option<Box<ResolvedAttributes>>,
 }
 
+impl OwnedTitle {
+    /// Returns this snapshot's deferred cross-reference template and
+    /// segments, if it carries any — the same shape and the same accessor
+    /// name as [`Content::deferred_parts`], so a caller that only needs the
+    /// segments/template (not the borrowed inline tree a live `Content`
+    /// additionally offers) can treat either the same way. Used by
+    /// `document::title_freeze` (issue #1110's parse-time demand-driven
+    /// title freeze), which retains a section heading's own snapshot on the
+    /// [`Parser`] — which cannot itself be generic over the
+    /// source lifetime — for a *later* section's own auto-generated id to
+    /// demand.
+    pub(crate) fn deferred_parts(&self) -> Option<DeferredParts<'_>> {
+        self.deferred.as_ref().map(|d| DeferredParts {
+            block: &d.block,
+            footnote: &d.footnote,
+            template: &d.template,
+        })
+    }
+}
+
 impl<'src> Content<'src> {
     /// Constructs a `Content` from a source `Span` and a potentially-filtered
     /// view of that source text.

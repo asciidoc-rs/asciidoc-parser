@@ -1,4 +1,4 @@
-use std::{fmt, sync::LazyLock};
+use std::{collections::HashSet, fmt, sync::LazyLock};
 
 use regex::Regex;
 
@@ -13,7 +13,7 @@ use crate::{
         Content, DeferredParts, SubstitutionGroup, inline_builder::fold_reference_text,
         substitute_attributes_in_reftext,
     },
-    document::{InterpretedValue, RefType},
+    document::{InterpretedValue, RefType, title_freeze},
     inlines::InlineNode,
     internal::debug::DebugSliceReference,
     parser::{ResolvedAttributes, ResolvedReference, XrefSignifier},
@@ -270,13 +270,68 @@ impl<'src> SectionBlock<'src> {
         let mut section_title = Content::from(title_span);
         SubstitutionGroup::Title.apply(&mut section_title, parser, metadata.attrlist.as_ref());
 
-        // The footnote-free rendering of the title, for the reference text and
-        // auto-generated ID.
-        let title_reftext = fold_reference_text(
-            section_title.inlines(),
-            &*parser.renderer,
-            &parser.render_context(),
-        );
+        // A fully-owned snapshot of the title's own deferred cross-references,
+        // registered below (once the section's final id is known) as a
+        // potential target for a *later* section's own demand — see
+        // `document::title_freeze` (issue #1110). `None` for the
+        // overwhelmingly common title with no embedded cross-reference at
+        // all, which this whole mechanism has nothing to do for.
+        //
+        // Built via `to_owned_title` rather than reading `section_title`'s
+        // own [`deferred_parts`](Content::deferred_parts) directly: that
+        // template is empty for any content but a *carried* title (an
+        // ordinary section heading always still has its tree to fold, so it
+        // never needs one) — `to_owned_title` is what synthesizes one from
+        // the tree, which the snapshot needs since it cannot keep the tree
+        // itself (see `title_freeze`'s own docs).
+        let recomputable_title =
+            section_title
+                .to_owned_title(parser)
+                .deferred_parts()
+                .map(|deferred| title_freeze::RecomputableTitle {
+                    block: deferred.block.to_vec(),
+                    footnote: deferred.footnote.to_vec(),
+                    template: deferred.template.to_vec(),
+                });
+
+        // Whether this section is about to auto-generate its own id: the one
+        // parse-time trigger for eagerly converting a title before the whole
+        // document — and so the complete catalog — is available, mirroring
+        // Asciidoctor's `generate_id` -> `Section#title` path. `manual_id`
+        // (below) folds in the same two sources once more, for the branch
+        // that actually assigns the id; this is computed ahead of it because
+        // it also decides *how* `title_reftext` is computed next.
+        let will_auto_generate_id = sectids && attr_or_anchor_id.is_none() && embedded_id.is_none();
+
+        // A title with no embedded cross-reference folds exactly as before:
+        // this pass and the ordinary per-content one already agree, since
+        // there is nothing left for either to resolve. A title carrying one,
+        // when this section is about to auto-generate its own id, is instead
+        // resolved *now*, against the catalog as it currently stands —
+        // recursively demanding (and permanently freezing) any *earlier*
+        // title it depends on, exactly the eager conversion Asciidoctor
+        // performs at this same point to build the id string. This section's
+        // *own* result is used only for that string (and, below, as a
+        // provisional catalog reference text) — never frozen itself; see
+        // `title_freeze`'s own "It is the target, never the demander"
+        // section. Every other title (an explicit id, or `sectids` disabled)
+        // keeps the plain unresolved-fallback fold: nothing forces its
+        // conversion this early either way.
+        let title_reftext = match will_auto_generate_id
+            .then_some(recomputable_title.as_ref())
+            .flatten()
+        {
+            Some(node) => {
+                title_freeze::resolve_now(node, parser, &mut HashSet::new())
+                    .0
+                    .rendered
+            }
+            None => fold_reference_text(
+                section_title.inlines(),
+                &*parser.renderer,
+                &parser.render_context(),
+            ),
+        };
 
         // A section carrying the `bibliography` style implicitly adds that
         // style to each top-level unordered list in its body (see the
@@ -392,7 +447,21 @@ impl<'src> SectionBlock<'src> {
             .or_else(|| embedded_reftext.clone())
             .unwrap_or_else(|| CowStr::from(title_reftext.as_str()));
 
-        let section_id = if sectids && manual_id.is_none() {
+        // Whether a `manual_id` above was actually registered to *this*
+        // section — `false` when `register_ref` rejected it as a duplicate,
+        // in which case the id belongs to whichever section claimed it
+        // first, not this one. `effective_id` below reads this rather than
+        // assuming `manual_id`'s mere presence means ownership.
+        let mut manual_id_registered = false;
+
+        // Whether this section auto-generates its own id — reused below to
+        // compute `effective_id`, since which branch actually ran is exactly
+        // what decides whether `section_id` (set unconditionally from
+        // `embedded_id` in the `else` branch, duplicate or not — see that
+        // branch's own comment) is safe to treat as this section's own.
+        let is_auto_generated_id = sectids && manual_id.is_none();
+
+        let section_id = if is_auto_generated_id {
             let id = parser.generate_and_register_unique_id(
                 &proposed_base_id,
                 Some(&reftext),
@@ -406,6 +475,7 @@ impl<'src> SectionBlock<'src> {
             if let Some(manual_id) = manual_id {
                 match parser.register_ref(manual_id, Some(&reftext), RefType::Section) {
                     Ok(()) => {
+                        manual_id_registered = true;
                         if let Some(signifier) = xref_signifier {
                             parser.set_ref_signifier(manual_id, signifier);
                         }
@@ -425,6 +495,53 @@ impl<'src> SectionBlock<'src> {
             // sources directly from the anchor/attrlist).
             embedded_id.map(str::to_string)
         };
+
+        // The section's effective id: `section_id` (the field, and the local
+        // variable of the same name above) only ever holds an id drawn from
+        // an *embedded* title anchor — everything else `id()`/`reference_id()`
+        // read directly from `attrlist`/`anchor` instead (see
+        // `reference_id`'s own docs) — so an id supplied *above* the heading
+        // falls back to `manual_id` here, but only when this section actually
+        // won that id: a rejected duplicate must not be treated as this
+        // section's own, or `title_freeze::register_recomputable_title` below
+        // would replace the legitimate owner's snapshot with this section's.
+        //
+        // `section_id` itself cannot answer that for the *embedded*-anchor
+        // case: `id()`/`reference_id()` deliberately reads it back
+        // unconditionally, duplicate or not (see the `else` branch above),
+        // the same way `attrlist.id()` reflects a duplicate *attribute* id
+        // regardless of registration. Reusing it here would let exactly the
+        // same rejected duplicate back in, just from the other source — so
+        // this reads `is_auto_generated_id` instead, to know which branch
+        // actually ran, rather than trying to infer ownership from its result.
+        let effective_id = if is_auto_generated_id {
+            section_id.clone()
+        } else {
+            manual_id_registered
+                .then(|| manual_id.map(str::to_string))
+                .flatten()
+        };
+
+        // A section without an explicit reftext is a *recomputable*
+        // cross-reference target: another (later) section's own
+        // auto-generated id may still need to demand this one's reference
+        // text — either freezing it right away (`title_freeze::resolve_now`
+        // above already did exactly that for a demand originating *here*,
+        // against whatever earlier titles *this* section's own title
+        // references) or, lacking any demand at all, once the whole
+        // document's catalog is known, in the ordinary document-order pass
+        // (`document::title_refs`). Either way that needs this section's own
+        // deferred cross-references on hand, so register them under the id
+        // just determined — this section's own eager conversion above never
+        // freezes *itself* (see `title_freeze`'s own docs), so this always
+        // runs regardless of `will_auto_generate_id`. See
+        // `document::title_freeze` (issue #1110).
+        if !has_explicit_reftext
+            && let Some(id) = effective_id.as_deref()
+            && let Some(recomputable_title) = recomputable_title
+        {
+            title_freeze::register_recomputable_title(parser, id, recomputable_title);
+        }
 
         // Restore "normal" top-level section type if exiting a level 1
         // appendix.
@@ -1132,14 +1249,25 @@ fn generate_section_id(title: &str, parser: &Parser) -> String {
         .unwrap_or_default()
         .to_owned();
 
-    let mut gen_id = title.to_lowercase().to_owned();
+    // Real HTML tags are stripped *first*, as their own pass, via the same
+    // tag-stripper `Document::doctitle_sanitized` uses — not folded into the
+    // regex below alongside the "invalid character" alternative. A single
+    // combined regex with both alternatives is order-dependent: at a
+    // position where a run of invalid characters happens to run straight
+    // into a tag's `<` (e.g. the `][forward]</a>`-shaped text a title's own
+    // *unresolved* cross-reference rendering produces — `[forward]` is the
+    // reference's bracketed fallback, `</a>` its enclosing anchor's closing
+    // tag), the greedy `[^ \w\-.]+` alternative — which matches starting at
+    // the `]`, not the `<` — already claims the tag's `<` and `/` before the
+    // tag alternative ever gets a chance to match the *whole* tag as one
+    // unit, leaking the tag name (`a`) through into the generated id. Tags
+    // are gone before that regex ever runs, so this can no longer happen.
+    let mut gen_id = crate::content::sanitize_title(title).to_lowercase();
 
     #[allow(clippy::unwrap_used)]
     static INVALID_SECTION_ID_CHARS: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(
-            r"<[^>]+>|&lt;[^&]*&gt;|&(?:[a-z][a-z]+\d{0,2}|#\d{2,5}|#x[\da-f]{2,4});|[^ \w\-.]+",
-        )
-        .unwrap()
+        Regex::new(r"&lt;[^&]*&gt;|&(?:[a-z][a-z]+\d{0,2}|#\d{2,5}|#x[\da-f]{2,4});|[^ \w\-.]+")
+            .unwrap()
     });
 
     gen_id = INVALID_SECTION_ID_CHARS

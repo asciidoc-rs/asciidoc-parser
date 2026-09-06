@@ -196,6 +196,68 @@ impl Catalog {
         self.reftext_to_id.get(reftext).cloned()
     }
 
+    /// Resolves `target` to a registered same-document ID: a direct ID match
+    /// first, then a natural (reference-text) match — the two-step lookup
+    /// [`CatalogResolver`](crate::parser::CatalogResolver) performs inline,
+    /// and that the document-order title resolution passes
+    /// (`document::title_refs`, and its parse-time counterpart
+    /// `document::title_freeze`) also need, to tell whether a cross-reference
+    /// target names a *recomputable* title rather than an ordinary anchor or
+    /// an unresolved/cross-document target.
+    pub(crate) fn same_document_id(&self, target: &str) -> Option<String> {
+        if self.contains_id(target) {
+            Some(target.to_string())
+        } else {
+            self.resolve_id(target)
+        }
+    }
+
+    /// Overwrites an already-registered element's reference text.
+    ///
+    /// Used only to install a title's *frozen* reference text once computed
+    /// (`document::title_freeze`, issue #1110's parse-time demand-driven
+    /// freeze), so a plain (non-title) cross-reference to it — which, unlike
+    /// a title-to-title one, is never re-resolved against the tree — still
+    /// sees the same frozen text. A no-op if `id` is not registered.
+    ///
+    /// The reverse (reftext -> id) lookup is updated to match: when the old
+    /// reftext still points at `id` there, it is handed over to another
+    /// entry that also carries that same (duplicate) reftext, if one exists,
+    /// or removed otherwise — a natural cross-reference to the vacated text
+    /// should still resolve to whichever entry legitimately keeps it, the
+    /// same as if `id` had never claimed it first.
+    pub(crate) fn set_reftext(&mut self, id: &str, reftext: String) {
+        let Some(entry) = self.refs.get_mut(id) else {
+            return;
+        };
+        let previous = entry.reftext.replace(reftext.clone());
+
+        if let Some(previous) = previous
+            && self.reftext_to_id.get(&previous).map(String::as_str) == Some(id)
+        {
+            let other_owner = self
+                .refs
+                .iter()
+                .find(|(other_id, entry)| {
+                    other_id.as_str() != id && entry.reftext.as_deref() == Some(previous.as_str())
+                })
+                .map(|(other_id, _)| other_id.clone());
+
+            match other_owner {
+                Some(other_id) => {
+                    self.reftext_to_id.insert(previous, other_id);
+                }
+                None => {
+                    self.reftext_to_id.remove(&previous);
+                }
+            }
+        }
+
+        self.reftext_to_id
+            .entry(reftext)
+            .or_insert_with(|| id.to_string());
+    }
+
     /// Attaches an [`XrefSignifier`] to an already-registered element, so a
     /// cross-reference to it can build `full`/`short`
     /// [`xrefstyle`](crate::parser::XrefStyle) text. A no-op if `id` is not
@@ -710,6 +772,94 @@ mod tests {
         let id2 = catalog.generate_and_register_unique_id("taken", None, RefType::Section, "-");
         assert_eq!(id2, "taken-3");
         assert!(catalog.contains_id("taken-3"));
+    }
+
+    #[test]
+    fn same_document_id_matches_by_id_then_by_reftext() {
+        let mut catalog = Catalog::new();
+        catalog
+            .register_ref("later", Some("The Later Section"), RefType::Section)
+            .unwrap();
+
+        // A direct ID match wins even when it also happens to be a reftext.
+        assert_eq!(catalog.same_document_id("later"), Some("later".to_string()));
+
+        // A natural (reference-text) match is the fallback.
+        assert_eq!(
+            catalog.same_document_id("The Later Section"),
+            Some("later".to_string())
+        );
+
+        // Neither: no same-document target at all.
+        assert_eq!(catalog.same_document_id("nonexistent"), None);
+    }
+
+    #[test]
+    fn set_reftext_overwrites_and_reindexes() {
+        let mut catalog = Catalog::new();
+        catalog
+            .register_ref("s1", Some("Old Text"), RefType::Section)
+            .unwrap();
+
+        catalog.set_reftext("s1", "New Text".to_string());
+
+        assert_eq!(
+            catalog.get_ref("s1").unwrap().reftext,
+            Some("New Text".to_string())
+        );
+
+        // The reverse lookup follows the new text...
+        assert_eq!(catalog.resolve_id("New Text"), Some("s1".to_string()));
+
+        // ...and the stale reverse entry for the old text is gone, since it
+        // still pointed at this same id.
+        assert_eq!(catalog.resolve_id("Old Text"), None);
+    }
+
+    #[test]
+    fn set_reftext_is_a_no_op_for_an_unregistered_id() {
+        let mut catalog = Catalog::new();
+        catalog.set_reftext("missing", "Text".to_string());
+        assert!(!catalog.contains_id("missing"));
+    }
+
+    #[test]
+    fn set_reftext_on_an_entry_with_no_previous_reftext_just_installs_it() {
+        // No `previous` reftext at all — the reverse-lookup handoff has
+        // nothing to do, since there was never a stale entry pointing at
+        // `id` to begin with.
+        let mut catalog = Catalog::new();
+        catalog.register_ref("s1", None, RefType::Section).unwrap();
+
+        catalog.set_reftext("s1", "New Text".to_string());
+
+        assert_eq!(
+            catalog.get_ref("s1").unwrap().reftext,
+            Some("New Text".to_string())
+        );
+        assert_eq!(catalog.resolve_id("New Text"), Some("s1".to_string()));
+    }
+
+    #[test]
+    fn set_reftext_keeps_a_duplicate_reftexts_original_owner() {
+        // Two sections that happen to share a reftext: the reverse lookup
+        // keeps pointing at whichever registered first, matching
+        // `register_ref`'s own duplicate handling. Overwriting the *first*
+        // section's reftext to something else must not drag that shared
+        // entry away from the second section, which still legitimately owns
+        // it.
+        let mut catalog = Catalog::new();
+        catalog
+            .register_ref("first", Some("Shared"), RefType::Section)
+            .unwrap();
+        catalog
+            .register_ref("second", Some("Shared"), RefType::Section)
+            .unwrap();
+
+        catalog.set_reftext("first", "Unique".to_string());
+
+        assert_eq!(catalog.resolve_id("Shared"), Some("second".to_string()));
+        assert_eq!(catalog.resolve_id("Unique"), Some("first".to_string()));
     }
 
     #[test]
