@@ -30,6 +30,8 @@ pub use header::{Comments, Header, HeaderAttributes};
 mod revision_line;
 pub use revision_line::RevisionLine;
 
+pub(crate) mod title_freeze;
+
 mod title_refs;
 
 mod toc;

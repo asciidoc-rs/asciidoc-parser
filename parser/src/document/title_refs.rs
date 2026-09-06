@@ -29,37 +29,12 @@ use crate::{
         XrefSegment, XrefTemplatePiece, fold_resolved_title, render_xref_template,
         resolved_destinations,
     },
-    document::Catalog,
+    document::{Catalog, title_freeze::Resolution},
     inlines::InlineNode,
     parser::{
-        InlineRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext,
-        ResolvedAttributes, ResolvedReference,
+        InlineRenderer, ReferenceResolver, ReferenceWarnings, ResolutionContext, ResolvedAttributes,
     },
 };
-
-/// The resolved outcome of one title: its final rendering, plus the resolved
-/// destinations of its cross-references in placeholder order.
-///
-/// The rendering is installed into the title's rendered string; the
-/// `block_ordered` / `footnote_ordered` destinations are mirrored into the
-/// title's inline tree (see [`Content::mirror_tree_xref_resolution`]), so both
-/// views of the title agree.
-///
-/// [`Content::mirror_tree_xref_resolution`]: crate::content::Content::mirror_tree_xref_resolution
-struct Resolution {
-    /// The title's final rendered form, with cross-title references
-    /// coordinated.
-    rendered: String,
-
-    /// The resolved destination of each title-level cross-reference, in
-    /// document order, ready for mirroring into the title tree.
-    block_ordered: Vec<Option<ResolvedReference>>,
-
-    /// The resolved destination of each cross-reference embedded in a footnote
-    /// the title carries, in segment order, ready for
-    /// mirroring into the title tree's footnote subtrees.
-    footnote_ordered: Vec<Option<ResolvedReference>>,
-}
 
 /// One title carrying cross-references, captured for the resolution pass.
 struct TitleNode<'src> {
@@ -132,7 +107,51 @@ pub(crate) fn resolve_title_references<'src>(
         }
     }
 
-    let mut memo: Vec<Option<Resolution>> = (0..nodes.len()).map(|_| None).collect();
+    // A title whose reference text was already demanded (and so frozen)
+    // during parsing — see `document::title_freeze`, issue #1110 — is seeded
+    // here rather than left for `compute` to derive: `compute`'s own
+    // memo check short-circuits on a `Some` entry before it would otherwise
+    // recompute the title fresh against the now-complete catalog, so this is
+    // the one hook this pass needs to install the frozen answer everywhere
+    // that answer belongs — the title's own final rendering as much as any
+    // other reference to it.
+    let mut memo: Vec<Option<Resolution>> = nodes
+        .iter()
+        .map(|node| {
+            node.map_id
+                .as_deref()
+                .and_then(|id| parser.frozen_title_resolution(id))
+                .cloned()
+        })
+        .collect();
+
+    // A frozen node's own segments are never walked by `compute` (its memo
+    // entry short-circuits before that loop runs), so this is the one chance
+    // to report whichever of them never resolved — `document::title_freeze`
+    // deliberately reports none of its own, precisely so it lands here: a
+    // `PossibleInvalidReference` warning only survives as part of a
+    // resolution sweep's own output, and this pre-seeding happens inside one.
+    // `frozen.block_ordered`/`footnote_ordered` already say which segment
+    // never resolved (a `None` — computed once, at freeze time, against
+    // whatever the catalog knew then, and never revisited); zipped against
+    // this same node's freshly-collected segments, position for position,
+    // that becomes the same `(target, source)` pair `compute` would have
+    // reported.
+    for (node, frozen) in nodes.iter().zip(memo.iter()) {
+        let Some(frozen) = frozen else { continue };
+
+        for (segment, destination) in node
+            .block
+            .iter()
+            .zip(frozen.block_ordered.iter())
+            .chain(node.footnote.iter().zip(frozen.footnote_ordered.iter()))
+        {
+            if destination.is_none() && segment.derived.is_none() {
+                warnings.unresolved(&segment.target, node.source);
+            }
+        }
+    }
+
     let mut in_progress: Vec<bool> = vec![false; nodes.len()];
 
     for (index, node) in nodes.iter().enumerate() {
@@ -353,7 +372,7 @@ fn compute<'src>(
         // correct.
         if !has_explicit_text
             && let Some(reference) = resolved.as_mut()
-            && let Some(target_id) = lookup_id(catalog, &xref.target)
+            && let Some(target_id) = catalog.same_document_id(&xref.target)
             && let Some(&(target_index, target_node)) = id_to_node.get(target_id.as_str())
             && reference.href.strip_prefix('#') == Some(target_id.as_str())
         {
@@ -436,16 +455,4 @@ fn compute<'src>(
         });
     }
     rendered
-}
-
-/// Resolves a cross-reference target to a catalog ID the same way
-/// [`CatalogResolver`](crate::parser::CatalogResolver) does: a direct ID match
-/// first, then a natural (reference-text) match. Only same-document IDs are
-/// returned, which is exactly the set of titles this pass can recompute.
-fn lookup_id(catalog: &Catalog, target: &str) -> Option<String> {
-    if catalog.contains_id(target) {
-        Some(target.to_string())
-    } else {
-        catalog.resolve_id(target)
-    }
 }

@@ -1361,6 +1361,167 @@ mod xrefs_in_titles {
         assert_eq!(para.title(), Some(r##"See <a href="#goal">Goal</a>"##));
     }
 
+    /// Issue #1110's own repro: a middle section's auto-generated id demands
+    /// `s1`'s reference text *during parsing*, before `forward` — the target
+    /// `s1`'s own title cross-references — is registered. Asciidoctor freezes
+    /// `s1`'s reference text at that partial-catalog answer forever, so the
+    /// forward reference stays the bracketed `[forward]` fallback even in
+    /// `s1`'s own final heading, once `forward` exists.
+    #[test]
+    fn forward_reference_in_title_freezes_when_demanded_by_an_auto_id_section() {
+        let doc =
+            Parser::default().parse("[#s1]\n== <<forward>>\n\n== <<s1>>\n\n[#forward]\n== Forward");
+
+        let sections: Vec<_> = sections(&doc);
+
+        // `s1`'s own heading stays frozen at the bracketed fallback — not
+        // resolved to `Forward`, even though `forward` is defined later in
+        // the very same document.
+        assert_eq!(
+            sections[0].section_title(),
+            r##"<a href="#forward">[forward]</a>"##
+        );
+
+        // The middle section's auto-generated id is derived from `s1`'s
+        // *frozen* reference text (`[forward]`, sanitized to `forward`), not
+        // from `s1`'s own id — the demand only ever reaches this through
+        // `s1`'s reftext, which is exactly what freezes.
+        assert_eq!(sections[1].id(), Some("_forward"));
+        assert_eq!(
+            sections[1].section_title(),
+            r##"<a href="#s1">[forward]</a>"##
+        );
+
+        assert_eq!(sections[2].section_title(), "Forward");
+    }
+
+    /// The inverse confirmation from issue #1110: without a demanding
+    /// auto-id section in between, the exact same forward reference resolves
+    /// normally, against the complete catalog, once the whole document is
+    /// parsed.
+    #[test]
+    fn forward_reference_in_title_resolves_without_a_demanding_section() {
+        let doc = Parser::default()
+            .parse("[#a]\n== See <<b>>\n\n[#b]\n== Consult https://google.com[Google]");
+
+        let sections: Vec<_> = sections(&doc);
+
+        assert_eq!(
+            sections[0].section_title(),
+            r##"See <a href="#b">Consult Google</a>"##
+        );
+    }
+
+    /// A plain (non-title) cross-reference to a frozen section sees the same
+    /// frozen text a title-to-title reference does: freezing installs it as
+    /// the section's registered catalog reference text too
+    /// (`Catalog::set_reftext`), which is what a paragraph's own reference
+    /// resolution reads.
+    #[test]
+    fn a_plain_reference_to_a_frozen_title_sees_its_frozen_text() {
+        let doc = Parser::default()
+            .parse("[#s1]\n== <<forward>>\n\n== <<s1>>\n\n[#forward]\n== Forward\n\npara <<s1>>");
+
+        let para = super::first_paragraph(&doc);
+        assert_eq!(para, r##"para <a href="#s1">[forward]</a>"##);
+    }
+
+    /// A target genuinely absent from the whole document — not merely
+    /// forward-referenced — still gets reported once, even when it is
+    /// discovered while freezing a demanded title rather than by the
+    /// ordinary post-parse pass (which never runs for a frozen title).
+    #[test]
+    fn a_target_that_never_resolves_in_a_frozen_title_is_still_a_warning() {
+        let doc = Parser::default().parse("[#s1]\n== <<nowhere>>\n\n== <<s1>>");
+
+        let sections: Vec<_> = sections(&doc);
+        assert_eq!(
+            sections[0].section_title(),
+            r##"<a href="#nowhere">[nowhere]</a>"##
+        );
+
+        assert!(
+            doc.warnings().any(|w| format!("{w:?}").contains("nowhere")),
+            "expected an unresolved-reference warning naming \"nowhere\"; warnings were: {:?}",
+            doc.warnings().collect::<Vec<_>>()
+        );
+    }
+
+    /// Two titles that reference each other, both reached through an
+    /// auto-id section's demand chain, must not deadlock or overflow the
+    /// stack: the second demand reached while the first is still being
+    /// resolved is a cycle, broken exactly like
+    /// `document::title_refs::compute` breaks one — the bracketed fallback,
+    /// without freezing the cycle partner prematurely.
+    #[test]
+    fn a_cycle_reached_through_a_demand_chain_does_not_deadlock() {
+        let doc = Parser::default().parse("[#x]\n== <<y>>\n\n[#y]\n== <<x>>\n\n== <<x>>");
+
+        let sections: Vec<_> = sections(&doc);
+
+        // `x`'s own title demands `y`'s reftext, which in turn demands `x`'s
+        // — but `x` is still mid-resolution, so `y`'s reference to it falls
+        // back to the bracketed form rather than recursing forever.
+        assert_eq!(sections[0].section_title(), r##"<a href="#y">[x]</a>"##);
+        assert_eq!(sections[1].section_title(), r##"<a href="#x">[x]</a>"##);
+    }
+
+    /// A cross-reference that supplies its own display text needs no
+    /// reference text from its target, so demanding one is skipped entirely
+    /// — mirroring `document::title_refs::compute`'s identical short-circuit.
+    /// `earlier`'s own (otherwise-demandable) forward reference is left
+    /// completely alone by the auto-id section referencing it with explicit
+    /// text, and so resolves normally, later, against the full catalog.
+    #[test]
+    fn explicit_link_text_in_a_title_never_demands_its_target() {
+        let doc = Parser::default()
+            .parse("[#earlier]\n== <<later>>\n\n== Ref <<earlier,Custom>>\n\n[#later]\n== Later");
+
+        let sections: Vec<_> = sections(&doc);
+
+        // The auto-id section's own rendering uses the explicit text
+        // verbatim.
+        assert_eq!(
+            sections[1].section_title(),
+            r##"Ref <a href="#earlier">Custom</a>"##
+        );
+
+        // `earlier` itself was never demanded, so it stayed open for the
+        // ordinary post-parse pass and resolved its own forward reference
+        // fully, rather than freezing at the bracketed fallback.
+        assert_eq!(
+            sections[0].section_title(),
+            r##"<a href="#later">Later</a>"##
+        );
+    }
+
+    /// A second, later auto-id section demanding an id an earlier one already
+    /// froze hits the frozen fast path directly, rather than re-resolving it
+    /// — both see the exact same (already-frozen) text.
+    #[test]
+    fn a_second_demand_for_an_already_frozen_id_reuses_it() {
+        let doc =
+            Parser::default().parse("[#a]\n== <<b>>\n\n== <<a>>\n\n== Ref <<a>>\n\n[#b]\n== B");
+
+        let sections: Vec<_> = sections(&doc);
+
+        assert_eq!(sections[0].section_title(), r##"<a href="#b">[b]</a>"##);
+        assert_eq!(sections[1].section_title(), r##"<a href="#a">[b]</a>"##);
+        assert_eq!(sections[2].section_title(), r##"Ref <a href="#a">[b]</a>"##);
+    }
+
+    fn sections<'a>(doc: &'a crate::Document<'a>) -> Vec<&'a crate::blocks::SectionBlock<'a>> {
+        doc.child_blocks()
+            .filter_map(|block| {
+                if let crate::blocks::Block::Section(section) = block {
+                    Some(section)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     #[test]
     fn two_references_in_a_carried_title_resolve_in_order() {
         // The carried title's deferred template is synthesized from its own

@@ -21,7 +21,10 @@ use crate::{
     Document, HasSpan, Span,
     blocks::{SectionNumber, SectionType},
     content::{OwnedTitle, SubstitutionGroup, XrefSegment, XrefTemplatePiece},
-    document::{Attribute, Catalog, DuplicateIdError, Footnote, InterpretedValue, RefType},
+    document::{
+        Attribute, Catalog, DuplicateIdError, Footnote, InterpretedValue, RefType,
+        title_freeze::{Resolution, TitleFreezeState},
+    },
     parser::{
         AllowableValue, AttributeValue, DatetimeContext, DefaultPathResolver, DocinfoFileHandler,
         HtmlInlineRenderer, ImageFileHandler, IncludeFileHandler, InlineRenderer,
@@ -212,6 +215,10 @@ pub struct Parser {
     /// cross-references, so an embedded `<<id>>` in a carried title still
     /// resolves once the catalog is complete.
     pub(crate) pending_block_title: Option<OwnedTitle>,
+
+    /// Parse-time, demand-driven title cross-reference state — see
+    /// `document::title_freeze` (issue #1110).
+    title_freeze: TitleFreezeState,
 
     /// Live values of [counter] attributes, keyed by counter name (e.g.
     /// `index`, `example-number`, `table-number`).
@@ -578,6 +585,7 @@ impl Default for Parser {
             in_delimited_block: false,
             in_bibliography_list_item: Cell::new(false),
             pending_block_title: None,
+            title_freeze: TitleFreezeState::default(),
             counter_values: RefCell::new(Arc::new(HashMap::new())),
             locked_counter_values: RefCell::new(HashMap::new()),
             locked_attribute_names: HashSet::new(),
@@ -1794,6 +1802,35 @@ impl Parser {
     /// [`register_ref`](Self::register_ref).
     pub(crate) fn set_ref_signifier(&self, id: &str, signifier: XrefSignifier) {
         self.catalog.borrow_mut().set_signifier(id, signifier);
+    }
+
+    /// Overwrites an already-registered element's reference text — see
+    /// [`Catalog::set_reftext`].
+    ///
+    /// Takes `&self` for the same reason as
+    /// [`register_ref`](Self::register_ref).
+    pub(crate) fn set_ref_reftext(&self, id: &str, reftext: String) {
+        self.catalog.borrow_mut().set_reftext(id, reftext);
+    }
+
+    /// Returns the frozen title resolution for `id`, if its reference text
+    /// was demanded — and so permanently fixed — during parsing rather than
+    /// left to the ordinary document-order pass. See
+    /// `document::title_freeze` (issue #1110).
+    pub(crate) fn frozen_title_resolution(&self, id: &str) -> Option<&Resolution> {
+        self.title_freeze.frozen_resolution(id)
+    }
+
+    /// Returns the parser's parse-time, demand-driven title state — see
+    /// `document::title_freeze` (issue #1110).
+    pub(crate) fn title_freeze_state(&self) -> &TitleFreezeState {
+        &self.title_freeze
+    }
+
+    /// Returns a mutable borrow of the parser's parse-time, demand-driven
+    /// title state — see `document::title_freeze` (issue #1110).
+    pub(crate) fn title_freeze_state_mut(&mut self) -> &mut TitleFreezeState {
+        &mut self.title_freeze
     }
 
     /// Records a referenced image in the document catalog when
