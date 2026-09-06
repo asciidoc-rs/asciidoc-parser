@@ -81,22 +81,6 @@ pub(super) fn indexterm_macros_level<'src>(
         return nodes;
     }
 
-    // A shorthand's look-ahead retry (absorbing trailing parens) has a subtle
-    // consequence: if the whole level accumulates *no* output and the last
-    // match is such a retry, the level is left **unchanged** rather than
-    // replaced. Concretely, content that is nothing but concealed shorthand
-    // terms (`(((coffee)))`, `(((a)))(((b)))`) is left *literal*, where the
-    // same terms with any surrounding output render to nothing. Detect that
-    // no-op and mirror it: leave the level untouched.
-    //
-    // This is a **known bug** (asciidoc-rs/asciidoc-parser#1123): a
-    // whole-content concealed term should render empty, not literal. The tree
-    // reproduces it here to keep parity with the golden output; fixing both
-    // is future work, tracked by that issue.
-    if indexterm_substitution_is_a_noop(&matches) {
-        return nodes;
-    }
-
     let macro_matches = matches.into_iter().map(|m| m.macro_match).collect();
 
     let rebuilt = rebuild_macro_level(nodes, pieces, s, macro_matches);
@@ -104,54 +88,9 @@ pub(super) fn indexterm_macros_level<'src>(
     rebuilt
 }
 
-/// A recognized index-term match, plus the two facts
-/// [`indexterm_substitution_is_a_noop`] needs to reproduce the whole-level
-/// no-op case.
+/// A recognized index-term match.
 struct RecognizedIndexterm<'src> {
     macro_match: MacroMatch<'src>,
-
-    /// Whether this match renders any output (a shown term, a kept parenthesis,
-    /// or an unescaped literal). A concealed term renders nothing.
-    rendered_nonempty: bool,
-
-    /// Whether recognizing this match advanced via a look-ahead retry — true
-    /// only for a shorthand that absorbed trailing parens. The macro forms
-    /// never retry.
-    is_skip: bool,
-}
-
-/// Reports whether this level's index-term substitution would be a **no-op**,
-/// leaving the content unchanged rather than replaced (see
-/// [`indexterm_macros_level`]).
-///
-/// That happens exactly when the accumulated output is empty *and* the last
-/// recognized match advanced via a look-ahead retry: an empty gap before every
-/// match, every match rendering nothing, and the final match a paren-absorbing
-/// shorthand. Any non-empty gap or shown term — or a trailing macro form,
-/// which never retries — means the terms are recognized normally.
-fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
-    let mut emitted_nonempty = false;
-    let mut prev_end = 0;
-    let mut last_is_skip = false;
-
-    for m in matches {
-        let full = &m.macro_match.full;
-
-        // A non-empty gap before the match is literal text, making the
-        // accumulated output non-empty.
-        if full.start > prev_end {
-            emitted_nonempty = true;
-        }
-
-        if m.rendered_nonempty {
-            emitted_nonempty = true;
-        }
-
-        prev_end = full.end;
-        last_is_skip = m.is_skip;
-    }
-
-    last_is_skip && !emitted_nonempty
 }
 
 /// Finds every recognized index term at this level — both the macro forms
@@ -166,9 +105,9 @@ fn indexterm_substitution_is_a_noop(matches: &[RecognizedIndexterm]) -> bool {
 /// function of its id alone (see
 /// [`find_anchor_matches`](super::anchors::find_anchor_matches)), it is
 /// recognized regardless of what its argument crosses; the node simply carries
-/// an empty `terms`. (The one exception is the whole-level no-op for a level
-/// of *only* concealed shorthand terms, which [`indexterm_macros_level`]
-/// handles by leaving the level literal.)
+/// an empty `terms`. That holds even when the level is nothing but concealed
+/// shorthand terms (`(((coffee)))`, `(((a)))(((b)))`): the level is replaced
+/// like any other, and folds to nothing (asciidoc-rs/asciidoc-parser#1123).
 ///
 /// A **visible** (flow) term (`indexterm2:[…]`, `((term))`) shows its term text
 /// in the flow, so that text must be reconstructible from this level's escaped
@@ -285,7 +224,6 @@ fn find_indexterm_matches<'src>(
         push_indexterm_shorthand_matches(
             s,
             &encl,
-            extra,
             full,
             escaped,
             nodes,
@@ -569,8 +507,7 @@ fn build_indexterm_macro_match<'src>(
     parser: &Parser,
 ) -> Option<RecognizedIndexterm<'src>> {
     // An escape (`\indexterm:…`) drops the backslash and keeps the rest
-    // literal. A macro form never retries via a look-ahead, and the
-    // unescaped literal is non-empty.
+    // literal.
     if escaped {
         return Some(RecognizedIndexterm {
             macro_match: MacroMatch {
@@ -579,14 +516,12 @@ fn build_indexterm_macro_match<'src>(
                 },
                 full,
             },
-            rendered_nonempty: true,
-            is_skip: false,
         });
     }
 
     let location = source_slice(pieces, full.clone(), root);
 
-    let (node, rendered_nonempty) = if is_visible {
+    let node = if is_visible {
         let source = TermSource {
             head: arg,
             tail: 0..0,
@@ -594,7 +529,7 @@ fn build_indexterm_macro_match<'src>(
 
         let shown = shown_term(s, &source, false, true, nodes, pieces, root);
 
-        let (terms, children, rendered_nonempty) = match shown.computed {
+        let (terms, children) = match shown.computed {
             Some(term) => {
                 // Whether an attribute list narrows the shown text is decided
                 // by the same byte [`shown_macro_term`] decides it by, and the
@@ -615,7 +550,6 @@ fn build_indexterm_macro_match<'src>(
                 let narrowed_by_a_list = term.contains('=');
 
                 let term = shown_macro_term(term, parser);
-                let rendered_nonempty = !term.is_empty();
 
                 let children = if narrowed_by_a_list {
                     vec![]
@@ -623,7 +557,7 @@ fn build_indexterm_macro_match<'src>(
                     shown.children
                 };
 
-                (vec![CowStr::from(term)], children, rendered_nonempty)
+                (vec![CowStr::from(term)], children)
             }
 
             None => {
@@ -635,31 +569,25 @@ fn build_indexterm_macro_match<'src>(
                     return None;
                 }
 
-                (vec![], shown.children, true)
+                (vec![], shown.children)
             }
         };
 
-        (
-            InlineNode::IndexTerm(Box::new(IndexTerm {
-                terms,
-                children,
-                visible: true,
-                location,
-            })),
-            rendered_nonempty,
-        )
+        InlineNode::IndexTerm(Box::new(IndexTerm {
+            terms,
+            children,
+            visible: true,
+            location,
+        }))
     } else {
         // A concealed term renders nothing, so it is always recognized; its
         // argument (which never reaches the flow) is not reconstructed.
-        (
-            InlineNode::IndexTerm(Box::new(IndexTerm {
-                terms: vec![],
-                children: vec![],
-                visible: false,
-                location,
-            })),
-            false,
-        )
+        InlineNode::IndexTerm(Box::new(IndexTerm {
+            terms: vec![],
+            children: vec![],
+            visible: false,
+            location,
+        }))
     };
 
     Some(RecognizedIndexterm {
@@ -670,9 +598,6 @@ fn build_indexterm_macro_match<'src>(
             },
             full,
         },
-        rendered_nonempty,
-        // The macro forms always `Continue`; only the shorthand can retry.
-        is_skip: false,
     })
 }
 
@@ -725,11 +650,10 @@ fn shown_macro_term(arg: String, parser: &Parser) -> String {
 /// `(((primary, secondary, tertiary)))`) — none at all when the visible term
 /// crosses an opaque span (see [`find_indexterm_matches`]).
 ///
-/// `inner` is the text between the outermost `((` and `))` (match group 3);
-/// `extra` is the count of `)` absorbed after the closing pair. Together they
-/// form `encl_text`, whose leading/trailing parentheses
-/// classify the term as concealed vs. visible and carry any literal parenthesis
-/// adjacent to (but not part of) the term:
+/// `encl` is the text between the outermost `((` and `))` (match group 3),
+/// plus any `)` absorbed after the closing pair — `encl_text`, whose
+/// leading/trailing parentheses classify the term as concealed vs. visible
+/// and carry any literal parenthesis adjacent to (but not part of) the term:
 ///
 /// - `(((x)))` → **concealed** `x` (the node consumes the whole match and
 ///   renders nothing);
@@ -768,7 +692,6 @@ fn shown_macro_term(arg: String, parser: &Parser) -> String {
 fn push_indexterm_shorthand_matches<'src>(
     s: &str,
     encl: &TermSource,
-    extra: usize,
     full: std::ops::Range<usize>,
     escaped: bool,
     nodes: &[InlineNode<'src>],
@@ -796,8 +719,6 @@ fn push_indexterm_shorthand_matches<'src>(
                     },
                     full,
                 },
-                rendered_nonempty: true,
-                is_skip: extra > 0,
             });
 
             return;
@@ -812,8 +733,6 @@ fn push_indexterm_shorthand_matches<'src>(
                 },
                 full: full.start..(full.start + 1),
             },
-            rendered_nonempty: false,
-            is_skip: false,
         });
 
         // Everything after it: the nested term, with the wrapping parenthesis
@@ -844,9 +763,6 @@ fn push_indexterm_shorthand_matches<'src>(
                 },
                 full: term_full,
             },
-            // The two kept parentheses are output whatever the term renders to.
-            rendered_nonempty: true,
-            is_skip: extra > 0,
         });
 
         return;
@@ -873,38 +789,26 @@ fn push_indexterm_shorthand_matches<'src>(
 
     let location = source_slice(pieces, full.clone(), root);
 
-    let (node, rendered_nonempty) = if visible {
+    let node = if visible {
         let shown = shown_term(s, &encl.narrow(&term_sub), true, false, nodes, pieces, root);
-
-        let shown_nonempty = shown.computed.as_ref().is_none_or(|term| !term.is_empty());
 
         let terms: Vec<CowStr<'src>> = shown
             .computed
             .map_or_else(Vec::new, |term| vec![CowStr::from(term)]);
 
-        // The match renders output when it shows a non-empty term or keeps a
-        // literal parenthesis beside it.
-        let rendered_nonempty = before || after || shown_nonempty;
-
-        (
-            InlineNode::IndexTerm(Box::new(IndexTerm {
-                terms,
-                children: shown.children,
-                visible: true,
-                location,
-            })),
-            rendered_nonempty,
-        )
+        InlineNode::IndexTerm(Box::new(IndexTerm {
+            terms,
+            children: shown.children,
+            visible: true,
+            location,
+        }))
     } else {
-        (
-            InlineNode::IndexTerm(Box::new(IndexTerm {
-                terms: vec![],
-                children: vec![],
-                visible: false,
-                location,
-            })),
-            false,
-        )
+        InlineNode::IndexTerm(Box::new(IndexTerm {
+            terms: vec![],
+            children: vec![],
+            visible: false,
+            location,
+        }))
     };
 
     // A kept literal parenthesis is left outside the node's `consumed`
@@ -920,8 +824,6 @@ fn push_indexterm_shorthand_matches<'src>(
             },
             full,
         },
-        rendered_nonempty,
-        is_skip: extra > 0,
     });
 }
 
@@ -1095,52 +997,42 @@ mod tests {
     }
 
     #[test]
-    fn an_all_concealed_shorthand_level_stays_literal() {
-        // A level whose only *output* would be from concealed shorthand terms
-        // accumulates no output and ends in a look-ahead retry, so the level
-        // is left literal (the #1123 bug — see
-        // `indexterm_substitution_is_a_noop`). The terms are left
-        // unrecognized (no `IndexTerm` node).
-        //
-        // Note the `(((coffee))) trailing` case: **trailing** text does *not*
-        // rescue recognition, because the no-op check only looks at output
-        // accumulated *up to* the retry — trailing text after it is never
-        // examined. Only output
-        // emitted *before* the retry (a leading/between gap, or a shown
-        // term) counts;
-        // see `a_concealed_term_after_leading_output_is_consumed` for that
-        // contrast. (Both match the golden output exactly — verified below.)
-        for source in [
-            "(((coffee)))",
-            "(((a)))(((b)))",
-            "indexterm:[x](((y)))",
-            "(((coffee))) trailing",
+    fn a_whole_concealed_shorthand_level_renders_empty() {
+        // Asciidoctor-parity fix for asciidoc-rs/asciidoc-parser#1123: a
+        // level that is nothing but concealed index terms is recognized and
+        // consumed like any other, folding to nothing — the same as a
+        // concealed term beside other output (see
+        // `a_concealed_term_after_leading_output_is_consumed`). Previously a
+        // shorthand's look-ahead retry (absorbing trailing parens) made such
+        // a level a spurious no-op, left literal; every term here is now an
+        // `IndexTerm` node.
+        for (source, expected) in [
+            ("(((coffee)))", ""),
+            ("(((a)))(((b)))", ""),
+            ("indexterm:[x](((y)))", ""),
+            ("(((coffee))) trailing", " trailing"),
         ] {
             let nodes = build_src(Span::new(source));
 
             assert!(
-                nodes.iter().all(|n| !matches!(n, InlineNode::IndexTerm(_))),
-                "an all-concealed level must be left literal for {source:?}: {nodes:?}"
+                nodes.iter().any(|n| matches!(n, InlineNode::IndexTerm(_))),
+                "expected the term(s) to be recognized for {source:?}: {nodes:?}"
             );
 
             let folded = fold_html(&nodes, &HtmlInlineRenderer {});
-            assert_eq!(folded, source, "left-literal fold for {source:?}");
-            assert_eq!(
-                golden_macros(source),
-                source,
-                "golden literal for {source:?}"
-            );
+            assert_eq!(folded, expected, "fold for {source:?}");
+            assert_eq!(golden_macros(source), expected, "golden for {source:?}");
         }
     }
 
     #[test]
     fn a_concealed_term_after_leading_output_is_consumed() {
-        // The contrast to the all-concealed no-op: **leading** text makes the
-        // accumulated output non-empty *before* the look-ahead retry, so
-        // the level is not a no-op and the concealed term is
+        // Leading text makes the accumulated output non-empty before a
+        // trailing concealed term's look-ahead retry, so the term is
         // recognized and consumed (renders nothing) — leaving only the
         // leading text. `leading (((coffee)))` folds to `leading `, not the
-        // literal source.
+        // literal source. (An all-concealed level reaches the same
+        // consumed-and-empty outcome; see the test above.)
         for source in ["leading (((coffee)))", "((a)) (((b)))"] {
             let folded = fold_html(&build_src(Span::new(source)), &HtmlInlineRenderer {});
             assert_eq!(
@@ -1811,9 +1703,8 @@ mod tests {
             r"*bold* \(((x))) _em_",
             // Recognized inside a rendered span (the macros step descends).
             r"_\(((x))) in em_",
-            // The shown term makes the substitution's output non-empty, so a
-            // concealed term beside it is consumed rather than left literal by
-            // the `Cow::Borrowed` no-op the level would otherwise be.
+            // A visible term beside a concealed one, in either order — both
+            // are consumed, the concealed one rendering nothing.
             r"\(((x)))(((y)))",
             r"\(((x))) and (((y)))",
             r"(((y))) and \(((x)))",

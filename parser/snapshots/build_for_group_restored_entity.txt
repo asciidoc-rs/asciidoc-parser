@@ -1,4 +1,4 @@
-"(((a &copy; b, c)))"	"(((a &copy; b, c)))"
+"(((a &copy; b, c)))"	""
 "((term &copy; other))"	"term &copy; other"
 "[[[b&copy;bref]]] entry"	"[[[b&copy;bref]]] entry"
 "[[i&copy;d]]text"	"[[i&copy;d]]text"
