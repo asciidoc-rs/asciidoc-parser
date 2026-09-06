@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 As of January 2026 and until the 1.0.0 version is released, I will only make minor version changes (incrementing the x in 0.x.0) if breaking changes are made (including changing the minimum supported Rust version). Features will now result in a patch version change (incrementing the y in 0.x.y). This brings us into closer compliance with typical SemVer practice (and follows the default behavior of release-plz).
 
+## [0.31.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.30.0...v0.31.0)
+_06 September 2026_
+
+### Added
+
+* [**breaking**] Replace inline text substitution with a structured inline AST ([#1059](https://github.com/asciidoc-rs/asciidoc-parser/pull/1059))
+
+### Fixed
+
+* Freeze a forward xref in a title when an auto-id section demands it ([#1389](https://github.com/asciidoc-rs/asciidoc-parser/pull/1389))
+* Render a whole-content concealed index-term shorthand as empty ([#1388](https://github.com/asciidoc-rs/asciidoc-parser/pull/1388))
+* Register a document title's anchor/image/link once, not per rebuild ([#1387](https://github.com/asciidoc-rs/asciidoc-parser/pull/1387))
+
+### Breaking changes
+
+Replacing the string-substitution inline pipeline with a structured inline AST ([#1059](https://github.com/asciidoc-rs/asciidoc-parser/pull/1059)) leaves rendered HTML output unchanged (verified against the frozen golden-HTML corpus described in `parser/snapshots/README.md`), but reshapes the public rendering surface. Downstream code updates as follows:
+
+* **`Content` rendering accessors** — `Content::rendered()` is renamed to `Content::rendered_html()` (same `&'src str` return type; only the name changed). `Content` also gains two new accessors: `inlines()`, which exposes the parsed `&[InlineNode]` tree directly, and `render_with()`, which renders with an explicit `&dyn InlineRenderer` without going through a `Parser`.
+* **`InlineSubstitutionRenderer` renamed to `InlineRenderer`** — `HtmlSubstitutionRenderer` is now `HtmlInlineRenderer`, and `Parser::with_inline_substitution_renderer()` is now `Parser::with_inline_renderer()`. Every render method that used to take a `*RenderParams` struct built from already-rendered strings (`ImageRenderParams`, `IconRenderParams`, `LinkRenderParams`, `CalloutRenderParams`, `IndexTermRenderParams`, `MenuRenderParams`, `FootnoteRenderParams` — all removed) now takes the corresponding inline-AST node instead (`&Image`, `&Callout`, `&Ref` + link text, `&IndexTerm` + visible term, `&Footnote`, or, for `render_menu`, the menu/submenus/menuitem fields as separate arguments), plus an explicit `&RenderContext` where the node itself doesn't carry one. `render_quoted_substitution` is renamed to `render_styled`, and its `attrlist: Option<Attrlist<'_>>` parameter becomes a non-optional `&Attrlist<'_>`. `render_keyboard`'s `keys: &[String]` becomes `&[CowStr<'_>]`. `XrefRenderParams` is unchanged in shape. A custom `InlineSubstitutionRenderer` implementation needs its trait name, method names, and method signatures updated to match `InlineRenderer`; every method's default behavior continues to produce the same output as before.
+
 ## [0.30.0](https://github.com/asciidoc-rs/asciidoc-parser/compare/v0.29.20...v0.30.0)
 _24 August 2026_
 
