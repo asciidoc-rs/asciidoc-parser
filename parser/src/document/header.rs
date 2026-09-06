@@ -2,13 +2,18 @@ use crate::{
     HasSpan, Parser, Span,
     attributes::{Attrlist, AttrlistContext},
     blocks::metadata::block_title_text,
-    content::{Content, SubstitutionGroup, sanitize_title, substitute_attributes_in_reftext},
+    content::{
+        SubstitutionGroup, inline_builder, sanitize_title, substitute_attributes_in_reftext,
+    },
     document::{
         Attribute, Author, AuthorLine, InterpretedValue, RefType, RevisionLine,
         is_attribute_entry_pass_macro, matches_author_pattern, set_author_metadata,
     },
+    inlines::InlineNode,
     internal::{debug::DebugSliceReference, opaque_iter::opaque_slice_iter},
+    parser::DeferredWarning,
     span::MatchedItem,
+    strings::CowStr,
     warnings::{MatchAndWarnings, Warning, WarningType},
 };
 
@@ -348,8 +353,8 @@ impl<'src> Header<'src> {
                     implicit_doctitle_str = Some(existing.clone());
                     title = Some(existing);
                 } else {
-                    let warnings_before_implicit_title = parser.substitution_warnings_len();
-                    let title_str = apply_title_subs(title_span.data(), parser);
+                    let built = build_title(title_span.data(), parser);
+                    let title_str = built.text.clone();
 
                     // Under `attribute-missing: warn`, a reference to an
                     // attribute defined later in the header is still
@@ -357,17 +362,22 @@ impl<'src> Header<'src> {
                     // `SkippingReferenceToMissingAttribute` warning here, even
                     // though the title is re-resolved against the final
                     // header state below and, in that case, resolves
-                    // correctly. Discard the eager warning whenever that
-                    // later re-resolution will run — i.e. the substituted
-                    // text still contains a `{`, mirroring the condition at
-                    // the re-resolution site below — since that pass raises
-                    // its own warning if the reference is still genuinely
-                    // unresolved once the full header is known. Warnings from
-                    // a fully-resolved title, or from `drop`/`drop-line` mode
-                    // (which does not leave a `{` behind), are left as they
-                    // are not superseded by a later pass.
-                    if title_str.contains('{') {
-                        parser.truncate_substitution_warnings(warnings_before_implicit_title);
+                    // correctly. Discard this build's diagnostics, and leave
+                    // any anchor/image/link it recognized unregistered,
+                    // whenever that later re-resolution will run — i.e. the
+                    // substituted text still contains a `{`, mirroring the
+                    // condition at the re-resolution site below — since that
+                    // later, authoritative build raises its own warning if a
+                    // reference is still genuinely unresolved once the full
+                    // header is known, and its own registration supersedes
+                    // this one's (see `build_title`'s doc comment, and
+                    // #1132). A fully-resolved title, or one substituted
+                    // under `drop`/`drop-line` mode (neither of which leaves
+                    // a `{` behind), has no re-resolution coming, so this
+                    // build's diagnostics and registrations are committed
+                    // immediately instead.
+                    if !title_str.contains('{') {
+                        commit_title_side_effects(built, parser);
                     }
 
                     parser.set_attribute_by_value_from_header("doctitle", &title_str);
@@ -421,34 +431,50 @@ impl<'src> Header<'src> {
             // holds that (resolved) value and is not
             // re-substituted.
             //
-            // Residual edge: a title that *mixes* a stateful, one-shot
-            // substitution with a later-defined reference (e.g. `= {counter:n}
-            // {project-name}`) still contains a `{` after the eager pass, so
-            // the re-resolution runs that one-shot substitution a
-            // second time. Re-resolving is done from the raw title
-            // (not the eager result) so that escaped `\{…}` and
-            // specialchars stay correct; the duplicated side effect
-            // here is the price of that. Since the eager pass now
-            // uses the `Title` group, this extends beyond a `{counter:…}`
-            // advancing twice to any stateful macro sharing the title with a
-            // later-defined reference — an anchor
-            // (`= {project-name} [[id]]`) can raise a spurious
-            // `DuplicateId` warning on its second registration, and a footnote
-            // (`= {project-name} footnote:[…]`) is defined twice. This is a
-            // rare combination — a document title is an unusual place for a
-            // footnote or anchor to begin with — and no test exercises it.
-            // Tracked as a follow-up in #1132: fixing it well wants a way to
-            // resolve attribute references once and branch into the
-            // remaining substitution steps without re-invoking macros — a
-            // shape that may fall out more naturally once inline content is
-            // a materialized tree instead of a re-run string pipeline.
+            // Residual edge (#1132): a title that *mixes* a stateful,
+            // one-shot substitution with a later-defined reference (e.g.
+            // `= {counter:n} {project-name}`) still contains a `{` after the
+            // eager pass, so the re-resolution below runs that one-shot
+            // substitution a second time. Re-resolving is done from the raw
+            // title (not the eager result) so that escaped `\{…}` and
+            // specialchars stay correct; the duplicated side effect here is
+            // the price of that. This was already true, and already
+            // accepted, for a `{counter:…}`/`{counter2:…}` directive before
+            // the `Title` group grew to include the `Macros` step:
+            // `AttributeReferences` resolves — and advances — a counter
+            // directive as part of building the tree itself (not as a
+            // deferred registration), so a second build always re-advances
+            // it, whichever substitution group runs it. A footnote shares
+            // that shape: its assigned number and catalog entry are also
+            // written during the tree build, not deferred, so
+            // `= {project-name} footnote:[…]` still defines the footnote
+            // twice.
+            //
+            // What *is* fixed here is the wider blast radius the `Macros`
+            // step alone introduced: an inline macro's own recognition side
+            // effect (an anchor's `DuplicateId` check, an image's or link's
+            // catalog entry) is a *deferred* registration, replayed from the
+            // finished tree by `apply_macro_side_effects` rather than
+            // written during the build — see `build_title`'s and
+            // `commit_title_side_effects`'s doc comments. That means at most
+            // one of the (up to) two builds below ever commits its
+            // registrations: the eager build above defers commitment
+            // whenever this re-resolution is coming, and this rebuild
+            // commits unconditionally, being the last one. So
+            // `= {project-name} [[dup]]` no longer raises a spurious
+            // `DuplicateId` warning, and `= {project-name} image:pic.png[]` /
+            // a `link:`/autolinked URL no longer double-enters the document
+            // catalog.
             let base = if !implicit_overridden_from_above
                 && let Some(raw) = title_source
                 && implicit_doctitle_str
                     .as_deref()
                     .is_some_and(|s| s.contains('{'))
             {
-                Some(apply_title_subs(raw.data(), parser))
+                let built = build_title(raw.data(), parser);
+                let text = built.text.clone();
+                commit_title_side_effects(built, parser);
+                Some(text)
             } else {
                 title
             };
@@ -1321,19 +1347,113 @@ fn split_author_entries(value: &str) -> Vec<&str> {
     entries
 }
 
-/// Applies the document title's substitutions — the `Title` group, the same
-/// steps as `Normal` — to `source`, mirroring Asciidoctor's eager
+/// The result of building the document title's inline tree via
+/// [`build_title`]: the tree itself, its folded HTML, and the recognition
+/// diagnostics the build recorded — none of it yet committed to `parser` (see
+/// [`commit_title_side_effects`]).
+struct BuiltTitle<'src> {
+    tree: Vec<InlineNode<'src>>,
+    text: String,
+    location: Span<'src>,
+    diagnostics: Vec<DeferredWarning>,
+}
+
+/// Builds the document title's tree through the `Title` group's
+/// substitutions — the same steps as `Normal` — mirroring Asciidoctor's eager
 /// substitution of the `= Title` line into the `doctitle` attribute. Unlike
 /// the restricted `Header` group used for author/revision lines and
 /// attribute-entry values, this renders quotes (formatting), replacements,
 /// and inline macros (e.g. `image:`) in the title itself.
-fn apply_title_subs(source: &str, parser: &Parser) -> String {
-    let span = Span::new(source);
+///
+/// This builds and folds the tree exactly as
+/// [`SubstitutionGroup::apply`] does, but stops short of committing what it
+/// found: no anchor/image/link is registered into the document catalog, no
+/// `DuplicateId`/dangerous-link-scheme warning is raised, and no recognition
+/// diagnostic (`attribute-missing`, …) reaches `parser`'s warnings. The
+/// caller commits those explicitly via [`commit_title_side_effects`], once it
+/// knows this build is the authoritative one.
+///
+/// # Why the title needs this split
+///
+/// `Header::parse` substitutes the implicit `= Title` line eagerly, at the
+/// title line, so a `{doctitle}` reference in a later header line resolves.
+/// When that eager substitution leaves an unresolved reference to an
+/// attribute defined *later* in the header, the title is substituted again
+/// from raw source once the whole header is known ("lazy" resolution — see
+/// the `base` computation in [`Header::parse`]). Of the two builds this can
+/// produce, only the final one is ever authoritative, so only it may commit
+/// registrations and diagnostics — committing both would double-register an
+/// anchor/image/link the title shares with a later-defined reference
+/// (#1132).
+///
+/// # What this does *not* prevent
+///
+/// A `counter`/`counter2` directive's advance and a footnote's assigned
+/// number and catalog entry are not deferred registrations the way an
+/// anchor/image/link's are — [`SubstitutionStep::AttributeReferences`] and
+/// the footnote step both write them as part of building the tree itself, so
+/// building the tree a second time re-advances or re-registers them
+/// regardless of whether [`commit_title_side_effects`] is ever called on
+/// either build. See the `base` computation's own doc comment for why this
+/// is an accepted, pre-existing edge rather than something this split fixes.
+///
+/// [`SubstitutionGroup::apply`]: crate::content::SubstitutionGroup::apply
+/// [`SubstitutionStep::AttributeReferences`]: crate::content::SubstitutionStep::AttributeReferences
+fn build_title<'src>(source: &'src str, parser: &Parser) -> BuiltTitle<'src> {
+    let location = Span::new(source);
 
-    let mut content = Content::from(span);
-    SubstitutionGroup::Title.apply(&mut content, parser, None);
+    // Marks matching `SubstitutionGroup::apply`'s own: everything the build
+    // records past these points is this build's alone.
+    let warnings_before_build = parser.substitution_warnings_len();
+    let diagnostics_before_build = parser.builder_diagnostics_len();
 
-    content.rendered_html().to_string()
+    let tree = inline_builder::build_for_group(
+        &SubstitutionGroup::Title,
+        CowStr::from(source),
+        location,
+        parser,
+        None,
+    );
+
+    // Incidental warnings a build can record along the way (e.g., an
+    // `Attrlist` parsed out of a match string) are always discarded —
+    // mirroring `SubstitutionGroup::apply`'s own unconditional discard of
+    // them.
+    parser.truncate_substitution_warnings(warnings_before_build);
+
+    // The build's *deliberate* recognition diagnostics, carried separately
+    // (see `Parser::record_builder_diagnostic`) so the caller can decide
+    // whether to commit them at all — see `commit_title_side_effects`.
+    let diagnostics = parser.drain_builder_diagnostics_since(diagnostics_before_build);
+
+    let render_context = parser.render_context();
+    let text = inline_builder::fold_html(&tree, &*parser.renderer, &render_context);
+
+    BuiltTitle {
+        tree,
+        text,
+        location,
+        diagnostics,
+    }
+}
+
+/// Commits a [`build_title`] result as the document title's **authoritative**
+/// substitution: carries its recognition diagnostics onto `parser` (in the
+/// same order [`SubstitutionGroup::apply`] would) and replays its
+/// anchor/image/link recognition via [`apply_macro_side_effects`].
+///
+/// Call this on at most one of the (up to) two builds a title's eager/lazy
+/// resolution produces — see [`build_title`]'s doc comment. Titles are
+/// inline content, never verbatim, so — unlike
+/// [`SubstitutionGroup::apply`] — this has no callouts side effect to
+/// replay.
+///
+/// [`SubstitutionGroup::apply`]: crate::content::SubstitutionGroup::apply
+/// [`apply_macro_side_effects`]: crate::content::inline_builder::apply_macro_side_effects
+fn commit_title_side_effects(built: BuiltTitle<'_>, parser: &Parser) {
+    parser.push_substitution_warnings(built.diagnostics);
+
+    inline_builder::apply_macro_side_effects(&built.tree, parser, built.location, false);
 }
 
 impl std::fmt::Debug for Header<'_> {
@@ -1745,6 +1865,80 @@ mod tests {
                 col: 1,
                 offset: 42
             }
+        );
+    }
+
+    #[test]
+    fn title_with_anchor_and_image_sharing_a_later_defined_reference_registers_once() {
+        // Regression test for #1132: an implicit title referencing an
+        // attribute defined later in the header is substituted eagerly (at
+        // the title line, still unresolved) and then again, lazily, once the
+        // full header is known. Both builds used to commit their
+        // anchor/image/link registration, double-entering the document
+        // catalog and, for the shared `[[dup]]` anchor, priming a spurious
+        // second registration attempt. Only the final (lazy) build commits
+        // now, so the body's own `[[dup]]` is the *only* genuine duplicate.
+        let doc = Parser::default().with_catalog_assets(true).parse(
+            "= {project-name} [[dup]] image:pic.png[]\n:project-name: ACME\n\n[[dup]]\ncontent",
+        );
+
+        assert_eq!(
+            doc.header().doctitle(),
+            Some(
+                "ACME <a id=\"dup\"></a> <span class=\"image\"><img src=\"pic.png\" alt=\"pic\"></span>"
+            )
+        );
+
+        assert_eq!(
+            doc.catalog()
+                .images()
+                .iter()
+                .map(|i| i.target.as_str())
+                .collect::<Vec<_>>(),
+            ["pic.png"]
+        );
+
+        let warnings: Vec<_> = doc.warnings().collect();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings.first().unwrap().warning,
+            WarningType::DuplicateId("dup".to_string())
+        );
+    }
+
+    #[test]
+    fn title_with_counter_and_later_defined_reference_still_double_advances() {
+        // Residual edge documented on the `base` computation in
+        // `Header::parse`: a `counter`/`counter2` directive advances as part
+        // of building the tree itself, not as a deferred registration
+        // replayed once, so a title mixing one with a later-defined
+        // reference still advances it on both the eager and the lazy build.
+        // This predates #1121 (see that computation's doc comment) and is
+        // not fixed by the anchor/image/link split above; pinned here so a
+        // future change to it is deliberate rather than accidental.
+        let doc =
+            Parser::default().parse("= {counter:n} {project-name}\n:project-name: ACME\n\ncontent");
+
+        assert_eq!(doc.header().doctitle(), Some("2 ACME"));
+        assert_eq!(doc.attribute_value("n"), InterpretedValue::Value("2"));
+    }
+
+    #[test]
+    fn title_with_footnote_and_later_defined_reference_still_double_registers() {
+        // Same residual edge as the counter case above, for a footnote: its
+        // assigned number and catalog entry are also written during the
+        // tree build rather than deferred, so a title mixing a footnote with
+        // a later-defined reference still defines it twice.
+        let doc = Parser::default()
+            .parse("= {project-name} footnote:[a note]\n:project-name: ACME\n\ncontent");
+
+        assert_eq!(
+            doc.catalog()
+                .footnotes()
+                .iter()
+                .map(|f| f.text.as_str())
+                .collect::<Vec<_>>(),
+            ["a note", "a note"]
         );
     }
 
