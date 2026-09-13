@@ -1,6 +1,6 @@
 # `snapshots/`
 
-Frozen, checked-in golden recordings for the `inline-ast` branch's differential test
+Frozen, checked-in golden recordings for the inline AST migration's differential test
 corpora. Each file is a **recording**, not a fixture list: it holds output that was once
 produced by the old string-substitution pipeline, captured before that pipeline was
 deleted (as part of [#1059](https://github.com/asciidoc-rs/asciidoc-parser/pull/1059)).
@@ -24,7 +24,7 @@ Unicode sentinel characters:
   against the document's reference catalog in a later pass.
 - **Footnote markers** — a third sentinel pair, `\u{E002}`/`\u{E003}`.
 
-The `inline-ast` branch ([#1059](https://github.com/asciidoc-rs/asciidoc-parser/pull/1059))
+The inline AST migration ([#1059](https://github.com/asciidoc-rs/asciidoc-parser/pull/1059))
 replaced that model with a first-class inline AST (`InlineNode`, in `parser/src/inlines/`),
 built directly from source in a single forward pass by the builder in
 `parser/src/content/inline_builder/`. Rendering (`rendered_html()`) is now a pure fold
