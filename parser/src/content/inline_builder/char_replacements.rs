@@ -848,6 +848,50 @@ mod tests {
     }
 
     #[test]
+    fn a_spaced_em_dash_between_two_spans_in_a_wrapped_list_item_does_not_panic() {
+        // Regression test for
+        // <https://github.com/asciidoc-rs/asciidoc-parser/issues/1394>: a list
+        // item whose principal text has a quoted span on *each* side of a
+        // spaced em dash (`_x_ -- \`y\``), continuing onto a second line,
+        // panicked in `quotes::source_slice`. The list item's principal text
+        // is a **filtered, joined** multi-line seed
+        // ([`build_from_value`](super::super::build_from_value)'s synthesized
+        // case), so both the `Text` gap between the two spans and the spans'
+        // own opaque placeholders become pieces whose source location
+        // coarsely falls back to the item's *whole* two-line span rather than
+        // their own precise bytes. The em dash's match boundary then lands
+        // exactly on the *trailing* edge of the leading span's atomic piece —
+        // `s_to_src` snapped that boundary to the piece's own (coarse, and
+        // therefore unrelated) end instead of deferring to the following
+        // piece, producing an inverted range. See
+        // `quotes::tests::s_to_src_defers_an_atomic_pieces_own_trailing_edge_to_the_next_piece`
+        // for the fix pinned at the `Piece` level.
+        use crate::{
+            Parser,
+            blocks::{Block, FindBlocks},
+        };
+
+        let doc = Parser::default().parse("* _x_ -- `y`\n  b\n");
+
+        let Some(Block::List(list)) = doc.child_blocks().next() else {
+            panic!("expected a list");
+        };
+
+        let Some(Block::ListItem(item)) = list.child_blocks().next() else {
+            panic!("expected a list item");
+        };
+
+        let Some(Block::Simple(principal)) = item.child_blocks().next() else {
+            panic!("expected the item's principal text block");
+        };
+
+        assert_eq!(
+            principal.content().rendered_html(),
+            "<em>x</em>&#8201;&#8212;&#8201;<code>y</code>\nb"
+        );
+    }
+
+    #[test]
     fn fold_matches_the_string_pipeline_through_replacements() {
         // For each fixture, folding the single-pass tree (special characters +
         // quotes + character replacements + post replacement) reproduces the

@@ -2661,7 +2661,7 @@ enum Bias {
 
 /// Maps a single match-string byte offset back to an absolute source byte
 /// offset. `bias` only matters for a boundary landing inside a `synthesized`
-/// piece; an atomic piece keeps its own nearer-edge snap regardless of it.
+/// piece; an atomic piece's own interior nearer-edge snap ignores it too.
 fn s_to_src(pieces: &[Piece], x: usize, bias: Bias) -> usize {
     for piece in pieces {
         let p_start = piece.s_start;
@@ -2678,24 +2678,33 @@ fn s_to_src(pieces: &[Piece], x: usize, bias: Bias) -> usize {
             return piece.src_offset;
         }
 
-        // A boundary exactly at the *end* of a synthesized piece belongs to
-        // whatever comes next, not to this piece: unlike a verbatim piece
-        // (whose `s_len` and `src_len` always agree, so its own end edge and
-        // the next piece's start edge are numerically the same value either
-        // way), a synthesized piece's `value` generally has a *different*
-        // byte length than its source span, so the plain linear mapping below
+        // A boundary exactly at the *end* of a synthesized **or atomic**
+        // piece belongs to whatever comes next, not to this piece: unlike a
+        // verbatim piece (whose `s_len` and `src_len` always agree, so its
+        // own end edge and the next piece's start edge are numerically the
+        // same value either way), both a synthesized piece's `value` and an
+        // atomic piece's single-character placeholder generally have a
+        // *different* byte length than the source span they stand for — for
+        // an atomic piece built from a synthesized run (an opaque span
+        // rebuilt from a filtered multi-line block's joined seed — see
+        // [`build`](super::build)), that source span coarsely falls back to
+        // the *whole* root, so its own trailing edge can land arbitrarily far
+        // from the next piece's honest start. The plain linear mapping below
         // is only honest at this piece's own `p_start` (a zero delta) — never
         // at `p_end`. Skipping to the next piece (or the past-the-last-piece
         // fallback, if there is none) lets that boundary resolve correctly
         // instead.
-        if piece.synthesized && x == p_end {
+        if (piece.synthesized || piece.atomic) && x == p_end {
             continue;
         }
 
         if x <= p_end {
             if piece.atomic {
-                // Snap to the nearer edge; a boundary never legitimately lands
-                // inside an atomic piece.
+                // Snap to the nearer edge. `p_end` is already resolved above
+                // (the defer-to-next-piece branch), so only `p_start` (where
+                // the tie always favors this piece's own start, `x - p_start`
+                // being zero) and a defensive, never-expected interior `x`
+                // reach this snap.
                 return if x - p_start <= p_end - x {
                     piece.src_offset
                 } else {
@@ -4360,6 +4369,65 @@ mod tests {
         assert_eq!(s_to_src(&pieces, 14, Bias::Start), 110);
         assert_eq!(s_to_src(&pieces, 14, Bias::End), 110);
         assert_eq!(s_to_src(&pieces, 16, Bias::Start), 112);
+    }
+
+    #[test]
+    fn s_to_src_defers_an_atomic_pieces_own_trailing_edge_to_the_next_piece() {
+        use super::{Bias, Piece, s_to_src};
+
+        // Regression test for
+        // <https://github.com/asciidoc-rs/asciidoc-parser/issues/1394>, at the
+        // `Piece` level (see
+        // `char_replacements::tests::a_spaced_em_dash_between_two_spans_in_a_wrapped_list_item_does_not_panic`
+        // for the end-to-end fixture that first caught it): an atomic piece's
+        // placeholder byte(s) generally have a *different* length than the
+        // source span they stand for, exactly like a synthesized piece's
+        // `value` — so a boundary landing on this piece's own trailing edge
+        // must defer to whatever piece comes next, the same way
+        // `s_to_src_resolves_a_synthesized_pieces_own_edges_exactly` already
+        // pins for a synthesized piece. This matters most when the atomic
+        // piece is itself built from a synthesized run (an opaque span
+        // rebuilt from a filtered multi-line block's joined seed): its own
+        // source span then coarsely falls back to the *whole* root, so its
+        // own end (112, below) lands nowhere near the next piece's honest
+        // start (100) — snapping to it instead of deferring produced an
+        // inverted `start > end` range and panicked.
+        fn atomic_piece() -> Piece {
+            Piece {
+                node_index: 0,
+                s_start: 0,
+                s_len: 1, // match-string range [0, 1)
+                src_offset: 2,
+                src_len: 110, // source range [2, 112) — a coarse whole-root span
+                atomic: true,
+                synthesized: false,
+            }
+        }
+
+        let following = Piece {
+            node_index: 1,
+            s_start: 1,
+            s_len: 4,
+            src_offset: 100,
+            src_len: 4, // source range [100, 104)
+            atomic: false,
+            synthesized: false,
+        };
+
+        let pieces = [atomic_piece(), following];
+
+        // The shared boundary (`x == 1`) resolves through the *following*
+        // piece's own honest linear mapping, not the atomic piece's own
+        // (unrelated, coarse) trailing edge.
+        assert_eq!(s_to_src(&pieces, 1, Bias::Start), 100);
+        assert_eq!(s_to_src(&pieces, 1, Bias::End), 100);
+        assert_eq!(s_to_src(&pieces, 5, Bias::Start), 104);
+
+        // A lone atomic piece still has no *next* piece to defer to, so its
+        // trailing edge falls back to the past-the-last-piece anchor — its
+        // own end, same as before this fix.
+        let pieces = [atomic_piece()];
+        assert_eq!(s_to_src(&pieces, 1, Bias::Start), 112);
     }
 
     #[test]
