@@ -1325,6 +1325,19 @@ mod tests {
     }
 
     #[test]
+    fn lines_starting_with_c_or_d_paren_are_a_paragraph_not_a_roman_list() {
+        // Only `i`, `v`, and `x` (either case) spell a Roman-numeral marker,
+        // so a prose enumeration reaching `c)` stays a paragraph.
+        let doc = crate::Parser::default().parse("c) third option\nd) fourth option");
+
+        let blocks: Vec<_> = doc.child_blocks().collect();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].raw_context().as_ref(), "paragraph");
+
+        assert!(doc.warnings().next().is_none());
+    }
+
+    #[test]
     fn marker_style_single_dot() {
         let list = list_parse(". Item one\n. Item two\n").unwrap();
         assert_eq!(list.item.marker_style(), Some("arabic"));
