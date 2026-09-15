@@ -131,14 +131,14 @@ impl<'src> ListItemMarker<'src> {
                 && marker_str
                     .chars()
                     .take(marker_str.len() - 1)
-                    .all(|c| "ivxlcdm".contains(c))
+                    .all(|c| "ivx".contains(c))
             {
                 Self::RomanNumeralLower(marker)
             } else if marker_str.ends_with(')')
                 && marker_str
                     .chars()
                     .take(marker_str.len() - 1)
-                    .all(|c| "IVXLCDM".contains(c))
+                    .all(|c| "IVX".contains(c))
             {
                 Self::RomanNumeralUpper(marker)
             } else if marker_str.ends_with('.')
@@ -479,7 +479,10 @@ impl std::fmt::Debug for ListItemMarker<'_> {
 }
 
 /// The bytes that can spell a Roman-numeral list marker, either case.
-const ROMAN_NUMERAL_BYTES: &[u8] = b"ivxlcdmIVXLCDM";
+/// Asciidoctor's `OrderedListRx` accepts only `[IVXivx]+\)` — the remaining
+/// Roman letters (`l`, `c`, `d`, `m`) are prose, not markers, so lines like
+/// `c) third option` stay paragraphs.
+const ROMAN_NUMERAL_BYTES: &[u8] = b"ivxIVX";
 
 /// A byte-level gate over [`CALLOUT_LIST_MARKER`]: every callout marker opens
 /// with `<`, so a line that doesn't cannot match — and almost no ordinary
@@ -559,8 +562,8 @@ static LIST_ITEM_MARKER: LazyLock<Regex> = LazyLock::new(|| {
                 |\u{2022}               # Bullet character • (unordered list)
                 |\d+\.                  # Digits followed by dot (numbered list)
                 |[a-zA-Z]\.             # Letter followed by dot (alpha list)
-                |[ivxlcdm]+\)           # Lowercase Roman numerals followed by )
-                |[IVXLCDM]+\)           # Uppercase Roman numerals followed by )
+                |[ivx]+\)               # Lowercase Roman numerals followed by )
+                |[IVX]+\)               # Uppercase Roman numerals followed by )
             )
             [\ \t]                  # Required whitespace after marker
         "#,
@@ -600,7 +603,10 @@ static DESCRIPTION_LIST_MARKER: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-/// Parses a lowercase Roman numeral string into its numeric value.
+/// Parses a Roman numeral string into its numeric value.
+///
+/// Only the letters a list marker can contain (see [`ROMAN_NUMERAL_BYTES`])
+/// are accepted; any other character yields `None`.
 fn parse_roman_numeral(s: &str) -> Option<u32> {
     let mut result: u32 = 0;
     let mut prev_value: u32 = 0;
@@ -610,10 +616,6 @@ fn parse_roman_numeral(s: &str) -> Option<u32> {
             'i' | 'I' => 1,
             'v' | 'V' => 5,
             'x' | 'X' => 10,
-            'l' | 'L' => 50,
-            'c' | 'C' => 100,
-            'd' | 'D' => 500,
-            'm' | 'M' => 1000,
             _ => return None,
         };
 
@@ -775,6 +777,11 @@ mod tests {
             "IX) item",
             "iV) item",
             "ix item",
+            // Roman letters outside the marker set (`l`, `c`, `d`, `m`).
+            "c) third option",
+            "d) fourth option",
+            "L) fifty",
+            "cm) item",
             // Ordinary prose.
             "The renderer walks the tree",
             "it",
@@ -819,6 +826,19 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn parse_roman_numeral_rejects_non_marker_letters() {
+        use super::parse_roman_numeral;
+
+        assert_eq!(parse_roman_numeral("xvii"), Some(17));
+        assert_eq!(parse_roman_numeral("XIV"), Some(14));
+
+        assert!(parse_roman_numeral("l").is_none());
+        assert!(parse_roman_numeral("C").is_none());
+        assert!(parse_roman_numeral("mdclxvi").is_none());
+        assert!(parse_roman_numeral("").is_none());
     }
 
     #[test]
@@ -1069,6 +1089,13 @@ mod tests {
         assert!(lim_parse("i").is_none());
         assert!(lim_parse("i.").is_none());
 
+        // Roman letters outside the marker set are prose, not markers.
+        assert!(lim_parse("l) fifty").is_none());
+        assert!(lim_parse("c) hundred").is_none());
+        assert!(lim_parse("d) five hundred").is_none());
+        assert!(lim_parse("m) thousand").is_none());
+        assert!(lim_parse("xl) forty").is_none());
+
         let lim = lim_parse("i) blah").unwrap();
 
         assert_eq!(
@@ -1133,6 +1160,13 @@ mod tests {
     fn roman_numeral_upper() {
         assert!(lim_parse("I").is_none());
         assert!(lim_parse("I.").is_none());
+
+        // Roman letters outside the marker set are prose, not markers.
+        assert!(lim_parse("L) fifty").is_none());
+        assert!(lim_parse("C) century").is_none());
+        assert!(lim_parse("D) five hundred").is_none());
+        assert!(lim_parse("M) thousand").is_none());
+        assert!(lim_parse("XL) forty").is_none());
 
         let lim = lim_parse("I) blah").unwrap();
 
